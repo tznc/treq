@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ActionIdempotencyKeys } from "./remote-idempotency";
+import {
+  ActionIdempotencyKeys,
+  PENDING_KEY_TTL_MS,
+} from "./remote-idempotency";
 
 function counter() {
   let next = 0;
@@ -46,6 +49,30 @@ describe("ActionIdempotencyKeys", () => {
     const keys = new ActionIdempotencyKeys(counter());
     const a = keys.keyFor("GitPush", [{ repo: "/r", workspace: "7" }]);
     expect(keys.keyFor("GitPush", [{ workspace: "7", repo: "/r" }])).toBe(a);
+  });
+
+  it("starts a new action once an ambiguous attempt's key expires", () => {
+    let now = 0;
+    const keys = new ActionIdempotencyKeys(counter(), () => now);
+    const first = keys.keyFor("GitPush", ["/r"]);
+    now = 5_000;
+    keys.settle(first, { status: "ambiguous", reason: "reset" });
+    now += PENDING_KEY_TTL_MS - 1;
+    expect(keys.keyFor("GitPush", ["/r"])).toBe(first);
+    now += PENDING_KEY_TTL_MS;
+    expect(keys.keyFor("GitPush", ["/r"])).not.toBe(first);
+  });
+
+  it("releases pending keys by scope, or all of them", () => {
+    const keys = new ActionIdempotencyKeys(counter());
+    const a = keys.keyFor("GitPush", ["/r"], "repo-a");
+    const b = keys.keyFor("GitPush", ["/r"], "repo-b");
+    expect(a).not.toBe(b);
+    keys.release("repo-a");
+    expect(keys.keyFor("GitPush", ["/r"], "repo-a")).not.toBe(a);
+    expect(keys.keyFor("GitPush", ["/r"], "repo-b")).toBe(b);
+    keys.release();
+    expect(keys.keyFor("GitPush", ["/r"], "repo-b")).not.toBe(b);
   });
 
   it("does not build keys from the clock", () => {

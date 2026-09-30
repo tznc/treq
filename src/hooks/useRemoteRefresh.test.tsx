@@ -2,7 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActiveRepository } from "../lib/active-repository";
+import {
+  repositoryCacheKey,
+  type ActiveRepository,
+} from "../lib/active-repository";
+import { remoteActionKeys } from "../lib/remote-idempotency";
 
 vi.mock("../lib/repository-adapter", () => ({
   transportChangeMarker: vi.fn(),
@@ -77,8 +81,10 @@ describe("useRemoteChangeMarkerWatch", () => {
     expect(invalidateRemoteRepositoryData).not.toHaveBeenCalled();
     expect(scheduleRefreshWorkspaceChanges).not.toHaveBeenCalled();
 
+    const release = vi.spyOn(remoteActionKeys, "release");
     await poll();
     expect(invalidateRemoteRepositoryData).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(repositoryCacheKey(remoteRepo));
     expect(scheduleRefreshWorkspaceChanges).toHaveBeenCalledWith({
       workspaceId: 7,
     });

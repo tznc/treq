@@ -77,7 +77,7 @@ function sentMutations(): TreqCommandRequest[] {
 }
 
 beforeEach(() => {
-  remoteActionKeys.clear();
+  remoteActionKeys.release();
   vi.mocked(invoke).mockReset();
   vi.mocked(dispatch).mockReset();
   vi.mocked(dispatchMutationOverSsh).mockReset();

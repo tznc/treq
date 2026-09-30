@@ -2,6 +2,7 @@ import {
   refreshRemoteRepository,
   useRemoteMutationFeedback,
 } from "../../lib/remote-mutation-ui";
+import { remoteActionKeys } from "../../lib/remote-idempotency";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -39,6 +40,9 @@ export function RemoteAmbiguousMutationDialog() {
           <Button
             type="button"
             onClick={() => {
+              // The user checks the fresh state before acting, so a later
+              // identical click is a new action, not a retry.
+              remoteActionKeys.release();
               refreshRemoteRepository();
               clearAmbiguous();
             }}

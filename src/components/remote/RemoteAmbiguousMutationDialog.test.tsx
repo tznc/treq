@@ -2,6 +2,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "../../../test/test-utils";
 import { scheduleRefreshWorkspaceChanges } from "../../lib/change-file-drag";
+import { remoteActionKeys } from "../../lib/remote-idempotency";
 import { useRemoteMutationFeedback } from "../../lib/remote-mutation-ui";
 import { invalidateQueries } from "../../lib/swr-cache";
 import { RemoteAmbiguousMutationDialog } from "./RemoteAmbiguousMutationDialog";
@@ -26,6 +27,7 @@ describe("RemoteAmbiguousMutationDialog", () => {
 
   it("refreshes the repository's remote data and closes on Refresh", async () => {
     const user = userEvent.setup();
+    const pending = remoteActionKeys.keyFor("GitPush", ["/r"], "repo");
     render(<RemoteAmbiguousMutationDialog />);
     expect(screen.getByTestId("remote-ambiguous-reason")).toHaveTextContent(
       "connection reset",
@@ -35,6 +37,10 @@ describe("RemoteAmbiguousMutationDialog", () => {
 
     expect(invalidateQueries).toHaveBeenCalled();
     expect(scheduleRefreshWorkspaceChanges).toHaveBeenCalled();
+    // The user has seen fresh state: pushing again is a new action.
+    expect(remoteActionKeys.keyFor("GitPush", ["/r"], "repo")).not.toBe(
+      pending,
+    );
     expect(useRemoteMutationFeedback.getState().ambiguousReason).toBeNull();
   });
 

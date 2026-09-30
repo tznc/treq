@@ -37,7 +37,7 @@ function mockStatus(running: boolean) {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  remoteActionKeys.clear();
+  remoteActionKeys.release();
 });
 
 describe("RemoteAgentScreen", () => {

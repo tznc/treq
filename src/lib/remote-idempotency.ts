@@ -40,28 +40,51 @@ function canonicalJson(value: unknown): string {
   );
 }
 
+/**
+ * How long an unconfirmed key stays reusable after its last send. A retry of
+ * the same uncertain attempt comes within minutes; an identical click after
+ * that is a new action, and reusing the key would make the VM replay the old
+ * result instead of running it (a push after new commits would not push).
+ */
+export const PENDING_KEY_TTL_MS = 10 * 60 * 1000;
+
+interface PendingKey {
+  key: string;
+  scope: string;
+  expiresAt: number;
+}
+
 export class ActionIdempotencyKeys {
   /** Unconfirmed actions: input fingerprint -> the key they were sent with. */
-  private readonly pending = new Map<string, string>();
+  private readonly pending = new Map<string, PendingKey>();
   private readonly newId: () => string;
+  private readonly now: () => number;
 
-  constructor(newId: () => string = () => crypto.randomUUID()) {
+  constructor(
+    newId: () => string = () => crypto.randomUUID(),
+    now: () => number = Date.now,
+  ) {
     this.newId = newId;
+    this.now = now;
   }
 
   /**
    * The key for an action with these inputs. Returns the earlier key while
-   * an action with the same inputs has no confirmed outcome; otherwise
-   * starts a new action. Callers include the endpoint identity and
-   * generation in `inputs` so a key never crosses to another VM.
+   * an action with the same inputs has no confirmed outcome and has not
+   * expired; otherwise starts a new action. `scope` names the endpoint
+   * generation and repository, so a key never crosses to another VM and
+   * `release` can end every pending action for one repository.
    */
-  keyFor(prefix: string, inputs: readonly unknown[]): string {
-    const fingerprint = canonicalJson([prefix, ...inputs]);
-    let key = this.pending.get(fingerprint);
-    if (!key) {
-      key = `${prefix}:${this.newId()}`;
-      this.pending.set(fingerprint, key);
+  keyFor(prefix: string, inputs: readonly unknown[], scope = ""): string {
+    const fingerprint = canonicalJson([scope, prefix, ...inputs]);
+    const expiresAt = this.now() + PENDING_KEY_TTL_MS;
+    const entry = this.pending.get(fingerprint);
+    if (entry && entry.expiresAt > this.now()) {
+      entry.expiresAt = expiresAt;
+      return entry.key;
     }
+    const key = `${prefix}:${this.newId()}`;
+    this.pending.set(fingerprint, { key, scope, expiresAt });
     return key;
   }
 
@@ -74,19 +97,38 @@ export class ActionIdempotencyKeys {
    * harmless because the VM abandons the claim on failure.
    */
   settle(key: string, result: MutationDispatchResult<unknown>): void {
-    if (result.status === "ambiguous") return;
-    for (const [fingerprint, pendingKey] of this.pending) {
-      if (pendingKey === key) this.pending.delete(fingerprint);
+    for (const [fingerprint, entry] of this.pending) {
+      if (entry.key !== key) continue;
+      if (result.status === "ambiguous") {
+        entry.expiresAt = this.now() + PENDING_KEY_TTL_MS;
+      } else {
+        this.pending.delete(fingerprint);
+      }
     }
   }
 
-  clear(): void {
-    this.pending.clear();
+  /**
+   * Ends the pending actions in `scope`, or all of them. Call it once the
+   * user has seen fresh remote state: the next click is a new action.
+   */
+  release(scope?: string): void {
+    for (const [fingerprint, entry] of this.pending) {
+      if (scope === undefined || entry.scope === scope) {
+        this.pending.delete(fingerprint);
+      }
+    }
   }
 }
 
 /** The app-wide store shared by the desktop adapter and the mobile screens. */
 export const remoteActionKeys = new ActionIdempotencyKeys();
+
+/** The pending-key scope for mobile actions sent to this endpoint generation. */
+export function endpointScope(endpoint: SshEndpoint): string {
+  const generation =
+    endpoint.source.type === "managed" ? endpoint.source.generation : 0;
+  return `${endpoint.id}#${generation}`;
+}
 
 /**
  * Sends a keyed mutation over SSH with the shared store's key for these
@@ -97,13 +139,11 @@ export async function dispatchKeyedMutationOverSsh<T = unknown>(
   endpoint: SshEndpoint,
   request: UnkeyedRequest,
 ): Promise<MutationDispatchResult<T>> {
-  const generation =
-    endpoint.source.type === "managed" ? endpoint.source.generation : 0;
-  const key = remoteActionKeys.keyFor(request.kind, [
-    endpoint.id,
-    generation,
-    request,
-  ]);
+  const key = remoteActionKeys.keyFor(
+    request.kind,
+    [request],
+    endpointScope(endpoint),
+  );
   const result = await dispatchMutationOverSsh<T>(endpoint, {
     ...request,
     idempotency_key: key,

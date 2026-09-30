@@ -532,10 +532,11 @@ export async function remoteKeyedMutation<T>(
   repo: ActiveRepository,
   request: UnkeyedRequest,
 ): Promise<T | undefined> {
-  const key = remoteActionKeys.keyFor(request.kind, [
+  const key = remoteActionKeys.keyFor(
+    request.kind,
+    [request],
     repositoryCacheKey(repo),
-    request,
-  ]);
+  );
   const result = await dispatchMutation<T>(repo, {
     ...request,
     idempotency_key: key,
