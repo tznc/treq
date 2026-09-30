@@ -32,6 +32,7 @@ import {
 } from "./remote-dispatch";
 import { transportCreateCommit } from "./repository-adapter";
 import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
+import { remoteActionKeys } from "./remote-idempotency";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -76,6 +77,7 @@ function sentMutations(): TreqCommandRequest[] {
 }
 
 beforeEach(() => {
+  remoteActionKeys.clear();
   vi.mocked(invoke).mockReset();
   vi.mocked(dispatch).mockReset();
   vi.mocked(dispatchMutationOverSsh).mockReset();
@@ -205,6 +207,41 @@ describe("remote repository mutations", () => {
     expect(firstKey).not.toBe(secondKey);
     expect(vi.mocked(dispatchMutationOverSsh).mock.calls[0][0]).toBe(endpoint);
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("reuses the key when retrying after an ambiguous outcome", async () => {
+    vi.mocked(dispatchMutationOverSsh)
+      .mockResolvedValueOnce({ status: "ambiguous", reason: "reset" })
+      .mockRejectedValueOnce(new Error("connection lost"));
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow("reset");
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow("lost");
+    await createCommit(ROOT, 7, "wip");
+    await createCommit(ROOT, 7, "wip");
+
+    const keys = sentMutations().map(
+      (request) => (request as { idempotency_key: string }).idempotency_key,
+    );
+    // No confirmed outcome until the third send, so it reuses the first key;
+    // its success releases the key for the next action.
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).toBe(keys[0]);
+    expect(keys[3]).not.toBe(keys[0]);
+  });
+
+  it("keeps pending keys apart by inputs and endpoint generation", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValue({
+      status: "ambiguous",
+      reason: "reset",
+    });
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow();
+    await expect(createCommit(ROOT, 7, "other")).rejects.toThrow();
+    setActiveRepositorySingleton({ ...remoteRepo(), endpointGeneration: 2 });
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow();
+
+    const keys = sentMutations().map(
+      (request) => (request as { idempotency_key: string }).idempotency_key,
+    );
+    expect(new Set(keys).size).toBe(3);
   });
 
   it("surfaces an ambiguous mutation as an error instead of success", async () => {

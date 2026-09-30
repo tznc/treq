@@ -42,6 +42,12 @@ describe("ActionIdempotencyKeys", () => {
     expect(keys.keyFor("rebase", ["/r", "ws", "main"])).toBe(a);
   });
 
+  it("fingerprints object inputs independently of property order", () => {
+    const keys = new ActionIdempotencyKeys(counter());
+    const a = keys.keyFor("GitPush", [{ repo: "/r", workspace: "7" }]);
+    expect(keys.keyFor("GitPush", [{ workspace: "7", repo: "/r" }])).toBe(a);
+  });
+
   it("does not build keys from the clock", () => {
     const keys = new ActionIdempotencyKeys(() => "fixed");
     expect(keys.keyFor("agent-start", ["/r", "ws"])).toBe("agent-start:fixed");

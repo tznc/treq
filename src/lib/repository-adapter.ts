@@ -15,6 +15,7 @@ import type { SshEndpoint, WorkspaceChangeMarker } from "./api-types-remote";
 import {
   matchesActiveCanonicalPath,
   peekActiveRepository,
+  repositoryCacheKey,
   type ActiveRepository,
 } from "./active-repository";
 import {
@@ -23,6 +24,7 @@ import {
   type MutationDispatchResult,
   type TreqCommandRequest,
 } from "./remote-dispatch";
+import { remoteActionKeys, type UnkeyedRequest } from "./remote-idempotency";
 import { applyMutationDispatchResult } from "./remote-mutation-ui";
 import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
 import type { CutoffReason } from "./remote-cert-lifecycle";
@@ -518,24 +520,49 @@ export async function remoteMutation<T>(
   repo: ActiveRepository,
   request: TreqCommandRequest,
 ): Promise<T | undefined> {
+  return finishMutation(await dispatchMutation<T>(repo, request));
+}
+
+/**
+ * `remoteMutation` for a command that carries an idempotency key. A retry of
+ * the same inputs on the same endpoint generation, sent before a confirmed
+ * outcome, reuses the earlier key so the VM runs the command at most once.
+ */
+export async function remoteKeyedMutation<T>(
+  repo: ActiveRepository,
+  request: UnkeyedRequest,
+): Promise<T | undefined> {
+  const key = remoteActionKeys.keyFor(request.kind, [
+    repositoryCacheKey(repo),
+    request,
+  ]);
+  const result = await dispatchMutation<T>(repo, {
+    ...request,
+    idempotency_key: key,
+  } as TreqCommandRequest);
+  remoteActionKeys.settle(key, result);
+  return finishMutation(result);
+}
+
+async function dispatchMutation<T>(
+  repo: ActiveRepository,
+  request: TreqCommandRequest,
+): Promise<MutationDispatchResult<T>> {
   const { transport } = requireSshTransport(repo);
-  let result: MutationDispatchResult<T>;
   try {
-    result = await dispatchMutationOverSsh<T>(transport.endpoint, request);
+    return await dispatchMutationOverSsh<T>(transport.endpoint, request);
   } catch (error) {
     noteCutoffFromError(error, repo.endpointId);
     throw error;
   }
+}
+
+function finishMutation<T>(result: MutationDispatchResult<T>): T | undefined {
   const value = applyMutationDispatchResult(result);
   if (result.status === "ambiguous") {
     throw new Error(result.reason);
   }
   return value;
-}
-
-/** A fresh key per user action, reused only by that action's retries. */
-export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
 }
 
 export async function transportCreateCommit(
@@ -546,12 +573,11 @@ export async function transportCreateCommit(
 ): Promise<string> {
   const repo = activeForPath(repoPath);
   if (!repo) return local();
-  const value = await remoteMutation<string>(repo, {
+  const value = await remoteKeyedMutation<string>(repo, {
     kind: "CreateCommit",
     repo: repo.canonicalPath,
     workspace: workspaceArg(workspaceId),
     message,
-    idempotency_key: newIdempotencyKey(),
   });
   return value ?? "Commit applied";
 }
