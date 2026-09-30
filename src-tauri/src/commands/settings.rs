@@ -89,3 +89,25 @@ pub fn set_window_repo_path(
   map.insert(window_map_label(window_label), repo_path);
   Ok(())
 }
+
+#[tauri::command]
+pub fn get_app_setup_script_status(
+  state: State<AppState>,
+) -> Result<core::app_setup_script::AppSetupScriptStatus, String> {
+  let db = state.db.lock_or_recover();
+  core::app_setup_script::get_status(&db)
+}
+
+#[tauri::command]
+pub fn save_app_setup_script(
+  state: State<AppState>,
+  script: String,
+  always_run: bool,
+) -> Result<(), String> {
+  {
+    let db = state.db.lock_or_recover();
+    core::app_setup_script::save(&db, &script, always_run)?;
+  }
+  core::app_setup_script::spawn_run_if_needed(core::app_setup_script::Trigger::SettingsChanged);
+  Ok(())
+}

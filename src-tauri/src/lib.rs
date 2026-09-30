@@ -496,6 +496,9 @@ pub fn run() {
       app.manage(remote_exec_state);
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
+      crate::core::app_setup_script::spawn_run_if_needed(
+        crate::core::app_setup_script::Trigger::Startup,
+      );
 
       // Listen for deep-link events and forward to frontend
       #[cfg(desktop)]
@@ -833,6 +836,8 @@ pub fn run() {
       commands::get_setting,
       commands::get_settings_batch,
       commands::set_setting,
+      commands::get_app_setup_script_status,
+      commands::save_app_setup_script,
       commands::get_repo_setting,
       commands::set_repo_setting,
       commands::list_skill_catalog,

@@ -150,6 +150,24 @@ export const getSettingsBatch = (
 export const setSetting = (key: string, value: string): Promise<void> =>
   invoke("set_setting", { key, value });
 
+export interface AppSetupScriptStatus {
+  script: string;
+  always_run: boolean;
+  last_hash: string | null;
+  last_run_at: string | null;
+  last_status: "passed" | "failed" | null;
+  running: boolean;
+}
+
+export const getAppSetupScriptStatus = (): Promise<AppSetupScriptStatus> =>
+  invoke("get_app_setup_script_status");
+
+/** Saves the script and runs it in the background when its hash changed. */
+export const saveAppSetupScript = (
+  script: string,
+  alwaysRun: boolean,
+): Promise<void> => invoke("save_app_setup_script", { script, alwaysRun });
+
 export const getRepoSetting = (
   repoPath: string,
   key: string,

@@ -18,7 +18,12 @@ import {
   ZOOM_STEP,
   useZoomSettingsStore,
 } from "../stores/zoomSettingsStore";
-import { getSetting, setSetting } from "../lib/api";
+import {
+  getAppSetupScriptStatus,
+  getSetting,
+  saveAppSetupScript,
+  setSetting,
+} from "../lib/api";
 import {
   AccountSettings,
   type CloudWorkspaceControls,
@@ -45,6 +50,7 @@ import { AgentOptions } from "./AgentOptions";
 import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
 
 const NOTIFY_AGENT_FINISHED_SETTING = "notify_agent_finished";
+import { AppSetupScriptSettings } from "./AppSetupScriptSettings";
 
 type TabValue =
   | "application"
@@ -74,6 +80,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [notifyDraft, setNotifyDraft] = useState<boolean | null>(null);
   const [fontDraft, setFontDraft] = useState<number | null>(null);
   const [zoomDraft, setZoomDraft] = useState<number | null>(null);
+  const [setupScriptDraft, setSetupScriptDraft] = useState<string | null>(null);
+  const [alwaysRunDraft, setAlwaysRunDraft] = useState<boolean | null>(null);
   const [savingRepository, setSavingRepository] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const repositorySettingsRef = useRef<RepositorySettingsContentHandle>(null);
@@ -115,6 +123,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   );
   // On unless explicitly turned off, matching the backend default.
   const notifyAgentFinished = notifyDraft ?? savedNotify?.trim() !== "false";
+  const { data: setupScriptStatus, mutate: mutateSetupScriptStatus } = useSWR(
+    "app-setup-script-status",
+    getAppSetupScriptStatus,
+    // Poll while the script runs in the background.
+    { refreshInterval: (status) => (status?.running ? 1000 : 0) },
+  );
+  const setupScript = setupScriptDraft ?? setupScriptStatus?.script ?? "";
+  const setupScriptAlwaysRun =
+    alwaysRunDraft ?? setupScriptStatus?.always_run ?? false;
   const defaultModel = modelDraft ?? savedModel ?? "";
   const defaultAgent = agentDraft ?? savedAgent ?? "";
   const conflictMarkerStyle = conflictDraft ?? savedConflict ?? "git";
@@ -137,6 +154,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       await mutateSavedNotify(notifyValue, { revalidate: false });
       await setFontSize(localFontSize);
       await setZoom(localZoom);
+      await saveAppSetupScript(setupScript, setupScriptAlwaysRun);
+      await mutateSetupScriptStatus();
 
       addToast({
         title: "Settings Saved",
@@ -392,6 +411,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                         className="mt-1"
                       />
                     </div>
+                    <AppSetupScriptSettings
+                      script={setupScript}
+                      alwaysRun={setupScriptAlwaysRun}
+                      status={setupScriptStatus}
+                      onScriptChange={setSetupScriptDraft}
+                      onAlwaysRunChange={setAlwaysRunDraft}
+                    />
 
                     <div>
                       <Label>Updates</Label>
