@@ -101,7 +101,8 @@ pub fn resolve(main_repo: &str, spec: &str, cwd: &Path) -> Result<String, String
     if paths.contains(&as_str) {
       return Ok(as_str);
     }
-    if as_path.is_absolute() && spec.contains(std::path::MAIN_SEPARATOR) {
+    // An absolute path names one directory; do not fall back to suffixes.
+    if Path::new(spec).is_absolute() {
       return Err(unknown());
     }
   }
@@ -235,6 +236,20 @@ mod tests {
     assert!(resolve(&main, "nope", cwd)
       .unwrap_err()
       .contains("not a supporting repository"));
+  }
+
+  #[test]
+  fn resolve_suffix_is_not_shadowed_by_same_named_dir_under_cwd() {
+    let temp = TempDir::new().unwrap();
+    let main = make_repo(temp.path(), "main");
+    let org_app = make_repo(temp.path(), "org/app");
+    add(&main, &org_app).unwrap();
+    std::fs::create_dir_all(Path::new(&main).join("org/app")).unwrap();
+
+    assert_eq!(
+      resolve(&main, "org/app", Path::new(&main)).unwrap(),
+      org_app
+    );
   }
 
   #[test]

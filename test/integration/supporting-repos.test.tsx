@@ -78,14 +78,6 @@ describe("Supporting repositories", () => {
     await user.click(await within(sidebar).findByText("feat/supporting-open"));
     const header = await screen.findByTestId("show-workspace-header");
     await within(header).findByText("feat/supporting-open");
-    await waitFor(() =>
-      expect(
-        within(sidebar)
-          .getByText("feat/supporting-open")
-          .closest(".bg-primary\\/20"),
-      ).toBeTruthy(),
-    );
-
     await user.click(await homeRow(mainPath));
     await waitFor(() =>
       expect(

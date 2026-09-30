@@ -137,16 +137,10 @@ export function HomeRepoSidebarRow({
                       title={repoPath}
                     >
                       <span className="font-medium">{repoLabel}</span>
-                      {missing ? (
-                        <span className="ml-1.5 text-muted-foreground">
-                          missing
+                      {!missing && homeRepoDisplayRef && (
+                        <span className="ml-1.5 font-mono text-muted-foreground">
+                          {homeRepoDisplayRef}
                         </span>
-                      ) : (
-                        homeRepoDisplayRef && (
-                          <span className="ml-1.5 font-mono text-muted-foreground">
-                            {homeRepoDisplayRef}
-                          </span>
-                        )
                       )}
                     </span>
                   ) : (
@@ -157,70 +151,78 @@ export function HomeRepoSidebarRow({
                       {homeRepoDisplayRef || "…"}
                     </span>
                   )}
-                  <div
-                    className="flex items-center gap-1 shrink-0 mr-1"
-                    hidden={!showActions}
-                  >
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          className="text-foreground"
-                          aria-label="Start agent"
-                          disabled={!caps.agentPty.supported}
-                          title={caps.agentPty.reason}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!caps.agentPty.supported) return;
-                            onStartAgent?.();
-                          }}
-                        >
-                          <Bot className="w-4 h-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Start agent</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          className="text-foreground"
-                          aria-label="Open shell"
-                          disabled={!caps.shell.supported}
-                          title={caps.shell.reason}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!caps.shell.supported) return;
-                            onStartShell?.();
-                          }}
-                        >
-                          <Terminal className="w-4 h-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Open shell</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          className="text-foreground"
-                          aria-label="Stack a workspace"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onStack?.();
-                          }}
-                        >
-                          <Layers2 className="w-4 h-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        Stack workspace
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
+                  {missing && (
+                    <span className="shrink-0 mr-1 text-xs text-muted-foreground">
+                      missing
+                    </span>
+                  )}
+                  {showActions && (
+                    <div className="flex items-center gap-1 shrink-0 mr-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            className="text-foreground"
+                            aria-label="Start agent"
+                            disabled={!caps.agentPty.supported}
+                            title={caps.agentPty.reason}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!caps.agentPty.supported) return;
+                              onStartAgent?.();
+                            }}
+                          >
+                            <Bot className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          Start agent
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            className="text-foreground"
+                            aria-label="Open shell"
+                            disabled={!caps.shell.supported}
+                            title={caps.shell.reason}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!caps.shell.supported) return;
+                              onStartShell?.();
+                            }}
+                          >
+                            <Terminal className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          Open shell
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            className="text-foreground"
+                            aria-label="Stack a workspace"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onStack?.();
+                            }}
+                          >
+                            <Layers2 className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          Stack workspace
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </div>
               </SidebarMenuButton>
             </TooltipTrigger>

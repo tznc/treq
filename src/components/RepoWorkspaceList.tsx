@@ -17,6 +17,7 @@ import {
 import type { PrInfo, QueueEntryStatus } from "../lib/api-types";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
 import { FEATURES } from "../lib/features";
+import { cn } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 import { pollMs } from "../lib/swr-cache";
 import {
@@ -251,7 +252,11 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
         {groupLabel ? (
           <SidebarGroupLabel
             asChild
-            className="uppercase tracking-widest cursor-pointer"
+            className={cn(
+              "uppercase tracking-widest cursor-pointer",
+              // Leave room for the scheduled-workspaces toggle.
+              workspaceScheduling && "pr-8",
+            )}
           >
             <button
               type="button"

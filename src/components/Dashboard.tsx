@@ -26,6 +26,7 @@ import {
   popPendingAgentRequests,
   processAgentDeepLinkRequests,
 } from "../lib/agentDeepLink";
+import { agentPtySessionId } from "../lib/agent-pty-id";
 import {
   acknowledgeAgentDispatch,
   addPromptHistory,
@@ -1476,7 +1477,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         (repo) => repo.exists && repo.path === activeSupportingRepoPath,
       )
     ) {
+      // Workspace and session ids are per repository; drop the selection so
+      // it does not match a main-repository workspace with the same id.
       setActiveSupportingRepoPath(null);
+      setSelectedWorkspace(null);
+      setSelectedWorkspaceIds(new Set());
+      setActiveSessionId(null);
     }
   }, [supportingRepos, activeSupportingRepoPath]);
 
@@ -2581,12 +2587,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
    * is one to act on.
    */
   const handleAutoReviewEvent = async (event: AutoReviewEvent) => {
-    if (event.repo_path !== repoPath) return;
-    const workspace = workspaces.find((w) => w.id === event.workspace_id);
+    // Events are broadcast to every window; this window handles its main
+    // repository's, even while a supporting repository is on screen.
+    if (!mainRepoPath || event.repo_path !== mainRepoPath) return;
+    const eventWorkspaces =
+      repoPath === mainRepoPath
+        ? workspaces
+        : await getWorkspaces(mainRepoPath).catch(() => []);
+    const workspace = eventWorkspaces.find((w) => w.id === event.workspace_id);
     if (!workspace) return;
     try {
       const { prompt, agent } = await prepareWorkspaceReview({
-        repoPath,
+        repoPath: mainRepoPath,
         workspaceId: event.workspace_id,
         branchName: workspace.branch_name,
         diffSummary: autoReviewSummary(event.trigger, workspace.branch_name),
@@ -2668,7 +2680,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   ]);
 
   useEffect(() => {
-    if (!mainRepoPath || workspaces.length === 0) return;
+    // `workspaces` lists the repository on screen; with a supporting one on
+    // screen, handleStartAgentRequest fetches the main repository's own.
+    if (!mainRepoPath || (!activeSupportingRepoPath && workspaces.length === 0))
+      return;
     const queued = popPendingAgentRequests(mainRepoPath);
     if (queued.length === 0 && deferredAgentRequests.length === 0) return;
     const pending = [...queued, ...deferredAgentRequests];
@@ -2677,7 +2692,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (isProcessedAgentRequest(request.requestId)) continue;
       void handleStartAgentRequestRef.current(request);
     }
-  }, [deferredAgentRequests, mainRepoPath, workspaces.length]);
+  }, [
+    deferredAgentRequests,
+    mainRepoPath,
+    activeSupportingRepoPath,
+    workspaces.length,
+  ]);
 
   const handleWorkspaceMultiSelect = (
     workspace: Workspace | null,
@@ -2851,7 +2871,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return {
         sessionId: session.id,
         sessionName: session.name,
-        ptySessionId: `session-${session.id}`,
+        ptySessionId: agentPtySessionId(repoPath, session.id),
         workspaceId: session.workspace_id,
         workspacePath:
           pending?.workspacePath ??

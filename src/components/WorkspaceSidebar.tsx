@@ -142,17 +142,21 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
     homeRepoPath ?? "",
     ...supportingRepos.map((repo) => repo.path),
   ]);
-  const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() =>
-    readCollapsedRepos(homeRepoPath),
-  );
+  // Stored per main repository; re-read when the window opens another one.
+  const [collapsedState, setCollapsedState] = useState(() => ({
+    mainRepoPath: homeRepoPath,
+    repos: readCollapsedRepos(homeRepoPath),
+  }));
+  const collapsedRepos =
+    collapsedState.mainRepoPath === homeRepoPath
+      ? collapsedState.repos
+      : readCollapsedRepos(homeRepoPath);
   const toggleCollapsed = (path: string) => {
-    setCollapsedRepos((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      writeCollapsedRepos(homeRepoPath, next);
-      return next;
-    });
+    const next = new Set(collapsedRepos);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    writeCollapsedRepos(homeRepoPath, next);
+    setCollapsedState({ mainRepoPath: homeRepoPath, repos: next });
   };
 
   const handleContainerClick = (e: React.MouseEvent) => {
@@ -221,7 +225,9 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
         onSelectStack={active ? onSelectStack : undefined}
         onStartAgent={active ? onStartAgent : undefined}
         onStartShell={active ? onStartShell : undefined}
-        terminalSessions={terminalSessions}
+        // Summaries come from the on-screen repository's terminal pane, and
+        // rows match them by branch name.
+        terminalSessions={active ? terminalSessions : undefined}
         onDropChangeFiles={active ? onDropChangeFiles : undefined}
       />
     );
