@@ -85,7 +85,7 @@ pub(super) fn handle_workspace_add(matches: &Matches) -> bool {
   let symlinked_dirs = get_arg_values(matches, "symlink");
   let symlinked_dirs = (!symlinked_dirs.is_empty()).then_some(symlinked_dirs);
 
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(p) => p,
     Err(e) => {
       super::log_cli_error(&format!("Error: {}", e));
@@ -217,7 +217,7 @@ pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
     return false;
   }
 
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(p) => p,
     Err(e) => {
       super::log_cli_error(&format!("Error: {}", e));
@@ -331,7 +331,7 @@ fn print_focused_workspace(repo_path: &str, workspace: &local_db::Workspace) -> 
 pub(super) fn handle_workspace_status(matches: &Matches) -> bool {
   let workspace_name = get_arg_value(matches, "workspace_name");
 
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(p) => p,
     Err(e) => {
       super::log_cli_error(&format!("Error: {}", e));
@@ -375,7 +375,7 @@ pub(super) fn handle_workspace_status(matches: &Matches) -> bool {
 
 pub(super) fn handle_workspace_diff(matches: &Matches) -> bool {
   let workspace_name = get_arg_value(matches, "workspace_name");
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(p) => p,
     Err(e) => {
       super::log_cli_error(&format!("Error: {}", e));
@@ -462,7 +462,7 @@ pub(super) fn handle_workspace_move(matches: &Matches) -> bool {
     return false;
   }
 
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(path) => path,
     Err(error) => {
       super::log_cli_error(&format!("Error: {}", error));
@@ -513,6 +513,13 @@ pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
     }
   };
 
+  if branch == "." {
+    super::log_cli_error(
+      "Error: agents cannot be started in a home repository. Create a workspace with `treq add` first.",
+    );
+    return false;
+  }
+
   let mode = match parse_agent_mode_or_default(get_arg_value(matches, "mode").as_deref()) {
     Ok(mode) => mode.to_string(),
     Err(error) => {
@@ -521,7 +528,7 @@ pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
     }
   };
 
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(path) => path,
     Err(error) => {
       super::log_cli_error(&format!("Error: {}", error));
@@ -590,7 +597,7 @@ pub(super) fn handle_workspace_commit(matches: &Matches) -> bool {
 
   let push = get_arg_flag(matches, "push");
 
-  let repo_path = match detect_repo_path() {
+  let repo_path = match super::resolve_command_repo(matches) {
     Ok(path) => path,
     Err(error) => {
       super::log_cli_error(&format!("Error: {}", error));

@@ -124,6 +124,8 @@ export async function processAgentDeepLinkRequests(
   requests: AgentDeepLinkRequest[],
   context: {
     repoPath: string | null;
+    /** Supporting repositories shown in this window; handled here too. */
+    supportingRepoPaths?: string[];
     workspacesLength: number;
     onSameRepoRequest: (request: AgentDeepLinkRequest) => Promise<void>;
     deferRequest: (request: AgentDeepLinkRequest) => void;
@@ -134,9 +136,13 @@ export async function processAgentDeepLinkRequests(
     await chain;
     if (isProcessedAgentRequest(request.requestId)) return;
 
-    if (request.repo === context.repoPath) {
+    if (
+      request.repo === context.repoPath ||
+      context.supportingRepoPaths?.includes(request.repo)
+    ) {
       if (!tryClaimAgentRequest(request.requestId)) return;
-      if (context.workspacesLength === 0) {
+      // Supporting-repository requests look up their own workspaces.
+      if (request.repo === context.repoPath && context.workspacesLength === 0) {
         context.deferRequest(request);
         return;
       }

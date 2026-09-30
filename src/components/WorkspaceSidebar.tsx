@@ -1,37 +1,12 @@
-import { DragDropContext, Droppable, type DropResult } from "@hello-pangea/dnd";
-import { Archive, Github, ListTodo, Search } from "lucide-react";
-import { useMemo, useState } from "react";
-import useSWR from "swr";
-import {
-  useGitRemoteInfo,
-  useMergeQueueEnabled,
-  usePrStatusPolling,
-} from "../hooks/useMergeQueueStatus";
-import { useWorkspaceSidebarMultiSelect } from "../hooks/useWorkspaceSidebarMultiSelect";
-import { useWorkspaceGitDetail } from "../hooks/useWorkspaceGitDetail";
-import {
-  getWorkspaces,
-  listWorkspaceStatuses,
-  type Workspace,
-} from "../lib/api";
-import type { PrInfo, QueueEntryStatus } from "../lib/api-types";
+import { Github, ListTodo, Search } from "lucide-react";
+import { useState } from "react";
+import type { SupportingRepo, Workspace } from "../lib/api";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
-import { FEATURES } from "../lib/features";
-import { supabase } from "../lib/supabase";
-import { pollMs } from "../lib/swr-cache";
-import {
-  buildWorkspaceTree,
-  flattenWorkspaceTree,
-  getDescendants,
-  getEntireStack,
-  type WorkspaceSidebarStatusWithAgentDetail,
-} from "../lib/workspace-tree";
-import { isWorkspaceHidden } from "../lib/workspace-utils";
 import { useRepositoryCacheKey } from "../lib/active-repository-context";
+import { repoDisplayLabels } from "../lib/repo-labels";
 import { usePreviewFeature } from "../stores/featurePreviewStore";
 import { HomeRepoSidebarRow } from "./HomeRepoSidebarRow";
-import { HiddenWorkspacesToggle } from "./HiddenWorkspacesToggle";
-import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
+import { RepoWorkspaceList } from "./RepoWorkspaceList";
 import type { TerminalSessionSummary } from "./terminal/types";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import {
@@ -39,23 +14,52 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSkeleton,
-  SidebarSeparator,
 } from "./ui/sidebar";
 import { TooltipProvider } from "./ui/tooltip";
 import { WorkspaceSidebarHeaderActions } from "./WorkspaceSidebarHeaderActions";
-import { WorkspaceSidebarItem } from "./WorkspaceSidebarItem";
 import { TRACKER_ICONS } from "./trackerIcons";
 import { WorkspaceSidebarPanelButton } from "./WorkspaceSidebarPanelButton";
 import { WorkspaceSidebarResizeHandle } from "./WorkspaceSidebarResizeHandle";
 
+const collapsedReposKey = (mainRepoPath?: string) =>
+  `treq.sidebar.collapsedRepos:${mainRepoPath ?? ""}`;
+
+const readCollapsedRepos = (mainRepoPath?: string): Set<string> => {
+  try {
+    const raw = localStorage.getItem(collapsedReposKey(mainRepoPath));
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const writeCollapsedRepos = (
+  mainRepoPath: string | undefined,
+  paths: Set<string>,
+) => {
+  try {
+    localStorage.setItem(
+      collapsedReposKey(mainRepoPath),
+      JSON.stringify([...paths]),
+    );
+  } catch {
+    // Collapsed state is a convenience; ignore storage failures.
+  }
+};
+
 interface WorkspaceSidebarProps {
+  /** Repository on screen: the main repository or a supporting one. */
   repoPath?: string;
+  /** Repository that identifies the window. Defaults to `repoPath`. */
+  mainRepoPath?: string;
+  supportingRepos?: SupportingRepo[];
+  onSelectRepoHome?: (repoPath: string) => void;
+  onAddRepository?: () => void;
+  onRemoveSupportingRepo?: (repoPath: string) => void;
+  onLocateSupportingRepo?: (repoPath: string) => void;
+  onOpenRepoSettings?: (repoPath: string) => void;
   homeRepoDisplayRef?: string | null;
   selectedWorkspaceId?: number | null;
   selectedWorkspaceIds?: Set<number>;
@@ -93,6 +97,13 @@ interface WorkspaceSidebarProps {
 
 export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   repoPath,
+  mainRepoPath,
+  supportingRepos = [],
+  onSelectRepoHome,
+  onAddRepository,
+  onRemoveSupportingRepo,
+  onLocateSupportingRepo,
+  onOpenRepoSettings,
   homeRepoDisplayRef,
   selectedWorkspaceId,
   selectedWorkspaceIds,
@@ -122,112 +133,27 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   terminalSessions,
   onDropChangeFiles,
 }) => {
-  const cacheKey = useRepositoryCacheKey(repoPath);
-  const workspaceScheduling = usePreviewFeature("workspaceScheduling");
+  const contextCacheKey = useRepositoryCacheKey(repoPath);
   const linearIntegration = usePreviewFeature("linearIntegration");
-  const { data: workspaces = [], isLoading: workspacesPending } = useSWR(
-    cacheKey ? ["workspaces", cacheKey] : null,
-    () => getWorkspaces(repoPath || ""),
-    { keepPreviousData: true },
+  const homeRepoPath = mainRepoPath ?? repoPath;
+  const presentSupportingRepos = supportingRepos.filter((repo) => repo.exists);
+  const isMultiRepo = supportingRepos.length > 0;
+  const labels = repoDisplayLabels([
+    homeRepoPath ?? "",
+    ...supportingRepos.map((repo) => repo.path),
+  ]);
+  const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() =>
+    readCollapsedRepos(homeRepoPath),
   );
-  const workspacesLoaded = workspacesPending === false && Boolean(repoPath);
-
-  // Branches with an open agent terminal, and whether any of those sessions
-  // is actively streaming -- drives the sidebar spinner's spin vs. idle pip.
-  const streamingByBranchWithAgentSession = useMemo(() => {
-    const branches = new Map<string, boolean>();
-    for (const session of terminalSessions ?? []) {
-      if (session.kind !== "agent" || !session.branchName) continue;
-      branches.set(
-        session.branchName,
-        (branches.get(session.branchName) ?? false) || session.isStreaming,
-      );
-    }
-    return branches;
-  }, [terminalSessions]);
-
-  // Shares its key with Dashboard.tsx's own plain `listWorkspaceStatuses`
-  // poll, so this fetcher must stay a plain pass-through of that call --
-  // see useWorkspaceGitDetail for the extra per-workspace detail this
-  // sidebar needs on top of it.
-  const { data: workspaceStatuses = [] } = useSWR(
-    cacheKey && workspacesLoaded ? ["workspace-statuses", cacheKey] : null,
-    () => listWorkspaceStatuses(repoPath || ""),
-    { keepPreviousData: true },
-  );
-  const gitDetailById = useWorkspaceGitDetail({
-    repoPath,
-    cacheKey,
-    enabled: workspacesLoaded,
-    statuses: workspaceStatuses,
-  });
-
-  const { data: remoteInfo } = useGitRemoteInfo(repoPath);
-  const { data: queueEnabled } = useMergeQueueEnabled(repoPath);
-  const repoFullName = remoteInfo?.full_name;
-  // Single Rust-backed cache for all workspace PR statuses — no per-row
-  // `gh pr view` polling from the WebView.
-  const { data: prStatusesByBranch = {} } = usePrStatusPolling(repoPath);
-  const { data: branchQueueStatuses } = useSWR(
-    FEATURES.mergeQueue && queueEnabled === true && repoFullName
-      ? ["repo-branch-queue-statuses", repoFullName]
-      : null,
-    async () => {
-      const { data } = await supabase.rpc("get_repo_branch_queue_statuses", {
-        p_repo_full_name: repoFullName!,
-      });
-      const map = new Map<string, QueueEntryStatus>();
-      for (const row of (data ?? []) as {
-        branch_name: string;
-        status: string;
-      }[]) {
-        map.set(row.branch_name, row.status as QueueEntryStatus);
-      }
-      return map;
-    },
-    { refreshInterval: pollMs(30_000) },
-  );
-
-  const statuses: WorkspaceSidebarStatusWithAgentDetail[] = (() => {
-    const statusById = new Map(
-      (workspaceStatuses ?? []).map((status) => [status.current.id, status]),
-    );
-    return (workspaces ?? []).map((workspace) => {
-      const status = statusById.get(workspace.id);
-      const detail = gitDetailById?.get(workspace.id);
-      return {
-        ...(status ?? { current: workspace, has_conflicts: false }),
-        ...detail,
-      };
+  const toggleCollapsed = (path: string) => {
+    setCollapsedRepos((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      writeCollapsedRepos(homeRepoPath, next);
+      return next;
     });
-  })();
-  const workspacesForSelection = statuses.map((s) => s.current);
-  const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-
-  const visibleStatuses = (() => {
-    if (!workspaceScheduling || showHidden) return statuses;
-    return statuses.filter((status) => !isWorkspaceHidden(status.current));
-  })();
-  const hiddenCount = workspaceScheduling
-    ? statuses.filter((status) => isWorkspaceHidden(status.current)).length
-    : 0;
-
-  const flattenedNodes = (() => {
-    const isMergedBranch = (branchName: string) =>
-      (prStatusesByBranch as Record<string, PrInfo | null>)[branchName]
-        ?.state === "MERGED";
-    const tree = buildWorkspaceTree(visibleStatuses, isMergedBranch);
-    return flattenWorkspaceTree(tree);
-  })();
-
-  const { handleItemSelect, clearLastSelectedIndex } =
-    useWorkspaceSidebarMultiSelect({
-      flattenedNodes,
-      onSelectStack,
-      onWorkspaceMultiSelect,
-      onWorkspaceClick,
-    });
+  };
 
   const handleContainerClick = (e: React.MouseEvent) => {
     if (
@@ -240,54 +166,11 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
         null as Parameters<NonNullable<typeof onWorkspaceMultiSelect>>[0],
         e,
       );
-      clearLastSelectedIndex();
     }
   };
 
-  const handleDoubleClick = (workspace: Workspace, e: React.MouseEvent) => {
-    if (!onSelectStack) return;
-    e.stopPropagation();
-
-    if (e.shiftKey) {
-      const descendants = getDescendants(
-        workspacesForSelection,
-        workspace.branch_name,
-      );
-      const ids = new Set([workspace.id, ...descendants.map((w) => w.id)]);
-      onSelectStack(ids);
-      return;
-    }
-
-    const stack = getEntireStack(workspacesForSelection, workspace.branch_name);
-    onSelectStack(new Set(stack.map((w) => w.id)));
-  };
-
-  const handleDragEnd = (result: DropResult) => {
-    if (!onMoveWorkspace) return;
-
-    const draggedId = parseInt(result.draggableId, 10);
-    const draggedWorkspace = workspacesForSelection.find(
-      (w) => w.id === draggedId,
-    );
-    if (!draggedWorkspace) return;
-
-    if (result.combine) {
-      const targetWorkspace = workspacesForSelection.find(
-        (w) => String(w.id) === result.combine!.draggableId,
-      );
-      if (targetWorkspace && targetWorkspace.id !== draggedWorkspace.id) {
-        onMoveWorkspace(draggedWorkspace, targetWorkspace.branch_name);
-      }
-      return;
-    }
-
-    if (result.destination) {
-      onMoveWorkspace(draggedWorkspace, null);
-    }
-  };
-
-  const repoName = repoPath
-    ? repoPath.split("/").filter(Boolean).pop() || "Repository"
+  const repoName = homeRepoPath
+    ? homeRepoPath.split("/").filter(Boolean).pop() || "Repository"
     : "Repository";
 
   // GitHub/Linear/Settings are their own nav destinations — don't keep home/workspace
@@ -299,14 +182,97 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
     currentPage !== "jira" &&
     currentPage !== "settings" &&
     currentPage !== "artifacts";
-  const isHomeSelected =
-    workspaceSelectionActive && selectedWorkspaceId === null;
-  const activeSelectedWorkspaceId = workspaceSelectionActive
-    ? selectedWorkspaceId
-    : undefined;
-  const activeSelectedWorkspaceIds = workspaceSelectionActive
-    ? selectedWorkspaceIds
-    : undefined;
+  const isActiveRepo = (path: string | undefined) =>
+    !isMultiRepo || path === repoPath;
+  const isHomeSelected = (path: string | undefined) =>
+    workspaceSelectionActive &&
+    isActiveRepo(path) &&
+    selectedWorkspaceId === null;
+
+  // Only the repository on screen gets selection and workspace actions, so
+  // stacks, multi-select, and drag-to-move never cross repositories. Rows in
+  // other repositories switch to that repository when clicked.
+  const renderWorkspaceList = (path: string | undefined, label?: string) => {
+    const active = isActiveRepo(path);
+    const selectionShown = active && workspaceSelectionActive;
+    return (
+      <RepoWorkspaceList
+        key={path ?? ""}
+        repoPath={path}
+        cacheKey={active ? contextCacheKey : path}
+        groupLabel={label}
+        collapsed={label ? collapsedRepos.has(path ?? "") : false}
+        onToggleCollapsed={() => toggleCollapsed(path ?? "")}
+        activeSelectedWorkspaceId={
+          selectionShown ? selectedWorkspaceId : undefined
+        }
+        activeSelectedWorkspaceIds={
+          selectionShown ? selectedWorkspaceIds : undefined
+        }
+        selectedWorkspaceIds={active ? selectedWorkspaceIds : undefined}
+        onWorkspaceClick={onWorkspaceClick}
+        onWorkspaceMultiSelect={active ? onWorkspaceMultiSelect : undefined}
+        onBulkArchive={onBulkArchive}
+        onArchiveWorkspace={active ? onArchiveWorkspace : undefined}
+        archivingWorkspaceIds={active ? archivingWorkspaceIds : undefined}
+        exitingWorkspaceIds={active ? exitingWorkspaceIds : undefined}
+        onAddAfter={active ? onAddAfter : undefined}
+        onMoveWorkspace={active ? onMoveWorkspace : undefined}
+        onSelectStack={active ? onSelectStack : undefined}
+        onStartAgent={active ? onStartAgent : undefined}
+        onStartShell={active ? onStartShell : undefined}
+        terminalSessions={terminalSessions}
+        onDropChangeFiles={active ? onDropChangeFiles : undefined}
+      />
+    );
+  };
+
+  const renderHomeRow = (
+    path: string | undefined,
+    options: { supporting?: SupportingRepo } = {},
+  ) => {
+    const active = isActiveRepo(path);
+    const { supporting } = options;
+    const missing = supporting ? !supporting.exists : false;
+    return (
+      <HomeRepoSidebarRow
+        key={path ?? ""}
+        repoPath={path}
+        repoLabel={isMultiRepo ? labels.get(path ?? "") : undefined}
+        missing={missing}
+        homeRepoDisplayRef={active ? homeRepoDisplayRef : null}
+        isHomeSelected={isHomeSelected(path)}
+        selectedWorkspaceIds={active ? selectedWorkspaceIds : undefined}
+        onWorkspaceClick={
+          active
+            ? onWorkspaceClick
+            : () => {
+                if (path && !missing) onSelectRepoHome?.(path);
+              }
+        }
+        onWorkspaceMultiSelect={active ? onWorkspaceMultiSelect : undefined}
+        onOpenBranchSwitcher={active ? onOpenBranchSwitcher : undefined}
+        onDropChangeFiles={active ? onDropChangeFiles : undefined}
+        onStartAgent={active ? onStartHomeAgent : undefined}
+        onStartShell={active ? onStartHomeShell : undefined}
+        onStack={active ? onStackHome : undefined}
+        onAddRepository={supporting ? undefined : onAddRepository}
+        onOpenRepoSettings={
+          supporting && !missing && path
+            ? () => onOpenRepoSettings?.(path)
+            : undefined
+        }
+        onLocateRepo={
+          supporting && missing && path
+            ? () => onLocateSupportingRepo?.(path)
+            : undefined
+        }
+        onRemoveRepo={
+          supporting && path ? () => onRemoveSupportingRepo?.(path) : undefined
+        }
+      />
+    );
+  };
 
   return (
     <TooltipProvider delay={200} timeout={100}>
@@ -346,19 +312,10 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           <SidebarGroup className="py-0">
             <SidebarGroupContent>
               <SidebarMenu>
-                <HomeRepoSidebarRow
-                  repoPath={repoPath}
-                  homeRepoDisplayRef={homeRepoDisplayRef}
-                  isHomeSelected={isHomeSelected}
-                  selectedWorkspaceIds={selectedWorkspaceIds}
-                  onWorkspaceClick={onWorkspaceClick}
-                  onWorkspaceMultiSelect={onWorkspaceMultiSelect}
-                  onOpenBranchSwitcher={onOpenBranchSwitcher}
-                  onDropChangeFiles={onDropChangeFiles}
-                  onStartAgent={onStartHomeAgent}
-                  onStartShell={onStartHomeShell}
-                  onStack={onStackHome}
-                />
+                {renderHomeRow(homeRepoPath)}
+                {supportingRepos.map((repo) =>
+                  renderHomeRow(repo.path, { supporting: repo }),
+                )}
 
                 {onOpenGitHub && (
                   <WorkspaceSidebarPanelButton
@@ -407,118 +364,22 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {workspaces.length > 0 && <SidebarSeparator />}
-
-          <SidebarGroup className="py-0">
-            <SidebarGroupLabel className="uppercase tracking-widest">
-              Workspaces
-            </SidebarGroupLabel>
-            {workspaceScheduling && (
-              <HiddenWorkspacesToggle
-                showHidden={showHidden}
-                hiddenCount={hiddenCount}
-                onToggle={() => setShowHidden((value) => !value)}
-              />
-            )}
-            <SidebarGroupContent>
-              <DragDropContext onDragEnd={handleDragEnd}>
-                <Droppable droppableId="sidebar-root" isCombineEnabled>
-                  {(droppableProvided) => (
-                    <SidebarMenu
-                      ref={droppableProvided.innerRef}
-                      {...droppableProvided.droppableProps}
-                    >
-                      {workspacesPending &&
-                        flattenedNodes.length === 0 &&
-                        Array.from({ length: 6 }, (_, index) => (
-                          <SidebarMenuItem key={`workspace-skeleton-${index}`}>
-                            <SidebarMenuSkeleton />
-                          </SidebarMenuItem>
-                        ))}
-                      {flattenedNodes.map((node, index) => (
-                        <WorkspaceSidebarItem
-                          key={node.status.current.id}
-                          node={node}
-                          index={index}
-                          repoPath={repoPath}
-                          selectedWorkspaceId={activeSelectedWorkspaceId}
-                          selectedWorkspaceIds={activeSelectedWorkspaceIds}
-                          onWorkspaceClick={onWorkspaceClick}
-                          onWorkspaceMultiSelect={handleItemSelect}
-                          onAddAfter={onAddAfter}
-                          onStartAgent={onStartAgent}
-                          onStartShell={onStartShell}
-                          onArchiveWorkspace={onArchiveWorkspace}
-                          archiving={archivingWorkspaceIds?.has(
-                            node.status.current.id,
-                          )}
-                          exiting={exitingWorkspaceIds?.has(
-                            node.status.current.id,
-                          )}
-                          onRenameWorkspace={setRenameTarget}
-                          onDoubleClick={handleDoubleClick}
-                          queueStatus={branchQueueStatuses?.get(
-                            node.status.current.branch_name,
-                          )}
-                          prInfo={
-                            (
-                              prStatusesByBranch as Record<
-                                string,
-                                PrInfo | null
-                              >
-                            )[node.status.current.branch_name] ?? null
-                          }
-                          hasRemote={!!remoteInfo}
-                          onDropChangeFiles={onDropChangeFiles}
-                          hasActiveAgentSession={streamingByBranchWithAgentSession.has(
-                            node.status.current.branch_name,
-                          )}
-                          isAgentSessionStreaming={
-                            streamingByBranchWithAgentSession.get(
-                              node.status.current.branch_name,
-                            ) ?? false
-                          }
-                        />
-                      ))}
-                      {droppableProvided.placeholder}
-                      {selectedWorkspaceIds &&
-                        selectedWorkspaceIds.size > 0 &&
-                        !archivingWorkspaceIds?.size &&
-                        !exitingWorkspaceIds?.size && (
-                          <SidebarMenuItem>
-                            <SidebarMenuButton
-                              type="button"
-                              onClick={onBulkArchive}
-                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            >
-                              <Archive />
-                              <span>
-                                Archive {selectedWorkspaceIds.size} workspace
-                                {selectedWorkspaceIds.size > 1 ? "s" : ""}
-                              </span>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        )}
-                    </SidebarMenu>
-                  )}
-                </Droppable>
-              </DragDropContext>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {isMultiRepo ? (
+            <>
+              {renderWorkspaceList(
+                homeRepoPath,
+                labels.get(homeRepoPath ?? ""),
+              )}
+              {presentSupportingRepos.map((repo) =>
+                renderWorkspaceList(repo.path, labels.get(repo.path)),
+              )}
+            </>
+          ) : (
+            renderWorkspaceList(repoPath)
+          )}
         </SidebarContent>
         <WorkspaceSidebarResizeHandle />
       </Sidebar>
-      {renameTarget && repoPath && (
-        <RenameWorkspaceDialog
-          open={!!renameTarget}
-          onOpenChange={(open) => {
-            if (!open) setRenameTarget(null);
-          }}
-          repoPath={repoPath}
-          workspace={renameTarget}
-          onSuccess={() => setRenameTarget(null)}
-        />
-      )}
     </TooltipProvider>
   );
 };

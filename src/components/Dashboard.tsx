@@ -49,6 +49,10 @@ import {
   selectFolder,
   setSetting,
   setWindowRepoPath,
+  setWindowSupportingRepoPaths,
+  listSupportingRepos,
+  addSupportingRepo,
+  removeSupportingRepo,
   updateSessionAccess,
   type Workspace,
 } from "../lib/api";
@@ -265,13 +269,28 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   initialViewMode = "show-workspace",
 }) => {
-  const [repoPath, setRepoPath] = useState(() => {
+  const [mainRepoPath, setMainRepoPath] = useState(() => {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get("repo") || "";
   });
+  // A supporting repository selected in the sidebar; null for the main one.
+  // `repoPath` is the repository on screen, so everything that reads it
+  // follows the sidebar selection.
+  const [activeSupportingRepoPath, setActiveSupportingRepoPath] = useState<
+    string | null
+  >(null);
+  const repoPath =
+    mainRepoPath && activeSupportingRepoPath
+      ? activeSupportingRepoPath
+      : mainRepoPath;
+  const setRepoPath = (path: string) => {
+    setMainRepoPath(path);
+    setActiveSupportingRepoPath(null);
+  };
+  // Reload reopens the window's main repository, not the one on screen.
   useEffect(() => {
-    syncRepoUrlParam(repoPath);
-  }, [repoPath]);
+    syncRepoUrlParam(mainRepoPath);
+  }, [mainRepoPath]);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
   const [homeRepoDisplayRef, setHomeRepoDisplayRef] = useState<string | null>(
     null,
@@ -1430,10 +1449,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
       } catch (e) {
         console.error("Failed to init repo:", e);
       }
-      await setWindowRepoPath(repoPath);
+      await setWindowRepoPath(mainRepoPath);
       return true;
     },
   );
+
+  const { data: supportingRepos = [], mutate: mutateSupportingRepos } = useSWR(
+    mainRepoPath && !isRemoteActive ? ["supporting-repos", mainRepoPath] : null,
+    () => listSupportingRepos(mainRepoPath),
+  );
+  const supportingRepoPathsKey = supportingRepos
+    .filter((repo) => repo.exists)
+    .map((repo) => repo.path)
+    .join("\n");
+  useEffect(() => {
+    void setWindowSupportingRepoPaths(
+      supportingRepoPathsKey ? supportingRepoPathsKey.split("\n") : [],
+    ).catch((error) => {
+      console.error("Failed to register supporting repositories:", error);
+    });
+  }, [supportingRepoPathsKey]);
+  useEffect(() => {
+    if (
+      activeSupportingRepoPath &&
+      !supportingRepos.some(
+        (repo) => repo.exists && repo.path === activeSupportingRepoPath,
+      )
+    ) {
+      setActiveSupportingRepoPath(null);
+    }
+  }, [supportingRepos, activeSupportingRepoPath]);
 
   useEffect(() => {
     if (!dataRepoPath) {
@@ -1519,7 +1564,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     setSelectedWorkspace((current) => {
       if (!current) return current;
-      const updated = workspaces.find((w) => w.id === current.id);
+      // Ids are per repository; only refresh from the same repository.
+      const updated = workspaces.find(
+        (w) => w.id === current.id && w.repo_path === current.repo_path,
+      );
       if (!updated || JSON.stringify(updated) === JSON.stringify(current)) {
         return current;
       }
@@ -1531,8 +1579,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // open. Only react to ids that were listed before, so a workspace selected
   // right after creation is not dropped while the list catches up.
   const listedWorkspaceIdsRef = useRef<ReadonlySet<number>>(new Set());
+  const listedRepoKeyRef = useRef(queryRepoKey);
   useEffect(() => {
-    const previous = listedWorkspaceIdsRef.current;
+    // Switching repositories replaces the list; that is not a removal.
+    const sameRepo = listedRepoKeyRef.current === queryRepoKey;
+    listedRepoKeyRef.current = queryRepoKey;
+    const previous = sameRepo ? listedWorkspaceIdsRef.current : new Set();
     const current = new Set(workspaces.map((w) => w.id));
     listedWorkspaceIdsRef.current = current;
     if (
@@ -1623,6 +1675,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setSessionSelectedFile(null);
       },
     });
+
+  const addSupportingRepoAtPath = async (selected: string) => {
+    if (!mainRepoPath) return;
+    try {
+      const added = await addSupportingRepo(mainRepoPath, selected);
+      await initRepo(added);
+      await mutateSupportingRepos();
+      addToast({
+        title: "Repository Added",
+        description: `${added.split(/[\\/]/).pop() || added} is now a supporting repository`,
+        type: "success",
+      });
+    } catch (error) {
+      addToast({
+        title: "Failed to add repository",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    }
+  };
+
+  const handleAddSupportingRepo = async () => {
+    const selected = await selectFolder();
+    if (!selected) return;
+    await addSupportingRepoAtPath(selected);
+  };
+
+  const handleRemoveSupportingRepo = async (path: string) => {
+    if (!mainRepoPath) return;
+    const confirmed = await ask(
+      `Remove ${path} from this window? Its files and workspaces are not deleted.`,
+      { title: "Remove Repository", kind: "warning" },
+    );
+    if (!confirmed) return;
+    try {
+      await removeSupportingRepo(mainRepoPath, path);
+      if (activeSupportingRepoPath === path) {
+        setActiveSupportingRepoPath(null);
+        setSelectedWorkspace(null);
+      }
+      await mutateSupportingRepos();
+    } catch (error) {
+      addToast({
+        title: "Failed to remove repository",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    }
+  };
+
+  const handleLocateSupportingRepo = async (path: string) => {
+    if (!mainRepoPath) return;
+    const selected = await selectFolder();
+    if (!selected) return;
+    await removeSupportingRepo(mainRepoPath, path);
+    await addSupportingRepoAtPath(selected);
+  };
+
+  const handleSelectRepoHome = (path: string) => {
+    activateRepo(path);
+    setSelectedWorkspace(null);
+    setViewMode("show-workspace");
+  };
+
+  const handleOpenRepoSettings = (path: string) => {
+    activateRepo(path);
+    setSelectedWorkspace(null);
+    openSettings();
+  };
 
   const handleOpenRepository = async () => {
     const selected = await selectFolder();
@@ -1762,6 +1883,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       listen<string>("menu-repository-path-selected", (event) => {
         void openRepositoryAtPath(event.payload);
       }),
+      listen("menu-add-repository", () => {
+        void handleAddSupportingRepo();
+      }),
       // Menu open via SSH
       listen("menu-open-ssh", () => {
         if (!useFeaturePreviewStore.getState().flags.remoteSsh) return;
@@ -1848,6 +1972,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [
     repoPath,
+    mainRepoPath,
     selectedWorkspace,
     effectiveDefaultBranch,
     addToast,
@@ -1865,13 +1990,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
       forceNew?: boolean;
       name?: string;
       agent?: AgentKind;
+      /** Repository of the workspace; defaults to the one on screen. */
+      repoPath?: string;
     },
   ): Promise<number> => {
-    const sessions = await getSessions(repoPath);
+    const sessionRepoPath = options?.repoPath ?? repoPath;
+    const sessions = await getSessions(sessionRepoPath);
     if (!options?.forceNew) {
       const existing = sessions.find((s) => s.workspace_id === workspaceId);
       if (existing) {
-        await updateSessionAccess(repoPath, existing.id);
+        await updateSessionAccess(sessionRepoPath, existing.id);
         return existing.id;
       }
     }
@@ -1885,7 +2013,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       name = `${agentInfo(options?.agent ?? DEFAULT_AGENT).label} ${index}`;
     }
 
-    const sessionId = await createSession(repoPath, workspaceId, name);
+    const sessionId = await createSession(sessionRepoPath, workspaceId, name);
 
     void invalidateQueries(["sessions"]);
     return sessionId;
@@ -2032,8 +2160,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   // Navigate to workspace without creating an agent session
+  /** Puts the repository at `path` (main or supporting) on screen. */
+  const activateRepo = (path: string) => {
+    const next = path && path !== mainRepoPath ? path : null;
+    if (next === activeSupportingRepoPath) return;
+    setActiveSupportingRepoPath(next);
+    setSelectedWorkspaceIds(new Set());
+    setActiveSessionId(null);
+  };
+
   const handleSelectWorkspace = (workspace: Workspace | null) => {
     const next = workspace ?? null;
+    if (next?.repo_path) activateRepo(next.repo_path);
     setSelectedWorkspace(next);
     setViewMode("show-workspace");
     if (repoPath) {
@@ -2363,7 +2501,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       forceNew: true,
       agent,
       name: sessionName,
+      repoPath: workspace.repo_path,
     });
+    activateRepo(workspace.repo_path);
     setActiveSessionId(sessionId);
     setSelectedWorkspace(workspace);
     setViewMode("show-workspace");
@@ -2377,7 +2517,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return next;
     });
     if (prompt) {
-      addPromptHistory(repoPath, workspace.id, sessionId, prompt, agent)
+      addPromptHistory(
+        workspace.repo_path,
+        workspace.id,
+        sessionId,
+        prompt,
+        agent,
+      )
         .then(() => {
           void invalidateQueries(["prompt-history"]);
           invalidateQueries(["workspace-starting-prompt"]);
@@ -2390,7 +2536,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleStartAgentRequest = async (request: AgentDeepLinkRequest) => {
-    const workspace = findWorkspaceByBranch(workspaces, request.branch);
+    // The request may target the main repository or a supporting one,
+    // whichever is on screen.
+    const requestWorkspaces =
+      request.repo === repoPath
+        ? workspaces
+        : await getWorkspaces(request.repo).catch(() => []);
+    const workspace = findWorkspaceByBranch(requestWorkspaces, request.branch);
     if (!workspace) {
       addToast({
         title: "Workspace not found",
@@ -2474,8 +2626,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await listen<string[]>("deep-link-received", async (event) => {
         const requests = parseAgentDeepLinks(event.payload ?? []);
         await processAgentDeepLinkRequests(requests, {
-          repoPath,
-          workspacesLength: workspaces.length,
+          repoPath: mainRepoPath,
+          supportingRepoPaths: supportingRepoPathsKey
+            ? supportingRepoPathsKey.split("\n")
+            : [],
+          // `workspaces` lists the repository on screen. A main-repository
+          // request made while a supporting one is on screen fetches its own.
+          workspacesLength: activeSupportingRepoPath ? 1 : workspaces.length,
           onSameRepoRequest: (request) =>
             handleStartAgentRequestRef.current(request),
           deferRequest: (request) => {
@@ -2503,11 +2660,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => {
       unlistenPromise.then((fn) => fn());
     };
-  }, [repoPath, workspaces.length]);
+  }, [
+    mainRepoPath,
+    activeSupportingRepoPath,
+    supportingRepoPathsKey,
+    workspaces.length,
+  ]);
 
   useEffect(() => {
-    if (!repoPath || workspaces.length === 0) return;
-    const queued = popPendingAgentRequests(repoPath);
+    if (!mainRepoPath || workspaces.length === 0) return;
+    const queued = popPendingAgentRequests(mainRepoPath);
     if (queued.length === 0 && deferredAgentRequests.length === 0) return;
     const pending = [...queued, ...deferredAgentRequests];
     setDeferredAgentRequests([]);
@@ -2515,7 +2677,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (isProcessedAgentRequest(request.requestId)) continue;
       void handleStartAgentRequestRef.current(request);
     }
-  }, [deferredAgentRequests, repoPath, workspaces.length]);
+  }, [deferredAgentRequests, mainRepoPath, workspaces.length]);
 
   const handleWorkspaceMultiSelect = (
     workspace: Workspace | null,
@@ -2810,6 +2972,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )}
           <WorkspaceSidebar
             repoPath={dataRepoPath}
+            mainRepoPath={isRemoteActive ? undefined : mainRepoPath}
+            supportingRepos={isRemoteActive ? [] : supportingRepos}
+            onSelectRepoHome={handleSelectRepoHome}
+            onAddRepository={
+              mainRepoPath && !isRemoteActive
+                ? () => void handleAddSupportingRepo()
+                : undefined
+            }
+            onRemoveSupportingRepo={(path) =>
+              void handleRemoveSupportingRepo(path)
+            }
+            onLocateSupportingRepo={(path) =>
+              void handleLocateSupportingRepo(path)
+            }
+            onOpenRepoSettings={handleOpenRepoSettings}
             homeRepoDisplayRef={homeRepoDisplayRef}
             selectedWorkspaceId={selectedWorkspace?.id ?? null}
             selectedWorkspaceIds={selectedWorkspaceIds}

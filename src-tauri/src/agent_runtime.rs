@@ -26,27 +26,52 @@ pub(crate) fn extract_repo_from_agent_deep_link(url: &str) -> Option<String> {
 
 fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> Option<String> {
   let state = app.state::<AppState>();
-  let repo_map = state.window_repo_paths.lock().ok()?;
   let normalized_target = agent_dispatch::normalize_repo_path(repo);
-
-  let mut fallback: Option<String> = None;
   let windows = app.webview_windows();
-  for (label, repo_path) in repo_map.iter() {
-    let normalized = agent_dispatch::normalize_repo_path(repo_path);
-    if normalized != normalized_target {
-      continue;
+
+  let pick = |labels: Vec<String>| -> Option<String> {
+    let mut fallback: Option<String> = None;
+    for label in labels {
+      let Some(window) = windows.get(&label) else {
+        continue;
+      };
+      if window.is_focused().unwrap_or(false) {
+        return Some(label);
+      }
+      if fallback.is_none() {
+        fallback = Some(label);
+      }
     }
-    let Some(window) = windows.get(label) else {
-      continue;
-    };
-    if window.is_focused().unwrap_or(false) {
-      return Some(label.clone());
-    }
-    if fallback.is_none() {
-      fallback = Some(label.clone());
-    }
+    fallback
+  };
+
+  let main_labels: Vec<String> = state
+    .window_repo_paths
+    .lock()
+    .ok()?
+    .iter()
+    .filter(|(_, path)| agent_dispatch::normalize_repo_path(path) == normalized_target)
+    .map(|(label, _)| label.clone())
+    .collect();
+  if let Some(label) = pick(main_labels) {
+    return Some(label);
   }
-  fallback
+
+  // A window where the repository is a supporting repository handles it only
+  // when no window has it open as the main repository.
+  let supporting_labels: Vec<String> = state
+    .window_supporting_repo_paths
+    .lock()
+    .ok()?
+    .iter()
+    .filter(|(_, paths)| {
+      paths
+        .iter()
+        .any(|path| agent_dispatch::normalize_repo_path(path) == normalized_target)
+    })
+    .map(|(label, _)| label.clone())
+    .collect();
+  pick(supporting_labels)
 }
 
 pub(crate) fn route_agent_deep_link(app: &AppHandle, url: String) -> bool {
@@ -226,6 +251,12 @@ pub(crate) fn start_instance_registry_heartbeat(app: AppHandle) {
     let now = agent_dispatch::now_millis();
 
     let repo_map = state.window_repo_paths.lock().ok().map(|m| m.clone());
+    let supporting_map = state
+      .window_supporting_repo_paths
+      .lock()
+      .ok()
+      .map(|m| m.clone())
+      .unwrap_or_default();
     let mut focus_map = match state.window_last_focused_at.lock() {
       Ok(guard) => guard,
       Err(_) => {
@@ -247,11 +278,21 @@ pub(crate) fn start_instance_registry_heartbeat(app: AppHandle) {
           focus_map.insert(label.clone(), now);
         }
         let last_focused_at = focus_map.get(&label).copied();
+        for supporting_path in supporting_map.get(&label).into_iter().flatten() {
+          snapshots.push(agent_dispatch::InstanceWindowSnapshot {
+            window_label: label.clone(),
+            normalized_repo_path: agent_dispatch::normalize_repo_path(supporting_path),
+            focused,
+            last_focused_at,
+            supporting: true,
+          });
+        }
         snapshots.push(agent_dispatch::InstanceWindowSnapshot {
           window_label: label,
           normalized_repo_path: agent_dispatch::normalize_repo_path(&repo_path),
           focused,
           last_focused_at,
+          supporting: false,
         });
       }
     }

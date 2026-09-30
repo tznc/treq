@@ -54,6 +54,27 @@ branch. When stacking more work on an existing workspace, pass its branch to
 confirm the new workspace appears below its target. If it does not, correct the
 metadata with `treq set <workspace_name> -t <target_branch>` before continuing.
 
+## Supporting repositories
+
+When the system prompt lists supporting repositories, you may read them but
+must not edit them directly. Delegate changes to an agent scoped to a
+workspace in that repository:
+
+```bash
+treq add -r <repo> <branch_name> [-d <description>]
+treq agent -r <repo> <branch_name> "<prompt>"
+treq st -r <repo> [<workspace_name>]
+treq diff -r <repo> <workspace_name>
+```
+
+- `<repo>` is the supporting repository's path or directory name.
+- `-r` works on `add`, `set`, `st`, `diff`, `agent`, and `commit`. `mv` takes
+  `--repo` because `-r` is its range flag.
+- `treq agent` needs a workspace branch. It cannot start an agent in a home
+  repository.
+- `treq agent` returns once the agent is started. Poll `treq st -r` to follow
+  its progress.
+
 ## Send files to the user
 
 Use `treq send` when the user should see a file, screenshot, or text preview

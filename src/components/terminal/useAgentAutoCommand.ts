@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { getSessionModel, getTreqBinDir } from "../../lib/api";
+import {
+  getSessionModel,
+  getTreqBinDir,
+  listSupportingRepos,
+} from "../../lib/api";
 import { prepareAgentAutoCommand } from "../../lib/prepareAgentAutoCommand";
 import { useToast } from "../ui/toast";
 import type { AgentSessionData } from "./types";
@@ -26,6 +30,14 @@ export const useAgentAutoCommand = (
     getTreqBinDir,
   );
 
+  const { data: supportingRepos, isLoading: supportingLoading } = useSWR(
+    ["supporting-repos", sessionData.repoPath],
+    () => listSupportingRepos(sessionData.repoPath),
+  );
+  const supportingRepoPaths = (supportingRepos ?? [])
+    .filter((repo) => repo.exists)
+    .map((repo) => repo.path);
+
   const sessionModel =
     sessionModelOverride === undefined
       ? (loadedModel ?? null)
@@ -35,12 +47,13 @@ export const useAgentAutoCommand = (
 
   const pendingPrompt = restarted ? undefined : sessionData.pendingPrompt;
   const { data: prepared, error: prepareErr } = useSWR(
-    isModelLoaded && treqBinDirReady
+    isModelLoaded && treqBinDirReady && !supportingLoading
       ? [
           "agent-auto-command",
           sessionData.agent ?? "claude",
           sessionData.workspacePath,
           sessionData.repoPath,
+          supportingRepoPaths.join("\n"),
           sessionModel,
           treqBinDir,
           pendingPrompt,
@@ -52,6 +65,7 @@ export const useAgentAutoCommand = (
         agent: sessionData.agent ?? "claude",
         workspacePath: sessionData.workspacePath,
         repoPath: sessionData.repoPath,
+        supportingRepoPaths,
         sessionModel,
         permissionMode: sessionData.permissionMode,
         pendingPrompt,

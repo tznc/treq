@@ -195,6 +195,36 @@ export const setWindowRepoPath = (repoPath: string): Promise<void> =>
     windowLabel: currentWindowLabel(),
   });
 
+export interface SupportingRepo {
+  path: string;
+  exists: boolean;
+}
+
+export const listSupportingRepos = (
+  repoPath: string,
+): Promise<SupportingRepo[]> => invoke("list_supporting_repos", { repoPath });
+
+/** Validates and links a supporting repository; returns its canonical path. */
+export const addSupportingRepo = (
+  repoPath: string,
+  supportingPath: string,
+): Promise<string> =>
+  invoke("add_supporting_repo", { repoPath, supportingPath });
+
+export const removeSupportingRepo = (
+  repoPath: string,
+  supportingPath: string,
+): Promise<void> =>
+  invoke("remove_supporting_repo", { repoPath, supportingPath });
+
+export const setWindowSupportingRepoPaths = (
+  repoPaths: string[],
+): Promise<void> =>
+  invoke("set_window_supporting_repo_paths", {
+    repoPaths,
+    windowLabel: currentWindowLabel(),
+  });
+
 export const detectEditorApps = (): Promise<EditorAppsResponse> =>
   invoke("detect_editor_apps");
 

@@ -71,6 +71,10 @@ pub struct InstanceWindowSnapshot {
   pub normalized_repo_path: String,
   pub focused: bool,
   pub last_focused_at: Option<u64>,
+  /// The window shows this repository as a supporting repository of another
+  /// main repository. Windows where it is the main repository win.
+  #[serde(default)]
+  pub supporting: bool,
 }
 
 pub fn now_millis() -> u64 {
@@ -97,6 +101,12 @@ pub fn resolve_target_instance<'a>(
   repo_path: &str,
 ) -> Option<&'a RegisteredInstance> {
   let normalized_repo = normalize_repo_path(repo_path);
+  let has_main_window = instances.iter().any(|instance| {
+    instance
+      .windows
+      .iter()
+      .any(|w| w.normalized_repo_path == normalized_repo && !w.supporting)
+  });
 
   let mut focused_match: Option<(&RegisteredInstance, u64)> = None;
   let mut recency_match: Option<(&RegisteredInstance, u64)> = None;
@@ -104,7 +114,7 @@ pub fn resolve_target_instance<'a>(
 
   for instance in instances {
     for window in &instance.windows {
-      if window.normalized_repo_path != normalized_repo {
+      if window.normalized_repo_path != normalized_repo || (has_main_window && window.supporting) {
         continue;
       }
 
@@ -213,6 +223,7 @@ mod tests {
           normalized_repo_path: repo.clone(),
           focused: false,
           last_focused_at: Some(100),
+          supporting: false,
         }],
       ),
       make_instance(
@@ -223,6 +234,7 @@ mod tests {
           normalized_repo_path: repo,
           focused: true,
           last_focused_at: Some(50),
+          supporting: false,
         }],
       ),
     ];
@@ -243,6 +255,7 @@ mod tests {
           normalized_repo_path: repo.clone(),
           focused: false,
           last_focused_at: Some(100),
+          supporting: false,
         }],
       ),
       make_instance(
@@ -253,12 +266,51 @@ mod tests {
           normalized_repo_path: repo,
           focused: false,
           last_focused_at: Some(50),
+          supporting: false,
         }],
       ),
     ];
 
     let selected = resolve_target_instance(&instances, "/tmp/repo").unwrap();
     assert_eq!(selected.instance_id, "a");
+  }
+
+  #[test]
+  fn prefers_main_window_over_focused_supporting_window() {
+    let repo = normalize_repo_path("/tmp/repo");
+    let window = |label: &str, focused: bool, supporting: bool| InstanceWindowSnapshot {
+      window_label: label.to_string(),
+      normalized_repo_path: repo.clone(),
+      focused,
+      last_focused_at: Some(if focused { 100 } else { 1 }),
+      supporting,
+    };
+    let instances = vec![
+      make_instance("supporting", 10, vec![window("w1", true, true)]),
+      make_instance("main", 10, vec![window("w2", false, false)]),
+    ];
+
+    let selected = resolve_target_instance(&instances, "/tmp/repo").unwrap();
+    assert_eq!(selected.instance_id, "main");
+  }
+
+  #[test]
+  fn falls_back_to_supporting_window_when_no_main_window() {
+    let repo = normalize_repo_path("/tmp/repo");
+    let instances = vec![make_instance(
+      "supporting",
+      10,
+      vec![InstanceWindowSnapshot {
+        window_label: "w1".to_string(),
+        normalized_repo_path: repo,
+        focused: false,
+        last_focused_at: None,
+        supporting: true,
+      }],
+    )];
+
+    let selected = resolve_target_instance(&instances, "/tmp/repo").unwrap();
+    assert_eq!(selected.instance_id, "supporting");
   }
 
   #[test]

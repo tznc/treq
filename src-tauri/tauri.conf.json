@@ -68,6 +68,12 @@
               "takesValue": true,
               "multiple": true,
               "description": "Path to symlink from the home repo into the new workspace; repeatable (e.g. node_modules)"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
@@ -98,6 +104,12 @@
               "short": "t",
               "takesValue": true,
               "description": "Set target branch"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
@@ -109,6 +121,12 @@
               "index": 1,
               "takesValue": true,
               "description": "Workspace name (omit to use the current workspace, or list all from the home repo)"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
@@ -120,6 +138,12 @@
               "index": 1,
               "takesValue": true,
               "description": "Workspace branch name (omit to use the current workspace)"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
@@ -160,6 +184,11 @@
               "takesValue": true,
               "multiple": true,
               "description": "Commit IDs to move"
+            },
+            {
+              "name": "repo",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
@@ -185,6 +214,12 @@
               "short": "m",
               "takesValue": true,
               "description": "Permission mode: edit or plan"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
@@ -208,6 +243,12 @@
             {
               "name": "push",
               "description": "Push to remote after committing"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
             }
           ]
         },
