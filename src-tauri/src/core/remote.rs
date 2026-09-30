@@ -791,29 +791,6 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         }),
       })
     }
-    TreqCommandRequest::ResolveConflict { repo, revision, .. } => {
-      let revision = revision.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListConflicts {
-          repo: repo.clone(),
-          workspace: None,
-        },
-        check: Box::new(move |value| {
-          let Some(items) = value.as_array() else {
-            return MutationVerificationOutcome::Ambiguous;
-          };
-          let still_conflicted = items.iter().any(|item| {
-            item.as_str() == Some(revision.as_str())
-              || json_str(item, "path") == Some(revision.as_str())
-          });
-          if still_conflicted {
-            MutationVerificationOutcome::NotApplied
-          } else {
-            MutationVerificationOutcome::AlreadyApplied
-          }
-        }),
-      })
-    }
     TreqCommandRequest::GitBookmarkTrack { repo, bookmark, .. } => {
       let bookmark = bookmark.clone();
       Some(MutationVerification {
@@ -870,6 +847,13 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
     // used and is easy to get subtly wrong). Rather than guess and risk a
     // false "already applied"/"not applied" call, these fall back to
     // `MutationVerificationOutcome::Ambiguous` in `retry_after_reconnect`.
+    //
+    // `ResolveConflict` is one of them. It runs in a short-lived resolve
+    // workspace that no typed read exposes (`ListWorkspaces` filters resolve
+    // workspaces out), `ListConflicts` returns file paths rather than change
+    // ids, and `CommitDiff` does not report conflict state. Its effect on the
+    // revision's conflict flag is not observable today, so reconnect retry
+    // and stale idempotency-claim recovery both report ambiguity.
     _ => None,
   }
 }
@@ -3993,6 +3977,25 @@ mod tests {
       path: "a.txt".into(),
     };
     assert!(verification_for(&request).is_none());
+  }
+
+  #[test]
+  fn resolve_conflict_has_no_verification_recipe() {
+    // The old recipe compared the change id against `ListConflicts`, which
+    // lists file paths, so it always reported "already applied".
+    let request = TreqCommandRequest::ResolveConflict {
+      repo: "/r".into(),
+      revision: "qpvuntsm".into(),
+      sides: vec!["1".into()],
+      idempotency_key: "k".into(),
+    };
+    assert!(verification_for(&request).is_none());
+    // Stale idempotency-claim recovery on the VM shares the recipe, so it
+    // refuses to replay or rerun rather than inventing a result.
+    assert!(matches!(
+      recover_stale_claim(&request),
+      Ok(RecoveryDecision::Ambiguous)
+    ));
   }
 
   #[test]

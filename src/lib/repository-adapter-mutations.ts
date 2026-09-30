@@ -286,13 +286,11 @@ export async function transportResolveCommit(
     revision,
     sides,
   });
-  return (
-    result ?? {
-      success: true,
-      message: ALREADY_APPLIED,
-      change_id: revision,
-      remaining_conflicts: [],
-    }
+  if (result) return result;
+  // An earlier attempt landed before a reconnect, but no typed read reports
+  // which conflicts remain, so do not claim the change is fully resolved.
+  throw new Error(
+    `ambiguous: resolving ${revision} may have applied before the connection dropped; reopen its conflicts to check what remains`,
   );
 }
 
