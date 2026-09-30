@@ -62,7 +62,7 @@ it("captures the supporting repositories flow", async () => {
     name: "supporting-repos-01-added",
     expectations: [
       "The sidebar shows two home repository rows; only the main (on-screen) row shows the agent, shell and stack icons.",
-      "Workspaces are split into two labelled groups; the main group lists feat/main-work and the supporting group is empty.",
+      "A 'Workspaces' header sits above two labelled repository groups with no divider between the groups; the main group lists feat/main-work.",
       "A success toast says the repository is now a supporting repository.",
     ],
   });
@@ -136,11 +136,15 @@ it("captures the supporting repositories flow", async () => {
   expect((await getSessions(mainPath))[0].id).toBe(
     (await getSessions(supportingPath))[0].id,
   );
-  await screen.findByText(/fake-agent:/, undefined, { timeout: 20000 });
+  // The pane shows both repositories' agents side by side.
+  await waitFor(
+    () => expect(screen.getAllByText(/fake-agent:/)).toHaveLength(2),
+    { timeout: 20000 },
+  );
   await captureDocument(document, {
     name: "supporting-repos-04b-main-agent",
     expectations: [
-      "The header shows feat/main-work and its terminal runs the fake agent.",
+      "The terminal pane shows two agent terminals, tagged feat/svc and feat/main-work, each running the fake agent.",
       "feat/main-work is highlighted in the main group; feat/svc is not highlighted.",
     ],
   });
@@ -148,14 +152,29 @@ it("captures the supporting repositories flow", async () => {
   await within(screen.getByTestId("show-workspace-header")).findByText(
     "feat/svc",
   );
-  await new Promise((r) => setTimeout(r, 2000));
+  // Switching repositories keeps both terminals and their output.
+  expect(screen.getAllByText(/fake-agent:/)).toHaveLength(2);
   await captureDocument(document, {
     name: "supporting-repos-04c-back-to-supporting-agent",
     expectations: [
-      "The header shows feat/svc and a terminal tab with the fake agent is still shown.",
+      "The header shows feat/svc, and both agent terminals are still shown with their fake-agent output.",
       "feat/svc is highlighted; feat/main-work is not.",
     ],
   });
+
+  // Clicking the main workspace's terminal badge switches to its repository.
+  const mainBadge = screen
+    .getAllByText("feat/main-work")
+    .find(
+      (el) =>
+        !sidebar.contains(el) &&
+        !el.closest("[data-testid='show-workspace-header']"),
+    );
+  expect(mainBadge).toBeTruthy();
+  await user.click(mainBadge as HTMLElement);
+  await within(screen.getByTestId("show-workspace-header")).findByText(
+    "feat/main-work",
+  );
 
   // Back to the main repository, then collapse the supporting group.
   await user.click(await homeRow(mainPath));

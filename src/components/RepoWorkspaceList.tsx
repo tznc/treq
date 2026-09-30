@@ -49,6 +49,8 @@ export interface RepoWorkspaceListProps {
   cacheKey?: string;
   /** Repository label; set when the window shows several repositories. */
   groupLabel?: string;
+  /** Draw a separator above the list; off between repository groups. */
+  showSeparator?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   /** Undefined when the selection is in another repository or page. */
@@ -78,6 +80,7 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
   repoPath,
   cacheKey,
   groupLabel,
+  showSeparator = true,
   collapsed = false,
   onToggleCollapsed,
   activeSelectedWorkspaceId,
@@ -247,7 +250,9 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
 
   return (
     <>
-      {(groupLabel || workspaces.length > 0) && <SidebarSeparator />}
+      {showSeparator && (groupLabel || workspaces.length > 0) && (
+        <SidebarSeparator />
+      )}
       <SidebarGroup className="py-0">
         {groupLabel ? (
           <SidebarGroupLabel

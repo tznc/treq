@@ -7,7 +7,7 @@ import {
 } from "../../lib/api";
 import { prepareAgentAutoCommand } from "../../lib/prepareAgentAutoCommand";
 import { useToast } from "../ui/toast";
-import type { AgentSessionData } from "./types";
+import { type AgentSessionData, dbSessionIdOf } from "./types";
 
 // `restarted` is set once the agent has been relaunched in place (after a
 // model change). The relaunch starts a fresh agent without the session's
@@ -22,8 +22,8 @@ export const useAgentAutoCommand = (
   >(undefined);
 
   const { data: loadedModel, isLoading: modelLoading } = useSWR(
-    ["session-model", sessionData.repoPath, sessionData.sessionId],
-    () => getSessionModel(sessionData.repoPath, sessionData.sessionId),
+    ["session-model", sessionData.repoPath, dbSessionIdOf(sessionData)],
+    () => getSessionModel(sessionData.repoPath, dbSessionIdOf(sessionData)),
   );
   const { data: treqBinDir = null, isLoading: binLoading } = useSWR(
     "treq-bin-dir",

@@ -49,7 +49,7 @@ import {
   createTerminalOutputTail,
   terminalQuestionWindow,
 } from "./terminalOutputTail";
-import type { AgentSessionData } from "./types";
+import { type AgentSessionData, dbSessionIdOf } from "./types";
 import { useAgentAutoCommand } from "./useAgentAutoCommand";
 import { agentInfo, DEFAULT_AGENT } from "../../lib/agents";
 import { agentTerminalId } from "./agentTerminalId";
@@ -122,7 +122,7 @@ export const AgentTerminalPanel = ({
       register: () =>
         registerAgentChat(
           sessionData.repoPath,
-          sessionData.sessionId,
+          dbSessionIdOf(sessionData),
           sessionData.ptySessionId,
           sessionData.sessionName,
           sessionData.agent ?? "claude",
@@ -132,14 +132,14 @@ export const AgentTerminalPanel = ({
       recordUserMessage: (screenBefore, text) =>
         recordAgentChatUserMessage(
           sessionData.repoPath,
-          sessionData.sessionId,
+          dbSessionIdOf(sessionData),
           screenBefore,
           text,
         ),
       recordScreen: (screen) =>
         recordAgentChatScreen(
           sessionData.repoPath,
-          sessionData.sessionId,
+          dbSessionIdOf(sessionData),
           screen,
         ),
       getScreen: () =>
@@ -155,7 +155,7 @@ export const AgentTerminalPanel = ({
     };
   }, [
     sessionData.repoPath,
-    sessionData.sessionId,
+    dbSessionIdOf(sessionData),
     sessionData.ptySessionId,
     sessionData.sessionName,
     sessionData.agent,
@@ -264,7 +264,7 @@ export const AgentTerminalPanel = ({
       const modelToSave = newModel === "default" ? null : newModel;
       await setSessionModel(
         sessionData.repoPath,
-        sessionData.sessionId,
+        dbSessionIdOf(sessionData),
         modelToSave,
       );
       // Relaunch the agent with the new model. The old PTY is closed before

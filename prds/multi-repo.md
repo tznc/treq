@@ -17,7 +17,8 @@ Agents started from the main repository know where the supporting repositories a
 - Add and remove supporting repositories from an open main repository.
 - Browse, create, and work in supporting-repository workspaces from the same window.
 - Let a main-repository agent read supporting repositories and delegate changes to agents scoped to supporting-repository workspaces.
-- Keep every existing single-repository surface (workspace view, changes, commits, review, terminal) unchanged: each still operates on one repository.
+- Keep every existing single-repository surface (workspace view, changes, commits, review) unchanged: each still operates on one repository.
+- The terminal pane shows agent sessions from every repository in the window. Switching repositories keeps them running and visible; clicking a terminal's workspace badge switches to that terminal's repository.
 
 ## Non-goals
 
@@ -59,7 +60,7 @@ Order, top to bottom:
 1. Main home-repository row.
 2. One home-repository row per supporting repository.
 3. Integration items.
-4. Workspaces, grouped by repository: one labelled group for the main repository, then one per supporting repository.
+4. A **Workspaces** header, then workspaces grouped by repository with no divider between groups: one labelled group for the main repository, then one per supporting repository.
 
 - When supporting repositories exist, every home-repository row and workspace group shows the repository directory name. When two repositories share a directory name, the parent directory is included (`org/app`).
 - Each repository group can be collapsed. The collapsed state is remembered per main repository.

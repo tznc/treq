@@ -13,6 +13,8 @@ import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
+  SidebarGroupLabel,
+  SidebarSeparator,
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
@@ -225,9 +227,17 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
         onSelectStack={active ? onSelectStack : undefined}
         onStartAgent={active ? onStartAgent : undefined}
         onStartShell={active ? onStartShell : undefined}
-        // Summaries come from the on-screen repository's terminal pane, and
-        // rows match them by branch name.
-        terminalSessions={active ? terminalSessions : undefined}
+        // Rows match summaries by branch name, so each group gets only its
+        // repository's agents. Shells carry no repository; they belong to the
+        // repository on screen.
+        terminalSessions={
+          isMultiRepo
+            ? terminalSessions?.filter((session) =>
+                session.repoPath ? session.repoPath === path : active,
+              )
+            : terminalSessions
+        }
+        showSeparator={!isMultiRepo}
         onDropChangeFiles={active ? onDropChangeFiles : undefined}
       />
     );
@@ -372,6 +382,12 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
 
           {isMultiRepo ? (
             <>
+              <SidebarSeparator />
+              <SidebarGroup className="py-0">
+                <SidebarGroupLabel className="uppercase tracking-widest">
+                  Workspaces
+                </SidebarGroupLabel>
+              </SidebarGroup>
               {renderWorkspaceList(
                 homeRepoPath,
                 labels.get(homeRepoPath ?? ""),
