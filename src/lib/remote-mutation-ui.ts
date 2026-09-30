@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { MutationDispatchResult } from "./remote-dispatch";
 import { invalidateQueries } from "./swr-cache";
 import { peekActiveRepository, repositoryCacheKey } from "./active-repository";
+import { scheduleRefreshWorkspaceChanges } from "./change-file-drag";
 
 interface RemoteMutationFeedbackState {
   ambiguousReason: string | null;
@@ -43,6 +44,15 @@ export function invalidateRemoteRepositoryData() {
   void invalidateQueries(["workspace-review-change-count"]);
 }
 
+/**
+ * Reloads everything shown for the active remote repository, including the
+ * changes viewer and file browser, which load outside SWR.
+ */
+export function refreshRemoteRepository() {
+  invalidateRemoteRepositoryData();
+  scheduleRefreshWorkspaceChanges();
+}
+
 export const useRemoteMutationFeedback = create<RemoteMutationFeedbackState>(
   (set) => ({
     ambiguousReason: null,
@@ -53,6 +63,9 @@ export const useRemoteMutationFeedback = create<RemoteMutationFeedbackState>(
           lastStatus: "ambiguous",
           ambiguousReason: result.reason,
         });
+        // The cached view may miss a change that did land, and the user
+        // decides from it whether to retry.
+        refreshRemoteRepository();
         return;
       }
       set({ lastStatus: result.status, ambiguousReason: null });
