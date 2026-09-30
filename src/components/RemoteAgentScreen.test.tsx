@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoteAgentScreen } from "./RemoteAgentScreen";
 import type { SshEndpoint } from "../lib/api-types-remote";
 import * as remoteDispatch from "../lib/remote-dispatch";
+import { remoteActionKeys } from "../lib/remote-idempotency";
 import { render, screen } from "../../test/test-utils";
 
 const ENDPOINT: SshEndpoint = {
@@ -36,9 +37,41 @@ function mockStatus(running: boolean) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  remoteActionKeys.clear();
 });
 
 describe("RemoteAgentScreen", () => {
+  it("keeps an unconfirmed start's key when the screen remounts", async () => {
+    const user = userEvent.setup();
+    mockStatus(false);
+    const mutation = vi
+      .spyOn(remoteDispatch, "dispatchMutationOverSsh")
+      .mockResolvedValue({ status: "ambiguous", reason: "connection reset" });
+    const start = async () => {
+      await user.type(
+        await screen.findByPlaceholderText("Prompt for the agent"),
+        "fix it",
+      );
+      await user.click(screen.getByRole("button", { name: "Start agent" }));
+    };
+
+    const first = render(
+      <RemoteAgentScreen endpoint={ENDPOINT} repo="/r" workspace="ws" />,
+    );
+    await start();
+    await vi.waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
+    // RemoteConnectPanel remounts the repo view on resume and reconnect.
+    first.unmount();
+    render(<RemoteAgentScreen endpoint={ENDPOINT} repo="/r" workspace="ws" />);
+    await start();
+
+    await vi.waitFor(() => expect(mutation).toHaveBeenCalledTimes(2));
+    const keys = mutation.mock.calls.map(
+      ([, request]) => (request as { idempotency_key: string }).idempotency_key,
+    );
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   it("retries an unconfirmed start with the same idempotency key", async () => {
     const user = userEvent.setup();
     mockStatus(false);

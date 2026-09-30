@@ -14,10 +14,11 @@
 // sent it: the mobile repo view remounts on resume and reconnect, and the
 // desktop adapter has no component at all.
 
-import { useState } from "react";
-import type {
-  MutationDispatchResult,
-  TreqCommandRequest,
+import type { SshEndpoint } from "./api-types-remote";
+import {
+  dispatchMutationOverSsh,
+  type MutationDispatchResult,
+  type TreqCommandRequest,
 } from "./remote-dispatch";
 
 /** A mutation request whose idempotency key the store fills in. */
@@ -87,8 +88,26 @@ export class ActionIdempotencyKeys {
 /** The app-wide store shared by the desktop adapter and the mobile screens. */
 export const remoteActionKeys = new ActionIdempotencyKeys();
 
-/** One `ActionIdempotencyKeys` per component instance. */
-export function useActionIdempotencyKeys(): ActionIdempotencyKeys {
-  const [keys] = useState(() => new ActionIdempotencyKeys());
-  return keys;
+/**
+ * Sends a keyed mutation over SSH with the shared store's key for these
+ * inputs on this endpoint generation, so a retry after the screen remounts
+ * (resume, reconnect) still reuses the key of the unconfirmed attempt.
+ */
+export async function dispatchKeyedMutationOverSsh<T = unknown>(
+  endpoint: SshEndpoint,
+  request: UnkeyedRequest,
+): Promise<MutationDispatchResult<T>> {
+  const generation =
+    endpoint.source.type === "managed" ? endpoint.source.generation : 0;
+  const key = remoteActionKeys.keyFor(request.kind, [
+    endpoint.id,
+    generation,
+    request,
+  ]);
+  const result = await dispatchMutationOverSsh<T>(endpoint, {
+    ...request,
+    idempotency_key: key,
+  } as TreqCommandRequest);
+  remoteActionKeys.settle(key, result);
+  return result;
 }

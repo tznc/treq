@@ -1,9 +1,6 @@
 import { useState } from "react";
 import useSWR from "swr";
-import {
-  dispatchOverSsh,
-  dispatchMutationOverSsh,
-} from "../lib/remote-dispatch";
+import { dispatchOverSsh } from "../lib/remote-dispatch";
 import type { SshEndpoint } from "../lib/api-types-remote";
 import type { WorkspaceStatus, JjFileChange } from "../lib/api-types";
 import {
@@ -11,7 +8,7 @@ import {
   MutationButton,
   describeMutationOutcome,
 } from "./remote/RemoteScreenControls";
-import { useActionIdempotencyKeys } from "../lib/remote-idempotency";
+import { dispatchKeyedMutationOverSsh } from "../lib/remote-idempotency";
 
 interface WorkspaceChangeMarker {
   operation_id: string;
@@ -96,7 +93,6 @@ export function WorkspaceDetailScreen({
   const [commitMessage, setCommitMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
   const [pushError, setPushError] = useState<string | null>(null);
-  const actionKeys = useActionIdempotencyKeys();
 
   return (
     <section className="flex flex-col gap-3">
@@ -138,20 +134,13 @@ export function WorkspaceDetailScreen({
             onConfirm={async () => {
               setRebaseError(null);
               const target = targetBranch.trim();
-              const idempotencyKey = actionKeys.keyFor("rebase", [
-                repo,
-                workspace,
-                target,
-              ]);
               try {
-                const result = await dispatchMutationOverSsh(endpoint, {
+                const result = await dispatchKeyedMutationOverSsh(endpoint, {
                   kind: "RebaseWorkspace",
                   repo,
                   workspace,
                   target_branch: target,
-                  idempotency_key: idempotencyKey,
                 });
-                actionKeys.settle(idempotencyKey, result);
                 const outcome = describeMutationOutcome(result);
                 if (outcome) {
                   setRebaseError(outcome);
@@ -184,20 +173,13 @@ export function WorkspaceDetailScreen({
             onConfirm={async () => {
               setCommitError(null);
               const message = commitMessage.trim();
-              const idempotencyKey = actionKeys.keyFor("commit", [
-                repo,
-                workspace,
-                message,
-              ]);
               try {
-                const result = await dispatchMutationOverSsh(endpoint, {
+                const result = await dispatchKeyedMutationOverSsh(endpoint, {
                   kind: "CreateCommit",
                   repo,
                   workspace,
                   message,
-                  idempotency_key: idempotencyKey,
                 });
-                actionKeys.settle(idempotencyKey, result);
                 const outcome = describeMutationOutcome(result);
                 if (outcome) {
                   setCommitError(outcome);
@@ -222,15 +204,12 @@ export function WorkspaceDetailScreen({
           confirmLabel="Confirm push"
           onConfirm={async () => {
             setPushError(null);
-            const idempotencyKey = actionKeys.keyFor("push", [repo, workspace]);
             try {
-              const result = await dispatchMutationOverSsh(endpoint, {
+              const result = await dispatchKeyedMutationOverSsh(endpoint, {
                 kind: "GitPush",
                 repo,
                 workspace,
-                idempotency_key: idempotencyKey,
               });
-              actionKeys.settle(idempotencyKey, result);
               const outcome = describeMutationOutcome(result);
               if (outcome) {
                 setPushError(outcome);
@@ -325,7 +304,6 @@ export function ConflictsScreen({
   const [revision, setRevision] = useState("@");
   const [side, setSide] = useState("side1");
   const [resolveError, setResolveError] = useState<string | null>(null);
-  const actionKeys = useActionIdempotencyKeys();
 
   return (
     <section className="flex flex-col gap-2">
@@ -378,21 +356,13 @@ export function ConflictsScreen({
             onConfirm={async () => {
               setResolveError(null);
               const target = revision.trim();
-              const idempotencyKey = actionKeys.keyFor("resolve", [
-                repo,
-                workspace,
-                target,
-                side,
-              ]);
               try {
-                const result = await dispatchMutationOverSsh(endpoint, {
+                const result = await dispatchKeyedMutationOverSsh(endpoint, {
                   kind: "ResolveConflict",
                   repo,
                   revision: target,
                   sides: [side],
-                  idempotency_key: idempotencyKey,
                 });
-                actionKeys.settle(idempotencyKey, result);
                 const outcome = describeMutationOutcome(result);
                 if (outcome) {
                   setResolveError(outcome);
