@@ -5927,7 +5927,7 @@ pub fn jj_rebase_workspace_bookmark_onto_deferred_checkout(
   )
 }
 
-// home-head-test: workspace_bookmark_rebase, stacked_workspace_rebase_keeps_home_on_branch
+// home-head-test: workspace_bookmark_rebase, stacked_workspace_rebase_keeps_home_on_branch, stacked_workspace_rebase_moves_chained_working_copies
 fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   workspace_path: &str,
   workspace_branch: &str,
@@ -5997,19 +5997,25 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   // Another working copy checked out on a moved commit (the home repo on the
   // branch this workspace is stacked on) moves with it. Left out, the move
   // reparents it onto the lineage's old base and takes it off its branch.
-  let moved: HashSet<_> = commits_to_move.iter().cloned().collect();
-  for wc_id in loaded.repo.view().wc_commit_ids().values() {
-    if moved.contains(wc_id) {
-      continue;
-    }
-    let wc_commit = loaded
-      .repo
-      .store()
-      .get_commit(wc_id)
-      .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
-    if wc_commit.parent_ids().iter().all(|id| moved.contains(id)) {
-      commits_to_move.insert(0, wc_id.clone());
-    }
+  // Repeat until nothing joins: a working copy can sit on another one that
+  // only joins in this loop.
+  let mut moved: HashSet<_> = commits_to_move.iter().cloned().collect();
+  let mut pending = loaded
+    .repo
+    .view()
+    .wc_commit_ids()
+    .values()
+    .filter(|id| !moved.contains(*id))
+    .map(|id| loaded.repo.store().get_commit(id))
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
+  while let Some(index) = pending
+    .iter()
+    .position(|wc_commit| wc_commit.parent_ids().iter().all(|id| moved.contains(id)))
+  {
+    let wc_commit = pending.swap_remove(index);
+    moved.insert(wc_commit.id().clone());
+    commits_to_move.insert(0, wc_commit.id().clone());
   }
 
   let mut tx = loaded.repo.start_transaction();
