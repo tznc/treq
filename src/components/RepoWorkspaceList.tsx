@@ -104,7 +104,9 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
   const { data: workspaces = [], isLoading: workspacesPending } = useSWR(
     cacheKey ? ["workspaces", cacheKey] : null,
     () => getWorkspaces(repoPath || ""),
-    { keepPreviousData: true },
+    // Agents create workspaces in supporting repositories with `treq add -r`
+    // while another repository is on screen; nothing else refreshes them.
+    { keepPreviousData: true, refreshInterval: pollMs(10000) },
   );
   const workspacesLoaded = workspacesPending === false && Boolean(repoPath);
 
