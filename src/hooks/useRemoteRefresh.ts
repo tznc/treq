@@ -84,7 +84,7 @@ export function useRemoteChangeMarkerWatch(
       lastSeenOperationId.current = operationId;
       // Pending idempotency keys stay: the change may be the ambiguous
       // attempt itself landing, and a retry must still carry its key so the
-      // VM does not run it twice. Refresh or the key TTL ends that action.
+      // VM does not run it twice. A confirmed outcome ends that action.
       invalidateRemoteRepositoryData();
       // The changes diff viewer and file browser load outside SWR. They
       // reload on the same event the local file watcher sends, scoped to the

@@ -2,7 +2,6 @@ import {
   refreshRemoteRepository,
   useRemoteMutationFeedback,
 } from "../../lib/remote-mutation-ui";
-import { remoteActionKeys } from "../../lib/remote-idempotency";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -40,9 +39,9 @@ export function RemoteAmbiguousMutationDialog() {
           <Button
             type="button"
             onClick={() => {
-              // The user checks the fresh state before acting, so a later
-              // identical click is a new action, not a retry.
-              remoteActionKeys.release();
+              // Pending idempotency keys stay: the refresh may fail while the
+              // connection is down, and a retry must still carry the original
+              // key so the VM replays the first result instead of rerunning.
               refreshRemoteRepository();
               clearAmbiguous();
             }}

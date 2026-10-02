@@ -1,8 +1,5 @@
-import { describe, expect, it } from "vitest";
-import {
-  ActionIdempotencyKeys,
-  PENDING_KEY_TTL_MS,
-} from "./remote-idempotency";
+import { describe, expect, it, vi } from "vitest";
+import { ActionIdempotencyKeys } from "./remote-idempotency";
 
 function counter() {
   let next = 0;
@@ -51,16 +48,20 @@ describe("ActionIdempotencyKeys", () => {
     expect(keys.keyFor("GitPush", [{ workspace: "7", repo: "/r" }])).toBe(a);
   });
 
-  it("starts a new action once an ambiguous attempt's key expires", () => {
-    let now = 0;
-    const keys = new ActionIdempotencyKeys(counter(), () => now);
-    const first = keys.keyFor("GitPush", ["/r"]);
-    now = 5_000;
-    keys.settle(first, { status: "ambiguous", reason: "reset" });
-    now += PENDING_KEY_TTL_MS - 1;
-    expect(keys.keyFor("GitPush", ["/r"])).toBe(first);
-    now += PENDING_KEY_TTL_MS;
-    expect(keys.keyFor("GitPush", ["/r"])).not.toBe(first);
+  it("keeps an ambiguous attempt's key across a long reconnect", () => {
+    vi.useFakeTimers();
+    try {
+      const keys = new ActionIdempotencyKeys(counter());
+      const first = keys.keyFor("SplitCommit", ["/r", "abc"]);
+      keys.settle(first, { status: "ambiguous", reason: "reset" });
+      vi.advanceTimersByTime(6 * 60 * 60 * 1000);
+      // Elapsed time does not show the first attempt never landed.
+      expect(keys.keyFor("SplitCommit", ["/r", "abc"])).toBe(first);
+      keys.settle(first, { status: "already_applied" });
+      expect(keys.keyFor("SplitCommit", ["/r", "abc"])).not.toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("releases pending keys by scope, or all of them", () => {

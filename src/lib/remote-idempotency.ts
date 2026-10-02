@@ -40,51 +40,33 @@ function canonicalJson(value: unknown): string {
   );
 }
 
-/**
- * How long an unconfirmed key stays reusable after its last send. A retry of
- * the same uncertain attempt comes within minutes; an identical click after
- * that is a new action, and reusing the key would make the VM replay the old
- * result instead of running it (a push after new commits would not push).
- */
-export const PENDING_KEY_TTL_MS = 10 * 60 * 1000;
-
 interface PendingKey {
   key: string;
   scope: string;
-  expiresAt: number;
 }
 
 export class ActionIdempotencyKeys {
   /** Unconfirmed actions: input fingerprint -> the key they were sent with. */
   private readonly pending = new Map<string, PendingKey>();
   private readonly newId: () => string;
-  private readonly now: () => number;
 
-  constructor(
-    newId: () => string = () => crypto.randomUUID(),
-    now: () => number = Date.now,
-  ) {
+  constructor(newId: () => string = () => crypto.randomUUID()) {
     this.newId = newId;
-    this.now = now;
   }
 
   /**
    * The key for an action with these inputs. Returns the earlier key while
-   * an action with the same inputs has no confirmed outcome and has not
-   * expired; otherwise starts a new action. `scope` names the endpoint
-   * generation and repository, so a key never crosses to another VM and
-   * `release` can end every pending action for one repository.
+   * an action with the same inputs has no confirmed outcome, however long
+   * that takes: elapsed time does not show the earlier attempt never landed.
+   * `scope` names the endpoint generation and repository, so a key never
+   * crosses to another VM.
    */
   keyFor(prefix: string, inputs: readonly unknown[], scope = ""): string {
     const fingerprint = canonicalJson([scope, prefix, ...inputs]);
-    const expiresAt = this.now() + PENDING_KEY_TTL_MS;
     const entry = this.pending.get(fingerprint);
-    if (entry && entry.expiresAt > this.now()) {
-      entry.expiresAt = expiresAt;
-      return entry.key;
-    }
+    if (entry) return entry.key;
     const key = `${prefix}:${this.newId()}`;
-    this.pending.set(fingerprint, { key, scope, expiresAt });
+    this.pending.set(fingerprint, { key, scope });
     return key;
   }
 
@@ -98,19 +80,17 @@ export class ActionIdempotencyKeys {
    */
   settle(key: string, result: MutationDispatchResult<unknown>): void {
     for (const [fingerprint, entry] of this.pending) {
-      if (entry.key !== key) continue;
-      if (result.status === "ambiguous") {
-        entry.expiresAt = this.now() + PENDING_KEY_TTL_MS;
-      } else {
+      if (entry.key === key && result.status !== "ambiguous") {
         this.pending.delete(fingerprint);
       }
     }
   }
 
   /**
-   * Ends the pending actions in `scope`, or all of them. Call it only when
-   * the user asks for fresh remote state (Refresh): a background change
-   * cannot be told apart from the ambiguous attempt itself landing.
+   * Drops the pending actions in `scope`, or all of them. Only for resetting
+   * state between tests: no UI event shows that an unconfirmed attempt never
+   * landed. A retry that carries the key ends the action once the VM
+   * confirms its outcome (it replays a stored result if the first landed).
    */
   release(scope?: string): void {
     for (const [fingerprint, entry] of this.pending) {

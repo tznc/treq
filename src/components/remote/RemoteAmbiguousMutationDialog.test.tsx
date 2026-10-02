@@ -37,10 +37,9 @@ describe("RemoteAmbiguousMutationDialog", () => {
 
     expect(invalidateQueries).toHaveBeenCalled();
     expect(scheduleRefreshWorkspaceChanges).toHaveBeenCalled();
-    // The user has seen fresh state: pushing again is a new action.
-    expect(remoteActionKeys.keyFor("GitPush", ["/r"], "repo")).not.toBe(
-      pending,
-    );
+    // Refresh may fail while disconnected, so the retry keeps its key.
+    expect(remoteActionKeys.keyFor("GitPush", ["/r"], "repo")).toBe(pending);
+    remoteActionKeys.release();
     expect(useRemoteMutationFeedback.getState().ambiguousReason).toBeNull();
   });
 
