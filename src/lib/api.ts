@@ -31,11 +31,14 @@ import type {
   WorkspaceStatus,
 } from "./api-types";
 import { enqueueJjExclusive } from "./enqueue-jj-exclusive";
+import { localReadOr, localRepoPathOrNull } from "./local-only";
 import {
   assertLocalOperation,
+  remoteRepositoryContaining,
   transportCreateCommit,
   transportGetCommitDiff,
   transportGetCommitFileDiff,
+  transportGetGitRemoteInfo,
   transportGetWorkspaceFileHunks,
   transportGetRepoCurrentBranch,
   transportGetRepoDefaultBranch,
@@ -50,16 +53,21 @@ import {
   transportListRepoBranches,
   transportListWorkspaceStatuses,
 } from "./repository-adapter";
+import { repoStateScope } from "./repo-state-scope";
 import {
+  transportCheckBranchExists,
   transportCreateWorkspace,
   transportDeleteWorkspace,
   transportMoveWorkspaceChanges,
+  transportPullWorkspace,
   transportPushWorkspace,
   transportRenameWorkspace,
   transportRestoreFile,
   transportSetWorkspaceTargetBranch,
   transportSplitWorkingCopy,
+  transportSwitchRepoBranch,
   transportUpdateWorkspace,
+  transportWorkingCopyMutation,
 } from "./repository-adapter-mutations";
 import { currentWindowLabel } from "./window-label";
 
@@ -75,8 +83,10 @@ export * from "./api-types";
  * (and writes nothing) when the folder is not a Git repository. Resolves
  * `false` when jj setup failed for another reason; the repo still opens.
  */
-export const initRepo = (repoPath: string): Promise<boolean> =>
-  invoke("init_repo", { repoPath });
+export const initRepo = async (repoPath: string): Promise<boolean> => {
+  assertLocalOperation(repoPath, "Initializing a repository");
+  return invoke("init_repo", { repoPath });
+};
 
 // Database API
 export const getWorkspaces = (repoPath: string): Promise<Workspace[]> =>
@@ -117,27 +127,26 @@ export const deleteWorkspace = (repoPath: string, id: number): Promise<void> =>
     }),
   );
 
-export const archiveWorkspace = async (
-  repoPath: string,
-  id: number,
-): Promise<void> => {
-  assertLocalOperation(repoPath, "Archiving a workspace");
-  return invoke("archive_workspace", {
+export const archiveWorkspace = (repoPath: string, id: number): Promise<void> =>
+  transportDeleteWorkspace(
     repoPath,
     id,
-  });
-};
+    () => invoke("archive_workspace", { repoPath, id }),
+    "ArchiveWorkspace",
+  );
 
-export const ensureWorkspaceIndexed = (
+export const ensureWorkspaceIndexed = async (
   repoPath: string,
   workspaceId: number | null,
   workspacePath: string,
-): Promise<boolean> =>
-  invoke("ensure_workspace_indexed", {
+): Promise<boolean> => {
+  assertLocalOperation(repoPath, "Indexing workspace files");
+  return invoke("ensure_workspace_indexed", {
     repoPath,
     workspaceId,
     workspacePath,
   });
+};
 
 export const getSetting = (key: string): Promise<string | null> =>
   invoke("get_setting", { key });
@@ -170,50 +179,86 @@ export const saveAppSetupScript = (
 export const runAppSetupScript = (): Promise<void> =>
   invoke("run_app_setup_script");
 
-export const getRepoSetting = (
+// Repository settings are keyed by local path. A remote repository has none
+// yet, so it reads defaults and refuses writes.
+export const getRepoSetting = async (
   repoPath: string,
   key: string,
-): Promise<string | null> => invoke("get_repo_setting", { repoPath, key });
+): Promise<string | null> =>
+  remoteRepositoryContaining(repoPath)
+    ? null
+    : invoke("get_repo_setting", { repoPath, key });
 
-export const setRepoSetting = (
+export const setRepoSetting = async (
   repoPath: string,
   key: string,
   value: string,
-): Promise<void> => invoke("set_repo_setting", { repoPath, key, value });
+): Promise<void> => {
+  assertLocalOperation(repoPath, "Changing repository settings");
+  return invoke("set_repo_setting", { repoPath, key, value });
+};
 
 export const listAgentReviewComments = (
   repoPath: string,
   targetType: string,
   targetId: string,
 ): Promise<import("./api-types-review").AgentReviewComment[]> =>
-  invoke("list_agent_review_comments", { repoPath, targetType, targetId });
+  invoke("list_agent_review_comments", {
+    repoPath: repoStateScope(repoPath),
+    targetType,
+    targetId,
+  });
 
 export const resolveAgentReviewComment = (
   repoPath: string,
   commentId: string,
 ): Promise<void> =>
-  invoke("resolve_agent_review_comment", { repoPath, commentId });
+  invoke("resolve_agent_review_comment", {
+    repoPath: repoStateScope(repoPath),
+    commentId,
+  });
 
 export const deleteAgentReviewComment = (
   repoPath: string,
   commentId: string,
 ): Promise<void> =>
-  invoke("delete_agent_review_comment", { repoPath, commentId });
+  invoke("delete_agent_review_comment", {
+    repoPath: repoStateScope(repoPath),
+    commentId,
+  });
 
-export const applyAgentReviewSuggestion = (
+export const applyAgentReviewSuggestion = async (
   repoPath: string,
   commentId: string,
-): Promise<void> =>
-  invoke("apply_agent_review_suggestion", { repoPath, commentId });
+): Promise<void> => {
+  assertLocalOperation(repoPath, "Applying a review suggestion");
+  return invoke("apply_agent_review_suggestion", { repoPath, commentId });
+};
+
+// A remote repository's `.treq/config.yaml` lives on the remote host.
+const NO_REPO_YAML: RepoYamlConfig = {
+  branch_name_pattern: null,
+  default_model: null,
+  default_agent: null,
+  target_branch: null,
+  included_copy_files: null,
+  review_prompt: null,
+  review_agent: null,
+  auto_review_trigger: null,
+};
 
 export const loadRepoYamlConfig = (repoPath: string): Promise<RepoYamlConfig> =>
-  invoke("load_repo_yaml_config", { repoPath });
+  localReadOr(repoPath, NO_REPO_YAML, () =>
+    invoke("load_repo_yaml_config", { repoPath }),
+  );
 
 export const setWindowRepoPath = (repoPath: string): Promise<void> =>
-  invoke("set_window_repo_path", {
-    repoPath,
-    windowLabel: currentWindowLabel(),
-  });
+  localReadOr(repoPath, undefined, () =>
+    invoke("set_window_repo_path", {
+      repoPath,
+      windowLabel: currentWindowLabel(),
+    }),
+  );
 
 export interface SupportingRepo {
   path: string;
@@ -253,13 +298,18 @@ export const checkPrerequisites = (): Promise<PrerequisiteStatus[]> =>
 
 export const getGitRemoteUrl = (
   repoPath: string,
-): Promise<GitRemoteInfo | null> => invoke("get_git_remote_url", { repoPath });
+): Promise<GitRemoteInfo | null> =>
+  transportGetGitRemoteInfo(repoPath, () =>
+    invoke("get_git_remote_url", { repoPath }),
+  );
 
 export const getPrChecksViaGh = (
   repoPath: string,
   branchName: string,
 ): Promise<PrCiStatus | null> =>
-  invoke("get_pr_checks_via_gh", { repoPath, branchName });
+  localReadOr(repoPath, null, () =>
+    invoke("get_pr_checks_via_gh", { repoPath, branchName }),
+  );
 
 export const getPrChecksForPr = (
   repoFullName: string,
@@ -282,13 +332,17 @@ export const getWorkspaceChangedFiles = (
 export const listGitignoredPathSuggestions = (
   repoPath: string,
 ): Promise<string[]> =>
-  invoke("list_gitignored_path_suggestions", { repoPath });
+  localReadOr(repoPath, [], () =>
+    invoke("list_gitignored_path_suggestions", { repoPath }),
+  );
 
-export const getWorkspaceReadme = (
+export const getWorkspaceReadme = async (
   repoPath: string,
   workspaceId: number | null,
-): Promise<string | null> =>
-  invoke("get_workspace_readme", { repoPath, workspaceId });
+): Promise<string | null> => {
+  assertLocalOperation(repoPath, "Reading the workspace README");
+  return invoke("get_workspace_readme", { repoPath, workspaceId });
+};
 
 export const getWorkspaceFileHunks = (
   repoPath: string,
@@ -371,25 +425,34 @@ export const jjRestoreFile = (
     }),
   );
 
-export const jjRestoreAll = async (workspacePath: string): Promise<string> => {
-  assertLocalOperation(workspacePath, "Discarding all changes");
-  return invoke("jj_restore_all", { workspacePath });
-};
+export const jjRestoreAll = (workspacePath: string): Promise<string> =>
+  transportWorkingCopyMutation(
+    workspacePath,
+    (repo, workspace) => ({ kind: "RestoreAll", repo, workspace }),
+    () => invoke("jj_restore_all", { workspacePath }),
+  );
 
-export const jjSnapshotWorkingCopy = async (
-  workspacePath: string,
-): Promise<string> => {
-  assertLocalOperation(workspacePath, "Snapshotting the working copy");
-  return invoke("jj_snapshot_working_copy", { workspacePath });
-};
+export const jjSnapshotWorkingCopy = (workspacePath: string): Promise<string> =>
+  transportWorkingCopyMutation(
+    workspacePath,
+    (repo, workspace) => ({ kind: "SnapshotWorkingCopy", repo, workspace }),
+    () => invoke("jj_snapshot_working_copy", { workspacePath }),
+  );
 
-export const jjRestoreSnapshot = async (
+export const jjRestoreSnapshot = (
   workspacePath: string,
   snapshotId: string,
-): Promise<string> => {
-  assertLocalOperation(workspacePath, "Restoring a working-copy snapshot");
-  return invoke("jj_restore_snapshot", { workspacePath, snapshotId });
-};
+): Promise<string> =>
+  transportWorkingCopyMutation(
+    workspacePath,
+    (repo, workspace) => ({
+      kind: "RestoreSnapshot",
+      repo,
+      workspace,
+      snapshot_id: snapshotId,
+    }),
+    () => invoke("jj_restore_snapshot", { workspacePath, snapshotId }),
+  );
 
 export const createCommit = (
   repoPath: string,
@@ -439,16 +502,13 @@ export const listRepoBranches = (repoPath: string): Promise<JjBranch[]> =>
     invoke("list_repo_branches", { repoPath }),
   );
 
-export const switchRepoBranch = async (
+export const switchRepoBranch = (
   repoPath: string,
   bookmarkName: string,
-): Promise<string> => {
-  assertLocalOperation(repoPath, "Switching the repository branch");
-  return invoke("switch_repo_branch", {
-    repoPath,
-    bookmarkName,
-  });
-};
+): Promise<string> =>
+  transportSwitchRepoBranch(repoPath, bookmarkName, () =>
+    invoke("switch_repo_branch", { repoPath, bookmarkName }),
+  );
 
 export interface SyncStatus {
   ahead: number;
@@ -460,25 +520,24 @@ export const jjGitFetchBackground = (repoPath: string): Promise<void> =>
     invoke("jj_git_fetch_background", { repoPath }),
   );
 
-export const pullWorkspaceFromRemote = async (
+export const pullWorkspaceFromRemote = (
   repoPath: string,
   workspaceId: number | null,
-): Promise<PullWorkspaceResult> => {
-  assertLocalOperation(repoPath, "Pulling a workspace");
-  return invoke("pull_workspace_from_remote", {
-    repoPath,
-    workspaceId,
-  });
-};
+): Promise<PullWorkspaceResult> =>
+  transportPullWorkspace(repoPath, workspaceId, () =>
+    invoke("pull_workspace_from_remote", { repoPath, workspaceId }),
+  );
 
 export const checkBranchExists = (
   repoPath: string,
   branchName: string,
 ): Promise<BranchStatus> =>
-  invoke("jj_check_branch_exists", {
-    repoPath,
-    branchName,
-  });
+  transportCheckBranchExists(repoPath, branchName, () =>
+    invoke("jj_check_branch_exists", {
+      repoPath,
+      branchName,
+    }),
+  );
 
 export const getCommitDiff = (
   repoPath: string,
@@ -758,4 +817,4 @@ export const ensureMobileDeviceKey = (): Promise<DeviceKeyInfo> =>
 export const listInstalledSkills = (
   repoPath?: string | null,
 ): Promise<InstalledSkill[]> =>
-  invoke("list_installed_skills", { repoPath: repoPath ?? null });
+  invoke("list_installed_skills", { repoPath: localRepoPathOrNull(repoPath) });

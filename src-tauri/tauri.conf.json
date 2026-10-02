@@ -322,7 +322,7 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "Free-form payload: repository URL for clone"
+              "description": "Free-form payload: repository URL for clone, or branch name for switch-branch"
             },
             {
               "name": "idempotency-key",
@@ -606,7 +606,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: fetch, bookmark-track, push"
+              "description": "Command action: fetch, pull, remote-info, bookmark-track, push"
             },
             {
               "name": "repo",

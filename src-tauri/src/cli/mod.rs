@@ -258,7 +258,7 @@ fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), St
         }
       }
     }
-    "status" | "branches" | "probe" | "init" | "clone" | "usage" => {
+    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "switch-branch" => {
       handle_remote_review_command("repo", matches, format)
     }
     other => Err(format!("unknown repo action '{other}'")),
@@ -399,6 +399,10 @@ pub(crate) fn parse_remote_command_request(
     ("repo", "branches") => Ok(TreqCommandRequest::ListBranches { repo }),
     ("repo", "probe") => Ok(TreqCommandRequest::ProbeRepo { repo }),
     ("repo", "usage") => Ok(TreqCommandRequest::MachineUsage { root: repo }),
+    ("repo", "switch-branch") => Ok(TreqCommandRequest::SwitchRepoBranch {
+      repo,
+      bookmark: require_value("branch name")?,
+    }),
     ("repo", "init") => Ok(TreqCommandRequest::InitRepo {
       repo,
       idempotency_key: require_idempotency_key(idempotency_key)?,
@@ -440,6 +444,10 @@ pub(crate) fn parse_remote_command_request(
       repo,
       workspace: require_workspace()?,
     }),
+    ("workspace", "archive") => Ok(TreqCommandRequest::ArchiveWorkspace {
+      repo,
+      workspace: require_workspace()?,
+    }),
     ("workspace", "move") => Ok(TreqCommandRequest::MoveWorkspaceChanges {
       repo,
       workspace: require_workspace()?,
@@ -454,6 +462,13 @@ pub(crate) fn parse_remote_command_request(
       workspace: require_workspace()?,
       target_branch: require_target("target branch")?,
       idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
+    ("workspace", "snapshot") => Ok(TreqCommandRequest::SnapshotWorkingCopy { repo, workspace }),
+    ("workspace", "restore-all") => Ok(TreqCommandRequest::RestoreAll { repo, workspace }),
+    ("workspace", "restore-snapshot") => Ok(TreqCommandRequest::RestoreSnapshot {
+      repo,
+      workspace,
+      snapshot_id: require_target("snapshot id")?,
     }),
     ("changes", "list") => Ok(TreqCommandRequest::ListChanges { repo, workspace }),
     ("changes", "workspace-diff") => Ok(TreqCommandRequest::WorkspaceDiff {
@@ -510,6 +525,11 @@ pub(crate) fn parse_remote_command_request(
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
     ("commits", "list") => Ok(TreqCommandRequest::ListCommits { repo, workspace }),
+    ("workspace", "stash") => Ok(TreqCommandRequest::StashWorkspaceChanges {
+      repo,
+      workspace,
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("commits", "create") => Ok(TreqCommandRequest::CreateCommit {
       repo,
       workspace,
@@ -539,7 +559,23 @@ pub(crate) fn parse_remote_command_request(
       target_workspace: require_value("target workspace id")?,
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("commits", "undo") => Ok(TreqCommandRequest::UndoCommit {
+      repo,
+      workspace: require_workspace()?,
+      commit: require_target("commit change id")?,
+    }),
     ("commits", "abandon") => Ok(TreqCommandRequest::AbandonCommit {
+      repo,
+      workspace: require_workspace()?,
+      commit: require_target("commit change id")?,
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
+    ("commits", "undo-operation") => Ok(TreqCommandRequest::UndoOperation {
+      repo,
+      workspace,
+      operation_id: require_target("operation id")?,
+    }),
+    ("commits", "revert") => Ok(TreqCommandRequest::RevertCommit {
       repo,
       workspace: require_workspace()?,
       commit: require_target("commit change id")?,
@@ -554,6 +590,8 @@ pub(crate) fn parse_remote_command_request(
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
     ("git", "fetch") => Ok(TreqCommandRequest::GitFetch { repo }),
+    ("git", "pull") => Ok(TreqCommandRequest::PullWorkspace { repo, workspace }),
+    ("git", "remote-info") => Ok(TreqCommandRequest::GitRemoteInfo { repo }),
     ("git", "bookmark-track") => Ok(TreqCommandRequest::GitBookmarkTrack {
       repo,
       bookmark: require_value("bookmark name")?,

@@ -77,6 +77,8 @@ import {
 } from "../lib/commitsTabLabel";
 import { cn, getFullWorkspacePath, resolveReadmeImageSrc } from "../lib/utils";
 import { sumWorkspaceLocFromLog } from "../lib/workspace-stack";
+import { REMOTE_FILE_TREE_REASON } from "../lib/remote-capabilities";
+import { RemoteOperationUnsupportedError } from "../lib/repository-adapter";
 import type { AgentReviewComment } from "../lib/api-types-review";
 import type { SessionCreationInfo } from "../types/sessions";
 import { ChangesDiffViewer } from "./ChangesDiffViewer";
@@ -476,8 +478,11 @@ export const ShowWorkspace = ({
         ]);
         return { entries, readme };
       } catch (error) {
-        console.error("Failed to load workspace overview:", error);
-        return { entries: [], readme: null as string | null };
+        const unavailable = error instanceof RemoteOperationUnsupportedError;
+        if (!unavailable) {
+          console.error("Failed to load workspace overview:", error);
+        }
+        return { entries: [], readme: null as string | null, unavailable };
       }
     },
   );
@@ -1316,7 +1321,9 @@ export const ShowWorkspace = ({
                     })}
                     {!overviewPending && rootEntries.length === 0 && (
                       <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                        No files found
+                        {overviewData?.unavailable
+                          ? REMOTE_FILE_TREE_REASON
+                          : "No files found"}
                       </div>
                     )}
                   </div>

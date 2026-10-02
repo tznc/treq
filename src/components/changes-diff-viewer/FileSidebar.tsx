@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import type { JjFileChange } from "../../lib/api";
 import type { ParsedFileChange } from "../../lib/git-utils";
+import { isRemoteRepository } from "../../lib/active-repository";
+import { useActiveRepository } from "../../lib/active-repository-context";
 import { setChangeFilesDragData } from "../../lib/change-file-drag";
 import {
   AlertDialog,
@@ -117,6 +119,8 @@ export function FileSidebar({
   sourceBranch,
 }: FileSidebarProps) {
   const [showDiscardAllDialog, setShowDiscardAllDialog] = useState(false);
+  // Hidden for remote repositories until the stash modal (list/apply/delete) is routed.
+  const isRemote = isRemoteRepository(useActiveRepository());
 
   const handleFileDragStart = (path: string, event: React.DragEvent) => {
     const files =
@@ -215,7 +219,7 @@ export function FileSidebar({
                     );
                   }}
                   onDiscardAll={() => setShowDiscardAllDialog(true)}
-                  onStashAll={handleStashAll}
+                  onStashAll={isRemote ? undefined : handleStashAll}
                   onDiscard={handleDiscardFiles}
                   onDeselectAll={() => setSelectedUnstagedFiles(new Set())}
                   onSelectAll={handleSelectAllUnstaged}

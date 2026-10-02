@@ -52,18 +52,29 @@ export const TREQ_COMMAND_KINDS = [
   "RenameWorkspace",
   "UpdateWorkspace",
   "DeleteWorkspace",
+  "ArchiveWorkspace",
   "MoveWorkspaceChanges",
   "RebaseWorkspace",
+  "SwitchRepoBranch",
   "RestoreFile",
   "PatchFile",
+  "SnapshotWorkingCopy",
+  "RestoreAll",
+  "RestoreSnapshot",
+  "StashWorkspaceChanges",
   "CreateCommit",
   "DescribeCommit",
   "SplitCommit",
   "MoveCommit",
+  "UndoCommit",
   "AbandonCommit",
+  "UndoOperation",
+  "RevertCommit",
   "ResolveConflict",
   "GitFetch",
+  "PullWorkspace",
   "GitBookmarkTrack",
+  "GitRemoteInfo",
   "GitPush",
   "AgentStart",
   "AgentInput",
@@ -165,6 +176,7 @@ export type TreqCommandRequest =
       description?: string | null;
     }
   | { kind: "DeleteWorkspace"; repo: string; workspace: string }
+  | { kind: "ArchiveWorkspace"; repo: string; workspace: string }
   | {
       kind: "MoveWorkspaceChanges";
       repo: string;
@@ -182,6 +194,7 @@ export type TreqCommandRequest =
       target_branch: string;
       idempotency_key: string;
     }
+  | { kind: "SwitchRepoBranch"; repo: string; bookmark: string }
   | {
       kind: "RestoreFile";
       repo: string;
@@ -194,6 +207,20 @@ export type TreqCommandRequest =
       workspace?: string | null;
       path: string;
       patch_base64: string;
+      idempotency_key: string;
+    }
+  | { kind: "SnapshotWorkingCopy"; repo: string; workspace?: string | null }
+  | { kind: "RestoreAll"; repo: string; workspace?: string | null }
+  | {
+      kind: "RestoreSnapshot";
+      repo: string;
+      workspace?: string | null;
+      snapshot_id: string;
+    }
+  | {
+      kind: "StashWorkspaceChanges";
+      repo: string;
+      workspace?: string | null;
       idempotency_key: string;
     }
   | {
@@ -229,8 +256,22 @@ export type TreqCommandRequest =
       target_workspace: string;
       idempotency_key: string;
     }
+  | { kind: "UndoCommit"; repo: string; workspace: string; commit: string }
   | {
       kind: "AbandonCommit";
+      repo: string;
+      workspace: string;
+      commit: string;
+      idempotency_key: string;
+    }
+  | {
+      kind: "UndoOperation";
+      repo: string;
+      workspace?: string | null;
+      operation_id: string;
+    }
+  | {
+      kind: "RevertCommit";
       repo: string;
       workspace: string;
       commit: string;
@@ -244,12 +285,14 @@ export type TreqCommandRequest =
       idempotency_key: string;
     }
   | { kind: "GitFetch"; repo: string }
+  | { kind: "PullWorkspace"; repo: string; workspace?: string | null }
   | {
       kind: "GitBookmarkTrack";
       repo: string;
       bookmark: string;
       remote_name: string;
     }
+  | { kind: "GitRemoteInfo"; repo: string }
   | {
       kind: "GitPush";
       repo: string;

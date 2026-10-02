@@ -97,6 +97,8 @@ import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
 import { UseIdleAgentCheckbox } from "./UseIdleAgentCheckbox";
 import { DirectoryBatchLoader } from "./file-browser/directoryBatchLoader";
+import { REMOTE_FILE_TREE_REASON } from "../lib/remote-capabilities";
+import { remoteRepositoryContaining } from "../lib/repository-adapter";
 import { flattenExpandedTree } from "./file-browser/flattenTree";
 
 // Helper to check if file is binary
@@ -1207,8 +1209,9 @@ export const FileBrowser = ({
   })();
 
   const workspacePath = workspace ? getFullWorkspacePath(workspace) : basePath;
+  const isRemoteTree = remoteRepositoryContaining(basePath) !== null;
   useSWR(
-    repoPath
+    repoPath && !isRemoteTree
       ? [
           "ensure-workspace-indexed",
           repoPath,
@@ -1224,8 +1227,9 @@ export const FileBrowser = ({
     data: loadedRootEntries,
     isLoading: isLoadingDir,
     mutate: mutateRootEntries,
-  } = useSWR(basePath ? ["list-directory", basePath] : null, async () =>
-    filterHiddenEntries(await listDirectory(basePath)),
+  } = useSWR(
+    basePath && !isRemoteTree ? ["list-directory", basePath] : null,
+    async () => filterHiddenEntries(await listDirectory(basePath)),
   );
   const rootEntries = loadedRootEntries ?? EMPTY_DIRECTORY_ENTRIES;
 
@@ -2030,7 +2034,14 @@ export const FileBrowser = ({
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* File Tree */}
         <div className="w-72 flex-shrink-0 border-r bg-sidebar overflow-hidden">
-          {isLoadingDir && rootEntries.length === 0 ? (
+          {isRemoteTree ? (
+            <p
+              className="p-4 text-sm text-muted-foreground"
+              data-testid="remote-file-tree-unavailable"
+            >
+              {REMOTE_FILE_TREE_REASON}
+            </p>
+          ) : isLoadingDir && rootEntries.length === 0 ? (
             <div className="flex items-center justify-center p-4">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>

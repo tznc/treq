@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { repoStateScope } from "./repo-state-scope";
 
 // Split out of api-extra.ts/api-types.ts to keep those under the
 // max-lines lint limit -- mirrors the api-github.ts precedent.
@@ -44,18 +45,19 @@ export const loadPendingPageReview = (
   repoPath: string,
   workspaceId: number,
 ): Promise<PendingPageReview | null> =>
-  invoke("load_pending_page_review", { repoPath, workspaceId }).then(
-    (review) => {
-      if (!review) return null;
-      const normalized = { ...review } as PendingPageReview & {
-        comments: unknown;
-      };
-      if (typeof normalized.comments === "string") {
-        normalized.comments = JSON.parse(normalized.comments);
-      }
-      return normalized as PendingPageReview;
-    },
-  );
+  invoke("load_pending_page_review", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  }).then((review) => {
+    if (!review) return null;
+    const normalized = { ...review } as PendingPageReview & {
+      comments: unknown;
+    };
+    if (typeof normalized.comments === "string") {
+      normalized.comments = JSON.parse(normalized.comments);
+    }
+    return normalized as PendingPageReview;
+  });
 
 export const savePendingPageReview = (
   repoPath: string,
@@ -65,7 +67,7 @@ export const savePendingPageReview = (
   summaryText?: string,
 ): Promise<number> =>
   invoke("save_pending_page_review", {
-    repoPath,
+    repoPath: repoStateScope(repoPath),
     workspaceId,
     url,
     comments: JSON.stringify(comments),
@@ -76,7 +78,10 @@ export const clearPendingPageReview = (
   repoPath: string,
   workspaceId: number,
 ): Promise<void> =>
-  invoke("clear_pending_page_review", { repoPath, workspaceId });
+  invoke("clear_pending_page_review", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  });
 
 // In-app browser webview control API
 export const openBrowserWebview = (

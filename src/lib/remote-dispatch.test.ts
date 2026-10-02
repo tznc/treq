@@ -27,18 +27,29 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
       "RenameWorkspace",
       "UpdateWorkspace",
       "DeleteWorkspace",
+      "ArchiveWorkspace",
       "MoveWorkspaceChanges",
       "RebaseWorkspace",
+      "SwitchRepoBranch",
       "RestoreFile",
       "PatchFile",
+      "SnapshotWorkingCopy",
+      "RestoreAll",
+      "RestoreSnapshot",
+      "StashWorkspaceChanges",
       "CreateCommit",
       "DescribeCommit",
       "SplitCommit",
       "MoveCommit",
+      "UndoCommit",
       "AbandonCommit",
+      "UndoOperation",
+      "RevertCommit",
       "ResolveConflict",
       "GitFetch",
+      "PullWorkspace",
       "GitBookmarkTrack",
+      "GitRemoteInfo",
       "GitPush",
       "AgentStart",
       "AgentInput",
@@ -54,7 +65,7 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
       "CommitFileDiff",
       "SearchFiles",
     ]);
-    expect(TREQ_COMMAND_KINDS).toHaveLength(45);
+    expect(TREQ_COMMAND_KINDS).toHaveLength(56);
   });
 
   it("is exhaustive over the request union", () => {
@@ -99,6 +110,7 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
       },
       { kind: "UpdateWorkspace", repo: "/r", workspace: "1" },
       { kind: "DeleteWorkspace", repo: "/r", workspace: "1" },
+      { kind: "ArchiveWorkspace", repo: "/r", workspace: "1" },
       {
         kind: "MoveWorkspaceChanges",
         repo: "/r",
@@ -114,6 +126,7 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
         target_branch: "main",
         idempotency_key: "k",
       },
+      { kind: "SwitchRepoBranch", repo: "/r", bookmark: "feat" },
       { kind: "RestoreFile", repo: "/r", path: "a" },
       {
         kind: "PatchFile",
@@ -122,6 +135,10 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
         patch_base64: "YQ==",
         idempotency_key: "k",
       },
+      { kind: "SnapshotWorkingCopy", repo: "/r" },
+      { kind: "RestoreAll", repo: "/r", workspace: "1" },
+      { kind: "RestoreSnapshot", repo: "/r", snapshot_id: "0a1b" },
+      { kind: "StashWorkspaceChanges", repo: "/r", idempotency_key: "k" },
       {
         kind: "CreateCommit",
         repo: "/r",
@@ -152,8 +169,17 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
         target_workspace: "2",
         idempotency_key: "k",
       },
+      { kind: "UndoCommit", repo: "/r", workspace: "1", commit: "c" },
       {
         kind: "AbandonCommit",
+        repo: "/r",
+        workspace: "1",
+        commit: "c",
+        idempotency_key: "k",
+      },
+      { kind: "UndoOperation", repo: "/r", operation_id: "0a1b" },
+      {
+        kind: "RevertCommit",
         repo: "/r",
         workspace: "1",
         commit: "c",
@@ -167,12 +193,14 @@ describe("TreqCommandRequest TypeScript/Rust parity", () => {
         idempotency_key: "k",
       },
       { kind: "GitFetch", repo: "/r" },
+      { kind: "PullWorkspace", repo: "/r", workspace: "1" },
       {
         kind: "GitBookmarkTrack",
         repo: "/r",
         bookmark: "main",
         remote_name: "origin",
       },
+      { kind: "GitRemoteInfo", repo: "/r" },
       { kind: "GitPush", repo: "/r", idempotency_key: "k" },
       {
         kind: "AgentStart",
