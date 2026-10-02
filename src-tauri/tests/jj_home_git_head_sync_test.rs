@@ -382,6 +382,38 @@ fn workspace_bookmark_rebase() {
   assert!(assert_git_head_follows_wc_parent(&repo, Some("feature")).is_empty());
 }
 
+/// Rebasing a workspace stacked on home's checked-out branch rewrites that
+/// branch's commits. Home's `@` must move with them: HEAD stays on the branch
+/// by name and uncommitted home edits survive.
+#[test]
+fn stacked_workspace_rebase_keeps_home_on_branch() {
+  let (repo, main) = home_on_feature();
+  let ws = repo
+    .create_workspace_with_commit("ws-branch", "ws.txt", "ws\n", Some("feature"))
+    .expect("stacked workspace");
+  let ws_path = repo.workspace_full_path(&ws);
+  TestRepo::write_workspace_file(&repo.repo_path, "f1.txt", "edited at home\n").expect("write");
+  TestRepo::write_workspace_file(&repo.repo_path, "home.txt", "new at home\n").expect("write");
+  jj::jj_get_changed_files(&repo.repo_path).expect("snapshot home edits");
+
+  jj::jj_rebase_workspace_bookmark_onto(&ws_path, "ws-branch", &main).expect("rebase workspace");
+
+  git(&repo, &["merge-base", "--is-ancestor", &main, "feature"]);
+  assert_eq!(
+    assert_git_head_follows_wc_parent(&repo, Some("feature")),
+    vec!["f1.txt", "home.txt"]
+  );
+  let home = std::path::Path::new(&repo.repo_path);
+  assert_eq!(
+    std::fs::read_to_string(home.join("f1.txt")).unwrap(),
+    "edited at home\n"
+  );
+  assert!(
+    home.join("target_0.txt").exists(),
+    "home should see the rebased base"
+  );
+}
+
 /// Covers the resolve workspace lifecycle: start (detach), pick a side,
 /// commit the resolution, then forget the resolve workspace.
 #[test]

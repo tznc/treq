@@ -149,9 +149,12 @@ fn test_force_rebase_workspace_uses_rooted_subtree_scope_excluding_root() {
     "root workspace should be skipped: {}",
     result.message
   );
-  assert!(
-    result.message.contains("feat-child-b") && result.message.contains("feat-grandchild-c"),
-    "rebased descendants should be reported: {}",
+  let b_path = repo.workspace_full_path(&ws_b);
+  let c_path = repo.workspace_full_path(&ws_c);
+  assert_eq!(
+    treq_lib::jj::jj_get_commit_id(&c_path, "@-").expect("grandchild parent"),
+    treq_lib::jj::jj_get_commit_id(&b_path, "@").expect("child working copy"),
+    "the grandchild should stay stacked on the child: {}",
     result.message
   );
   assert!(

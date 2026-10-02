@@ -5927,7 +5927,7 @@ pub fn jj_rebase_workspace_bookmark_onto_deferred_checkout(
   )
 }
 
-// home-head-test: workspace_bookmark_rebase
+// home-head-test: workspace_bookmark_rebase, stacked_workspace_rebase_keeps_home_on_branch
 fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   workspace_path: &str,
   workspace_branch: &str,
@@ -5992,6 +5992,23 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   if let Some(wc_commit) = old_wc_commit.as_ref() {
     if !commits_to_move.iter().any(|id| id == wc_commit.id()) {
       commits_to_move.insert(0, wc_commit.id().clone());
+    }
+  }
+  // Another working copy checked out on a moved commit (the home repo on the
+  // branch this workspace is stacked on) moves with it. Left out, the move
+  // reparents it onto the lineage's old base and takes it off its branch.
+  let moved: HashSet<_> = commits_to_move.iter().cloned().collect();
+  for wc_id in loaded.repo.view().wc_commit_ids().values() {
+    if moved.contains(wc_id) {
+      continue;
+    }
+    let wc_commit = loaded
+      .repo
+      .store()
+      .get_commit(wc_id)
+      .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
+    if wc_commit.parent_ids().iter().all(|id| moved.contains(id)) {
+      commits_to_move.insert(0, wc_id.clone());
     }
   }
 
