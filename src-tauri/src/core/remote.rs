@@ -934,7 +934,10 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         check: Box::new(move |value| check_resolve_conflict(value, &revision)),
       })
     }
-    // Discarding everything leaves no changed files to list.
+    // Discarding everything leaves no changed files to list. A nonempty
+    // working copy does not prove the discard never ran: an agent or another
+    // client may have written new edits after it landed, and RestoreAll has
+    // no idempotency key, so rerunning it would discard those edits.
     TreqCommandRequest::RestoreAll { repo, workspace } => Some(MutationVerification {
       read_request: TreqCommandRequest::ListChanges {
         repo: repo.clone(),
@@ -942,8 +945,7 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
       },
       check: Box::new(|value| match value.as_array() {
         Some(items) if items.is_empty() => MutationVerificationOutcome::AlreadyApplied,
-        Some(_) => MutationVerificationOutcome::NotApplied,
-        None => MutationVerificationOutcome::Ambiguous,
+        _ => MutationVerificationOutcome::Ambiguous,
       }),
     }),
     TreqCommandRequest::GitBookmarkTrack { repo, bookmark, .. } => {
@@ -4408,18 +4410,24 @@ mod tests {
   }
 
   #[test]
-  fn restore_all_verification_checks_for_remaining_changes() {
+  fn restore_all_verification_never_reruns_over_remaining_changes() {
     let request = TreqCommandRequest::RestoreAll {
       repo: "/r".into(),
       workspace: Some("1".into()),
     };
     let check = verification_for(&request).expect("recipe").check;
-    let changed = serde_json::json!([{ "path": "a.txt" }]);
     assert_eq!(
       check(&serde_json::json!([])),
       MutationVerificationOutcome::AlreadyApplied
     );
-    assert_eq!(check(&changed), MutationVerificationOutcome::NotApplied);
+    // The discard landed but its reply was lost, and an agent wrote a new
+    // file before reconnect verification. `NotApplied` would make
+    // `retry_after_reconnect` resend RestoreAll and delete that edit.
+    let edited_after_discard = serde_json::json!([{ "path": "agent-new.txt" }]);
+    assert_eq!(
+      check(&edited_after_discard),
+      MutationVerificationOutcome::Ambiguous
+    );
     assert_eq!(
       check(&serde_json::json!({})),
       MutationVerificationOutcome::Ambiguous
