@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 import { dispatchOverSsh } from "../lib/remote-dispatch";
 import type { SshEndpoint } from "../lib/api-types-remote";
@@ -8,11 +8,7 @@ import {
   MutationButton,
   describeMutationOutcome,
 } from "./remote/RemoteScreenControls";
-import {
-  dispatchKeyedMutationOverSsh,
-  endpointScope,
-  remoteActionKeys,
-} from "../lib/remote-idempotency";
+import { dispatchKeyedMutationOverSsh } from "../lib/remote-idempotency";
 
 interface WorkspaceChangeMarker {
   operation_id: string;
@@ -85,18 +81,6 @@ export function WorkspaceDetailScreen({
       }),
     { refreshInterval: 15_000 },
   );
-
-  // A marker that moves after the first read means the repo changed and the
-  // screen shows it, so a later identical click is a new action.
-  const seenOperationId = useRef<string | null>(null);
-  useEffect(() => {
-    const operationId = marker?.operation_id;
-    if (!operationId) return;
-    if (seenOperationId.current && seenOperationId.current !== operationId) {
-      remoteActionKeys.release(endpointScope(endpoint));
-    }
-    seenOperationId.current = operationId;
-  }, [marker?.operation_id, endpoint]);
 
   const refreshAll = () => {
     mutateStatus();

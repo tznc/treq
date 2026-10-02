@@ -108,8 +108,9 @@ export class ActionIdempotencyKeys {
   }
 
   /**
-   * Ends the pending actions in `scope`, or all of them. Call it once the
-   * user has seen fresh remote state: the next click is a new action.
+   * Ends the pending actions in `scope`, or all of them. Call it only when
+   * the user asks for fresh remote state (Refresh): a background change
+   * cannot be told apart from the ambiguous attempt itself landing.
    */
   release(scope?: string): void {
     for (const [fingerprint, entry] of this.pending) {

@@ -9,7 +9,6 @@ import { scheduleRefreshWorkspaceChanges } from "../lib/change-file-drag";
 import { transportChangeMarker } from "../lib/repository-adapter";
 import { dispatch } from "../lib/remote-dispatch";
 import { invalidateRemoteRepositoryData } from "../lib/remote-mutation-ui";
-import { remoteActionKeys } from "../lib/remote-idempotency";
 
 interface RemoteAgentStatus {
   running: boolean;
@@ -83,9 +82,9 @@ export function useRemoteChangeMarkerWatch(
     }
     if (operationId !== lastSeenOperationId.current) {
       lastSeenOperationId.current = operationId;
-      // The repo changed and the view reloads with it, so a later identical
-      // click is a new action rather than a retry of an uncertain one.
-      remoteActionKeys.release(identity);
+      // Pending idempotency keys stay: the change may be the ambiguous
+      // attempt itself landing, and a retry must still carry its key so the
+      // VM does not run it twice. Refresh or the key TTL ends that action.
       invalidateRemoteRepositoryData();
       // The changes diff viewer and file browser load outside SWR. They
       // reload on the same event the local file watcher sends, scoped to the

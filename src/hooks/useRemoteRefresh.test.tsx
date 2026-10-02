@@ -81,10 +81,17 @@ describe("useRemoteChangeMarkerWatch", () => {
     expect(invalidateRemoteRepositoryData).not.toHaveBeenCalled();
     expect(scheduleRefreshWorkspaceChanges).not.toHaveBeenCalled();
 
-    const release = vi.spyOn(remoteActionKeys, "release");
+    // An ambiguous push left its key pending in this repository's scope.
+    const scope = repositoryCacheKey(remoteRepo);
+    const pendingKey = remoteActionKeys.keyFor("GitPush", ["main"], scope);
     await poll();
     expect(invalidateRemoteRepositoryData).toHaveBeenCalledTimes(1);
-    expect(release).toHaveBeenCalledWith(repositoryCacheKey(remoteRepo));
+    // The move may be that push landing, so the retry must still carry its
+    // key or the VM would run it a second time.
+    expect(remoteActionKeys.keyFor("GitPush", ["main"], scope)).toBe(
+      pendingKey,
+    );
+    remoteActionKeys.release(scope);
     expect(scheduleRefreshWorkspaceChanges).toHaveBeenCalledWith({
       workspaceId: 7,
     });
