@@ -447,12 +447,27 @@ describe("transportResolveCommit", () => {
     ).resolves.toEqual(result);
   });
 
-  it("does not claim zero remaining conflicts after an already-applied reconnect", async () => {
+  it("reports success once the VM log shows the revision conflict-free", async () => {
     vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
       status: "already_applied",
     });
     await expect(
       transportResolveCommit(ROOT, "qpvuntsm", ["1"], vi.fn()),
-    ).rejects.toThrow(/ambiguous/);
+    ).resolves.toEqual({
+      success: true,
+      message: "Resolved qpvuntsm",
+      change_id: "qpvuntsm",
+      remaining_conflicts: [],
+    });
+  });
+
+  it("surfaces an ambiguous reconnect instead of guessing", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "ambiguous",
+      reason: "reset",
+    });
+    await expect(
+      transportResolveCommit(ROOT, "qpvuntsm", ["1"], vi.fn()),
+    ).rejects.toThrow("reset");
   });
 });

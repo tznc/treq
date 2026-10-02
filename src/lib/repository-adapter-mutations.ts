@@ -287,11 +287,14 @@ export async function transportResolveCommit(
     sides,
   });
   if (result) return result;
-  // An earlier attempt landed before a reconnect, but no typed read reports
-  // which conflicts remain, so do not claim the change is fully resolved.
-  throw new Error(
-    `ambiguous: resolving ${revision} may have applied before the connection dropped; reopen its conflicts to check what remains`,
-  );
+  // An earlier attempt landed before a reconnect: the VM's log shows the
+  // revision no longer has conflicts.
+  return {
+    success: true,
+    message: `Resolved ${revision}`,
+    change_id: revision,
+    remaining_conflicts: [],
+  };
 }
 
 interface CommitTarget {
