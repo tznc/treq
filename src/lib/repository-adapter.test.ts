@@ -428,6 +428,28 @@ describe("remote repository mutations", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("never invents a snapshot id when the VM returns no value", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "already_applied",
+    });
+    // The id is the undo handle `jjRestoreSnapshot` takes.
+    await expect(jjSnapshotWorkingCopy(WORKSPACE_DIR)).rejects.toThrow(
+      /ambiguous/,
+    );
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "applied",
+      value: "0a1b",
+    });
+    await expect(jjSnapshotWorkingCopy(WORKSPACE_DIR)).resolves.toBe("0a1b");
+  });
+
+  it("reports an already-applied discard as success", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "already_applied",
+    });
+    await expect(jjRestoreAll(ROOT)).resolves.toMatch(/Already applied/);
+  });
+
   it("snapshots, discards, and restores a remote working copy", async () => {
     await jjSnapshotWorkingCopy(WORKSPACE_DIR);
     await jjRestoreAll(ROOT);

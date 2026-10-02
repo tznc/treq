@@ -289,11 +289,15 @@ export async function transportRestoreFile(
 /**
  * Runs a whole-working-copy mutation (snapshot, discard all, restore a
  * snapshot) addressed by a workspace path in the active remote repository.
+ * Pass `requireValue` when the caller consumes the returned value (a
+ * snapshot id): without the VM's value it throws instead of returning a
+ * placeholder.
  */
 export async function transportWorkingCopyMutation(
   workspacePath: string,
   request: (repo: string, workspace: string | null) => TreqCommandRequest,
   local: () => Promise<string>,
+  { requireValue = false }: { requireValue?: boolean } = {},
 ): Promise<string> {
   const location = await resolveRemoteLocation(workspacePath);
   if (!location) return local();
@@ -302,7 +306,13 @@ export async function transportWorkingCopyMutation(
     repo,
     request(repo.canonicalPath, workspace),
   );
-  return result ?? ALREADY_APPLIED;
+  if (result !== undefined) return result;
+  if (requireValue) {
+    throw new Error(
+      "ambiguous: the VM did not return a value for this working-copy operation; try again",
+    );
+  }
+  return ALREADY_APPLIED;
 }
 
 /**

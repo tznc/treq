@@ -437,6 +437,8 @@ export const jjSnapshotWorkingCopy = (workspacePath: string): Promise<string> =>
     workspacePath,
     (repo, workspace) => ({ kind: "SnapshotWorkingCopy", repo, workspace }),
     () => invoke("jj_snapshot_working_copy", { workspacePath }),
+    // The id is the undo handle `jjRestoreSnapshot` takes; never invent one.
+    { requireValue: true },
   );
 
 export const jjRestoreSnapshot = (
