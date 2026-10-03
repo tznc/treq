@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use tauri_plugin_cli::Matches;
 
 use crate::core;
+use crate::core::linear_review;
 use crate::local_db;
 use crate::review_aggregate;
 
@@ -98,14 +99,28 @@ pub(super) fn handle_agent_review_command(
       let target_id = require_value(matches, "target-id")?;
       let file = require_value(matches, "file")?;
       let side = parse_side(get_arg_value(matches, "side").as_deref())?;
-      validate_add_target(
-        &repo_path,
-        &target_type,
-        &target_id,
-        &file,
-        end_line,
-        side.as_deref(),
-      )?;
+      // Linear content is reviewed from a snapshot; keep the exact text the
+      // comment covers so a suggestion can be applied to the live content.
+      let quoted_text = if linear_review::is_linear_target(&target_type) {
+        Some(linear_review::quote_snapshot_lines(
+          &repo_path,
+          &target_type,
+          &target_id,
+          &file,
+          start_line,
+          end_line,
+        )?)
+      } else {
+        validate_add_target(
+          &repo_path,
+          &target_type,
+          &target_id,
+          &file,
+          end_line,
+          side.as_deref(),
+        )?;
+        None
+      };
       let comment = local_db::create_agent_review_comment(
         &repo_path,
         &target_type,
@@ -118,6 +133,7 @@ pub(super) fn handle_agent_review_command(
         &require_value(matches, "comment")?,
         suggestion.as_deref(),
         LOCAL_AGENT_SOURCE,
+        quoted_text.as_deref(),
       )?;
       match format {
         OutputFormat::Json => print_json(&comment),
@@ -184,8 +200,15 @@ pub(super) fn handle_agent_review_command(
   }
 }
 
-/// Target types the app renders review comments for.
-const KNOWN_TARGET_TYPES: &[&str] = &[DEFAULT_TARGET_TYPE, "file_browser_file"];
+/// Target types the app renders review comments for. The Linear ones are
+/// validated against their snapshot instead (`linear_review`).
+const KNOWN_TARGET_TYPES: &[&str] = &[
+  DEFAULT_TARGET_TYPE,
+  "file_browser_file",
+  linear_review::TARGET_LINEAR_ISSUE,
+  linear_review::TARGET_LINEAR_PROJECT,
+  linear_review::TARGET_LINEAR_DOCUMENT,
+];
 
 /// Rejects an `add` that nothing could display: an unknown target type, a
 /// target that does not exist, a `--file` that is not relative, or (on the
@@ -309,6 +332,7 @@ mod tests {
       "body",
       None,
       LOCAL_AGENT_SOURCE,
+      None,
     )
     .unwrap();
     resolve_comment(repo, &comment.id).unwrap();

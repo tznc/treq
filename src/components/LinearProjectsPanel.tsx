@@ -17,6 +17,10 @@ import { LinearFilterMenu } from "./LinearFilterMenu";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { LinearCommentedContent } from "./LinearCommentedContent";
 import { cn } from "../lib/utils";
+import {
+  AGENT_REVIEW_TARGET_LINEAR_DOCUMENT,
+  AGENT_REVIEW_TARGET_LINEAR_PROJECT,
+} from "../lib/api-types-review";
 
 type ProjectFilters = {
   state?: string;
@@ -126,7 +130,11 @@ export const LinearProjectsSection: React.FC<{ repoPath: string }> = ({
     filteredProjects[0] ??
     null;
 
-  const { data: documents = [], isLoading: isLoadingDocuments } = useSWR(
+  const {
+    data: documents = [],
+    isLoading: isLoadingDocuments,
+    mutate: refetchDocuments,
+  } = useSWR(
     repoPath && selectedProject
       ? (["linear-project-documents", repoPath, selectedProject.id] as const)
       : null,
@@ -272,6 +280,7 @@ export const LinearProjectsSection: React.FC<{ repoPath: string }> = ({
             comments={projectComments}
             isLoadingComments={isLoadingProjectComments}
             commentsError={projectCommentsError}
+            onContentChanged={() => void refetch()}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -282,8 +291,12 @@ export const LinearProjectsSection: React.FC<{ repoPath: string }> = ({
 
       <DocumentDialog
         repoPath={repoPath}
-        document={openDocument}
+        // Read the latest copy so an applied suggestion shows up at once.
+        document={
+          documents.find((doc) => doc.id === openDocument?.id) ?? openDocument
+        }
         onClose={() => setOpenDocument(null)}
+        onContentChanged={() => void refetchDocuments()}
       />
     </div>
   );
@@ -297,6 +310,7 @@ const ProjectDetail: React.FC<{
   comments: LinearComment[];
   isLoadingComments: boolean;
   commentsError: unknown;
+  onContentChanged: () => void;
 }> = ({
   project,
   documents,
@@ -305,6 +319,7 @@ const ProjectDetail: React.FC<{
   comments,
   isLoadingComments,
   commentsError,
+  onContentChanged,
 }) => (
   <div className="p-4" data-testid="linear-project-detail">
     <div className="flex items-center gap-2 flex-wrap">
@@ -358,6 +373,14 @@ const ProjectDetail: React.FC<{
         comments={comments}
         isLoadingComments={isLoadingComments}
         commentsError={commentsError}
+        review={{
+          targetType: AGENT_REVIEW_TARGET_LINEAR_PROJECT,
+          targetId: project.id,
+          title: project.name,
+          url: project.url,
+          body: project.description ?? "",
+          onContentChanged,
+        }}
       />
     </div>
   </div>
@@ -367,7 +390,8 @@ const DocumentDialog: React.FC<{
   repoPath: string;
   document: LinearDocument | null;
   onClose: () => void;
-}> = ({ repoPath, document: doc, onClose }) => {
+  onContentChanged: () => void;
+}> = ({ repoPath, document: doc, onClose, onContentChanged }) => {
   const {
     data: comments = [],
     isLoading: isLoadingComments,
@@ -392,6 +416,18 @@ const DocumentDialog: React.FC<{
           comments={comments}
           isLoadingComments={isLoadingComments}
           commentsError={commentsError}
+          review={
+            doc
+              ? {
+                  targetType: AGENT_REVIEW_TARGET_LINEAR_DOCUMENT,
+                  targetId: doc.id,
+                  title: doc.title,
+                  url: doc.url,
+                  body: doc.content ?? "",
+                  onContentChanged,
+                }
+              : undefined
+          }
         />
       </DialogContent>
     </Dialog>

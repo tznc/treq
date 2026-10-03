@@ -3,9 +3,9 @@ import { useState } from "react";
 import useSWR from "swr";
 import { type LinearIssue, linearListIssueComments } from "../lib/api-linear";
 import { Button } from "./ui/button";
-import { LinearComments } from "./LinearComments";
-import { MarkdownContent } from "./MarkdownContent";
+import { LinearCommentedContent } from "./LinearCommentedContent";
 import { cn } from "../lib/utils";
+import { AGENT_REVIEW_TARGET_LINEAR_ISSUE } from "../lib/api-types-review";
 
 type KickoffHandler = (issueId: string) => void;
 
@@ -14,7 +14,9 @@ export const LinearIssuesList: React.FC<{
   issues: LinearIssue[];
   subissuesMap: Map<string, LinearIssue[]>;
   onKickoff: KickoffHandler;
-}> = ({ repoPath, issues, subissuesMap, onKickoff }) => (
+  /** Reloads the issues after an agent review suggestion lands in Linear. */
+  onContentChanged?: () => void;
+}> = ({ repoPath, issues, subissuesMap, onKickoff, onContentChanged }) => (
   <div className="divide-y divide-border">
     {issues.map((issue) => {
       const subissues = subissuesMap.get(issue.id) || [];
@@ -25,6 +27,7 @@ export const LinearIssuesList: React.FC<{
             issue={issue}
             indent={false}
             onKickoff={onKickoff}
+            onContentChanged={onContentChanged}
           />
           {subissues.map((subissue) => (
             <LinearIssueRow
@@ -33,6 +36,7 @@ export const LinearIssuesList: React.FC<{
               issue={subissue}
               indent
               onKickoff={onKickoff}
+              onContentChanged={onContentChanged}
             />
           ))}
         </div>
@@ -46,7 +50,8 @@ const LinearIssueRow: React.FC<{
   issue: LinearIssue;
   indent: boolean;
   onKickoff: KickoffHandler;
-}> = ({ repoPath, issue, indent, onKickoff }) => {
+  onContentChanged?: () => void;
+}> = ({ repoPath, issue, indent, onKickoff, onContentChanged }) => {
   const [expanded, setExpanded] = useState(false);
 
   const {
@@ -136,19 +141,19 @@ const LinearIssueRow: React.FC<{
 
       {expanded && (
         <div className="px-4 pb-4 pl-11" data-testid="linear-issue-expanded">
-          {issue.description && (
-            <MarkdownContent
-              content={issue.description}
-              className="text-sm prose-p:my-1"
-            />
-          )}
-          <h4 className="text-xs font-medium text-muted-foreground uppercase mt-4 mb-2">
-            Activity
-          </h4>
-          <LinearComments
+          <LinearCommentedContent
+            content={issue.description || "_No description._"}
             comments={comments}
-            isLoading={isLoadingComments}
-            error={commentsError}
+            isLoadingComments={isLoadingComments}
+            commentsError={commentsError}
+            review={{
+              targetType: AGENT_REVIEW_TARGET_LINEAR_ISSUE,
+              targetId: issue.id,
+              title: `${issue.identifier} ${issue.title}`,
+              url: issue.url,
+              body: issue.description ?? "",
+              onContentChanged,
+            }}
           />
         </div>
       )}

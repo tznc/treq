@@ -14,6 +14,21 @@ export type AgentReviewTargetType = string;
 
 export const AGENT_REVIEW_TARGET_WORKSPACE_DIFF = "workspace_diff";
 export const AGENT_REVIEW_TARGET_FILE_BROWSER_FILE = "file_browser_file";
+export const AGENT_REVIEW_TARGET_LINEAR_ISSUE = "linear_issue";
+export const AGENT_REVIEW_TARGET_LINEAR_PROJECT = "linear_project";
+export const AGENT_REVIEW_TARGET_LINEAR_DOCUMENT = "linear_document";
+
+export type LinearReviewTargetType =
+  | typeof AGENT_REVIEW_TARGET_LINEAR_ISSUE
+  | typeof AGENT_REVIEW_TARGET_LINEAR_PROJECT
+  | typeof AGENT_REVIEW_TARGET_LINEAR_DOCUMENT;
+
+/** Snapshot file a Linear review comment on the entity's own text uses. */
+export const LINEAR_REVIEW_BODY_FILE = "body.md";
+
+/** Snapshot file a Linear review comment on one Linear comment uses. */
+export const linearReviewCommentFile = (commentId: string) =>
+  `comments/${commentId}.md`;
 
 /**
  * A local-only review comment written by a review agent. Never synced to
@@ -38,4 +53,6 @@ export interface AgentReviewComment {
   source: string;
   created_at: string;
   resolved_at: string | null;
+  /** Exact reviewed text of the line range; set for Linear targets. */
+  quoted_text?: string | null;
 }

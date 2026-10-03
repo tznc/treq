@@ -918,6 +918,129 @@ pub async fn linear_list_document_comments_impl(
   fetch_comments_for_entity(client, CommentEntity::Document, document_id).await
 }
 
+/// Where one reviewable Linear text lives: the query root that reads it, the
+/// field holding it, the mutation that writes it, and the entity id.
+struct ReviewTextLocation {
+  root: &'static str,
+  field: &'static str,
+  mutation: &'static str,
+  id: String,
+}
+
+fn review_text_location(
+  target_type: &str,
+  target_id: &str,
+  text: &crate::core::linear_review::LinearTextRef,
+) -> Result<ReviewTextLocation, String> {
+  use crate::core::linear_review::{
+    LinearTextRef, TARGET_LINEAR_DOCUMENT, TARGET_LINEAR_ISSUE, TARGET_LINEAR_PROJECT,
+  };
+  let (root, field, mutation, id) = match (target_type, text) {
+    (_, LinearTextRef::Comment(id)) => ("comment", "body", "commentUpdate", id.as_str()),
+    (TARGET_LINEAR_ISSUE, _) => ("issue", "description", "issueUpdate", target_id),
+    (TARGET_LINEAR_PROJECT, _) => ("project", "description", "projectUpdate", target_id),
+    (TARGET_LINEAR_DOCUMENT, _) => ("document", "content", "documentUpdate", target_id),
+    (other, _) => return Err(format!("'{other}' is not a Linear review target")),
+  };
+  Ok(ReviewTextLocation {
+    root,
+    field,
+    mutation,
+    id: id.to_string(),
+  })
+}
+
+fn get_review_text_body(location: &ReviewTextLocation) -> serde_json::Value {
+  let ReviewTextLocation { root, field, .. } = location;
+  serde_json::json!({
+    "query": format!("query($id: String!) {{ {root}(id: $id) {{ {field} }} }}"),
+    "variables": { "id": location.id },
+  })
+}
+
+fn set_review_text_body(location: &ReviewTextLocation, text: &str) -> serde_json::Value {
+  let ReviewTextLocation {
+    field, mutation, ..
+  } = location;
+  serde_json::json!({
+    "query": format!(
+      "mutation($id: String!, $text: String!) {{ {mutation}(id: $id, input: {{ {field}: $text }}) {{ success }} }}"
+    ),
+    "variables": { "id": location.id, "text": text },
+  })
+}
+
+/// Reads the current Linear text a review comment was written against.
+async fn linear_get_review_text(
+  client: &LinearClientSource,
+  location: &ReviewTextLocation,
+) -> Result<String, String> {
+  let data: serde_json::Value =
+    linear_graphql(client, &get_review_text_body(location), location.root).await?;
+  let node = data
+    .get(location.root)
+    .filter(|node| !node.is_null())
+    .ok_or_else(|| format!("{} {} not found", location.root, location.id))?;
+  Ok(
+    node[location.field]
+      .as_str()
+      .unwrap_or_default()
+      .to_string(),
+  )
+}
+
+async fn linear_set_review_text(
+  client: &LinearClientSource,
+  location: &ReviewTextLocation,
+  text: &str,
+) -> Result<(), String> {
+  let data: serde_json::Value =
+    linear_graphql(client, &set_review_text_body(location, text), location.root).await?;
+  if data[location.mutation]["success"].as_bool() == Some(true) {
+    Ok(())
+  } else {
+    Err(format!(
+      "Linear did not accept the {} update",
+      location.root
+    ))
+  }
+}
+
+/// Applies one agent review suggestion to Linear: re-reads the live text,
+/// replaces the passage the comment reviewed, writes it back, and marks the
+/// comment resolved. Editing a Linear comment only works on the viewer's own
+/// comments; Linear's error is passed through for anyone else's.
+pub async fn linear_apply_review_suggestion_impl(
+  client: &LinearClientSource,
+  repo_path: &str,
+  comment_id: &str,
+) -> Result<(), String> {
+  use crate::core::linear_review::{is_linear_target, parse_text_ref, splice_quoted};
+  let comment = crate::local_db::get_agent_review_comment(repo_path, comment_id)?
+    .ok_or_else(|| format!("Review comment '{comment_id}' not found"))?;
+  if !is_linear_target(&comment.target_type) {
+    return Err(format!(
+      "Review comment '{comment_id}' is not on Linear content"
+    ));
+  }
+  let replacement = comment
+    .suggested_replacement
+    .as_deref()
+    .ok_or_else(|| "Review comment has no suggested change".to_string())?;
+  let quoted = comment
+    .quoted_text
+    .as_deref()
+    .ok_or_else(|| "Review comment has no reviewed text to replace".to_string())?;
+  let text = parse_text_ref(&comment.file_path)
+    .ok_or_else(|| format!("Unknown Linear text '{}'", comment.file_path))?;
+  let location = review_text_location(&comment.target_type, &comment.target_id, &text)?;
+
+  let live = linear_get_review_text(client, &location).await?;
+  let updated = splice_quoted(&live, quoted, replacement)?;
+  linear_set_review_text(client, &location, &updated).await?;
+  crate::local_db::resolve_agent_review_comment(repo_path, &comment.id)
+}
+
 fn poll_linear_kickoff(repo_path: &str) -> Result<(), String> {
   let db = crate::tracker::open_app_db()?;
 
@@ -1267,6 +1390,132 @@ mod tests {
   fn use_mock_endpoint(server: &wiremock::MockServer, timeout: Duration) -> TestEndpointGuard {
     TEST_ENDPOINT.with(|e| *e.borrow_mut() = Some((server.uri(), timeout)));
     TestEndpointGuard
+  }
+
+  #[test]
+  fn review_text_bodies_pass_ids_and_text_as_variables() {
+    use crate::core::linear_review::LinearTextRef;
+    let location = review_text_location("linear_document", HOSTILE, &LinearTextRef::Body).unwrap();
+    let get = get_review_text_body(&location);
+    assert!(!get["query"].as_str().unwrap().contains(HOSTILE));
+    assert!(get["query"]
+      .as_str()
+      .unwrap()
+      .contains("document(id: $id) { content }"));
+    let set = set_review_text_body(&location, HOSTILE);
+    let query = set["query"].as_str().unwrap();
+    assert!(!query.contains(HOSTILE));
+    assert!(query.contains("documentUpdate(id: $id, input: { content: $text })"));
+    assert_eq!(set["variables"]["text"], HOSTILE);
+
+    let comment = review_text_location(
+      "linear_issue",
+      "issue-1",
+      &LinearTextRef::Comment("c-1".into()),
+    )
+    .unwrap();
+    assert_eq!(
+      (comment.root, comment.mutation),
+      ("comment", "commentUpdate")
+    );
+    assert_eq!(comment.id, "c-1");
+    assert!(review_text_location("workspace_diff", "1", &LinearTextRef::Body).is_err());
+  }
+
+  #[tokio::test]
+  async fn applying_a_review_suggestion_rewrites_the_linear_text() {
+    use wiremock::{
+      matchers::{body_partial_json, method},
+      Mock, MockServer, ResponseTemplate,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let comment = crate::local_db::create_agent_review_comment(
+      repo,
+      "linear_issue",
+      "issue-1",
+      "body.md",
+      None,
+      2,
+      2,
+      None,
+      "Typo",
+      Some("Ship the fix"),
+      "local-agent",
+      Some("Ship teh fix"),
+    )
+    .unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(body_partial_json(
+        serde_json::json!({ "variables": { "id": "issue-1" } }),
+      ))
+      .and(body_partial_json(
+        serde_json::json!({ "variables": { "text": "Intro\nShip the fix\nEnd" } }),
+      ))
+      .respond_with(
+        ResponseTemplate::new(200)
+          .set_body_json(serde_json::json!({ "data": { "issueUpdate": { "success": true } } })),
+      )
+      .expect(1)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "data": { "issue": { "description": "Intro\nShip teh fix\nEnd" } }
+      })))
+      .mount(&server)
+      .await;
+    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
+
+    linear_apply_review_suggestion_impl(&api_key("lin_api_test"), repo, &comment.id)
+      .await
+      .unwrap();
+    let stored = crate::local_db::get_agent_review_comment(repo, &comment.id)
+      .unwrap()
+      .unwrap();
+    assert_eq!(stored.status, "resolved");
+  }
+
+  #[tokio::test]
+  async fn applying_a_suggestion_to_changed_text_fails_without_writing() {
+    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let comment = crate::local_db::create_agent_review_comment(
+      repo,
+      "linear_project",
+      "p-1",
+      "body.md",
+      None,
+      1,
+      1,
+      None,
+      "Typo",
+      Some("new"),
+      "local-agent",
+      Some("old"),
+    )
+    .unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "data": { "project": { "description": "rewritten by someone" } }
+      })))
+      .expect(1)
+      .mount(&server)
+      .await;
+    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
+
+    let err = linear_apply_review_suggestion_impl(&api_key("lin_api_test"), repo, &comment.id)
+      .await
+      .unwrap_err();
+    assert!(err.contains("changed after the review"), "{err}");
+    let stored = crate::local_db::get_agent_review_comment(repo, &comment.id)
+      .unwrap()
+      .unwrap();
+    assert_eq!(stored.status, "open");
   }
 
   #[tokio::test]

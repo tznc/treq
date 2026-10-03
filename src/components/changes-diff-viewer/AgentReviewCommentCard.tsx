@@ -18,6 +18,10 @@ interface AgentReviewCommentCardProps {
   onApplySuggestion: (commentId: string) => Promise<void>;
   onSendToAgent?: (comment: AgentReviewComment) => Promise<void>;
   onError: (message: string) => void;
+  /** Replaces the `file:line` label, e.g. for content that is not a file. */
+  locationLabel?: string;
+  /** Label of the apply button; "Apply" by default. */
+  applyLabel?: string;
 }
 
 /**
@@ -33,6 +37,8 @@ export function AgentReviewCommentCard({
   onApplySuggestion,
   onSendToAgent,
   onError,
+  locationLabel,
+  applyLabel = "Apply",
 }: AgentReviewCommentCardProps) {
   const [pending, setPending] = useState(false);
   const suggestionDiff =
@@ -62,8 +68,13 @@ export function AgentReviewCommentCard({
           Local
         </span>
         <span className="text-xs text-muted-foreground">
-          {comment.file_path}:{comment.start_line}
-          {comment.end_line !== comment.start_line && `-${comment.end_line}`}
+          {locationLabel ?? (
+            <>
+              {comment.file_path}:{comment.start_line}
+              {comment.end_line !== comment.start_line &&
+                `-${comment.end_line}`}
+            </>
+          )}
         </span>
       </div>
 
@@ -128,7 +139,7 @@ export function AgentReviewCommentCard({
         </div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {comment.suggested_replacement != null && (
           <Button
             size="sm"
@@ -138,7 +149,7 @@ export function AgentReviewCommentCard({
             onClick={() => run(() => onApplySuggestion(comment.id))}
           >
             <Wand2 className="w-3 h-3" />
-            Apply
+            {applyLabel}
           </Button>
         )}
         {onSendToAgent && (

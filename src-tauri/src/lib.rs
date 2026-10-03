@@ -1024,6 +1024,8 @@ pub fn run() {
       commands::linear_list_issue_comments,
       commands::linear_list_project_comments,
       commands::linear_list_document_comments,
+      commands::linear_prepare_review,
+      commands::linear_apply_review_suggestion,
       commands::tracker_list_containers,
       commands::tracker_list_items,
       commands::tracker_get_viewer,

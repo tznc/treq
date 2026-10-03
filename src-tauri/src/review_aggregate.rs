@@ -235,6 +235,7 @@ mod tests {
       source: "local-agent".to_string(),
       created_at: "2024-01-01T00:00:00Z".to_string(),
       resolved_at: None,
+      quoted_text: None,
     }
   }
 
