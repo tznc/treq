@@ -21,6 +21,7 @@ import {
 import {
   getAppSetupScriptStatus,
   getSetting,
+  runAppSetupScript,
   saveAppSetupScript,
   setSetting,
 } from "../lib/api";
@@ -165,6 +166,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         description: "Application settings updated successfully",
         type: "success",
       });
+    } catch (error) {
+      addToast({
+        title: "Error",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    }
+  };
+
+  const handleRunSetupScript = async () => {
+    try {
+      await runAppSetupScript();
+      await mutateSetupScriptStatus();
     } catch (error) {
       addToast({
         title: "Error",
@@ -420,6 +434,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                       status={setupScriptStatus}
                       onScriptChange={setSetupScriptDraft}
                       onAlwaysRunChange={setAlwaysRunDraft}
+                      onRun={handleRunSetupScript}
                     />
 
                     <div>

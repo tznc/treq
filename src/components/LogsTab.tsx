@@ -4,6 +4,7 @@ import { Database, Loader2, Table2 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   getAgentChat,
+  getAppSetupLogs,
   getLogTimeseries,
   getRepoLogs,
   listAgentChats,
@@ -22,9 +23,9 @@ interface Props {
 }
 
 type View = "browse" | "explorer";
-type SourceGroup = "checks" | "agent-chats";
+type SourceGroup = "checks" | "agent-chats" | "app-setup";
 
-/** Repo-level check and agent logs. */
+/** Repo-level check and agent logs, plus app-level setup script logs. */
 export function LogsTab({ repoPath, onSendToAgent }: Props) {
   const [source, setSource] = useState<SourceGroup>("checks");
   const [view, setView] = useState<View>("browse");
@@ -67,6 +68,7 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
         >
           <option value="checks">Checks</option>
           <option value="agent-chats">Agent</option>
+          <option value="app-setup">App setup</option>
         </select>
         {checksSelected && (
           <div className="flex items-center gap-1">
@@ -92,6 +94,8 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
 
       {source === "agent-chats" ? (
         <AgentChatsSource repoPath={repoPath} onSendToAgent={onSendToAgent} />
+      ) : source === "app-setup" ? (
+        <AppSetupSource onSendToAgent={onSendToAgent} />
       ) : browsing ? (
         <>
           <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-muted/30">
@@ -226,6 +230,64 @@ function AgentChatsSource({
               header: "Role",
               className: "w-[6ch] text-blue-600 dark:text-blue-400",
               render: (record) => record.job_id,
+            },
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
+function AppSetupSource({
+  onSendToAgent,
+}: {
+  onSendToAgent?: (prompt: string) => void;
+}) {
+  const [levels, setLevels] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+
+  const { data: records = [], isLoading } = useSWR(
+    ["app-setup-logs", levels, search],
+    () =>
+      getAppSetupLogs({
+        levels: levels.length > 0 ? levels : undefined,
+        search: search || undefined,
+      }),
+  );
+
+  function handleSendToAgent(chosen: LogRecordView[]) {
+    onSendToAgent?.(buildLogLinesPrompt(chosen, "my app setup script logs"));
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-muted/30">
+        <LogLevelFilter value={levels} onChange={setLevels} />
+        <input
+          aria-label="Search app setup logs"
+          placeholder="Search all runs…"
+          className="ml-auto h-8 w-full max-w-sm min-w-[160px] rounded-md border bg-background px-2 text-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading logs…
+        </div>
+      ) : (
+        <LogFeed
+          records={records}
+          testId="app-setup-logs-output"
+          lineTestId="app-setup-log-line"
+          emptyMessage="No app setup script runs yet. Set a script in Application settings and click Run."
+          onSendToAgent={handleSendToAgent}
+          prefixColumns={[
+            {
+              header: "Run",
+              className: "w-[5ch] text-muted-foreground",
+              render: (record) => `#${record.run_id}`,
             },
           ]}
         />

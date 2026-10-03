@@ -104,10 +104,28 @@ pub fn save_app_setup_script(
   script: String,
   always_run: bool,
 ) -> Result<(), String> {
-  {
-    let db = state.db.lock_or_recover();
-    core::app_setup_script::save(&db, &script, always_run)?;
-  }
-  core::app_setup_script::spawn_run_if_needed(core::app_setup_script::Trigger::SettingsChanged);
-  Ok(())
+  let db = state.db.lock_or_recover();
+  core::app_setup_script::save(&db, &script, always_run)
+}
+
+#[tauri::command]
+pub fn run_app_setup_script() {
+  core::app_setup_script::spawn_run_if_needed(core::app_setup_script::Trigger::Manual);
+}
+
+#[tauri::command]
+pub async fn get_app_setup_logs(
+  levels: Option<Vec<String>>,
+  search: Option<String>,
+) -> Result<Vec<core::checks_logs::LogRecordView>, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let query = core::checks_logs::LogQuery {
+      levels,
+      search,
+      ..Default::default()
+    };
+    core::app_setup_script::query_logs(&core::app_setup_script::app_db_path()?, &query)
+  })
+  .await
+  .map_err(|e| e.to_string())?
 }

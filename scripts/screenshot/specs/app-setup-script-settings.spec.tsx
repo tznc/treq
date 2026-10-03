@@ -1,8 +1,8 @@
 import * as React from "react";
-import { it } from "vitest";
+import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { createTestRepo, openRepo } from "../../../test/utils";
-import { render, screen } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { saveAppSetupScript } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
@@ -24,7 +24,7 @@ it("captures the application setup script settings", async () => {
     expectations: [
       "An 'Application Setup Script' textarea with a monospace placeholder sits in the Application tab.",
       "A 'Run on every app startup' switch is shown in the off state with its label beside it.",
-      "The status line under the switch reads 'Never run'.",
+      "A disabled 'Run' button sits below the switch, with 'Never run' beside it.",
     ],
   });
 
@@ -33,6 +33,9 @@ it("captures the application setup script settings", async () => {
     screen.getByRole("switch", { name: "Run on every app startup" }),
   );
   await user.click(screen.getByRole("button", { name: /save settings/i }));
+  const run = screen.getByRole("button", { name: /^run$/i });
+  await waitFor(() => expect(run).toBeEnabled());
+  await user.click(run);
   await screen.findByText(/Last run .* passed/);
   await captureDocument(document, {
     name: "app-setup-script-settings-02-ran",
@@ -40,7 +43,7 @@ it("captures the application setup script settings", async () => {
     expectations: [
       "The textarea shows 'echo setup' in monospace.",
       "The 'Run on every app startup' switch is on (filled primary color).",
-      "The status line reads 'Last run <timestamp> · passed'.",
+      "Beside the enabled 'Run' button the status reads 'Last run <timestamp> · passed'.",
     ],
   });
 }, 60000);

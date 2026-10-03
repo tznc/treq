@@ -11,6 +11,7 @@ describe("AppSetupScriptSettings", () => {
         alwaysRun={false}
         onScriptChange={vi.fn()}
         onAlwaysRunChange={vi.fn()}
+        onRun={vi.fn()}
       />,
     );
 
@@ -18,5 +19,6 @@ describe("AppSetupScriptSettings", () => {
     expect(
       screen.getByRole("switch", { name: "Run on every app startup" }),
     ).toHaveAttribute("data-disabled");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 });

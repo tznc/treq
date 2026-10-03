@@ -93,6 +93,16 @@ export const getRepoLogs = (
     offset: options?.offset ?? null,
   });
 
+/** Output of every application setup script run, newest run first. */
+export const getAppSetupLogs = (options?: {
+  levels?: string[];
+  search?: string;
+}): Promise<LogRecordView[]> =>
+  invoke("get_app_setup_logs", {
+    levels: options?.levels ?? null,
+    search: options?.search ?? null,
+  });
+
 export const getLogTimeseries = (
   repoPath: string,
   options?: { levels?: string[]; search?: string; bucketSeconds?: number },

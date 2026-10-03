@@ -838,6 +838,8 @@ pub fn run() {
       commands::set_setting,
       commands::get_app_setup_script_status,
       commands::save_app_setup_script,
+      commands::run_app_setup_script,
+      commands::get_app_setup_logs,
       commands::get_repo_setting,
       commands::set_repo_setting,
       commands::list_skill_catalog,

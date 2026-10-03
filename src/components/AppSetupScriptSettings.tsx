@@ -1,4 +1,6 @@
+import { Play } from "lucide-react";
 import type { AppSetupScriptStatus } from "../lib/api";
+import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
@@ -9,6 +11,7 @@ interface AppSetupScriptSettingsProps {
   status?: AppSetupScriptStatus;
   onScriptChange: (script: string) => void;
   onAlwaysRunChange: (alwaysRun: boolean) => void;
+  onRun: () => void;
 }
 
 export function AppSetupScriptSettings({
@@ -17,9 +20,14 @@ export function AppSetupScriptSettings({
   status,
   onScriptChange,
   onAlwaysRunChange,
+  onRun,
 }: AppSetupScriptSettingsProps) {
   // Before the status loads the props are defaults; an edit would overwrite.
   const loading = !status;
+  // Run executes the saved script, so an unsaved edit must be saved first.
+  const unsaved = !!status && script !== status.script;
+  const canRun =
+    !!status && !status.running && !unsaved && status.script.trim() !== "";
   return (
     <div>
       <Label htmlFor="app-setup-script">Application Setup Script</Label>
@@ -33,8 +41,8 @@ export function AppSetupScriptSettings({
         rows={4}
       />
       <p className="text-sm text-muted-foreground mt-1">
-        Shell script run from your home directory. It runs once, and again
-        whenever you change it.
+        Shell script run from your home directory when you click Run. Its output
+        is in the Logs tab under App setup.
       </p>
       <div className="flex items-center gap-2 mt-3">
         <Switch
@@ -48,9 +56,17 @@ export function AppSetupScriptSettings({
           Run on every app startup
         </Label>
       </div>
-      <p className="text-sm text-muted-foreground mt-2">
-        {formatStatus(status)}
-      </p>
+      <div className="flex items-center gap-3 mt-3">
+        <Button size="sm" variant="outline" disabled={!canRun} onClick={onRun}>
+          <Play className="h-3 w-3 mr-1" />
+          Run
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          {unsaved
+            ? "Save settings to run the edited script."
+            : formatStatus(status)}
+        </p>
+      </div>
     </div>
   );
 }
