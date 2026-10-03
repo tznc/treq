@@ -5994,21 +5994,35 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
       commits_to_move.insert(0, wc_commit.id().clone());
     }
   }
-  // Another working copy checked out on a moved commit (the home repo on the
-  // branch this workspace is stacked on) moves with it. Left out, the move
-  // reparents it onto the lineage's old base and takes it off its branch.
-  // Repeat until nothing joins: a working copy can sit on another one that
-  // only joins in this loop.
+  // Other working copies sitting on moved commits move with them: the home
+  // repo on the branch this workspace is stacked on, and stacked workspaces
+  // with no commits yet, which chain on each other's working copies. Left
+  // out, the move reparents them onto the lineage's old base, which takes
+  // home off its branch and splits the stack. A working copy with commits on
+  // top stays, since moving it alone would split those commits off it.
+  let wc_commits = revset::ResolvedRevsetExpression::commits(
+    loaded
+      .repo
+      .view()
+      .wc_commit_ids()
+      .values()
+      .cloned()
+      .collect(),
+  );
   let mut moved: HashSet<_> = commits_to_move.iter().cloned().collect();
-  let mut pending = loaded
-    .repo
-    .view()
-    .wc_commit_ids()
-    .values()
-    .filter(|id| !moved.contains(*id))
-    .map(|id| loaded.repo.store().get_commit(id))
+  let mut pending = wc_commits
+    .minus(&wc_commits.children().minus(&wc_commits).ancestors())
+    .evaluate(loaded.repo.as_ref())
+    .map_err(|e| JjError::IoError(format!("Failed to find working copies to move: {}", e)))?
+    .iter()
+    .commits(loaded.repo.store())
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
+  pending.retain(|wc_commit| !moved.contains(wc_commit.id()));
+  // Repeat until nothing joins: a working copy can sit on another one that
+  // only joins in this loop. Each joins after its parents, so inserting it at
+  // the front keeps the list children-first, the order `compute_move_commits`
+  // expects.
   while let Some(index) = pending
     .iter()
     .position(|wc_commit| wc_commit.parent_ids().iter().all(|id| moved.contains(id)))
