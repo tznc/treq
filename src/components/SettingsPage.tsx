@@ -154,8 +154,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       await mutateSavedNotify(notifyValue, { revalidate: false });
       await setFontSize(localFontSize);
       await setZoom(localZoom);
-      await saveAppSetupScript(setupScript, setupScriptAlwaysRun);
-      await mutateSetupScriptStatus();
+      // Unedited, `setupScript` may be the "" fallback of an unloaded status.
+      if (setupScriptDraft !== null || alwaysRunDraft !== null) {
+        await saveAppSetupScript(setupScript, setupScriptAlwaysRun);
+        await mutateSetupScriptStatus();
+      }
 
       addToast({
         title: "Settings Saved",

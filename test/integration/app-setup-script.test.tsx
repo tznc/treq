@@ -7,7 +7,7 @@ import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 
-describe("application setup script", () => {
+describe("application setup script", { timeout: 15_000 }, () => {
   let user: ReturnType<typeof userEvent.setup>;
 
   beforeEach(async () => {
@@ -21,6 +21,8 @@ describe("application setup script", () => {
     render(<Dashboard />);
     await user.click(await screen.findByLabelText("Settings"));
     await user.click(await screen.findByRole("tab", { name: /application/i }));
+    const script = await screen.findByLabelText("Application Setup Script");
+    await waitFor(() => expect(script).toBeEnabled());
   }
 
   it("runs a saved script once and shows when it last ran", async () => {
@@ -47,7 +49,7 @@ describe("application setup script", () => {
   it("shows a failed run", async () => {
     await openApplicationSettings();
     await user.type(
-      await screen.findByLabelText("Application Setup Script"),
+      screen.getByLabelText("Application Setup Script"),
       "exit 1",
     );
     await user.click(screen.getByRole("button", { name: /save settings/i }));

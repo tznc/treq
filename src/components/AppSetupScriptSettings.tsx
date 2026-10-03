@@ -18,12 +18,15 @@ export function AppSetupScriptSettings({
   onScriptChange,
   onAlwaysRunChange,
 }: AppSetupScriptSettingsProps) {
+  // Before the status loads the props are defaults; an edit would overwrite.
+  const loading = !status;
   return (
     <div>
       <Label htmlFor="app-setup-script">Application Setup Script</Label>
       <Textarea
         id="app-setup-script"
         value={script}
+        disabled={loading}
         onChange={(e) => onScriptChange(e.target.value)}
         placeholder="brew install jj"
         className="mt-2 font-mono"
@@ -38,6 +41,7 @@ export function AppSetupScriptSettings({
           id="app-setup-script-always-run"
           aria-label="Run on every app startup"
           checked={alwaysRun}
+          disabled={loading}
           onCheckedChange={onAlwaysRunChange}
         />
         <Label htmlFor="app-setup-script-always-run">
