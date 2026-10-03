@@ -3,21 +3,20 @@
 //! every app startup when `always_run` is on. Each run's output is stored as
 //! log records next to the app DB, so the Logs tab can show it.
 
-use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::Utc;
 use jj_lib::lock::FileLock;
 use serde::{Deserialize, Serialize};
 
 use crate::core::checks_logs::{
-  infer_level, make_log_line, now_timestamp, query_repo_logs, strip_ansi, LogQuery, LogRecordView,
-  LogWriter,
+  infer_level, make_log_line, now_timestamp, query_repo_logs, LogQuery, LogRecordView, LogWriter,
 };
+use crate::core::shell_step::{self, ShellStep, StepOutcome};
 use crate::db::Database;
 
 pub const SCRIPT_KEY: &str = "app_setup_script";
@@ -48,8 +47,7 @@ pub struct AppSetupScriptStatus {
   pub running: bool,
 }
 
-/// Spawned runs that have not finished. Counted from before the thread starts,
-/// so a status read right after a run request already sees the run.
+/// Runs in this process that will run the script and have not finished.
 static PENDING_RUNS: AtomicUsize = AtomicUsize::new(0);
 
 /// A script still running after this long is killed and recorded as failed,
@@ -98,7 +96,6 @@ pub fn query_logs(db_path: &Path, query: &LogQuery) -> Result<Vec<LogRecordView>
 
 /// Sends one run's output to the app log and, when the store opened, to the
 /// run's log records.
-#[derive(Clone)]
 struct RunLog {
   writer: Option<LogWriter>,
   run_id: i64,
@@ -127,86 +124,38 @@ impl RunLog {
       ));
     }
   }
-
-  fn output(&self, stream: &'static str, pipe: impl Read + Send + 'static) {
-    let log = self.clone();
-    std::thread::spawn(move || {
-      for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-        let message = strip_ansi(&line);
-        log.write(stream, infer_level(&message), &message);
-      }
-    });
-  }
 }
 
-/// Runs the script with `sh -c` from the home directory. Returns whether it
-/// exited successfully within `timeout`.
-fn execute(script: &str, timeout: Duration, log: &RunLog) -> bool {
+/// Runs the script from the home directory. Returns whether it exited
+/// successfully within `timeout`.
+fn execute(script: &str, timeout: Duration, log: RunLog) -> bool {
   let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-  let mut command = Command::new("sh");
-  command
-    .args(["-c", script])
-    .current_dir(&home)
-    .env("PATH", crate::binary_paths::get_extended_path())
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
-  // Its own process group, so a timeout also kills what the script started.
-  #[cfg(unix)]
-  std::os::unix::process::CommandExt::process_group(&mut command, 0);
-  let mut child = match command.spawn() {
-    Ok(child) => child,
-    Err(e) => {
-      log.write("stderr", "error", &format!("Failed to start: {}", e));
-      return false;
-    }
+  let log = Arc::new(log);
+  let sink: shell_step::LineSink = {
+    let log = log.clone();
+    Arc::new(move |stream, message| log.write(stream, infer_level(message), message))
   };
-  // Not joined: a background job the script starts can hold the pipes open.
-  if let Some(stdout) = child.stdout.take() {
-    log.output("stdout", stdout);
-  }
-  if let Some(stderr) = child.stderr.take() {
-    log.output("stderr", stderr);
-  }
-
-  let deadline = Instant::now() + timeout;
-  loop {
-    match child.try_wait() {
-      Ok(Some(status)) => {
-        log::info!("App setup script exited with {}", status);
-        return status.success();
-      }
-      Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
-      Ok(None) => {
-        let message = format!("Timed out after {:?} and was killed.", timeout);
-        log.write("stderr", "error", &message);
-        kill_process_group(&mut child);
-        let _ = child.wait();
-        return false;
-      }
-      Err(e) => {
-        log.write(
-          "stderr",
-          "error",
-          &format!("Failed waiting for the script: {}", e),
-        );
-        return false;
-      }
+  let step = ShellStep {
+    script,
+    cwd: Path::new(&home),
+    env: None,
+    timeout,
+  };
+  match shell_step::run(&step, sink) {
+    Ok(StepOutcome::Exited(status)) => {
+      log::info!("App setup script exited with {}", status);
+      status.success()
+    }
+    Ok(StepOutcome::TimedOut) => {
+      let message = format!("Timed out after {:?} and was killed.", timeout);
+      log.write("stderr", "error", &message);
+      false
+    }
+    Err(e) => {
+      log.write("stderr", "error", &format!("Failed to run: {}", e));
+      false
     }
   }
-}
-
-#[cfg(unix)]
-fn kill_process_group(child: &mut Child) {
-  // `process_group(0)` made the script's pid its group id.
-  unsafe {
-    libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
-  }
-}
-
-#[cfg(not(unix))]
-fn kill_process_group(child: &mut Child) {
-  let _ = child.kill();
 }
 
 /// The lock file that serializes runs across every Treq process and thread
@@ -234,7 +183,7 @@ pub fn run_if_needed(db_path: &Path, trigger: Trigger) -> Result<bool, String> {
   db.set_setting(LAST_RUN_ID_KEY, &run_id.to_string())
     .map_err(|e| e.to_string())?;
 
-  let status = if execute(&script, RUN_TIMEOUT, &RunLog::open(db_path, run_id)) {
+  let status = if execute(&script, RUN_TIMEOUT, RunLog::open(db_path, run_id)) {
     "passed"
   } else {
     "failed"
@@ -245,11 +194,11 @@ pub fn run_if_needed(db_path: &Path, trigger: Trigger) -> Result<bool, String> {
   Ok(true)
 }
 
-/// The app DB path set at startup.
+/// The app DB path inside the app data dir set at startup.
 pub fn app_db_path() -> Result<PathBuf, String> {
-  std::env::var("TREQ_APP_DB_PATH")
-    .map(PathBuf::from)
-    .map_err(|_| "TREQ_APP_DB_PATH is not set".to_string())
+  crate::core::app_data_dir()
+    .map(|dir| dir.join(crate::core::APP_DB_FILE_NAME))
+    .ok_or_else(|| "TREQ_APP_DATA_DIR is not set".to_string())
 }
 
 /// Runs `run_if_needed` on a background thread with its own connection to the
@@ -263,18 +212,44 @@ pub fn spawn_run_if_needed(trigger: Trigger) {
   }
 }
 
+/// Whether a startup run would run the script. Checked before waiting on the
+/// claim, so a startup that will skip never shows as running while another
+/// instance holds the claim.
+fn startup_will_run(db_path: &Path) -> Result<bool, String> {
+  let db = Database::new(db_path.to_path_buf()).map_err(|e| e.to_string())?;
+  Ok(script_to_run(&db, Trigger::Startup)?.is_some())
+}
+
 fn spawn_run(db_path: PathBuf, trigger: Trigger) -> JoinHandle<()> {
-  PENDING_RUNS.fetch_add(1, Ordering::SeqCst);
+  // Counted before the thread starts, so the status read after a click sees it.
+  let pending = (trigger == Trigger::Manual).then(PendingRun::start);
   std::thread::spawn(move || {
-    // Decrements on every exit, including a panic in the run.
-    let _pending = PendingRun;
+    let _pending = match pending {
+      Some(pending) => pending,
+      None => match startup_will_run(&db_path) {
+        Ok(true) => PendingRun::start(),
+        Ok(false) => return,
+        Err(e) => {
+          log::warn!("App setup script failed: {}", e);
+          return;
+        }
+      },
+    };
     if let Err(e) = run_if_needed(&db_path, trigger) {
       log::warn!("App setup script failed: {}", e);
     }
   })
 }
 
+/// Counts a run in `PENDING_RUNS` until dropped, including on a panic.
 struct PendingRun;
+
+impl PendingRun {
+  fn start() -> Self {
+    PENDING_RUNS.fetch_add(1, Ordering::SeqCst);
+    PendingRun
+  }
+}
 
 impl Drop for PendingRun {
   fn drop(&mut self) {
@@ -285,7 +260,11 @@ impl Drop for PendingRun {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::sync::Mutex;
   use tempfile::TempDir;
+
+  /// Serializes tests that read `PENDING_RUNS`, which every test shares.
+  static PENDING_RUNS_TESTS: Mutex<()> = Mutex::new(());
 
   /// Creates the app DB in `dir` and returns its path.
   fn test_db(dir: &TempDir) -> PathBuf {
@@ -311,14 +290,6 @@ mod tests {
     std::fs::read_to_string(dir.path().join("runs.log"))
       .map(|s| s.lines().count())
       .unwrap_or(0)
-  }
-
-  /// A log that only goes to the app log.
-  fn no_store() -> RunLog {
-    RunLog {
-      writer: None,
-      run_id: 0,
-    }
   }
 
   #[test]
@@ -398,15 +369,8 @@ mod tests {
     save(&open(&db), "echo second", false).unwrap();
     run_if_needed(&db, Trigger::Manual).unwrap();
 
-    // Output is read on detached threads, so it can land after the run returns.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let records = loop {
-      let records = query_logs(&db, &LogQuery::default()).unwrap();
-      if records.len() == 3 || Instant::now() > deadline {
-        break records;
-      }
-      std::thread::sleep(Duration::from_millis(50));
-    };
+    // Recorded only after the output drained, so no polling is needed.
+    let records = query_logs(&db, &LogQuery::default()).unwrap();
 
     let lines: Vec<_> = records
       .iter()
@@ -446,7 +410,26 @@ mod tests {
   }
 
   #[test]
+  fn skipping_startup_is_not_running_while_another_instance_runs() {
+    let _serial = PENDING_RUNS_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = TempDir::new().unwrap();
+    let db = test_db(&dir);
+    save(&open(&db), &counting_script(&dir, "a"), false).unwrap();
+    // Stands in for another Treq process that is mid-run on the same DB.
+    let claim = FileLock::lock(claim_path(&db)).unwrap();
+
+    let startup = spawn_run(db.clone(), Trigger::Startup);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!get_status(&open(&db)).unwrap().running);
+
+    drop(claim);
+    startup.join().unwrap();
+    assert_eq!(run_count(&dir), 0);
+  }
+
+  #[test]
   fn running_tracks_spawned_runs_only() {
+    let _serial = PENDING_RUNS_TESTS.lock().unwrap_or_else(|e| e.into_inner());
     let dir = TempDir::new().unwrap();
     let db = test_db(&dir);
     save(&open(&db), "echo hi", false).unwrap();
@@ -457,25 +440,6 @@ mod tests {
       .join()
       .unwrap();
     assert!(!get_status(&open(&db)).unwrap().running);
-  }
-
-  #[test]
-  fn execute_kills_a_script_that_outlives_the_timeout() {
-    let started = Instant::now();
-    assert!(!execute(
-      "sleep 30",
-      Duration::from_millis(200),
-      &no_store()
-    ));
-    assert!(started.elapsed() < Duration::from_secs(10));
-  }
-
-  #[test]
-  fn execute_does_not_wait_for_background_jobs() {
-    // The job inherits the script's stdout and holds it open after `sh` exits.
-    let started = Instant::now();
-    assert!(execute("sleep 30 &", Duration::from_secs(60), &no_store()));
-    assert!(started.elapsed() < Duration::from_secs(10));
   }
 
   #[test]

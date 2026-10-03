@@ -2,7 +2,7 @@
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestRepo, openRepo } from "../utils";
-import { getSetting, saveAppSetupScript } from "../../src/lib/api";
+import { getSetting, saveAppSetupScript, setSetting } from "../../src/lib/api";
 import { render, screen, waitFor, within } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
@@ -15,6 +15,8 @@ describe("application setup script", { timeout: 20_000 }, () => {
     openRepo(repoPath);
     user = userEvent.setup();
     await saveAppSetupScript("", false);
+    await setSetting("app_setup_script_last_run_at", "");
+    await setSetting("app_setup_script_last_status", "");
   });
 
   async function openApplicationSettings() {

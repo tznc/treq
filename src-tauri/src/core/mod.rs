@@ -28,6 +28,7 @@ pub mod remote_ssh_ws_stream;
 pub mod repo;
 pub mod resolve;
 pub mod sessions;
+pub mod shell_step;
 pub mod skills;
 pub mod stash;
 pub mod submodules;

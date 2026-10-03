@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Play } from "lucide-react";
 import type { AppSetupScriptStatus } from "../lib/api";
 import { Button } from "./ui/button";
@@ -9,25 +10,45 @@ interface AppSetupScriptSettingsProps {
   script: string;
   alwaysRun: boolean;
   status?: AppSetupScriptStatus;
+  /** Why the status failed to load; the editor stays disabled without it. */
+  loadError?: string;
   onScriptChange: (script: string) => void;
   onAlwaysRunChange: (alwaysRun: boolean) => void;
-  onRun: () => void;
+  /** Starts a run; resolves once the refreshed status reports it. */
+  onRun: () => Promise<void>;
 }
 
 export function AppSetupScriptSettings({
   script,
   alwaysRun,
   status,
+  loadError,
   onScriptChange,
   onAlwaysRunChange,
   onRun,
 }: AppSetupScriptSettingsProps) {
+  // Set from the click until the status reports the run, so a second click
+  // in between cannot start another run.
+  const [starting, setStarting] = useState(false);
   // Before the status loads the props are defaults; an edit would overwrite.
   const loading = !status;
   // Run executes the saved script, so an unsaved edit must be saved first.
   const unsaved = !!status && script !== status.script;
   const canRun =
-    !!status && !status.running && !unsaved && status.script.trim() !== "";
+    !!status &&
+    !status.running &&
+    !starting &&
+    !unsaved &&
+    status.script.trim() !== "";
+
+  async function handleRun() {
+    setStarting(true);
+    try {
+      await onRun();
+    } finally {
+      setStarting(false);
+    }
+  }
   return (
     <div>
       <Label htmlFor="app-setup-script">Application Setup Script</Label>
@@ -57,15 +78,26 @@ export function AppSetupScriptSettings({
         </Label>
       </div>
       <div className="flex items-center gap-3 mt-3">
-        <Button size="sm" variant="outline" disabled={!canRun} onClick={onRun}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canRun}
+          onClick={handleRun}
+        >
           <Play className="h-3 w-3 mr-1" />
           Run
         </Button>
-        <p className="text-sm text-muted-foreground">
-          {unsaved
-            ? "Save settings to run the edited script."
-            : formatStatus(status)}
-        </p>
+        {loadError ? (
+          <p className="text-sm text-destructive">
+            Could not load the setup script: {loadError}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {unsaved
+              ? "Save settings to run the edited script."
+              : formatStatus(status)}
+          </p>
+        )}
       </div>
     </div>
   );
