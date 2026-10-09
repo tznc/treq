@@ -19,10 +19,7 @@ import {
   useZoomSettingsStore,
 } from "../stores/zoomSettingsStore";
 import {
-  getAppSetupScriptStatus,
   getSetting,
-  runAppSetupScript,
-  saveAppSetupScript,
   setSetting,
 } from "../lib/api";
 import {
@@ -52,6 +49,7 @@ import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
 
 const NOTIFY_AGENT_FINISHED_SETTING = "notify_agent_finished";
 import { AppSetupScriptSettings } from "./AppSetupScriptSettings";
+import { useAppSetupScript } from "./useAppSetupScript";
 
 type TabValue =
   | "application"
@@ -81,8 +79,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [notifyDraft, setNotifyDraft] = useState<boolean | null>(null);
   const [fontDraft, setFontDraft] = useState<number | null>(null);
   const [zoomDraft, setZoomDraft] = useState<number | null>(null);
-  const [setupScriptDraft, setSetupScriptDraft] = useState<string | null>(null);
-  const [alwaysRunDraft, setAlwaysRunDraft] = useState<boolean | null>(null);
   const [savingRepository, setSavingRepository] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const repositorySettingsRef = useRef<RepositorySettingsContentHandle>(null);
@@ -124,19 +120,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   );
   // On unless explicitly turned off, matching the backend default.
   const notifyAgentFinished = notifyDraft ?? savedNotify?.trim() !== "false";
-  const {
-    data: setupScriptStatus,
-    error: setupScriptError,
-    mutate: mutateSetupScriptStatus,
-  } = useSWR(
-    "app-setup-script-status",
-    getAppSetupScriptStatus,
-    // Poll while the script runs in the background.
-    { refreshInterval: (status) => (status?.running ? 1000 : 0) },
+  const setupScript = useAppSetupScript((error) =>
+    addToast({
+      title: "Error",
+      description: error instanceof Error ? error.message : String(error),
+      type: "error",
+    }),
   );
-  const setupScript = setupScriptDraft ?? setupScriptStatus?.script ?? "";
-  const setupScriptAlwaysRun =
-    alwaysRunDraft ?? setupScriptStatus?.always_run ?? false;
   const defaultModel = modelDraft ?? savedModel ?? "";
   const defaultAgent = agentDraft ?? savedAgent ?? "";
   const conflictMarkerStyle = conflictDraft ?? savedConflict ?? "git";
@@ -159,30 +149,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       await mutateSavedNotify(notifyValue, { revalidate: false });
       await setFontSize(localFontSize);
       await setZoom(localZoom);
-      // Unedited, `setupScript` may be the "" fallback of an unloaded status.
-      if (setupScriptDraft !== null || alwaysRunDraft !== null) {
-        await saveAppSetupScript(setupScript, setupScriptAlwaysRun);
-        await mutateSetupScriptStatus();
-      }
+      await setupScript.save();
 
       addToast({
         title: "Settings Saved",
         description: "Application settings updated successfully",
         type: "success",
       });
-    } catch (error) {
-      addToast({
-        title: "Error",
-        description: error instanceof Error ? error.message : String(error),
-        type: "error",
-      });
-    }
-  };
-
-  const handleRunSetupScript = async () => {
-    try {
-      await runAppSetupScript();
-      await mutateSetupScriptStatus();
     } catch (error) {
       addToast({
         title: "Error",
@@ -433,15 +406,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                       />
                     </div>
                     <AppSetupScriptSettings
-                      script={setupScript}
-                      alwaysRun={setupScriptAlwaysRun}
-                      status={setupScriptStatus}
-                      loadError={
-                        setupScriptError ? String(setupScriptError) : undefined
-                      }
-                      onScriptChange={setSetupScriptDraft}
-                      onAlwaysRunChange={setAlwaysRunDraft}
-                      onRun={handleRunSetupScript}
+                      script={setupScript.script}
+                      alwaysRun={setupScript.alwaysRun}
+                      status={setupScript.status}
+                      loadError={setupScript.loadError}
+                      onScriptChange={setupScript.setScript}
+                      onAlwaysRunChange={setupScript.setAlwaysRun}
+                      onRun={setupScript.run}
                     />
 
                     <div>
