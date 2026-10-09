@@ -311,7 +311,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: inspect, status, branches, probe, init, clone, usage"
+              "description": "Action: inspect, status, branches, probe, init, clone, usage, switch-branch"
             },
             {
               "name": "repo",
@@ -345,7 +345,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, inspect, create, rename, update, delete, move, rebase, marker"
+              "description": "Action: list, inspect, create, rename, update, delete, archive, move, rebase, marker, stash, snapshot, restore-all, restore-snapshot"
             },
             {
               "name": "repo",
@@ -508,7 +508,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, diff, file-diff, create, describe, split, move, abandon"
+              "description": "Action: list, diff, file-diff, create, describe, split, move, abandon, revert, undo, undo-operation"
             },
             {
               "name": "repo",
