@@ -18,10 +18,7 @@ import {
   ZOOM_STEP,
   useZoomSettingsStore,
 } from "../stores/zoomSettingsStore";
-import {
-  getSetting,
-  setSetting,
-} from "../lib/api";
+import { getSetting, setSetting } from "../lib/api";
 import {
   AccountSettings,
   type CloudWorkspaceControls,

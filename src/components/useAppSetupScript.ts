@@ -10,7 +10,11 @@ import {
 export function useAppSetupScript(onError: (error: unknown) => void) {
   const [scriptDraft, setScript] = useState<string | null>(null);
   const [alwaysRunDraft, setAlwaysRun] = useState<boolean | null>(null);
-  const { data: status, error, mutate } = useSWR(
+  const {
+    data: status,
+    error,
+    mutate,
+  } = useSWR(
     "app-setup-script-status",
     getAppSetupScriptStatus,
     // Poll while the script runs in the background.
