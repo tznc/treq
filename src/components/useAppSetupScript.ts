@@ -10,6 +10,7 @@ import {
 export function useAppSetupScript(onError: (error: unknown) => void) {
   const [scriptDraft, setScript] = useState<string | null>(null);
   const [alwaysRunDraft, setAlwaysRun] = useState<boolean | null>(null);
+  const [running, setRunning] = useState(false);
   const {
     data: status,
     error,
@@ -18,7 +19,10 @@ export function useAppSetupScript(onError: (error: unknown) => void) {
     "app-setup-script-status",
     getAppSetupScriptStatus,
     // Poll while the script runs in the background.
-    { refreshInterval: (s) => (s?.running ? 1000 : 0) },
+    {
+      refreshInterval: running ? 1000 : 0,
+      onSuccess: (latest) => setRunning(latest.running),
+    },
   );
   const script = scriptDraft ?? status?.script ?? "";
   const alwaysRun = alwaysRunDraft ?? status?.always_run ?? false;
