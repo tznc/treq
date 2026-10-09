@@ -1594,6 +1594,7 @@ mod notify {
           normalized_repo_path: normalize_repo_path(&repo),
           focused: false,
           last_focused_at: None,
+          supporting: false,
         }],
       }],
       &repo,
