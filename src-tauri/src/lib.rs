@@ -18,7 +18,6 @@ pub mod core;
 pub mod db;
 pub mod file_indexer;
 pub mod github;
-pub mod jira;
 pub mod jj;
 #[cfg(feature = "gui")]
 pub mod linear;
@@ -35,7 +34,6 @@ pub mod review_aggregate;
 pub mod send_dispatch;
 pub mod telemetry;
 pub mod tracker;
-pub mod trello;
 pub mod unified_patch;
 
 #[cfg(feature = "gui")]
@@ -92,9 +90,6 @@ use crate::core::remote_pty::PtyLaunchSpec;
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::core::skills::SkillInstallScope;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::tracker::TrackerProvider;
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use commands::RemoteExecState;
@@ -1059,11 +1054,6 @@ pub fn run() {
       commands::linear_list_document_comments,
       commands::linear_prepare_review,
       commands::linear_apply_review_suggestion,
-      commands::tracker_list_containers,
-      commands::tracker_list_items,
-      commands::tracker_get_viewer,
-      commands::tracker_open_or_create_workspace_from_item,
-      commands::tracker_start_auto_kickoff_polling,
       commands::load_repo_yaml_config,
       commands::get_run_logs,
       commands::get_repo_logs,

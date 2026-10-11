@@ -10,7 +10,6 @@ const API_FILES = [
   join("src", "lib", "api-linear.ts"),
   join("src", "lib", "api-pr-status.ts"),
   join("src", "lib", "api-remote-ssh.ts"),
-  join("src", "lib", "api-tracker.ts"),
 ];
 const API_REPORT_FILE = API_FILES[0];
 const RUST_SRC_DIR = join("src-tauri", "src");
