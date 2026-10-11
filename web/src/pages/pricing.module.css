@@ -28,7 +28,7 @@
 
 .plans {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.25rem;
   margin-bottom: 3.5rem;
 }
@@ -189,7 +189,7 @@
 
 .comparisonTable {
   width: 100%;
-  min-width: 36rem;
+  min-width: 44rem;
   margin: 0;
   table-layout: fixed;
   border-collapse: separate;
@@ -198,11 +198,11 @@
 }
 
 .comparisonFeatureCol {
-  width: 46%;
+  width: 31%;
 }
 
 .comparisonPlanCol {
-  width: 27%;
+  width: 23%;
 }
 
 .comparisonFeatureHeader,
@@ -367,6 +367,12 @@
   font-size: 0.95rem;
 }
 
+@media (max-width: 900px) {
+  .plans {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .page {
     padding: 2rem 1rem 3rem;
@@ -374,10 +380,6 @@
 
   .title {
     font-size: 2rem;
-  }
-
-  .plans {
-    grid-template-columns: 1fr;
   }
 
   .priceAmount {

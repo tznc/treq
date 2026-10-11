@@ -109,13 +109,17 @@ export function enqueueOperationKey(
   return `enqueue:${queueId}:${prNumber}:${headSha}`;
 }
 
+// Keyed by the CI run as well: a lane that is cancelled (the queue paused,
+// or a PR under test was pushed to) is reserved again in a new CI run with
+// the same number, base and PRs, and that run still has to be built.
 export function startLaneOperationKey(
   queueId: string,
+  ciRunId: string,
   laneNumber: number,
   baseSha: string,
   entrySetHash: string,
 ): string {
-  return `start-lane:${queueId}:${laneNumber}:${baseSha}:${entrySetHash}`;
+  return `start-lane:${queueId}:${ciRunId}:${laneNumber}:${baseSha}:${entrySetHash}`;
 }
 
 export function mergePrOperationKey(

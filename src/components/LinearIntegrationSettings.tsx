@@ -5,7 +5,8 @@ import useSWR from "swr";
 import { useAuthStore } from "../stores/authStore";
 import { isProSubscription } from "../lib/subscription";
 import { FEATURES } from "../lib/features";
-import { supabase } from "../lib/supabase";
+import { isProRequiredError } from "../lib/pro-required";
+import { supabase, WEB_URL } from "../lib/supabase";
 import {
   getLinearApiKey,
   setLinearApiKey,
@@ -125,6 +126,20 @@ export const LinearIntegrationSettings: React.FC<
         "create-linear-oauth-intent",
         { body: {} },
       );
+      if (error && isProRequiredError(error)) {
+        // The server decides entitlement; the Pro gate above is display only.
+        addToast({
+          title: "Linear OAuth needs Pro",
+          description:
+            "Add a personal Linear API key above to use Linear on the Free plan.",
+          type: "info",
+          action: {
+            label: "Upgrade to Pro",
+            onClick: () => void openUrl(`${WEB_URL}/dashboard`),
+          },
+        });
+        return;
+      }
       if (error) {
         throw new Error(
           error instanceof Error ? error.message : JSON.stringify(error),

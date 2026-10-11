@@ -27,6 +27,7 @@ export const prepareAgentAutoCommand = async ({
   agent,
   workspacePath,
   repoPath,
+  supportingRepoPaths,
   sessionModel,
   permissionMode,
   pendingPrompt,
@@ -35,6 +36,7 @@ export const prepareAgentAutoCommand = async ({
   agent: AgentKind;
   workspacePath: string | null;
   repoPath: string;
+  supportingRepoPaths?: string[];
   sessionModel: string | null;
   permissionMode?: string | null;
   pendingPrompt?: string | null;
@@ -45,7 +47,7 @@ export const prepareAgentAutoCommand = async ({
   skillWriteWarning?: string;
 }> => {
   const cwd = workspacePath || repoPath;
-  const agentPathContext = { workspacePath, repoPath };
+  const agentPathContext = { workspacePath, repoPath, supportingRepoPaths };
   const systemPrompt = buildTreqAgentSystemPrompt(agentPathContext);
 
   let promptContents = systemPrompt;

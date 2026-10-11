@@ -1,0 +1,9 @@
+.other {
+  font-size: 0.875rem;
+}
+
+.other a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

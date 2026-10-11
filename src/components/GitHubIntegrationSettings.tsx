@@ -10,6 +10,7 @@ import {
   useSetMergeQueueEnabled,
 } from "../hooks/useMergeQueueStatus";
 import { FEATURES } from "../lib/features";
+import { isProRequiredError } from "../lib/pro-required";
 import { supabase, WEB_URL } from "../lib/supabase";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
@@ -58,24 +59,32 @@ const MergeQueueSetting: React.FC<{
   const { data: enabled, isLoading } = useMergeQueueEnabled(repoPath);
   const setEnabled = useSetMergeQueueEnabled(repoPath);
   const [error, setError] = useState<string | null>(null);
+  // The server refused to turn the queue on because there is no Pro, even
+  // if the subscription the app last read said otherwise.
+  const [proRequired, setProRequired] = useState(false);
+  const hasPro = isPro && !proRequired;
 
   const isLinked =
     !!remoteInfo &&
     repositories.some((repo) => repo.full_name === remoteInfo.full_name);
-  const isEligible = isPro && isLinked;
+  const isEligible = hasPro && isLinked;
 
   async function apply(next: boolean) {
     setError(null);
     try {
       await setEnabled.mutateAsync(next);
     } catch (err) {
-      setError((err as Error).message);
+      if (isProRequiredError(err)) {
+        setProRequired(true);
+      } else {
+        setError((err as Error).message);
+      }
     }
   }
 
   function ineligibleReason(): string {
     if (!remoteInfo) return "This repository has no GitHub remote.";
-    if (!isPro) return "Upgrade to Pro to use the merge queue.";
+    if (!hasPro) return "Upgrade to Pro to use the merge queue.";
     return `Install the Treq GitHub App on ${remoteInfo.full_name} to use the merge queue.`;
   }
 
@@ -120,7 +129,7 @@ const MergeQueueSetting: React.FC<{
             ) : null}
             Enable merge queue
           </Button>
-        ) : !isPro ? (
+        ) : !hasPro ? (
           <Button
             size="sm"
             variant="outline"

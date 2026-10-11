@@ -1,11 +1,21 @@
 // Completes the GitHub App installation flow: verifies the single-use intent
-// state belongs to the authenticated user, confirms the installation exists
-// on GitHub via app-level auth, links it, and consumes the intent.
+// state belongs to the authenticated user, exchanges GitHub's OAuth `code`
+// and checks the installation is in that GitHub user's installations,
+// confirms the installation exists on GitHub via app-level auth, links it,
+// and consumes the intent. Requires Pro. The logic lives in lib.ts.
 //
 // A browser-supplied installation_id alone never determines ownership.
+//
+// Env: GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET (the App's OAuth
+// client), GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_BASE64 (app-level auth).
+// The App must have "Request user authorization (OAuth) during
+// installation" turned on, or every link fails with
+// github_authorization_required.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { getInstallation } from "../_shared/merge-queue/github-adapter.ts";
+import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { githubInstallationAccess } from "./github.ts";
+import { completeInstallation, installationLinkStore } from "./lib.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,16 +28,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(input),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 Deno.serve(async (req) => {
@@ -54,16 +54,11 @@ Deno.serve(async (req) => {
   } = await supabaseUser.auth.getUser();
   if (authError || !user) return json({ error: "Unauthorized" }, 401);
 
-  let body: { installation_id?: number; state?: string };
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON" }, 400);
-  }
-  const installationId = Number(body.installation_id);
-  const state = body.state;
-  if (!Number.isInteger(installationId) || installationId <= 0 || !state) {
-    return json({ error: "Missing installation_id or state" }, 400);
   }
 
   const supabase = createClient(
@@ -71,68 +66,22 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   );
 
-  // Atomically consume the intent: single-use, unexpired, owned by the
-  // caller. Consuming before the GitHub lookup prevents concurrent reuse.
-  const stateHash = await sha256Hex(state);
-  const { data: intent, error: intentError } = await supabase
-    .from("github_install_intents")
-    .update({ consumed_at: new Date().toISOString() })
-    .eq("state_hash", stateHash)
-    .eq("user_id", user.id)
-    .is("consumed_at", null)
-    .gte("expires_at", new Date().toISOString())
-    .select("id")
-    .maybeSingle();
-  if (intentError) {
-    console.error("[complete-github-installation] intent lookup failed:", intentError.message);
-    return json({ error: "Failed to verify install intent" }, 500);
-  }
-  if (!intent) {
-    return json({ error: "Install intent is invalid, expired or already used" }, 403);
-  }
-
-  // Verify the installation actually exists for our app on GitHub's side.
-  let installation;
   try {
-    installation = await getInstallation(installationId);
+    const result = await completeInstallation(body, {
+      userId: user.id,
+      hasPro: () => userHasPro(supabase, user.id),
+      store: installationLinkStore(supabase),
+      github: githubInstallationAccess({
+        clientId: Deno.env.get("GITHUB_APP_CLIENT_ID") ?? "",
+        clientSecret: Deno.env.get("GITHUB_APP_CLIENT_SECRET") ?? "",
+      }),
+    });
+    return json(result.body, result.status);
   } catch (err) {
     console.error(
-      "[complete-github-installation] GitHub lookup failed:",
+      "[complete-github-installation] failed:",
       err instanceof Error ? err.message : String(err),
     );
-    return json({ error: "Failed to verify installation with GitHub" }, 502);
+    return json({ error: "Failed to complete installation" }, 500);
   }
-  if (!installation) {
-    return json({ error: "Installation not found on GitHub" }, 404);
-  }
-
-  const { error: linkError } = await supabase
-    .from("github_app_installations")
-    .upsert(
-      {
-        id: installation.id,
-        account_login: installation.account.login,
-        account_type: installation.account.type,
-        account_avatar_url: installation.account.avatar_url ?? null,
-        app_id: installation.app_id,
-        linked_user_id: user.id,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" },
-    );
-  if (linkError) {
-    console.error("[complete-github-installation] link failed:", linkError.message);
-    return json({ error: "Failed to link installation" }, 500);
-  }
-
-  console.log(
-    JSON.stringify({
-      operation: "installation_linked",
-      installation_id: installation.id,
-      account_login: installation.account.login,
-      user_id: user.id,
-    }),
-  );
-
-  return json({ ok: true, account_login: installation.account.login });
 });

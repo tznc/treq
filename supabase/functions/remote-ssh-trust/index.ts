@@ -11,6 +11,11 @@
 //   "remove_authorized_key"  - remove a previously installed authorized key
 //   "keyscan_endpoint"       - re-run the host-key scan against the caller's managed endpoint
 //
+// `install_authorized_key` and `keyscan_endpoint` run a command on the
+// managed Sprite, which wakes it, so they require Pro like remote-instance's
+// `wake` (402 `pro_required`). The other actions only touch the database and
+// stay open, so a user whose Pro ended can still revoke keys.
+//
 // Auth: user JWT in Authorization header. Every action re-derives ownership
 // from `owner_user_id` server-side; a caller-supplied instance_id/key_id is
 // only ever used to look up a row already scoped to that owner (PRD
@@ -21,6 +26,11 @@
 // never included in any response or database write.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
+import {
+  PRO_REQUIRED_MESSAGES,
+  refuseGatedAction,
+  userHasPro,
+} from "../_shared/billing/entitlement.ts";
 import { recordAuditEvent, startTimer } from "../_shared/remote/audit.ts";
 import { correlationIdFromRequest, logWithCorrelation } from "../_shared/remote/correlation.ts";
 import {
@@ -64,6 +74,12 @@ const corsHeaders = {
 // should be short enough to bound loss exposure while allowing normal
 // reconnects") while still tolerating a slow client clock or a long-running
 // interactive session started just before expiry.
+// Actions that exec on the managed Sprite and so wake it.
+const PRO_GATED_TRUST_ACTIONS: ReadonlySet<string> = new Set([
+  "install_authorized_key",
+  "keyscan_endpoint",
+]);
+
 const CERTIFICATE_VALIDITY_MINUTES = 20;
 const CERTIFICATE_CLOCK_SKEW_MINUTES = 2;
 
@@ -135,6 +151,13 @@ Deno.serve(async (req) => {
   const correlationId = correlationIdFromRequest(req);
 
   try {
+    const refused = await refuseGatedAction(
+      action,
+      PRO_GATED_TRUST_ACTIONS,
+      () => userHasPro(supabase, user.id),
+      PRO_REQUIRED_MESSAGES.cloudWorkspace,
+    );
+    if (refused) return json(refused.body, refused.status, correlationId);
     switch (action) {
       case "register_client_key":
         return await handleRegisterClientKey(supabase, user.id, body, correlationId);

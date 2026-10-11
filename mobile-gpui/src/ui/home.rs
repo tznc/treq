@@ -1,4 +1,5 @@
-//! Home: account, managed instance and saved SSH hosts.
+//! Home: a landing page when signed out, otherwise account, managed
+//! instance and saved SSH hosts.
 
 use gpui_kit::{component::Disableable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -14,6 +15,8 @@ use gpui_kit::{
 
 use super::{model, screens, widgets};
 use crate::{backend::ConnectionKind, managed, store};
+
+const TAGLINE: &str = "Isolates each agent and rebases stacked PRs when the base moves";
 
 pub struct HomeScreen {
   scroll: ScrollHandle,
@@ -154,18 +157,15 @@ impl HomeScreen {
     )
   }
 
-  fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  // The saved-host rows, or `None` when there are none.
+  fn host_rows(&self, cx: &mut Context<Self>) -> Option<Div> {
     let connecting = model(cx).read(cx).connecting.is_some();
     let hosts = store::user_managed_endpoints();
-    let empty = hosts.is_empty();
-    let list = widgets::card(cx)
-      .when(empty, |card| {
-        card.child(widgets::centered_message(
-          "No SSH hosts saved on this device.",
-          cx,
-        ))
-      })
-      .children(hosts.into_iter().enumerate().map(|(i, host)| {
+    if hosts.is_empty() {
+      return None;
+    }
+    Some(
+      widgets::card(cx).children(hosts.into_iter().enumerate().map(|(i, host)| {
         let detail = format!("{}@{}:{}", host.username, host.hostname, host.port);
         let id = host.id.clone();
         let remove = Button::new(("remove-host", i))
@@ -187,7 +187,17 @@ impl HomeScreen {
         .when(!connecting, |row| {
           row.on_click(move |_, _, cx| super::connect_user_managed(host.clone(), cx))
         })
-      }));
+      })),
+    )
+  }
+
+  fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let list = self.host_rows(cx).unwrap_or_else(|| {
+      widgets::card(cx).child(widgets::centered_message(
+        "No SSH hosts saved on this device.",
+        cx,
+      ))
+    });
     widgets::section("SSH hosts on this device", cx)
       .child(list)
       .child(
@@ -198,24 +208,102 @@ impl HomeScreen {
           .on_click(|_, _, cx| screens::add_host::open(cx)),
       )
   }
+
+  /// The signed-out start screen: brand centered, sign-in within thumb reach.
+  fn landing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let model = model(cx).read(cx);
+    let busy = model.auth_busy;
+    let error = model.auth_error.clone();
+    let connecting = model.connecting;
+    let connect_error = model.connect_error.clone();
+    // Saved hosts stay reachable below the buttons.
+    let hosts = self.host_rows(cx);
+    v_flex()
+      .min_h_full()
+      .p_6()
+      .gap_6()
+      .child(
+        v_flex()
+          .flex_1()
+          .items_center()
+          .justify_center()
+          .gap_3()
+          .child(widgets::logo(96.))
+          .child(widgets::wordmark(40., cx))
+          .child(widgets::muted(TAGLINE, cx).max_w(px(300.)).text_center()),
+      )
+      .child(
+        v_flex()
+          .gap_3()
+          .child(
+            Button::new("sign-in")
+              .primary()
+              .large()
+              .w_full()
+              .h(px(widgets::CTA_H))
+              .label("Sign in")
+              .loading(busy)
+              .on_click(|_, _, cx| super::sign_in(cx)),
+          )
+          .children(error.map(|e| widgets::error_text(e, cx).text_center()))
+          .child(
+            Button::new("add-host")
+              .outline()
+              .large()
+              .w_full()
+              .h(px(widgets::CTA_H))
+              .label("Use your own SSH host")
+              .on_click(|_, _, cx| screens::add_host::open(cx)),
+          )
+          .when_some(connecting, |c, step| {
+            c.child(
+              h_flex()
+                .gap_2()
+                .justify_center()
+                .items_center()
+                .child(Spinner::new().small())
+                .child(widgets::muted(format!("{step}…"), cx)),
+            )
+          })
+          .children(connect_error.map(|e| widgets::error_text(e, cx).text_center()))
+          .children(hosts.map(|rows| widgets::section("SSH hosts on this device", cx).child(rows))),
+      )
+  }
+
+  /// Compact brand header above the signed-in home.
+  fn brand_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    h_flex()
+      .gap_2()
+      .items_center()
+      .child(widgets::logo(28.))
+      .child(widgets::wordmark(20., cx))
+  }
 }
 
 impl Render for HomeScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let account = self.account(cx);
-    let connection = self.connection(cx);
-    let hosts = self.hosts(cx);
+    let model = model(cx).read(cx);
+    let landing = super::is_landing(model.user.as_deref(), model.connection.is_some());
+    let content = if landing {
+      self.landing(cx).into_any_element()
+    } else {
+      let header = self.brand_header(cx);
+      let account = self.account(cx);
+      let connection = self.connection(cx);
+      let hosts = self.hosts(cx);
+      widgets::page()
+        .child(header)
+        .child(account)
+        .child(connection)
+        .child(hosts)
+        .into_any_element()
+    };
     div()
       .id("home")
       .size_full()
       .overflow_y_scroll()
       .track_scroll(&self.scroll)
       .bg(cx.theme().background)
-      .child(
-        widgets::page()
-          .child(account)
-          .child(connection)
-          .child(hosts),
-      )
+      .child(content)
   }
 }

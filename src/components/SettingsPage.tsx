@@ -45,6 +45,8 @@ import { AgentOptions } from "./AgentOptions";
 import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
 
 const NOTIFY_AGENT_FINISHED_SETTING = "notify_agent_finished";
+import { AppSetupScriptSettings } from "./AppSetupScriptSettings";
+import { useAppSetupScript } from "./useAppSetupScript";
 
 type TabValue =
   | "application"
@@ -115,6 +117,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   );
   // On unless explicitly turned off, matching the backend default.
   const notifyAgentFinished = notifyDraft ?? savedNotify?.trim() !== "false";
+  const setupScript = useAppSetupScript((error) =>
+    addToast({
+      title: "Error",
+      description: error instanceof Error ? error.message : String(error),
+      type: "error",
+    }),
+  );
   const defaultModel = modelDraft ?? savedModel ?? "";
   const defaultAgent = agentDraft ?? savedAgent ?? "";
   const conflictMarkerStyle = conflictDraft ?? savedConflict ?? "git";
@@ -137,6 +146,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       await mutateSavedNotify(notifyValue, { revalidate: false });
       await setFontSize(localFontSize);
       await setZoom(localZoom);
+      await setupScript.save();
 
       addToast({
         title: "Settings Saved",
@@ -392,13 +402,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                         className="mt-1"
                       />
                     </div>
+                    <AppSetupScriptSettings
+                      script={setupScript.script}
+                      alwaysRun={setupScript.alwaysRun}
+                      status={setupScript.status}
+                      loadError={setupScript.loadError}
+                      onScriptChange={setupScript.setScript}
+                      onAlwaysRunChange={setupScript.setAlwaysRun}
+                      onRun={setupScript.run}
+                    />
 
                     <div>
                       <Label>Updates</Label>
                       <p className="text-sm text-muted-foreground mt-1 mb-3">
-                        Compare this build against the published version at
-                        treq.dev/version. Automatic install is available on
-                        macOS.
+                        Check treq.dev for a newer signed release and install
+                        it.
                       </p>
                       <Button
                         type="button"

@@ -41,9 +41,9 @@ select throws_ok(
   'P0001', null,
   'a customer cannot be attached to a user that does not exist');
 select throws_ok(
-  $$select public.billing_attach_customer('organization', '00000000-0000-0000-0000-0000000000c2', 'cus_attach_org')$$,
+  $$select public.billing_attach_customer('team', '00000000-0000-0000-0000-0000000000c2', 'cus_attach_org')$$,
   '22023', null,
-  'organization owners are rejected until Team ships');
+  'an owner type other than user or organization is rejected');
 
 -- The webhook confirms the mapping billing-checkout wrote.
 select is(

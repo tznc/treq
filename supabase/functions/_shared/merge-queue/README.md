@@ -69,6 +69,24 @@ webhook payloads.
   passes.
 - A moved head re-queues the entry at the new SHA instead of failing it.
 
+## Pro entitlement
+
+The merge queue is a Pro feature (`prds/billing-and-teams.md`,
+"Enforcement"). `installation_has_pro(installation_id)` answers for the
+installation's owner: today the user who linked it.
+
+- `set_merge_queue_enabled(..., true)` and any write that turns
+  `merge_queue_configs.enabled` on raise SQLSTATE `PT402` (HTTP 402, hint
+  `pro_required`) without Pro. Turning the queue off always works.
+- `enqueue-workspace` answers 402 `pro_required` to `enqueue`; `dequeue`
+  always works.
+- Before `queue.drive` or `ci.completed` tests or merges anything, the
+  worker checks the owner (`entitlement-pause.ts`). Without Pro it cancels
+  every lane, puts its PRs back to `queued`, and comments once on each
+  waiting PR (operation key and marker `pro-paused:{entryId}`). Later drives
+  of a paused queue only read the database. When Pro returns, the
+  reconciler's next drive starts lanes again.
+
 ## Retry & dead-letter policy
 
 - Retryable (GitHub 429/5xx/rate-limit 403, network, lease contention,
@@ -96,12 +114,37 @@ supabase functions deploy complete-github-installation
 supabase secrets set \
   GITHUB_APP_ID=... \
   GITHUB_APP_PRIVATE_KEY_BASE64=... \
+  GITHUB_APP_CLIENT_ID=... \
+  GITHUB_APP_CLIENT_SECRET=... \
   GITHUB_WEBHOOK_SECRET=...
 ```
 
 `GITHUB_WEBHOOK_SECRET` is mandatory: the webhook function refuses every
-request when it is unset. Never log tokens, the private key, or the
-webhook secret.
+request when it is unset. Never log tokens, the private key, the client
+secret, or the webhook secret.
+
+### GitHub App settings for installation linking
+
+GitHub warns that the `installation_id` on its post-install redirect can be
+forged, so `complete-github-installation` only links an installation that
+the installing GitHub user can access. In the App's settings
+(**Developer settings → GitHub Apps → Edit**, on the account or
+organization that owns the App):
+
+- Under **Identifying and authorizing users**, select **Request user
+  authorization (OAuth) during installation**, and set the first
+  **Callback URL** to `https://treq.dev/integrations/github/callback`.
+  With this option on, **Setup URL** cannot be set and GitHub redirects to the
+  callback URL with `code`, `installation_id`, `setup_action` and the
+  `state` passed to the install URL.
+- Copy the **Client ID** into `GITHUB_APP_CLIENT_ID`, and generate a client
+  secret (**Client secrets → Generate a new client secret**) for
+  `GITHUB_APP_CLIENT_SECRET`.
+
+The function exchanges `code` for a user access token, checks the
+installation is in that user's `GET /user/installations` (up to 10 pages of
+100), and discards the token. A redirect without `code` answers 400
+`github_authorization_required`, so an App without the setting fails closed.
 
 ### Cron
 
@@ -155,6 +198,8 @@ fix the underlying cause, then `select pgmq.send('merge_queue_commands',
   revoked from `anon`/`authenticated`).
 - Installation linking requires a server-minted single-use intent
   (`create-github-install-intent` → GitHub install with `state` →
-  `complete-github-installation` verifies user + expiry + GitHub-side
-  installation before linking). A browser-supplied `installation_id`
-  alone never determines ownership.
+  `complete-github-installation` verifies user + expiry, exchanges GitHub's
+  OAuth `code`, requires the installation in that GitHub user's
+  `GET /user/installations`, and looks it up with app auth before
+  linking). A browser-supplied `installation_id` alone never determines
+  ownership.

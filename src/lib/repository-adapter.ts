@@ -15,6 +15,7 @@ import type { SshEndpoint, WorkspaceChangeMarker } from "./api-types-remote";
 import {
   matchesActiveCanonicalPath,
   peekActiveRepository,
+  repositoryCacheKey,
   type ActiveRepository,
 } from "./active-repository";
 import {
@@ -23,9 +24,9 @@ import {
   type MutationDispatchResult,
   type TreqCommandRequest,
 } from "./remote-dispatch";
+import { remoteActionKeys, type UnkeyedRequest } from "./remote-idempotency";
 import { applyMutationDispatchResult } from "./remote-mutation-ui";
-import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
-import type { CutoffReason } from "./remote-cert-lifecycle";
+import { noteCutoffFromError } from "./remote-cutoff-errors";
 
 export function workspaceArg(
   workspaceId: number | null | undefined,
@@ -148,32 +149,6 @@ export async function resolveRemoteLocation(
     throw new Error(`workspace_not_found: no remote workspace at ${dirName}`);
   }
   return { repo, workspace: String(match.id), relative: tail.join("/") };
-}
-
-/** Maps the Rust `CutoffReason` display text carried in a
- * `credential_cut_off: endpoint <id> (<reason>)` error to its reason. */
-const CUTOFF_REASON_TEXT: [string, CutoffReason][] = [
-  ["(session ended)", "session_ended"],
-  ["(client key revoked)", "key_revoked"],
-  ["(instance no longer accessible)", "instance_inaccessible"],
-];
-
-function cutoffReasonFromError(error: unknown): CutoffReason | null {
-  const message = error instanceof Error ? error.message : String(error);
-  if (
-    !message.includes("credential_cut_off") &&
-    !message.includes("CredentialCutOff")
-  ) {
-    return null;
-  }
-  const match = CUTOFF_REASON_TEXT.find(([text]) => message.includes(text));
-  return match ? match[1] : "certificate_expired";
-}
-
-function noteCutoffFromError(error: unknown, endpointId: string | null) {
-  if (!endpointId) return;
-  const reason = cutoffReasonFromError(error);
-  if (reason) useRemoteCutoffStore.getState().recordCutoff(endpointId, reason);
 }
 
 export async function remoteDispatch<T>(
@@ -518,24 +493,50 @@ export async function remoteMutation<T>(
   repo: ActiveRepository,
   request: TreqCommandRequest,
 ): Promise<T | undefined> {
+  return finishMutation(await dispatchMutation<T>(repo, request));
+}
+
+/**
+ * `remoteMutation` for a command that carries an idempotency key. A retry of
+ * the same inputs on the same endpoint generation, sent before a confirmed
+ * outcome, reuses the earlier key so the VM runs the command at most once.
+ */
+export async function remoteKeyedMutation<T>(
+  repo: ActiveRepository,
+  request: UnkeyedRequest,
+): Promise<T | undefined> {
+  const key = remoteActionKeys.keyFor(
+    request.kind,
+    [request],
+    repositoryCacheKey(repo),
+  );
+  const result = await dispatchMutation<T>(repo, {
+    ...request,
+    idempotency_key: key,
+  } as TreqCommandRequest);
+  remoteActionKeys.settle(key, result);
+  return finishMutation(result);
+}
+
+async function dispatchMutation<T>(
+  repo: ActiveRepository,
+  request: TreqCommandRequest,
+): Promise<MutationDispatchResult<T>> {
   const { transport } = requireSshTransport(repo);
-  let result: MutationDispatchResult<T>;
   try {
-    result = await dispatchMutationOverSsh<T>(transport.endpoint, request);
+    return await dispatchMutationOverSsh<T>(transport.endpoint, request);
   } catch (error) {
     noteCutoffFromError(error, repo.endpointId);
     throw error;
   }
+}
+
+function finishMutation<T>(result: MutationDispatchResult<T>): T | undefined {
   const value = applyMutationDispatchResult(result);
   if (result.status === "ambiguous") {
     throw new Error(result.reason);
   }
   return value;
-}
-
-/** A fresh key per user action, reused only by that action's retries. */
-export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
 }
 
 export async function transportCreateCommit(
@@ -546,12 +547,11 @@ export async function transportCreateCommit(
 ): Promise<string> {
   const repo = activeForPath(repoPath);
   if (!repo) return local();
-  const value = await remoteMutation<string>(repo, {
+  const value = await remoteKeyedMutation<string>(repo, {
     kind: "CreateCommit",
     repo: repo.canonicalPath,
     workspace: workspaceArg(workspaceId),
     message,
-    idempotency_key: newIdempotencyKey(),
   });
   return value ?? "Commit applied";
 }

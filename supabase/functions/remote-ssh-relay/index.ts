@@ -6,13 +6,15 @@
 //   Authorization: Bearer <Supabase session JWT>
 //
 // The relay checks the caller owns the endpoint, the instance can be
-// reached, and the client key is not revoked. It then opens the Sprites TCP
+// reached, the caller has Pro (402 `pro_required` otherwise), and the client
+// key is not revoked. It then opens the Sprites TCP
 // proxy with the org token (a server-side secret) and pipes raw bytes. SSH
 // runs end to end inside those bytes, so host-key pinning and certificate
 // auth are unchanged. See `_shared/remote/ssh-relay.ts` for why a relay
 // exists and why its connections are expected to drop after a few minutes.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
+import { userHasPro } from "../_shared/billing/entitlement.ts";
 import {
   correlationIdFromRequest,
   logWithCorrelation,
@@ -40,9 +42,14 @@ function errorResponse(
   message: string,
   status: number,
   correlationId: string,
+  code?: string,
 ): Response {
   return new Response(
-    JSON.stringify({ error: message, correlation_id: correlationId }),
+    JSON.stringify({
+      error: message,
+      ...(code ? { code } : {}),
+      correlation_id: correlationId,
+    }),
     {
       status,
       headers: {
@@ -97,6 +104,7 @@ Deno.serve(async (req) => {
       if (error) throw new Error(`failed to read client key: ${error.message}`);
       return data;
     },
+    hasPro: (ownerUserId) => userHasPro(supabase, ownerUserId),
   };
 
   let target;
@@ -127,7 +135,7 @@ Deno.serve(async (req) => {
         "warn",
         `relay refused: status=${err.status} reason=${err.message}`,
       );
-      return errorResponse(err.message, err.status, correlationId);
+      return errorResponse(err.message, err.status, correlationId, err.code);
     }
     if (err instanceof UpstreamError) {
       logWithCorrelation(

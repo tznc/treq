@@ -1,7 +1,8 @@
 import React from "react";
 import clsx from "clsx";
 import { useAuth } from "./AuthProvider";
-import { APP_DEEP_LINK, APP_DOWNLOAD_URL } from "../lib/constants";
+import { APP_DEEP_LINK } from "../lib/constants";
+import { DownloadButton } from "./DownloadLinks";
 
 type Props = {
   mobile?: boolean;
@@ -17,8 +18,6 @@ export default function NavbarAuthLinks({
 
   const accountHref = signedIn ? "/dashboard" : "/sign-in";
   const accountLabel = signedIn ? "Dashboard" : "Sign in";
-  const ctaHref = signedIn ? APP_DEEP_LINK : APP_DOWNLOAD_URL;
-  const ctaLabel = signedIn ? "Open App" : "Get Started";
 
   const Wrapper: "li" | "div" = mobile ? "li" : "div";
   const wrapperClass = clsx(
@@ -40,9 +39,17 @@ export default function NavbarAuthLinks({
         </a>
       </Wrapper>
       <Wrapper className={wrapperClass}>
-        <a href={ctaHref} className="button button--primary button--sm">
-          {ctaLabel}
-        </a>
+        {signedIn ? (
+          <a href={APP_DEEP_LINK} className="button button--primary button--sm">
+            Open App
+          </a>
+        ) : (
+          <DownloadButton
+            location="navbar"
+            className="button button--primary button--sm"
+            label="Download"
+          />
+        )}
       </Wrapper>
     </>
   );

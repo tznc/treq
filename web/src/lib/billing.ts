@@ -2,7 +2,7 @@ import { supabase } from "./supabase";
 
 // Edge Functions answer errors as `{ error: string }`. supabase-js wraps a
 // non-2xx answer in an error whose `context` is the raw Response.
-async function functionErrorMessage(
+export async function functionErrorMessage(
   error: unknown,
   fallback: string,
 ): Promise<string> {
@@ -17,10 +17,19 @@ async function functionErrorMessage(
   return fallback;
 }
 
-/** Asks billing-checkout for an embedded Checkout session for Pro. */
-export async function fetchCheckoutClientSecret(): Promise<string> {
+export type CheckoutRequest =
+  | { plan: "pro" }
+  | { plan: "team"; organization_id: string };
+
+/**
+ * Asks billing-checkout for an embedded Checkout session: Pro for the user,
+ * or Team for an organization they own.
+ */
+export async function fetchCheckoutClientSecret(
+  request: CheckoutRequest = { plan: "pro" },
+): Promise<string> {
   const { data, error } = await supabase.functions.invoke("billing-checkout", {
-    body: { plan: "pro" },
+    body: request,
   });
   if (error) {
     throw new Error(await functionErrorMessage(error, "Could not start checkout"));
@@ -30,10 +39,15 @@ export async function fetchCheckoutClientSecret(): Promise<string> {
   return secret;
 }
 
-/** Asks billing-portal for a Stripe customer portal URL. */
-export async function fetchBillingPortalUrl(): Promise<string> {
+/**
+ * Asks billing-portal for a Stripe customer portal URL: the user's own, or
+ * with an organization id, that organization's.
+ */
+export async function fetchBillingPortalUrl(
+  request: { organization_id?: string } = {},
+): Promise<string> {
   const { data, error } = await supabase.functions.invoke("billing-portal", {
-    body: {},
+    body: request,
   });
   if (error) {
     throw new Error(

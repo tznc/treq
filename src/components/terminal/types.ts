@@ -5,7 +5,14 @@ import type { ConsolidatedTerminalHandle } from "../ConsolidatedTerminal";
 export const MIN_TERMINAL_WIDTH = 300;
 
 export interface AgentSessionData {
+  /**
+   * Identifies the session in the terminal pane. The pane can show sessions
+   * from several repositories, whose database ids overlap, so this can differ
+   * from `dbSessionId`.
+   */
   sessionId: number;
+  /** The session's id in `repoPath`'s database; defaults to `sessionId`. */
+  dbSessionId?: number;
   sessionName: string;
   ptySessionId: string;
   workspacePath: string | null;
@@ -36,8 +43,14 @@ export interface TerminalSessionSummary {
   name: string;
   /** null when the terminal belongs to the main repo (not a workspace). */
   branchName: string | null;
+  /** Repository of an agent terminal; unset for shells. */
+  repoPath?: string;
   isMainRepo: boolean;
   agent?: AgentKind;
   /** True while output is actively streaming (shows a spinner). */
   isStreaming: boolean;
 }
+
+/** The id to pass to session APIs together with `repoPath`. */
+export const dbSessionIdOf = (session: AgentSessionData): number =>
+  session.dbSessionId ?? session.sessionId;

@@ -72,15 +72,15 @@ test.describe('Navbar navigation', () => {
     await expect(page.getByRole('heading', { name: 'Treq', level: 1 })).toBeVisible();
   });
 
-  test('Get Started button navigates to installation page when signed out', async ({ page }) => {
+  test('Download button links to the latest release when signed out', async ({ page }) => {
     await page.goto('/');
-    await nav(page).getByRole('link', { name: 'Get Started' }).click();
-    await expect(page.getByRole('heading', { name: 'Installation and Quickstart', level: 1 })).toBeVisible();
+    await expect(nav(page).getByRole('link', { name: 'Download', exact: true }))
+      .toHaveAttribute('href', /^https:\/\/github\.com\/tznc\/treq\/releases\//);
   });
 
   test('installation lists each release target', async ({ page }) => {
     await page.goto('/');
-    await nav(page).getByRole('link', { name: 'Get Started' }).click();
+    await footer(page).getByRole('link', { name: 'Installation' }).click();
     await expect(page.getByRole('heading', { name: 'Installation and Quickstart', level: 1 })).toBeVisible();
     await expect(page.getByRole('cell', { name: 'x86_64-pc-windows-msvc' })).toBeVisible();
     await expect(page.getByRole('cell', { name: 'x86_64-unknown-linux-gnu' })).toBeVisible();
@@ -117,7 +117,7 @@ test.describe('Navbar navigation', () => {
   test('GitHub link points to the correct repo', async ({ page }) => {
     await page.goto('/');
     await expect(nav(page).getByRole('link', { name: 'GitHub repository' }))
-      .toHaveAttribute('href', 'https://github.com/Ziinc/treq');
+      .toHaveAttribute('href', 'https://github.com/tznc/treq');
   });
 
   test('Sign in link navigates to login page when signed out', async ({ page }) => {
@@ -221,7 +221,7 @@ test.describe('Navbar navigation', () => {
       'treq://',
     );
     await expect(nav(page).getByRole('link', { name: 'Sign in' })).toHaveCount(0);
-    await expect(nav(page).getByRole('link', { name: 'Get Started' })).toHaveCount(0);
+    await expect(nav(page).getByRole('link', { name: 'Download', exact: true })).toHaveCount(0);
 
     await context.close();
   });
@@ -406,7 +406,7 @@ test.describe('Footer navigation', () => {
   test('GitHub link points to the correct repo', async ({ page }) => {
     await page.goto('/');
     await expect(footer(page).getByRole('link', { name: 'GitHub' }))
-      .toHaveAttribute('href', 'https://github.com/Ziinc/treq');
+      .toHaveAttribute('href', 'https://github.com/tznc/treq');
   });
 
   test('Pricing link navigates to pricing page', async ({ page }) => {

@@ -103,6 +103,11 @@ export function SendAssetLightboxCarousel({
                     ? "treq-send-image-scroll"
                     : undefined
                 }
+                data-lightbox-content={
+                  asset.id === current?.id && imageZoom > IMAGE_ZOOM_DEFAULT
+                    ? true
+                    : undefined
+                }
                 className={cn(
                   "w-full max-w-full overflow-auto",
                   asset.id === current?.id && imageZoom > IMAGE_ZOOM_DEFAULT
@@ -118,38 +123,40 @@ export function SendAssetLightboxCarousel({
                       : "items-center",
                   )}
                 >
-                  <ImageHighlightLayer
-                    highlights={asset.id === current?.id ? highlights : []}
-                    activeId={
-                      asset.id === current?.id ? activeHighlightId : null
-                    }
-                    onActiveIdChange={onActiveHighlightIdChange}
-                    onHighlightsChange={(next) => {
-                      if (!current || asset.id !== current.id) return;
-                      onHighlightsChange(next);
-                    }}
-                    onClickWithoutDrag={
-                      asset.id === current?.id ? onToggleImageZoom : undefined
-                    }
-                  >
-                    <img
-                      src={treqSendFileSrc(asset.path)}
-                      alt={asset.title}
-                      className={cn(
-                        "object-contain",
-                        asset.id === current?.id && showingImage
-                          ? imageZoom === IMAGE_ZOOM_DEFAULT
-                            ? "cursor-zoom-in"
-                            : "cursor-zoom-out"
-                          : undefined,
-                      )}
-                      style={imageSizeStyle(asset.id)}
-                      onLoad={(event) =>
-                        rememberFittedBaseSize(asset.id, event.currentTarget)
+                  <div data-lightbox-content className="contents">
+                    <ImageHighlightLayer
+                      highlights={asset.id === current?.id ? highlights : []}
+                      activeId={
+                        asset.id === current?.id ? activeHighlightId : null
                       }
-                      draggable={false}
-                    />
-                  </ImageHighlightLayer>
+                      onActiveIdChange={onActiveHighlightIdChange}
+                      onHighlightsChange={(next) => {
+                        if (!current || asset.id !== current.id) return;
+                        onHighlightsChange(next);
+                      }}
+                      onClickWithoutDrag={
+                        asset.id === current?.id ? onToggleImageZoom : undefined
+                      }
+                    >
+                      <img
+                        src={treqSendFileSrc(asset.path)}
+                        alt={asset.title}
+                        className={cn(
+                          "object-contain",
+                          asset.id === current?.id && showingImage
+                            ? imageZoom === IMAGE_ZOOM_DEFAULT
+                              ? "cursor-zoom-in"
+                              : "cursor-zoom-out"
+                            : undefined,
+                        )}
+                        style={imageSizeStyle(asset.id)}
+                        onLoad={(event) =>
+                          rememberFittedBaseSize(asset.id, event.currentTarget)
+                        }
+                        draggable={false}
+                      />
+                    </ImageHighlightLayer>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -168,8 +175,14 @@ export function SendAssetLightboxCarousel({
           </CarouselItem>
         ))}
       </CarouselContent>
-      <CarouselPrevious className="fixed left-3 top-1/2 h-16 w-16 border-white/20 bg-black/40 text-white hover:bg-black/60 hover:text-white [&_svg]:size-8" />
-      <CarouselNext className="fixed right-3 top-1/2 h-16 w-16 border-white/20 bg-black/40 text-white hover:bg-black/60 hover:text-white [&_svg]:size-8" />
+      <CarouselPrevious
+        data-lightbox-content
+        className="fixed left-3 top-1/2 h-16 w-16 border-white/20 bg-black/40 text-white hover:bg-black/60 hover:text-white [&_svg]:size-8"
+      />
+      <CarouselNext
+        data-lightbox-content
+        className="fixed right-3 top-1/2 h-16 w-16 border-white/20 bg-black/40 text-white hover:bg-black/60 hover:text-white [&_svg]:size-8"
+      />
     </Carousel>
   );
 }

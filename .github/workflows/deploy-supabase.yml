@@ -4,7 +4,7 @@ name: Deploy Supabase
 # project when supabase/** lands on main. Migrations run first so functions
 # never ship against a schema they don't expect.
 #
-# Requires, on the `production` environment (or repo-level):
+# Requires, on the `prod` environment (or repo-level):
 #   secrets.SUPABASE_ACCESS_TOKEN  personal access token for the Supabase CLI; with
 #                                  no DB password set, db push logs in through a
 #                                  temporary role the CLI creates with this token
@@ -32,7 +32,7 @@ jobs:
     name: db push + functions deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production
+    environment: prod
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
@@ -46,6 +46,17 @@ jobs:
 
       - name: Link project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      # GitHub runners have no IPv6, and the direct db host is IPv6-only. The
+      # CLI only falls back to the IPv4 pooler when supabase/.temp/pooler-url
+      # exists, and `supabase link` no longer writes it, so fetch it here.
+      - name: Use the IPv4 connection pooler
+        run: |
+          curl -fsS \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/database/pooler" \
+            | jq -er 'map(select(.database_type == "PRIMARY"))[0].connection_string' \
+            > supabase/.temp/pooler-url
 
       - name: Show pending migrations
         run: supabase db push --dry-run

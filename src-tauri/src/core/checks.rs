@@ -1,14 +1,12 @@
 use crate::core::checks_logs::{
-  infer_level, job_log_relative_path, make_log_line, now_timestamp, strip_ansi, LogWriter,
+  infer_level, job_log_relative_path, make_log_line, now_timestamp, LogWriter,
 };
 use crate::lock_ext::LockExt;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::BufRead;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const STEP_TIMEOUT_SECS: u64 = 60;
 const MAX_CONCURRENT_JOBS: usize = 4;
@@ -280,7 +278,6 @@ fn execute_job_steps(
   base_dir: &str,
   run_id: i64,
 ) -> Result<JobResult, String> {
-  let extended_path = crate::binary_paths::get_extended_path();
   let mut step_results = Vec::new();
 
   let writer = LogWriter::create(repo_path, run_id, job_id)?;
@@ -293,91 +290,35 @@ fn execute_job_steps(
       base_dir.to_string()
     };
 
-    let mut cmd = Command::new("sh");
-    cmd
-      .args(["-c", &step.run])
-      .current_dir(&cwd)
-      .env("PATH", &extended_path)
-      .stdin(Stdio::null())
-      .stdout(Stdio::piped())
-      .stderr(Stdio::piped());
-
-    if let Some(env_vars) = &step.env {
-      for (k, v) in env_vars {
-        cmd.env(k, v);
-      }
-    }
-
-    let mut child = cmd
-      .spawn()
-      .map_err(|e| format!("Failed to start step '{}': {}", step.name, e))?;
-
-    // Separate threads per pipe; one reader would deadlock on large output.
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let readers: Vec<_> = [
-      ("stdout", stdout.map(EitherPipe::Out)),
-      ("stderr", stderr.map(EitherPipe::Err)),
-    ]
-    .into_iter()
-    .filter_map(|(stream_name, pipe)| pipe.map(|p| (stream_name, p)))
-    .map(|(stream_name, pipe)| {
+    let sink: crate::core::shell_step::LineSink = {
       let writer = writer.clone();
       let step_name = step.name.clone();
-      let job_id_for_logs = job_id.to_string();
-      std::thread::spawn(move || {
-        let reader: Box<dyn std::io::Read + Send> = match pipe {
-          EitherPipe::Out(o) => Box::new(o),
-          EitherPipe::Err(e) => Box::new(e),
-        };
-        let buf = std::io::BufReader::new(reader);
-        for line in buf.lines() {
-          let Ok(raw) = line else { break };
-          let message = strip_ansi(&raw);
-          let entry = make_log_line(
-            now_timestamp(),
-            run_id,
-            &job_id_for_logs,
-            step_index as i64,
-            &step_name,
-            stream_name,
-            infer_level(&message),
-            &message,
-          );
-          let _ = writer.write_line(&entry);
-        }
+      let job_id = job_id.to_string();
+      std::sync::Arc::new(move |stream, message| {
+        let _ = writer.write_line(&make_log_line(
+          now_timestamp(),
+          run_id,
+          &job_id,
+          step_index as i64,
+          &step_name,
+          stream,
+          infer_level(message),
+          message,
+        ));
       })
-    })
-    .collect();
-
-    let timeout = Duration::from_secs(STEP_TIMEOUT_SECS);
-    let start = Instant::now();
-    let timed_out;
-    let exit_status = loop {
-      match child.try_wait() {
-        Ok(Some(status)) => {
-          timed_out = false;
-          break Some(status);
-        }
-        Ok(None) => {
-          if start.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            timed_out = true;
-            break None;
-          }
-          std::thread::sleep(Duration::from_millis(100));
-        }
-        Err(e) => return Err(format!("Failed waiting for step '{}': {}", step.name, e)),
-      }
     };
+    let outcome = crate::core::shell_step::run(
+      &crate::core::shell_step::ShellStep {
+        script: &step.run,
+        cwd: Path::new(&cwd),
+        env: step.env.as_ref(),
+        timeout: Duration::from_secs(STEP_TIMEOUT_SECS),
+      },
+      sink,
+    )
+    .map_err(|e| format!("Failed to run step '{}': {}", step.name, e))?;
 
-    // Killing the child closes the pipes, so the readers finish on their own.
-    for handle in readers {
-      let _ = handle.join();
-    }
-
-    if timed_out {
+    if matches!(outcome, crate::core::shell_step::StepOutcome::TimedOut) {
       let _ = writer.write_line(&make_log_line(
         now_timestamp(),
         run_id,
@@ -399,7 +340,7 @@ fn execute_job_steps(
       break;
     }
 
-    let success = exit_status.map(|s| s.success()).unwrap_or(false);
+    let success = outcome.success();
     step_results.push(StepResult {
       name: step.name.clone(),
       success,
@@ -418,12 +359,6 @@ fn execute_job_steps(
     steps: step_results,
     success: overall_success,
   })
-}
-
-/// Lets the two pipe types share one reader thread body.
-enum EitherPipe {
-  Out(std::process::ChildStdout),
-  Err(std::process::ChildStderr),
 }
 
 pub fn run_workflow_sync(

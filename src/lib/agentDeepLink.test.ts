@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   findWorkspaceByBranch,
   isProcessedAgentRequest,
   markProcessedAgentRequest,
   parseAgentDeepLinkUrl,
   popPendingAgentRequests,
+  processAgentDeepLinkRequests,
   queuePendingAgentRequest,
   tryClaimAgentRequest,
 } from "./agentDeepLink";
@@ -68,5 +69,50 @@ describe("agent deep-link helpers", () => {
     ] as Workspace[];
     expect(findWorkspaceByBranch(workspaces, "feat/x")?.id).toBe(2);
     expect(findWorkspaceByBranch(workspaces, "missing")).toBeNull();
+  });
+});
+
+describe("processAgentDeepLinkRequests with supporting repositories", () => {
+  const request = (repo: string, requestId: string) => ({
+    repo,
+    branch: "feat/x",
+    prompt: "do it",
+    mode: "acceptEdits" as const,
+    agent: "claude" as const,
+    requestId,
+  });
+
+  it("handles a supporting-repository request in this window without deferring", async () => {
+    const onSameRepoRequest = vi.fn(async () => {});
+    const deferRequest = vi.fn();
+    const openOtherRepoWindow = vi.fn();
+
+    await processAgentDeepLinkRequests([request("/repos/api", "sup-1")], {
+      repoPath: "/repos/app",
+      supportingRepoPaths: ["/repos/api"],
+      workspacesLength: 0,
+      onSameRepoRequest,
+      deferRequest,
+      openOtherRepoWindow,
+    });
+
+    expect(onSameRepoRequest).toHaveBeenCalledTimes(1);
+    expect(deferRequest).not.toHaveBeenCalled();
+    expect(openOtherRepoWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens another window for a repository that is not linked", async () => {
+    const openOtherRepoWindow = vi.fn();
+
+    await processAgentDeepLinkRequests([request("/repos/other", "sup-2")], {
+      repoPath: "/repos/app",
+      supportingRepoPaths: ["/repos/api"],
+      workspacesLength: 3,
+      onSameRepoRequest: vi.fn(async () => {}),
+      deferRequest: vi.fn(),
+      openOtherRepoWindow,
+    });
+
+    expect(openOtherRepoWindow).toHaveBeenCalledTimes(1);
   });
 });

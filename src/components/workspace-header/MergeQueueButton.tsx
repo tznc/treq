@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { GitMerge } from "lucide-react";
 import {
   useEnqueueWorkspace,
@@ -5,6 +6,8 @@ import {
   useMergeQueueStatus,
 } from "../../hooks/useMergeQueueStatus";
 import { FEATURES } from "../../lib/features";
+import { isProRequiredError } from "../../lib/pro-required";
+import { WEB_URL } from "../../lib/supabase";
 import { Button } from "../ui/button";
 import { useToast } from "../ui/toast";
 import {
@@ -57,6 +60,17 @@ const MergeQueueButtonInner = ({
         addToast({ title: "Added to merge queue", type: "success" });
       }
     } catch (err) {
+      if (isProRequiredError(err)) {
+        addToast({
+          title: "The merge queue needs Pro",
+          type: "info",
+          action: {
+            label: "Upgrade to Pro",
+            onClick: () => void openUrl(`${WEB_URL}/dashboard`),
+          },
+        });
+        return;
+      }
       addToast({
         title: "Queue error",
         description: (err as Error).message,

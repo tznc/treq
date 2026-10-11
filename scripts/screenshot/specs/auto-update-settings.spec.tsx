@@ -28,19 +28,18 @@ it("captures Check for updates on the Application settings tab", async () => {
     expectations: [
       "The Settings page Application tab is open.",
       "An Updates section is visible with a 'Check for updates' outline button.",
-      "Helper copy mentions treq.dev/version and that automatic install is available on macOS.",
+      "Helper copy says it checks treq.dev for a newer signed release.",
     ],
   });
 
   await user.click(checkButton);
-  // On this Linux CI host, install is unsupported — the manual check should say so.
-  await screen.findByText("Auto-update unavailable");
+  // The test bridge has no updater plugin, so the manual check reports an error.
+  await screen.findByText("Update check failed");
 
   await captureDocument(document, {
-    name: "auto-update-02-unsupported-toast",
+    name: "auto-update-02-check-failed-toast",
     expectations: [
-      "A toast titled 'Auto-update unavailable' is visible in the bottom-left.",
-      "The toast description says automatic updates are currently supported on macOS only.",
+      "A toast titled 'Update check failed' is visible in the bottom-left.",
     ],
   });
 }, 60000);

@@ -27,14 +27,14 @@ Approved by the owner on 2026-10-05:
 6. The GitHub App requires Pro or Team.
 7. Managed cloud workspaces require Pro or Team.
 8. Pro has a 14-day trial. Checkout requires a card.
-9. A Team plan costs US$99 per month for up to 10 members. An organization owns the subscription and the GitHub App installation.
+9. A Team plan costs US$199 per month for 5 members, plus US$8 per month for each extra member. An organization owns the subscription and the GitHub App installation.
 10. The private alpha covers managed cloud workspaces and SSH Remote Development. Joining the waitlist requires a Treq account.
 11. Service usage is measured from Supabase accounts.
 12. GitHub Discussions is the primary community channel. A Discord server is also a community channel, but it is deferred and not a priority.
 
 ## Summary
 
-Treq is the open-source Stacking Agent Development Environment. Each coding agent gets its own workspace, branches stack, and Treq rebases dependent work when the base moves. The desktop app is free, including GitHub and Linear through local tools. Pro is a cloud subscription at US$15 per user per month with a 14-day trial. It adds the features that need a server: the GitHub App and its merge queue, managed cloud workspaces, mobile access, and Linear OAuth. Team covers up to 10 members for US$99 per month.
+Treq is the open-source Stacking Agent Development Environment. Each coding agent gets its own workspace, branches stack, and Treq rebases dependent work when the base moves. The desktop app is free, including GitHub and Linear through local tools. Pro is a cloud subscription at US$15 per user per month with a 14-day trial. It adds the features that need a server: the GitHub App and its merge queue, managed cloud workspaces, mobile access, and Linear OAuth. Team covers 5 members for US$199 per month, and each extra member is US$8 per month.
 
 Marketing has one job: bring engineers who run several coding agents on one repository to the download, and move the ones who want the cloud features onto Pro or Team. Organic search carries acquisition. Stack comments on pull requests show Treq to reviewers who do not use it yet. Roadmap milestones supply the launch moments. The alpha waitlist collects signed-in engineers who want cloud workspaces early. There is no cash budget, so every channel runs on founder time.
 
@@ -105,7 +105,7 @@ These are hypotheses. The plan tests them with acquisition data, not interviews:
 | --- | --- | --- |
 | Free | US$0 | Every developer. The full desktop app, plus GitHub through the local `gh` CLI and Linear through a personal API key, for any repository. |
 | Pro | US$15 per user per month, 14-day trial with a card | Engineers who want the cloud features: the GitHub App and its merge queue, a managed cloud workspace, mobile access, and Linear OAuth. |
-| Team | US$99 per month for up to 10 members | Teams that share one GitHub App installation and merge queue. Every member gets Pro. |
+| Team | US$199 per month for 5 members, US$8 per extra member | Teams that share one GitHub App installation and merge queue. Every member gets Pro. |
 
 The conversion path is: search, stack comment, or community post, then site page, then download from GitHub Releases, then a first stacked workspace, then account creation, then trial, then Pro. The triggers to start a trial are turning on the merge queue, creating a cloud workspace, and connecting Linear with OAuth. Each one runs on the server, so a local build of the open-source app cannot turn it on. The trigger to move to Team is a second member of the same GitHub organization who needs the App.
 

@@ -13,7 +13,12 @@ vi.mock("./swr-cache", () => ({
   invalidateQueries: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock("./change-file-drag", () => ({
+  scheduleRefreshWorkspaceChanges: vi.fn(),
+}));
+
 import { invalidateQueries } from "./swr-cache";
+import { scheduleRefreshWorkspaceChanges } from "./change-file-drag";
 
 describe("useRemoteMutationFeedback", () => {
   beforeEach(() => {
@@ -40,12 +45,13 @@ describe("useRemoteMutationFeedback", () => {
     );
   });
 
-  it("does not refresh or retry on ambiguous", () => {
+  it("refreshes cached data on ambiguous so the user can check before retrying", () => {
     useRemoteMutationFeedback.getState().report({
       status: "ambiguous",
       reason: "unknown",
     });
-    expect(invalidateQueries).not.toHaveBeenCalled();
+    expect(invalidateQueries).toHaveBeenCalled();
+    expect(scheduleRefreshWorkspaceChanges).toHaveBeenCalled();
     expect(useRemoteMutationFeedback.getState().ambiguousReason).toBe(
       "unknown",
     );

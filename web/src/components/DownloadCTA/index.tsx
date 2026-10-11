@@ -1,8 +1,7 @@
 import type {ReactNode} from 'react';
 import Link from '@docusaurus/Link';
+import {DownloadButton, OtherDownloads} from '@site/src/components/DownloadLinks';
 import styles from './styles.module.css';
-
-export const DOWNLOAD_HREF = 'https://github.com/Ziinc/treq/releases';
 
 export default function DownloadCTA({
   title = 'Run parallel agents with Treq',
@@ -17,13 +16,12 @@ export default function DownloadCTA({
         macOS, Windows, and Linux.
       </p>
       <div className={styles.actions}>
-        <Link className="button button--primary" href={DOWNLOAD_HREF}>
-          Download Treq
-        </Link>
+        <DownloadButton location="cta" className="button button--primary" />
         <Link className="button button--secondary" to="/pricing">
           See pricing
         </Link>
       </div>
+      <OtherDownloads location="cta" className={styles.other} />
     </aside>
   );
 }

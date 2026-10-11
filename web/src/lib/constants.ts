@@ -12,7 +12,6 @@ export const STRIPE_PUBLISHABLE_KEY =
     : STRIPE_PUBLISHABLE_KEY_TEST;
 
 export const APP_DEEP_LINK = "treq://";
-export const APP_DOWNLOAD_URL = "/docs/getting-started/installation";
 
 // GitHub App — update with your actual App slug after creating it at
 // https://github.com/settings/apps/new

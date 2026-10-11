@@ -9,6 +9,8 @@ export const appendAgentPrompt = (command: string, prompt: string): string =>
 interface AgentPathContext {
   workspacePath: string | null;
   repoPath: string;
+  /** Supporting repositories of the main repository; readable, never written. */
+  supportingRepoPaths?: string[];
 }
 
 export interface AgentCliFiles {
@@ -23,6 +25,7 @@ export interface AgentCliFiles {
 export const buildTreqAgentSystemPrompt = ({
   workspacePath,
   repoPath,
+  supportingRepoPaths = [],
 }: AgentPathContext): string => {
   if (typeof resolveCommit !== "function") {
     throw new Error("resolveCommit Tauri invoke wrapper is missing");
@@ -47,6 +50,14 @@ export const buildTreqAgentSystemPrompt = ({
     "A Treq skill named treq is loaded automatically for this session.",
     "Follow it for the treq CLI, workspaces, sending files to the user, and commits.",
     "You may run treq CLI commands even when they create or manage workspaces outside the current working directory.",
+    ...(supportingRepoPaths.length > 0
+      ? [
+          `Supporting repositories: ${supportingRepoPaths.join(", ")}.`,
+          "You may read files in supporting repositories but must not write to them directly.",
+          'To change a supporting repository, create a workspace in it with `treq add -r <repo> <branch>` and start a scoped agent there with `treq agent -r <repo> <branch> "<prompt>"`.',
+          "Check its progress with `treq st -r <repo> <branch>`.",
+        ]
+      : []),
   ].join(" ");
 };
 
@@ -54,15 +65,16 @@ export const buildTreqAgentSystemPrompt = ({
 export const buildClaudeFilesystemSettings = ({
   workspacePath,
   repoPath,
+  supportingRepoPaths = [],
 }: AgentPathContext) => ({
   filesystem: workspacePath
     ? {
         denyRead: [repoPath],
-        allowRead: [workspacePath],
+        allowRead: [workspacePath, ...supportingRepoPaths],
         allowWrite: [workspacePath],
       }
     : {
-        allowRead: [repoPath],
+        allowRead: [repoPath, ...supportingRepoPaths],
         allowWrite: [repoPath],
       },
 });

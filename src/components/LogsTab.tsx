@@ -4,14 +4,15 @@ import { Database, Loader2, Table2 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   getAgentChat,
+  getAppSetupLogs,
   getLogTimeseries,
   getRepoLogs,
   listAgentChats,
 } from "../lib/api";
-import type { LogRecordView } from "../lib/api-types";
+import type { LogBucket, LogRecordView } from "../lib/api-types";
 import { LogLevelFilter } from "./LogLevelFilter";
 import { LogsSqlExplorer } from "./LogsSqlExplorer";
-import { LogFeed } from "./LogFeed";
+import { LogFeed, type PrefixColumn } from "./LogFeed";
 import { LogsTimeseriesChart } from "./LogsTimeseriesChart";
 import { buildLogLinesPrompt } from "../lib/logs-prompt";
 import { agentChatToLogRecords } from "../lib/agentChatLogs";
@@ -22,34 +23,13 @@ interface Props {
 }
 
 type View = "browse" | "explorer";
-type SourceGroup = "checks" | "agent-chats";
+type SourceGroup = "checks" | "agent-chats" | "app-setup";
 
-/** Repo-level check and agent logs. */
+/** Repo-level check and agent logs, plus app-level setup script logs. */
 export function LogsTab({ repoPath, onSendToAgent }: Props) {
   const [source, setSource] = useState<SourceGroup>("checks");
   const [view, setView] = useState<View>("browse");
-  const [levels, setLevels] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
-
   const browsing = source === "checks" && view === "browse";
-  const filters = {
-    levels: levels.length > 0 ? levels : undefined,
-    search: search || undefined,
-  };
-
-  const { data: records = [], isLoading } = useSWR(
-    browsing ? ["repo-logs", repoPath, levels, search] : null,
-    () => getRepoLogs(repoPath, filters),
-  );
-
-  const { data: buckets = [] } = useSWR(
-    browsing ? ["repo-logs-timeseries", repoPath, levels, search] : null,
-    () => getLogTimeseries(repoPath, { ...filters, bucketSeconds: 1 }),
-  );
-
-  function handleSendToAgent(chosen: LogRecordView[]) {
-    onSendToAgent?.(buildLogLinesPrompt(chosen, "my check logs"));
-  }
 
   const checksSelected = source === "checks";
 
@@ -67,6 +47,7 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
         >
           <option value="checks">Checks</option>
           <option value="agent-chats">Agent</option>
+          <option value="app-setup">App setup</option>
         </select>
         {checksSelected && (
           <div className="flex items-center gap-1">
@@ -92,52 +73,40 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
 
       {source === "agent-chats" ? (
         <AgentChatsSource repoPath={repoPath} onSendToAgent={onSendToAgent} />
+      ) : source === "app-setup" ? (
+        <FilteredLogs
+          swrKey={["app-setup-logs"]}
+          fetchLogs={getAppSetupLogs}
+          searchLabel="Search app setup logs"
+          testId="app-setup-logs-output"
+          lineTestId="app-setup-log-line"
+          emptyMessage="No app setup script runs yet. Set a script in Application settings and click Run."
+          promptLabel="my app setup script logs"
+          onSendToAgent={onSendToAgent}
+          prefixColumns={[RUN_COLUMN]}
+        />
       ) : browsing ? (
-        <>
-          <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-muted/30">
-            <LogLevelFilter value={levels} onChange={setLevels} />
-            <input
-              aria-label="Search logs"
-              placeholder="Search all runs…"
-              className="ml-auto h-8 w-full max-w-sm min-w-[160px] rounded-md border bg-background px-2 text-sm"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-
-          {buckets.length > 0 && (
-            <div className="px-2 pt-2 border-b">
-              <LogsTimeseriesChart buckets={buckets} bucketSeconds={1} />
-            </div>
-          )}
-
-          {isLoading ? (
-            <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading logs…
-            </div>
-          ) : (
-            <LogFeed
-              records={records}
-              testId="repo-logs-output"
-              lineTestId="repo-log-line"
-              emptyMessage="No check logs recorded yet. Run a workflow check from the Checks tab of any workspace to populate this table."
-              onSendToAgent={handleSendToAgent}
-              prefixColumns={[
-                {
-                  header: "Run",
-                  className: "w-[5ch] text-muted-foreground",
-                  render: (record) => `#${record.run_id}`,
-                },
-                {
-                  header: "Job",
-                  className: "w-[10ch] text-blue-600 dark:text-blue-400",
-                  render: (record) => record.job_id,
-                },
-              ]}
-            />
-          )}
-        </>
+        <FilteredLogs
+          swrKey={["repo-logs", repoPath]}
+          fetchLogs={(filters) => getRepoLogs(repoPath, filters)}
+          fetchBuckets={(filters) =>
+            getLogTimeseries(repoPath, { ...filters, bucketSeconds: 1 })
+          }
+          searchLabel="Search logs"
+          testId="repo-logs-output"
+          lineTestId="repo-log-line"
+          emptyMessage="No check logs recorded yet. Run a workflow check from the Checks tab of any workspace to populate this table."
+          promptLabel="my check logs"
+          onSendToAgent={onSendToAgent}
+          prefixColumns={[
+            RUN_COLUMN,
+            {
+              header: "Job",
+              className: "w-[10ch] text-blue-600 dark:text-blue-400",
+              render: (record) => record.job_id,
+            },
+          ]}
+        />
       ) : (
         <LogsSqlExplorer repoPath={repoPath} onSendToAgent={onSendToAgent} />
       )}
@@ -228,6 +197,97 @@ function AgentChatsSource({
               render: (record) => record.job_id,
             },
           ]}
+        />
+      )}
+    </>
+  );
+}
+
+const RUN_COLUMN: PrefixColumn = {
+  header: "Run",
+  className: "w-[5ch] text-muted-foreground",
+  render: (record) => `#${record.run_id}`,
+};
+
+interface LogFilters {
+  levels?: string[];
+  search?: string;
+}
+
+/** A level filter and search box over a log source, with an optional chart. */
+function FilteredLogs({
+  swrKey,
+  fetchLogs,
+  fetchBuckets,
+  searchLabel,
+  testId,
+  lineTestId,
+  emptyMessage,
+  promptLabel,
+  prefixColumns,
+  onSendToAgent,
+}: {
+  swrKey: unknown[];
+  fetchLogs: (filters: LogFilters) => Promise<LogRecordView[]>;
+  fetchBuckets?: (filters: LogFilters) => Promise<LogBucket[]>;
+  searchLabel: string;
+  testId: string;
+  lineTestId: string;
+  emptyMessage: string;
+  promptLabel: string;
+  prefixColumns: PrefixColumn[];
+  onSendToAgent?: (prompt: string) => void;
+}) {
+  const [levels, setLevels] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const filters = {
+    levels: levels.length > 0 ? levels : undefined,
+    search: search || undefined,
+  };
+
+  const { data: records = [], isLoading } = useSWR(
+    [...swrKey, levels, search],
+    () => fetchLogs(filters),
+  );
+  const { data: buckets = [] } = useSWR(
+    fetchBuckets ? [...swrKey, "timeseries", levels, search] : null,
+    () => fetchBuckets?.(filters) ?? [],
+  );
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-muted/30">
+        <LogLevelFilter value={levels} onChange={setLevels} />
+        <input
+          aria-label={searchLabel}
+          placeholder="Search all runs…"
+          className="ml-auto h-8 w-full max-w-sm min-w-[160px] rounded-md border bg-background px-2 text-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      {buckets.length > 0 && (
+        <div className="px-2 pt-2 border-b">
+          <LogsTimeseriesChart buckets={buckets} bucketSeconds={1} />
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading logs…
+        </div>
+      ) : (
+        <LogFeed
+          records={records}
+          testId={testId}
+          lineTestId={lineTestId}
+          emptyMessage={emptyMessage}
+          onSendToAgent={(chosen) =>
+            onSendToAgent?.(buildLogLinesPrompt(chosen, promptLabel))
+          }
+          prefixColumns={prefixColumns}
         />
       )}
     </>

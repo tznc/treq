@@ -34,7 +34,7 @@ jobs:
             printf 'export const toc = [];\n\n'
             printf "<ContentPageLayout toc={toc} breadcrumbs={[{label: 'Home', href: '/'}, {label: 'Changelog'}]}>\n\n"
             printf '# Changelog\n\n'
-            printf '> Full release history for [Treq](https://github.com/Ziinc/treq/releases).\n\n'
+            printf '> Full release history for [Treq](https://github.com/treq-dev/treq/releases).\n\n'
             tail -n +3 CHANGELOG.md | sed -e 's/{/\\{/g; s/}/\\}/g; s/</\&lt;/g'
             printf '\n</ContentPageLayout>\n'
           } > web/src/pages/changelog.mdx

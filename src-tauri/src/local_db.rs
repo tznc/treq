@@ -766,6 +766,17 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     )
     .map_err(|e| format!("Failed to create repo_trust table: {}", e))?;
 
+  conn
+    .execute(
+      "CREATE TABLE IF NOT EXISTS supporting_repos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_path TEXT NOT NULL UNIQUE,
+            added_at TEXT NOT NULL
+        )",
+      [],
+    )
+    .map_err(|e| format!("Failed to create supporting_repos table: {}", e))?;
+
   // Migration: rename pending_reviews columns from old schema to new schema.
   let has_old_columns: Result<i64, _> = conn.query_row(
         "SELECT COUNT(*) FROM pragma_table_info('pending_reviews') WHERE name IN ('comments_json', 'overall_comment', 'viewed_files_json')",
@@ -2782,6 +2793,7 @@ mod tests {
         normalized_repo_path: "/tmp/repo-a".to_string(),
         focused: true,
         last_focused_at: Some(1900),
+        supporting: false,
       }],
     };
 
@@ -4304,6 +4316,43 @@ pub fn is_repo_trusted(repo_path: &str) -> bool {
     })
     .map(|count| count > 0)
     .unwrap_or(false)
+}
+
+/// Supporting repository paths linked to the main repository at `repo_path`,
+/// in the order they were added.
+pub fn list_supporting_repo_paths(repo_path: &str) -> Result<Vec<String>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare("SELECT repo_path FROM supporting_repos ORDER BY id")
+    .map_err(|e| format!("Failed to prepare supporting_repos query: {}", e))?;
+  let rows = stmt
+    .query_map([], |row| row.get::<_, String>(0))
+    .map_err(|e| format!("Failed to query supporting_repos: {}", e))?;
+  rows
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| format!("Failed to read supporting_repos row: {}", e))
+}
+
+pub fn add_supporting_repo_path(repo_path: &str, supporting_path: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "INSERT OR IGNORE INTO supporting_repos (repo_path, added_at) VALUES (?1, ?2)",
+      params![supporting_path, Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to add supporting repo: {}", e))?;
+  Ok(())
+}
+
+pub fn remove_supporting_repo_path(repo_path: &str, supporting_path: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "DELETE FROM supporting_repos WHERE repo_path = ?1",
+      params![supporting_path],
+    )
+    .map_err(|e| format!("Failed to remove supporting repo: {}", e))?;
+  Ok(())
 }
 
 pub fn trust_repo(repo_path: &str) -> Result<(), String> {

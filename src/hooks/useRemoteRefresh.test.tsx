@@ -2,7 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActiveRepository } from "../lib/active-repository";
+import {
+  repositoryCacheKey,
+  type ActiveRepository,
+} from "../lib/active-repository";
+import { remoteActionKeys } from "../lib/remote-idempotency";
 
 vi.mock("../lib/repository-adapter", () => ({
   transportChangeMarker: vi.fn(),
@@ -77,8 +81,17 @@ describe("useRemoteChangeMarkerWatch", () => {
     expect(invalidateRemoteRepositoryData).not.toHaveBeenCalled();
     expect(scheduleRefreshWorkspaceChanges).not.toHaveBeenCalled();
 
+    // An ambiguous push left its key pending in this repository's scope.
+    const scope = repositoryCacheKey(remoteRepo);
+    const pendingKey = remoteActionKeys.keyFor("GitPush", ["main"], scope);
     await poll();
     expect(invalidateRemoteRepositoryData).toHaveBeenCalledTimes(1);
+    // The move may be that push landing, so the retry must still carry its
+    // key or the VM would run it a second time.
+    expect(remoteActionKeys.keyFor("GitPush", ["main"], scope)).toBe(
+      pendingKey,
+    );
+    remoteActionKeys.release(scope);
     expect(scheduleRefreshWorkspaceChanges).toHaveBeenCalledWith({
       workspaceId: 7,
     });

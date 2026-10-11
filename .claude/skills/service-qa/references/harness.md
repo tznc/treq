@@ -23,8 +23,15 @@ Part of the `service-qa` skill.
    with `SERVICE_QA_NO_EDGE=1`. The health gate then skips the Edge warm-up,
    and `scripts/service-qa/stripe.ts` runs the `stripe-webhook` handler
    in-process against the same local database. Specs that call other Edge
-   Functions still need a working runtime.
-5. **`recordOutcome(name, { expectations, details })`** — writes
+   Functions still need a working runtime. The `billing-enforcement-*` specs
+   call the gated functions' `lib.ts` handlers in-process for the same
+   reason.
+5. **Pro users** — `grantPro` / `endPro` in `scripts/service-qa/billing.ts`
+   write a subscription through the webhook's billing functions, so has_pro
+   and every Pro gate see a real row. `withMergeQueueFixture` grants Pro by
+   default (`{ pro: false }` for a Free user), since enabling and running
+   the merge queue require it.
+6. **`recordOutcome(name, { expectations, details })`** — writes
    `scripts/service-qa/.generated/<name>.json`. Like app-qa's
    `captureDocument` expectations, these are plain-English claims for the
    agent checklist in step 5 — complementary to the Vitest `expect` calls,

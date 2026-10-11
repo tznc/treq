@@ -22,7 +22,7 @@ const config: Config = {
         path: 'learn',
         routeBasePath: 'learn',
         sidebarPath: './sidebarsLearn.ts',
-        editUrl: 'https://github.com/Ziinc/treq/tree/main/web/',
+        editUrl: 'https://github.com/tznc/treq/tree/main/web/',
       },
     ],
     [
@@ -32,7 +32,7 @@ const config: Config = {
         path: 'compare',
         routeBasePath: 'compare',
         sidebarPath: './sidebarsCompare.ts',
-        editUrl: 'https://github.com/Ziinc/treq/tree/main/web/',
+        editUrl: 'https://github.com/tznc/treq/tree/main/web/',
       },
     ],
     function chunkSplittingPlugin() {
@@ -147,7 +147,7 @@ const config: Config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
-            'https://github.com/Ziinc/treq/tree/main/docs/',
+            'https://github.com/tznc/treq/tree/main/web/',
         },
         blog: false,
         theme: {
@@ -250,7 +250,7 @@ const config: Config = {
           type: 'html',
           position: 'right',
           value:
-            '<a href="https://github.com/Ziinc/treq" target="_blank" rel="noopener noreferrer" class="navbar__link header-github-link" aria-label="GitHub repository"></a>',
+            '<a href="https://github.com/tznc/treq" target="_blank" rel="noopener noreferrer" class="navbar__link header-github-link" aria-label="GitHub repository"></a>',
         },
       ],
     },
@@ -308,7 +308,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/Ziinc/treq',
+              href: 'https://github.com/tznc/treq',
             },
           ],
         },

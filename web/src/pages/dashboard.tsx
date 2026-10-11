@@ -6,6 +6,7 @@ import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import type { StripeEmbeddedCheckout } from "@stripe/stripe-js";
 import { loadStripe } from "@stripe/stripe-js/pure";
 import { supabase } from "../lib/supabase";
+import { proRequiredMessage } from "../lib/pro-required";
 import {
   GITHUB_APP_INSTALL_URL,
   STRIPE_PUBLISHABLE_KEY,
@@ -13,6 +14,7 @@ import {
 import {
   fetchBillingPortalUrl,
   fetchCheckoutClientSecret,
+  functionErrorMessage,
 } from "../lib/billing";
 import {
   formatPeriodEnd,
@@ -21,6 +23,17 @@ import {
   subscriptionStatusLabel,
   type Subscription,
 } from "../lib/subscription";
+import {
+  extraSeats,
+  forgetPendingInvite,
+  invitePage,
+  inviteTokenFromInput,
+  pendingInviteToken,
+  stashInviteForSignIn,
+  TEAM_EXTRA_SEAT_USD,
+  TEAM_INCLUDED_SEATS,
+  type OrganizationAction,
+} from "../lib/teams";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface GithubRepo {
@@ -55,7 +68,7 @@ interface QueueStatus {
   bisect_mode: boolean;
 }
 
-type Tab = "subscription" | "integrations";
+type Tab = "subscription" | "integrations" | "team";
 
 function defaultConfig(repoId: number, defaultBranch: string): MergeQueueConfig {
   return {
@@ -324,7 +337,7 @@ function RepoConfigPanel({
 
 // ── Integrations tab ─────────────────────────────────────────────────────────
 
-function IntegrationsTab() {
+function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
     | { githubApp?: boolean; mergeQueue?: boolean }
@@ -335,16 +348,24 @@ function IntegrationsTab() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
+  // The server refused the install because the user has no Pro.
+  const [installNeedsPro, setInstallNeedsPro] = useState<string | null>(null);
 
   // Installation linking requires a server-created single-use intent; the
   // opaque state travels through GitHub's install flow back to our callback.
   const startInstall = useCallback(async () => {
     if (!githubAppEnabled) return;
     setInstallError(null);
+    setInstallNeedsPro(null);
     const { data, error } = await supabase.functions.invoke(
       "create-github-install-intent",
       { body: {} }
     );
+    const needsPro = await proRequiredMessage(error);
+    if (needsPro) {
+      setInstallNeedsPro(needsPro);
+      return;
+    }
     if (error || !data?.state) {
       setInstallError(error?.message ?? "Failed to start installation");
       return;
@@ -441,6 +462,22 @@ function IntegrationsTab() {
           </div>
         )}
 
+        {installNeedsPro && (
+          <div style={{ fontSize: "0.85rem", marginTop: "0.75rem" }}>
+            <div>
+              {installNeedsPro}
+              <span style={styles.featureProBadge}>PRO</span>
+            </div>
+            <button
+              type="button"
+              onClick={onUpgrade}
+              style={{ ...styles.primaryButton, marginTop: "0.5rem" }}
+            >
+              Upgrade to Pro
+            </button>
+          </div>
+        )}
+
         {isConnected && (
           <div style={styles.repoSection}>
             <div style={styles.repoSectionHeader}>
@@ -493,11 +530,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 // Mounts Stripe's embedded Checkout. Stripe.js loads only here, and asks
-// billing-checkout for the session's client secret itself.
+// billing-checkout for the session's client secret itself: Pro for the
+// user, or Team when an organization id is given.
 function EmbeddedCheckoutPanel({
   onError,
+  organizationId,
 }: {
   onError: (message: string) => void;
+  organizationId?: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
 
@@ -508,7 +548,12 @@ function EmbeddedCheckoutPanel({
       .then((stripe) => {
         if (!stripe) throw new Error("Stripe failed to load");
         return stripe.initEmbeddedCheckout({
-          fetchClientSecret: fetchCheckoutClientSecret,
+          fetchClientSecret: () =>
+            fetchCheckoutClientSecret(
+              organizationId
+                ? { plan: "team", organization_id: organizationId }
+                : { plan: "pro" },
+            ),
         });
       })
       .then((instance) => {
@@ -528,7 +573,7 @@ function EmbeddedCheckoutPanel({
       cancelled = true;
       checkout?.destroy();
     };
-  }, [onError]);
+  }, [onError, organizationId]);
 
   return (
     <div
@@ -567,9 +612,12 @@ function SubscriptionTab({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // An owner can also read their organizations' customers. Only the
+    // user's own one belongs here.
     supabase
       .from("billing_customers")
       .select("trial_used_at")
+      .eq("owner_type", "user")
       .maybeSingle()
       .then(({ data }) => setBillingCustomer(data ?? null));
   }, [isPro]);
@@ -672,6 +720,12 @@ function SubscriptionTab({
             {formatPeriodEnd(periodEnd)}.
           </p>
         )}
+        {isPro && billingCustomer === null && (
+          <p style={styles.billingNote}>
+            Your Pro comes from a team. Its owners manage billing on the Team
+            tab.
+          </p>
+        )}
 
         <div style={styles.billingActions}>
           {!isPro && !checkoutOpen && (
@@ -728,6 +782,822 @@ function SubscriptionTab({
   );
 }
 
+// ── Team tab ─────────────────────────────────────────────────────────────────
+//
+// Organizations and Team (prds/billing-and-teams.md, "Organizations and
+// seats"). Reads go through RLS. Every change goes through the organizations
+// Edge Function, whose SQL enforces the rules; this tab only shows them.
+
+interface OrgMembership {
+  org_id: string;
+  user_id: string;
+  role: "owner" | "member";
+  created_at: string;
+  organizations: { id: string; name: string } | null;
+}
+
+interface MemberProfile {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+}
+
+interface PendingInvite {
+  id: string;
+  org_id: string;
+  email: string;
+  expires_at: string;
+}
+
+interface TeamSubscription {
+  owner_id: string;
+  status: string;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}
+
+interface Installation {
+  id: number;
+  account_login: string;
+  account_type: string;
+  organization_id: string | null;
+  linked_user_id: string | null;
+}
+
+interface TeamData {
+  memberships: OrgMembership[];
+  profiles: Map<string, MemberProfile>;
+  invites: PendingInvite[];
+  subscriptions: TeamSubscription[];
+  billingOrgIds: Set<string>;
+  installations: Installation[];
+}
+
+async function loadTeamData(): Promise<TeamData> {
+  const { data: membershipRows } = await supabase
+    .from("organization_members")
+    .select("org_id, user_id, role, created_at, organizations(id, name)")
+    .order("created_at");
+  const memberships = (membershipRows ?? []) as unknown as OrgMembership[];
+  const userIds = [...new Set(memberships.map((m) => m.user_id))];
+  const [profiles, invites, subscriptions, customers, installations] =
+    await Promise.all([
+      userIds.length > 0
+        ? supabase.from("profiles").select("id, email, full_name").in("id", userIds)
+        : Promise.resolve({ data: [] }),
+      supabase
+        .from("organization_invites")
+        .select("id, org_id, email, expires_at")
+        .is("accepted_at", null)
+        .is("revoked_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at"),
+      supabase
+        .from("billing_subscriptions")
+        .select("owner_id, status, current_period_end, cancel_at_period_end")
+        .eq("owner_type", "organization")
+        .in("status", ["trialing", "active", "past_due"]),
+      supabase.from("billing_customers").select("owner_id").eq("owner_type", "organization"),
+      supabase
+        .from("github_app_installations")
+        .select("id, account_login, account_type, organization_id, linked_user_id")
+        .order("account_login"),
+    ]);
+  return {
+    memberships,
+    profiles: new Map(
+      ((profiles.data ?? []) as MemberProfile[]).map((p) => [p.id, p]),
+    ),
+    invites: (invites.data ?? []) as PendingInvite[],
+    subscriptions: (subscriptions.data ?? []) as TeamSubscription[],
+    billingOrgIds: new Set(
+      ((customers.data ?? []) as { owner_id: string }[]).map((c) => c.owner_id),
+    ),
+    installations: (installations.data ?? []) as Installation[],
+  };
+}
+
+async function organizationsRequest<T = Record<string, unknown>>(
+  body: OrganizationAction,
+): Promise<T> {
+  const { data, error } = await supabase.functions.invoke("organizations", { body });
+  if (error) {
+    throw new Error(await functionErrorMessage(error, "Something went wrong. Try again."));
+  }
+  return data as T;
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : "Something went wrong. Try again.";
+}
+
+function memberName(profile: MemberProfile | undefined): string {
+  return profile?.full_name || profile?.email || "Unknown member";
+}
+
+function OrganizationCard({
+  org,
+  userId,
+  data,
+  checkoutAvailable,
+  onChanged,
+}: {
+  org: { id: string; name: string };
+  userId: string;
+  data: TeamData;
+  checkoutAvailable: boolean;
+  onChanged: () => Promise<unknown>;
+}) {
+  const members = data.memberships.filter((m) => m.org_id === org.id);
+  const isOwner = members.some((m) => m.user_id === userId && m.role === "owner");
+  const ownerCount = members.filter((m) => m.role === "owner").length;
+  const invites = data.invites.filter((i) => i.org_id === org.id);
+  const subscription = data.subscriptions.find((s) => s.owner_id === org.id);
+  const attached = data.installations.filter((i) => i.organization_id === org.id);
+  const attachable = data.installations.filter(
+    (i) => i.organization_id === null && i.linked_user_id === userId,
+  );
+
+  const [inviteEmail, setInviteEmail] = useState("");
+  // Accept links are shown once: the server stores only a hash of the token.
+  const [links, setLinks] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState<string | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (work: () => Promise<unknown>) => {
+    setPending(true);
+    setError(null);
+    try {
+      await work();
+      await onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const invite = (email: string) =>
+    run(async () => {
+      const result = await organizationsRequest<{
+        invite: { id: string };
+        accept_url: string;
+      }>({ action: "invite", organization_id: org.id, email });
+      setLinks((current) => ({ ...current, [result.invite.id]: result.accept_url }));
+      setInviteEmail("");
+    });
+
+  const copyLink = async (inviteId: string) => {
+    try {
+      await navigator.clipboard.writeText(links[inviteId]);
+      setCopied(inviteId);
+    } catch {
+      setError("Could not copy. Select the link and copy it yourself.");
+    }
+  };
+
+  const openPortal = () =>
+    run(async () => {
+      window.location.href = await fetchBillingPortalUrl({ organization_id: org.id });
+    });
+
+  const onCheckoutError = useCallback((message: string) => {
+    setCheckoutOpen(false);
+    setError(message);
+  }, []);
+
+  return (
+    <section aria-label={org.name} style={styles.orgCard}>
+      <div style={styles.orgName}>{org.name}</div>
+      <Field label="Your role">{isOwner ? "Owner" : "Member"}</Field>
+      <Field label="Plan">
+        {subscription ? (
+          <span>
+            <span style={styles.proBadge}>Team</span>{" "}
+            {subscriptionStatusLabel(
+              subscription.cancel_at_period_end ? "canceled" : subscription.status,
+            )}
+          </span>
+        ) : (
+          "No Team subscription"
+        )}
+      </Field>
+      {subscription?.current_period_end && (
+        <Field
+          label={subscription.cancel_at_period_end ? "Team until" : "Renews on"}
+        >
+          {formatPeriodEnd(subscription.current_period_end)}
+        </Field>
+      )}
+      {isOwner ? (
+        <Field label="Seats">
+          {members.length} of {TEAM_INCLUDED_SEATS} included
+          {extraSeats(members.length) > 0 &&
+            `, ${extraSeats(members.length)} extra at US$${TEAM_EXTRA_SEAT_USD} per month each`}
+        </Field>
+      ) : (
+        <Field label="Members">{members.length}</Field>
+      )}
+
+      {isOwner && (
+        <div style={styles.billingActions}>
+          {!subscription && !checkoutOpen && (
+            <div>
+              <span
+                title={!checkoutAvailable ? "Coming Soon" : undefined}
+                style={
+                  !checkoutAvailable
+                    ? { display: "inline-block", cursor: "not-allowed" }
+                    : undefined
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setCheckoutOpen(true);
+                  }}
+                  disabled={!checkoutAvailable}
+                  style={{
+                    ...styles.primaryButton,
+                    ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
+                  }}
+                >
+                  Buy Team
+                </button>
+              </span>
+              <div style={styles.comingSoonSubtext}>
+                {checkoutAvailable
+                  ? `US$199 per month for ${TEAM_INCLUDED_SEATS} members, then US$${TEAM_EXTRA_SEAT_USD} per extra member. Every member gets Pro.`
+                  : "Coming Soon"}
+              </div>
+            </div>
+          )}
+          {data.billingOrgIds.has(org.id) && (
+            <button
+              type="button"
+              onClick={openPortal}
+              disabled={pending}
+              style={styles.secondaryButton}
+            >
+              Manage billing
+            </button>
+          )}
+        </div>
+      )}
+      {checkoutOpen && (
+        <EmbeddedCheckoutPanel organizationId={org.id} onError={onCheckoutError} />
+      )}
+
+      {error && (
+        <div role="alert" style={styles.errorText}>
+          {error}
+        </div>
+      )}
+
+      <div style={styles.teamSubheading}>Members</div>
+      <ul aria-label="Members" style={styles.teamList}>
+        {members.map((m) => {
+          const name = memberName(data.profiles.get(m.user_id));
+          return (
+            <li key={m.user_id} style={styles.teamRow}>
+              <span>
+                {name}
+                {m.user_id === userId ? " (you)" : ""}
+                <span style={styles.teamMuted}>
+                  {" "}
+                  {data.profiles.get(m.user_id)?.email ?? ""}
+                </span>
+              </span>
+              <span style={styles.teamRowActions}>
+                <span style={styles.teamMuted}>
+                  {m.role === "owner" ? "Owner" : "Member"}
+                </span>
+                {isOwner && m.user_id !== userId && m.role === "member" && (
+                  <button
+                    type="button"
+                    aria-label={`Make ${name} an owner`}
+                    disabled={pending}
+                    style={styles.linkButton}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Make ${name} an owner of ${org.name}? Owners invite and remove members, manage billing, and can delete the organization.`,
+                        )
+                      ) {
+                        void run(() =>
+                          organizationsRequest({
+                            action: "promote_member",
+                            organization_id: org.id,
+                            user_id: m.user_id,
+                          }),
+                        );
+                      }
+                    }}
+                  >
+                    Make owner
+                  </button>
+                )}
+                {isOwner && m.user_id !== userId && m.role === "owner" && (
+                  <button
+                    type="button"
+                    aria-label={`Make ${name} a member`}
+                    disabled={pending}
+                    style={styles.linkButton}
+                    onClick={() => {
+                      if (window.confirm(`Make ${name} a member of ${org.name} instead of an owner?`)) {
+                        void run(() =>
+                          organizationsRequest({
+                            action: "demote_owner",
+                            organization_id: org.id,
+                            user_id: m.user_id,
+                          }),
+                        );
+                      }
+                    }}
+                  >
+                    Make member
+                  </button>
+                )}
+                {isOwner && m.user_id !== userId && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${name}`}
+                    disabled={pending}
+                    style={styles.linkButton}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Remove ${name} from ${org.name}? They lose Team at once.`,
+                        )
+                      ) {
+                        void run(() =>
+                          organizationsRequest({
+                            action: "remove_member",
+                            organization_id: org.id,
+                            user_id: m.user_id,
+                          }),
+                        );
+                      }
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      {isOwner && (
+        <>
+          <div style={styles.teamSubheading}>Pending invites</div>
+          {invites.length === 0 ? (
+            <p style={styles.teamMuted}>No pending invites.</p>
+          ) : (
+            <ul aria-label="Pending invites" style={styles.teamList}>
+              {invites.map((i) => (
+                <li key={i.id} style={styles.teamInvite}>
+                  <div style={styles.teamRow}>
+                    <span>
+                      {i.email}
+                      <span style={styles.teamMuted}>
+                        {" "}
+                        expires {formatPeriodEnd(i.expires_at)}
+                      </span>
+                    </span>
+                    <span style={styles.teamRowActions}>
+                      {!links[i.id] && (
+                        <button
+                          type="button"
+                          aria-label={`New link for ${i.email}`}
+                          disabled={pending}
+                          style={styles.linkButton}
+                          onClick={() => void invite(i.email)}
+                        >
+                          New link
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Revoke invite for ${i.email}`}
+                        disabled={pending}
+                        style={styles.linkButton}
+                        onClick={() =>
+                          void run(() =>
+                            organizationsRequest({
+                              action: "revoke_invite",
+                              invite_id: i.id,
+                            }),
+                          )
+                        }
+                      >
+                        Revoke
+                      </button>
+                    </span>
+                  </div>
+                  {links[i.id] && (
+                    <div style={styles.teamLinkRow}>
+                      <input
+                        readOnly
+                        aria-label={`Invite link for ${i.email}`}
+                        value={links[i.id]}
+                        style={styles.input}
+                        onFocus={(e) => e.currentTarget.select()}
+                      />
+                      <button
+                        type="button"
+                        style={styles.secondaryButton}
+                        onClick={() => void copyLink(i.id)}
+                      >
+                        {copied === i.id ? "Copied" : "Copy link"}
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <form
+            style={styles.teamForm}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void invite(inviteEmail);
+            }}
+          >
+            <input
+              type="email"
+              required
+              aria-label="Email to invite"
+              placeholder="teammate@example.com"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              style={styles.input}
+            />
+            <button type="submit" disabled={pending} style={styles.saveButton}>
+              Invite
+            </button>
+          </form>
+          <p style={styles.inputHint}>
+            Treq does not send invite emails yet. Copy the link and send it to
+            your teammate. A link works once, for any Treq account, and expires
+            after 7 days. New link replaces the old one. Team includes{" "}
+            {TEAM_INCLUDED_SEATS} members. Each member who joins beyond that
+            adds US${TEAM_EXTRA_SEAT_USD} per month, prorated.
+          </p>
+        </>
+      )}
+
+      <div style={styles.teamSubheading}>GitHub App installations</div>
+      {attached.length === 0 ? (
+        <p style={styles.teamMuted}>No installation belongs to {org.name}.</p>
+      ) : (
+        <ul aria-label="GitHub App installations" style={styles.teamList}>
+          {attached.map((i) => (
+            <li key={i.id} style={styles.teamRow}>
+              <span style={styles.repoName}>{i.account_login}</span>
+              <span style={styles.teamMuted}>{i.account_type}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {isOwner && attachable.length > 0 && (
+        <div>
+          <p style={styles.inputHint}>
+            Attach an installation you linked. Members can then see its
+            repositories, its merge queue runs on this organization&apos;s Team,
+            and only owners of {org.name} can relink it.
+          </p>
+          <div style={styles.billingActions}>
+            {attachable.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                disabled={pending}
+                style={styles.secondaryButton}
+                onClick={() =>
+                  void run(() =>
+                    organizationsRequest({
+                      action: "attach_installation",
+                      organization_id: org.id,
+                      installation_id: i.id,
+                    }),
+                  )
+                }
+              >
+                Attach {i.account_login}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOwner && (
+        <p style={styles.inputHint}>
+          {ownerCount > 1
+            ? "To transfer ownership, make another member an owner, then leave."
+            : "You are the only owner. To transfer ownership, make another member an owner, then leave. To close the organization instead, delete it."}
+        </p>
+      )}
+      <div style={styles.billingActions}>
+        <button
+          type="button"
+          aria-label={`Leave ${org.name}`}
+          disabled={pending}
+          style={styles.dangerButton}
+          onClick={() => {
+            if (window.confirm(`Leave ${org.name}? You lose its Team at once.`)) {
+              void run(() =>
+                organizationsRequest({ action: "leave", organization_id: org.id }),
+              );
+            }
+          }}
+        >
+          Leave
+        </button>
+        {isOwner && (
+          <button
+            type="button"
+            aria-label={`Delete ${org.name}`}
+            disabled={pending}
+            style={styles.dangerButton}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete ${org.name}? Every member loses access at once, pending invites stop working, and its GitHub App installations become yours. This cannot be undone.`,
+                )
+              ) {
+                void run(() =>
+                  organizationsRequest({
+                    action: "delete_organization",
+                    organization_id: org.id,
+                  }),
+                );
+              }
+            }}
+          >
+            Delete organization
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function clearSearchParams(...names: string[]) {
+  const url = new URL(window.location.href);
+  for (const name of names) url.searchParams.delete(name);
+  window.history.replaceState(null, "", url.toString());
+}
+
+function TeamTab({
+  userId,
+  reloadSubscription,
+  stripePaymentsEnabled,
+}: {
+  userId: string;
+  reloadSubscription: () => Promise<Subscription | null>;
+  stripePaymentsEnabled: boolean;
+}) {
+  const checkoutAvailable = stripePaymentsEnabled && STRIPE_PUBLISHABLE_KEY !== "";
+  const [data, setData] = useState<TeamData | null>(null);
+  // From the invite link's #invite= fragment, or stashed before sign-in.
+  const [inviteToken, setInviteToken] = useState<string | null>(() =>
+    pendingInviteToken(invitePage()),
+  );
+  const [inviteLink, setInviteLink] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checkoutReturn, setCheckoutReturn] = useState<"waiting" | "timed_out" | null>(
+    () => (new URLSearchParams(window.location.search).has("session_id") ? "waiting" : null),
+  );
+
+  const reload = useCallback(async () => {
+    const latest = await loadTeamData();
+    setData(latest);
+    return latest;
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  // Once read, the token leaves the address bar and the stash.
+  useEffect(() => {
+    forgetPendingInvite(invitePage());
+  }, []);
+
+  // After embedded Checkout returns, Team appears once the stripe-webhook
+  // function has recorded the subscription. Poll until then.
+  useEffect(() => {
+    if (checkoutReturn !== "waiting") return;
+    let polls = 0;
+    let stopped = false;
+    const ownsTeam = (latest: TeamData) =>
+      latest.memberships.some(
+        (m) =>
+          m.user_id === userId &&
+          m.role === "owner" &&
+          latest.subscriptions.some((s) => s.owner_id === m.org_id),
+      );
+    const finish = (outcome: "timed_out" | null) => {
+      stopped = true;
+      clearSearchParams("session_id");
+      setCheckoutReturn(outcome);
+      if (outcome === null) void reloadSubscription();
+    };
+    const timer = window.setInterval(() => {
+      if (stopped) return;
+      polls += 1;
+      void reload().then((latest) => {
+        if (stopped) return;
+        if (ownsTeam(latest)) finish(null);
+        else if (polls >= CHECKOUT_RETURN_MAX_POLLS) finish("timed_out");
+      });
+    }, CHECKOUT_RETURN_POLL_MS);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [checkoutReturn, reload, reloadSubscription, userId]);
+
+  const run = async (work: () => Promise<string>) => {
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      setNotice(await work());
+      await reload();
+      void reloadSubscription();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const accept = (token: string) =>
+    run(async () => {
+      const joined = await organizationsRequest<{
+        organization: { name: string };
+        result: string;
+      }>({ action: "accept", token });
+      setInviteToken(null);
+      setInviteLink("");
+      return joined.result === "already_member"
+        ? `You are already a member of ${joined.organization.name}.`
+        : `You joined ${joined.organization.name}. Every member of a team with Team has Pro.`;
+    });
+
+  const orgs = new Map<string, { id: string; name: string }>();
+  for (const m of data?.memberships ?? []) {
+    if (m.user_id === userId && m.organizations) orgs.set(m.org_id, m.organizations);
+  }
+
+  return (
+    <section aria-labelledby="team-heading">
+      <h2 id="team-heading" style={styles.sectionTitle}>
+        Team
+      </h2>
+
+      {checkoutReturn === "waiting" && (
+        <div role="status" style={styles.notice}>
+          Payment received. Activating Team…
+        </div>
+      )}
+      {checkoutReturn === "timed_out" && (
+        <div role="status" style={styles.notice}>
+          Payment received. Team will appear here within a few minutes.
+        </div>
+      )}
+      {notice && (
+        <div role="status" style={styles.notice}>
+          {notice}
+        </div>
+      )}
+      {error && (
+        <div role="alert" style={{ ...styles.errorText, marginBottom: "0.75rem" }}>
+          {error}
+        </div>
+      )}
+
+      {inviteToken && (
+        <div style={styles.orgCard}>
+          <div style={styles.orgName}>You have an invite</div>
+          <p style={styles.billingNote}>
+            Accepting adds this account to the team. If the team has Team, you
+            get Pro right away.
+          </p>
+          <div style={styles.billingActions}>
+            <button
+              type="button"
+              disabled={pending}
+              style={styles.primaryButton}
+              onClick={() => void accept(inviteToken)}
+            >
+              Accept invite
+            </button>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() => setInviteToken(null)}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
+
+      {data === null ? (
+        <div style={styles.loadingText}>Loading…</div>
+      ) : (
+        [...orgs.values()].map((org) => (
+          <OrganizationCard
+            key={org.id}
+            org={org}
+            userId={userId}
+            data={data}
+            checkoutAvailable={checkoutAvailable}
+            onChanged={async () => {
+              await reload();
+              void reloadSubscription();
+            }}
+          />
+        ))
+      )}
+
+      <div style={styles.orgCard}>
+        <div style={styles.orgName}>Join a team</div>
+        <form
+          style={styles.teamForm}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const token = inviteTokenFromInput(inviteLink);
+            if (!token) {
+              setNotice(null);
+              setError("That is not an invite link. Paste the whole link you were sent.");
+              return;
+            }
+            void accept(token);
+          }}
+        >
+          <input
+            aria-label="Invite link"
+            placeholder="https://treq.dev/dashboard?tab=team#invite=…"
+            value={inviteLink}
+            onChange={(e) => setInviteLink(e.target.value)}
+            style={styles.input}
+          />
+          <button type="submit" disabled={pending} style={styles.saveButton}>
+            Join
+          </button>
+        </form>
+      </div>
+
+      <div style={styles.orgCard}>
+        <div style={styles.orgName}>Create an organization</div>
+        <p style={styles.billingNote}>
+          An organization holds a Team subscription: US$199 per month for{" "}
+          {TEAM_INCLUDED_SEATS} members, then US${TEAM_EXTRA_SEAT_USD} per extra
+          member, each with everything in Pro. It can also own
+          a shared GitHub App installation.
+        </p>
+        <form
+          style={styles.teamForm}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              const created = await organizationsRequest<{
+                organization: { name: string };
+              }>({ action: "create", name: orgName });
+              setOrgName("");
+              return `Created ${created.organization.name}.`;
+            });
+          }}
+        >
+          <input
+            required
+            maxLength={100}
+            aria-label="Organization name"
+            placeholder="Acme"
+            value={orgName}
+            onChange={(e) => setOrgName(e.target.value)}
+            style={styles.input}
+          />
+          <button type="submit" disabled={pending} style={styles.saveButton}>
+            Create organization
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 // ── Dashboard shell ──────────────────────────────────────────────────────────
 
 function DashboardContent() {
@@ -750,9 +1620,17 @@ function DashboardContent() {
   });
 
   useEffect(() => {
+    // Sign-in brings the user back here, so an invite link opened while
+    // signed out still works. The redirect keeps the path and query; the
+    // invite token in the fragment waits in sessionStorage.
+    const signIn = () => {
+      stashInviteForSignIn(invitePage());
+      const here = `${window.location.pathname}${window.location.search}`;
+      window.location.href = `/sign-in?redirect=${encodeURIComponent(here)}`;
+    };
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       if (!s) {
-        window.location.href = "/sign-in";
+        signIn();
         return;
       }
       setSession(s);
@@ -765,7 +1643,7 @@ function DashboardContent() {
     } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
-      if (!s) window.location.href = "/sign-in";
+      if (!s) signIn();
     });
 
     return () => authSub.unsubscribe();
@@ -836,6 +1714,15 @@ function DashboardContent() {
           >
             Integrations
           </button>
+          <button
+            onClick={() => setActiveTab("team")}
+            style={{
+              ...styles.navItem,
+              ...(activeTab === "team" ? styles.navItemActive : {}),
+            }}
+          >
+            Team
+          </button>
         </nav>
 
         <button onClick={handleSignOut} style={styles.signOutButton}>
@@ -852,7 +1739,17 @@ function DashboardContent() {
           />
         )}
 
-        {activeTab === "integrations" && <IntegrationsTab />}
+        {activeTab === "integrations" && (
+          <IntegrationsTab onUpgrade={() => setActiveTab("subscription")} />
+        )}
+
+        {activeTab === "team" && (
+          <TeamTab
+            userId={user.id}
+            reloadSubscription={loadSubscription}
+            stripePaymentsEnabled={stripePaymentsEnabled}
+          />
+        )}
       </div>
     </div>
   );
@@ -1000,6 +1897,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "not-allowed",
   },
   secondaryButton: {
+    whiteSpace: "nowrap",
     display: "inline-block",
     padding: "0.6rem 1.25rem",
     borderRadius: "8px",
@@ -1211,7 +2109,58 @@ const styles: Record<string, React.CSSProperties> = {
   },
   queueStatusText: { color: "var(--ifm-color-emphasis-600)" },
   configActions: { display: "flex", justifyContent: "flex-end" },
+  // Team tab
+  orgCard: {
+    padding: "1.5rem",
+    borderRadius: "10px",
+    border: "1px solid var(--ifm-color-emphasis-200)",
+    backgroundColor: "var(--ifm-background-color)",
+    marginBottom: "1rem",
+  },
+  orgName: { fontWeight: 700, fontSize: "1rem", marginBottom: "0.25rem" },
+  teamSubheading: {
+    marginTop: "1.25rem",
+    marginBottom: "0.4rem",
+    fontSize: "0.78rem",
+    fontWeight: 600,
+    color: "var(--ifm-color-emphasis-600)",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
+  },
+  teamList: { listStyle: "none", margin: 0, padding: 0 },
+  teamRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "0.75rem",
+    padding: "0.4rem 0",
+    fontSize: "0.85rem",
+  },
+  teamRowActions: { display: "flex", alignItems: "center", gap: "0.75rem" },
+  teamInvite: { borderBottom: "1px solid var(--ifm-color-emphasis-100)" },
+  teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
+  teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
+  teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
+  linkButton: {
+    border: "none",
+    background: "none",
+    padding: 0,
+    color: "var(--ifm-color-primary)",
+    fontSize: "0.8rem",
+    cursor: "pointer",
+  },
+  dangerButton: {
+    padding: "0.45rem 1rem",
+    borderRadius: "6px",
+    border: "1px solid rgba(239,68,68,0.4)",
+    backgroundColor: "transparent",
+    color: "#ef4444",
+    fontSize: "0.85rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
   saveButton: {
+    whiteSpace: "nowrap",
     padding: "0.45rem 1.2rem",
     borderRadius: "6px",
     border: "none",

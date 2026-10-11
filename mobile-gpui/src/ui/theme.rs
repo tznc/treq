@@ -4,6 +4,9 @@ use std::borrow::Cow;
 
 use gpui_kit::{component::Theme, px, App};
 
+/// The Treq logo blue (sampled from `assets/logo.svg`'s PNG render), as 0xRRGGBB.
+pub const BRAND_BLUE: u32 = 0x4B97E3;
+
 // Static Inter weights. Android's only UI font is a single variable Roboto,
 // which the text system treats as one regular face, so bold text would not
 // render. Bundling a static family gives real weights on every platform.

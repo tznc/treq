@@ -1,11 +1,13 @@
 // Proxies authenticated Linear API requests to the Linear GraphQL endpoint.
 // The client sends a GraphQL query/mutation, and this function forwards it
 // using the stored access token from linear_oauth_tokens. An access token
-// close to expiry is refreshed first and the new grant is stored. The
-// request logic lives in lib.ts so it can be unit tested.
+// close to expiry is refreshed first and the new grant is stored. Requires
+// Pro: a Free user gets 402 pro_required and uses a personal API key
+// instead. The request logic lives in lib.ts so it can be unit tested.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { proxyLinearRequest, type StoredToken } from "./lib.ts";
+import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { linearTokenStore, proxyLinearRequest } from "./lib.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,24 +75,8 @@ Deno.serve(async (req) => {
       linearClient: clientId && clientSecret
         ? { id: clientId, secret: clientSecret }
         : null,
-      store: {
-        load: async () => {
-          const { data, error } = await supabase
-            .from("linear_oauth_tokens")
-            .select("access_token, refresh_token, expires_at, updated_at")
-            .eq("user_id", user.id)
-            .maybeSingle();
-          if (error) throw new Error(error.message);
-          return (data as StoredToken | null) ?? null;
-        },
-        save: async (update) => {
-          const { error } = await supabase
-            .from("linear_oauth_tokens")
-            .update({ ...update, updated_at: new Date().toISOString() })
-            .eq("user_id", user.id);
-          if (error) throw new Error(error.message);
-        },
-      },
+      hasPro: () => userHasPro(supabase, user.id),
+      store: linearTokenStore(supabase, user.id),
     },
   );
   return respond(result.body, result.status);

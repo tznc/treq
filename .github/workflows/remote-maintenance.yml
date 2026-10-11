@@ -1,0 +1,59 @@
+name: Remote maintenance
+
+# Runs the remote-admin maintenance actions that have no in-database
+# scheduler (this project has no pg_cron). The sweep stops cloud workspaces
+# whose owner lost Pro and deletes them 30 days later
+# (prds/billing-and-teams.md, B02). The prune keeps remote audit events
+# within their retention window. Both no-op until the secrets exist.
+
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly: sweep lapsed instances
+    - cron: "23 3 * * *" # daily: prune audit events
+  workflow_dispatch:
+    inputs:
+      action:
+        description: remote-admin action to run
+        required: true
+        type: choice
+        options:
+          - sweep_lapsed_instances
+          - prune_audit_events
+
+concurrency:
+  group: remote-maintenance
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call remote-admin
+        env:
+          REMOTE_ADMIN_URL: ${{ secrets.REMOTE_ADMIN_URL }}
+          REMOTE_ADMIN_API_KEY: ${{ secrets.REMOTE_ADMIN_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_ACTION: ${{ inputs.action }}
+        run: |
+          if [ -z "$REMOTE_ADMIN_URL" ] || [ -z "$REMOTE_ADMIN_API_KEY" ]; then
+            echo "::notice::REMOTE_ADMIN_URL or REMOTE_ADMIN_API_KEY is not set; skipping."
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            action="$INPUT_ACTION"
+          elif [ "$SCHEDULE" = "23 3 * * *" ]; then
+            action="prune_audit_events"
+          else
+            action="sweep_lapsed_instances"
+          fi
+          echo "Running $action"
+          curl --fail-with-body --silent --show-error --max-time 300 \
+            -X POST "$REMOTE_ADMIN_URL" \
+            -H "x-admin-api-key: $REMOTE_ADMIN_API_KEY" \
+            -H "content-type: application/json" \
+            --data "{\"action\":\"$action\"}"
+          echo

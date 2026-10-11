@@ -61,6 +61,64 @@ describe("TaskInput issue chip", () => {
     });
   });
 
+  it.each([
+    "success",
+    "failure",
+  ])("shows loading while starting a session and clears it after %s", async (outcome) => {
+    let resolve!: (id: number) => void;
+    let reject!: (error: Error) => void;
+    api.createSession.mockReturnValue(
+      new Promise<number>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      }),
+    );
+    const onSessionCreated = vi.fn();
+    render(
+      <TaskInput
+        repoPath="/repo"
+        workspaceId={1}
+        workingDirectory="/repo"
+        initialText="Fix the bug"
+        onSessionCreated={onSessionCreated}
+      />,
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "codex",
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    const starting = await screen.findByRole("button", { name: "Starting…" });
+    expect(starting).toBeDisabled();
+    expect(starting).toHaveAttribute("aria-busy", "true");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+
+    if (outcome === "success") resolve(99);
+    else reject(new Error("Session unavailable"));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Starting…" }),
+      ).not.toBeInTheDocument();
+    });
+    const run = screen.getByRole("button", { name: "Run" });
+    expect(run).toHaveAttribute("aria-busy", "false");
+    if (outcome === "success") {
+      expect(onSessionCreated).toHaveBeenCalledTimes(1);
+      expect(run).toBeDisabled();
+    } else {
+      expect(run).toBeEnabled();
+      expect(screen.getByPlaceholderText("Describe a task...")).toHaveValue(
+        "Fix the bug",
+      );
+      expect(
+        await screen.findByText("Session unavailable"),
+      ).toBeInTheDocument();
+    }
+  });
+
   it("renders a dismissible issue chip from initialIssue", async () => {
     render(
       <TaskInput

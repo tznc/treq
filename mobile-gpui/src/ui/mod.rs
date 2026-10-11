@@ -28,6 +28,12 @@ use crate::{
 
 pub use load::Load;
 
+/// The signed-out, unconnected home is a landing page. Once signed in or
+/// connected (even to a saved SSH host) the regular home takes over.
+fn is_landing(user: Option<&str>, connected: bool) -> bool {
+  user.is_none() && !connected
+}
+
 /// App-wide state the screens observe.
 #[derive(Default)]
 pub struct AppModel {
@@ -249,6 +255,8 @@ impl Render for Root {
     let page = self.stack.last().expect("the stack keeps its root page");
     let can_go_back = self.stack.len() > 1;
     let model = self.model.read(cx);
+    // The landing page brings its own branding, so it drops the title bar.
+    let landing = !can_go_back && is_landing(model.user.as_deref(), model.connection.is_some());
     let blocked = model.cutoff.clone();
     let managed = model
       .connection
@@ -264,34 +272,36 @@ impl Render for Root {
       .pl(visible.origin.x)
       .pr(viewport.width - visible.right())
       .pb(viewport.height - visible.bottom())
-      .child(
-        h_flex()
-          .h(px(56.))
-          .px_2()
-          .gap_1()
-          .items_center()
-          .border_b_1()
-          .border_color(theme.border)
-          .when(can_go_back, |bar| {
-            bar.child(
-              Button::new("back")
-                .ghost()
-                .large()
-                .icon(IconName::ArrowLeft)
-                .on_click(|_, _, cx| nav::pop(cx)),
-            )
-          })
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .px_2()
-              .truncate()
-              .text_lg()
-              .font_weight(FontWeight::SEMIBOLD)
-              .child(page.title.clone()),
-          ),
-      )
+      .when(!landing, |root| {
+        root.child(
+          h_flex()
+            .h(px(56.))
+            .px_2()
+            .gap_1()
+            .items_center()
+            .border_b_1()
+            .border_color(theme.border)
+            .when(can_go_back, |bar| {
+              bar.child(
+                Button::new("back")
+                  .ghost()
+                  .large()
+                  .icon(IconName::ArrowLeft)
+                  .on_click(|_, _, cx| nav::pop(cx)),
+              )
+            })
+            .child(
+              div()
+                .flex_1()
+                .min_w_0()
+                .px_2()
+                .truncate()
+                .text_lg()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(page.title.clone()),
+            ),
+        )
+      })
       .child(div().flex_1().min_h_0().child(page.view.clone()))
       .when_some(blocked, |root, reason| {
         root.child(cutoff_overlay(reason, managed, cx))
@@ -643,5 +653,18 @@ impl Root {
       repo_path: location.repo,
       workspace: location.workspace,
     }));
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::is_landing;
+
+  #[test]
+  fn landing_only_when_signed_out_and_unconnected() {
+    assert!(is_landing(None, false));
+    assert!(!is_landing(Some("a@b.c"), false));
+    assert!(!is_landing(None, true));
+    assert!(!is_landing(Some("a@b.c"), true));
   }
 }

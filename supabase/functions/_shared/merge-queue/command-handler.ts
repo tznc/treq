@@ -27,6 +27,10 @@ import {
   mergePreconditionViolation,
 } from "./state-machine.ts";
 import { canMergeLane, entrySetHash } from "./scheduler.ts";
+import {
+  holdQueueWithoutPro,
+  supabasePauseStore,
+} from "./entitlement-pause.ts";
 import type { QueueConfigRow, QueueRow, RepoMeta } from "./queue-repository.ts";
 import {
   countQueuedEntries,
@@ -57,6 +61,9 @@ export interface HandlerContext {
   // the transactional lane reservation RPC.
   leaseToken?: string;
   adapterFor: (repo: RepoMeta) => Promise<GitHubAdapter>;
+  // installation_has_pro for the repo's GitHub App installation. A queue
+  // whose owner has no Pro is paused rather than tested or merged.
+  installationHasPro: (installationId: number) => Promise<boolean>;
   publish: (command: MergeQueueCommand, delaySeconds?: number) => Promise<void>;
   log: (fields: Record<string, unknown>) => void;
 }
@@ -115,6 +122,26 @@ async function loadQueueContext(
   const config = await getQueueConfig(ctx.supabase, queue.repo_id, queue.target_branch);
   return { queue, config, repo };
 }
+
+// True when the installation owner has no Pro. The queue is then paused:
+// lanes cancelled, PRs kept queued, one comment each.
+async function heldWithoutPro(
+  ctx: HandlerContext,
+  queue: QueueRow,
+  repo: RepoMeta,
+): Promise<boolean> {
+  return await holdQueueWithoutPro(
+    { id: queue.id },
+    {
+      hasPro: () => ctx.installationHasPro(repo.installationId),
+      store: supabasePauseStore(ctx.supabase, ctx.workerId),
+      github: () => ctx.adapterFor(repo),
+      log: ctx.log,
+    },
+  );
+}
+
+const PAUSED_WITHOUT_PRO = "paused: the installation owner has no Pro";
 
 // ── entry.enqueue ─────────────────────────────────────────────────────────────
 
@@ -231,6 +258,9 @@ async function handleDrive(
   if (queue.paused || !config.enabled) {
     return { outcome: "already_satisfied", detail: "queue paused or disabled" };
   }
+  if (await heldWithoutPro(ctx, queue, repo)) {
+    return { outcome: "already_satisfied", detail: PAUSED_WITHOUT_PRO };
+  }
 
   const gh = await ctx.adapterFor(repo);
 
@@ -295,6 +325,7 @@ async function buildLane(
 ): Promise<void> {
   const startKey = startLaneOperationKey(
     queue.id,
+    reservation.ciRunId,
     reservation.laneNumber,
     reservation.expectedBaseSha ?? "tip",
     entrySetHash(reservation.entries.map((e) => e.entryId)),
@@ -416,6 +447,10 @@ async function handleCiCompleted(
     return { outcome: "obsolete", detail: "queue no longer exists" };
   }
   const { queue, config, repo } = loaded;
+  // Pausing cancels this lane too, so its result no longer applies.
+  if (await heldWithoutPro(ctx, queue, repo)) {
+    return { outcome: "obsolete", detail: PAUSED_WITHOUT_PRO };
+  }
   const gh = await ctx.adapterFor(repo);
 
   // Required checks are evaluated against the exact tested SHA; the

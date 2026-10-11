@@ -26,6 +26,7 @@ import {
   popPendingAgentRequests,
   processAgentDeepLinkRequests,
 } from "../lib/agentDeepLink";
+import { agentPtySessionId, paneSessionId } from "../lib/agent-pty-id";
 import {
   acknowledgeAgentDispatch,
   addPromptHistory,
@@ -49,6 +50,10 @@ import {
   selectFolder,
   setSetting,
   setWindowRepoPath,
+  setWindowSupportingRepoPaths,
+  listSupportingRepos,
+  addSupportingRepo,
+  removeSupportingRepo,
   updateSessionAccess,
   type Workspace,
 } from "../lib/api";
@@ -114,6 +119,7 @@ import {
   revokeClientKey,
   wakeInstance,
 } from "../lib/remote-control-plane";
+import { isProRequiredError } from "../lib/pro-required";
 import {
   listUserManagedEndpoints,
   saveUserManagedEndpoint,
@@ -121,10 +127,8 @@ import {
   type SavedRemoteRepositoryRecord,
   type UserManagedEndpointRecord,
 } from "../lib/remote-endpoints";
-import {
-  dispatchMutationOverSsh,
-  dispatchOverSsh,
-} from "../lib/remote-dispatch";
+import { dispatchOverSsh } from "../lib/remote-dispatch";
+import { dispatchKeyedMutationOverSsh } from "../lib/remote-idempotency";
 import {
   LAST_OPENED_REMOTE_REPO_ID_KEY,
   canonicalizeRemotePath,
@@ -264,13 +268,28 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   initialViewMode = "show-workspace",
 }) => {
-  const [repoPath, setRepoPath] = useState(() => {
+  const [mainRepoPath, setMainRepoPath] = useState(() => {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get("repo") || "";
   });
+  // A supporting repository selected in the sidebar; null for the main one.
+  // `repoPath` is the repository on screen, so everything that reads it
+  // follows the sidebar selection.
+  const [activeSupportingRepoPath, setActiveSupportingRepoPath] = useState<
+    string | null
+  >(null);
+  const repoPath =
+    mainRepoPath && activeSupportingRepoPath
+      ? activeSupportingRepoPath
+      : mainRepoPath;
+  const setRepoPath = (path: string) => {
+    setMainRepoPath(path);
+    setActiveSupportingRepoPath(null);
+  };
+  // Reload reopens the window's main repository, not the one on screen.
   useEffect(() => {
-    syncRepoUrlParam(repoPath);
-  }, [repoPath]);
+    syncRepoUrlParam(mainRepoPath);
+  }, [mainRepoPath]);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
   const [homeRepoDisplayRef, setHomeRepoDisplayRef] = useState<string | null>(
     null,
@@ -624,13 +643,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setExplicitEndpointError(undefined);
     setRemoteRepoBusy(true);
     try {
-      const result = await dispatchMutationOverSsh<RepositoryInspection>(
+      const result = await dispatchKeyedMutationOverSsh<RepositoryInspection>(
         activeSshEndpoint,
         {
           kind: "CloneRepo",
           repo_url: explicitEndpointCloneUrl.trim(),
           destination: canonicalizeRemotePath(explicitEndpointRepoPath),
-          idempotency_key: `clone-${activeSshEndpoint.id}-${Date.now()}`,
         },
       );
       if (result.status === "ambiguous") {
@@ -656,12 +674,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setExplicitEndpointError(undefined);
     setRemoteRepoBusy(true);
     try {
-      const result = await dispatchMutationOverSsh<RepositoryInspection>(
+      const result = await dispatchKeyedMutationOverSsh<RepositoryInspection>(
         activeSshEndpoint,
         {
           kind: "InitRepo",
           repo: canonicalizeRemotePath(explicitEndpointRepoPath),
-          idempotency_key: `init-${activeSshEndpoint.id}-${Date.now()}`,
         },
       );
       if (result.status === "ambiguous") {
@@ -918,11 +935,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setProvisioningError(message);
-      addToast({
-        title: "Couldn't create cloud workspace",
-        description: message,
-        type: "error",
-      });
+      // Without Pro the card shows "Upgrade to Pro" instead of an error.
+      if (!isProRequiredError(error)) {
+        addToast({
+          title: "Couldn't create cloud workspace",
+          description: message,
+          type: "error",
+        });
+      }
       // The control plane records the failure; reload so the card offers a
       // retry instead of a fresh create.
       await refreshInstanceStatus();
@@ -1426,10 +1446,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
       } catch (e) {
         console.error("Failed to init repo:", e);
       }
-      await setWindowRepoPath(repoPath);
+      await setWindowRepoPath(mainRepoPath);
       return true;
     },
   );
+
+  const { data: supportingRepos = [], mutate: mutateSupportingRepos } = useSWR(
+    mainRepoPath && !isRemoteActive ? ["supporting-repos", mainRepoPath] : null,
+    () => listSupportingRepos(mainRepoPath),
+  );
+  const supportingRepoPathsKey = supportingRepos
+    .filter((repo) => repo.exists)
+    .map((repo) => repo.path)
+    .join("\n");
+  useEffect(() => {
+    void setWindowSupportingRepoPaths(
+      supportingRepoPathsKey ? supportingRepoPathsKey.split("\n") : [],
+    ).catch((error) => {
+      console.error("Failed to register supporting repositories:", error);
+    });
+  }, [supportingRepoPathsKey]);
+  useEffect(() => {
+    if (
+      activeSupportingRepoPath &&
+      !supportingRepos.some(
+        (repo) => repo.exists && repo.path === activeSupportingRepoPath,
+      )
+    ) {
+      // Workspace and session ids are per repository; drop the selection so
+      // it does not match a main-repository workspace with the same id.
+      setActiveSupportingRepoPath(null);
+      setSelectedWorkspace(null);
+      setSelectedWorkspaceIds(new Set());
+      setActiveSessionId(null);
+    }
+  }, [supportingRepos, activeSupportingRepoPath]);
 
   useEffect(() => {
     if (!dataRepoPath) {
@@ -1505,6 +1556,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
     { refreshInterval: pollMs(10000) },
   );
 
+  // The terminal pane shows agents from every repository in the window. One
+  // key covers them all, so switching the repository on screen never empties
+  // the list (an agent terminal that unmounts comes back without its output).
+  const linkedRepoPaths = isRemoteActive
+    ? []
+    : [mainRepoPath, ...supportingRepoPathsKey.split("\n")].filter(Boolean);
+  const { data: linkedRepoData } = useSWR(
+    linkedRepoPaths.length > 1
+      ? ["sessions", "linked", ...linkedRepoPaths]
+      : null,
+    () =>
+      Promise.all(
+        linkedRepoPaths.map(async (path) => ({
+          repoPath: path,
+          sessions: await getSessions(path).catch(() => []),
+          workspaces: await getWorkspaces(path).catch(() => []),
+        })),
+      ),
+    { refreshInterval: pollMs(30000), keepPreviousData: true },
+  );
+  const linkedRepoSessions =
+    linkedRepoPaths.length > 1 && linkedRepoData
+      ? linkedRepoData
+      : [{ repoPath, sessions, workspaces }];
+  /** Pane id of a session in the repository at `path`. */
+  const toPaneSessionId = (path: string, sessionId: number) =>
+    mainRepoPath ? paneSessionId(path, mainRepoPath, sessionId) : sessionId;
+
   // `workspaces` is refetched (e.g. after a push, or on its 10s interval) and
   // returns fresh object references every time, but `selectedWorkspace` is a
   // point-in-time snapshot. Without this, fields like `not_on_remote` on the
@@ -1515,7 +1594,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     setSelectedWorkspace((current) => {
       if (!current) return current;
-      const updated = workspaces.find((w) => w.id === current.id);
+      // Ids are per repository; only refresh from the same repository.
+      const updated = workspaces.find(
+        (w) => w.id === current.id && w.repo_path === current.repo_path,
+      );
       if (!updated || JSON.stringify(updated) === JSON.stringify(current)) {
         return current;
       }
@@ -1527,8 +1609,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // open. Only react to ids that were listed before, so a workspace selected
   // right after creation is not dropped while the list catches up.
   const listedWorkspaceIdsRef = useRef<ReadonlySet<number>>(new Set());
+  const listedRepoKeyRef = useRef(queryRepoKey);
   useEffect(() => {
-    const previous = listedWorkspaceIdsRef.current;
+    // Switching repositories replaces the list; that is not a removal.
+    const sameRepo = listedRepoKeyRef.current === queryRepoKey;
+    listedRepoKeyRef.current = queryRepoKey;
+    const previous = sameRepo ? listedWorkspaceIdsRef.current : new Set();
     const current = new Set(workspaces.map((w) => w.id));
     listedWorkspaceIdsRef.current = current;
     if (
@@ -1619,6 +1705,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setSessionSelectedFile(null);
       },
     });
+
+  const addSupportingRepoAtPath = async (selected: string) => {
+    if (!mainRepoPath) return;
+    try {
+      const added = await addSupportingRepo(mainRepoPath, selected);
+      await initRepo(added);
+      await mutateSupportingRepos();
+      addToast({
+        title: "Repository Added",
+        description: `${added.split(/[\\/]/).pop() || added} is now a supporting repository`,
+        type: "success",
+      });
+    } catch (error) {
+      addToast({
+        title: "Failed to add repository",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    }
+  };
+
+  const handleAddSupportingRepo = async () => {
+    const selected = await selectFolder();
+    if (!selected) return;
+    await addSupportingRepoAtPath(selected);
+  };
+
+  const handleRemoveSupportingRepo = async (path: string) => {
+    if (!mainRepoPath) return;
+    const confirmed = await ask(
+      `Remove ${path} from this window? Its files and workspaces are not deleted.`,
+      { title: "Remove Repository", kind: "warning" },
+    );
+    if (!confirmed) return;
+    try {
+      await removeSupportingRepo(mainRepoPath, path);
+      if (activeSupportingRepoPath === path) {
+        setActiveSupportingRepoPath(null);
+        setSelectedWorkspace(null);
+      }
+      await mutateSupportingRepos();
+    } catch (error) {
+      addToast({
+        title: "Failed to remove repository",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    }
+  };
+
+  const handleLocateSupportingRepo = async (path: string) => {
+    if (!mainRepoPath) return;
+    const selected = await selectFolder();
+    if (!selected) return;
+    await removeSupportingRepo(mainRepoPath, path);
+    await addSupportingRepoAtPath(selected);
+  };
+
+  const handleSelectRepoHome = (path: string) => {
+    activateRepo(path);
+    setSelectedWorkspace(null);
+    setViewMode("show-workspace");
+  };
+
+  const handleOpenRepoSettings = (path: string) => {
+    activateRepo(path);
+    setSelectedWorkspace(null);
+    openSettings();
+  };
 
   const handleOpenRepository = async () => {
     const selected = await selectFolder();
@@ -1758,6 +1913,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       listen<string>("menu-repository-path-selected", (event) => {
         void openRepositoryAtPath(event.payload);
       }),
+      listen("menu-add-repository", () => {
+        void handleAddSupportingRepo();
+      }),
       // Menu open via SSH
       listen("menu-open-ssh", () => {
         if (!useFeaturePreviewStore.getState().flags.remoteSsh) return;
@@ -1844,6 +2002,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [
     repoPath,
+    mainRepoPath,
     selectedWorkspace,
     effectiveDefaultBranch,
     addToast,
@@ -1861,13 +2020,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
       forceNew?: boolean;
       name?: string;
       agent?: AgentKind;
+      /** Repository of the workspace; defaults to the one on screen. */
+      repoPath?: string;
     },
   ): Promise<number> => {
-    const sessions = await getSessions(repoPath);
+    const sessionRepoPath = options?.repoPath ?? repoPath;
+    const sessions = await getSessions(sessionRepoPath);
     if (!options?.forceNew) {
       const existing = sessions.find((s) => s.workspace_id === workspaceId);
       if (existing) {
-        await updateSessionAccess(repoPath, existing.id);
+        await updateSessionAccess(sessionRepoPath, existing.id);
         return existing.id;
       }
     }
@@ -1881,7 +2043,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       name = `${agentInfo(options?.agent ?? DEFAULT_AGENT).label} ${index}`;
     }
 
-    const sessionId = await createSession(repoPath, workspaceId, name);
+    const sessionId = await createSession(sessionRepoPath, workspaceId, name);
 
     void invalidateQueries(["sessions"]);
     return sessionId;
@@ -1916,7 +2078,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         label: "Open",
         onClick: () => {
           handleSelectWorkspace(workspace);
-          setActiveSessionId(sessionId);
+          setActiveSessionId(toPaneSessionId(repoPath, sessionId));
         },
       },
     });
@@ -1940,7 +2102,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       void invalidateQueries(["workspaces", queryRepoKey]);
       invalidateQueries(["workspace-statuses", queryRepoKey]);
     }
-    setActiveSessionId(sessionData.sessionId);
+    const paneId = toPaneSessionId(repoPath, sessionData.sessionId);
+    setActiveSessionId(paneId);
     const targetWorkspaceId = sessionData.workspaceId ?? null;
     const onScreen =
       isSessionView && (selectedWorkspace?.id ?? null) === targetWorkspaceId;
@@ -1955,7 +2118,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     ) {
       setPendingSessionData((prev) => {
         const next = new Map(prev);
-        next.set(sessionData.sessionId, {
+        next.set(paneId, {
           pendingPrompt: sessionData.pendingPrompt,
           permissionMode: sessionData.permissionMode,
           agent: sessionData.agent,
@@ -2028,8 +2191,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   // Navigate to workspace without creating an agent session
+  /** Puts the repository at `path` (main or supporting) on screen. */
+  const activateRepo = (path: string) => {
+    // Only repositories linked in this window; a remote repository's
+    // workspaces carry the remote path.
+    const linked = supportingRepos.some(
+      (repo) => repo.exists && repo.path === path,
+    );
+    const next = linked ? path : null;
+    if (next === activeSupportingRepoPath) return;
+    setActiveSupportingRepoPath(next);
+    setSelectedWorkspaceIds(new Set());
+  };
+
   const handleSelectWorkspace = (workspace: Workspace | null) => {
     const next = workspace ?? null;
+    if (next?.repo_path) activateRepo(next.repo_path);
     setSelectedWorkspace(next);
     setViewMode("show-workspace");
     if (repoPath) {
@@ -2269,12 +2446,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       agent: resolvedAgent,
     });
     void invalidateQueries(["sessions"]);
-    setActiveSessionId(sessionId);
+    const paneId = toPaneSessionId(repoPath, sessionId);
+    setActiveSessionId(paneId);
     setSelectedWorkspace(workspace);
     if (resolvedAgent) {
       setPendingSessionData((prev) => {
         const next = new Map(prev);
-        next.set(sessionId, { agent: resolvedAgent! });
+        next.set(paneId, { agent: resolvedAgent! });
         return next;
       });
     }
@@ -2331,8 +2509,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // for workspace-level session indicators.
   const workspaceBranchByPath = (() => {
     const map = new Map<string, string>();
-    for (const ws of workspaces) {
-      map.set(getFullWorkspacePath(ws), ws.branch_name);
+    for (const linked of linkedRepoSessions) {
+      for (const ws of linked.workspaces) {
+        map.set(getFullWorkspacePath(ws), ws.branch_name);
+      }
     }
     return map;
   })();
@@ -2359,13 +2539,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
       forceNew: true,
       agent,
       name: sessionName,
+      repoPath: workspace.repo_path,
     });
-    setActiveSessionId(sessionId);
+    activateRepo(workspace.repo_path);
+    const paneId = toPaneSessionId(workspace.repo_path, sessionId);
+    setActiveSessionId(paneId);
     setSelectedWorkspace(workspace);
     setViewMode("show-workspace");
     setPendingSessionData((prev) => {
       const next = new Map(prev);
-      next.set(sessionId, {
+      next.set(paneId, {
         pendingPrompt: prompt,
         permissionMode: mode,
         agent,
@@ -2373,7 +2556,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return next;
     });
     if (prompt) {
-      addPromptHistory(repoPath, workspace.id, sessionId, prompt, agent)
+      addPromptHistory(
+        workspace.repo_path,
+        workspace.id,
+        sessionId,
+        prompt,
+        agent,
+      )
         .then(() => {
           void invalidateQueries(["prompt-history"]);
           invalidateQueries(["workspace-starting-prompt"]);
@@ -2386,7 +2575,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleStartAgentRequest = async (request: AgentDeepLinkRequest) => {
-    const workspace = findWorkspaceByBranch(workspaces, request.branch);
+    // The request may target the main repository or a supporting one,
+    // whichever is on screen.
+    const requestWorkspaces =
+      request.repo === repoPath
+        ? workspaces
+        : await getWorkspaces(request.repo).catch(() => []);
+    const workspace = findWorkspaceByBranch(requestWorkspaces, request.branch);
     if (!workspace) {
       addToast({
         title: "Workspace not found",
@@ -2425,12 +2620,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
    * is one to act on.
    */
   const handleAutoReviewEvent = async (event: AutoReviewEvent) => {
-    if (event.repo_path !== repoPath) return;
-    const workspace = workspaces.find((w) => w.id === event.workspace_id);
+    // Events are broadcast to every window; this window handles its main
+    // repository's, even while a supporting repository is on screen.
+    if (!mainRepoPath || event.repo_path !== mainRepoPath) return;
+    const eventWorkspaces =
+      repoPath === mainRepoPath
+        ? workspaces
+        : await getWorkspaces(mainRepoPath).catch(() => []);
+    const workspace = eventWorkspaces.find((w) => w.id === event.workspace_id);
     if (!workspace) return;
     try {
       const { prompt, agent } = await prepareWorkspaceReview({
-        repoPath,
+        repoPath: mainRepoPath,
         workspaceId: event.workspace_id,
         branchName: workspace.branch_name,
         diffSummary: autoReviewSummary(event.trigger, workspace.branch_name),
@@ -2470,8 +2671,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await listen<string[]>("deep-link-received", async (event) => {
         const requests = parseAgentDeepLinks(event.payload ?? []);
         await processAgentDeepLinkRequests(requests, {
-          repoPath,
-          workspacesLength: workspaces.length,
+          repoPath: mainRepoPath,
+          supportingRepoPaths: supportingRepoPathsKey
+            ? supportingRepoPathsKey.split("\n")
+            : [],
+          // `workspaces` lists the repository on screen. A main-repository
+          // request made while a supporting one is on screen fetches its own.
+          workspacesLength: activeSupportingRepoPath ? 1 : workspaces.length,
           onSameRepoRequest: (request) =>
             handleStartAgentRequestRef.current(request),
           deferRequest: (request) => {
@@ -2499,11 +2705,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => {
       unlistenPromise.then((fn) => fn());
     };
-  }, [repoPath, workspaces.length]);
+  }, [
+    mainRepoPath,
+    activeSupportingRepoPath,
+    supportingRepoPathsKey,
+    workspaces.length,
+  ]);
 
   useEffect(() => {
-    if (!repoPath || workspaces.length === 0) return;
-    const queued = popPendingAgentRequests(repoPath);
+    // `workspaces` lists the repository on screen; with a supporting one on
+    // screen, handleStartAgentRequest fetches the main repository's own.
+    if (!mainRepoPath || (!activeSupportingRepoPath && workspaces.length === 0))
+      return;
+    const queued = popPendingAgentRequests(mainRepoPath);
     if (queued.length === 0 && deferredAgentRequests.length === 0) return;
     const pending = [...queued, ...deferredAgentRequests];
     setDeferredAgentRequests([]);
@@ -2511,7 +2725,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (isProcessedAgentRequest(request.requestId)) continue;
       void handleStartAgentRequestRef.current(request);
     }
-  }, [deferredAgentRequests, repoPath, workspaces.length]);
+  }, [
+    deferredAgentRequests,
+    mainRepoPath,
+    activeSupportingRepoPath,
+    workspaces.length,
+  ]);
 
   const handleWorkspaceMultiSelect = (
     workspace: Workspace | null,
@@ -2674,33 +2893,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   // Build agent session data for the terminal pane
-  const agentSessionsForPane = ((): AgentSessionData[] => {
-    const workspaceMap = new Map(workspaces.map((ws) => [ws.id, ws]));
+  const agentSessionsForPane = linkedRepoSessions.flatMap(
+    (linked): AgentSessionData[] => {
+      const workspaceMap = new Map(linked.workspaces.map((ws) => [ws.id, ws]));
 
-    return sessions.map((session) => {
-      const sessionWorkspace = session.workspace_id
-        ? (workspaceMap.get(session.workspace_id) ?? null)
-        : null;
-      const pending = pendingSessionData.get(session.id);
-      return {
-        sessionId: session.id,
-        sessionName: session.name,
-        ptySessionId: `session-${session.id}`,
-        workspaceId: session.workspace_id,
-        workspacePath:
-          pending?.workspacePath ??
-          (sessionWorkspace ? getFullWorkspacePath(sessionWorkspace) : null),
-        repoPath: sessionWorkspace?.repo_path ?? repoPath,
-        workspaceName: sessionWorkspace?.branch_name ?? null,
-        workingDirectoryOverride: pending?.workspacePath ?? undefined,
-        ...(pending && {
-          pendingPrompt: pending.pendingPrompt,
-          permissionMode: pending.permissionMode,
-          agent: pending.agent,
-        }),
-      };
-    });
-  })();
+      return linked.sessions.map((session) => {
+        const sessionWorkspace = session.workspace_id
+          ? (workspaceMap.get(session.workspace_id) ?? null)
+          : null;
+        const paneId = toPaneSessionId(linked.repoPath, session.id);
+        const pending = pendingSessionData.get(paneId);
+        return {
+          sessionId: paneId,
+          dbSessionId: session.id,
+          sessionName: session.name,
+          ptySessionId: agentPtySessionId(linked.repoPath, session.id),
+          workspaceId: session.workspace_id,
+          workspacePath:
+            pending?.workspacePath ??
+            (sessionWorkspace ? getFullWorkspacePath(sessionWorkspace) : null),
+          repoPath: linked.repoPath,
+          workspaceName: sessionWorkspace?.branch_name ?? null,
+          workingDirectoryOverride: pending?.workspacePath ?? undefined,
+          ...(pending && {
+            pendingPrompt: pending.pendingPrompt,
+            permissionMode: pending.permissionMode,
+            agent: pending.agent,
+          }),
+        };
+      });
+    },
+  );
 
   const sessionLayerStyle: CSSProperties = {
     visibility: isSessionView ? "visible" : "hidden",
@@ -2806,6 +3029,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )}
           <WorkspaceSidebar
             repoPath={dataRepoPath}
+            mainRepoPath={isRemoteActive ? undefined : mainRepoPath}
+            supportingRepos={isRemoteActive ? [] : supportingRepos}
+            onSelectRepoHome={handleSelectRepoHome}
+            onAddRepository={
+              mainRepoPath && !isRemoteActive
+                ? () => void handleAddSupportingRepo()
+                : undefined
+            }
+            onRemoveSupportingRepo={(path) =>
+              void handleRemoveSupportingRepo(path)
+            }
+            onLocateSupportingRepo={(path) =>
+              void handleLocateSupportingRepo(path)
+            }
+            onOpenRepoSettings={handleOpenRepoSettings}
             homeRepoDisplayRef={homeRepoDisplayRef}
             selectedWorkspaceId={selectedWorkspace?.id ?? null}
             selectedWorkspaceIds={selectedWorkspaceIds}
@@ -2965,6 +3203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       idleAgentSession={terminalSessionSummaries.find(
                         (session) =>
                           session.kind === "agent" &&
+                          session.repoPath === repoPath &&
                           session.branchName ===
                             selectedWorkspace?.branch_name &&
                           !session.isStreaming,
@@ -2983,7 +3222,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {/* Shared workspace terminal pane - always rendered to preserve state */}
               <WorkspaceTerminalPane
                 ref={terminalPaneRef}
-                key={queryRepoKey}
+                // One pane for the window: it shows supporting-repository
+                // agents too, so switching repositories keeps it mounted.
+                key={activeSupportingRepoPath ? mainRepoPath : queryRepoKey}
                 workingDirectory={
                   selectedWorkspace
                     ? getFullWorkspacePath(selectedWorkspace)
@@ -3004,13 +3245,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }
                   setActiveSessionId(sessionId);
                   // Find the session to determine view mode
-                  const session = sessions.find((s) => s.id === sessionId);
-                  if (session) {
+                  const linked = linkedRepoSessions.find((entry) =>
+                    entry.sessions.some(
+                      (s) =>
+                        toPaneSessionId(entry.repoPath, s.id) === sessionId,
+                    ),
+                  );
+                  const session = linked?.sessions.find(
+                    (s) => toPaneSessionId(linked.repoPath, s.id) === sessionId,
+                  );
+                  if (linked && session) {
+                    activateRepo(linked.repoPath);
                     setViewMode(
                       session.workspace_id ? "show-workspace" : "session",
                     );
                     if (session.workspace_id) {
-                      const ws = workspaces.find(
+                      const ws = linked.workspaces.find(
                         (w) => w.id === session.workspace_id,
                       );
                       if (ws) setSelectedWorkspace(ws);
@@ -3024,9 +3274,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }}
                 onCreateNewSession={(activeWorkspacePath) => {
                   if (activeWorkspacePath) {
-                    const ws = workspaces.find(
-                      (w) => getFullWorkspacePath(w) === activeWorkspacePath,
-                    );
+                    const ws = linkedRepoSessions
+                      .flatMap((entry) => entry.workspaces)
+                      .find(
+                        (w) => getFullWorkspacePath(w) === activeWorkspacePath,
+                      );
+                    if (ws && ws.repo_path !== repoPath) {
+                      void launchAgentSession({ workspace: ws });
+                      return;
+                    }
                     handleCreateSessionFromSidebar(ws?.id ?? null);
                   } else {
                     handleCreateSessionFromSidebar(
@@ -3036,11 +3292,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }}
                 onNavigateToWorkspace={(workspaceKey, isMainRepo) => {
                   if (isMainRepo) {
-                    handleSelectWorkspace(null);
+                    // Agent terminals pass their repository path.
+                    if (
+                      linkedRepoSessions.some(
+                        (entry) => entry.repoPath === workspaceKey,
+                      )
+                    ) {
+                      handleSelectRepoHome(workspaceKey);
+                    } else {
+                      handleSelectWorkspace(null);
+                    }
                   } else {
-                    const ws = workspaces.find(
-                      (w) => w.workspace_path === workspaceKey,
-                    );
+                    const ws = linkedRepoSessions
+                      .flatMap((entry) => entry.workspaces)
+                      .find(
+                        (w) =>
+                          w.workspace_path === workspaceKey ||
+                          getFullWorkspacePath(w) === workspaceKey,
+                      );
                     if (ws) {
                       handleSelectWorkspace(ws);
                     }

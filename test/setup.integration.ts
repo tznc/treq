@@ -35,7 +35,7 @@ configure({ asyncUtilTimeout: 8_000 });
 // Keep integration tests deterministic: avoid background auto-rebase races
 // during commit creation in Rust core.
 process.env.TREQ_DISABLE_AUTO_REBASE = "1";
-// Skip startup auto-update curl checks (spawn_blocking contention under CI).
+// Skip the startup update check; tests have no updater endpoint.
 process.env.TREQ_DISABLE_AUTO_UPDATE = "1";
 
 // One app data dir (and so one app treq.db) per worker process.

@@ -1,9 +1,6 @@
 import { useState } from "react";
 import useSWR from "swr";
-import {
-  dispatchOverSsh,
-  dispatchMutationOverSsh,
-} from "../lib/remote-dispatch";
+import { dispatchOverSsh } from "../lib/remote-dispatch";
 import type { SshEndpoint } from "../lib/api-types-remote";
 import type {
   Workspace,
@@ -22,7 +19,7 @@ import {
   MutationButton,
   describeMutationOutcome,
 } from "./remote/RemoteScreenControls";
-import { useActionIdempotencyKeys } from "../lib/remote-idempotency";
+import { dispatchKeyedMutationOverSsh } from "../lib/remote-idempotency";
 
 /**
  * Where the user is inside a remote repository. It only names remote
@@ -170,7 +167,6 @@ function WorkspaceListScreen({
   const [branchName, setBranchName] = useState("");
   const [sourceBranch, setSourceBranch] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
-  const actionKeys = useActionIdempotencyKeys();
 
   return (
     <section className="flex flex-col gap-2">
@@ -206,20 +202,13 @@ function WorkspaceListScreen({
             setCreateError(null);
             const branch = branchName.trim();
             const source = sourceBranch.trim() || null;
-            const idempotencyKey = actionKeys.keyFor("create-workspace", [
-              repo,
-              branch,
-              source,
-            ]);
             try {
-              const result = await dispatchMutationOverSsh(endpoint, {
+              const result = await dispatchKeyedMutationOverSsh(endpoint, {
                 kind: "CreateWorkspace",
                 repo,
                 branch_name: branch,
                 source_branch: source,
-                idempotency_key: idempotencyKey,
               });
-              actionKeys.settle(idempotencyKey, result);
               const outcome = describeMutationOutcome(result);
               if (outcome) {
                 setCreateError(outcome);

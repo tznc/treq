@@ -26,7 +26,7 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 | --- | --- | --- |
 | Free | US$0 | No cloud features. |
 | Pro | US$15 per user per month, 14-day trial with a card | `pro` for the subscribing user. |
-| Team | US$99 per month for up to 10 members | `pro` for every member of the organization. |
+| Team | US$199 per month for 5 members, plus US$8 per month for each member beyond 5 | `pro` for every member of the organization. |
 
 The trial applies to Pro only. A user gets one Pro trial per Stripe customer, recorded when the first trial starts.
 
@@ -64,10 +64,10 @@ Stripe stays the source of truth for payment state. The webhook copies the field
 
 | Function | Auth | Behavior |
 | --- | --- | --- |
-| `billing-checkout` | User JWT | Creates or reuses the owner's Stripe customer, then creates an embedded Checkout session in subscription mode. Prices come from the lookup keys `treq_pro_monthly` and `treq_team_monthly`. Pro sets `trial_period_days: 14` unless `trial_used_at` is set, and always collects a card. Team requires the caller to own the organization. Returns the session's client secret. |
+| `billing-checkout` | User JWT | Creates or reuses the owner's Stripe customer, then creates an embedded Checkout session in subscription mode. Prices come from the lookup keys `treq_pro_monthly` and `treq_team_monthly`. Team buys one unit per member. Pro sets `trial_period_days: 14` unless `trial_used_at` is set, and always collects a card. Team requires the caller to own the organization. Returns the session's client secret. |
 | `billing-portal` | User JWT | Returns a Stripe customer portal URL for the caller's customer, or for an organization they own. |
 | `stripe-webhook` | Stripe signature | Verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET`, skips events already in `billing_events`, and upserts `billing_subscriptions` on `customer.subscription.created`, `updated`, and `deleted`. `checkout.session.completed` confirms the customer mapping and sets `trial_used_at`. |
-| `organizations` | User JWT | Creates an organization, invites by email, accepts an invite by token, promotes and demotes owners, removes a member, deletes the organization, and attaches a GitHub App installation the caller linked. |
+| `organizations` | User JWT | Creates an organization, invites by email, accepts an invite by token, promotes and demotes owners, removes a member, deletes the organization, and attaches a GitHub App installation the caller linked. After a join, leave or removal it sets the Team subscription's quantity to the member count. |
 
 The Checkout session carries the owner type and ID in `metadata` and `client_reference_id`. The webhook reads the owner from the customer mapping, not from the email on the Stripe customer.
 
@@ -91,7 +91,7 @@ Sprites have no stop call. A Sprite pauses on its own about 30 seconds after its
 
 ## Organizations and seats
 
-The user who creates an organization becomes its owner. The owner buys Team, invites members by email, and removes them. A Team covers 10 members, counting pending invites. An invite beyond that fails with a message that names the limit.
+The user who creates an organization becomes its owner. The owner buys Team, invites members by email, and removes them. Team has no member cap. Its price `treq_team_monthly` is graduated: the first 5 units carry the flat US$199 and each unit after that costs US$8. The subscription's quantity is the member count, set at checkout and updated with proration by the `organizations` function after every join, leave and removal. Pending invites are not billed. Account deletion does not update the quantity, so a seat freed that way is corrected at the next join, leave or removal.
 
 An invite link holds a single-use token that expires after 7 days. The token sits in the URL fragment, so it never reaches analytics or server logs. Accepting it requires signing in with any account. The invite is matched by token, not by email, so a member can join with a different address.
 
@@ -108,7 +108,7 @@ When an account is deleted and it was the last owner, the longest-standing membe
 Web dashboard:
 
 - The Subscription tab opens embedded Checkout for Pro, shows trial and renewal dates, and links to the customer portal.
-- A Team tab creates an organization, buys Team, lists members and pending invites, and shows seats used out of 10.
+- A Team tab creates an organization, buys Team, lists members and pending invites, and shows members against the 5 included seats and any extra seats billed.
 - The pricing page links its Pro and Team buttons to the matching Checkout.
 
 Desktop app:

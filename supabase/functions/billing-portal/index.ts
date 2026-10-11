@@ -1,11 +1,15 @@
-// Returns a Stripe customer portal URL for the signed-in user's customer
+// Returns a Stripe customer portal URL for the signed-in user's customer, or
+// with `organization_id` for an organization they own
 // (prds/billing-and-teams.md, "Edge functions"). Called by the web dashboard
 // with the user's Supabase JWT. The logic lives in lib.ts.
 // Env: STRIPE_SECRET_KEY, and WEB_URL for the return URL (default
 // https://treq.dev).
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { billingStoreFor } from "../_shared/billing/store.ts";
+import {
+  billingStoreFor,
+  organizationBillingFor,
+} from "../_shared/billing/store.ts";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { createPortal } from "./lib.ts";
 
@@ -52,6 +56,11 @@ Deno.serve(async (req) => {
     return json({ error: "Billing is not configured" }, 500);
   }
 
+  // An empty body opens the user's own portal.
+  const body = (await req.json().catch(() => null)) as {
+    organization_id?: unknown;
+  } | null;
+
   const service = createClient(
     supabaseUrl,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
@@ -60,6 +69,8 @@ Deno.serve(async (req) => {
   try {
     const result = await createPortal({
       store: billingStoreFor(service, user.id),
+      organizations: organizationBillingFor(service, user.id),
+      organizationId: body?.organization_id,
       stripe: createStripeClient(stripeKey),
       webUrl: Deno.env.get("WEB_URL") ?? "https://treq.dev",
     });

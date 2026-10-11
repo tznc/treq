@@ -1,11 +1,15 @@
-// Opens an embedded Stripe Checkout session for Pro and returns its client
-// secret (prds/billing-and-teams.md, "Edge functions"). Called by the web
-// dashboard with the user's Supabase JWT. The logic lives in lib.ts.
+// Opens an embedded Stripe Checkout session for Pro, or for Team on behalf of
+// an organization the caller owns, and returns its client secret
+// (prds/billing-and-teams.md, "Edge functions"). Called by the web dashboard
+// with the user's Supabase JWT. The logic lives in lib.ts.
 // Env: STRIPE_SECRET_KEY, and WEB_URL for the return URL (default
 // https://treq.dev).
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { billingStoreFor } from "../_shared/billing/store.ts";
+import {
+  billingStoreFor,
+  organizationBillingFor,
+} from "../_shared/billing/store.ts";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { createCheckout } from "./lib.ts";
 
@@ -68,6 +72,7 @@ Deno.serve(async (req) => {
     const result = await createCheckout(body, {
       user: { id: user.id, email: user.email },
       store: billingStoreFor(service, user.id),
+      organizations: organizationBillingFor(service, user.id),
       stripe: createStripeClient(stripeKey),
       webUrl: Deno.env.get("WEB_URL") ?? "https://treq.dev",
     });

@@ -42,10 +42,12 @@ export type SubscriptionEventArgs = {
   p_trial_end: string | null;
 };
 
+export type BillingOwnerType = "user" | "organization";
+
 export type CheckoutCompletedArgs = {
   p_event_id: string;
   p_customer_id: string;
-  p_owner_type: "user";
+  p_owner_type: BillingOwnerType;
   p_owner_id: string;
 };
 
@@ -185,7 +187,8 @@ function subscriptionAction(event: StripeEvent): EventAction {
 // The owner comes from metadata, which only billing-checkout can write
 // because it holds the secret key. client_reference_id must agree with it:
 // a Payment Link accepts client_reference_id from its URL, so on its own it
-// would let anyone attach their Stripe customer to another user.
+// would let anyone attach their Stripe customer to another user. The owner
+// is a user for Pro and an organization for Team.
 function checkoutAction(event: StripeEvent): EventAction {
   const session = event.data.object;
   if (session.mode !== "subscription") {
@@ -200,10 +203,11 @@ function checkoutAction(event: StripeEvent): EventAction {
   }
 
   const metadata = isRecord(session.metadata) ? session.metadata : {};
-  if (metadata.owner_type !== "user") {
+  const ownerType = metadata.owner_type;
+  if (ownerType !== "user" && ownerType !== "organization") {
     return {
       action: "ignore",
-      reason: "checkout session without a user owner",
+      reason: "checkout session without a user or organization owner",
     };
   }
   const ownerId = metadata.owner_id;
@@ -226,7 +230,7 @@ function checkoutAction(event: StripeEvent): EventAction {
     args: {
       p_event_id: event.id,
       p_customer_id: customerId,
-      p_owner_type: "user",
+      p_owner_type: ownerType,
       p_owner_id: ownerId.toLowerCase(),
     },
   };

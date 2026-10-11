@@ -4,56 +4,42 @@ import Link from '@docusaurus/Link';
 import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
+import {FAQ_ITEMS, PRICING_SCHEMA} from '@site/src/lib/pricing';
 
 import styles from './pricing.module.css';
 
-const PRICING_SCHEMA = {
-  '@context': 'https://schema.org',
-  '@type': 'Product',
-  name: 'Treq',
-  description:
-    'AI workspace manager for developers. Free desktop app with local GitHub and Linear integrations. Pro adds cloud GitHub and Linear integrations.',
-  url: 'https://treq.dev/pricing',
-  brand: {
-    '@type': 'Brand',
-    name: 'Treq',
-  },
-  offers: [
-    {
-      '@type': 'Offer',
-      name: 'Free',
-      price: '0',
-      priceCurrency: 'USD',
-      description:
-        'Desktop app with local GitHub (via the gh CLI) and Linear (via your API key) integrations.',
-    },
-    {
-      '@type': 'Offer',
-      name: 'Pro',
-      price: '15',
-      priceCurrency: 'USD',
-      unitText: 'user/month',
-      description:
-        'Cloud GitHub and Linear integrations, with no local CLI or API key. Billed per user per month.',
-    },
-  ],
-};
-
 type PlanFeature = {
-  text: string;
-  included: boolean;
+  text: ReactNode;
+  key: string;
 };
 
 const FREE_FEATURES: PlanFeature[] = [
-  {text: 'Full desktop app', included: true},
-  {text: 'Local GitHub integration (gh CLI)', included: true},
-  {text: 'Local Linear integration (your API key)', included: true},
+  {key: 'desktop', text: 'Full desktop app'},
+  {
+    key: 'github',
+    text: (
+      <>
+        GitHub through your local <code>gh</code> CLI, for any repository
+      </>
+    ),
+  },
+  {key: 'linear', text: 'Linear through your personal API key'},
 ];
 
 const PRO_FEATURES: PlanFeature[] = [
-  {text: 'Full desktop app', included: true},
-  {text: 'Cloud GitHub integration', included: true},
-  {text: 'Cloud Linear integration', included: true},
+  {key: 'free', text: 'Everything in Free'},
+  {key: 'github-app', text: 'Treq GitHub App'},
+  {key: 'merge-queue', text: 'Merge queue (private alpha)'},
+  {key: 'cloud', text: 'Managed cloud workspace (private alpha)'},
+  {key: 'linear-oauth', text: 'Linear OAuth'},
+];
+
+const TEAM_FEATURES: PlanFeature[] = [
+  {key: 'pro', text: 'Everything in Pro for every member'},
+  {key: 'installation', text: 'Shared GitHub App installation'},
+  {key: 'merge-queue', text: 'Shared merge queue (private alpha)'},
+  {key: 'one-bill', text: 'One bill for the whole team'},
 ];
 
 type ComparisonCell = {
@@ -65,6 +51,7 @@ type ComparisonRow = {
   feature: string;
   free: ComparisonCell;
   pro: ComparisonCell;
+  team: ComparisonCell;
 };
 
 const COMPARISON_ROWS: ComparisonRow[] = [
@@ -72,45 +59,56 @@ const COMPARISON_ROWS: ComparisonRow[] = [
     feature: 'Desktop app',
     free: {included: true},
     pro: {included: true},
+    team: {included: true},
   },
   {
-    feature: 'GitHub integration',
-    free: {included: true, detail: 'Local, via gh CLI'},
-    pro: {included: true, detail: 'Cloud, no CLI needed'},
+    feature: 'GitHub',
+    free: {included: true, detail: 'Local gh CLI'},
+    pro: {included: true, detail: 'Treq GitHub App'},
+    team: {included: true, detail: 'Shared GitHub App installation'},
   },
   {
-    feature: 'Linear integration',
-    free: {included: true, detail: 'Local, via your API key'},
-    pro: {included: true, detail: 'Cloud, no API key needed'},
+    feature: 'Merge queue',
+    free: {included: false},
+    pro: {included: true, detail: 'Private alpha'},
+    team: {included: true, detail: 'Shared, private alpha'},
+  },
+  {
+    feature: 'Managed cloud workspace',
+    free: {included: false},
+    pro: {included: true, detail: 'Private alpha'},
+    team: {included: true, detail: 'Private alpha, for each member'},
+  },
+  {
+    feature: 'Linear',
+    free: {included: true, detail: 'Personal API key'},
+    pro: {included: true, detail: 'API key or OAuth'},
+    team: {included: true, detail: 'API key or OAuth'},
+  },
+  {
+    feature: 'Price',
+    free: {included: true, detail: 'US$0'},
+    pro: {included: true, detail: 'US$15 per user per month'},
+    team: {included: true, detail: 'US$199 per month for 5 members, US$8 per extra member'},
+  },
+  {
+    feature: 'Free trial',
+    free: {included: false},
+    pro: {included: true, detail: '14 days, card required'},
+    team: {included: false},
   },
 ];
-
-const FAQ_ITEMS = [
-  {
-    question: 'Is the desktop app still free on Pro?',
-    answer:
-      'Yes. Pro is a cloud subscription on top of the same open source desktop app. Your local workspaces stay on your machine either way.',
-  },
-  {
-    question: 'How do I upgrade?',
-    answer:
-      'Create an account, then start a Pro subscription from the dashboard. You can move back to Free if you cancel.',
-  },
-] as const;
 
 function FeatureList({features}: {features: PlanFeature[]}): ReactNode {
   return (
     <ul className={styles.featureList}>
       {features.map((feature) => (
         <li
-          key={feature.text}
-          className={clsx(
-            styles.featureItem,
-            feature.included ? styles.featureIncluded : styles.featureExcluded,
-          )}
+          key={feature.key}
+          className={clsx(styles.featureItem, styles.featureIncluded)}
         >
           <span className={styles.featureMark} aria-hidden="true">
-            {feature.included ? '✓' : '–'}
+            ✓
           </span>
           <span className={styles.featureText}>
             <span>{feature.text}</span>
@@ -124,27 +122,31 @@ function FeatureList({features}: {features: PlanFeature[]}): ReactNode {
 function PlansSection(): ReactNode {
   return (
     <section className={styles.plans} aria-label="Plans">
-      <article className={styles.plan}>
-        <Heading as="h2" className={styles.planName}>
+      <article className={styles.plan} aria-labelledby="plan-free">
+        <Heading as="h2" id="plan-free" className={styles.planName}>
           Free
         </Heading>
+        <p className={styles.planSeats}>Open source</p>
         <p className={styles.planPrice}>
           <span className={styles.priceAmount}>$0</span>
         </p>
         <FeatureList features={FREE_FEATURES} />
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
-          to="/docs/getting-started/installation"
+          href={DOWNLOAD_HREF}
         >
-          Get started
+          Download Treq
         </Link>
       </article>
 
-      <article className={clsx(styles.plan, styles.planPro)}>
-        <Heading as="h2" className={styles.planName}>
+      <article
+        className={clsx(styles.plan, styles.planPro)}
+        aria-labelledby="plan-pro"
+      >
+        <Heading as="h2" id="plan-pro" className={styles.planName}>
           Pro
         </Heading>
-        <p className={styles.planSeats}>Per user</p>
+        <p className={styles.planSeats}>14-day free trial, card required</p>
         <p className={styles.planPrice}>
           <span className={styles.priceAmount}>$15</span>
           <span className={styles.priceUnit}>/user/month</span>
@@ -152,9 +154,27 @@ function PlansSection(): ReactNode {
         <FeatureList features={PRO_FEATURES} />
         <Link
           className={clsx('button', styles.planButton, styles.planButtonPrimary)}
-          to="/dashboard"
+          to="/dashboard?tab=subscription"
         >
-          Upgrade to Pro
+          Start 14-day free trial
+        </Link>
+      </article>
+
+      <article className={styles.plan} aria-labelledby="plan-team">
+        <Heading as="h2" id="plan-team" className={styles.planName}>
+          Team
+        </Heading>
+        <p className={styles.planSeats}>5 members included, US$8 per extra</p>
+        <p className={styles.planPrice}>
+          <span className={styles.priceAmount}>$199</span>
+          <span className={styles.priceUnit}>/month</span>
+        </p>
+        <FeatureList features={TEAM_FEATURES} />
+        <Link
+          className={clsx('button', styles.planButton, styles.planButtonSecondary)}
+          to="/dashboard?tab=team"
+        >
+          Set up Team
         </Link>
       </article>
     </section>
@@ -202,6 +222,7 @@ function ComparisonSection(): ReactNode {
             <col className={styles.comparisonFeatureCol} />
             <col className={styles.comparisonPlanCol} />
             <col className={styles.comparisonPlanCol} />
+            <col className={styles.comparisonPlanCol} />
           </colgroup>
           <thead>
             <tr>
@@ -219,6 +240,9 @@ function ComparisonSection(): ReactNode {
                 )}
               >
                 Pro
+              </th>
+              <th scope="col" className={styles.comparisonPlanHeader}>
+                Team
               </th>
             </tr>
           </thead>
@@ -240,6 +264,9 @@ function ComparisonSection(): ReactNode {
                   )}
                 >
                   <ComparisonValue cell={row.pro} />
+                </td>
+                <td className={styles.comparisonDataCell}>
+                  <ComparisonValue cell={row.team} />
                 </td>
               </tr>
             ))}
@@ -273,7 +300,7 @@ export default function PricingPage(): ReactNode {
   return (
     <Layout
       title="Pricing"
-      description="Treq pricing. Free for open source developers on public GitHub repos. Pro is $15/user/month for all repos."
+      description="Treq pricing. The desktop app is free. Pro is $15 per user per month with a 14-day trial. Team is $199 per month for 5 members, then $8 per extra member."
     >
       <Head>
         <script type="application/ld+json">
@@ -286,7 +313,8 @@ export default function PricingPage(): ReactNode {
             Pricing
           </Heading>
           <p className={styles.intro}>
-            The Treq desktop app is free and open source.
+            The Treq desktop app is free and open source. Pro and Team add the
+            features that run on Treq&apos;s servers.
           </p>
         </header>
 
