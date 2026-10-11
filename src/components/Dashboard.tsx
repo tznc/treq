@@ -13,7 +13,6 @@ import {
 } from "react";
 import useSWR from "swr";
 import { useLocation } from "wouter";
-import { useAutoUpdate } from "../hooks/useAutoUpdate";
 import { useKeyboardShortcut } from "../hooks/useKeyboard";
 import { useMutation } from "../hooks/useMutation";
 import { useWorkspaceHierarchy } from "../hooks/useWorkspaceHierarchy";
@@ -803,7 +802,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setProvisioningError(undefined);
     try {
       const [hosts, status] = await Promise.all([
-        listSshHosts().catch(() => []),
+        // ~/.ssh/config discovery only feeds the user-managed form.
+        useFeaturePreviewStore.getState().flags.remoteSsh
+          ? listSshHosts().catch(() => [])
+          : Promise.resolve([]),
         getInstanceStatus().catch(() => null),
       ]);
       setRemoteSshHosts(hosts.map((h) => h.alias));
@@ -1147,10 +1149,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const terminalPaneRef = useRef<WorkspaceTerminalPaneHandle>(null);
 
   const { addToast } = useToast();
-  useAutoUpdate({
-    autoCheck: import.meta.env.MODE !== "test",
-    listenMenu: import.meta.env.MODE !== "test",
-  });
   const handleReturnToDashboard = () => {
     // Navigate to main repo ShowWorkspace > Code
     setSelectedWorkspace(null);
@@ -1800,7 +1798,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Restore the last-opened remote SSH repository only after reconnect and
   // trust validation. A stored blob or descriptor is not enough on its own.
   useEffect(() => {
-    if (!remoteSshEnabled || repoPath) {
+    if (repoPath) {
       return;
     }
     let cancelled = false;
@@ -1814,9 +1812,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const descriptor = await getSavedRemoteRepository(id);
       if (!descriptor || cancelled) return;
 
-      const userManaged = (await listUserManagedEndpoints()).find(
-        (endpoint) => endpoint.id === descriptor.endpoint_id,
-      );
+      // User-managed endpoints only restore while the preview is on; the
+      // Treq-managed cloud workspace restores regardless.
+      const userManaged = useFeaturePreviewStore.getState().flags.remoteSsh
+        ? (await listUserManagedEndpoints()).find(
+            (endpoint) => endpoint.id === descriptor.endpoint_id,
+          )
+        : undefined;
       let endpoint: SshEndpoint | null = userManaged
         ? sshEndpointFromUserManaged(userManaged)
         : null;
@@ -1918,7 +1920,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }),
       // Menu open via SSH
       listen("menu-open-ssh", () => {
-        if (!useFeaturePreviewStore.getState().flags.remoteSsh) return;
         void handleOpenRemoteSetup();
       }),
       // Menu factory reset
@@ -2057,33 +2058,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setSessionSelectedFile(options?.selectedFilePath ?? null);
   };
 
-  // A session started away from the visible terminal (a tracker kickoff, or a
-  // dialog pointed at another workspace) gets a toast instead of a jump.
-  const announceSessionStarted = async (
-    sessionId: number,
-    workspaceId: number | null,
-  ) => {
-    const known =
-      workspaceId == null || workspaces.some((ws) => ws.id === workspaceId)
-        ? workspaces
-        : await fetchAndCache(["workspaces", queryRepoKey], () =>
-            getWorkspaces(dataRepoPath),
-          ).catch(() => workspaces);
-    const workspace = known.find((ws) => ws.id === workspaceId) ?? null;
-    addToast({
-      title: "Session started",
-      description: `in ${workspace?.branch_name ?? effectiveDefaultBranch}`,
-      type: "success",
-      action: {
-        label: "Open",
-        onClick: () => {
-          handleSelectWorkspace(workspace);
-          setActiveSessionId(toPaneSessionId(repoPath, sessionId));
-        },
-      },
-    });
-  };
-
   const handleSessionCreated = (sessionData: {
     sessionId: number;
     workspaceId?: number | null;
@@ -2104,12 +2078,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     const paneId = toPaneSessionId(repoPath, sessionData.sessionId);
     setActiveSessionId(paneId);
-    const targetWorkspaceId = sessionData.workspaceId ?? null;
-    const onScreen =
-      isSessionView && (selectedWorkspace?.id ?? null) === targetWorkspaceId;
-    if (!onScreen) {
-      void announceSessionStarted(sessionData.sessionId, targetWorkspaceId);
-    }
     if (
       sessionData.pendingPrompt ||
       sessionData.permissionMode ||
@@ -2936,6 +2904,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       open={showRemoteSetupDialog}
       onOpenChange={setShowRemoteSetupDialog}
       sshConfigAliasSuggestions={remoteSshHosts}
+      allowUserManaged={remoteSshEnabled}
       instanceStatus={instanceStatus}
       provisioningStage={provisioningStage}
       provisioningError={provisioningError}
@@ -3007,8 +2976,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <>
           <Onboarding
             onOpenRepo={handleOpenRepository}
-            onOpenRemoteSsh={
-              remoteSshEnabled ? handleOpenRemoteSetup : undefined
+            onOpenRemoteSsh={handleOpenRemoteSetup}
+            remoteLabel={
+              remoteSshEnabled ? "Open via SSH" : "Open cloud workspace"
             }
           />
           {explicitEndpointPathForm}

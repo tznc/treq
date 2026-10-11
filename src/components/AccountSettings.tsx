@@ -37,8 +37,16 @@ interface AccountSettingsProps {
 export const AccountSettings: React.FC<AccountSettingsProps> = ({
   cloudWorkspace,
 }) => {
-  const { user, loading, subscription, signIn, signOut, exchangeToken } =
-    useAuthStore();
+  const {
+    user,
+    loading,
+    signingIn,
+    signInError,
+    subscription,
+    signIn,
+    signOut,
+    exchangeToken,
+  } = useAuthStore();
   const [callbackUrl, setCallbackUrl] = useState("");
   const [devError, setDevError] = useState<string | null>(null);
   const [devLoading, setDevLoading] = useState(false);
@@ -82,6 +90,18 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
     );
   }
 
+  if (signingIn) {
+    return (
+      <div
+        role="status"
+        className="flex flex-col items-center justify-center py-16 gap-3"
+      >
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Signing you in…</p>
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
@@ -98,6 +118,11 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
           <ExternalLink className="w-4 h-4" />
           Sign in with Browser
         </Button>
+        {signInError && (
+          <p role="alert" className="text-sm text-destructive text-center">
+            Sign-in failed: {signInError}
+          </p>
+        )}
 
         {isDev && (
           <div className="w-full max-w-sm mt-4 p-3 border border-dashed border-yellow-500/50 rounded-lg bg-yellow-500/5">

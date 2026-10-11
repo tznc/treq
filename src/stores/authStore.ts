@@ -22,6 +22,10 @@ export interface AuthState {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  /** True while a sign-in token from a `treq://auth/callback` link is exchanged. */
+  signingIn: boolean;
+  /** Why the last token exchange failed; cleared when a new one starts. */
+  signInError: string | null;
   subscription: Subscription | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -35,6 +39,8 @@ export const defaultAuthState = {
   user: null as User | null,
   session: null as Session | null,
   loading: true,
+  signingIn: false,
+  signInError: null as string | null,
   subscription: null as Subscription | null,
 };
 
@@ -85,6 +91,53 @@ export function startSubscriptionRefreshOnFocus(): () => void {
   });
 }
 
+type SetAuth = (partial: Partial<AuthState>) => void;
+type GetAuth = () => AuthState;
+
+/** Trades a one-time desktop sign-in token for a Supabase session. */
+async function exchangeTokenForSession(
+  token: string,
+  set: SetAuth,
+  get: GetAuth,
+) {
+  const response = await fetch(
+    `${SUPABASE_URL}/functions/v1/exchange-desktop-token`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ token }),
+    },
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error || "Token exchange failed",
+    );
+  }
+
+  const data = await response.json();
+  watchAuthChanges();
+  const { data: sessionData, error } = await supabase.auth.setSession({
+    access_token: data.access_token as string,
+    refresh_token: data.refresh_token as string,
+  });
+
+  if (error) throw error;
+  if (sessionData.session) {
+    set({
+      session: sessionData.session,
+      user: sessionData.session.user,
+    });
+    await persistSession(sessionData.session);
+    await get().fetchSubscription();
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   ...defaultAuthState,
   signIn: async () => {
@@ -124,41 +177,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await get().fetchSubscription();
   },
   exchangeToken: async (token) => {
-    const response = await fetch(
-      `${SUPABASE_URL}/functions/v1/exchange-desktop-token`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          apikey: SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ token }),
-      },
-    );
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(
-        (err as { error?: string }).error || "Token exchange failed",
-      );
-    }
-
-    const data = await response.json();
-    watchAuthChanges();
-    const { data: sessionData, error } = await supabase.auth.setSession({
-      access_token: data.access_token as string,
-      refresh_token: data.refresh_token as string,
-    });
-
-    if (error) throw error;
-    if (sessionData.session) {
+    set({ signingIn: true, signInError: null });
+    try {
+      await exchangeTokenForSession(token, set, get);
+    } catch (err) {
       set({
-        session: sessionData.session,
-        user: sessionData.session.user,
+        signInError:
+          err instanceof Error ? err.message : "Token exchange failed",
       });
-      await persistSession(sessionData.session);
-      await get().fetchSubscription();
+      throw err;
+    } finally {
+      set({ signingIn: false });
     }
   },
   restoreSession: async () => {

@@ -37,11 +37,14 @@ const TooltipContent = ({
   sideOffset?: number;
 }) => (
   <TooltipPortal>
+    {/* The positioner's transform makes it the stacking context, so it needs
+        the z-index for the tooltip to show above z-indexed page content. */}
     <TooltipPrimitive.Positioner
       align={align}
       alignOffset={alignOffset}
       side={side}
       sideOffset={sideOffset}
+      className="z-50"
     >
       <TooltipPrimitive.Popup
         ref={ref}

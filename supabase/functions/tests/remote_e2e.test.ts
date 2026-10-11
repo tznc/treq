@@ -115,6 +115,36 @@ async function createE2eTestUser(cfg: NonNullable<ReturnType<typeof e2eConfig>>)
     throw new Error(`failed to create e2e test user: ${createError?.message}`);
   }
 
+  // ensure/wake/reprovision answer 402 `pro_required` without Pro. Grant it
+  // through the RPCs the Stripe webhook calls (as service-qa's billing.ts).
+  const billingSuffix = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
+  const customerId = `cus_e2e${billingSuffix}`;
+  const eventIds = [`evt_e2e${billingSuffix}a`, `evt_e2e${billingSuffix}b`];
+  const mapped = await admin.rpc("billing_record_checkout_completed", {
+    p_event_id: eventIds[0],
+    p_customer_id: customerId,
+    p_owner_type: "user",
+    p_owner_id: created.user.id,
+  });
+  const subscribed = await admin.rpc("billing_record_subscription_event", {
+    p_event_id: eventIds[1],
+    p_event_type: "customer.subscription.created",
+    p_event_created: new Date().toISOString(),
+    p_subscription_id: `sub_e2e${billingSuffix}`,
+    p_customer_id: customerId,
+    p_plan: "pro",
+    p_status: "active",
+    p_current_period_end: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    p_cancel_at_period_end: false,
+    p_trial_end: null,
+  });
+  if (mapped.data !== "applied" || subscribed.data !== "applied") {
+    await admin.auth.admin.deleteUser(created.user.id);
+    throw new Error(
+      `failed to grant Pro to e2e test user: ${mapped.error?.message ?? mapped.data} / ${subscribed.error?.message ?? subscribed.data}`,
+    );
+  }
+
   const anon = createClient(cfg.url, cfg.anonKey);
   const { data: signedIn, error: signInError } = await anon.auth.signInWithPassword({ email, password });
   if (signInError || !signedIn.session) {
@@ -130,6 +160,10 @@ async function createE2eTestUser(cfg: NonNullable<ReturnType<typeof e2eConfig>>)
      * or are removed by the standalone cleanup script's own pass keyed off
      * the same tag - this call always runs from a `finally` block below. */
     async cleanup() {
+      // Deleting the user does not cascade to billing rows.
+      await admin.from("billing_subscriptions").delete().eq("owner_id", created.user!.id);
+      await admin.from("billing_customers").delete().eq("owner_id", created.user!.id);
+      await admin.from("billing_events").delete().in("stripe_event_id", eventIds);
       const { error } = await admin.auth.admin.deleteUser(created.user!.id);
       if (error) {
         console.error(`[remote-e2e cleanup] FAILED to delete test user ${created.user!.id}: ${error.message}`);

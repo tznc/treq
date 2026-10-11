@@ -4006,6 +4006,14 @@ fn workspace_diff_with_conflict_style(
   let base_revision =
     resolve_workspace_diff_base_revision(repo_path, &workspace, workspace_dir_str)?;
   let tip_revision = resolve_workspace_diff_tip_revision(repo_path, &workspace, workspace_dir_str)?;
+  // Diff from the fork point, not the base tip: when the target moves ahead
+  // (e.g. a remote merge is fetched) before the workspace is rebased, a
+  // two-dot diff shows the target's new commits as reverted Committed files.
+  let base_revision = if base_revision == "@" {
+    base_revision
+  } else {
+    jj::fork_point_revset(&base_revision, &tip_revision)
+  };
 
   let mut diff = jj::jj_get_merge_diff_between_revisions(
     workspace_dir_str,

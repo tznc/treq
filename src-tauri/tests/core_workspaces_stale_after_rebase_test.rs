@@ -518,3 +518,56 @@ fn test_auto_rebase_does_not_leave_stale_working_copy_on_stacked_workspaces() {
     assert!(is_clean, "[{label}] Expected clean WC at '{path}'");
   }
 }
+
+// ─── test 7: commits stacked on a carried working copy ──────────────────────
+
+/// A rebase carries another workspace's working copy along when it sits on the
+/// moved lineage. When commits sit on top of that working copy, moving it alone
+/// would split them off it, so the stack stays together.
+#[test]
+fn lineage_rebase_keeps_commits_on_their_stacked_working_copy() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch().to_string();
+  let ws_a = repo
+    .create_workspace_with_commit("feat/split-a", "split-a.txt", "a\n", None)
+    .expect("Failed to create workspace A");
+  let ws_b = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/split-b",
+    None,
+    None,
+    Some(&ws_a.branch_name),
+    None,
+    None,
+  )
+  .expect("Failed to create empty workspace B");
+  let ws_c = repo
+    .create_workspace_with_commit(
+      "feat/split-c",
+      "split-c.txt",
+      "c\n",
+      Some(&ws_b.branch_name),
+    )
+    .expect("Failed to create workspace C");
+  let a_path = repo.workspace_full_path(&ws_a);
+  let b_path = repo.workspace_full_path(&ws_b);
+  let c_path = repo.workspace_full_path(&ws_c);
+  repo
+    .commit_file("main-advance.txt", "advance\n", "chore: advance main")
+    .expect("Failed to advance main");
+
+  jj::jj_rebase_workspace_bookmark_onto(&a_path, &ws_a.branch_name, &default_branch)
+    .expect("Failed to rebase workspace A");
+
+  assert!(
+    std::path::Path::new(&a_path)
+      .join("main-advance.txt")
+      .exists(),
+    "A should be on the advanced main"
+  );
+  assert_eq!(
+    jj::jj_get_commit_id(&c_path, "@--").expect("C base"),
+    workspace_wc_commit(&b_path),
+    "C's commit should stay on B's working copy"
+  );
+}

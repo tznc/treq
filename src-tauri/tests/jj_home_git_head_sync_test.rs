@@ -382,6 +382,75 @@ fn workspace_bookmark_rebase() {
   assert!(assert_git_head_follows_wc_parent(&repo, Some("feature")).is_empty());
 }
 
+/// Rebasing a workspace stacked on home's checked-out branch rewrites that
+/// branch's commits. Home's `@` must move with them: HEAD stays on the branch
+/// by name and uncommitted home edits survive.
+#[test]
+fn stacked_workspace_rebase_keeps_home_on_branch() {
+  let (repo, main) = home_on_feature();
+  let ws = repo
+    .create_workspace_with_commit("ws-branch", "ws.txt", "ws\n", Some("feature"))
+    .expect("stacked workspace");
+  let ws_path = repo.workspace_full_path(&ws);
+  TestRepo::write_workspace_file(&repo.repo_path, "f1.txt", "edited at home\n").expect("write");
+  TestRepo::write_workspace_file(&repo.repo_path, "home.txt", "new at home\n").expect("write");
+  jj::jj_get_changed_files(&repo.repo_path).expect("snapshot home edits");
+
+  jj::jj_rebase_workspace_bookmark_onto(&ws_path, "ws-branch", &main).expect("rebase workspace");
+
+  git(&repo, &["merge-base", "--is-ancestor", &main, "feature"]);
+  assert_eq!(
+    assert_git_head_follows_wc_parent(&repo, Some("feature")),
+    vec!["f1.txt", "home.txt"]
+  );
+  let home = std::path::Path::new(&repo.repo_path);
+  assert_eq!(
+    std::fs::read_to_string(home.join("f1.txt")).unwrap(),
+    "edited at home\n"
+  );
+  assert!(
+    home.join("target_0.txt").exists(),
+    "home should see the rebased base"
+  );
+}
+
+/// Working copies stacked on each other (home, then two workspaces whose `@`
+/// sit on the previous `@`) all move when the lineage under home moves.
+#[test]
+fn stacked_workspace_rebase_moves_chained_working_copies() {
+  let (repo, main) = home_on_feature();
+  let ws = repo
+    .create_workspace_with_commit("ws-branch", "ws.txt", "ws\n", Some("feature"))
+    .expect("stacked workspace");
+  let ws_path = repo.workspace_full_path(&ws);
+  let second = repo
+    .create_workspace_simple("wc-second")
+    .expect("second workspace");
+  let second_path = repo.workspace_full_path(&second);
+  let third = repo
+    .create_workspace_simple("wc-third")
+    .expect("third workspace");
+  let third_path = repo.workspace_full_path(&third);
+  let home_wc = jj::jj_get_commit_id(&repo.repo_path, "@").expect("home @");
+  jj::jj_new_with_parents(&second_path, &[home_wc]).expect("second @ on home @");
+  let second_wc = jj::jj_get_commit_id(&second_path, "@").expect("second @");
+  jj::jj_new_with_parents(&third_path, &[second_wc]).expect("third @ on second @");
+
+  jj::jj_rebase_workspace_bookmark_onto(&ws_path, "ws-branch", &main).expect("rebase workspace");
+
+  assert!(assert_git_head_follows_wc_parent(&repo, Some("feature")).is_empty());
+  assert_eq!(
+    jj::jj_get_commit_id(&second_path, "@-").expect("second parent"),
+    jj::jj_get_commit_id(&repo.repo_path, "@").expect("home @ after"),
+    "the second working copy should stay on home's @"
+  );
+  assert_eq!(
+    jj::jj_get_commit_id(&third_path, "@-").expect("third parent"),
+    jj::jj_get_commit_id(&second_path, "@").expect("second @ after"),
+    "the third working copy should stay on the second's @"
+  );
+}
+
 /// Covers the resolve workspace lifecycle: start (detach), pick a side,
 /// commit the resolution, then forget the resolve workspace.
 #[test]

@@ -319,3 +319,69 @@ fn test_dry_run_no_conflict_with_disjoint_changes() {
     "dry run should not detect conflict for disjoint changes"
   );
 }
+
+/// A home-repo branch cut from the default branch tip has no target-ahead commits,
+/// but `include_target_branch_history` should still return the default branch's
+/// recent history so the Commits tab can show it below the branch's own commits.
+#[test]
+fn test_list_commits_on_feature_branch_includes_default_branch_history() {
+  let repo = TestRepo::new().expect("create repo");
+  let default_branch = repo.default_branch();
+
+  repo
+    .commit_file("main_history.txt", "main history", "main history commit")
+    .expect("main history commit");
+
+  create_branch_with_commit(
+    &repo,
+    "tipfeature",
+    default_branch,
+    "tip_feature.txt",
+    "tip feature",
+    "tip feature work",
+  );
+
+  let result = list_commits(&repo.repo_path, None, true, None, Some(20))
+    .expect("list_commits with target history should succeed");
+
+  let branch_descriptions: Vec<_> = result
+    .commits
+    .iter()
+    .filter(|c| !c.on_target_only)
+    .map(|c| c.description.clone())
+    .collect();
+  let target_descriptions: Vec<_> = result
+    .commits
+    .iter()
+    .filter(|c| c.on_target_only)
+    .map(|c| c.description.clone())
+    .collect();
+
+  assert!(
+    branch_descriptions
+      .iter()
+      .any(|d| d.contains("tip feature work")),
+    "branch commit should be listed first, got: {:?}",
+    branch_descriptions
+  );
+  assert!(
+    target_descriptions
+      .iter()
+      .any(|d| d.contains("main history commit")),
+    "default branch history should be included, got: {:?}",
+    target_descriptions
+  );
+  assert!(
+    !target_descriptions
+      .iter()
+      .any(|d| d.contains("tip feature work")),
+    "branch commits must not be duplicated into target history"
+  );
+
+  let without_target = list_commits(&repo.repo_path, None, false, None, Some(20))
+    .expect("list_commits without target history should succeed");
+  assert!(
+    without_target.commits.iter().all(|c| !c.on_target_only),
+    "default branch history should be omitted when include_target_branch_history is false"
+  );
+}

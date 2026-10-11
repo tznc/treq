@@ -33,11 +33,14 @@ const PopoverContent = ({
   sideOffset?: number;
 }) => (
   <PopoverPrimitive.Portal>
+    {/* The positioner's transform makes it the stacking context, so it needs
+        the z-index for the popup to open above z-indexed page content. */}
     <PopoverPrimitive.Positioner
       align={align}
       alignOffset={alignOffset}
       side={side}
       sideOffset={sideOffset}
+      className="z-50"
     >
       <PopoverPrimitive.Popup
         ref={ref}

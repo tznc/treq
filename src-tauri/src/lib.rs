@@ -327,6 +327,7 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
 fn menu_item_url(menu_id: &str) -> Option<&'static str> {
   match menu_id {
     "learn_more" => Some("https://treq.dev/docs"),
+    "discussions" => Some("https://github.com/tznc/treq/discussions"),
     _ => None,
   }
 }
@@ -677,16 +678,15 @@ pub fn run() {
           // Help menu
           let view_logs_item = MenuItemBuilder::with_id("view_logs", "View Logs").build(app)?;
 
-          let check_for_updates_item =
-            MenuItemBuilder::with_id("check_for_updates", "Check for Updates...").build(app)?;
-
           let learn_more_item = MenuItemBuilder::with_id("learn_more", "Learn More").build(app)?;
+          let discussions_item =
+            MenuItemBuilder::with_id("discussions", "Community Discussions").build(app)?;
 
           let help_menu = SubmenuBuilder::new(app, "Help")
-            .item(&check_for_updates_item)
             .item(&view_logs_item)
             .separator()
             .item(&learn_more_item)
+            .item(&discussions_item)
             .build()?;
 
           let menu_builder = MenuBuilder::new(app)
@@ -774,10 +774,13 @@ pub fn run() {
           // Help menu
           let view_logs_item = MenuItemBuilder::with_id("view_logs", "View Logs").build(app)?;
           let learn_more_item = MenuItemBuilder::with_id("learn_more", "Learn More").build(app)?;
+          let discussions_item =
+            MenuItemBuilder::with_id("discussions", "Community Discussions").build(app)?;
           let help_menu = SubmenuBuilder::new(app, "Help")
             .item(&view_logs_item)
             .separator()
             .item(&learn_more_item)
+            .item(&discussions_item)
             .build()?;
 
           let mut menu_builder = MenuBuilder::new(app).item(&file_menu).item(&go_menu);
@@ -824,7 +827,6 @@ pub fn run() {
               let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
             }
           }
-          "check_for_updates" => emit_to_focused(app, "menu-check-for-updates", ()),
           id => {
             if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
@@ -1091,6 +1093,14 @@ mod tests {
   #[test]
   fn maps_learn_more_menu_item_to_docs_url() {
     assert_eq!(menu_item_url("learn_more"), Some("https://treq.dev/docs"));
+  }
+
+  #[test]
+  fn maps_discussions_menu_item_to_github_discussions() {
+    assert_eq!(
+      menu_item_url("discussions"),
+      Some("https://github.com/tznc/treq/discussions")
+    );
   }
 
   #[test]
