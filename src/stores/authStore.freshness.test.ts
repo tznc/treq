@@ -200,3 +200,62 @@ describe("subscription refresh on window focus", () => {
     expect(mocks.subscriptionQuery.single).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("exchangeToken", () => {
+  it("is signing in until the session and subscription are loaded", async () => {
+    const useAuthStore = await loadStore();
+    let finishExchange!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishExchange = resolve;
+          }),
+      ),
+    );
+    mocks.auth.setSession.mockResolvedValue({
+      data: { session: session("new-access", "new-refresh") },
+      error: null,
+    });
+
+    const exchange = useAuthStore.getState().exchangeToken("tok");
+    expect(useAuthStore.getState().signingIn).toBe(true);
+
+    finishExchange(
+      new Response(JSON.stringify({ access_token: "a", refresh_token: "r" }), {
+        status: 200,
+      }),
+    );
+    await exchange;
+
+    expect(useAuthStore.getState()).toMatchObject({
+      signingIn: false,
+      signInError: null,
+      user: { id: "user-1" },
+      subscription: { plan: "free" },
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("records why a failed exchange failed", async () => {
+    const useAuthStore = await loadStore();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "Token expired" }), {
+          status: 400,
+        }),
+      ),
+    );
+
+    await expect(useAuthStore.getState().exchangeToken("tok")).rejects.toThrow(
+      "Token expired",
+    );
+    expect(useAuthStore.getState()).toMatchObject({
+      signingIn: false,
+      signInError: "Token expired",
+    });
+    vi.unstubAllGlobals();
+  });
+});
