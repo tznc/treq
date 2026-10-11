@@ -57,7 +57,7 @@ it("captures Create PR sending the description an agent just wrote", async () =>
     name: "create-pr-agent-description-01-before",
     expectations: [
       "The workspace header for feat/create-pr shows an enabled dark 'Create PR' button with a GitHub icon.",
-      "The header subtitle still reads 'Initial task from the user': the view has not re-read the description the agent just wrote.",
+      "The description box in the Code tab, between the prompt input and the file list, still reads 'Initial task from the user': the view has not re-read the description the agent just wrote.",
     ],
   });
 
@@ -77,7 +77,7 @@ it("captures Create PR sending the description an agent just wrote", async () =>
     name: "create-pr-agent-description-02-created",
     expectations: [
       "A green success toast reads 'Pull request created' with '#81' beneath it.",
-      "The header subtitle now shows the agent's description (Summary / Testing), the text sent as the PR body.",
+      "The description box in the Code tab now shows the agent's description rendered as Markdown: 'Summary' and 'Testing' headings with bullet lists, no literal '##'.",
     ],
   });
 }, 60000);
