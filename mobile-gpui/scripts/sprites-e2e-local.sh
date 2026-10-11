@@ -2,39 +2,32 @@
 # Runs tests/sprites_e2e.rs against a local Supabase CLI stack whose Edge
 # Functions call the real Sprites API (no stub). See SPRITES_E2E.md.
 #
-#   TREQ_SPRITES_API_TOKEN=<test-org token> mobile-gpui/scripts/sprites-e2e-local.sh
+# You configure supabase/functions/.env yourself; this script only checks it.
 #
-# Set SKIP_STACK=1 to reuse a stack this script already started.
+#   mobile-gpui/scripts/sprites-e2e-local.sh
+#
+# Set SKIP_STACK=1 to reuse a stack that is already running with that .env.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 
-: "${TREQ_SPRITES_API_TOKEN:?set TREQ_SPRITES_API_TOKEN to a token from a dedicated Sprites test organization}"
 for tool in supabase docker cargo; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "$tool not found" >&2; exit 1; }
 done
 
+env_file=supabase/functions/.env
+fail() { echo "$env_file: $1 (see mobile-gpui/SPRITES_E2E.md)" >&2; exit 1; }
+[ -f "$env_file" ] || fail "missing"
+grep -Eq '^TREQ_SPRITES_API_TOKEN=.+' "$env_file" || fail "set TREQ_SPRITES_API_TOKEN to a test-organization token"
+grep -Eq '^REMOTE_SSH_RELAY_URL=.+' "$env_file" || fail "set REMOTE_SSH_RELAY_URL so this machine can dial the relay"
+grep -Eq '^REMOTE_SSH_CA_ED25519_SEED_BASE64=.+' "$env_file" || fail "set the REMOTE_SSH_CA_ED25519_* pair"
+grep -Eq '^TREQ_REMOTE_SPRITES_STUB=1' "$env_file" && fail "remove TREQ_REMOTE_SPRITES_STUB=1, or provisioning never reaches Sprites"
+
 if [ "${SKIP_STACK:-}" != "1" ]; then
 	docker info >/dev/null 2>&1 || { echo "Docker is not reachable" >&2; exit 1; }
 	npm install --omit=dev --prefix supabase/functions >/dev/null
-
-	# The functions read this file when the stack starts. Unlike
-	# scripts/service-qa/up.sh there is no TREQ_REMOTE_SPRITES_STUB, so
-	# provisioning hits Sprites. The relay URL must be one this machine can
-	# dial: the functions' own SUPABASE_URL is a Docker-internal address.
-	# The CA pair is the local-only one service-qa uses.
-	env_file=supabase/functions/.env
-	[ -f "$env_file" ] && cp "$env_file" "$env_file.bak-sprites-e2e"
-	cat >"$env_file" <<EOF
-TREQ_SPRITES_API_TOKEN=${TREQ_SPRITES_API_TOKEN}
-TREQ_SPRITES_API_URL=${TREQ_SPRITES_API_URL:-https://api.sprites.dev}
-REMOTE_SSH_RELAY_URL=http://127.0.0.1:54321/functions/v1/remote-ssh-relay
-REMOTE_SSH_CA_ED25519_SEED_BASE64=U7QP4DsQ6pPuNz9nyuniR6tEsHqTOvulJhpWElYm07Y=
-REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64=uL88vOSTAX5b7HkQyciJmsjAKWT4aJVnukznoRrgDic=
-EOF
-	echo "Wrote $env_file (previous copy, if any: $env_file.bak-sprites-e2e)"
-
+	# The functions read the .env when the stack starts.
 	supabase stop >/dev/null 2>&1 || true
 	supabase start --exclude logflare,vector,studio,imgproxy,storage-api
 	supabase db reset --local

@@ -27,25 +27,38 @@ The first build of the mobile crate compiles GPUI and takes a while. Later build
 
 You only need a Sprites token. Everything else runs on your machine.
 
-```bash
-cd treq
-export TREQ_SPRITES_API_TOKEN=<test-org token>
-mobile-gpui/scripts/sprites-e2e-local.sh
-```
+1. Edit `supabase/functions/.env` yourself. The script reads it but never writes it. Remove `TREQ_REMOTE_SPRITES_STUB=1` if `scripts/service-qa/up.sh` put it there, and make sure these lines are present:
+
+   ```bash
+   TREQ_SPRITES_API_TOKEN=<test-org token>
+   # TREQ_SPRITES_API_URL=https://api.sprites.dev   # optional, this is the default
+   # The functions' own SUPABASE_URL is a Docker-internal address, so point the relay at one this machine can dial.
+   REMOTE_SSH_RELAY_URL=http://127.0.0.1:54321/functions/v1/remote-ssh-relay
+   # Local-only CA pair, the same one service-qa uses.
+   REMOTE_SSH_CA_ED25519_SEED_BASE64=U7QP4DsQ6pPuNz9nyuniR6tEsHqTOvulJhpWElYm07Y=
+   REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64=uL88vOSTAX5b7HkQyciJmsjAKWT4aJVnukznoRrgDic=
+   ```
+
+2. Run the script:
+
+   ```bash
+   cd treq
+   mobile-gpui/scripts/sprites-e2e-local.sh
+   ```
 
 The script:
 
-- Writes `supabase/functions/.env` with your token, the local test CA and `REMOTE_SSH_RELAY_URL=http://127.0.0.1:54321/...`. Unlike `scripts/service-qa/up.sh`, it does not set `TREQ_REMOTE_SPRITES_STUB`. It backs up the previous file to `.env.bak-sprites-e2e`.
-- Restarts the stack with `supabase start`, then runs `supabase db reset --local`. **This wipes your local database.**
+- Checks the `.env`: the token, relay URL and CA must be set, and the stub must be off. If anything is wrong it stops and names the line to fix.
+- Restarts the stack with `supabase start` so the functions pick up the `.env`, then runs `supabase db reset --local`. **This wipes your local database.**
 - Reads the URL and keys from `supabase status -o env` and runs the suite.
 
-To re-run against the same stack without resetting it:
+To re-run against the same stack without restarting or resetting it:
 
 ```bash
 SKIP_STACK=1 mobile-gpui/scripts/sprites-e2e-local.sh
 ```
 
-Afterwards, restore the stub setup for service-qa with `scripts/service-qa/up.sh`. If you want your old `.env` back, it is in `supabase/functions/.env.bak-sprites-e2e`.
+Note that `scripts/service-qa/up.sh` overwrites `supabase/functions/.env` with its stub setup. After running it, redo step 1.
 
 ## Option B: the hosted Supabase test project (what CI uses)
 
@@ -89,7 +102,7 @@ A line like `SKIP: TREQ_REMOTE_E2E_MOBILE=1 not set` followed by `ok` means noth
 
 - **`ensure: 402 … pro_required`**: the Pro grant did not take. Check that the billing migrations are applied (`supabase db reset --local`, or `supabase db push` on the test project).
 - **Stuck below `ready`, then a timeout**: provisioning failed at Sprites. Look at the Edge Function logs (`supabase functions logs` locally, or the dashboard). Each failing call prints a `correlation_id` you can search for.
-- **Relay or SSH errors on the first command**: in option A, check that `REMOTE_SSH_RELAY_URL` in `supabase/functions/.env` is reachable from your machine and that the stack was restarted after the file was written.
+- **Relay or SSH errors on the first command**: in option A, check that `REMOTE_SSH_RELAY_URL` in `supabase/functions/.env` is reachable from your machine. If you edited the `.env` after the stack started, restart it (run without `SKIP_STACK`).
 - **The run was killed, so no cleanup ran**: the Sprite is named `dev-treq-<user id>`. Delete it in the Sprites dashboard or CLI. Against the hosted test project, `deno run --allow-net --allow-env scripts/remote-e2e-cleanup.ts --dry-run` lists what is left over.
 
 ## CI
