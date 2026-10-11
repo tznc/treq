@@ -303,11 +303,13 @@ export const WorkspaceSidebarItem: React.FC<WorkspaceSidebarItemProps> = ({
                             statusIndicator.color === "red"
                               ? `workspace-conflict-indicator-${workspace.id}`
                               : `workspace-status-indicator-${workspace.id}`;
+                          // Spinner centers via inset-y-0 my-auto: animate-spin's
+                          // transform would override a -translate-y-1/2.
                           return statusIndicator.spin ? (
                             <Loader2
                               data-testid={testId}
                               className={cn(
-                                "w-3.5 h-3.5 shrink-0 animate-spin absolute right-3 top-1/2 -translate-y-1/2 group-hover/workspace:hidden group-focus-within/workspace:hidden",
+                                "w-3.5 h-3.5 shrink-0 animate-spin absolute right-3 inset-y-0 my-auto group-hover/workspace:hidden group-focus-within/workspace:hidden",
                                 WORKSPACE_STATUS_DOT_TEXT_CLASS[
                                   statusIndicator.color
                                 ],
