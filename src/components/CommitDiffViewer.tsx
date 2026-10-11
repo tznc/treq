@@ -271,8 +271,8 @@ export const CommitDiffViewer = ({
         return listCommits(
           repoPath,
           null,
-          false,
-          undefined,
+          true,
+          targetBranchLimit > 10 ? targetBranchLimit : undefined,
           homeRepoLimit > 15 ? homeRepoLimit : undefined,
         );
       }
@@ -314,6 +314,8 @@ export const CommitDiffViewer = ({
       return {
         ...empty,
         commits: normalizeCommits(workspaceCommits),
+        targetBranchCommits: targetOnly,
+        targetBranchCommitsBranch: commitsResult.target_branch ?? null,
       };
     }
 
@@ -774,7 +776,7 @@ export const CommitDiffViewer = ({
 
   const targetBranchDayGroups = groupCommitsByDay(targetBranchCommits);
   const showTargetBranchSection =
-    !isHomeRepo && !isDefaultWorkspaceBranch && targetBranchCommits.length > 0;
+    !isDefaultWorkspaceBranch && targetBranchCommits.length > 0;
   const showTentativeWorkingCopy = !isHomeRepo && tentativeWorkingCopy != null;
   const hasMutableWorkspaceCommits = commits.some(
     (commit) =>
@@ -937,7 +939,7 @@ export const CommitDiffViewer = ({
                 key={`${group.dayKey}-${groupIndex}`}
                 className="mt-5 first:mt-0"
               >
-                <p className="text-base font-semibold text-muted-foreground mb-1 pl-7">
+                <p className="text-base text-muted-foreground mb-1 pl-7">
                   {group.label}
                 </p>
                 <div className="space-y-0">
@@ -1031,7 +1033,9 @@ export const CommitDiffViewer = ({
               <>
                 {commits.length === 0 && (
                   <p className="text-muted-foreground mb-3 pl-7">
-                    There are no commits within this workspace branch yet.
+                    {isHomeRepo
+                      ? "There are no commits on this branch yet."
+                      : "There are no commits within this workspace branch yet."}
                   </p>
                 )}
                 <div className="border-t border-border my-4 mx-2" />
@@ -1043,7 +1047,7 @@ export const CommitDiffViewer = ({
                     key={`tb-${group.dayKey}-${groupIndex}`}
                     className="mt-5 first:mt-0"
                   >
-                    <p className="text-base font-semibold text-muted-foreground mb-1 pl-7">
+                    <p className="text-base text-muted-foreground mb-1 pl-7">
                       {group.label}
                     </p>
                     <div className="space-y-0">
