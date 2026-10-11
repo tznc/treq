@@ -13,6 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+#[cfg(feature = "gui")]
+use tauri::async_runtime::spawn_blocking;
+#[cfg(not(feature = "gui"))]
+use tokio::task::spawn_blocking;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -239,7 +243,7 @@ pub async fn open_or_create_workspace_from_item(
   let repo_path_owned = repo_path.to_string();
   let item = item.clone();
 
-  tauri::async_runtime::spawn_blocking(move || {
+  spawn_blocking(move || {
     let base_branch = crate::core::get_repo_default_branch(&repo_path_owned)
       .map_err(|e| format!("Failed to get repo default branch: {e}"))?;
 

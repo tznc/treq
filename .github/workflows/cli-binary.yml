@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "src-tauri/src/lib.rs"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/build.rs"
       - ".github/workflows/cli-binary.yml"
 
 jobs:
@@ -70,3 +72,42 @@ jobs:
           npm run tauri build -- --target aarch64-apple-darwin --bundles app
           codesign --force --deep --sign - target/aarch64-apple-darwin/release/bundle/macos/Treq.app
           bash scripts/verify-macos-bundle.sh target/aarch64-apple-darwin/release/bundle/macos/Treq.app
+
+  headless-linux-cli:
+    name: Headless Linux CLI
+    needs: detect-rust-changes
+    if: needs.detect-rust-changes.outputs.rust_changed == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            ./src-tauri -> target
+          key: musl
+
+      # Same build as the release's linux-cli job, without the webkit/gtk
+      # packages: the build fails if a desktop dependency leaks back in.
+      - name: Build headless CLI
+        run: |
+          sed -i 's/^crate-type = .*/crate-type = ["rlib"]/' src-tauri/Cargo.toml
+          cargo build --release --locked --no-default-features --bin treq --target x86_64-unknown-linux-musl
+
+      - name: Run CLI in Alpine
+        run: |
+          docker run --rm -v "$PWD/target/x86_64-unknown-linux-musl/release/treq:/usr/local/bin/treq:ro" \
+            alpine:3.20 treq --help | grep -F "Usage: treq"
