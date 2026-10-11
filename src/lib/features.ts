@@ -10,7 +10,6 @@ export const PREVIEW_FEATURE_IDS = [
   "trelloIntegration",
   "jiraIntegration",
   "logs",
-  "checks",
   "browser",
   "agentMessageQueue",
 ] as const;
@@ -58,11 +57,6 @@ export const PREVIEW_FEATURES: readonly PreviewFeature[] = [
     id: "logs",
     title: "Logs",
     docsPath: "/docs/concepts/logs",
-  },
-  {
-    id: "checks",
-    title: "Checks",
-    docsPath: "/docs/concepts/checks",
   },
   {
     id: "browser",

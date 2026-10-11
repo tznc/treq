@@ -17,7 +17,6 @@ describe("preview features", () => {
       "trelloIntegration",
       "jiraIntegration",
       "logs",
-      "checks",
       "browser",
       "agentMessageQueue",
     ]);
@@ -35,7 +34,6 @@ describe("preview features", () => {
     expect(FEATURES.trelloIntegration).toBe(false);
     expect(FEATURES.jiraIntegration).toBe(false);
     expect(FEATURES.logs).toBe(false);
-    expect(FEATURES.checks).toBe(false);
     expect(FEATURES.browser).toBe(false);
     expect(FEATURES.agentMessageQueue).toBe(false);
   });
@@ -48,7 +46,6 @@ describe("preview features", () => {
     expect(previewFeatureDefault("trelloIntegration")).toBe(true);
     expect(previewFeatureDefault("jiraIntegration")).toBe(true);
     expect(previewFeatureDefault("logs")).toBe(true);
-    expect(previewFeatureDefault("checks")).toBe(true);
     expect(previewFeatureDefault("browser")).toBe(true);
     expect(previewFeatureDefault("agentMessageQueue")).toBe(true);
   });
