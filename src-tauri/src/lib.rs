@@ -923,7 +923,6 @@ pub fn run() {
       commands::get_sessions,
       commands::update_session_access,
       commands::get_session_model,
-      commands::set_session_model,
       commands::add_prompt_history,
       commands::get_prompt_history,
       commands::get_workspace_starting_prompt,

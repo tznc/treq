@@ -29,7 +29,6 @@ describe("agents", () => {
     expect(agentInfo("claude")).toMatchObject({
       label: "Claude",
       hasPlanMode: true,
-      hasModelPicker: true,
     });
   });
 });

@@ -162,8 +162,8 @@ it("hides the agent message queue when its feature preview is off", async () => 
   await captureDocument(document, {
     name: "agent-message-queue-06-toolbar-flag-off",
     expectations: [
-      "The agent terminal toolbar has no Queue (list) icon left of the model selector.",
-      "The rest of the toolbar (model, search, close) renders normally.",
+      "The agent terminal toolbar has no Queue (list) icon left of the search button.",
+      "The rest of the toolbar (search, close) renders normally.",
     ],
   });
 }, 60000);
