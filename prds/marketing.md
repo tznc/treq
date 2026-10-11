@@ -36,13 +36,15 @@ Approved by the owner on 2026-10-05:
 
 Treq is the open-source Stacking Agent Development Environment. Each coding agent gets its own workspace, branches stack, and Treq rebases dependent work when the base moves. The desktop app is free, including GitHub and Linear through local tools. Pro is a cloud subscription at US$15 per user per month with a 14-day trial. It adds the features that need a server: the GitHub App and its merge queue, managed cloud workspaces, mobile access, and Linear OAuth. Team covers 5 members for US$199 per month, and each extra member is US$8 per month.
 
-Marketing has one job: bring engineers who run several coding agents on one repository to the download, and move the ones who want the cloud features onto Pro or Team. Organic search carries acquisition. Stack comments on pull requests show Treq to reviewers who do not use it yet. Roadmap milestones supply the launch moments. The alpha waitlist collects signed-in engineers who want cloud workspaces early. There is no cash budget, so every channel runs on founder time.
+Marketing has one job: bring engineers who run several coding agents on one repository to the download, and move the ones who want the cloud features onto Pro or Team. Organic search carries acquisition. Roadmap milestones supply the launch moments. The alpha waitlist collects signed-in engineers who want cloud workspaces early. There is no cash budget, so every channel runs on founder time.
 
 ## Product truth
 
 Marketing copy may only claim what the product does today. Check claims against this section and against the code before publishing.
 
 Shipped means available in the latest published release on GitHub Releases. Merged to `main` is not enough, because users cannot download it. The latest published release is v0.2.0, from 2026-08-09.
+
+A preview feature is off by default. Users turn it on under Settings > Feature Preview, and the app links each preview to its docs page. Copy must call a preview a preview.
 
 ### Shipped
 
@@ -57,24 +59,32 @@ Shipped means available in the latest published release on GitHub Releases. Merg
 ### Merged, ships in v0.3.0
 
 - Windows and Linux builds.
-- Linear integration: view issues, create workspaces from issues, and auto-kickoff on a label. A personal API key is free. OAuth is Pro.
+- First-run checks for Git, `gh`, and agent CLIs.
+- Desktop notifications when an agent finishes or needs input.
+- Preview: Workspace Checks.
+- Preview: Linear integration: view issues, create workspaces from issues, and auto-kickoff on a label. A personal API key is free. OAuth is Pro.
+- Preview: SSH Remote Development.
+
+### Merged, waiting on the owner to turn on
+
+These run on treq.dev and the Supabase service, so they do not wait for a desktop release. Each sits behind a feature flag in `package.json`.
+
+- Pro checkout, the trial, the billing portal, and the Team plan with organizations (`stripePayments`).
+- The GitHub App merge queue (`mergeQueue`).
+- Server-side Pro enforcement for every cloud feature. It deploys with the Supabase functions and has no flag, so a cloud feature refuses a user without Pro as soon as it deploys.
 
 ### Not shipped
 
-- Pro checkout, the trial, and the Team plan.
-- The merge queue.
-- Workspace Checks.
-- SSH Remote Development and managed cloud workspaces. See [Remote Development](./remote-development.md).
+- Managed cloud workspaces. See [Remote Development](./remote-development.md).
 - Mobile apps. See [Mobile](./mobile.md).
-- Stack comments on pull requests.
+- The alpha waitlist.
 
 ### Site copy that conflicts with product truth
 
 Fix these before any amplification. A visitor who finds a false claim stops trusting the rest of the page.
 
 1. Every page lists Windows and Linux, and the pricing page lists the Linear integration. No published release includes either. Publishing v0.3.0 resolves both.
-2. "Upgrade to Pro" on the pricing page leads to a disabled button on the dashboard. Checkout resolves it.
-3. Download links point at the old `Ziinc/treq` repository and its full release list. Point them at the latest release in `treq-dev/treq`.
+2. The pricing page's "Start 14-day free trial" and "Set up Team" buttons lead to a dashboard that cannot check out while `stripePayments` is off. Turning on the flag resolves it.
 
 ## Positioning
 
@@ -107,7 +117,7 @@ These are hypotheses. The plan tests them with acquisition data, not interviews:
 | Pro | US$15 per user per month, 14-day trial with a card | Engineers who want the cloud features: the GitHub App and its merge queue, a managed cloud workspace, mobile access, and Linear OAuth. |
 | Team | US$199 per month for 5 members, US$8 per extra member | Teams that share one GitHub App installation and merge queue. Every member gets Pro. |
 
-The conversion path is: search, stack comment, or community post, then site page, then download from GitHub Releases, then a first stacked workspace, then account creation, then trial, then Pro. The triggers to start a trial are turning on the merge queue, creating a cloud workspace, and connecting Linear with OAuth. Each one runs on the server, so a local build of the open-source app cannot turn it on. The trigger to move to Team is a second member of the same GitHub organization who needs the App.
+The conversion path is: search or community post, then site page, then download from GitHub Releases, then a first stacked workspace, then account creation, then trial, then Pro. The triggers to start a trial are turning on the merge queue, creating a cloud workspace, and connecting Linear with OAuth. Each one runs on the server, so a local build of the open-source app cannot turn it on. The trigger to move to Team is a second member of the same GitHub organization who needs the App.
 
 The Team plan and the trial are approved decisions. Any further price change, discount, or plan needs its own decision.
 
@@ -116,11 +126,10 @@ The Team plan and the trial are approved decisions. Any further price change, di
 | Priority | Channel | Assets | Automation |
 | --- | --- | --- | --- |
 | 1 | Organic search | Learn articles, comparison pages, free tools under `/tools/`, skills directory | biz-tools daily keyword report and weekly Draft content PRs |
-| 2 | Stack comments | One comment on each stacked pull request Treq creates, linking to treq.dev | Posted by the app |
-| 3 | GitHub | README, release notes, changelog, GitHub Discussions | Release notes are GitHub auto-generated |
-| 4 | Alpha waitlist | Join from the dashboard after sign-in, alpha invitations, alpha update emails | Waitlist counts reported in the GTM digest |
-| 5 | Developer communities | One post per launch moment, written for that community's rules | None. The owner posts by hand. |
-| 6 | Integration directories | GitHub Marketplace listing, Linear integration listing | None |
+| 2 | GitHub | README, release notes, changelog, GitHub Discussions | Release notes are GitHub auto-generated |
+| 3 | Alpha waitlist | Join from the dashboard after sign-in, alpha invitations, alpha update emails | Waitlist counts reported in the GTM digest |
+| 4 | Developer communities | One post per launch moment, written for that community's rules | None. The owner posts by hand. |
+| 5 | Integration directories | GitHub Marketplace listing, Linear integration listing | None |
 
 Organic search leads because it compounds and costs founder time, not cash. The free tools and the skills directory attract searchers who are not yet looking for Treq. Each of those pages must link to the relevant Learn article and to the download.
 
@@ -130,9 +139,8 @@ Community posts are limited to launch moments. A post without new product substa
 
 The funnel in [Offer and conversion](#offer-and-conversion) is one pass. These loops turn usage into new visitors without cash:
 
-1. **Stack comments.** Treq posts one comment on each stacked pull request it creates. The comment lists the stack and links to treq.dev with UTM parameters. Every reviewer on that pull request sees it, including reviewers who do not use Treq. Security and Privacy discloses it.
-2. **Team invites.** The GitHub App installation belongs to the organization, not to one user. When a second member needs the merge queue, the owner moves to Team and invites them. Each invite brings a new user into the app.
-3. **Skills directory.** Each public skill page links to the download and opens the skill in Treq. Searchers who find a skill install the app to use it.
+1. **Team invites.** The GitHub App installation belongs to the organization, not to one user. When a second member needs the merge queue, the owner moves to Team and invites them. Each invite brings a new user into the app.
+2. **Skills directory.** Each public skill page links to the download and opens the skill in Treq. Searchers who find a skill install the app to use it.
 
 ## Content engine
 
@@ -195,7 +203,6 @@ The desktop app has no telemetry, and marketing must not add any. The funnel is 
 | --- | --- | --- |
 | Discover | Search Console, Bing Webmaster Tools | Clicks, impressions, and position by query and page |
 | Visit | GA4 on treq.dev | Sessions and landing pages |
-| Refer | GA4 | Sessions from UTM-tagged stack comment links |
 | Download intent | GA4 | Outbound clicks to GitHub Releases |
 | Download | GitHub Releases API | Asset download counts per release |
 | Sign up | Supabase | New accounts per week |
@@ -242,7 +249,6 @@ biz-tools has adapters for Search Console, Bing, GA4, and Stripe, and a daily ke
 | Content drafts contain wrong product claims | Review finds errors in more than one draft in a month | Tighten the avoid list and the product truth section. Lower the weekly draft count. |
 | Traffic without downloads | Organic clicks grow while download clicks stay flat | Review landing pages for a clear next step. Check that the traffic matches the audiences. |
 | Downloads without paid conversion | Accounts grow but subscriptions do not | Check whether trial users turn on the merge queue or create a cloud workspace. Revisit which features Pro includes. |
-| Stack comments read as spam | Maintainers complain, or more repositories turn the comment off | Shorten the comment. If complaints continue, make it opt-in. |
 | Cloud workspace cost outruns revenue | Monthly VM spend per paying account exceeds the Pro price | Lower the base allocation or price the cloud workspace as an add-on. |
 | Competitor pages go stale | A competitor changes features or pricing | Re-check each comparison page once a quarter. |
 | Marketing work crowds out product work | Marketing time exceeds four hours per week for three weeks | Cut community posts first, then draft volume. |

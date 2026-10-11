@@ -310,6 +310,10 @@ const config: Config = {
               label: 'GitHub',
               href: 'https://github.com/tznc/treq',
             },
+            {
+              label: 'Discussions',
+              href: 'https://github.com/tznc/treq/discussions',
+            },
           ],
         },
       ],

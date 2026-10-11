@@ -31,9 +31,9 @@ Q1 and Q2 have nothing planned. Q3 targets GitHub integration and workspace chec
 
 ## Linear Integration
 
-:::tip[Shipped]
+:::note[Work in progress]
 
-View Linear issues, create workspaces from issues, and auto-kickoff on labels are all available. See [Linear Integration](/docs/concepts/linear-integration).
+Merged and ships as a preview in v0.3.0. Viewing Linear issues, creating workspaces from issues, and auto-kickoff on labels work once you turn on the preview under Settings > Feature Preview. See [Linear Integration](/docs/concepts/linear-integration).
 
 :::
 
@@ -53,6 +53,12 @@ Pull request create and view, CI status, and inline review threads are available
 
 ## Workspace Checks
 
+:::note[Work in progress]
+
+Merged and ships as a preview in v0.3.0. Turn it on under Settings > Feature Preview. See [Checks](/docs/concepts/checks).
+
+:::
+
 [Coding agents](/learn/concepts/ai-engineering/coding-agents) produce plausible changes. **Workspace Checks** make those changes accountable. You define workflows, similar in shape to GitHub Actions, that run as quality gates inside a workspace before you treat the work as ready to push or merge.
 
 A check workflow is a named set of jobs and steps: install, lint, typecheck, unit tests, integration tests, or any shell-backed assertion you care about. Each step passes or fails. Soft advice is not enough here. The gate is the assertion result.
@@ -62,6 +68,12 @@ The longer-term goal is an **agentic self-fixing loop**. An agent makes a change
 These checks live with the workspace, so each stacked layer can verify its own increment before it joins a larger review.
 
 ## SSH Remote Development
+
+:::note[Work in progress]
+
+Merged and ships as a preview in v0.3.0. Turn it on under Settings > Feature Preview. See [Remote SSH workspaces](/docs/how-to/remote-ssh-workspaces).
+
+:::
 
 Today, [Treq workspaces](/docs/concepts/workspaces) and [terminal sessions](/docs/concepts/terminal-sessions) run on your local machine. **SSH Remote Development** opens a workspace on a remote host over SSH and lets you develop there directly from the same UI.
 
