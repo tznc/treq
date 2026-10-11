@@ -61,153 +61,34 @@ fn transport_error(error: impl std::fmt::Display) -> FunctionError {
   }
 }
 
-/// The Supabase project and session a control-plane call goes to. The app
-/// builds one per call from the signed-in session; `tests/sprites_e2e.rs`
-/// points one at a test project.
-#[derive(Clone)]
-pub struct Client {
-  pub http: reqwest::Client,
-  pub url: String,
-  pub anon_key: String,
-  /// The user's access token, or the anon key when signed out.
-  pub token: String,
-}
-
-impl Client {
-  async fn current() -> Self {
-    let env = config::env();
-    let backend = backend::get();
-    let token = backend
-      .auth
-      .access_token()
-      .await
-      .unwrap_or_else(|| env.supabase.anon_key.clone());
-    Self {
-      http: backend.http.clone(),
-      url: env.supabase.url.clone(),
-      anon_key: env.supabase.anon_key.clone(),
-      token,
-    }
+async fn invoke<T: DeserializeOwned>(name: &str, body: Value) -> Result<T, FunctionError> {
+  let env = config::env();
+  let backend = backend::get();
+  let token = backend
+    .auth
+    .access_token()
+    .await
+    .unwrap_or_else(|| env.supabase.anon_key.clone());
+  let response = backend
+    .http
+    .post(format!("{}/functions/v1/{name}", env.supabase.url))
+    .bearer_auth(token)
+    .header("apikey", &env.supabase.anon_key)
+    .json(&body)
+    .send()
+    .await
+    .map_err(transport_error)?;
+  let status = response.status();
+  if !status.is_success() {
+    let header_id = response
+      .headers()
+      .get("x-correlation-id")
+      .and_then(|v| v.to_str().ok())
+      .map(str::to_owned);
+    let body = response.json::<ErrorBody>().await.unwrap_or_default();
+    return Err(function_error(status.as_u16(), header_id, body));
   }
-
-  async fn invoke<T: DeserializeOwned>(&self, name: &str, body: Value) -> Result<T, FunctionError> {
-    let response = self
-      .http
-      .post(format!(
-        "{}/functions/v1/{name}",
-        self.url.trim_end_matches('/')
-      ))
-      .bearer_auth(&self.token)
-      .header("apikey", &self.anon_key)
-      .json(&body)
-      .send()
-      .await
-      .map_err(transport_error)?;
-    let status = response.status();
-    if !status.is_success() {
-      let header_id = response
-        .headers()
-        .get("x-correlation-id")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned);
-      let body = response.json::<ErrorBody>().await.unwrap_or_default();
-      return Err(function_error(status.as_u16(), header_id, body));
-    }
-    response.json::<T>().await.map_err(transport_error)
-  }
-
-  pub async fn instance_status(&self) -> Result<Option<ManagedInstance>, FunctionError> {
-    self
-      .invoke::<StatusResponse>("remote-instance", json!({ "action": "status" }))
-      .await
-      .map(|r| r.instance)
-  }
-
-  pub async fn wake(&self, instance_id: &str) -> Result<(), FunctionError> {
-    self
-      .invoke::<Value>(
-        "remote-instance",
-        json!({
-            "action": "wake",
-            "instance_id": instance_id,
-            "idempotency_key": format!("wake-{instance_id}-{}", uuid::Uuid::new_v4()),
-        }),
-      )
-      .await
-      .map(drop)
-  }
-
-  pub async fn register_client_key(
-    &self,
-    public_key: &str,
-    comment: &str,
-    idempotency_key: &str,
-  ) -> Result<ClientKey, FunctionError> {
-    let response = self
-      .invoke::<RegisterResponse>(
-        "remote-ssh-trust",
-        json!({
-            "action": "register_client_key",
-            "public_key": public_key,
-            "comment": comment,
-            "idempotency_key": idempotency_key,
-        }),
-      )
-      .await?;
-    // An idempotent replay returns the key list instead of the key.
-    let RegisterResponse { key, keys } = response;
-    key
-      .or_else(|| {
-        keys
-          .iter()
-          .find(|k| k.comment.as_deref() == Some(comment))
-          .or(keys.first())
-          .cloned()
-      })
-      .ok_or_else(|| FunctionError {
-        status: 0,
-        code: "no_key".into(),
-        message: "The control plane returned no client key".into(),
-        correlation_id: None,
-      })
-  }
-
-  pub async fn issue_certificate(
-    &self,
-    instance_id: &str,
-    key_id: &str,
-    renewal: bool,
-  ) -> Result<IssueCertificateResponse, FunctionError> {
-    let mut body = json!({
-        "action": "issue_certificate",
-        "instance_id": instance_id,
-        "key_id": key_id,
-    });
-    if renewal {
-      body["renewal"] = json!(true);
-    }
-    self.invoke("remote-ssh-trust", body).await
-  }
-
-  pub async fn report_cutoff(
-    &self,
-    instance_id: &str,
-    endpoint_id: &str,
-    reason: &str,
-  ) -> Result<(), FunctionError> {
-    self
-      .invoke::<Value>(
-        "remote-ssh-trust",
-        json!({
-            "action": "report_cutoff",
-            "instance_id": instance_id,
-            "endpoint_id": endpoint_id,
-            "reason": reason,
-        }),
-      )
-      .await
-      .map(drop)
-  }
+  response.json::<T>().await.map_err(transport_error)
 }
 
 /// The fields of a managed instance the mobile flow uses. The status
@@ -225,6 +106,25 @@ struct StatusResponse {
   instance: Option<ManagedInstance>,
 }
 
+pub async fn instance_status() -> Result<Option<ManagedInstance>, FunctionError> {
+  invoke::<StatusResponse>("remote-instance", json!({ "action": "status" }))
+    .await
+    .map(|r| r.instance)
+}
+
+pub async fn wake(instance_id: &str) -> Result<(), FunctionError> {
+  invoke::<Value>(
+    "remote-instance",
+    json!({
+        "action": "wake",
+        "instance_id": instance_id,
+        "idempotency_key": format!("wake-{instance_id}-{}", uuid::Uuid::new_v4()),
+    }),
+  )
+  .await
+  .map(drop)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClientKey {
   pub id: String,
@@ -240,23 +140,37 @@ struct RegisterResponse {
   keys: Vec<ClientKey>,
 }
 
-pub async fn instance_status() -> Result<Option<ManagedInstance>, FunctionError> {
-  Client::current().await.instance_status().await
-}
-
-pub async fn wake(instance_id: &str) -> Result<(), FunctionError> {
-  Client::current().await.wake(instance_id).await
-}
-
 pub async fn register_client_key(
   public_key: &str,
   comment: &str,
   idempotency_key: &str,
 ) -> Result<ClientKey, FunctionError> {
-  Client::current()
-    .await
-    .register_client_key(public_key, comment, idempotency_key)
-    .await
+  let response = invoke::<RegisterResponse>(
+    "remote-ssh-trust",
+    json!({
+        "action": "register_client_key",
+        "public_key": public_key,
+        "comment": comment,
+        "idempotency_key": idempotency_key,
+    }),
+  )
+  .await?;
+  // An idempotent replay returns the key list instead of the key.
+  let RegisterResponse { key, keys } = response;
+  key
+    .or_else(|| {
+      keys
+        .iter()
+        .find(|k| k.comment.as_deref() == Some(comment))
+        .or(keys.first())
+        .cloned()
+    })
+    .ok_or_else(|| FunctionError {
+      status: 0,
+      code: "no_key".into(),
+      message: "The control plane returned no client key".into(),
+      correlation_id: None,
+    })
 }
 
 pub async fn issue_certificate(
@@ -264,18 +178,29 @@ pub async fn issue_certificate(
   key_id: &str,
   renewal: bool,
 ) -> Result<IssueCertificateResponse, FunctionError> {
-  Client::current()
-    .await
-    .issue_certificate(instance_id, key_id, renewal)
-    .await
+  let mut body = json!({
+      "action": "issue_certificate",
+      "instance_id": instance_id,
+      "key_id": key_id,
+  });
+  if renewal {
+    body["renewal"] = json!(true);
+  }
+  invoke("remote-ssh-trust", body).await
 }
 
 /// Best-effort audit of a credential cutoff.
 pub async fn report_cutoff(instance_id: &str, endpoint_id: &str, reason: &str) {
-  let result = Client::current()
-    .await
-    .report_cutoff(instance_id, endpoint_id, reason)
-    .await;
+  let result = invoke::<Value>(
+    "remote-ssh-trust",
+    json!({
+        "action": "report_cutoff",
+        "instance_id": instance_id,
+        "endpoint_id": endpoint_id,
+        "reason": reason,
+    }),
+  )
+  .await;
   if let Err(error) = result {
     log::warn!("report_cutoff failed: {error}");
   }

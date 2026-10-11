@@ -22,7 +22,7 @@ use crate::{
 pub const NO_MANAGED_INSTANCE: &str =
   "No managed instance for this account yet. Set one up from Treq on desktop, then connect here.";
 pub const SECURE_STORAGE_PREFIX: &str = "secure_storage_unavailable:";
-pub const DEVICE_KEY_COMMENT: &str = "treq-mobile-device";
+const DEVICE_KEY_COMMENT: &str = "treq-mobile-device";
 const READY_POLL: Duration = Duration::from_secs(2);
 const READY_TIMEOUT: Duration = Duration::from_secs(600);
 const RENEWAL_REMAINING_FRACTION: f64 = 0.2;
@@ -77,7 +77,7 @@ pub fn renewal_backoff(attempt: u32) -> Duration {
   Duration::from_secs((15u64 << attempt.min(4)).min(120))
 }
 
-pub fn reason_code(reason: CutoffReason) -> &'static str {
+fn reason_code(reason: CutoffReason) -> &'static str {
   match reason {
     CutoffReason::SessionEnded => "session_ended",
     CutoffReason::KeyRevoked => "key_revoked",

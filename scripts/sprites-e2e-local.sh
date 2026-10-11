@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Runs tests/sprites_e2e.rs against a local Supabase CLI stack whose Edge
-# Functions call the real Sprites API (no stub). See SPRITES_E2E.md.
+# Runs the shared managed-instance suite (src-tauri/tests/remote_e2e_native.rs)
+# against a local Supabase CLI stack whose Edge Functions call the real
+# Sprites API (no stub). Desktop and mobile share this flow. See
+# src-tauri/tests/SPRITES_E2E.md.
 #
 # You configure supabase/functions/.env yourself; this script only checks it.
 #
-#   mobile-gpui/scripts/sprites-e2e-local.sh
+#   scripts/sprites-e2e-local.sh
 #
 # Set SKIP_STACK=1 to reuse a stack that is already running with that .env.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 for tool in supabase docker cargo; do
@@ -17,7 +19,7 @@ for tool in supabase docker cargo; do
 done
 
 env_file=supabase/functions/.env
-fail() { echo "$env_file: $1 (see mobile-gpui/SPRITES_E2E.md)" >&2; exit 1; }
+fail() { echo "$env_file: $1 (see src-tauri/tests/SPRITES_E2E.md)" >&2; exit 1; }
 [ -f "$env_file" ] || fail "missing"
 grep -Eq '^TREQ_SPRITES_API_TOKEN=.+' "$env_file" || fail "set TREQ_SPRITES_API_TOKEN to a test-organization token"
 grep -Eq '^REMOTE_SSH_RELAY_URL=.+' "$env_file" || fail "set REMOTE_SSH_RELAY_URL so this machine can dial the relay"
@@ -34,11 +36,10 @@ if [ "${SKIP_STACK:-}" != "1" ]; then
 fi
 
 eval "$(supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
-export TREQ_REMOTE_E2E=1 TREQ_REMOTE_E2E_MOBILE=1
+export TREQ_REMOTE_E2E=1 TREQ_REMOTE_E2E_NATIVE=1
 export SUPABASE_TEST_URL="$API_URL" SUPABASE_TEST_ANON_KEY="$ANON_KEY" SUPABASE_TEST_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
 
-# treq_lib embeds the desktop frontend, which the mobile app does not use.
+# treq_lib embeds the desktop frontend; the suite does not need a real build.
 [ -f src/dist/index.html ] || { mkdir -p src/dist && echo '<!doctype html>' >src/dist/index.html; }
 
-cd mobile-gpui
-cargo test --test sprites_e2e -- --ignored --nocapture --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --test remote_e2e_native -- --ignored --nocapture --test-threads=1

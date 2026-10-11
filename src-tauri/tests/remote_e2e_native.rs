@@ -1,4 +1,10 @@
-//! Live native-SSH acceptance against a dedicated test project.
+//! Live acceptance for the managed-instance flow against a dedicated test
+//! project whose Edge Functions provision real Fly Sprites.
+//!
+//! Desktop and mobile share this flow: the same `remote-instance` and
+//! `remote-ssh-trust` calls, and the same `treq_lib` relay transport, typed
+//! commands, PTY channel and credential cutoff. Only key storage differs per
+//! client, so this one suite covers both. See `SPRITES_E2E.md` for local runs.
 //!
 //! Gated on `TREQ_REMOTE_E2E=1` plus `TREQ_REMOTE_E2E_NATIVE=1` and the
 //! Supabase test-project credentials. Missing credentials skip (via
@@ -16,7 +22,8 @@ use treq_lib::core::remote_control_plane::{
   SshAuthentication, SshEndpoint, SshEndpointSource, TrustedHostKey,
 };
 use treq_lib::core::remote_ssh_transport::{
-  exec_command, CancellationToken, ExecLimits, RemotePtyChannel, SshConnectionPool,
+  exec_command, CancellationToken, CutoffReason, ExecLimits, RemotePtyChannel, SshConnectionPool,
+  SshTransportError,
 };
 
 const LIVE_IGNORE: &str =
@@ -311,6 +318,19 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
   );
   let api_headers = [("apikey", cfg.anon_key.as_str())];
 
+  let (st, empty_json) = json_post(
+    &instance_url,
+    &access,
+    &api_headers,
+    serde_json::json!({ "action": "status" }),
+  )
+  .await;
+  assert_eq!(st, 200, "status failed: {empty_json}");
+  assert!(
+    empty_json["instance"].is_null(),
+    "a new user must have no instance: {empty_json}"
+  );
+
   let (ensure_status, ensure_json) = json_post(
     &instance_url,
     &access,
@@ -349,19 +369,38 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
 
   let dir = tempfile::tempdir().expect("tempdir");
   let (key_path, public_line) = write_client_key(dir.path());
-  let (reg_status, reg_json) = json_post(
-    &trust_url,
-    &access,
-    &api_headers,
-    serde_json::json!({
-      "action": "register_client_key",
-      "idempotency_key": e2e_tag(),
-      "public_key": format!("{public_line} {tag}@e2e")
-    }),
-  )
-  .await;
+  // Clients retry registration with a stable idempotency key; a replay must
+  // return the same key rather than registering a second one.
+  let register = serde_json::json!({
+    "action": "register_client_key",
+    "idempotency_key": e2e_tag(),
+    "public_key": format!("{public_line} {tag}@e2e")
+  });
+  let (reg_status, reg_json) = json_post(&trust_url, &access, &api_headers, register.clone()).await;
   assert_eq!(reg_status, 200, "register_client_key failed: {reg_json}");
   let key_id = reg_json["key"]["id"].as_str().expect("key id").to_string();
+  let (replay_status, replay_json) = json_post(&trust_url, &access, &api_headers, register).await;
+  assert_eq!(
+    replay_status, 200,
+    "register_client_key replay failed: {replay_json}"
+  );
+  // A replay answers with the user's key list instead of the single key.
+  let replayed_ids: Vec<&str> = replay_json["key"]["id"]
+    .as_str()
+    .into_iter()
+    .chain(
+      replay_json["keys"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|k| k["id"].as_str()),
+    )
+    .collect();
+  assert_eq!(
+    replayed_ids,
+    vec![key_id.as_str()],
+    "a replayed registration must resolve the same single key: {replay_json}"
+  );
   let instance_id = json_post(
     &instance_url,
     &access,
@@ -516,6 +555,49 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
     &agent_args,
     ExecLimits::default(),
     &CancellationToken::new(),
+  )
+  .await;
+
+  // Silent renewal: the same action with `renewal: true`, swapped into the
+  // same endpoint id while the pool stays open.
+  let (renew_status, renew_json) = json_post(
+    &trust_url,
+    &access,
+    &api_headers,
+    serde_json::json!({
+      "action": "issue_certificate",
+      "instance_id": instance_id,
+      "key_id": key_id,
+      "renewal": true
+    }),
+  )
+  .await;
+  assert_eq!(renew_status, 200, "renewal failed: {renew_json}");
+  assert_eq!(
+    renew_json["endpoint"]["id"].as_str(),
+    Some(endpoint.id.as_str()),
+    "renewal must keep the endpoint id"
+  );
+  assert!(
+    renew_json["expires_at"].as_str().unwrap_or_default()
+      >= issue_json["expires_at"].as_str().unwrap_or_default(),
+    "renewal moved expiry backwards: {renew_json}"
+  );
+  endpoint.authentication = SshAuthentication::Certificate {
+    key_reference: key_path.clone(),
+    certificate: Some(
+      renew_json["certificate"]
+        .as_str()
+        .expect("renewed certificate")
+        .to_string(),
+    ),
+  };
+  exec_typed(
+    &pool,
+    &endpoint,
+    TreqCommandRequest::ListWorkspaces {
+      repo: repo_a.clone(),
+    },
   )
   .await;
 
@@ -676,13 +758,86 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
   let after_repro = exec_typed(
     &pool3,
     &endpoint,
-    TreqCommandRequest::InspectRepository { repo: repo_a },
+    TreqCommandRequest::InspectRepository {
+      repo: repo_a.clone(),
+    },
   )
   .await;
   assert!(
     !after_repro.is_null(),
     "repository must survive an in-place repair"
   );
+
+  // Revoked key. The renewal refusal is what both clients classify as a
+  // key-revoked cutoff (409 "Key has been revoked"); the pool then refuses
+  // further commands locally and the client reports the cutoff.
+  let (revoke_status, revoke_json) = json_post(
+    &trust_url,
+    &access,
+    &api_headers,
+    serde_json::json!({
+      "action": "revoke_client_key",
+      "key_id": key_id,
+      "idempotency_key": e2e_tag()
+    }),
+  )
+  .await;
+  assert_eq!(
+    revoke_status, 200,
+    "revoke_client_key failed: {revoke_json}"
+  );
+  let (refused_status, refused_json) = json_post(
+    &trust_url,
+    &access,
+    &api_headers,
+    serde_json::json!({
+      "action": "issue_certificate",
+      "instance_id": instance_id,
+      "key_id": key_id,
+      "renewal": true
+    }),
+  )
+  .await;
+  assert!(
+    refused_status == 409 && refused_json.to_string().to_lowercase().contains("revoked"),
+    "renewal with a revoked key must be refused as revoked: HTTP {refused_status} {refused_json}"
+  );
+  pool3
+    .force_cutoff(&endpoint.id, CutoffReason::KeyRevoked)
+    .await;
+  let refused = exec_command(
+    &pool3,
+    &endpoint,
+    &TreqCommandRequest::InspectRepository { repo: repo_a }
+      .cli_args()
+      .expect("typed args"),
+    ExecLimits::default(),
+    &CancellationToken::new(),
+  )
+  .await;
+  assert!(
+    matches!(
+      refused,
+      Err(SshTransportError::CredentialCutOff {
+        reason: CutoffReason::KeyRevoked,
+        ..
+      })
+    ),
+    "a cut-off endpoint must refuse commands locally: {refused:?}"
+  );
+  let (cutoff_status, cutoff_json) = json_post(
+    &trust_url,
+    &access,
+    &api_headers,
+    serde_json::json!({
+      "action": "report_cutoff",
+      "instance_id": instance_id,
+      "endpoint_id": endpoint.id,
+      "reason": "key_revoked"
+    }),
+  )
+  .await;
+  assert_eq!(cutoff_status, 200, "report_cutoff failed: {cutoff_json}");
   drop(cleanup);
 }
 
