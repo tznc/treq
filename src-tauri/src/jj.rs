@@ -7320,6 +7320,15 @@ fn build_home_repo_fallback_revset(limit: Option<usize>) -> String {
   format!("latest(::@, {})", n)
 }
 
+/// Revset for the common ancestor of `a` and `b` (git's merge-base).
+pub fn fork_point_revset(a: &str, b: &str) -> String {
+  format!(
+    "fork_point({} | {})",
+    format_revset_symbol(a),
+    format_revset_symbol(b)
+  )
+}
+
 fn format_revset_symbol(symbol: &str) -> String {
   if symbol.starts_with('@') {
     return symbol.to_string();

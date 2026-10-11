@@ -667,3 +667,35 @@ fn test_diff_of_workspace_stacked_after_a_home_repo_commit() {
   let diff = treq_lib::core::workspace_diff(&repo.repo_path, ws.id);
   assert!(diff.is_ok(), "workspace diff failed: {:?}", diff.err());
 }
+
+#[test]
+fn test_workspace_diff_ignores_target_advance_before_rebase() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo");
+
+  let ws = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/target-moved",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .unwrap();
+  workspace_write_file(&repo, &ws, "workspace.txt", "workspace change\n");
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "workspace change").unwrap();
+
+  // A PR merges on the remote and is fetched while the workspace is still
+  // based on the old target tip.
+  repo
+    .remote_commit_file("upstream.txt", "upstream change\n", "upstream change")
+    .unwrap();
+  treq_lib::jj::jj_git_fetch(&repo.repo_path).unwrap();
+
+  let paths = workspace_diff_paths(&repo, &ws);
+  assert_eq!(
+    paths,
+    vec!["workspace.txt".to_string()],
+    "committed diff should be measured from the fork point, not the moved target tip"
+  );
+}
