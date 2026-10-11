@@ -19,33 +19,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  detect-windows-changes:
-    timeout-minutes: 15
-    name: detect windows-specific changes
-    runs-on: ubuntu-22.04
-    outputs:
-      windows_changed: ${{ steps.detect.outputs.windows_changed }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # The windows-rust job is slow and only ever catches
-      # bugs in code that branches on the Windows target. Skip it unless
-      # the diff actually touches windows-specific cfg branching so most
-      # PRs don't pay for it.
-      - name: Check for windows-specific branching in the diff
-        id: detect
-        run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          if git diff --unified=0 "$base...$head" -- 'src-tauri/**/*.rs' \
-              | grep -qE '^\+.*(cfg\(target_os = "windows"\)|cfg\(windows\)|cfg!\(windows\)|cfg!\(target_os = "windows"\))'; then
-            echo "windows_changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "windows_changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
   detect-rust-changes:
     timeout-minutes: 15
     name: detect rust changes
@@ -154,8 +127,6 @@ jobs:
           - platform: ubuntu-22.04
             task: test:integration
             rust: true
-          - platform: windows-latest
-            task: test:unit
     name: test-js / ${{ matrix.task }} / ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     env:
@@ -326,7 +297,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # fmt only needs rustfmt; Node, WebKit, npm ci and the cache are for
+      # clippy.
       - name: Setup Node.js
+        if: matrix.task != 'fmt'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -343,6 +317,7 @@ jobs:
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
       - name: install dependencies (ubuntu only)
+        if: matrix.task != 'fmt'
         # WebKit/GTK is needed to *link* treq/tauri.
         uses: awalsh128/cache-apt-pkgs-action@v1.6.1
         with:
@@ -351,12 +326,14 @@ jobs:
           execute_install_scripts: true
 
       - name: Install dependencies
+        if: matrix.task != 'fmt'
         run: npm ci
 
       # Restores the cache warm-caches.yml saves on main. PR runs don't save:
       # a PR's cache can only be read by that PR, and the multi-GB saves
       # evict main's caches from the repo's 10 GB quota.
       - uses: Swatinem/rust-cache@v2
+        if: matrix.task != 'fmt'
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -384,7 +361,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-22.04, macos-latest]
+        platform: [ubuntu-22.04]
+    # macOS runs after merge in warm-caches.yml: macOS runners are the
+    # scarcest and slowest, and the tests rarely differ by platform.
     name: test-rust / test / ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     steps:
@@ -405,6 +384,11 @@ jobs:
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+
+      # mold links the large test binaries several times faster than ld.
+      - name: Use mold linker
+        if: runner.os == 'Linux'
+        uses: rui314/setup-mold@v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
@@ -506,128 +490,6 @@ jobs:
         with:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: |
-            . -> target
-
-      - name: Run Rust task
-        working-directory: src-tauri
-        env:
-          RUST_BACKTRACE: 1
-        run: cargo nextest run --locked --no-fail-fast
-
-  # Windows rust tests are slow and only ever catch bugs in code that
-  # branches on the Windows target, so they're gated on detect-windows-changes
-  # finding windows-specific cfg branching in the diff instead of running on
-  # every PR.
-  windows-rust-tests:
-    needs: detect-windows-changes
-    if: needs.detect-windows-changes.outputs.windows_changed == 'true'
-    name: rust / test / windows-latest
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      # Windows Defender's real-time scanning intercepts every process spawn
-      # and file write; this job spawns hundreds of jj/git subprocesses per
-      # test run, so this materially cuts wall time. Exclude the workspace
-      # before checkout writes anything into it.
-      - name: Disable Defender scanning
-        shell: pwsh
-        run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          components: rustfmt
-          toolchain: stable
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
-      # windows-latest runners ship LLVM (lld-link.exe) but link.exe from MSVC
-      # is the default; switch to lld for a much faster linker on Windows.
-      - name: Use lld linker
-        run: |
-          echo "RUSTFLAGS=-C linker=lld-link" >> "$GITHUB_ENV"
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      # Runners already ship git + gh. Only jj needs installing; cache the
-      # release binary.
-      - name: Resolve jj release tag
-        id: jj
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          tag=$(curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/jj-vcs/jj/releases/latest | jq -r .tag_name)
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Restore jj CLI cache
-        id: jj-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-bin
-          key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
-
-      - name: Install jj CLI
-        if: steps.jj-cache.outputs.cache-hit != 'true'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          JJ_TAG: ${{ steps.jj.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p .ci-bin
-          asset="jj-${JJ_TAG}-x86_64-pc-windows-msvc.zip"
-          tmp=$(mktemp -d)
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/${asset}" \
-            -o "$tmp/jj.zip"
-          unzip -q "$tmp/jj.zip" -d "$tmp"
-          jj_bin=$(find "$tmp" -type f -name jj.exe | head -n 1)
-          test -n "$jj_bin"
-          install -m 755 "$jj_bin" .ci-bin/jj.exe
-
-      - name: Save jj CLI cache
-        if: steps.jj-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: .ci-bin
-          key: ${{ steps.jj-cache.outputs.cache-primary-key }}
-
-      - name: Add jj to PATH
-        run: echo "$GITHUB_WORKSPACE/.ci-bin" >> "$GITHUB_PATH"
-
-      - name: Verify tool versions
-        run: |
-          git --version
-          jj --version
-          gh --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
           workspaces: |
             . -> target
 

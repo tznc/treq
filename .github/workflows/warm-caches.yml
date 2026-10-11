@@ -1,6 +1,6 @@
 name: Warm caches
 
-# ci.yml and cli-binary.yml only run on pull_request, and an Actions cache
+# ci.yml only runs on pull_request, and an Actions cache
 # saved from a PR can only be read by that PR. These jobs build on main and
 # save under the default branch, which every PR can read, so a PR's first
 # run starts warm. PR jobs restore these caches but never save their own.
@@ -10,6 +10,8 @@ name: Warm caches
 #
 # These jobs get 30 minutes, not the 15 PR jobs get: they exist to absorb
 # cold builds so PR jobs don't have to.
+#
+# test-macos also runs the macOS Rust tests, which PRs skip.
 on:
   push:
     branches: [main]
@@ -109,14 +111,10 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --locked --all-targets --all-features
 
-  # Consumer: ci.yml test-rust (both platforms).
+  # Consumer: ci.yml test-rust (ubuntu).
   test-build:
-    name: test build / ${{ matrix.platform }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [ubuntu-22.04, macos-latest]
-    runs-on: ${{ matrix.platform }}
+    name: test build / ubuntu-22.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
       CARGO_INCREMENTAL: 0
@@ -140,8 +138,10 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Use mold linker
+        uses: rui314/setup-mold@v1
+
       - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
         uses: awalsh128/cache-apt-pkgs-action@v1.6.1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -161,12 +161,15 @@ jobs:
         working-directory: src-tauri
         run: cargo nextest run --locked --no-run
 
-  # Consumer: cli-binary.yml sandboxed-cli. That workflow sets no CARGO env,
-  # so neither does this job.
-  cli-macos:
-    name: CLI release build / macos-latest
+  # PRs only run test-rust on ubuntu. The macOS run happens here, after
+  # merge, and also keeps its own cache warm.
+  test-macos:
+    name: test-rust / test / macos-latest
     runs-on: macos-latest
     timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
     steps:
       - uses: actions/checkout@v4
 
@@ -182,16 +185,66 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Resolve jj release tag
+        id: jj
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/jj-vcs/jj/releases/latest | jq -r .tag_name)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Restore jj CLI cache
+        id: jj-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-bin
+          key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
+
+      - name: Install jj CLI
+        if: steps.jj-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          JJ_TAG: ${{ steps.jj.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-bin
+          tmp=$(mktemp -d)
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/jj-${JJ_TAG}-aarch64-apple-darwin.tar.gz" \
+            | tar -xz -C "$tmp"
+          jj_bin=$(find "$tmp" -type f -name jj | head -n 1)
+          test -n "$jj_bin"
+          install -m 755 "$jj_bin" .ci-bin/jj
+
+      - name: Save jj CLI cache
+        if: steps.jj-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-bin
+          key: ${{ steps.jj-cache.outputs.cache-primary-key }}
+
+      - name: Add jj to PATH
+        run: echo "$GITHUB_WORKSPACE/.ci-bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: npm ci
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: cli-macos
+          shared-key: test
           workspaces: |
             . -> target
 
-      - name: Build frontend assets
-        run: |
-          npm ci
-          npm run build
-
-      - name: Build release CLI binary
-        run: cargo build --release --locked --bin treq --target aarch64-apple-darwin
+      - name: Run Rust tests
+        working-directory: src-tauri
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo nextest run --locked --no-fail-fast
