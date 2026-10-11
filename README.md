@@ -39,6 +39,12 @@ Download the latest release [here](https://github.com/tznc/treq/releases/latest)
 
 ## Developer
 
+### Devcontainer
+
+Open the repository in VS Code and select **Dev Containers: Reopen in Container**
+for Node, Rust, and Tauri Linux build dependencies. See the
+[devcontainer guide](.devcontainer/README.md) for setup, test commands, and desktop GUI limitations.
+
 ### Regenerating screenshots
 
 The committed overview shot is `assets/screenshots/code.png`. Site crops are generated in the Deploy Web `landing-screenshots` job and are not committed.
