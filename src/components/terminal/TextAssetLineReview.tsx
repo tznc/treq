@@ -1,4 +1,9 @@
-import { useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { type AssetLineComment } from "../../lib/sendAssetReview";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -35,6 +40,18 @@ export function TextAssetLineReview({
     onUnsavedComposerChange?.(next != null);
   };
 
+  // Line where a mouse drag started; dragging over other lines extends the
+  // pending range from it.
+  const dragAnchorRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const endDrag = () => {
+      dragAnchorRef.current = null;
+    };
+    window.addEventListener("mouseup", endDrag);
+    return () => window.removeEventListener("mouseup", endDrag);
+  }, []);
+
   const selectLine = (lineNumber: number, event: ReactMouseEvent) => {
     if (event.shiftKey && pending) {
       setPending({
@@ -45,6 +62,24 @@ export function TextAssetLineReview({
       return;
     }
     setPending({ startLine: lineNumber, endLine: lineNumber, text: "" });
+  };
+
+  const startDrag = (lineNumber: number, event: ReactMouseEvent) => {
+    if (event.button !== 0) return;
+    // Stop native text selection while dragging across lines.
+    event.preventDefault();
+    selectLine(lineNumber, event);
+    if (!event.shiftKey || !pending) dragAnchorRef.current = lineNumber;
+  };
+
+  const extendDrag = (lineNumber: number) => {
+    const anchor = dragAnchorRef.current;
+    if (anchor == null) return;
+    setPending({
+      startLine: Math.min(anchor, lineNumber),
+      endLine: Math.max(anchor, lineNumber),
+      text: pending?.text ?? "",
+    });
   };
 
   const commitPending = () => {
@@ -73,7 +108,12 @@ export function TextAssetLineReview({
     <div
       data-testid="treq-send-text-preview"
       className="max-h-[80vh] w-full max-w-6xl overflow-auto rounded-lg bg-zinc-900 opacity-100 shadow-2xl font-mono text-sm leading-relaxed text-zinc-100"
+      // Keep line drags from swiping the surrounding carousel.
+      onPointerDown={(event) => event.stopPropagation()}
     >
+      <p className="sticky top-0 z-10 border-b border-white/10 bg-zinc-900 px-4 py-1.5 font-sans text-xs text-zinc-500">
+        Click a line to comment. Drag or Shift+click to select multiple lines.
+      </p>
       {lines.map((line, index) => {
         const lineNumber = index + 1;
         const isPending =
@@ -94,7 +134,12 @@ export function TextAssetLineReview({
                 isPending && "bg-red-500/15",
                 lineComments.length > 0 && "bg-amber-500/10",
               )}
-              onClick={(event) => selectLine(lineNumber, event)}
+              onMouseDown={(event) => startDrag(lineNumber, event)}
+              onMouseEnter={() => extendDrag(lineNumber)}
+              onClick={(event) => {
+                // Mouse clicks are handled on mousedown; this covers keyboard.
+                if (event.detail === 0) selectLine(lineNumber, event);
+              }}
             >
               <span className="w-8 shrink-0 select-none text-right text-xs text-zinc-500">
                 {lineNumber}
