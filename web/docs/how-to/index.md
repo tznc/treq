@@ -17,4 +17,5 @@ Concise, task-focused guides for accomplishing specific things with Treq.
   {type: 'link', href: '/docs/how-to/creating-and-viewing-pull-requests', label: 'Creating and Viewing Pull Requests'},
   {type: 'link', href: '/docs/how-to/installing-skills', label: 'Installing Skills from the Library'},
   {type: 'link', href: '/docs/how-to/scheduling-workspaces', label: 'Scheduling Workspaces'},
+  {type: 'link', href: '/docs/how-to/cloud-workspaces', label: 'Cloud Workspaces'},
 ]} />

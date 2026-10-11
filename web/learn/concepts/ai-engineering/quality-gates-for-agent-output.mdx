@@ -1,0 +1,93 @@
+---
+sidebar_position: 8
+description: A quality gate is a command that passes or fails on a coding agent's change. Here is how to define gates and run them per workspace.
+---
+
+import DefinitionCard from "@site/src/components/DefinitionCard";
+
+# Quality Gates for Agent Output
+
+_A quality gate is an automated pass or fail check that a coding agent's change must clear before a person spends review time on it._
+
+A [coding agent](/learn/concepts/ai-engineering/coding-agents) reports that a task is done when it believes the task is done. That belief comes from the model, not from the code. A gate replaces the belief with an exit code.
+
+## Introduction
+
+An agent can write a patch that reads well, compiles on its machine, and still breaks the build. It can also skip a failing test and say the work is complete. Reviewers catch some of this, but reviewing every plausible diff by eye does not scale once several agents run at once.
+
+A **quality gate** moves the first judgment to a command. If the command exits non-zero, the change is not ready, and no one needs to read the diff yet.
+
+<DefinitionCard
+  term="Quality Gate"
+  definition="An automated check with a binary result that a change must pass before the next stage, such as human review or merge."
+/>
+
+## Understanding the Concept
+
+A gate has three properties. It runs without a person. It returns pass or fail from an observable result, usually a process exit code. It runs the same way every time. A prompt that asks the agent to "make sure the tests pass" has none of these, because the agent grades its own work.
+
+Gates sit at different distances from the merge.
+
+| Gate | Runs where | What it catches |
+| --- | --- | --- |
+| Agent self-check | Inside the agent session | Errors the agent notices while it works |
+| Workspace gate | In the agent's workspace, before review | Build, lint, type, and test failures on this one change |
+| CI on the pull request | On a hosted runner, after push | Failures in a clean environment and across the full suite |
+| Human review | In the review UI | Intent, design, and risk the commands cannot see |
+
+The workspace gate is the cheap one. It runs before you push and before you read the diff, so a failure costs the agent a retry and costs you nothing. It does not replace CI, which runs in a clean environment. It does not replace [human-in-the-loop review](/learn/ai-code-review), because commands cannot judge whether the change is the right one.
+
+## Applying It in Practice
+
+Start with the commands you already trust. Install, lint, typecheck, and unit tests make a first gate. Order them from fastest to slowest so a cheap failure stops the run early.
+
+Keep each gate narrow and deterministic. A test that fails one run in ten teaches you to ignore the gate. Set a time limit on every step, so a hung process fails instead of blocking the workspace.
+
+Then decide what a failure does. The simplest rule is that a red gate sends the change back to the agent with the failing output. The agent needs the log, not a summary, because the log holds the file and line that failed.
+
+When agents work in [parallel](/learn/parallel-coding-agents), each one needs its own gate run against its own files. A shared checkout produces results that belong to no one change.
+
+## Workspace Checks in Treq
+
+Treq's **Workspace Checks** run this kind of gate inside a [workspace](/docs/concepts/workspaces). You define workflows as YAML files in `.treq/workflows/`. Each workflow has jobs, and each job has steps with a shell command. A step passes when its command exits zero. The first failing step stops its job.
+
+```yaml
+name: CI
+jobs:
+  verify:
+    name: Verify
+    steps:
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+```
+
+From a pull request that belongs to a workspace, **Run All** runs every job in a workflow, with up to 4 jobs at once. A step that runs longer than 60 seconds is terminated and counts as failed. Treq stores each run with the stdout and stderr of every step, so you can read why a gate failed or hand the log to the agent. Each stacked workspace has its own run history, so each layer of a [stack](/learn/concepts/git/stacked-prs) can pass its gate before you review the next one.
+
+Treq asks you to trust a repository before it runs its workflows, because the workflow files contain shell commands. When a run passes and the workspace has uncommitted changes, Treq commits them with a `treq-autosave:` message. Workspace Checks do not run the fix loop for you. They report the result and you decide what to do next.
+
+:::note[Preview in v0.3.0]
+
+Workspace Checks are a feature preview in v0.3.0 and are off by default. Turn them on in Settings under **Feature Preview**. The latest published release before it is v0.2.0, which does not include them. See the [Workspace Checks docs](/docs/concepts/checks) for setup, and [install Treq](/docs/getting-started/installation) for downloads.
+
+:::
+
+## Engineering Considerations
+
+Gates measure what you wrote down. A change can pass every command and still be wrong, so write gates for the failures you have seen before and add one after each new escape.
+
+Do not let the agent edit the gate it must pass. If the agent can loosen a test or delete a step, a green result tells you nothing. Review changes to workflow files and test configuration as carefully as the code.
+
+Treat a flaky gate as a defect in the gate. Fix it or remove it, because a gate that fails at random trains everyone to rerun until it is green.
+
+## Scaling and Operational Considerations
+
+Gate time adds to every agent loop. Keep the workspace gate under a few minutes and move the slow suites to CI. Track how often a change passes the workspace gate and then fails CI. A high rate means the workspace gate is missing something CI catches.
+
+## Next Steps
+
+- [Human in the Loop AI Code Review](/learn/ai-code-review): the human checkpoint after the gates pass
+- [What is AI Code Review?](/learn/concepts/ai-engineering/ai-code-review): add AI findings on top of command results
+- [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs): a checklist for agent pull requests
+- [Workspace Checks](/docs/concepts/checks): configure and run checks in Treq

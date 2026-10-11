@@ -35,8 +35,7 @@ pub fn resolve_ssh_config_alias(
 /// managed-VM setup flow's identity picker. Never reads or returns private
 /// key material - see `core::remote_local_keys`.
 #[tauri::command]
-pub fn list_local_ssh_identities(state: State<AppState>) -> Result<Vec<LocalSshIdentity>, String> {
-  require_remote_ssh(&state)?;
+pub fn list_local_ssh_identities() -> Result<Vec<LocalSshIdentity>, String> {
   remote_local_keys::list_local_ssh_identities()
 }
 
@@ -45,11 +44,7 @@ pub fn list_local_ssh_identities(state: State<AppState>) -> Result<Vec<LocalSshI
 /// control plane. Never reads or returns private key material - see
 /// `core::remote_local_keys::read_local_public_key`.
 #[tauri::command]
-pub fn read_local_ssh_public_key(
-  state: State<AppState>,
-  reference: String,
-) -> Result<String, String> {
-  require_remote_ssh(&state)?;
+pub fn read_local_ssh_public_key(reference: String) -> Result<String, String> {
   remote_local_keys::read_local_public_key(&reference)
 }
 
@@ -57,10 +52,6 @@ pub fn read_local_ssh_public_key(
 /// registration and certificate-based SSH auth, generating one on first
 /// use. Returns only public material - see `core::remote_device_key`.
 #[tauri::command]
-pub async fn ensure_mobile_device_key(
-  state: State<'_, AppState>,
-  app: tauri::AppHandle,
-) -> Result<DeviceKeyInfo, String> {
-  require_remote_ssh(&state)?;
+pub async fn ensure_mobile_device_key(app: tauri::AppHandle) -> Result<DeviceKeyInfo, String> {
   remote_device_key::ensure_device_key(&app).await
 }

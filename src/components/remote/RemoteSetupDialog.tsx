@@ -44,6 +44,11 @@ export interface RemoteSetupDialogProps {
   onRegisterUserManaged: (values: UserManagedFormValues) => Promise<void>;
   /** Open repositories on the existing managed instance without provisioning another. */
   onOpenManagedRepositories?: () => void;
+  /**
+   * Whether the "Your own VM" path is offered. When false (the `remoteSsh`
+   * preview is off) the dialog opens straight on the managed cloud workspace.
+   */
+  allowUserManaged?: boolean;
 }
 
 /**
@@ -69,12 +74,14 @@ export function RemoteSetupDialog({
   onDeleteInstance,
   onRegisterUserManaged,
   onOpenManagedRepositories,
+  allowUserManaged = true,
 }: RemoteSetupDialogProps) {
-  const [mode, setMode] = useState<RemoteSetupMode>("choice");
+  const initialMode: RemoteSetupMode = allowUserManaged ? "choice" : "managed";
+  const [mode, setMode] = useState<RemoteSetupMode>(initialMode);
 
   useEffect(() => {
-    if (open) setMode("choice");
-  }, [open]);
+    if (open) setMode(initialMode);
+  }, [open, initialMode]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -137,11 +144,13 @@ export function RemoteSetupDialog({
                 usageError={cloudUsageError}
               />
             </div>
-            <div className="mt-6">
-              <Button variant="ghost" onClick={() => setMode("choice")}>
-                Back
-              </Button>
-            </div>
+            {allowUserManaged && (
+              <div className="mt-6">
+                <Button variant="ghost" onClick={() => setMode("choice")}>
+                  Back
+                </Button>
+              </div>
+            )}
           </>
         )}
 
