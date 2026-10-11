@@ -28,9 +28,11 @@ on:
       - "crates/treq-napi/**"
       - ".github/workflows/deploy-web.yml"
 
+# Production deploys queue behind each other. PR previews get a group per PR,
+# so one PR's preview no longer cancels another's pending run.
 concurrency:
-  group: deploy-web
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('deploy-web-pr-{0}', github.event.pull_request.number) || 'deploy-web' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

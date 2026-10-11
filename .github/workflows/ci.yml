@@ -13,6 +13,11 @@ env:
 on:
   pull_request:
 
+# A new push supersedes the previous run; free its runners for other PRs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   detect-windows-changes:
     name: detect windows-specific changes
@@ -318,7 +323,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [fmt, check, clippy]
+        # No separate `check`: clippy --all-targets runs the same checks.
+        task: [fmt, clippy]
     name: verify-rust / ${{ matrix.task }} / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
@@ -365,9 +371,6 @@ jobs:
           case "${{ matrix.task }}" in
             fmt)
               cargo fmt --check
-              ;;
-            check)
-              cargo check --locked
               ;;
             clippy)
               cargo clippy --locked --all-targets --all-features -- -D warnings

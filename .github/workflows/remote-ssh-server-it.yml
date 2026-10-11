@@ -12,6 +12,10 @@ name: Remote SSH Server Integration
 # sshd KRLs are not used for client-key revocation (client cutoff is
 # tested separately).
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
