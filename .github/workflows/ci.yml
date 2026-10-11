@@ -13,8 +13,14 @@ env:
 on:
   pull_request:
 
+# A new push supersedes the previous run; free its runners for other PRs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   detect-windows-changes:
+    timeout-minutes: 15
     name: detect windows-specific changes
     runs-on: ubuntu-22.04
     outputs:
@@ -24,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The windows-rust job is slow (45m timeout) and only ever catches
+      # The windows-rust job is slow and only ever catches
       # bugs in code that branches on the Windows target. Skip it unless
       # the diff actually touches windows-specific cfg branching so most
       # PRs don't pay for it.
@@ -41,6 +47,7 @@ jobs:
           fi
 
   detect-rust-changes:
+    timeout-minutes: 15
     name: detect rust changes
     runs-on: ubuntu-22.04
     outputs:
@@ -59,6 +66,7 @@ jobs:
               - "Cargo.lock"
 
   detect-js-changes:
+    timeout-minutes: 15
     name: detect js changes
     runs-on: ubuntu-22.04
     outputs:
@@ -90,24 +98,20 @@ jobs:
     # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
     needs: [detect-js-changes, detect-rust-changes]
     if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: ${{ matrix.timeout-minutes }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: ubuntu-22.04
             task: check
-            timeout-minutes: 15
           - platform: ubuntu-22.04
             task: check:format
-            timeout-minutes: 15
           - platform: ubuntu-22.04
             task: lint
-            timeout-minutes: 15
             rust: true
           - platform: ubuntu-22.04
             task: knip
-            timeout-minutes: 15
     name: verify-js / ${{ matrix.task }} / ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     env:
@@ -138,7 +142,7 @@ jobs:
     # Rust changes.
     needs: [detect-js-changes, detect-rust-changes]
     if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: ${{ matrix.timeout-minutes }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -146,15 +150,12 @@ jobs:
           # Unit tests: mocked Tauri, no NAPI/jj. Parallel file execution.
           - platform: ubuntu-22.04
             task: test:unit
-            timeout-minutes: 15
           # Integration tests: NAPI + real jj repos. Serial file execution.
           - platform: ubuntu-22.04
             task: test:integration
-            timeout-minutes: 30
             rust: true
           - platform: windows-latest
             task: test:unit
-            timeout-minutes: 15
     name: test-js / ${{ matrix.task }} / ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     env:
@@ -318,7 +319,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [fmt, check, clippy]
+        # No separate `check`: clippy --all-targets runs the same checks.
+        task: [fmt, clippy]
     name: verify-rust / ${{ matrix.task }} / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
@@ -365,9 +367,6 @@ jobs:
           case "${{ matrix.task }}" in
             fmt)
               cargo fmt --check
-              ;;
-            check)
-              cargo check --locked
               ;;
             clippy)
               cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -510,7 +509,7 @@ jobs:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --no-fail-fast
 
-  # Windows rust tests are slow (45m) and only ever catch bugs in code that
+  # Windows rust tests are slow and only ever catch bugs in code that
   # branches on the Windows target, so they're gated on detect-windows-changes
   # finding windows-specific cfg branching in the diff instead of running on
   # every PR.
@@ -519,7 +518,7 @@ jobs:
     if: needs.detect-windows-changes.outputs.windows_changed == 'true'
     name: rust / test / windows-latest
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       # Windows Defender's real-time scanning intercepts every process spawn
       # and file write; this job spawns hundreds of jj/git subprocesses per

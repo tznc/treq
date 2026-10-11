@@ -9,7 +9,11 @@ defaults:
     shell: bash
 
 on:
+  # Push is main-only: without the branch filter every feature-branch push
+  # that touched src-tauri/** ran the ~30 runner-minute Android build, which
+  # saturated the runner pool and queued every other PR's checks.
   push:
+    branches: [main]
     paths:
       - "mobile-gpui/**"
       - "src-tauri/**"
@@ -33,7 +37,7 @@ jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -54,10 +58,13 @@ jobs:
         working-directory: mobile-gpui
         run: cargo test --lib
 
+  # The APK build and emulator smoke run on manual dispatch only; nightly.yml
+  # builds the mobile apps every day. Push and PR runs keep the unit tests.
   android-apk:
     name: Android debug APK
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Free disk space
@@ -110,7 +117,7 @@ jobs:
     name: Emulator smoke test
     needs: android-apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -123,7 +130,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Run on the emulator
-        timeout-minutes: 20
+        timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34

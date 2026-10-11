@@ -6,8 +6,13 @@ on:
       - "src-tauri/src/lib.rs"
       - ".github/workflows/cli-binary.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   detect-rust-changes:
+    timeout-minutes: 15
     name: detect rust changes
     runs-on: ubuntu-22.04
     outputs:
@@ -27,7 +32,7 @@ jobs:
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
     runs-on: macos-latest
-    timeout-minutes: 35 # a Cargo.lock change misses the rust cache; a cold build takes over 20 minutes
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
