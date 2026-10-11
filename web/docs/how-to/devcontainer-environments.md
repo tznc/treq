@@ -24,6 +24,12 @@ When Treq starts the container it adds the [Claude Code feature](https://github.
 
 To manage Claude Code yourself, list `ghcr.io/anthropics/devcontainer-features/claude-code` in your `devcontainer.json`; Treq then leaves the feature to your config but still mounts the config volume.
 
+## The treq CLI in the container
+
+Treq also copies the `treq` CLI matching the app's version into `/usr/local/bin/treq`, so agents can run `treq` commands in the container as they do on the host. It downloads the static Linux build (x86_64 or arm64) from the app's GitHub release once, then reuses it. If the download fails, the container still starts without the CLI and Treq logs a warning.
+
+To use a local build instead, for example a development version with no release yet, set `TREQ_DEVCONTAINER_CLI` to the path of a Linux `treq` binary before starting Treq. Build one with `cargo build --release --no-default-features --bin treq --target x86_64-unknown-linux-musl`.
+
 ## Switch environment
 
 1. Open the repository and find the environment button in the task composer, next to the agent picker. It reads **Local** by default.
@@ -43,6 +49,5 @@ Because the paths match, Treq passes host paths to the container unchanged. Each
 
 ## Limitations
 
-- The `treq` CLI is not installed in the container, so agents cannot run `treq` commands there.
 - Remote SSH repositories ignore this setting.
 - Treq does not stop the container. Stop it with `docker stop` when you are done.

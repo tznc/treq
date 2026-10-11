@@ -213,7 +213,112 @@ pub fn up(repo_path: &str, claude_code: bool) -> Result<DevcontainerStatus, Stri
   if claude_code {
     give_config_volume_to_remote_user(&output.stdout)?;
   }
+  // The container still works without the CLI, so a failed install only
+  // logs: agents lose `treq` commands, not their terminal.
+  if let Some((container_id, _)) = up_result(&output.stdout) {
+    if let Err(e) = install_treq_cli(&container_id) {
+      log::warn!("treq CLI not installed in devcontainer: {e}");
+    }
+  }
   Ok(status(repo_path))
+}
+
+/// Overrides the downloaded CLI with a local Linux build of `treq`, for
+/// development builds whose version has no release yet.
+const CLI_OVERRIDE_ENV: &str = "TREQ_DEVCONTAINER_CLI";
+const CLI_INSTALL_PATH: &str = "/usr/local/bin/treq";
+
+/// The release asset architecture for a container's `uname -m`.
+fn cli_arch(uname_m: &str) -> Option<&'static str> {
+  match uname_m.trim() {
+    "x86_64" | "amd64" => Some("x86_64"),
+    "aarch64" | "arm64" => Some("aarch64"),
+    _ => None,
+  }
+}
+
+fn cli_asset_url(version: &str, arch: &str) -> String {
+  format!(
+    "https://github.com/tznc/treq/releases/download/v{version}/treq-cli-{version}-linux-{arch}.tar.gz"
+  )
+}
+
+fn docker(args: &[&str]) -> Result<String, String> {
+  let output = Command::new("docker")
+    .args(args)
+    .env("PATH", crate::binary_paths::get_extended_path())
+    .output()
+    .map_err(|e| format!("docker {}: {e}", args[0]))?;
+  if !output.status.success() {
+    return Err(format!(
+      "docker {}: {}",
+      args[0],
+      String::from_utf8_lossy(&output.stderr).trim()
+    ));
+  }
+  Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Puts the `treq` CLI matching this app's version on the container's PATH,
+/// so agents in it can call `treq` like they do on the host. Skips the
+/// download when the container already has that version.
+fn install_treq_cli(container_id: &str) -> Result<(), String> {
+  let version = env!("CARGO_PKG_VERSION");
+  let installed =
+    docker(&["exec", container_id, CLI_INSTALL_PATH, "--version"]).unwrap_or_default();
+  if installed.trim() == format!("treq {version}") {
+    return Ok(());
+  }
+  if let Some(binary) = std::env::var_os(CLI_OVERRIDE_ENV) {
+    let binary = binary.to_string_lossy();
+    docker(&["cp", &binary, &format!("{container_id}:{CLI_INSTALL_PATH}")])?;
+    return Ok(());
+  }
+  let uname = docker(&["exec", container_id, "uname", "-m"])?;
+  let arch = cli_arch(&uname).ok_or_else(|| format!("no treq CLI build for {}", uname.trim()))?;
+  let archive = download_cli(version, arch)?;
+  let staged = "/tmp/treq-cli.tar.gz";
+  docker(&[
+    "cp",
+    &archive.to_string_lossy(),
+    &format!("{container_id}:{staged}"),
+  ])?;
+  docker(&[
+    "exec",
+    "-u",
+    "root",
+    container_id,
+    "sh",
+    "-c",
+    &format!("tar -xzf {staged} -C /usr/local/bin treq && rm -f {staged}"),
+  ])?;
+  Ok(())
+}
+
+/// Downloads the release archive once per version and architecture, into
+/// the temp dir, and returns its path.
+fn download_cli(version: &str, arch: &str) -> Result<PathBuf, String> {
+  let dir = std::env::temp_dir().join("treq-cli");
+  let archive = dir.join(format!("treq-cli-{version}-linux-{arch}.tar.gz"));
+  if archive.is_file() {
+    return Ok(archive);
+  }
+  let url = cli_asset_url(version, arch);
+  let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .map_err(|e| e.to_string())?;
+  let bytes = runtime.block_on(async {
+    let response = reqwest::get(&url).await?.error_for_status()?;
+    response.bytes().await
+  });
+  let bytes = bytes.map_err(|e| format!("download {url}: {e}"))?;
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  // Write then rename so an interrupted download never looks complete.
+  let partial = archive.with_extension("partial");
+  std::fs::write(&partial, &bytes).map_err(|e| e.to_string())?;
+  std::fs::rename(&partial, &archive).map_err(|e| e.to_string())?;
+  Ok(archive)
 }
 
 /// Docker creates the config volume owned by root; the container's remote
@@ -388,6 +493,22 @@ mod tests {
     assert_eq!(
       up_failure_message(b"", b"a\nb"),
       "Devcontainer failed to start: a\nb"
+    );
+  }
+
+  #[test]
+  fn maps_container_arch_to_cli_asset_arch() {
+    assert_eq!(cli_arch("x86_64\n"), Some("x86_64"));
+    assert_eq!(cli_arch("aarch64"), Some("aarch64"));
+    assert_eq!(cli_arch("arm64"), Some("aarch64"));
+    assert_eq!(cli_arch("riscv64"), None);
+  }
+
+  #[test]
+  fn cli_asset_url_points_at_the_matching_release() {
+    assert_eq!(
+      cli_asset_url("0.4.0", "aarch64"),
+      "https://github.com/tznc/treq/releases/download/v0.4.0/treq-cli-0.4.0-linux-aarch64.tar.gz"
     );
   }
 }
