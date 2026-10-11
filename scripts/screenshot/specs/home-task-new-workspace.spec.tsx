@@ -34,7 +34,7 @@ it("captures a home-view task starting in its own workspace", async () => {
     await captureDocument(document, {
       name: "home-task-new-workspace-01-toggle-on",
       expectations: [
-        "The home view's task input shows a 'Run in a new workspace' switch, turned on (blue), next to the File and Attach buttons.",
+        "The home view's task input shows a compact 'Run in a new workspace' switch, turned on (blue), with its thumb contained in the track and aligned with the File and Attach buttons.",
         `The task input contains "${PROMPT}".`,
       ],
     });
@@ -59,7 +59,7 @@ it("captures a home-view task starting in its own workspace", async () => {
     await captureDocument(document, {
       name: "home-task-new-workspace-03-toggle-off",
       expectations: [
-        "The 'Run in a new workspace' switch is now off (grey), with its label still visible.",
+        "The compact 'Run in a new workspace' switch is now off (grey), with its thumb contained in the track and its label still visible and aligned.",
       ],
     });
   } finally {
