@@ -1640,8 +1640,7 @@ export const ShowWorkspace = ({
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        This branch doesn&apos;t exist on remote yet. Push to
-                        create it.
+                        Push to remote
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
