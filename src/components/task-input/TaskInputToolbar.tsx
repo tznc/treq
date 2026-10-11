@@ -1,4 +1,4 @@
-import { ChevronDown, Paperclip, Plus } from "lucide-react";
+import { ChevronDown, Loader2, Paperclip, Plus } from "lucide-react";
 import { useId } from "react";
 import { AgentIcon } from "../icons/AgentIcons";
 import { Button } from "../ui/button";
@@ -129,13 +129,26 @@ export const TaskInputToolbar: React.FC<TaskInputToolbarProps> = ({
                 <Button
                   size="sm"
                   disabled={isEmpty || submitting}
+                  aria-busy={submitting}
                   onClick={() => onSubmit("acceptEdits")}
                   className={cn(
                     "h-7 text-xs px-3",
                     supportsPlan && "rounded-r-none",
                   )}
                 >
-                  {selectedAgent === "claude" ? "Edit" : "Run"}
+                  {submitting ? (
+                    <>
+                      <Loader2
+                        className="w-3.5 h-3.5 animate-spin"
+                        aria-hidden="true"
+                      />
+                      Starting…
+                    </>
+                  ) : selectedAgent === "claude" ? (
+                    "Edit"
+                  ) : (
+                    "Run"
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top">
