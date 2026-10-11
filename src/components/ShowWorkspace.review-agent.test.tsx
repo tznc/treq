@@ -10,6 +10,9 @@ import type { TerminalSessionSummary } from "./terminal/types";
 let capturedOnCreateAgentWithReview:
   | ((review: string, mode: "plan" | "acceptEdits") => Promise<void>)
   | undefined;
+let capturedOnStartAgentReview:
+  | ((prompt: string, agent?: string) => Promise<void>)
+  | undefined;
 
 vi.mock("./FileBrowser", () => ({
   FileBrowser: () => <div data-testid="file-browser" />,
@@ -22,13 +25,16 @@ vi.mock("./LinearCommitHistory", () => ({
 vi.mock("./ChangesDiffViewer", () => ({
   ChangesDiffViewer: ({
     onCreateAgentWithReview,
+    onStartAgentReview,
   }: {
     onCreateAgentWithReview?: (
       review: string,
       mode: "plan" | "acceptEdits",
     ) => Promise<void>;
+    onStartAgentReview?: (prompt: string, agent?: string) => Promise<void>;
   }) => {
     capturedOnCreateAgentWithReview = onCreateAgentWithReview;
+    capturedOnStartAgentReview = onStartAgentReview;
     return <div data-testid="changes-viewer" />;
   },
 }));
@@ -93,6 +99,7 @@ function renderWorkspace(
   },
 ) {
   capturedOnCreateAgentWithReview = undefined;
+  capturedOnStartAgentReview = undefined;
   return render(
     <ShowWorkspace
       repositoryPath={workspace.repo_path}
@@ -272,5 +279,35 @@ describe("Send review to terminal respects default agent setting", () => {
 
     expect(onSendToIdleAgent).toHaveBeenCalledWith(84, "review text");
     expect(onSessionCreated).not.toHaveBeenCalled();
+  });
+
+  it("Start Review opens a new agent session even when an agent is idle", async () => {
+    const onSessionCreated = vi.fn();
+    const onSendToIdleAgent = vi.fn();
+    const idleAgentSession: TerminalSessionSummary = {
+      id: "agent-84",
+      kind: "agent",
+      name: "Claude 1",
+      branchName: "feature-one",
+      isMainRepo: false,
+      isStreaming: false,
+    };
+    renderWorkspace(onSessionCreated, {
+      idleAgentSession,
+      onSendToIdleAgent,
+    });
+
+    await openReviewTab();
+    await waitFor(() => expect(capturedOnStartAgentReview).toBeDefined());
+    await capturedOnStartAgentReview!("review prompt", "codex");
+
+    expect(onSendToIdleAgent).not.toHaveBeenCalled();
+    expect(onSessionCreated).toHaveBeenCalledOnce();
+    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
+      SessionCreationInfo,
+    ];
+    expect(sessionInfo.pendingPrompt).toBe("review prompt");
+    expect(sessionInfo.permissionMode).toBe("acceptEdits");
+    expect(sessionInfo.agent).toBe("codex");
   });
 });

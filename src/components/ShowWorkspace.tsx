@@ -986,9 +986,10 @@ export const ShowWorkspace = ({
     mode: "plan" | "acceptEdits",
     sessionName: string,
     agentOverride?: string,
+    { reuseIdleAgent = true }: { reuseIdleAgent?: boolean } = {},
   ) => {
     try {
-      if (sendToIdleAgent(reviewMarkdown)) {
+      if (reuseIdleAgent && sendToIdleAgent(reviewMarkdown)) {
         addToast({
           title: "Review sent to agent",
           description: "Sent review to the idle agent",
@@ -1022,9 +1023,15 @@ export const ShowWorkspace = ({
     mode: "plan" | "acceptEdits",
   ) => createAgentWithReview(reviewMarkdown, mode, "Code Review");
 
-  /** Launches a review agent terminal seeded with a generated review prompt. */
+  /**
+   * Launches a review agent terminal seeded with a generated review prompt.
+   * Always a new terminal: a reviewer that inherits an idle agent's context
+   * would review its own work.
+   */
   const handleStartAgentReview = (prompt: string, agent?: string) =>
-    createAgentWithReview(prompt, "acceptEdits", "AI Review", agent);
+    createAgentWithReview(prompt, "acceptEdits", "AI Review", agent, {
+      reuseIdleAgent: false,
+    });
 
   const handleCreateAgentWithPageReview = (
     reviewMarkdown: string,
