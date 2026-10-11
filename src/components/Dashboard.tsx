@@ -81,7 +81,6 @@ import {
   useRemoteAgentRefresh,
   useRemoteChangeMarkerWatch,
 } from "../hooks/useRemoteRefresh";
-import { ARTIFACTS_BASE_PATH, artifactsPath } from "../lib/artifactRoutes";
 import {
   type ChangeFilesMoveRequest,
   dispatchRefreshWorkspaceChanges,
@@ -179,7 +178,6 @@ import {
 } from "../stores/featurePreviewStore";
 import { useSidebarWidthStore } from "../stores/sidebarWidthStore";
 import { AgentPromptDialog } from "./AgentPromptDialog";
-import { ArtifactsPage } from "./ArtifactsPage";
 import { CommandPalette } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GitHubPanel } from "./GitHubPanel";
@@ -248,7 +246,6 @@ type ViewMode =
   | "session"
   | "show-workspace"
   | "settings"
-  | "artifacts"
   | "merge-preview"
   | "github"
   | "linear"
@@ -1188,19 +1185,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setViewMode(previousViewModeRef.current);
   };
 
-  const openArtifacts = () => {
-    if (viewMode !== "artifacts") {
-      previousViewModeRef.current = viewMode;
-    }
-    setViewMode("artifacts");
-    navigate(artifactsPath());
-  };
-
-  const closeArtifacts = () => {
-    setViewMode(previousViewModeRef.current);
-    navigate("/", { replace: true });
-  };
-
   const openGitHub = () => {
     if (viewMode !== "github") {
       previousViewModeRef.current = viewMode;
@@ -1240,20 +1224,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (viewMode === "github" && !location.startsWith(GITHUB_BASE_PATH)) {
       setViewMode(previousViewModeRef.current);
     }
-    if (viewMode === "artifacts" && !location.startsWith(ARTIFACTS_BASE_PATH)) {
-      setViewMode(previousViewModeRef.current);
-    }
     if (viewMode === "linear" && !location.startsWith(LINEAR_BASE_PATH)) {
       setViewMode(previousViewModeRef.current);
     }
-    if (location.startsWith(ARTIFACTS_BASE_PATH) && viewMode !== "artifacts") {
-      if (viewMode !== "github") {
-        previousViewModeRef.current = viewMode;
-      }
-      setViewMode("artifacts");
-    }
     if (location.startsWith(LINEAR_BASE_PATH) && viewMode !== "linear") {
-      if (viewMode !== "github" && viewMode !== "artifacts") {
+      if (viewMode !== "github") {
         previousViewModeRef.current = viewMode;
       }
       setViewMode("linear");
@@ -1270,7 +1245,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setViewMode(previousViewModeRef.current);
       }
       if (enabled && location.startsWith(basePath) && viewMode !== id) {
-        if (viewMode !== "github" && viewMode !== "artifacts") {
+        if (viewMode !== "github") {
           previousViewModeRef.current = viewMode;
         }
         setViewMode(id);
@@ -1286,9 +1261,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const leftGitHub =
       previousViewModeForUrlRef.current === "github" && viewMode !== "github";
-    const leftArtifacts =
-      previousViewModeForUrlRef.current === "artifacts" &&
-      viewMode !== "artifacts";
     const leftLinear =
       previousViewModeForUrlRef.current === "linear" && viewMode !== "linear";
     const leftTracker = Object.values(TRACKER_PROVIDERS).find(
@@ -1299,9 +1271,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       navigate("/", { replace: true });
     }
     if (leftGitHub && location.startsWith(GITHUB_BASE_PATH)) {
-      navigate("/", { replace: true });
-    }
-    if (leftArtifacts && location.startsWith(ARTIFACTS_BASE_PATH)) {
       navigate("/", { replace: true });
     }
     if (leftLinear && location.startsWith(LINEAR_BASE_PATH)) {
@@ -3045,21 +3014,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
             onOpenJira={
               jiraIntegrationEnabled ? () => openTracker("jira") : undefined
             }
-            onOpenArtifacts={openArtifacts}
             currentPage={
               viewMode === "settings"
                 ? "settings"
                 : viewMode === "github"
                   ? "github"
-                  : viewMode === "artifacts"
-                    ? "artifacts"
-                    : viewMode === "linear" ||
-                        viewMode === "trello" ||
-                        viewMode === "jira"
-                      ? viewMode
-                      : viewMode === "session" || viewMode === "show-workspace"
-                        ? "session"
-                        : undefined
+                  : viewMode === "linear" ||
+                      viewMode === "trello" ||
+                      viewMode === "jira"
+                    ? viewMode
+                    : viewMode === "session" || viewMode === "show-workspace"
+                      ? "session"
+                      : undefined
             }
           />
 
@@ -3316,13 +3282,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       closeSettings();
                     },
                   }}
-                />
-              )}
-
-              {viewMode === "artifacts" && (
-                <ArtifactsPage
-                  repoPath={dataRepoPath}
-                  onClose={closeArtifacts}
                 />
               )}
 

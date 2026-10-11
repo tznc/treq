@@ -295,10 +295,3 @@ pub fn search_workspace_files(
       .collect(),
   )
 }
-
-#[tauri::command]
-pub fn list_send_artifacts(
-  repo_path: String,
-) -> Result<Vec<crate::send_dispatch::SendArtifactRecord>, String> {
-  crate::send_dispatch::list_send_artifacts(&repo_path)
-}
