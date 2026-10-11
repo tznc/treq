@@ -84,7 +84,11 @@ describe("session started feedback", () => {
     );
     const pane = await screen.findByTestId("workspace-terminal-pane");
     expect(
-      await within(pane).findByText("prompt: Rework it", {}, { timeout: 15000 }),
+      await within(pane).findByText(
+        "prompt: Rework it",
+        {},
+        { timeout: 15000 },
+      ),
     ).toBeInTheDocument();
   }, 60000);
 
@@ -113,7 +117,11 @@ describe("session started feedback", () => {
     );
     const pane = await screen.findByTestId("workspace-terminal-pane");
     expect(
-      await within(pane).findByText("prompt: Do the thing", {}, { timeout: 15000 }),
+      await within(pane).findByText(
+        "prompt: Do the thing",
+        {},
+        { timeout: 15000 },
+      ),
     ).toBeInTheDocument();
   }, 60000);
 
