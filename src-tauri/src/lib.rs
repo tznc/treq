@@ -346,6 +346,20 @@ where
   !first_arg.starts_with("treq://") && !first_arg.starts_with("-psn_")
 }
 
+/// Updater plugin keyed to `TAURI_SIGNER_PUBLIC_KEY`, read at build time so
+/// release CI supplies the key alongside `TAURI_SIGNING_PRIVATE_KEY`. Builds
+/// without it keep the empty `pubkey` from tauri.conf.json, so update checks
+/// fail signature verification instead of trusting unsigned artifacts.
+#[cfg(desktop)]
+fn updater_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config>
+{
+  let builder = tauri_plugin_updater::Builder::new();
+  match option_env!("TAURI_SIGNER_PUBLIC_KEY") {
+    Some(pubkey) if !pubkey.is_empty() => builder.pubkey(pubkey).build(),
+    _ => builder.build(),
+  }
+}
+
 #[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
 pub fn run() {
   telemetry::install_panic_hook();
@@ -390,7 +404,10 @@ pub fn run() {
     builder
   };
   #[cfg(desktop)]
-  let builder = builder.plugin(tauri_plugin_cli::init());
+  let builder = builder
+    .plugin(tauri_plugin_cli::init())
+    .plugin(updater_plugin())
+    .plugin(tauri_plugin_process::init());
   builder
     .on_window_event(|window, event| {
       // Fires once, after the window is actually gone (not on a
@@ -661,11 +678,15 @@ pub fn run() {
           // Help menu
           let view_logs_item = MenuItemBuilder::with_id("view_logs", "View Logs").build(app)?;
 
+          let check_for_updates_item =
+            MenuItemBuilder::with_id("check_for_updates", "Check for Updates...").build(app)?;
+
           let learn_more_item = MenuItemBuilder::with_id("learn_more", "Learn More").build(app)?;
           let discussions_item =
             MenuItemBuilder::with_id("discussions", "Community Discussions").build(app)?;
 
           let help_menu = SubmenuBuilder::new(app, "Help")
+            .item(&check_for_updates_item)
             .item(&view_logs_item)
             .separator()
             .item(&learn_more_item)
@@ -810,6 +831,7 @@ pub fn run() {
               let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
             }
           }
+          "check_for_updates" => emit_to_focused(app, "menu-check-for-updates", ()),
           id => {
             if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;

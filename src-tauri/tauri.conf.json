@@ -24,6 +24,12 @@
     }
   },
   "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://treq.dev/version.json"
+      ]
+    },
     "cli": {
       "description": "Treq - Stacking ADE",
       "subcommands": {

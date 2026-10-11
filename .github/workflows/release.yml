@@ -136,6 +136,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Signs the updater artifacts that tauri-plugin-updater verifies
+          # against `plugins.updater.pubkey` in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Compiled into the app as the updater's verification key.
+          TAURI_SIGNER_PUBLIC_KEY: ${{ vars.TAURI_SIGNER_PUBLIC_KEY }}
         with:
           tagName: v__VERSION__
           releaseName: "v__VERSION__"
@@ -143,7 +149,10 @@ jobs:
           releaseDraft: true
           prerelease: false
           releaseAssetNamePattern: "[name]-[version]-[platform]-[arch][ext]"
-          args: ${{ matrix.args }}
+          # Uploads latest.json; the web build republishes it as treq.dev/version.json.
+          includeUpdaterJson: true
+          # Updater artifacts need the signing key, so only release builds make them.
+          args: ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Verify packaged macOS bundle
         if: runner.os == 'macOS'

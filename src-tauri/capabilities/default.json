@@ -42,6 +42,8 @@
     "dialog:allow-open",
     "log:default",
     "deep-link:default",
-    "cli:default"
+    "cli:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

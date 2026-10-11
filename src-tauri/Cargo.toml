@@ -35,6 +35,9 @@ tauri-plugin-cli = "2.4.1"
 # Parses CLI args before Tauri starts (see `cli::args`); same version the plugin uses.
 clap = "4"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# In-app updates from signed GitHub release artifacts (see `latest.json`).
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dependencies]
 tauri = { version = "2.10.3", features = ["protocol-asset", "unstable"] }

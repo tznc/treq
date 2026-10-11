@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
+import { useAutoUpdate } from "../hooks/useAutoUpdate";
 import { useThemeStore } from "../stores/themeStore";
 import { useTerminalSettingsStore } from "../stores/terminalSettingsStore";
 import {
@@ -76,6 +77,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [fontDraft, setFontDraft] = useState<number | null>(null);
   const [zoomDraft, setZoomDraft] = useState<number | null>(null);
   const [savingRepository, setSavingRepository] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const repositorySettingsRef = useRef<RepositorySettingsContentHandle>(null);
 
   const theme = useThemeStore((s) => s.theme);
@@ -95,6 +97,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     }
   }, [skillsInstallation, currentTab]);
   const { addToast } = useToast();
+  const { checkForUpdate } = useAutoUpdate({
+    autoCheck: false,
+    listenMenu: false,
+  });
   const { data: savedModel } = useSWR(["setting", "default_model"], () =>
     getSetting("default_model"),
   );
@@ -405,6 +411,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                       onAlwaysRunChange={setupScript.setAlwaysRun}
                       onRun={setupScript.run}
                     />
+
+                    <div>
+                      <Label>Updates</Label>
+                      <p className="text-sm text-muted-foreground mt-1 mb-3">
+                        Check treq.dev for a newer signed release and install
+                        it.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={checkingUpdate}
+                        onClick={async () => {
+                          setCheckingUpdate(true);
+                          try {
+                            await checkForUpdate();
+                          } finally {
+                            setCheckingUpdate(false);
+                          }
+                        }}
+                      >
+                        {checkingUpdate ? "Checking…" : "Check for updates"}
+                      </Button>
+                    </div>
                   </div>
                 </TabsContent>
 
