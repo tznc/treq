@@ -31,6 +31,33 @@ fn resolve_local_working_dir(
   Ok(Some(absolute_path.to_string_lossy().into_owned()))
 }
 
+/// The repository and working directory for a PTY that should run in the
+/// repository's devcontainer, or `None` to run it on the host. The repo's
+/// `environment` setting decides, and only while the preview is on.
+fn devcontainer_repo(
+  state: &State<'_, AppState>,
+  repo_path: Option<&str>,
+  working_dir: Option<&str>,
+) -> Option<(String, String)> {
+  use crate::core::devcontainer::{repo_root_for, ENVIRONMENT_DEVCONTAINER, ENVIRONMENT_SETTING};
+  use crate::core::feature_preview::{self, PreviewFeature};
+  use crate::lock_ext::LockExt;
+
+  let dir = working_dir.or(repo_path)?.to_string();
+  let repo = match repo_path {
+    Some(repo) => repo.to_string(),
+    None => repo_root_for(Path::new(&dir))
+      .to_string_lossy()
+      .into_owned(),
+  };
+  let db = state.db.lock_or_recover();
+  if !feature_preview::is_enabled(&db, PreviewFeature::Devcontainers) {
+    return None;
+  }
+  let environment = db.get_repo_setting(&repo, ENVIRONMENT_SETTING).ok()??;
+  (environment == ENVIRONMENT_DEVCONTAINER).then_some((repo, dir))
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn pty_create_session(
@@ -85,12 +112,15 @@ pub async fn pty_create_session(
     )?;
     (Some(program), args, None, None)
   } else {
-    (
-      shell,
-      Vec::new(),
-      resolve_local_working_dir(repo_path.as_deref(), workspace_id, working_dir)?,
-      initial_command,
-    )
+    let working_dir = resolve_local_working_dir(repo_path.as_deref(), workspace_id, working_dir)?;
+    match devcontainer_repo(&state, repo_path.as_deref(), working_dir.as_deref()) {
+      Some((repo, dir)) => {
+        let (program, args) =
+          crate::core::devcontainer::exec_shell_command(&repo, &dir, &session_id);
+        (Some(program), args, None, initial_command)
+      }
+      None => (shell, Vec::new(), working_dir, initial_command),
+    }
   };
 
   tauri::async_runtime::spawn_blocking(move || {

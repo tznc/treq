@@ -24,6 +24,7 @@ function defaultFlags(): PreviewFlags {
     linearIntegration: previewFeatureDefault("linearIntegration"),
     logs: previewFeatureDefault("logs"),
     browser: previewFeatureDefault("browser"),
+    devcontainers: previewFeatureDefault("devcontainers"),
   };
 }
 

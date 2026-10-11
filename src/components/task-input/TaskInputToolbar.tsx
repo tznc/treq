@@ -20,6 +20,8 @@ import { cn } from "../../lib/utils";
 import type { AgentPermissionMode } from "../../lib/agentDeepLink";
 import { agentInfo, type AgentKind } from "../../lib/agents";
 import { AgentOptions } from "../AgentOptions";
+import { EnvironmentSelector } from "../EnvironmentSelector";
+import type { RepoEnvironment } from "../../hooks/useRepoEnvironment";
 
 interface TaskInputToolbarProps {
   isEmpty: boolean;
@@ -38,6 +40,8 @@ interface TaskInputToolbarProps {
     onCheckedChange: (checked: boolean) => void;
   };
   onSubmit: (mode: AgentPermissionMode) => void;
+  /** Where the session runs; omitted while the devcontainers preview is off. */
+  environment?: RepoEnvironment | null;
 }
 
 export const TaskInputToolbar: React.FC<TaskInputToolbarProps> = ({
@@ -53,6 +57,7 @@ export const TaskInputToolbar: React.FC<TaskInputToolbarProps> = ({
   onSaveAsRepoDefaultChange,
   newWorkspace,
   onSubmit,
+  environment,
 }) => {
   const supportsPlan = agentInfo(selectedAgent).hasPlanMode;
   const newWorkspaceSwitchId = useId();
@@ -107,6 +112,7 @@ export const TaskInputToolbar: React.FC<TaskInputToolbarProps> = ({
             Set as default for this repo
           </label>
         )}
+        {environment && <EnvironmentSelector env={environment} />}
         <div className="flex items-center gap-1.5">
           <AgentIcon
             agent={selectedAgent}

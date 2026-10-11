@@ -37,6 +37,7 @@ import {
 } from "../lib/taskWorkspace";
 import { useToast } from "./ui/toast";
 import { useDebounce } from "../hooks/useDebounce";
+import { useRepoEnvironment } from "../hooks/useRepoEnvironment";
 import { cn } from "../lib/utils";
 import { DEFAULT_AGENT, toAgentKind, type AgentKind } from "../lib/agents";
 import type { SessionCreationInfo } from "../types/sessions";
@@ -80,6 +81,13 @@ export const TaskInput: React.FC<TaskInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
+  const environment = useRepoEnvironment(repoPath, (message) =>
+    addToast({
+      title: "Devcontainer did not start",
+      description: message,
+      type: "error",
+    }),
+  );
 
   // @ mention state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -515,6 +523,7 @@ export const TaskInput: React.FC<TaskInputProps> = ({
                   : undefined
               }
               onSubmit={handleSubmit}
+              environment={environment}
             />
           </div>
         </div>

@@ -11,6 +11,7 @@
     "githubApp": true,
     "skillsInstallation": false,
     "remoteSsh": false,
+    "devcontainers": false,
     "linearIntegration": false,
     "logs": true,
     "browser": false

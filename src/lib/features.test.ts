@@ -15,6 +15,7 @@ describe("preview features", () => {
       "linearIntegration",
       "logs",
       "browser",
+      "devcontainers",
     ]);
     for (const feature of PREVIEW_FEATURES) {
       expect(feature.docsPath.startsWith("/docs/")).toBe(true);

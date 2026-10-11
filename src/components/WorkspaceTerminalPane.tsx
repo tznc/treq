@@ -19,11 +19,13 @@ import {
   type WorkspaceTerminalPaneProps,
 } from "./workspace-terminal-pane/types";
 import { agentSessionIdOf, agentTerminalId } from "./terminal/agentTerminalId";
+import { useRepoEnvironment } from "../hooks/useRepoEnvironment";
 
 export type { WorkspaceTerminalPaneHandle };
 
 const WorkspaceTerminalPaneInner = ({
   workingDirectory,
+  repoPath,
   remoteHost,
   onSessionError,
   currentBranch,
@@ -39,6 +41,10 @@ const WorkspaceTerminalPaneInner = ({
   className,
   ref,
 }: WorkspaceTerminalPaneProps) => {
+  const environment = useRepoEnvironment(repoPath, (message) =>
+    onSessionError?.(message),
+  );
+
   // Shared pane state
   const [collapsed, setCollapsed] = useState(true);
   const [maximized, setMaximized] = useState(false);
@@ -529,6 +535,7 @@ const WorkspaceTerminalPaneInner = ({
       onTerminalDoubleClick={handleTerminalDoubleClick}
       onTerminalOutput={handleTerminalOutput}
       onTerminalIdle={handleTerminalIdlePulse}
+      environment={environment}
     />
   );
 };

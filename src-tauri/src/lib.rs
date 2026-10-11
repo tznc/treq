@@ -929,6 +929,8 @@ pub fn run() {
       commands::build_resolve_agent_prompt,
       commands::resolve_commit,
       commands::pty_create_session,
+      commands::devcontainer_status,
+      commands::devcontainer_up,
       commands::pty_session_exists,
       commands::pty_write,
       commands::pty_write_suppress_echo,
