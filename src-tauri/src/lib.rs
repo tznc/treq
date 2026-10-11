@@ -678,11 +678,15 @@ pub fn run() {
           // Help menu
           let view_logs_item = MenuItemBuilder::with_id("view_logs", "View Logs").build(app)?;
 
+          let check_for_updates_item =
+            MenuItemBuilder::with_id("check_for_updates", "Check for Updates...").build(app)?;
+
           let learn_more_item = MenuItemBuilder::with_id("learn_more", "Learn More").build(app)?;
           let discussions_item =
             MenuItemBuilder::with_id("discussions", "Community Discussions").build(app)?;
 
           let help_menu = SubmenuBuilder::new(app, "Help")
+            .item(&check_for_updates_item)
             .item(&view_logs_item)
             .separator()
             .item(&learn_more_item)
@@ -827,6 +831,7 @@ pub fn run() {
               let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
             }
           }
+          "check_for_updates" => emit_to_focused(app, "menu-check-for-updates", ()),
           id => {
             if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
