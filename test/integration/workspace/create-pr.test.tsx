@@ -269,37 +269,36 @@ describe("ShowWorkspace - Create PR", () => {
     expect(ghCreatePr).toHaveBeenCalledTimes(1);
   }, 30_000);
 
-  it.each(["CLOSED", "MERGED"] as const)(
-    "offers Create PR again when the branch's last PR is %s",
-    async (state) => {
-      await setupPushedWorkspaceWithGitHub();
-      const oldPr = {
-        number: 7,
-        title: "Old attempt",
-        state,
-        url: "https://github.com/acme/treq/pull/7",
-        head_ref_name: "feat/create-pr",
-        base_ref_name: "main",
-        merge_state_status: null,
-        is_draft: false,
-      };
-      vi.mocked(getCachedPrInfo).mockResolvedValue(oldPr);
-      vi.mocked(getPrInfoViaGh).mockResolvedValue(oldPr);
-      render(<Dashboard />);
+  it.each([
+    "CLOSED",
+    "MERGED",
+  ] as const)("offers Create PR again when the branch's last PR is %s", async (state) => {
+    await setupPushedWorkspaceWithGitHub();
+    const oldPr = {
+      number: 7,
+      title: "Old attempt",
+      state,
+      url: "https://github.com/acme/treq/pull/7",
+      head_ref_name: "feat/create-pr",
+      base_ref_name: "main",
+      merge_state_status: null,
+      is_draft: false,
+    };
+    vi.mocked(getCachedPrInfo).mockResolvedValue(oldPr);
+    vi.mocked(getPrInfoViaGh).mockResolvedValue(oldPr);
+    render(<Dashboard />);
 
-      const header = await openWorkspace("feat/create-pr");
-      expect(
-        await within(header).findByRole("button", {
-          name: new RegExp(`view pr.*${state}`, "i"),
-        }),
-      ).toBeVisible();
-      await user.click(await findEnabledCreatePr(header));
-      await waitFor(() => {
-        expect(ghCreatePr).toHaveBeenCalled();
-      });
-    },
-    30_000,
-  );
+    const header = await openWorkspace("feat/create-pr");
+    expect(
+      await within(header).findByRole("button", {
+        name: new RegExp(`view pr.*${state}`, "i"),
+      }),
+    ).toBeVisible();
+    await user.click(await findEnabledCreatePr(header));
+    await waitFor(() => {
+      expect(ghCreatePr).toHaveBeenCalled();
+    });
+  }, 30_000);
 
   it("pushes a rewritten (diverged) branch before creating a PR", async () => {
     const { workspace } = await setupPushedWorkspaceWithGitHub();
