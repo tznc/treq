@@ -3,7 +3,7 @@ name: Deploy Web
 on:
   workflow_dispatch:
   # Only Docusaurus site changes. App changes reach the landing screenshots on
-  # the next site change or release.
+  # the next site change, release or nightly run.
   push:
     branches:
       - main
@@ -13,6 +13,9 @@ on:
   # Rebuild so /version and the download links pick up the new release.
   release:
     types: [published]
+  # Nightly production rebuild, an hour after the nightly build.
+  schedule:
+    - cron: "0 10 * * *"
   pull_request:
     branches:
       - main
@@ -139,8 +142,8 @@ jobs:
         shell: bash
         working-directory: web
     environment:
-      name: ${{ (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'production' || 'preview' }}
-      url: ${{ (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'https://treq.dev' || format('https://preview-{0}.treq-9zy.pages.dev', github.event.pull_request.number) }}
+      name: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'production' || 'preview' }}
+      url: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'https://treq.dev' || format('https://preview-{0}.treq-9zy.pages.dev', github.event.pull_request.number) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -169,13 +172,13 @@ jobs:
           path: /tmp/landing-screenshots
       - name: Build docs
         env:
-          DOCUSAURUS_ENABLE_GTAG: ${{ (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
+          DOCUSAURUS_ENABLE_GTAG: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
           # Authenticated GitHub API calls for the latest-release plugin.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SKIP_LANDING_SCREENSHOTS: "1"
         run: bash scripts/ci-deploy-web-build.sh /tmp/landing-screenshots
       - name: Publish to Production
-        if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
