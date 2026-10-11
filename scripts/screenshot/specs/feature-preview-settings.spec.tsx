@@ -3,18 +3,15 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
-import { createWorkspace } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
 
 it("captures the Feature Preview settings tab and gated UI", async () => {
   const { repoPath } = createTestRepo(false);
   openRepo(repoPath);
-  await createWorkspace(repoPath, "feat/preview");
   const user = userEvent.setup();
   render(<Dashboard />);
 
@@ -27,7 +24,7 @@ it("captures the Feature Preview settings tab and gated UI", async () => {
   await captureDocument(document, {
     name: "feature-preview-01-settings-tab",
     expectations: [
-      "Settings shows a Feature Preview tab with Skills installation, Workspace scheduling, and Remote SSH.",
+      "Settings shows a Feature Preview tab with Skills installation and Remote SSH.",
       "Each feature title is a documentation link and has an on/off switch.",
     ],
   });
@@ -41,24 +38,6 @@ it("captures the Feature Preview settings tab and gated UI", async () => {
     expectations: [
       "The Skills settings tab is gone after Skills installation is switched off.",
       "Feature Preview remains the selected settings tab.",
-    ],
-  });
-
-  await user.click(
-    screen.getByRole("switch", { name: "Workspace scheduling" }),
-  );
-  await user.click(screen.getByRole("button", { name: "Close" }));
-  await user.click(await findSidebarBranchElement("feat/preview"));
-  expect(await screen.findByTestId("show-workspace-header")).toBeTruthy();
-  expect(
-    screen.queryByTestId("schedule-workspace-button"),
-  ).not.toBeInTheDocument();
-
-  await captureDocument(document, {
-    name: "feature-preview-03-schedule-button-hidden",
-    expectations: [
-      "The workspace header is visible for feat/preview.",
-      "The Schedule button is not shown in the workspace header.",
     ],
   });
 }, 60000);

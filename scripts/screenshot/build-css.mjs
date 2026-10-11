@@ -38,7 +38,6 @@ const datepickerThemeCssPath = path.join(
 	repoRoot,
 	"src",
 	"components",
-	"schedule-datepicker.css",
 );
 const prismThemeCssPath = path.join(
 	repoRoot,

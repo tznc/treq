@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { CalendarClock, CircleHelp, ExternalLink, Layers2 } from "lucide-react";
+import { CircleHelp, ExternalLink, Layers2 } from "lucide-react";
 
 import useSWR from "swr";
 import { useRepositoryCacheKey } from "../lib/active-repository-context";
@@ -16,7 +16,6 @@ import {
   type StackedWorkspaceEntry,
 } from "../lib/workspace-tree";
 import { getWorkspaceDisplayTitle } from "../lib/workspace-utils";
-import { Button } from "./ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -34,7 +33,6 @@ interface WorkspaceStackPanelProps {
   /** The repo's default branch name, e.g. "main" */
   defaultBranch: string;
   onSelectWorkspace?: (workspace: Workspace) => void;
-  onScheduleStack?: (workspaces: Workspace[]) => void;
 }
 
 /**
@@ -48,7 +46,6 @@ export const WorkspaceStackPanel = ({
   workspace,
   defaultBranch,
   onSelectWorkspace,
-  onScheduleStack,
 }: WorkspaceStackPanelProps) => {
   // Shared with Dashboard, which keys by repository identity (not the path) for remote repos.
   const repoCacheKey = useRepositoryCacheKey(repoPath);
@@ -139,20 +136,6 @@ export const WorkspaceStackPanel = ({
           </Tooltip>
         </TooltipProvider>
         <span className="ml-auto flex items-center gap-2 text-xs font-normal">
-          {onScheduleStack && (
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              data-testid="schedule-stack-button"
-              onClick={() =>
-                onScheduleStack(stack.map((entry) => entry.workspace))
-              }
-            >
-              <CalendarClock className="w-3.5 h-3.5" />
-              Schedule
-            </Button>
-          )}
           <span>
             {currentIndex + 1} of {stack.length}
           </span>

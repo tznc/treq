@@ -1,8 +1,7 @@
 /**
  * Verifies that the workspace header stays legible when the main area is
  * narrow: the right-hand actions (Push, Merge, Details)
- * must not overlap the branch name, target branch selector, or Schedule
- * button on the left.
+ * must not overlap the branch name or target branch selector on the left.
  */
 
 import userEvent from "@testing-library/user-event";
@@ -61,7 +60,7 @@ it("keeps the workspace header actions clear of the branch controls when narrow"
     name: "workspace-header-narrow-01-900px",
     viewport: { width: 900, height: 600 },
     expectations: [
-      "In the workspace header, no button or label is drawn on top of another: the branch name, target branch selector and Schedule button are fully readable.",
+      "In the workspace header, no button or label is drawn on top of another: the branch name and target branch selector are fully readable.",
       "The right-hand actions (Push, Merge, Details, more) are fully visible, moving to a second header row if the first row has no room.",
     ],
   });

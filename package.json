@@ -10,7 +10,6 @@
     "mergeQueue": false,
     "githubApp": true,
     "skillsInstallation": false,
-    "workspaceScheduling": false,
     "remoteSsh": false,
     "linearIntegration": false,
     "trelloIntegration": false,

@@ -11,7 +11,6 @@ describe("preview features", () => {
   it("lists all preview features with docs paths", () => {
     expect(PREVIEW_FEATURES.map((feature) => feature.id)).toEqual([
       "skillsInstallation",
-      "workspaceScheduling",
       "remoteSsh",
       "linearIntegration",
       "trelloIntegration",
@@ -28,7 +27,6 @@ describe("preview features", () => {
 
   it("uses package.json as the production default", () => {
     expect(FEATURES.skillsInstallation).toBe(false);
-    expect(FEATURES.workspaceScheduling).toBe(false);
     expect(FEATURES.remoteSsh).toBe(false);
     expect(FEATURES.linearIntegration).toBe(false);
     expect(FEATURES.trelloIntegration).toBe(false);
@@ -40,7 +38,6 @@ describe("preview features", () => {
 
   it("defaults every preview flag on in test and dev", () => {
     expect(previewFeatureDefault("skillsInstallation")).toBe(true);
-    expect(previewFeatureDefault("workspaceScheduling")).toBe(true);
     expect(previewFeatureDefault("remoteSsh")).toBe(true);
     expect(previewFeatureDefault("linearIntegration")).toBe(true);
     expect(previewFeatureDefault("trelloIntegration")).toBe(true);

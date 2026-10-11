@@ -115,7 +115,6 @@ import {
 import { ViewPrButton } from "./ViewPrButton";
 import { WorkspaceStackPanel } from "./WorkspaceStackPanel";
 import { MergeQueueButton } from "./workspace-header/MergeQueueButton";
-import { useWorkspaceScheduling } from "./workspace-header/useWorkspaceScheduling";
 import {
   type WorkspaceTrackerMetadata,
   WorkspaceTrackerBadges,
@@ -225,7 +224,6 @@ export const ShowWorkspace = ({
 
   const { addToast } = useToast();
   const logsEnabled = usePreviewFeature("logs");
-  const scheduling = useWorkspaceScheduling(effectiveRepoPath, workspace);
   const { fontSize } = useTerminalSettingsStore();
 
   const { data: remoteInfo } = useGitRemoteInfo(effectiveRepoPath || undefined);
@@ -1220,7 +1218,6 @@ export const ShowWorkspace = ({
                       workspace={workspace}
                       defaultBranch={defaultTargetBranch}
                       onSelectWorkspace={onNavigateToWorkspace}
-                      onScheduleStack={scheduling.onScheduleStack}
                     />
                   )}
                   {/* File Search Input */}
@@ -1511,7 +1508,6 @@ export const ShowWorkspace = ({
                   />
                 </>
               )}
-              {scheduling.button}
               {!workspace && (
                 <>
                   <button
@@ -1932,7 +1928,6 @@ export const ShowWorkspace = ({
           </div>
         </div>
       </div>
-      {scheduling.dialog}
     </>
   );
 };

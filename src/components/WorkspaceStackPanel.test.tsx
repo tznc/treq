@@ -395,28 +395,6 @@ describe("WorkspaceStackPanel", () => {
     expect(columns[0]).toBe("6ch auto 6ch");
   });
 
-  it("schedules the entire stack from the stack card", async () => {
-    const user = userEvent.setup();
-    const onScheduleStack = vi.fn();
-    vi.mocked(api.listWorkspaceStatuses).mockResolvedValue(
-      asStatuses([rootWorkspace, middleWorkspace, tipWorkspace]),
-    );
-    vi.mocked(api.listCommits).mockResolvedValue(makeLogResult(0, 0));
-
-    render(
-      <WorkspaceStackPanel
-        repoPath={middleWorkspace.repo_path}
-        workspace={middleWorkspace}
-        defaultBranch="main"
-        onScheduleStack={onScheduleStack}
-      />,
-    );
-
-    await user.click(await screen.findByTestId("schedule-stack-button"));
-    expect(onScheduleStack).toHaveBeenCalledTimes(1);
-    const scheduled = onScheduleStack.mock.calls[0][0] as Workspace[];
-    expect(scheduled.map((ws) => ws.id).sort()).toEqual([1, 2, 3]);
-  });
   it("refetches in a remote repo when the repository-keyed statuses are invalidated", async () => {
     const endpoint = {
       id: "endpoint-1",

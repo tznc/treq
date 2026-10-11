@@ -4,7 +4,6 @@ export const FEATURES = pkg.featureFlags;
 
 export const PREVIEW_FEATURE_IDS = [
   "skillsInstallation",
-  "workspaceScheduling",
   "remoteSsh",
   "linearIntegration",
   "trelloIntegration",
@@ -27,11 +26,6 @@ export const PREVIEW_FEATURES: readonly PreviewFeature[] = [
     id: "skillsInstallation",
     title: "Skills installation",
     docsPath: "/docs/how-to/installing-skills",
-  },
-  {
-    id: "workspaceScheduling",
-    title: "Workspace scheduling",
-    docsPath: "/docs/how-to/scheduling-workspaces",
   },
   {
     id: "remoteSsh",

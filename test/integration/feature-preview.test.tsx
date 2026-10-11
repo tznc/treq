@@ -7,7 +7,11 @@ import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 import {
   createWorkspace,
+<<<<<<< HEAD
   scheduleWorkspaces,
+=======
+  runWorkflow,
+>>>>>>> e591c89 (Remove workspace scheduling feature)
   setSetting,
 } from "../../src/lib/api";
 import {
@@ -40,9 +44,6 @@ describe("feature preview settings", () => {
     await openFeaturePreview();
     expect(
       screen.getByRole("button", { name: "Skills installation" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Workspace scheduling" }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Remote SSH" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Logs" })).toBeTruthy();
@@ -106,20 +107,6 @@ describe("feature preview settings", () => {
     expect(screen.queryByRole("tab", { name: /^skills$/i })).toBeNull();
   });
 
-  it("hides the Schedule button when workspace scheduling is off", async () => {
-    await createWorkspace(repoPath, "feat/preview");
-    await openFeaturePreview();
-    await user.click(
-      screen.getByRole("switch", { name: "Workspace scheduling" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    const { findSidebarBranchElement } = await import("../utils");
-    await user.click(await findSidebarBranchElement("feat/preview"));
-    expect(await screen.findByTestId("show-workspace-header")).toBeTruthy();
-    expect(
-      screen.queryByTestId("schedule-workspace-button"),
-    ).not.toBeInTheDocument();
-  });
 });
 
 describe("tracker preview routes", () => {
@@ -176,16 +163,6 @@ describe("feature preview onboarding", () => {
 });
 
 describe("feature preview rust gates", () => {
-  it("rejects schedule_workspaces when the preview flag is off", async () => {
-    const { repoPath } = createTestRepo(false);
-    const workspaceId = await createWorkspace(repoPath, "feat/gated");
-    const { setSetting } = await import("../../src/lib/api");
-    await setSetting(previewSettingKey("workspaceScheduling"), "false");
-    await expect(
-      scheduleWorkspaces(repoPath, [workspaceId], "2099-01-01T00:00:00Z"),
-    ).rejects.toThrow(/workspaceScheduling/);
-  });
-
   it("rejects Trello and Jira commands when their preview flags are off", async () => {
     const { repoPath } = createTestRepo(false);
     await setSetting(previewSettingKey("trelloIntegration"), "false");

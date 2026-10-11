@@ -30,7 +30,7 @@ Download the latest release [here](https://github.com/tznc/treq/releases/latest)
 - Exposes workspace management to agents through the [treq CLI](https://treq.dev/docs/reference/cli).
 - Agents can send assets as [reviewable artifacts](https://treq.dev/docs/reference/cli#treq-send).
 - Handles [commit management](https://treq.dev/docs/concepts/commit-management), reviewing either a single commit or the cumulative stack.
-- Lets you [schedule work](https://treq.dev/docs/concepts/workspaces) by hiding a workspace or shifting commit timestamps.
+- Lets you [schedule work](https://treq.dev/docs/concepts/workspaces) by shifting commit timestamps.
 - Manages [GitHub issues and pull requests](https://treq.dev/docs/concepts/github-integration) in the app, including starting an agent from an issue.
 - Runs shells and agents in [terminal sessions](https://treq.dev/docs/concepts/terminal-sessions) attached to the workspace, with automatic skill installation.
 - [Local by default](https://treq.dev/docs/security-and-privacy), with no code uploaded.
