@@ -298,7 +298,7 @@ jobs:
           restore-keys: |
             vitest-fsmc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
 
-      # Restores the addon built on main (napi-cache.yml) or builds it.
+      # Restores the addon built on main (warm-caches.yml) or builds it.
       - name: NAPI addon
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
         uses: ./.github/actions/napi-addon
@@ -353,9 +353,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Restores the cache warm-caches.yml saves on main. PR runs don't save:
+      # a PR's cache can only be read by that PR, and the multi-GB saves
+      # evict main's caches from the repo's 10 GB quota.
       - uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
+          shared-key: clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
 
@@ -497,9 +501,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Restores the test build warm-caches.yml saves on main; see verify-rust.
       - uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
 

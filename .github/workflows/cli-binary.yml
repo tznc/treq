@@ -48,11 +48,14 @@ jobs:
         with:
           toolchain: stable
 
+      # The workspace root (not src-tauri/) owns target/. warm-caches.yml
+      # saves this cache on main.
       - uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
+          shared-key: cli-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
-            ./src-tauri -> target
+            . -> target
 
       - name: Build frontend assets
         run: |

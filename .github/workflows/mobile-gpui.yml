@@ -37,7 +37,9 @@ jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # PRs get 15 minutes. The main push run saves the cache PRs restore, so
+    # it gets room for a cold build.
+    timeout-minutes: ${{ github.event_name == 'push' && 30 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,6 +47,7 @@ jobs:
         with:
           workspaces: ./mobile-gpui -> target
           key: host
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: System dependencies
         run: |
           sudo apt-get update
@@ -64,7 +67,7 @@ jobs:
     name: Android debug APK
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Free disk space

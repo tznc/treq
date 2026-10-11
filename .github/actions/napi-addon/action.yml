@@ -1,7 +1,7 @@
 name: NAPI addon
 description: >
   Restore the compiled tauri-test NAPI addon from cache, or build it and save
-  it. Shared by ci.yml (PRs, consumers) and napi-cache.yml (main, producer)
+  it. Shared by ci.yml (PRs, consumers) and warm-caches.yml (main, producer)
   so both compute the same cache keys. Expects the WebKit/GTK apt packages
   and `npm ci` to have run first.
 
@@ -28,12 +28,12 @@ runs:
         toolchain: stable
 
     # shared-key: without it the key includes the job id, so the cache main
-    # saves from napi-cache.yml would never match the PR job in ci.yml.
+    # saves from warm-caches.yml would never match the PR job in ci.yml.
     - uses: Swatinem/rust-cache@v2
       if: steps.napi-cache.outputs.cache-hit != 'true'
       with:
         shared-key: napi-addon
-        cache-on-failure: true
+        save-if: ${{ github.ref == 'refs/heads/main' }}
         workspaces: |
           . -> target
 
