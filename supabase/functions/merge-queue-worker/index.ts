@@ -46,6 +46,7 @@ import {
 } from "../_shared/merge-queue/messages.ts";
 import { parseCommand } from "../_shared/merge-queue/schemas.ts";
 import { handleCommand } from "../_shared/merge-queue/command-handler.ts";
+import { installationHasPro } from "../_shared/billing/entitlement.ts";
 import type { RepoMeta } from "../_shared/merge-queue/queue-repository.ts";
 
 const BATCH_SIZE = 5;
@@ -171,6 +172,8 @@ async function processMessage(
             repo.name,
           );
         },
+        installationHasPro: (installationId) =>
+          installationHasPro(supabase, installationId),
         publish: async (cmd, delaySeconds = 0) => {
           await publishMergeQueueCommand(supabase, cmd, delaySeconds);
         },

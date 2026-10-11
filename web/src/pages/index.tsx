@@ -5,7 +5,8 @@ import Head from '@docusaurus/Head';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
-import {DOWNLOAD_HREF} from '@site/src/components/DownloadCTA';
+import {DownloadButton, OtherDownloads} from '@site/src/components/DownloadLinks';
+import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import styles from './index.module.css';
@@ -66,20 +67,18 @@ function HomepageHeader() {
           dependent workspaces when the target branch moves.
         </p>
         <div className={styles.buttons}>
-          <Link
+          <DownloadButton
+            location="hero"
             className={clsx('button', styles.primaryButton)}
-            href={DOWNLOAD_HREF}
-            target="_blank"
-            rel="noopener noreferrer">
-            <DownloadIcon />
-            Download Treq
-          </Link>
+            icon={<DownloadIcon />}
+          />
           <Link
             className={clsx('button', styles.secondaryButton)}
             to="/docs/getting-started/installation">
             Read the docs
           </Link>
         </div>
+        <OtherDownloads location="hero" className={styles.heroOtherDownloads} />
         <div className={styles.platformsSupported}>
           <span>Available for</span>
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" className={styles.platformIcon} viewBox="0 0 16 16" aria-label="macOS">
@@ -643,17 +642,15 @@ function ClosingCTA(): ReactNode {
           The desktop app is Apache 2.0. Treq was used to build Treq.
         </p>
         <div className={styles.closingCTAButtons}>
-          <Link
-            className={styles.closingCTAButton}
-            href={DOWNLOAD_HREF}
-            target="_blank"
-            rel="noopener noreferrer">
-            Download Treq
-          </Link>
+          <DownloadButton location="closing" className={styles.closingCTAButton} />
           <Link className={styles.closingCTASecondary} to="/pricing">
             See pricing
           </Link>
         </div>
+        <OtherDownloads
+          location="closing"
+          className={styles.closingCTAOtherDownloads}
+        />
       </div>
     </section>
   );
@@ -674,7 +671,7 @@ const SOFTWARE_APP_SCHEMA = {
     priceCurrency: 'USD',
   },
   downloadUrl: DOWNLOAD_HREF,
-  codeRepository: 'https://github.com/Ziinc/treq',
+  codeRepository: 'https://github.com/tznc/treq',
   license: 'https://www.apache.org/licenses/LICENSE-2.0',
 };
 

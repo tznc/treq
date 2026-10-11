@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const LATEST_RELEASE_API =
-  'https://api.github.com/repos/treq-dev/treq/releases/latest';
+  'https://api.github.com/repos/tznc/treq/releases/latest';
 
 // GitHub's /releases/latest skips drafts and prereleases, so this is the
 // release the desktop updater can actually download.

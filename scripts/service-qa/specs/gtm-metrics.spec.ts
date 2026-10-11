@@ -3,7 +3,7 @@
  *
  * biz-tools calls GET gtm-metrics?from=&to= with the x-gtm-metrics-secret
  * header and gets aggregate counts only. The spec seeds accounts and GitHub
- * App installations (and alpha waitlist rows when 030_alpha_waitlist.sql is
+ * App installations (and alpha waitlist rows when 031_alpha_waitlist.sql is
  * present) and checks the counts move by exactly that much. The local
  * database may hold rows from other specs, so it compares before and after.
  */
@@ -223,7 +223,7 @@ it("returns aggregate counts that match seeded data and nothing else", async () 
   await recordOutcome("gtm-metrics-02-counts", {
     expectations: [
       "After seeding 2 accounts and 3 installations (2 linked to one account), accounts_created and accounts_total rise by 2, installations_total by 3, and github_app_installations_linked by 1.",
-      "Waitlist counts rise by 2 joined, 1 unsubscribed, 1 active when 030_alpha_waitlist.sql is applied, and are null when it is not.",
+      "Waitlist counts rise by 2 joined, 1 unsubscribed, 1 active when 031_alpha_waitlist.sql is applied, and are null when it is not.",
       "The response has only from, to, and the count keys; it contains no email, user ID, or installation ID.",
     ],
     details: { alphaTable: alpha, before, after },

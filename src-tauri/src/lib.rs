@@ -342,7 +342,7 @@ where
   !first_arg.starts_with("treq://") && !first_arg.starts_with("-psn_")
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
 pub fn run() {
   telemetry::install_panic_hook();
   // CLI invocations never start Tauri: see `cli::args` for why.

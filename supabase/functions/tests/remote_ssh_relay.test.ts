@@ -73,6 +73,8 @@ function store(
         owner === OWNER && id === "key-1" ? (key as never) : null,
       );
     },
+    // Pro refusals are covered in test/billing/relay-pro.test.ts.
+    hasPro: () => Promise.resolve(true),
   };
 }
 

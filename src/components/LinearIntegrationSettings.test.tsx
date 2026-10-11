@@ -1,62 +1,107 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultAuthState, useAuthStore } from "../stores/authStore";
+import { render, screen, waitFor } from "../../test/test-utils";
 import { useToastStore } from "../stores/toastStore";
 import { LinearIntegrationSettings } from "./LinearIntegrationSettings";
 
-const { invokeEdgeFn } = vi.hoisted(() => ({ invokeEdgeFn: vi.fn() }));
-
-vi.mock("../lib/supabase", () => ({
-  supabase: { functions: { invoke: invokeEdgeFn } },
+const auth = vi.hoisted(() => ({
+  user: { id: "user-1" },
+  session: { access_token: "token" },
+  loading: false,
+  subscription: { plan: "pro", status: "active" },
 }));
+const invoke = vi.hoisted(() => vi.fn());
 
+vi.mock("../stores/authStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../stores/authStore")>();
+  const { createAuthStoreMock } = await import(
+    "../../test/mocks/zustandAuthStore"
+  );
+  return { ...actual, useAuthStore: createAuthStoreMock(auth) };
+});
+vi.mock("../lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/features")>();
+  return { ...actual, FEATURES: { ...actual.FEATURES, pro: true } };
+});
+vi.mock("../lib/supabase", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/supabase")>();
+  return {
+    ...actual,
+    WEB_URL: "http://localhost:3001",
+    supabase: { functions: { invoke } },
+  };
+});
 vi.mock("../lib/api-linear", () => ({
-  getLinearApiKey: vi.fn().mockResolvedValue(null),
+  getLinearApiKey: vi.fn(async () => null),
   setLinearApiKey: vi.fn(),
-  getLinearAutoKickoffLabel: vi.fn().mockResolvedValue(null),
+  getLinearAutoKickoffLabel: vi.fn(async () => null),
   setLinearAutoKickoffLabel: vi.fn(),
   linearStartAutoKickoffPolling: vi.fn(),
 }));
 
-const AUTHORIZATION_URL =
-  "https://linear.app/oauth/authorize?client_id=abc&state=def";
-
-describe("LinearIntegrationSettings OAuth connect", () => {
+describe("Linear OAuth connect", () => {
   beforeEach(() => {
-    vi.mocked(openUrl).mockClear();
-    useAuthStore.setState({
-      ...defaultAuthState,
-      loading: false,
-      subscription: {
-        plan: "pro",
-        status: "active",
-        current_period_end: null,
-      },
-    });
+    invoke.mockReset();
+    vi.mocked(openUrl).mockReset();
+    useToastStore.setState({ toasts: [] });
   });
 
-  it("opens the authorization_url returned by create-linear-oauth-intent", async () => {
-    // Same body as supabase/functions/create-linear-oauth-intent/index.ts.
-    invokeEdgeFn.mockResolvedValue({
+  it("offers Upgrade to Pro and the API key path when the server answers pro_required", async () => {
+    invoke.mockResolvedValue({
+      data: null,
+      error: Object.assign(
+        new Error("Edge Function returned a non-2xx status code"),
+        {
+          context: new Response(
+            JSON.stringify({
+              error: "Linear OAuth needs Pro.",
+              code: "pro_required",
+            }),
+            { status: 402 },
+          ),
+        },
+      ),
+    });
+    const user = userEvent.setup();
+    render(<LinearIntegrationSettings repoPath="/repo" />);
+
+    await user.click(screen.getByRole("button", { name: /Connect via OAuth/ }));
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts).toHaveLength(1),
+    );
+    const [toast] = useToastStore.getState().toasts;
+    expect(toast).toMatchObject({
+      title: "Linear OAuth needs Pro",
+      type: "info",
+      action: { label: "Upgrade to Pro" },
+    });
+    expect(toast.description).toMatch(/API key/);
+    toast.action!.onClick();
+    expect(openUrl).toHaveBeenCalledWith("http://localhost:3001/dashboard");
+  });
+
+  it("opens the authorization URL the server returns", async () => {
+    invoke.mockResolvedValue({
       data: {
-        authorization_url: AUTHORIZATION_URL,
-        expires_at: "2026-01-01T00:15:00.000Z",
+        authorization_url: "https://linear.app/oauth/authorize?state=abc",
+        expires_at: "2026-10-05T12:15:00Z",
       },
       error: null,
     });
+    const user = userEvent.setup();
     render(<LinearIntegrationSettings repoPath="/repo" />);
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Connect via OAuth" }),
-    );
+    await user.click(screen.getByRole("button", { name: /Connect via OAuth/ }));
 
-    expect(invokeEdgeFn).toHaveBeenCalledWith("create-linear-oauth-intent", {
+    expect(invoke).toHaveBeenCalledWith("create-linear-oauth-intent", {
       body: {},
     });
     await waitFor(() =>
-      expect(openUrl).toHaveBeenCalledWith(AUTHORIZATION_URL),
+      expect(openUrl).toHaveBeenCalledWith(
+        "https://linear.app/oauth/authorize?state=abc",
+      ),
     );
     expect(useToastStore.getState().toasts).toEqual([]);
   });

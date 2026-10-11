@@ -3,9 +3,12 @@
 //
 // POST body: { repo_full_name: string; branch_name: string; action: "enqueue" | "dequeue" }
 // Auth: user JWT in Authorization header (passed automatically by supabase.functions.invoke)
+// "enqueue" requires Pro for the installation's owner (402 pro_required);
+// "dequeue" always works. See lib.ts.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { getInstallationToken } from "../_shared/merge-queue/github-adapter.ts";
+import { authorizeQueueAction, queueAccessStore } from "./lib.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -58,27 +61,20 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  // Look up the repo + installation, verifying the user owns it
-  const { data: repoRow, error: repoErr } = await supabase
-    .from("github_repositories")
-    .select("id, owner, name, installation_id")
-    .eq("full_name", repo_full_name)
-    .maybeSingle();
-
-  if (repoErr || !repoRow) {
-    return json({ error: "Repository not found or not connected" }, 404);
+  // Look up the repo + installation, verifying the user owns it and, to
+  // enqueue, that its owner has Pro.
+  let access;
+  try {
+    access = await authorizeQueueAction(
+      { userId: user.id, repoFullName: repo_full_name, action },
+      queueAccessStore(supabase),
+    );
+  } catch (err) {
+    console.error("[enqueue-workspace] access check failed:", (err as Error).message);
+    return json({ error: "Failed to check access" }, 500);
   }
-
-  // Verify the caller owns this installation
-  const { data: instRow } = await supabase
-    .from("github_app_installations")
-    .select("linked_user_id")
-    .eq("id", repoRow.installation_id)
-    .single();
-
-  if (!instRow || instRow.linked_user_id !== user.id) {
-    return json({ error: "Forbidden" }, 403);
-  }
+  if (!access.ok) return json(access.body, access.status);
+  const repoRow = access.repo;
 
   // Get an installation token to make GitHub API calls
   let token: string;

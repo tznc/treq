@@ -11,6 +11,11 @@ import { Input } from "./ui/input";
 import { WEB_URL } from "../lib/supabase";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAuthStore } from "../stores/authStore";
+import {
+  isProSubscription,
+  subscriptionPeriodLabel,
+  subscriptionStatusLabel,
+} from "../lib/subscription";
 import { useEffect, useState } from "react";
 import {
   CloudWorkspaceCard,
@@ -130,8 +135,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
     user.user_metadata?.full_name || user.user_metadata?.name || "User";
   const { email } = user;
 
-  const isPro =
-    subscription?.plan === "pro" && subscription?.status === "active";
+  const isPro = isProSubscription(subscription);
 
   return (
     <div className="space-y-6">
@@ -177,21 +181,24 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
               <span className="text-sm text-muted-foreground">Status</span>
               <span
                 className={`text-sm font-medium ${
-                  subscription.status === "active"
+                  subscription.status === "active" ||
+                  subscription.status === "trialing"
                     ? "text-green-600 dark:text-green-400"
-                    : subscription.status === "canceled"
+                    : subscription.status === "canceled" ||
+                        subscription.status === "past_due"
                       ? "text-yellow-600 dark:text-yellow-400"
                       : "text-muted-foreground"
                 }`}
               >
-                {subscription.status.charAt(0).toUpperCase() +
-                  subscription.status.slice(1).replace("_", " ")}
+                {subscriptionStatusLabel(subscription.status)}
               </span>
             </div>
           )}
           {subscription?.current_period_end && (
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Period ends</span>
+              <span className="text-sm text-muted-foreground">
+                {subscriptionPeriodLabel(subscription.status)}
+              </span>
               <span className="text-sm">
                 {new Date(subscription.current_period_end).toLocaleDateString()}
               </span>

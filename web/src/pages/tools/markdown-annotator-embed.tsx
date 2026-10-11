@@ -12,7 +12,7 @@ const AnnotatorTool = lazy(() =>
 function TreqBadge() {
   return (
     <a
-      href="https://treq.dev"
+      href="https://treq.dev/?utm_source=treq-embed&utm_medium=badge&utm_campaign=markdown-annotator"
       target="_blank"
       rel="noopener noreferrer"
       className={styles.badge}

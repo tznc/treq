@@ -1,5 +1,5 @@
 /**
- * Alpha waitlist (030_alpha_waitlist.sql + functions/alpha-unsubscribe).
+ * Alpha waitlist (031_alpha_waitlist.sql + functions/alpha-unsubscribe).
  *
  * A signed-in user joins with the same upsert the dashboard's Alpha tab
  * sends, follows the unsubscribe link from an email (GET, then the RFC 8058

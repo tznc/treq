@@ -14,7 +14,7 @@ The goal of Treq is to provide a full suite of high-productivity tooling with th
 
 ## Getting Started
 
-Download the latest release [here](https://github.com/Ziinc/treq/releases). Install steps are in the [installation docs](https://treq.dev/docs/getting-started/installation).
+Download the latest release [here](https://github.com/tznc/treq/releases/latest). Install steps are in the [installation docs](https://treq.dev/docs/getting-started/installation).
 
 ## Features
 

@@ -2,6 +2,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { create } from "zustand";
 import { getSetting, setSetting } from "../lib/api";
 import { remoteCutOffManaged } from "../lib/api-extra";
+import { onWindowFocus } from "../lib/focus-refresh";
 import {
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
@@ -11,7 +12,8 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 export interface Subscription {
-  status: "active" | "canceled" | "past_due" | "inactive";
+  /** `canceled` means set to cancel at the period end, still Pro until then. */
+  status: "trialing" | "active" | "canceled" | "past_due" | "inactive";
   plan: "free" | "pro";
   current_period_end: string | null;
 }
@@ -48,6 +50,39 @@ async function persistSession(sess: Session | null) {
   } else {
     await setSetting("supabase_session", "");
   }
+}
+
+let authWatch: { unsubscribe: () => void } | null = null;
+
+/**
+ * Keeps the stored tokens in step with supabase-js. Refresh tokens rotate on
+ * every refresh, and the old one stops working shortly after. Restoring a
+ * session with an expired access token refreshes it, so without this the
+ * next launch would present a dead refresh token and sign the user out.
+ * Registered before the first setSession so that refresh is captured too.
+ */
+function watchAuthChanges() {
+  if (authWatch) return;
+  authWatch = supabase.auth.onAuthStateChange((event, session) => {
+    if ((event === "TOKEN_REFRESHED" || event === "SIGNED_IN") && session) {
+      useAuthStore.setState({ session, user: session.user });
+      void persistSession(session).catch(() => undefined);
+    } else if (event === "SIGNED_OUT") {
+      useAuthStore.setState({ session: null, user: null, subscription: null });
+      void persistSession(null).catch(() => undefined);
+    }
+  }).data.subscription;
+}
+
+/**
+ * Refetches the subscription whenever the window comes back to the
+ * foreground, so a purchase or cancellation made on the web dashboard shows
+ * up without a restart. Returns a function that stops it.
+ */
+export function startSubscriptionRefreshOnFocus(): () => void {
+  return onWindowFocus(() => {
+    void useAuthStore.getState().refreshSubscription();
+  });
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -110,6 +145,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     const data = await response.json();
+    watchAuthChanges();
     const { data: sessionData, error } = await supabase.auth.setSession({
       access_token: data.access_token as string,
       refresh_token: data.refresh_token as string,
@@ -130,6 +166,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const stored = await getSetting("supabase_session");
       if (stored) {
         const tokens = JSON.parse(stored) as Record<string, string>;
+        watchAuthChanges();
         const { data, error } = await supabase.auth.setSession({
           access_token: tokens.accessToken,
           refresh_token: tokens.refreshToken,
@@ -139,6 +176,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             session: data.session,
             user: data.session.user,
           });
+          await persistSession(data.session);
           await get().fetchSubscription();
         }
       }

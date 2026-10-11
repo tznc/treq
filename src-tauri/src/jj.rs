@@ -1492,7 +1492,8 @@ fn parse_sparse_patterns(patterns: &[String]) -> Result<Vec<RepoPathBuf>, JjErro
 }
 
 /// True when a registered workspace never got past `init_workspace_with_existing_repo`:
-/// its working copy is still the empty commit on root and its directory holds only `.jj`.
+/// its working copy is still the empty commit on root and its directory holds only `.jj`
+/// (plus the `.git` worktree file that jj >= 0.46 writes in colocated repos).
 fn is_interrupted_workspace_init(
   repo_path: &str,
   name: &str,
@@ -1504,7 +1505,9 @@ fn is_interrupted_workspace_init(
       .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>())
       .map_err(|e| JjError::IoError(format!("Failed to read workspace dir: {}", e)))?
       .iter()
-      .all(|entry| entry.file_name() == ".jj"),
+      .all(|entry| {
+        entry.file_name() == ".jj" || (entry.file_name() == ".git" && entry.path().is_file())
+      }),
   };
   if !only_jj {
     return Ok(false);

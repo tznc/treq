@@ -4,6 +4,7 @@
  * specs do not leak state across the local Supabase CLI stack.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { clearBilling, grantPro, type ProGrant } from "./billing";
 import { getAnonClient, getServiceClient } from "./clients";
 import { FEATURES } from "./features";
 import {
@@ -23,6 +24,8 @@ export type MergeQueueFixture = {
   email: string;
   password: string;
   linked: LinkedRepo;
+  /** The user's Pro subscription; null for a fixture created with `pro: false`. */
+  pro: ProGrant | null;
   /** Enable the merge queue config row for the linked repo's default branch. */
   enableQueue: () => Promise<void>;
   /**
@@ -41,11 +44,13 @@ export type MergeQueueFixture = {
 
 /**
  * Create a signed-in email/password user (feature flag overridden on) and a
- * linked GitHub repo. Caller must `await fixture.teardown()` — prefer
- * `withMergeQueueFixture`.
+ * linked GitHub repo. The user has Pro unless `pro: false`, since turning
+ * the merge queue on and running it require Pro (027_billing_enforcement.sql).
+ * Caller must `await fixture.teardown()` — prefer `withMergeQueueFixture`.
  */
 export async function setupMergeQueueFixture(opts?: {
   fullName?: string;
+  pro?: boolean;
 }): Promise<MergeQueueFixture> {
   if (!FEATURES.emailSignup) {
     throw new Error("emailSignup feature flag must be true in service-qa");
@@ -53,6 +58,8 @@ export async function setupMergeQueueFixture(opts?: {
 
   const admin = getServiceClient();
   const testUser: TestUser = await createTestUser();
+  const pro =
+    opts?.pro === false ? null : await grantPro(admin, testUser.user.id);
   const linked = await linkGithubRepo(admin, testUser.user.id, {
     fullName: opts?.fullName,
   });
@@ -64,6 +71,7 @@ export async function setupMergeQueueFixture(opts?: {
       password: testUser.password,
     });
   if (signInError || !signIn.session) {
+    await clearBilling(admin, [testUser.user.id]);
     await deleteTestUser(admin, testUser.user.id);
     throw new Error(
       `email/password sign-in failed: ${signInError?.message ?? "no session"}`,
@@ -84,6 +92,7 @@ export async function setupMergeQueueFixture(opts?: {
       .from("github_app_installations")
       .delete()
       .eq("id", linked.installationId);
+    await clearBilling(admin, [testUser.user.id]);
     await deleteTestUser(admin, testUser.user.id);
   };
 
@@ -119,6 +128,7 @@ export async function setupMergeQueueFixture(opts?: {
     email: testUser.email,
     password: testUser.password,
     linked,
+    pro,
     enableQueue,
     seedQueuedEntry,
     teardown,
@@ -128,7 +138,7 @@ export async function setupMergeQueueFixture(opts?: {
 /** Run `fn` with a fresh fixture; always teardown even on assertion failure. */
 export async function withMergeQueueFixture<T>(
   fn: (fixture: MergeQueueFixture) => Promise<T>,
-  opts?: { fullName?: string },
+  opts?: { fullName?: string; pro?: boolean },
 ): Promise<T> {
   const fixture = await setupMergeQueueFixture(opts);
   try {

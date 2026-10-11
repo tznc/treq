@@ -36,7 +36,7 @@ module.exports = function jsonLdPlugin() {
               name: 'Treq',
               url: SITE_URL,
               logo: `${SITE_URL}/img/favicon.svg`,
-              sameAs: ['https://github.com/Ziinc/treq'],
+              sameAs: ['https://github.com/tznc/treq'],
             }),
           },
         ],

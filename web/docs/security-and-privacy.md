@@ -38,15 +38,15 @@ This analytics applies only to the website. Visiting the docs does not connect t
 
 ## Open Source
 
-Treq is fully open source. You can read every line of the desktop app, CLI, and documentation site in the [public repository](https://github.com/Ziinc/treq).
+Treq is fully open source. You can read every line of the desktop app, CLI, and documentation site in the [public repository](https://github.com/tznc/treq).
 
 Audit the code yourself, or follow the public history of changes. These files are the direct sources for the claims on this page:
 
 | Claim | Source |
 |---|---|
-| Telemetry stays on disk | [`src-tauri/src/telemetry.rs`](https://github.com/Ziinc/treq/blob/main/src-tauri/src/telemetry.rs) |
-| App and repository databases | [`src-tauri/src/db.rs`](https://github.com/Ziinc/treq/blob/main/src-tauri/src/db.rs), [`src-tauri/src/local_db.rs`](https://github.com/Ziinc/treq/blob/main/src-tauri/src/local_db.rs) |
-| CLI command set | [`src-tauri/src/cli/mod.rs`](https://github.com/Ziinc/treq/blob/main/src-tauri/src/cli/mod.rs) |
+| Telemetry stays on disk | [`src-tauri/src/telemetry.rs`](https://github.com/tznc/treq/blob/main/src-tauri/src/telemetry.rs) |
+| App and repository databases | [`src-tauri/src/db.rs`](https://github.com/tznc/treq/blob/main/src-tauri/src/db.rs), [`src-tauri/src/local_db.rs`](https://github.com/tznc/treq/blob/main/src-tauri/src/local_db.rs) |
+| CLI command set | [`src-tauri/src/cli/mod.rs`](https://github.com/tznc/treq/blob/main/src-tauri/src/cli/mod.rs) |
 
 ## Learn More
 

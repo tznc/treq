@@ -16,6 +16,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 tauri-test = ["dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
+# Linked into another Tauri app as a library (mobile-gpui): leaves out the
+# mobile entry point, whose JNI symbols would clash with the host app's.
+embed = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

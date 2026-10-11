@@ -1,0 +1,139 @@
+name: Mobile GPUI
+
+# Experimental: the Treq mobile app rebuilt with GPUI (mobile-gpui/).
+# Produces an installable Android debug APK (signed with the debug key) as
+# the `treq-gpui-debug-apk` artifact, then smoke-tests it on an emulator.
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  push:
+    paths:
+      - "mobile-gpui/**"
+      - "src-tauri/**"
+      - "package.json"
+      - ".github/workflows/mobile-gpui.yml"
+  pull_request:
+    paths:
+      - "mobile-gpui/**"
+      - ".github/workflows/mobile-gpui.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  NDK_VERSION: 27.0.12077973
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./mobile-gpui -> target
+          key: host
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev \
+            libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
+      # treq_lib embeds the desktop frontend, which this app does not use.
+      - name: Placeholder frontend dist
+        run: mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html
+      - name: cargo test
+        working-directory: mobile-gpui
+        run: cargo test --lib
+
+  android-apk:
+    name: Android debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          df -h /
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./mobile-gpui -> target
+          key: android
+          cache-on-failure: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Placeholder frontend dist
+        run: mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html
+      # The generated Gradle project calls back into the Tauri CLI, so it is
+      # a local npm install.
+      - name: Build debug APK (arm64 + x86_64)
+        working-directory: mobile-gpui
+        run: |
+          npm install --no-audit --no-fund
+          npm run tauri -- android init --ci
+          npm run tauri -- android build --debug --apk --target aarch64 --target x86_64 --ci
+          apk=$(find gen/android/app/build/outputs/apk -name '*universal-debug.apk' | head -1)
+          ls -la "$apk"
+          cp "$apk" "$RUNNER_TEMP/treq-gpui-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: treq-gpui-debug-apk
+          path: ${{ runner.temp }}/treq-gpui-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  emulator-smoke:
+    name: Emulator smoke test
+    needs: android-apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: treq-gpui-debug-apk
+          path: ${{ runner.temp }}/apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run on the emulator
+        timeout-minutes: 20
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: mobile-gpui/scripts/android-smoke.sh ${{ runner.temp }}/apk/treq-gpui-debug.apk target/android-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: treq-gpui-emulator-screenshots
+          path: target/android-smoke

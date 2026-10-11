@@ -1,0 +1,70 @@
+name: Deploy Supabase
+
+# Applies pending migrations and deploys every edge function to the hosted
+# project when supabase/** lands on main. Migrations run first so functions
+# never ship against a schema they don't expect.
+#
+# Requires, on the `prod` environment (or repo-level):
+#   secrets.SUPABASE_ACCESS_TOKEN  personal access token for the Supabase CLI; with
+#                                  no DB password set, db push logs in through a
+#                                  temporary role the CLI creates with this token
+#   vars.SUPABASE_PROJECT_REF      project ref (the <ref> in <ref>.supabase.co)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+      - ".github/workflows/deploy-supabase.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-supabase
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: db push + functions deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: prod
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      # GitHub runners have no IPv6, and the direct db host is IPv6-only. The
+      # CLI only falls back to the IPv4 pooler when supabase/.temp/pooler-url
+      # exists, and `supabase link` no longer writes it, so fetch it here.
+      - name: Use the IPv4 connection pooler
+        run: |
+          curl -fsS \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/database/pooler" \
+            | jq -er 'map(select(.database_type == "PRIMARY"))[0].connection_string' \
+            > supabase/.temp/pooler-url
+
+      - name: Show pending migrations
+        run: supabase db push --dry-run
+
+      - name: Apply migrations
+        run: supabase db push
+
+      # With no names, deploys every supabase/functions/*/index.ts (skipping
+      # _shared and tests) and applies the verify_jwt settings in config.toml.
+      - name: Deploy edge functions
+        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF" --use-api

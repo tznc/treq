@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Cloud, Loader2, Trash2, Wrench } from "lucide-react";
 import { useState } from "react";
 import type {
@@ -5,6 +6,8 @@ import type {
   MachineUsageReport,
   ManagedInstanceState,
 } from "../../lib/api-types-remote";
+import { isProRequiredError, proRequiredMessage } from "../../lib/pro-required";
+import { WEB_URL } from "../../lib/supabase";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -142,7 +145,13 @@ export function CloudWorkspaceCard({
     instanceRecord?.status === "failed" && !instanceRecord.provider_resource_id;
   const endpoint = instanceStatus?.endpoint ?? null;
   const creating = submitting && !instance;
-  const errorSummary = provisioningError?.split("\n")[0];
+  // The server refuses ensure/wake/reprovision without Pro. That is an
+  // upsell, not a failure.
+  const proRequired =
+    provisioningError !== undefined && isProRequiredError(provisioningError);
+  const errorSummary = proRequired
+    ? undefined
+    : provisioningError?.split("\n")[0];
 
   const run = async (action: () => Promise<void>) => {
     setSubmitting(true);
@@ -274,6 +283,24 @@ export function CloudWorkspaceCard({
           {provisioningStage && (
             <p className="text-sm text-muted-foreground">{provisioningStage}</p>
           )}
+        </div>
+      )}
+
+      {proRequired && provisioningError && (
+        <div className="mt-3 flex items-center gap-2 text-sm">
+          <span className="rounded bg-green-500/20 px-1.5 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">
+            PRO
+          </span>
+          <span className="min-w-0 flex-1 text-muted-foreground">
+            {proRequiredMessage(provisioningError)}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void openUrl(`${WEB_URL}/dashboard`)}
+          >
+            Upgrade to Pro
+          </Button>
         </div>
       )}
 

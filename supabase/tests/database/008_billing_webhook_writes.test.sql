@@ -130,9 +130,9 @@ select is(
 select is((select count(*)::int from public.billing_customers where stripe_customer_id = 'cus_ghost'), 0,
   'the ghost customer is not mapped');
 select throws_ok(
-  $$select public.billing_record_checkout_completed('evt_checkout_org', 'cus_org', 'organization', '00000000-0000-0000-0000-0000000000b3')$$,
+  $$select public.billing_record_checkout_completed('evt_checkout_org', 'cus_org', 'team', '00000000-0000-0000-0000-0000000000b3')$$,
   '22023', null,
-  'organization owners are rejected until Team ships');
+  'an owner type other than user or organization is rejected');
 
 -- ── Mapping first, then the subscription ─────────────────────────────────
 select is(

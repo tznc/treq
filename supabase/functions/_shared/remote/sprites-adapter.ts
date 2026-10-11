@@ -71,6 +71,9 @@ export interface ManagedComputeProvider {
   createInstance(params: CreateInstanceParams): Promise<ProviderInstance>;
   getInstance(providerId: string): Promise<ProviderInstance>;
   wakeInstance(providerId: string): Promise<void>;
+  // Stops the machine and keeps its disk. Used when the owner's Pro ends
+  // (`lapse-sweep.ts`).
+  stopInstance(providerId: string): Promise<void>;
   replaceInstance(params: ReplaceInstanceParams): Promise<ProviderInstance>;
   deleteInstance(providerId: string): Promise<void>;
   // Runs a command through the documented non-TTY HTTP exec endpoint. The
@@ -333,6 +336,15 @@ export class SpritesProvider implements ManagedComputeProvider {
     // Sprite pauses again about 30 seconds after the exec ends unless the
     // SSH session that follows keeps it active.
     await this.execOnMachine(providerId, ["true"]);
+  }
+
+  async stopInstance(_providerId: string): Promise<void> {
+    // Sprites have no stop endpoint, and need none: a Sprite pauses on its
+    // own about 30 seconds after the last exec or connection ends, and its
+    // filesystem persists while paused (see wakeInstance). Once the owner
+    // has no Pro, nothing reaches it again: remote-instance refuses `wake`
+    // and `reprovision`, and remote-ssh-relay refuses connections. A relay
+    // connection already open ends at the Edge Function wall-clock limit.
   }
 
   async replaceInstance(

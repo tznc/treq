@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { detectEditorApps, getSettingsBatch } from "../lib/api";
 import { PREVIEW_FEATURE_IDS, previewSettingKey } from "../lib/features";
 import { TREQ_SEND_EVENT, type TreqSendPayload } from "../lib/treqSend";
-import { useAuthStore } from "./authStore";
+import { startSubscriptionRefreshOnFocus, useAuthStore } from "./authStore";
 import { useEditorAppsStore } from "./editorAppsStore";
 import { applySettingsRecord } from "./settingsHydration";
 import { useThemeStore } from "./themeStore";
@@ -60,6 +60,8 @@ export function AppStoreEffects() {
   useSWR("auth-restore-session", () =>
     useAuthStore.getState().restoreSession(),
   );
+
+  useEffect(() => startSubscriptionRefreshOnFocus(), []);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");

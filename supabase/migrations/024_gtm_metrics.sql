@@ -11,7 +11,7 @@
 -- drops out of past windows too, and a member who left and rejoined only
 -- counts by their latest unsubscribe time.
 --
--- The alpha waitlist counts are null until 023_alpha_waitlist.sql has run,
+-- The alpha waitlist counts are null until 031_alpha_waitlist.sql has run,
 -- so this migration does not depend on it. PL/pgSQL plans each statement
 -- when it first runs, so the waitlist query below is never planned while
 -- the table is missing.

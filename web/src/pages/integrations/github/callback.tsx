@@ -2,10 +2,18 @@ import React, { useEffect, useState } from "react";
 import Layout from "@theme/Layout";
 import BrowserOnly from "@docusaurus/BrowserOnly";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
+import { functionErrorMessage } from "../../../lib/billing";
+import { proRequiredMessage } from "../../../lib/pro-required";
 import { supabase } from "../../../lib/supabase";
 import { signInHrefFor } from "../../../lib/utils";
 
-type State = "loading" | "success" | "error" | "unauthenticated";
+type State =
+  | "loading"
+  | "success"
+  | "choose_organization"
+  | "error"
+  | "needs_pro"
+  | "unauthenticated";
 
 function CallbackContent() {
   const [state, setState] = useState<State>("loading");
@@ -16,6 +24,10 @@ function CallbackContent() {
       const params = new URLSearchParams(window.location.search);
       const installationId = params.get("installation_id");
       const installState = params.get("state");
+      // GitHub adds `code` when the App requests user authorization during
+      // installation. The function exchanges it to confirm the GitHub user
+      // can access installation_id, and refuses without it.
+      const code = params.get("code");
 
       if (!installationId) {
         setState("error");
@@ -43,30 +55,49 @@ function CallbackContent() {
       }
 
       // Linking is completed server-side: the single-use state must match an
-      // unexpired intent created by this user, and the installation is
-      // verified against GitHub before it is linked.
+      // unexpired intent created by this user, and the installation must be
+      // one the authorizing GitHub user can access.
       const { data, error } = await supabase.functions.invoke(
         "complete-github-installation",
         {
           body: {
             installation_id: parseInt(installationId, 10),
             state: installState,
+            code,
           },
         }
       );
 
+      const needsPro = await proRequiredMessage(error);
+      if (needsPro) {
+        setState("needs_pro");
+        setMessage(needsPro);
+        return;
+      }
       if (error || data?.error) {
         setState("error");
-        setMessage(data?.error ?? error?.message ?? "Unknown error");
+        setMessage(
+          data?.error ??
+            (await functionErrorMessage(error, error?.message ?? "Unknown error"))
+        );
         return;
       }
 
-      setState("success");
+      // A GitHub organization's installation that no Treq organization owns
+      // yet: an owner chooses one on the Team tab.
+      const chooseOrganization =
+        data?.account_type === "Organization" && !data?.organization_id;
+      setState(chooseOrganization ? "choose_organization" : "success");
 
       // Redirect to dashboard after a brief pause
-      setTimeout(() => {
-        window.location.href = "/dashboard?tab=integrations";
-      }, 2000);
+      setTimeout(
+        () => {
+          window.location.href = chooseOrganization
+            ? "/dashboard?tab=team"
+            : "/dashboard?tab=integrations";
+        },
+        chooseOrganization ? 4000 : 2000
+      );
     };
 
     run();
@@ -90,6 +121,20 @@ function CallbackContent() {
         </>
       )}
 
+      {state === "choose_organization" && (
+        <>
+          <div style={styles.icon}>✓</div>
+          <p style={styles.text}>
+            GitHub App connected. It belongs to a GitHub organization, so choose
+            which Treq organization owns it by attaching it on the Team tab.
+            Until then it stays linked to your account.
+          </p>
+          <a href="/dashboard?tab=team" style={styles.link}>
+            Go to the Team tab
+          </a>
+        </>
+      )}
+
       {state === "error" && (
         <>
           <div style={{ ...styles.icon, color: "#ef4444" }}>✕</div>
@@ -98,6 +143,15 @@ function CallbackContent() {
           </p>
           <a href="/dashboard?tab=integrations" style={styles.link}>
             Return to dashboard
+          </a>
+        </>
+      )}
+
+      {state === "needs_pro" && (
+        <>
+          <p style={styles.text}>{message}</p>
+          <a href="/dashboard?tab=subscription" style={styles.link}>
+            Upgrade to Pro
           </a>
         </>
       )}

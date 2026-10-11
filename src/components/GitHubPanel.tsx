@@ -39,6 +39,7 @@ import { supabase } from "../lib/supabase";
 import { pollMs } from "../lib/swr-cache";
 import { cn } from "../lib/utils";
 import { useAuthStore } from "../stores/authStore";
+import { isProSubscription } from "../lib/subscription";
 import { CreateIssueForm, IssueDetailPanel } from "./github-panel/IssueDetail";
 import { MergeQueueTab } from "./github-panel/MergeQueueTab";
 import { NewPrDialog } from "./github-panel/NewPrDialog";
@@ -87,8 +88,7 @@ export const GitHubPanel: React.FC<GitHubPanelProps> = ({
   onOpenWorkspace,
 }) => {
   const { subscription } = useAuthStore();
-  const isPro =
-    subscription?.plan === "pro" && subscription.status === "active";
+  const isPro = isProSubscription(subscription);
   const { data: remoteInfo, isLoading: remoteLoading } =
     useGitRemoteInfo(repoPath);
   const { data: queueEnabled } = useMergeQueueEnabled(repoPath);

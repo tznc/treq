@@ -1,10 +1,17 @@
-export const PAYMENT_LINK_URL =
+// Stripe publishable keys for embedded Checkout on the dashboard. The test
+// key belongs to Treq's Stripe test mode (TREQ-162). The live key is left
+// empty for the owner to fill in when live payments launch (TREQ-326).
+// While it is empty, production builds never open Checkout.
+const STRIPE_PUBLISHABLE_KEY_TEST =
+  "pk_test_51Sz674Gdctkyk7T0pwBiRMnVzSgXF3kqpChpkC16Ixs3FWmx0s1j5GXudB5CcXrFU3v5ittemjWRNS8XEUG8O0fu000KLIu586";
+export const STRIPE_PUBLISHABLE_KEY_PROD = "";
+
+export const STRIPE_PUBLISHABLE_KEY =
   process.env.NODE_ENV === "production"
-    ? "https://buy.stripe.com/your-prod-payment-link"
-    : "https://buy.stripe.com/test_aFa4gzacLbZ40lHdPNbAs01";
+    ? STRIPE_PUBLISHABLE_KEY_PROD
+    : STRIPE_PUBLISHABLE_KEY_TEST;
 
 export const APP_DEEP_LINK = "treq://";
-export const APP_DOWNLOAD_URL = "/docs/getting-started/installation";
 
 // GitHub App — update with your actual App slug after creating it at
 // https://github.com/settings/apps/new

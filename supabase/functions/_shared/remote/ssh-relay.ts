@@ -17,6 +17,10 @@
 // most. That is expected: the client's SSH pool reconnects on the next
 // command, and PTY sessions run inside tmux on the VM so they reattach.
 
+import {
+  PRO_REQUIRED_CODE,
+  PRO_REQUIRED_MESSAGES,
+} from "../billing/entitlement.ts";
 import { spritesProxyUrl, type SpritesConfig } from "./sprites-adapter.ts";
 
 // Instance states in which the Sprite exists and the proxy can reach it. A
@@ -80,6 +84,8 @@ export interface RelayStore {
     ownerUserId: string,
     keyId: string,
   ): Promise<RelayClientKeyRow | null>;
+  /** has_pro for the owner. */
+  hasPro(ownerUserId: string): Promise<boolean>;
 }
 
 export interface RelayAuthDeps {
@@ -92,6 +98,8 @@ export class RelayError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    /** Machine-readable reason, e.g. `pro_required`. */
+    public readonly code?: string,
   ) {
     super(message);
   }
@@ -138,6 +146,17 @@ export async function authorizeRelayRequest(
     throw new RelayError(
       `Instance is not ready (status: ${instance.status})`,
       409,
+    );
+  }
+
+  // Connecting wakes a paused Sprite, so this is what keeps the cloud
+  // workspace of an owner whose Pro ended stopped (prds/billing-and-teams.md,
+  // "Enforcement").
+  if (!(await deps.store.hasPro(ownerUserId))) {
+    throw new RelayError(
+      PRO_REQUIRED_MESSAGES.cloudWorkspace,
+      402,
+      PRO_REQUIRED_CODE,
     );
   }
 

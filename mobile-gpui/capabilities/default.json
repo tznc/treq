@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "No webview content: the GPUI interface calls plugins from Rust.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

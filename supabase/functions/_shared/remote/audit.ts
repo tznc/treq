@@ -43,7 +43,14 @@ export type RemoteAuditEventType =
   | "ca_trust_installed"
   | "ca_trust_install_failed"
   | "admin_client_key_revoked"
-  | "admin_instance_recovered";
+  | "admin_instance_recovered"
+  // The owner's Pro ended (prds/billing-and-teams.md, open decision B02):
+  // the lapse sweep stops the instance, deletes it after 30 days, or clears
+  // the lapse when Pro returns. See `lapse-sweep.ts`.
+  | "instance_lapse_stopped"
+  | "instance_lapse_deleted"
+  | "instance_lapse_cleared"
+  | "instance_lapse_sweep_failed";
 
 export type RemoteAuditSeverity = "info" | "warning" | "error";
 

@@ -1,0 +1,68 @@
+[package]
+name = "treq-gpui"
+version = "0.1.0"
+description = "Experimental Treq mobile app with a GPUI interface"
+edition = "2021"
+publish = false
+
+# A separate workspace: this app needs tauri >= 2.12 (tauri-plugin-gpui) and
+# must not move the desktop app's lockfile.
+[workspace]
+
+[lib]
+# `cdylib` is what Android loads; `rlib` keeps `cargo run` working on desktop.
+name = "treq_gpui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+treq = { path = "../src-tauri", features = ["embed"] }
+tauri = { version = "2.12", features = ["unstable"] }
+tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "ccr-abfcd600-eoaphz", features = ["mobile"] }
+gpui-kit = "0.7.1"
+tauri-plugin-deep-link = "2.4.7"
+tauri-plugin-opener = "2.5.2"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+log = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Only here to turn on `debug-embed`, so gpui-kit's icons are compiled into debug builds (a phone cannot read the build machine's files).
+rust-embed = { version = "8.13", features = ["debug-embed"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+vt100 = "0.16"
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+# The device SSH key lives in the OS keystore behind biometrics, through
+# treq's `core::remote_device_key`.
+tauri-plugin-keystore = "2.1.0-alpha.1"
+tauri-plugin-biometric = "2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+env_logger = "0.11"
+
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+
+# wgpu turns on shader debug info in debug builds, and the Android emulator's
+# SwiftShader Vulkan rejects the SPIR-V that produces. Build wgpu-types as in
+# release so its default instance flags leave that off.
+[profile.dev.package.wgpu-types]
+debug-assertions = false
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true

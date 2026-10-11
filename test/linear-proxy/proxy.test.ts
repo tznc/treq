@@ -33,6 +33,7 @@ function setup(opts: {
   stored: StoredToken | null | (() => StoredToken | null);
   graphql?: Route;
   oauth?: Route;
+  pro?: boolean;
 }) {
   const fetch = vi.fn(
     async (url: string | URL | Request, init?: RequestInit) => {
@@ -54,6 +55,7 @@ function setup(opts: {
     store: { load, save },
     fetch: fetch as unknown as typeof globalThis.fetch,
     linearClient: { id: "client-id", secret: "client-secret" },
+    hasPro: vi.fn(async () => opts.pro ?? true),
     now: () => NOW,
   };
   const graphqlAuth = () =>
@@ -69,6 +71,24 @@ async function run(deps: ProxyDeps) {
 }
 
 describe("proxyLinearRequest", () => {
+  it("answers 402 pro_required for a user without Pro, before reading the token or calling Linear", async () => {
+    const { deps, fetch } = setup({ stored: token(), pro: false });
+    const result = await run(deps);
+    expect(result.status).toBe(402);
+    expect(result.body.code).toBe("pro_required");
+    // The desktop app shows this message as is, so it names the free path.
+    expect(result.body.error).toMatch(/personal Linear API key/);
+    expect(deps.store.load).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the entitlement check fails", async () => {
+    const { deps, fetch } = setup({ stored: token() });
+    vi.mocked(deps.hasPro).mockRejectedValueOnce(new Error("db down"));
+    expect((await run(deps)).status).toBe(500);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("reports an unlinked Linear account", async () => {
     const { deps } = setup({ stored: null });
     expect(await run(deps)).toEqual({

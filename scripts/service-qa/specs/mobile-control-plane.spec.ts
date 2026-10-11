@@ -13,6 +13,7 @@ import { it, expect, afterEach } from "vitest";
 import { getAnonClient, getAnonKey, getFunctionsBaseUrl, getServiceClient } from "../clients";
 import { FEATURES } from "../features";
 import { createTestUser, deleteTestUser, type TestUser } from "../seed";
+import { clearBilling, grantPro } from "../billing";
 import { recordOutcome } from "../record";
 
 const usersToDelete: string[] = [];
@@ -21,6 +22,7 @@ afterEach(async () => {
   const admin = getServiceClient();
   while (usersToDelete.length > 0) {
     const id = usersToDelete.pop()!;
+    await clearBilling(admin, [id]);
     try {
       await deleteTestUser(admin, id);
     } catch {
@@ -37,6 +39,8 @@ async function signedInUser(): Promise<{
   expect(FEATURES.emailSignup).toBe(true);
   const testUser = await createTestUser();
   usersToDelete.push(testUser.user.id);
+  // ensure/wake/reprovision require Pro (027_billing_enforcement.sql).
+  await grantPro(getServiceClient(), testUser.user.id);
   const client = getAnonClient();
   const { data, error } = await client.auth.signInWithPassword({
     email: testUser.email,

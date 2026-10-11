@@ -1,10 +1,11 @@
 // Creates a single-use install intent for the authenticated user and returns
 // the opaque state to append to the GitHub App installation URL. Only the
-// SHA-256 hash of the state is stored.
+// SHA-256 hash of the state is stored. Requires Pro. The logic lives in
+// lib.ts.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-
-const INTENT_TTL_MINUTES = 15;
+import { userHasPro } from "../_shared/billing/entitlement.ts";
+import { createInstallIntent, installIntentStore } from "./lib.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,16 +18,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(input),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 Deno.serve(async (req) => {
@@ -58,24 +49,18 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   );
 
-  // 256 bits of entropy, never stored in the clear.
-  const stateBytes = crypto.getRandomValues(new Uint8Array(32));
-  const state = Array.from(stateBytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  const expiresAt = new Date(
-    Date.now() + INTENT_TTL_MINUTES * 60 * 1000,
-  ).toISOString();
-
-  const { error } = await supabase.from("github_install_intents").insert({
-    user_id: user.id,
-    state_hash: await sha256Hex(state),
-    expires_at: expiresAt,
-  });
-  if (error) {
-    console.error("[create-github-install-intent] insert failed:", error.message);
+  try {
+    const result = await createInstallIntent({
+      userId: user.id,
+      hasPro: () => userHasPro(supabase, user.id),
+      store: installIntentStore(supabase),
+    });
+    return json(result.body, result.status);
+  } catch (err) {
+    console.error(
+      "[create-github-install-intent] failed:",
+      err instanceof Error ? err.message : String(err),
+    );
     return json({ error: "Failed to create install intent" }, 500);
   }
-
-  return json({ state, expires_at: expiresAt });
 });

@@ -30,12 +30,21 @@ const enqueue: MergeQueueCommand = {
 describe("operation keys", () => {
   it("builds stable keys from identities", () => {
     expect(enqueueOperationKey("q-1", 42, "abc")).toBe("enqueue:q-1:42:abc");
-    expect(startLaneOperationKey("q-1", 2, "base", "hash")).toBe(
-      "start-lane:q-1:2:base:hash",
+    expect(startLaneOperationKey("q-1", "run-7", 2, "base", "hash")).toBe(
+      "start-lane:q-1:run-7:2:base:hash",
     );
     expect(mergePrOperationKey("123", 42, "abc")).toBe("merge-pr:123:42:abc");
     expect(deleteTestBranchOperationKey("123", "treq/x")).toBe(
       "delete-test-branch:123:treq/x",
+    );
+  });
+
+  it("gives a lane reserved again after a cancel its own start key", () => {
+    // Pausing the queue, or a push to a PR under test, cancels a lane and
+    // reserves the same PRs again on the same base in a new CI run. That run
+    // must be built, not skipped as already started.
+    expect(startLaneOperationKey("q-1", "run-1", 1, "tip", "hash")).not.toBe(
+      startLaneOperationKey("q-1", "run-2", 1, "tip", "hash"),
     );
   });
 

@@ -114,6 +114,7 @@ import {
   revokeClientKey,
   wakeInstance,
 } from "../lib/remote-control-plane";
+import { isProRequiredError } from "../lib/pro-required";
 import {
   listUserManagedEndpoints,
   saveUserManagedEndpoint,
@@ -918,11 +919,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setProvisioningError(message);
-      addToast({
-        title: "Couldn't create cloud workspace",
-        description: message,
-        type: "error",
-      });
+      // Without Pro the card shows "Upgrade to Pro" instead of an error.
+      if (!isProRequiredError(error)) {
+        addToast({
+          title: "Couldn't create cloud workspace",
+          description: message,
+          type: "error",
+        });
+      }
       // The control plane records the failure; reload so the card offers a
       // retry instead of a fresh create.
       await refreshInstanceStatus();

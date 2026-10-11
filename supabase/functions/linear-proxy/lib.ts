@@ -1,6 +1,13 @@
 // Request logic for the linear-proxy Edge Function, kept free of Deno and
 // Supabase imports so it runs under the repo's unit tests. The caller
-// supplies the user's token store, `fetch`, and the Linear OAuth client.
+// supplies the user's token store, `fetch`, the Linear OAuth client, and the
+// user's Pro check.
+
+import {
+  PRO_REQUIRED_MESSAGES,
+  proRequired,
+} from "../_shared/billing/entitlement.ts";
+import type { ServiceClientLike } from "../_shared/billing/store.ts";
 
 export type StoredToken = {
   access_token: string;
@@ -17,10 +24,37 @@ export interface TokenStore {
   save(update: TokenUpdate): Promise<void>;
 }
 
+/** TokenStore through a service-role client. */
+export function linearTokenStore(
+  client: ServiceClientLike,
+  userId: string,
+): TokenStore {
+  return {
+    load: async () => {
+      const { data, error } = await client
+        .from("linear_oauth_tokens")
+        .select("access_token, refresh_token, expires_at, updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return (data as StoredToken | null) ?? null;
+    },
+    save: async (update) => {
+      const { error } = await client
+        .from("linear_oauth_tokens")
+        .update({ ...update, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+      if (error) throw new Error(error.message);
+    },
+  };
+}
+
 export interface ProxyDeps {
   store: TokenStore;
   fetch: typeof fetch;
   linearClient: { id: string; secret: string } | null;
+  /** has_pro for the signed-in user. Linear OAuth is a Pro feature. */
+  hasPro: () => Promise<boolean>;
   now?: () => number;
 }
 
@@ -105,6 +139,18 @@ export async function proxyLinearRequest(
   deps: ProxyDeps,
 ): Promise<ProxyResult> {
   const now = (deps.now ?? Date.now)();
+
+  // A Free user gets 402 and a message pointing at the personal API key,
+  // which the desktop app uses directly without this proxy.
+  try {
+    if (!(await deps.hasPro())) {
+      const refused = proRequired(PRO_REQUIRED_MESSAGES.linearOAuth);
+      return json(refused.body, refused.status);
+    }
+  } catch (err) {
+    console.error("[linear-proxy] entitlement check failed:", errorMessage(err));
+    return json({ error: "Failed to check your plan" }, 500);
+  }
 
   let token: StoredToken | null;
   try {

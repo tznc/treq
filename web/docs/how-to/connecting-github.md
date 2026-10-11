@@ -40,8 +40,8 @@ Without a working `gh` session, Free-tier Create PR, View PR, the GitHub panel, 
 1. Open Settings → Integrations in the desktop app. If you are signed out, choose **Sign in with Browser** and finish the Treq account flow.
 2. Choose **Manage GitHub**. That opens the web dashboard Integrations tab.
 3. Start the GitHub App install from the dashboard. Treq mints a single-use install intent, then sends you through GitHub's install screen.
-4. Pick the organization or user and the repositories the App may access.
-5. Complete the callback so Treq records the installation and repository list.
+4. Pick the organization or user and the repositories the App may access, then authorize the App when GitHub asks.
+5. Complete the callback. Treq uses that authorization once to check that your GitHub account can access the installation, then records the installation and repository list.
 
 Back in the desktop app, Connected repositories should list the repos the App can see for your plan. If a repo is missing, re-open Manage GitHub and adjust the App's repository access on GitHub.
 

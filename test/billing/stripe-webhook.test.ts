@@ -169,9 +169,19 @@ describe("actionForEvent: checkout.session.completed", () => {
     expect(actionForEvent(event)).toMatchObject({ action: "ignore" });
   });
 
-  it("ignores an organization owner until Team ships", () => {
+  it("maps the customer to an organization owner for Team", () => {
     const event = copy(checkoutCompleted);
     event.data.object.metadata.owner_type = "organization";
+    expect(actionForEvent(event)).toMatchObject({
+      action: "rpc",
+      fn: "billing_record_checkout_completed",
+      args: { p_owner_type: "organization", p_owner_id: OWNER_ID },
+    });
+  });
+
+  it("ignores an owner type it does not know", () => {
+    const event = copy(checkoutCompleted);
+    event.data.object.metadata.owner_type = "team";
     expect(actionForEvent(event)).toMatchObject({ action: "ignore" });
   });
 

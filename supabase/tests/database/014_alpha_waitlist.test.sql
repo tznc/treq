@@ -1,4 +1,4 @@
--- 030_alpha_waitlist.sql: a signed-in user reads, joins, leaves, and rejoins
+-- 031_alpha_waitlist.sql: a signed-in user reads, joins, leaves, and rejoins
 -- only their own waitlist row. They never see or change the unsubscribe
 -- token, and the consent and unsubscribe times come from the database
 -- clock, not the browser.

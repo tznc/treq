@@ -54,6 +54,11 @@
   margin-bottom: 1rem;
 }
 
+.heroOtherDownloads {
+  margin: 0 0 1rem;
+  color: #525252;
+}
+
 .platformsSupported {
   font-size: 0.9rem;
   color: #525252;
@@ -1245,6 +1250,11 @@
   text-decoration: none;
 }
 
+.closingCTAOtherDownloads {
+  margin: 1rem 0 0;
+  color: #d4d4d4;
+}
+
 .closingCTASecondary {
   display: inline-flex;
   align-items: center;
@@ -1379,6 +1389,7 @@
 }
 
 [data-theme='dark'] .platformsSupported,
+[data-theme='dark'] .heroOtherDownloads,
 [data-theme='dark'] .agentsLabel,
 [data-theme='dark'] .agentIcon span {
   color: #a3a3a3;

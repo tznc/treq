@@ -64,6 +64,12 @@ export class StubSpritesProvider implements ManagedComputeProvider {
     return Promise.resolve();
   }
 
+  stopInstance(providerId: string): Promise<void> {
+    const machine = machines.get(providerId);
+    if (machine) machine.state = "suspended";
+    return Promise.resolve();
+  }
+
   replaceInstance(params: ReplaceInstanceParams): Promise<ProviderInstance> {
     const machine = machines.get(params.providerResourceId);
     if (!machine) throw new ProviderError("not_found", "stub instance not found");

@@ -51,7 +51,7 @@ select is(
   (public.gtm_metrics('2001-01-01', '2001-01-07') ->> 'github_app_installations_linked')::int, 1,
   'two installations linked to one account count once, and an unlinked one not at all');
 
--- Before 030_alpha_waitlist.sql exists the waitlist counts are null; after,
+-- Before 031_alpha_waitlist.sql exists the waitlist counts are null; after,
 -- they are zero for this window, since no waitlist row dates from 2001.
 select is(
   public.gtm_metrics('2001-01-01', '2001-01-07')

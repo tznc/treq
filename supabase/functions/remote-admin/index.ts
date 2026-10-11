@@ -29,6 +29,12 @@
 //   "list_recent_failures"  - reads `remote_recent_failures` (see migration
 //                             017_remote_ssh_observability.sql)
 //   "prune_audit_events"    - runs the retention cleanup function
+//   "sweep_lapsed_instances" - stops the cloud workspace of every owner
+//                             whose Pro ended and deletes it 30 days later
+//                             (prds/billing-and-teams.md, open decision
+//                             B02; see `_shared/remote/lapse-sweep.ts`).
+//                             Schedule it hourly from the same scheduler
+//                             that runs `prune_audit_events`.
 //
 // Every admin action writes its own audit trail entry (event types
 // `admin_client_key_revoked` / `admin_instance_recovered`) distinct from a
@@ -38,6 +44,9 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { recordAuditEvent } from "../_shared/remote/audit.ts";
 import { correlationIdFromRequest, logWithCorrelation } from "../_shared/remote/correlation.ts";
+import { supabaseLapseSweepStore, sweepLapsedInstances } from "../_shared/remote/lapse-sweep.ts";
+import { SpritesProvider, spritesConfigFromEnv } from "../_shared/remote/sprites-adapter.ts";
+import { isSpritesStubEnabled, StubSpritesProvider } from "../_shared/remote/stub-sprites-adapter.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -118,6 +127,8 @@ Deno.serve(async (req) => {
         return await handleListRecentFailures(supabase, body);
       case "prune_audit_events":
         return await handlePruneAuditEvents(supabase);
+      case "sweep_lapsed_instances":
+        return await handleSweepLapsedInstances(supabase, correlationId);
       default:
         return json({ error: `Unknown action '${action}'` }, 400);
     }
@@ -255,4 +266,14 @@ async function handlePruneAuditEvents(supabase: SupabaseClient): Promise<Respons
   const { data, error } = await supabase.rpc("prune_remote_audit_events");
   if (error) throw new Error(`failed to prune audit events: ${error.message}`);
   return json({ deleted_count: data });
+}
+
+async function handleSweepLapsedInstances(supabase: SupabaseClient, correlationId: string): Promise<Response> {
+  const result = await sweepLapsedInstances({
+    store: supabaseLapseSweepStore(supabase, correlationId),
+    provider: isSpritesStubEnabled() ? new StubSpritesProvider() : new SpritesProvider(spritesConfigFromEnv()),
+    now: () => new Date(),
+    log: (fields) => logWithCorrelation(correlationId, "log", JSON.stringify(fields)),
+  });
+  return json(result);
 }
