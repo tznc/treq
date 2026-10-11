@@ -47,7 +47,7 @@ The managed provider is Fly Sprites. The suites test what Sprites actually offer
 | Suite | What it covers | Command |
 |---|---|---|
 | `remote_e2e.rs` | Sprites adapter against the real API: idempotent create, readiness, exec reachability, idle pause then wake and reconnect with files intact, in-place repair, delete and inventory check | `TREQ_REMOTE_E2E=1 cargo test --test remote_e2e -- --ignored --test-threads=1` |
-| `remote_e2e_native.rs` | Full managed flow over native certificate SSH: two repositories, mutations, PTY, reconnect, idle pause then wake and reconnect, repair with host trust carried over | add `TREQ_REMOTE_E2E_NATIVE=1`, `--test remote_e2e_native` |
+| `remote_e2e_native.rs` | The managed flow desktop and mobile share, over native certificate SSH through the relay: status, ensure, key registration and replay, certificate issue and renewal, two repositories, mutations, PTY, reconnect, idle pause then wake, repair with host trust carried over, key-revoked cutoff. Local run against real Sprites: [`SPRITES_E2E.md`](SPRITES_E2E.md) | add `TREQ_REMOTE_E2E_NATIVE=1`, `--test remote_e2e_native` |
 | `supabase/functions/tests/remote_e2e.test.ts` | Deployed Edge Functions on the test project: provisioning, trust, wake, repair, audit, delete | `deno test --allow-net --allow-env supabase/functions/tests/remote_e2e.test.ts` (add `TREQ_REMOTE_E2E_SOAK=1` for the hours-long cold-Sprite soak) |
 
 `.github/workflows/remote-e2e.yml` runs the adapter and Edge suites nightly and on demand, and skips cleanly when the secrets below are absent. The native suite and the soak run only on demand. A final step sweeps leftover e2e resources whether or not the tests passed. `.github/workflows/remote-e2e-cleanup.yml` is the daily orphan scan.
@@ -75,5 +75,7 @@ Local-only tuning, not secrets:
 - `TREQ_REMOTE_E2E_IDLE_PAUSE_WAIT_SECS`: how long `remote_e2e_native.rs` idles before it wakes the VM (default 90).
 
 The Edge Functions on the Supabase test project read their own `TREQ_SPRITES_API_URL` and `TREQ_SPRITES_API_TOKEN` function secrets. Set those to the same test organization.
+
+The native and Edge suites grant their test users Pro through the billing RPCs (`billing_record_checkout_completed`, `billing_record_subscription_event`), because `ensure`, `wake` and `reprovision` answer 402 without it.
 
 Sprites created by `remote_e2e.rs` are named `dev-treq-treq-e2e-<uuid>`. Sprites created through the Edge Functions are named `dev-treq-<user id>` for an e2e-tagged test user. The cleanup script deletes only those two shapes and refuses anything else.
