@@ -16,4 +16,5 @@ AI engineering covers the tools and practices used to build software with AI. St
   {type: 'link', href: '/learn/ai-code-review', label: 'Human in the Loop AI Code Review'},
   {type: 'link', href: '/learn/parallel-coding-agents', label: 'Parallel Coding Agents Without Branch Chaos'},
   {type: 'link', href: '/learn/concepts/ai-engineering/agent-orchestration', label: 'What is Agent Orchestration?'},
+  {type: 'link', href: '/learn/concepts/ai-engineering/quality-gates-for-agent-output', label: 'Quality Gates for Agent Output'},
 ]} />

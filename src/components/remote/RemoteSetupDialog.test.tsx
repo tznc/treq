@@ -31,6 +31,19 @@ describe("RemoteSetupDialog", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens straight on the managed workspace when user-managed SSH is not allowed", async () => {
+    render(<RemoteSetupDialog {...baseProps()} allowUserManaged={false} />);
+    expect(
+      await screen.findByRole("button", { name: "Create cloud workspace" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Your own VM/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Back" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("provisions one managed cloud workspace without region, size, or SSH identity", async () => {
     const user = userEvent.setup();
     const props = baseProps();

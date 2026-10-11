@@ -1,5 +1,5 @@
 // Aggregate service metrics for the GTM digest in biz-tools
-// (prds/marketing.md, "Measurement").
+// (biz-tools docs/gtm/treq.md, "Measurement").
 //
 //   GET /gtm-metrics?from=YYYY-MM-DD&to=YYYY-MM-DD
 //   x-gtm-metrics-secret: <GTM_METRICS_SECRET>

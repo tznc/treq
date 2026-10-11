@@ -1,7 +1,7 @@
 # Content manifests
 
 This directory holds publication manifests for treq.dev content. The
-[Ziinc/biz-tools](https://github.com/Ziinc/biz-tools) repository runs the
+[tznc/biz-tools](https://github.com/tznc/biz-tools) repository runs the
 workflows that read and write them. See its `docs/gtm-automation.md` for the full loop.
 
 - **Draft content** runs weekly. It turns the newest Search Console keyword gaps into

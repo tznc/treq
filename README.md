@@ -37,6 +37,10 @@ Download the latest release [here](https://github.com/tznc/treq/releases/latest)
 - Sends [no telemetry](https://treq.dev/docs/security-and-privacy#telemetry), privacy focused with application logs kept local.
 - Uses [Jujutsu under the hood and is Jujitsu CLI compatible](https://treq.dev/docs/under-the-hood) while staying Git compatible.
 
+## Community
+
+Ask questions, share feedback, and propose features in [GitHub Discussions](https://github.com/tznc/treq/discussions).
+
 ## Developer
 
 ### Devcontainer

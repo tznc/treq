@@ -7,7 +7,7 @@ export const PRICING_SCHEMA = {
   '@type': 'Product',
   name: 'Treq',
   description:
-    'Open source desktop app for running coding agents in stacked workspaces. Free on your machine. Pro and Team add the Treq GitHub App, Linear OAuth, and a managed cloud workspace in private alpha.',
+    'Open source desktop app for running coding agents in stacked workspaces. Free on your machine. Pro and Team add the Treq GitHub App, Linear OAuth, and a managed cloud workspace.',
   url: 'https://treq.dev/pricing',
   brand: {
     '@type': 'Brand',
@@ -29,7 +29,7 @@ export const PRICING_SCHEMA = {
       priceCurrency: 'USD',
       unitText: 'user/month',
       description:
-        'The Treq GitHub App and Linear OAuth, plus the merge queue and a managed cloud workspace in private alpha. Billed per user per month after a 14-day trial that needs a card.',
+        'The Treq GitHub App and Linear OAuth, plus a managed cloud workspace and the merge queue in private alpha. Billed per user per month after a 14-day trial that needs a card.',
     },
     {
       '@type': 'Offer',
@@ -47,7 +47,7 @@ export const FAQ_ITEMS = [
   {
     question: 'What is free, and what do I pay for?',
     answer:
-      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App, Linear OAuth, and two features in private alpha, the merge queue and a managed cloud workspace.",
+      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App, Linear OAuth, a managed cloud workspace, and the merge queue in private alpha.",
   },
   {
     question: 'How does the Pro trial work?',

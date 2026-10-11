@@ -24,6 +24,7 @@ const sidebars: SidebarsConfig = {
             'concepts/ai-engineering/human-in-the-loop-ai-code-review',
             'concepts/ai-engineering/parallel-coding-agents',
             'concepts/ai-engineering/agent-orchestration',
+            'concepts/ai-engineering/quality-gates-for-agent-output',
           ],
         },
         {

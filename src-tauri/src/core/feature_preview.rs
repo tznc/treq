@@ -87,6 +87,23 @@ pub fn require(db: &Database, feature: PreviewFeature) -> Result<(), String> {
   }
 }
 
+/// Gate for commands that act on a specific SSH endpoint. Treq-managed cloud
+/// workspaces (`Managed`) are always allowed: server-side Pro enforcement
+/// already gates them. User-managed and alias endpoints stay behind the
+/// `remoteSsh` preview.
+pub fn require_remote_for_source(
+  db: &Database,
+  source: &crate::core::remote_control_plane::SshEndpointSource,
+) -> Result<(), String> {
+  use crate::core::remote_control_plane::SshEndpointSource;
+  match source {
+    SshEndpointSource::Managed { .. } => Ok(()),
+    SshEndpointSource::UserManaged | SshEndpointSource::ExplicitAlias { .. } => {
+      require(db, PreviewFeature::RemoteSsh)
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -135,5 +152,41 @@ mod tests {
       .expect("set");
     let err = require(&db, PreviewFeature::WorkspaceScheduling).expect_err("disabled");
     assert!(err.contains("workspaceScheduling"));
+  }
+
+  #[test]
+  fn managed_endpoint_passes_with_remote_ssh_off() {
+    use crate::core::remote_control_plane::SshEndpointSource;
+    let (_dir, db) = temp_db();
+    db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "false")
+      .expect("set");
+    let managed = SshEndpointSource::Managed {
+      provider: "sprites".into(),
+      generation: 1,
+    };
+    assert!(require_remote_for_source(&db, &managed).is_ok());
+  }
+
+  #[test]
+  fn user_managed_endpoints_fail_with_remote_ssh_off() {
+    use crate::core::remote_control_plane::SshEndpointSource;
+    let (_dir, db) = temp_db();
+    db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "false")
+      .expect("set");
+    let err = require_remote_for_source(&db, &SshEndpointSource::UserManaged).expect_err("gated");
+    assert!(err.contains("remoteSsh"));
+    let alias = SshEndpointSource::ExplicitAlias {
+      alias: "box".into(),
+    };
+    assert!(require_remote_for_source(&db, &alias).is_err());
+  }
+
+  #[test]
+  fn user_managed_endpoint_passes_with_remote_ssh_on() {
+    use crate::core::remote_control_plane::SshEndpointSource;
+    let (_dir, db) = temp_db();
+    db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "true")
+      .expect("set");
+    assert!(require_remote_for_source(&db, &SshEndpointSource::UserManaged).is_ok());
   }
 }
