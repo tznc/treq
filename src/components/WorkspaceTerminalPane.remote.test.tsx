@@ -141,3 +141,33 @@ describe("WorkspaceTerminalPane with a remote repository", () => {
     expect(screen.queryByRole("button", { name: "Detach" })).toBeNull();
   });
 });
+
+describe("WorkspaceTerminalPane wheel handling", () => {
+  it("keeps horizontal swipes away from the terminal so the pane can scroll", () => {
+    const ref = paneRef();
+    render(
+      <WorkspaceTerminalPane
+        ref={ref}
+        workingDirectory={REPO}
+        resolveRemoteShell={shellTarget}
+      />,
+    );
+    act(() => ref.current?.createShellSession(REPO));
+
+    // Stands in for xterm's wheel listener, which cancels the event.
+    const terminal = document.querySelector("[data-terminal-id]")!;
+    const xtermWheel = vi.fn();
+    terminal.addEventListener("wheel", xtermWheel);
+
+    const wheel = (init: WheelEventInit) =>
+      terminal.dispatchEvent(
+        new WheelEvent("wheel", { bubbles: true, ...init }),
+      );
+
+    wheel({ deltaX: 40, deltaY: 2 });
+    expect(xtermWheel).not.toHaveBeenCalled();
+
+    wheel({ deltaX: 0, deltaY: 40 });
+    expect(xtermWheel).toHaveBeenCalledTimes(1);
+  });
+});

@@ -185,6 +185,7 @@ export const WorkspaceTerminalPaneView: React.FC<
           data-testid="terminal-scroll-container"
           className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex"
           style={{ backgroundColor: "#1e1e1e" }}
+          onWheelCapture={keepHorizontalWheelForPane}
         >
           {terminals.map(({ terminal, workspace }, index) => {
             const minTerminalPx = containerWidth * 0.4 || 300;
@@ -322,6 +323,14 @@ export const WorkspaceTerminalPaneView: React.FC<
     </div>
   </div>
 );
+
+// xterm cancels every wheel event while the running program has mouse
+// reporting on (agent TUIs do), and cancels diagonal ones in the alt screen,
+// which swallows horizontal trackpad swipes. Stop horizontal swipes before
+// they reach xterm so the browser scrolls this container natively.
+function keepHorizontalWheelForPane(e: React.WheelEvent) {
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.stopPropagation();
+}
 
 function PaneControlButton({
   ariaLabel,
