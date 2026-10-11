@@ -92,6 +92,18 @@ it("captures the Commits tab before and after pushing a workspace to remote", as
 		],
 	});
 
+	await user.hover(pushButton);
+	expect(await screen.findByRole("tooltip")).toHaveTextContent(
+		"Push to remote",
+	);
+	await captureDocument(document, {
+		name: "commits-tab-after-push-01b-push-tooltip",
+		expectations: [
+			"A tooltip reading 'Push to remote' is shown next to the blue 'Push' button in the header.",
+		],
+	});
+	await user.unhover(pushButton);
+
 	await user.click(pushButton);
 	await screen.findByText("Pushed to remote");
 
