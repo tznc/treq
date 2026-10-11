@@ -7,12 +7,17 @@
  * Without that overflow, a pane whose columns all sit at `minWidth` (three or
  * more terminals) could not be resized at all.
  */
-export function resizeTerminalPair(
-  leftWidth: number,
-  rightWidth: number,
-  deltaX: number,
-  minWidth: number,
-): { left: number; right: number } {
+export function resizeTerminalPair({
+  leftWidth,
+  rightWidth,
+  deltaX,
+  minWidth,
+}: {
+  leftWidth: number;
+  rightWidth: number;
+  deltaX: number;
+  minWidth: number;
+}): { left: number; right: number } {
   const left = Math.max(minWidth, leftWidth + deltaX);
   const right = Math.max(minWidth, rightWidth - (left - leftWidth));
   return { left, right };

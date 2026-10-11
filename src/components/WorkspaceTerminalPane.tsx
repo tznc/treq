@@ -321,12 +321,12 @@ const WorkspaceTerminalPaneInner = ({
       const rightCurrentWidth =
         prev.get(rightId) ?? rightEl.getBoundingClientRect().width;
 
-      const { left: newLeftWidth, right: newRightWidth } = resizeTerminalPair(
-        leftCurrentWidth,
-        rightCurrentWidth,
+      const { left: newLeftWidth, right: newRightWidth } = resizeTerminalPair({
+        leftWidth: leftCurrentWidth,
+        rightWidth: rightCurrentWidth,
         deltaX,
         minWidth,
-      );
+      });
 
       newWidths.set(leftId, newLeftWidth);
       newWidths.set(rightId, newRightWidth);
