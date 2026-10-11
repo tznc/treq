@@ -32,7 +32,7 @@ export const useAgentAutoCommand = (sessionData: AgentSessionData) => {
   const isModelLoaded = !modelLoading;
   const treqBinDirReady = !binLoading;
 
-  const pendingPrompt = sessionData.pendingPrompt;
+  const { pendingPrompt } = sessionData;
   const { data: prepared, error: prepareErr } = useSWR(
     isModelLoaded && treqBinDirReady && !supportingLoading
       ? [
