@@ -40,7 +40,7 @@ jobs:
   remote-ssh-server-it:
     name: Real sshd integration
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4

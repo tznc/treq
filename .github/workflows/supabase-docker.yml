@@ -16,7 +16,7 @@ jobs:
   self-hosted:
     name: single-tenant self-hosted image
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
