@@ -35,6 +35,7 @@ export interface ChangesDiffViewerProps {
   onCreateAgentWithReview?: (
     reviewMarkdown: string,
     mode: "plan" | "acceptEdits",
+    useIdleAgent?: boolean,
   ) => Promise<void>;
   /**
    * Launches a review agent terminal seeded with `prompt`, the same way any

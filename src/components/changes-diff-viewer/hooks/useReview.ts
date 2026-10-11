@@ -47,7 +47,11 @@ interface UseReviewParams {
   >;
   isReloadingRef: React.MutableRefObject<boolean>;
   onCreateAgentWithReview:
-    | ((review: string, mode: "plan" | "acceptEdits") => Promise<void>)
+    | ((
+        review: string,
+        mode: "plan" | "acceptEdits",
+        useIdleAgent?: boolean,
+      ) => Promise<void>)
     | undefined;
   onReviewSubmitted: (() => void) | undefined;
   addToast: ReturnType<typeof useToast>["addToast"];
@@ -269,12 +273,15 @@ export function useReview({
       actualConflictedFiles,
     });
 
-  const handleRequestChanges = async (mode: "plan" | "acceptEdits") => {
+  const handleRequestChanges = async (
+    mode: "plan" | "acceptEdits",
+    useIdleAgent = false,
+  ) => {
     setSendingReview(true);
     try {
       const markdown = formatReviewMarkdown();
       if (onCreateAgentWithReview) {
-        await onCreateAgentWithReview(markdown, mode);
+        await onCreateAgentWithReview(markdown, mode, useIdleAgent);
       } else {
         addToast({
           title: "No handler provided",

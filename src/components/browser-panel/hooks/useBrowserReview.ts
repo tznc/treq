@@ -18,7 +18,11 @@ interface UseBrowserReviewParams {
   repoPath: string | undefined;
   workspaceId: number | undefined;
   onCreateAgentWithReview:
-    | ((review: string, mode: "plan" | "acceptEdits") => Promise<void>)
+    | ((
+        review: string,
+        mode: "plan" | "acceptEdits",
+        useIdleAgent?: boolean,
+      ) => Promise<void>)
     | undefined;
   onReviewSubmitted: (() => void) | undefined;
   addToast: ReturnType<typeof useToast>["addToast"];
@@ -96,12 +100,12 @@ export function useBrowserReview({
   }, []);
 
   const handleRequestChanges = useCallback(
-    async (mode: "plan" | "acceptEdits") => {
+    async (mode: "plan" | "acceptEdits", useIdleAgent = false) => {
       setSendingReview(true);
       try {
         const markdown = formatReviewMarkdown();
         if (onCreateAgentWithReview) {
-          await onCreateAgentWithReview(markdown, mode);
+          await onCreateAgentWithReview(markdown, mode, useIdleAgent);
         } else {
           addToast({
             title: "No handler provided",

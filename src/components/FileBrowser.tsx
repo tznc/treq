@@ -95,6 +95,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
+import { UseIdleAgentCheckbox } from "./UseIdleAgentCheckbox";
 import { DirectoryBatchLoader } from "./file-browser/directoryBatchLoader";
 import { flattenExpandedTree } from "./file-browser/flattenTree";
 
@@ -145,6 +146,7 @@ interface FileBrowserProps {
   onCreateAgentWithReview?: (
     reviewMarkdown: string,
     mode: "plan" | "acceptEdits",
+    useIdleAgent?: boolean,
   ) => Promise<void>;
 }
 
@@ -1189,6 +1191,7 @@ export const FileBrowser = ({
   const { addToast } = useToast();
   const { fontSize } = useTerminalSettingsStore();
   const listRef = useRef<VirtuosoHandle>(null);
+  const [useIdleAgent, setUseIdleAgent] = useState(false);
   const fileBrowserReview = useFileBrowserReview({
     repoPath,
     workspaceId: workspace?.id,
@@ -1939,6 +1942,11 @@ export const FileBrowser = ({
                     placeholder="Add a summary comment (optional)..."
                     className="min-h-[80px] text-sm"
                   />
+                  <UseIdleAgentCheckbox
+                    checked={useIdleAgent}
+                    onCheckedChange={setUseIdleAgent}
+                    disabled={fileBrowserReview.sendingReview}
+                  />
                   <div className="flex justify-between gap-2">
                     <Button
                       size="sm"
@@ -1964,7 +1972,10 @@ export const FileBrowser = ({
                         size="sm"
                         variant="secondary"
                         onClick={() =>
-                          fileBrowserReview.handleRequestChanges("plan")
+                          fileBrowserReview.handleRequestChanges(
+                            "plan",
+                            useIdleAgent,
+                          )
                         }
                         disabled={fileBrowserReview.sendingReview}
                       >
@@ -1973,7 +1984,10 @@ export const FileBrowser = ({
                       <Button
                         size="sm"
                         onClick={() =>
-                          fileBrowserReview.handleRequestChanges("acceptEdits")
+                          fileBrowserReview.handleRequestChanges(
+                            "acceptEdits",
+                            useIdleAgent,
+                          )
                         }
                         disabled={fileBrowserReview.sendingReview}
                       >

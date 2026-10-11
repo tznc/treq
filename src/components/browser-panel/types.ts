@@ -35,6 +35,7 @@ export interface BrowserPanelProps {
   onCreateAgentWithReview?: (
     reviewMarkdown: string,
     mode: "plan" | "acceptEdits",
+    useIdleAgent?: boolean,
   ) => Promise<void>;
   onReviewSubmitted?: () => void;
   openRequest?: BrowserOpenRequest | null;
