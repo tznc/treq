@@ -15,7 +15,6 @@
 //! transport. Neither is wired into any component yet — that is Phase 6's
 //! job — but both are real, callable, and tested.
 
-use crate::core::feature_preview::PreviewFeature;
 use crate::core::remote::{MutationRetryOutcome, RemoteCommandError, TreqCommandRequest};
 use crate::core::remote_control_plane::SshEndpoint;
 use crate::core::remote_ssh_transport::{
@@ -59,7 +58,7 @@ pub async fn remote_dispatch_over_ssh(
   state: State<'_, RemoteExecState>,
   app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-  crate::commands::feature_preview::require(&app_state, PreviewFeature::RemoteSsh)?;
+  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
   let pool = state.0.clone();
   let cancellation = CancellationToken::new();
   crate::core::remote::execute_remote_command::<serde_json::Value>(
@@ -248,7 +247,7 @@ pub async fn remote_dispatch_mutation_over_ssh(
   state: State<'_, RemoteExecState>,
   app_state: State<'_, AppState>,
 ) -> Result<MutationDispatchResult, String> {
-  crate::commands::feature_preview::require(&app_state, PreviewFeature::RemoteSsh)?;
+  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
   let pool = state.0.clone();
   let cancellation = CancellationToken::new();
   let metrics = pool.metrics.clone();

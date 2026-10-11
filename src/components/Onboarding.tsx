@@ -12,11 +12,13 @@ import {
 interface OnboardingProps {
   onOpenRepo: () => Promise<void>;
   onOpenRemoteSsh?: () => Promise<void>;
+  remoteLabel?: string;
 }
 
 export const Onboarding: React.FC<OnboardingProps> = ({
   onOpenRepo,
   onOpenRemoteSsh,
+  remoteLabel = "Open via SSH",
 }) => (
   <div className="flex h-screen items-center justify-center bg-background mx-auto">
     <Card className="w-96">
@@ -40,7 +42,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({
             className="w-full"
           >
             <Server className="w-4 h-4 mr-2" />
-            Open via SSH
+            {remoteLabel}
           </Button>
         )}
       </CardContent>

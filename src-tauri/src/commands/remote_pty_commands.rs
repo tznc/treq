@@ -4,7 +4,6 @@
 //! caller who already knows the local terminal API is not learning a second
 //! vocabulary.
 
-use crate::core::feature_preview::PreviewFeature;
 use crate::core::remote::TreqCommandRequest;
 use crate::core::remote_control_plane::SshEndpoint;
 use crate::core::remote_pty::{PtyLaunchSpec, RemotePtyBinding, RemotePtyError, RemotePtyManager};
@@ -78,7 +77,7 @@ pub async fn remote_pty_create(
   state: State<'_, RemotePtyState>,
   app_state: State<'_, AppState>,
 ) -> Result<(), String> {
-  crate::commands::feature_preview::require(&app_state, PreviewFeature::RemoteSsh)?;
+  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
   log::debug!(
     "remote_pty_create: session_id={}, endpoint_id={}, repository_id={}, workspace_id={}",
     session_id,
@@ -261,7 +260,7 @@ pub async fn remote_pty_list_persistent_sessions(
   exec_state: State<'_, crate::commands::remote_control::RemoteExecState>,
   app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-  crate::commands::feature_preview::require(&app_state, PreviewFeature::RemoteSsh)?;
+  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
   let cancellation = CancellationToken::new();
   crate::core::remote::execute_remote_command::<serde_json::Value>(
     &exec_state.0,
@@ -302,7 +301,7 @@ pub async fn remote_pty_reattach(
   exec_state: State<'_, crate::commands::remote_control::RemoteExecState>,
   app_state: State<'_, AppState>,
 ) -> Result<(), String> {
-  crate::commands::feature_preview::require(&app_state, PreviewFeature::RemoteSsh)?;
+  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
   let cancellation = CancellationToken::new();
   let attach_command = crate::core::remote::execute_remote_command::<String>(
     &exec_state.0,
