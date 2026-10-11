@@ -353,11 +353,10 @@ export async function transportStashWorkspaceChanges(
 ): Promise<StashEntry> {
   const repo = activeForPath(repoPath);
   if (!repo) return local();
-  const entry = await remoteMutation<StashEntry>(repo, {
+  const entry = await remoteKeyedMutation<StashEntry>(repo, {
     kind: "StashWorkspaceChanges",
     repo: repo.canonicalPath,
     workspace: workspaceArg(workspaceId),
-    idempotency_key: newIdempotencyKey(),
   });
   if (!entry) throw new Error("stash_ambiguous: stash state unknown");
   return entry;
@@ -462,12 +461,11 @@ export async function transportRevertCommit(
 ): Promise<void> {
   const repo = activeForPath(target.repoPath);
   if (!repo) return local();
-  await remoteMutation(repo, {
+  await remoteKeyedMutation(repo, {
     kind: "RevertCommit",
     repo: repo.canonicalPath,
     workspace: String(target.workspaceId),
     commit: target.commitChangeId,
-    idempotency_key: newIdempotencyKey(),
   });
 }
 

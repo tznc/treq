@@ -260,27 +260,38 @@ export const setWindowRepoPath = (repoPath: string): Promise<void> =>
     }),
   );
 
+const SUPPORTING_REPOS = "Linking supporting repositories";
+
 export interface SupportingRepo {
   path: string;
   exists: boolean;
 }
 
+// Supporting repositories are linked by local path, so a remote repository
+// has none and cannot link one yet.
 export const listSupportingRepos = (
   repoPath: string,
-): Promise<SupportingRepo[]> => invoke("list_supporting_repos", { repoPath });
+): Promise<SupportingRepo[]> =>
+  localReadOr(repoPath, [], () =>
+    invoke("list_supporting_repos", { repoPath }),
+  );
 
 /** Validates and links a supporting repository; returns its canonical path. */
-export const addSupportingRepo = (
+export const addSupportingRepo = async (
   repoPath: string,
   supportingPath: string,
-): Promise<string> =>
-  invoke("add_supporting_repo", { repoPath, supportingPath });
+): Promise<string> => {
+  assertLocalOperation(repoPath, SUPPORTING_REPOS);
+  return invoke("add_supporting_repo", { repoPath, supportingPath });
+};
 
-export const removeSupportingRepo = (
+export const removeSupportingRepo = async (
   repoPath: string,
   supportingPath: string,
-): Promise<void> =>
-  invoke("remove_supporting_repo", { repoPath, supportingPath });
+): Promise<void> => {
+  assertLocalOperation(repoPath, SUPPORTING_REPOS);
+  return invoke("remove_supporting_repo", { repoPath, supportingPath });
+};
 
 export const setWindowSupportingRepoPaths = (
   repoPaths: string[],

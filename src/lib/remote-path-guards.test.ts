@@ -75,6 +75,8 @@ const GUARDED: [string, () => Promise<unknown>][] = [
   ["rebaseHomeRepoBranch", () => api.rebaseHomeRepoBranch(ROOT, "a", "b")],
   ["listDirectory", () => api.listDirectory(ROOT)],
   ["lsWorkspaceWithStatus", () => api.lsWorkspaceWithStatus(ROOT, 1)],
+  ["addSupportingRepo", () => api.addSupportingRepo(ROOT, "/other")],
+  ["removeSupportingRepo", () => api.removeSupportingRepo(ROOT, "/other")],
 ];
 
 // Local commands that still receive a remote path. Each entry is a gap to

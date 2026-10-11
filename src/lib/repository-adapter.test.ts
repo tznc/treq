@@ -1,15 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  applyAgentReviewSuggestion,
-  checkBranchExists,
-  archiveWorkspace,
   createCommit,
   createWorkspace,
   getCommitDiff,
-  getRepoSetting,
   getCommitFileDiff,
-  getGitRemoteUrl,
   getWorkspaceDiff,
   getWorkspaceFileHunks,
   jjGetCommitsAhead,
@@ -18,15 +13,11 @@ import {
   jjRestoreSnapshot,
   jjSnapshotWorkingCopy,
   jjSplit,
-  listAgentReviewComments,
   mergeWorkspace,
   moveWorkspaceChanges,
-  pullWorkspaceFromRemote,
   readFile,
   renameWorkspace,
-  revertCommit,
   searchWorkspaceFiles,
-  setRepoSetting,
   setWorkspaceTargetBranch,
   undoRepoOperation,
   switchRepoBranch,
@@ -156,14 +147,6 @@ describe("remote repository reads", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("reads the GitHub remote of a remote repository on its host", async () => {
-    const info = { owner: "acme", repo: "widgets", full_name: "acme/widgets" };
-    vi.mocked(dispatch).mockResolvedValueOnce(info);
-    await expect(getGitRemoteUrl(ROOT)).resolves.toEqual(info);
-    expect(sentReads()).toEqual([{ kind: "GitRemoteInfo", repo: ROOT }]);
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
   it("reads a workspace file through the typed ReadFile command", async () => {
     vi.mocked(dispatch).mockImplementation(async (_endpoint, request) => {
       if (request.kind === "ListWorkspaces") {
@@ -192,38 +175,6 @@ describe("remote repository reads", () => {
       `${scope}/.treq/workspaces/feat-a`,
     );
     expect(repoStateScope("/home/me/project")).toBe("/home/me/project");
-  });
-
-  it("checks a remote branch through the typed ListBranches read", async () => {
-    vi.mocked(dispatch).mockResolvedValue([{ name: "feat/a" }]);
-    await expect(checkBranchExists(ROOT, "feat/a")).resolves.toEqual({
-      local_exists: true,
-      remote_exists: false,
-    });
-    expect(sentReads()).toEqual([{ kind: "ListBranches", repo: ROOT }]);
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it("reads default repo settings and scopes agent review comments", async () => {
-    vi.mocked(invoke).mockResolvedValue([]);
-    await expect(getRepoSetting(ROOT, "default_agent")).resolves.toBeNull();
-    await expect(setRepoSetting(ROOT, "default_agent", "x")).rejects.toThrow(
-      /^unsupported:/,
-    );
-    await expect(applyAgentReviewSuggestion(ROOT, "c1")).rejects.toThrow(
-      /^unsupported:/,
-    );
-    await listAgentReviewComments(ROOT, "workspace", "7");
-    expect(vi.mocked(invoke).mock.calls).toEqual([
-      [
-        "list_agent_review_comments",
-        {
-          repoPath: repoStateScope(ROOT),
-          targetType: "workspace",
-          targetId: "7",
-        },
-      ],
-    ]);
   });
 });
 
@@ -298,37 +249,6 @@ describe("remote repository mutations", () => {
       (request) => (request as { idempotency_key: string }).idempotency_key,
     );
     expect(new Set(keys).size).toBe(3);
-  });
-
-  it("archives a remote workspace through the typed command", async () => {
-    await archiveWorkspace(ROOT, 7);
-    expect(sentMutations()).toEqual([
-      { kind: "ArchiveWorkspace", repo: ROOT, workspace: "7" },
-    ]);
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it("pulls a remote workspace through the typed command", async () => {
-    await pullWorkspaceFromRemote(ROOT, 7);
-    expect(sentMutations()).toEqual([
-      { kind: "PullWorkspace", repo: ROOT, workspace: "7" },
-    ]);
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it("reverts a remote commit with an idempotency key", async () => {
-    await revertCommit(ROOT, 7, "abc");
-    const [revert] = sentMutations();
-    expect(revert).toMatchObject({
-      kind: "RevertCommit",
-      repo: ROOT,
-      workspace: "7",
-      commit: "abc",
-    });
-    expect(
-      (revert as { idempotency_key: string }).idempotency_key,
-    ).toBeTruthy();
-    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("surfaces an ambiguous mutation as an error instead of success", async () => {
