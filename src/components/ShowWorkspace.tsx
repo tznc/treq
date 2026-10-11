@@ -224,7 +224,9 @@ export const ShowWorkspace = ({
   const repoCacheKey = useRepositoryCacheKey(effectiveRepoPath);
 
   const { addToast } = useToast();
-  const logsEnabled = usePreviewFeature("logs");
+  const logsPreviewEnabled = usePreviewFeature("logs");
+  // Logs are repo-wide, so only the home repo shows the tab.
+  const logsEnabled = logsPreviewEnabled && !workspace;
   const scheduling = useWorkspaceScheduling(effectiveRepoPath, workspace);
   const { fontSize } = useTerminalSettingsStore();
 
