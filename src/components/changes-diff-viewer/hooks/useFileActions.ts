@@ -27,7 +27,7 @@ import { deriveConventionalPrTitle } from "../../../lib/github-pr";
 import { invalidateReviewChangeCount } from "../../../lib/review-change-count";
 import type { useToast } from "../../ui/toast";
 import type { CommitAction, DiffLineSelection, FileHunksData } from "../types";
-import { computeHunkLineNumbers, parseHunkHeader } from "../utils";
+import { computeHunkLineNumbers, parseHunkHeader } from "../../diff/hunk-lines";
 
 interface UseFileActionsParams {
   workspacePath: string;

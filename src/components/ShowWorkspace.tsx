@@ -79,7 +79,7 @@ import { cn, getFullWorkspacePath, resolveReadmeImageSrc } from "../lib/utils";
 import { sumWorkspaceLocFromLog } from "../lib/workspace-stack";
 import type { AgentReviewComment } from "../lib/api-types-review";
 import type { SessionCreationInfo } from "../types/sessions";
-import { ChangesDiffViewer } from "./ChangesDiffViewer";
+import { ChangesDiffViewer } from "./changes-diff-viewer/ChangesDiffViewerMain";
 import { BrowserPanel } from "./browser-panel/BrowserPanel";
 import { useReviewSubView } from "./browser-panel/useReviewSubView";
 import { LocDiffMarker } from "./LocDiffMarker";

@@ -4,7 +4,8 @@ import { isBinaryFile, type ParsedFileChange } from "../../../lib/git-utils";
 import { escapeRegex } from "../../../lib/text-search";
 import { useDebounce } from "../../../hooks/useDebounce";
 import { useKeyboardShortcut } from "../../../hooks/useKeyboard";
-import { computeHunkLineNumbers, filterVisibleCommittedFiles } from "../utils";
+import { filterVisibleCommittedFiles } from "../utils";
+import { computeHunkLineNumbers } from "../../diff/hunk-lines";
 import type { DiffSearchData, FileHunksData } from "../types";
 
 interface UseDiffSearchParams {

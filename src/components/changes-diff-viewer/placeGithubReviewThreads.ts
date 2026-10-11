@@ -1,5 +1,5 @@
 import type { GhReviewThread } from "../../lib/api-types";
-import { computeHunkLineNumbers } from "./utils";
+import { computeHunkLineNumbers } from "../diff/hunk-lines";
 import type { FileHunksData } from "./types";
 
 function pushToMap(

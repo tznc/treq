@@ -29,7 +29,7 @@ vi.mock("./LinearCommitHistory", () => ({
   LinearCommitHistory: () => <div data-testid="linear-commit-history" />,
 }));
 
-vi.mock("./ChangesDiffViewer", () => ({
+vi.mock("./changes-diff-viewer/ChangesDiffViewerMain", () => ({
   ChangesDiffViewer: () => <div data-testid="changes-viewer" />,
 }));
 

@@ -23,7 +23,7 @@ import {
   type Workspace,
 } from "../lib/api";
 import { cn } from "../lib/utils";
-import { getLinePrefix, getLineTypeClass } from "./changes-diff-viewer/utils";
+import { getLinePrefix, getLineTypeClass } from "./diff/hunk-lines";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import {

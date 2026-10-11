@@ -13,19 +13,19 @@ import { CommentInput } from "../CommentInput";
 import { InlineConflictCard } from "../InlineConflictCard";
 import { AgentReviewInlineList } from "./AgentReviewContext";
 import { GithubThreadsInlineList } from "./GithubThreadsInlineList";
-import { HighlightedLine } from "./FileRowComponent";
+import { HighlightedLine } from "../diff/HighlightedLine";
 import {
   HunkContextLineRow,
   HunkExpandControl,
   HunkHeaderRow,
 } from "./HunkChrome";
+import { getQuoteProp } from "./utils";
 import {
   computeHunkLineNumbers,
   getLinePrefix,
   getLineTypeClass,
-  getQuoteProp,
   parseHunkHeader,
-} from "./utils";
+} from "../diff/hunk-lines";
 import type { HunkLinesProps } from "./types";
 import type { ConflictRegion } from "../../lib/api";
 

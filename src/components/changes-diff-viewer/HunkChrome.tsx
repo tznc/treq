@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { JjDiffHunk } from "../../lib/api";
-import { HighlightedLine } from "./FileRowComponent";
-import { parseHunkHeader } from "./utils";
+import { HighlightedLine } from "../diff/HighlightedLine";
+import { parseHunkHeader } from "../diff/hunk-lines";
 import { cn } from "../../lib/utils";
 import { getLanguageFromPath } from "../../lib/syntax-highlight";
 

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { useToast } from "../../ui/toast";
-import { computeHunkLineNumbers, resolveFileHunks } from "../utils";
+import { resolveFileHunks } from "../utils";
+import { computeHunkLineNumbers } from "../../diff/hunk-lines";
 import {
   FILE_COMMENT_HUNK_ID,
   type CommentLineQuery,

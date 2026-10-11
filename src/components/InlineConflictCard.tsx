@@ -11,7 +11,10 @@ import type {
   ConflictStyle,
 } from "../lib/api";
 import { getConflictDeletedSides } from "../lib/conflict-deleted-sides";
-import type { ConflictComment, DiffSearchData } from "./ChangesDiffViewer";
+import type {
+  ConflictComment,
+  DiffSearchData,
+} from "./changes-diff-viewer/types";
 import { Button } from "./ui/button";
 import { highlightInHtml } from "../lib/text-search";
 import { cn } from "../lib/utils";
