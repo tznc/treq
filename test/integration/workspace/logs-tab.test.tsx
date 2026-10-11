@@ -1,4 +1,4 @@
-// @include-serial
+// @include-parallel
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";

@@ -1,3 +1,4 @@
+// @include-parallel
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
