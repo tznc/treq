@@ -17,7 +17,7 @@ const BRANCH_NAME = "feat/commits-tab-demo";
 // Scenario: 5 commits land on the default branch, the user creates a
 // workspace via the home repo's "Stack" button, makes 2 workspace commits,
 // then pushes that workspace to the remote. Captures the Commits tab right
-// before and right after the push so the "Push to remote" affordance
+// before and right after the push so the "Push" affordance
 // disappearing is visible in the diff.
 it("captures the Commits tab before and after pushing a workspace to remote", async () => {
 	const { repoPath } = createTestRepo(true); // withRemote: real bare remote to push against
@@ -81,14 +81,14 @@ it("captures the Commits tab before and after pushing a workspace to remote", as
 	await screen.findByText("Workspace commit 2");
 	await screen.findByText("Workspace commit 1");
 	const pushButton = await screen.findByRole("button", {
-		name: /push to remote/i,
+		name: /^push$/i,
 	});
 	await captureDocument(document, {
 		name: "commits-tab-after-push-01-before-push",
 		expectations: [
 			"The Commits tab is active and shows a 'Today' section with Workspace commit 2 above Workspace commit 1.",
 			"A 'Recent on <branch>' section below lists 5 repo commits (Repo commit 1..5) plus the Initial commit, each tagged Immutable.",
-			"The header shows a blue 'Push to remote' button (workspace not yet pushed).",
+			"The header shows a blue 'Push' button (workspace not yet pushed).",
 		],
 	});
 
@@ -96,11 +96,11 @@ it("captures the Commits tab before and after pushing a workspace to remote", as
 	await screen.findByText("Pushed to remote");
 
 	// Dashboard keeps `selectedWorkspace` synced to the `workspaces` query, so
-	// the "Push to remote" button disappears on its own once the post-push
+	// the "Push" button disappears on its own once the post-push
 	// refetch lands -- no re-navigation required.
 	await waitFor(() => {
 		expect(
-			screen.queryByRole("button", { name: /push to remote/i }),
+			screen.queryByRole("button", { name: /^push$/i }),
 		).not.toBeInTheDocument();
 	});
 	// Let the post-push status/toast settle before snapshotting.
@@ -109,7 +109,7 @@ it("captures the Commits tab before and after pushing a workspace to remote", as
 	await captureDocument(document, {
 		name: "commits-tab-after-push-02-after-push",
 		expectations: [
-			"The 'Push to remote' button is gone from the header (only 'Merge...' and the overflow menu remain).",
+			"The 'Push' button is gone from the header (only 'Merge...' and the overflow menu remain).",
 			"A toast in the bottom-left corner with a green check icon reads 'Pushed to remote' / 'Changes pushed successfully'.",
 			"Workspace commit 1 and Workspace commit 2 are still listed, unchanged from the before-push screenshot.",
 		],

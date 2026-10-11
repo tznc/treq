@@ -1,6 +1,6 @@
 /**
  * Verifies that the workspace header stays legible when the main area is
- * narrow: the right-hand actions (Push to remote, Merge, Details)
+ * narrow: the right-hand actions (Push, Merge, Details)
  * must not overlap the branch name, target branch selector, or Schedule
  * button on the left.
  */
@@ -54,7 +54,7 @@ it("keeps the workspace header actions clear of the branch controls when narrow"
   await user.click(await screen.findByText(BRANCH_NAME));
   const header = await screen.findByTestId("show-workspace-header");
   expect(
-    await within(header).findByRole("button", { name: /push to remote/i }),
+    await within(header).findByRole("button", { name: /^push$/i }),
   ).toBeVisible();
 
   await captureDocument(document, {
@@ -62,14 +62,14 @@ it("keeps the workspace header actions clear of the branch controls when narrow"
     viewport: { width: 900, height: 600 },
     expectations: [
       "In the workspace header, no button or label is drawn on top of another: the branch name, target branch selector and Schedule button are fully readable.",
-      "The right-hand actions (Push to remote, Merge, Details, more) are fully visible, moving to a second header row if the first row has no room.",
+      "The right-hand actions (Push, Merge, Details, more) are fully visible, moving to a second header row if the first row has no room.",
     ],
   });
 
   await captureDocument(document, {
     name: "workspace-header-narrow-02-1440px",
     expectations: [
-      "At full width the workspace header is a single row: branch controls on the left, Push to remote / Merge / Details on the right.",
+      "At full width the workspace header is a single row: branch controls on the left, Push / Merge / Details on the right.",
     ],
   });
 }, 60000);

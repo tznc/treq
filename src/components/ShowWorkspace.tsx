@@ -1618,7 +1618,7 @@ export const ShowWorkspace = ({
               )}
             </div>
             <div className="flex items-center gap-2 ml-auto">
-              {/* Push to remote button - shown when the branch isn't on remote
+              {/* Push button - shown when the branch isn't on remote
 								    and we can't offer the combined push+create-PR flow (either
 								    there's no GitHub remote, or this is the default branch, which
 								    can't be PR'd into itself). */}
@@ -1636,7 +1636,7 @@ export const ShowWorkspace = ({
                           className="bg-blue-600 hover:bg-blue-700"
                         >
                           <Upload className="w-4 h-4" />
-                          Push to remote
+                          Push
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
@@ -1649,7 +1649,7 @@ export const ShowWorkspace = ({
 
               {/* Create / View PR. When the branch has a GitHub remote but
 								    hasn't been pushed yet, CreatePrButtonGroup pushes it first so
-								    there's no separate "Push to remote" click required. */}
+								    there's no separate "Push" click required. */}
               {workspace &&
                 workspace.branch_name !== defaultBranch &&
                 effectiveRepoPath && (
