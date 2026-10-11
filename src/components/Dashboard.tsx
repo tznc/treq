@@ -13,7 +13,6 @@ import {
 } from "react";
 import useSWR from "swr";
 import { useLocation } from "wouter";
-import { useAutoUpdate } from "../hooks/useAutoUpdate";
 import { useKeyboardShortcut } from "../hooks/useKeyboard";
 import { useMutation } from "../hooks/useMutation";
 import { useWorkspaceHierarchy } from "../hooks/useWorkspaceHierarchy";
@@ -1150,10 +1149,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const terminalPaneRef = useRef<WorkspaceTerminalPaneHandle>(null);
 
   const { addToast } = useToast();
-  useAutoUpdate({
-    autoCheck: import.meta.env.MODE !== "test",
-    listenMenu: import.meta.env.MODE !== "test",
-  });
   const handleReturnToDashboard = () => {
     // Navigate to main repo ShowWorkspace > Code
     setSelectedWorkspace(null);
