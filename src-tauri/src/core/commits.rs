@@ -149,7 +149,14 @@ pub fn list_commits(
         let mut result =
           jj::jj_get_home_repo_diverged_log(repo_path, &branch, &default_branch, limit)
             .map_err(|e| format!("Failed to list commits: {}", e))?;
-        if !include_target_branch_history {
+        if include_target_branch_history {
+          // Also show default-branch history when the branch has no target-ahead commits.
+          let target_limit = target_branch_limit.unwrap_or(10);
+          let target_commits =
+            jj::jj_get_target_branch_log(repo_path, &default_branch, target_limit)
+              .map_err(|e| format!("Failed to list target branch history: {}", e))?;
+          append_target_branch_commits(&mut result, target_commits);
+        } else {
           result.commits.retain(|c| !c.on_target_only);
         }
         Ok(result)

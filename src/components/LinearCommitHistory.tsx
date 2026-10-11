@@ -233,7 +233,7 @@ export const LinearCommitHistory = ({
               key={`${group.dayKey}-${groupIndex}`}
               className="mt-5 first:mt-0"
             >
-              <p className="text-xs font-semibold text-muted-foreground mb-1 pl-7">
+              <p className="text-xs text-muted-foreground mb-1 pl-7">
                 {group.label}
               </p>
               <ul className="space-y-0">
@@ -296,7 +296,7 @@ export const LinearCommitHistory = ({
                   key={`target-${group.dayKey}-${groupIndex}`}
                   className="mt-5 first:mt-0"
                 >
-                  <p className="text-xs font-semibold text-muted-foreground mb-1 pl-7">
+                  <p className="text-xs text-muted-foreground mb-1 pl-7">
                     {group.label}
                   </p>
                   <ul className="space-y-0">
@@ -337,7 +337,7 @@ export const LinearCommitHistory = ({
                   key={`target-${group.dayKey}-${groupIndex}`}
                   className="mt-5 first:mt-0"
                 >
-                  <p className="text-xs font-semibold text-muted-foreground mb-1 pl-7">
+                  <p className="text-xs text-muted-foreground mb-1 pl-7">
                     {group.label}
                   </p>
                   <ul className="space-y-0">
