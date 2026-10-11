@@ -986,7 +986,7 @@ export const ShowWorkspace = ({
     mode: "plan" | "acceptEdits",
     sessionName: string,
     agentOverride?: string,
-    { reuseIdleAgent = true }: { reuseIdleAgent?: boolean } = {},
+    reuseIdleAgent = false,
   ) => {
     try {
       if (reuseIdleAgent && sendToIdleAgent(reviewMarkdown)) {
@@ -1018,10 +1018,22 @@ export const ShowWorkspace = ({
     }
   };
 
+  /**
+   * Sends a finished review to a new agent terminal, or to the idle agent when
+   * the user ticked "Send to idle agent".
+   */
   const handleCreateAgentWithReview = (
     reviewMarkdown: string,
     mode: "plan" | "acceptEdits",
-  ) => createAgentWithReview(reviewMarkdown, mode, "Code Review");
+    useIdleAgent = false,
+  ) =>
+    createAgentWithReview(
+      reviewMarkdown,
+      mode,
+      "Code Review",
+      undefined,
+      useIdleAgent,
+    );
 
   /**
    * Launches a review agent terminal seeded with a generated review prompt.
@@ -1029,14 +1041,20 @@ export const ShowWorkspace = ({
    * would review its own work.
    */
   const handleStartAgentReview = (prompt: string, agent?: string) =>
-    createAgentWithReview(prompt, "acceptEdits", "AI Review", agent, {
-      reuseIdleAgent: false,
-    });
+    createAgentWithReview(prompt, "acceptEdits", "AI Review", agent);
 
   const handleCreateAgentWithPageReview = (
     reviewMarkdown: string,
     mode: "plan" | "acceptEdits",
-  ) => createAgentWithReview(reviewMarkdown, mode, "Page Review");
+    useIdleAgent = false,
+  ) =>
+    createAgentWithReview(
+      reviewMarkdown,
+      mode,
+      "Page Review",
+      undefined,
+      useIdleAgent,
+    );
 
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">

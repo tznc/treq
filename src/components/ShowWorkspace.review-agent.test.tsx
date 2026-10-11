@@ -8,7 +8,11 @@ import type { TerminalSessionSummary } from "./terminal/types";
 
 // Capture the onCreateAgentWithReview callback so tests can invoke it directly.
 let capturedOnCreateAgentWithReview:
-  | ((review: string, mode: "plan" | "acceptEdits") => Promise<void>)
+  | ((
+      review: string,
+      mode: "plan" | "acceptEdits",
+      useIdleAgent?: boolean,
+    ) => Promise<void>)
   | undefined;
 let capturedOnStartAgentReview:
   | ((prompt: string, agent?: string) => Promise<void>)
@@ -30,6 +34,7 @@ vi.mock("./ChangesDiffViewer", () => ({
     onCreateAgentWithReview?: (
       review: string,
       mode: "plan" | "acceptEdits",
+      useIdleAgent?: boolean,
     ) => Promise<void>;
     onStartAgentReview?: (prompt: string, agent?: string) => Promise<void>;
   }) => {
@@ -89,6 +94,15 @@ const workspace: Workspace = {
   title: "feature-one",
   created_at: new Date().toISOString(),
   not_on_remote: false,
+};
+
+const IDLE_AGENT: TerminalSessionSummary = {
+  id: "agent-84",
+  kind: "agent",
+  name: "Claude 1",
+  branchName: "feature-one",
+  isMainRepo: false,
+  isStreaming: false,
 };
 
 function renderWorkspace(
@@ -258,42 +272,41 @@ describe("Send review to terminal respects default agent setting", () => {
     expect(sessionInfo.workspacePath).toBeNull();
   });
 
-  it("sends Edit to an existing idle agent instead of creating a session", async () => {
+  it("sends Edit to an existing idle agent when the user opts in", async () => {
     const onSessionCreated = vi.fn();
     const onSendToIdleAgent = vi.fn();
-    const idleAgentSession: TerminalSessionSummary = {
-      id: "agent-84",
-      kind: "agent",
-      name: "Claude 1",
-      branchName: "feature-one",
-      isMainRepo: false,
-      isStreaming: false,
-    };
     renderWorkspace(onSessionCreated, {
-      idleAgentSession,
+      idleAgentSession: IDLE_AGENT,
+      onSendToIdleAgent,
+    });
+
+    await openReviewTab();
+    await capturedOnCreateAgentWithReview!("review text", "acceptEdits", true);
+
+    expect(onSendToIdleAgent).toHaveBeenCalledWith(84, "review text");
+    expect(onSessionCreated).not.toHaveBeenCalled();
+  });
+
+  it("opens a new agent session for Edit by default, even when an agent is idle", async () => {
+    const onSessionCreated = vi.fn();
+    const onSendToIdleAgent = vi.fn();
+    renderWorkspace(onSessionCreated, {
+      idleAgentSession: IDLE_AGENT,
       onSendToIdleAgent,
     });
 
     await openReviewTab();
     await capturedOnCreateAgentWithReview!("review text", "acceptEdits");
 
-    expect(onSendToIdleAgent).toHaveBeenCalledWith(84, "review text");
-    expect(onSessionCreated).not.toHaveBeenCalled();
+    expect(onSendToIdleAgent).not.toHaveBeenCalled();
+    expect(onSessionCreated).toHaveBeenCalledOnce();
   });
 
   it("Start Review opens a new agent session even when an agent is idle", async () => {
     const onSessionCreated = vi.fn();
     const onSendToIdleAgent = vi.fn();
-    const idleAgentSession: TerminalSessionSummary = {
-      id: "agent-84",
-      kind: "agent",
-      name: "Claude 1",
-      branchName: "feature-one",
-      isMainRepo: false,
-      isStreaming: false,
-    };
     renderWorkspace(onSessionCreated, {
-      idleAgentSession,
+      idleAgentSession: IDLE_AGENT,
       onSendToIdleAgent,
     });
 

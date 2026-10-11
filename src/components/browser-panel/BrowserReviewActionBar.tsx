@@ -1,4 +1,5 @@
 import { MessageSquare, Send, Trash2 } from "lucide-react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,6 +14,7 @@ import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Textarea } from "../ui/textarea";
 import type { ElementComment } from "./types";
+import { UseIdleAgentCheckbox } from "../UseIdleAgentCheckbox";
 
 export interface BrowserReviewActionBarProps {
   comments: ElementComment[];
@@ -25,7 +27,10 @@ export interface BrowserReviewActionBarProps {
   setShowCancelDialog: (open: boolean) => void;
   onDeleteComment: (commentId: string) => void;
   onCancelReview: () => void;
-  onRequestChanges: (mode: "plan" | "acceptEdits") => void;
+  onRequestChanges: (
+    mode: "plan" | "acceptEdits",
+    useIdleAgent: boolean,
+  ) => void;
 }
 
 export function BrowserReviewActionBar({
@@ -41,6 +46,7 @@ export function BrowserReviewActionBar({
   onCancelReview,
   onRequestChanges,
 }: BrowserReviewActionBarProps) {
+  const [useIdleAgent, setUseIdleAgent] = useState(false);
   const hasContent = comments.length > 0 || summary.trim().length > 0;
 
   return (
@@ -83,18 +89,25 @@ export function BrowserReviewActionBar({
                   placeholder="Add a summary comment (optional)..."
                   className="min-h-[80px] text-sm"
                 />
+                <UseIdleAgentCheckbox
+                  checked={useIdleAgent}
+                  onCheckedChange={setUseIdleAgent}
+                  disabled={sendingReview}
+                />
                 <div className="flex justify-end gap-2">
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => onRequestChanges("plan")}
+                    onClick={() => onRequestChanges("plan", useIdleAgent)}
                     disabled={sendingReview}
                   >
                     Plan
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => onRequestChanges("acceptEdits")}
+                    onClick={() =>
+                      onRequestChanges("acceptEdits", useIdleAgent)
+                    }
                     disabled={sendingReview}
                   >
                     Edit
