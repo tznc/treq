@@ -9,6 +9,10 @@ env:
   CARGO_INCREMENTAL: 0
   # Skip debug info for test binaries: faster builds, smaller artifacts
   CARGO_PROFILE_TEST_DEBUG: 0
+  # The NAPI addon builds with the dev profile, which keeps full debug info
+  # for workspace crates. Line tables keep backtraces readable for less
+  # compile and link time.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 on:
   pull_request:
