@@ -16,7 +16,7 @@ adb install -r treq-gpui-debug.apk
 
 Or copy the APK to the phone and open it, allowing installs from that source. The APK is signed with the debug key and contains arm64 (phones) and x86_64 (emulators) libraries. The workflow also uploads emulator screenshots (`treq-gpui-emulator-screenshots`).
 
-The [nightly release](https://github.com/tznc/treq/releases/tag/nightly) also carries `treq-nightly-android-arm64.apk`, this app built against tauri-gpui `main` (arm64 only). The nightly workflow builds an iOS simulator app too, uploaded as the `ios-debug-app` artifact.
+The [nightly release](https://github.com/tznc/treq/releases/tag/nightly) also carries `treq-nightly-android-arm64.apk`, this app built against tauri-gpui `main` (arm64 only). It also carries `treq-nightly-ios-simulator-arm64.zip`, an iOS simulator build (Apple silicon Macs; it does not install on a device): unzip it and run `xcrun simctl install booted <app>`.
 
 ## What works
 
