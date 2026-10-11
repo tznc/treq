@@ -20,7 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 treq = { path = "../src-tauri", features = ["embed"] }
 tauri = { version = "2.12", features = ["unstable"] }
-tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "ccr-abfcd600-eoaphz", features = ["mobile"] }
+tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "main", features = ["mobile"] }
 gpui-kit = "0.7.1"
 tauri-plugin-deep-link = "2.4.7"
 tauri-plugin-opener = "2.5.2"
@@ -49,6 +49,14 @@ android_logger = "0.15"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 env_logger = "0.11"
+
+# gpui-kit fork with a native touch selection opt-out and
+# `set_selected_text_range`, so tauri-plugin-gpui's native Android toolbar and
+# drag handles replace gpui-kit's own. Drop once upstream has both.
+[patch.crates-io]
+gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+gpui-component = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+gpui-base = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
 
 [profile.dev]
 opt-level = 1

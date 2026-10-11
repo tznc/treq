@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs the treq-gpui debug APK on a running emulator, opens the home and
-# add-host screens, and checks the app renders without crashing. Screenshots
+# Installs the treq-gpui debug APK on a running emulator, opens the signed-out
+# landing page, swipes it, and checks the app renders without crashing. Screenshots
 # and logcat go to the output directory.
 #
 #   mobile-gpui/scripts/android-smoke.sh <app.apk> [output-dir]
@@ -20,8 +20,19 @@ dismiss_dialogs() { adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM
 timeout 300 "$ADB_BIN" wait-for-device
 adb shell settings put global hide_error_dialogs 1 || true
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null || true
-adb install -r -g "$APK"
 adb logcat -c
+adb install -r -g "$APK"
+# Let the install settle before the first launch. The system's post-install
+# handling (PACKAGE_ADDED broadcast, `onPackageAdded` in the launcher) relaunches
+# an activity that is already running, and tauri-plugin-gpui does not yet
+# re-attach to a recreated activity, so the screen would go blank. Both waits
+# are best-effort: `wait-for-broadcast-idle` needs API 30+, the logcat wait is
+# capped at 20 s.
+adb shell am wait-for-broadcast-idle || sleep 5
+for _ in $(seq 20); do
+  if adb logcat -d | grep "onPackageAdded: $PKG" > /dev/null; then break; fi
+  sleep 1
+done
 # Keep a live capture so the logs survive an emulator crash.
 "$ADB_BIN" logcat > "$OUT/logcat-stream.txt" 2>&1 &
 LOGCAT_PID=$!
@@ -54,8 +65,9 @@ fi
 sleep 6
 shot 01-home
 
-# "Add SSH host" sits below the account and remote cards; scroll and tap it
-# by its approximate position, then come back with the back button.
+# The signed-out landing page fits on one screen (no saved hosts on a fresh
+# install), so the swipe only checks that scrolling it is harmless. Tapping
+# "Sign in" would leave the app for the browser, so it is not exercised.
 dismiss_dialogs
 size=$(adb shell wm size | awk '/Physical/ {print $3}' | tr -d '\r')
 width=${size%x*}

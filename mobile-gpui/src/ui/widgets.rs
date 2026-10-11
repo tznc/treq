@@ -1,12 +1,42 @@
 //! Small layout pieces shared by the screens, sized for touch.
 
+use std::sync::{Arc, LazyLock};
+
 use gpui_kit::{
   component::{h_flex, v_flex, ActiveTheme, IconName},
   *,
 };
 
+use super::theme::BRAND_BLUE;
+
+// The blue "T" mark, shared with the website and desktop app.
+const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo.imageset/logo@3x.png");
+
+// Decoded once: GPUI caches the texture by the image's id.
+static LOGO: LazyLock<Arc<Image>> =
+  LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
+
+/// The Treq mark, `size` logical pixels square.
+pub fn logo(size: f32) -> Img {
+  img(LOGO.clone()).size(px(size))
+}
+
+/// The lowercase "treq" wordmark in bold brand-blue monospace.
+pub fn wordmark(size: f32, cx: &App) -> Div {
+  div()
+    .font_family(cx.theme().mono_font_family.clone())
+    .font_weight(FontWeight::BOLD)
+    .text_size(px(size))
+    .line_height(relative(1.))
+    .text_color(rgb(BRAND_BLUE))
+    .child("treq")
+}
+
 /// Minimum height of a tappable row.
 pub const ROW_H: f32 = 56.;
+
+/// Height of a full-width call-to-action button (gpui-kit's large is 32px).
+pub const CTA_H: f32 = 52.;
 
 /// A titled group of content.
 pub fn section(title: impl Into<SharedString>, cx: &App) -> Div {
