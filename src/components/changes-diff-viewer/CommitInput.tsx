@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { cn } from "../../lib/utils";
-import type { CommitInputHandle, CommitInputProps } from "./types";
+import type { CommitInputProps } from "./types";
 
 const draftStorageKey = (workspacePath: string) =>
   `treq.commitDraft.${workspacePath}`;
@@ -203,4 +203,3 @@ const CommitInput = ({
 CommitInput.displayName = "CommitInput";
 
 export { CommitInput };
-export type { CommitInputHandle };

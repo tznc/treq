@@ -12,8 +12,6 @@ import {
   type ToastType,
 } from "../../stores/toastStore";
 
-export type { ToastType };
-
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const toasts = useToastStore((s) => s.toasts);
   const removeToast = useToastStore((s) => s.removeToast);

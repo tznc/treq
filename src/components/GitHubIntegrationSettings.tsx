@@ -15,7 +15,7 @@ import { supabase, WEB_URL } from "../lib/supabase";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
 
-export interface GitHubRepository {
+interface GitHubRepository {
   id: number;
   full_name: string;
   private: boolean;

@@ -1,4 +1,4 @@
-export type KeyboardShortcutEntry = {
+type KeyboardShortcutEntry = {
   keys: string[];
   action: string;
 };

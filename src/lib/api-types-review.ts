@@ -10,10 +10,9 @@ export interface ConflictCommentRecord {
 
 /** What an agent review targets. Open-ended so other content types can be
  * added later without changing the storage or the UI contract. */
-export type AgentReviewTargetType = string;
+type AgentReviewTargetType = string;
 
 export const AGENT_REVIEW_TARGET_WORKSPACE_DIFF = "workspace_diff";
-export const AGENT_REVIEW_TARGET_FILE_BROWSER_FILE = "file_browser_file";
 export const AGENT_REVIEW_TARGET_LINEAR_ISSUE = "linear_issue";
 export const AGENT_REVIEW_TARGET_LINEAR_PROJECT = "linear_project";
 export const AGENT_REVIEW_TARGET_LINEAR_DOCUMENT = "linear_document";

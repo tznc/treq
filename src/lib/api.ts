@@ -2,7 +2,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { InstalledSkill, RepoYamlConfig } from "./api-extra";
 import type {
-  BookmarkConflictResolutionResult,
   BranchStatus,
   DeviceKeyInfo,
   EditorAppsResponse,
@@ -523,11 +522,6 @@ export const switchRepoBranch = (
     invoke("switch_repo_branch", { repoPath, bookmarkName }),
   );
 
-export interface SyncStatus {
-  ahead: number;
-  behind: number;
-}
-
 export const jjGitFetchBackground = (repoPath: string): Promise<void> =>
   transportGitFetch(repoPath, () =>
     invoke("jj_git_fetch_background", { repoPath }),
@@ -594,7 +588,7 @@ export const getWorkspaceDiff = (
     ),
   );
 
-export interface HunkSpec {
+interface HunkSpec {
   file_path: string;
   start_line: number;
   end_line: number;
@@ -746,21 +740,6 @@ export const checkAndRebaseWorkspaces = async (
     workspaceId: workspaceId ?? null,
     defaultBranch: defaultBranch ?? null,
     force: force ?? null,
-  });
-};
-
-export const resolveBookmarkConflict = async (
-  repoPath: string,
-  workspaceId: number,
-  workspacePath: string,
-  branchName: string,
-): Promise<BookmarkConflictResolutionResult> => {
-  assertLocalOperation(repoPath, "Resolving a bookmark conflict");
-  return invoke("resolve_workspace_bookmark_conflict", {
-    repoPath,
-    workspaceId,
-    workspacePath,
-    branchName,
   });
 };
 

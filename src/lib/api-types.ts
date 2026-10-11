@@ -16,14 +16,14 @@ export interface Workspace {
   archived?: boolean;
 }
 
-export type RemoteSyncStatus =
+type RemoteSyncStatus =
   | { type: "NotOnRemote" }
   | { type: "InSync" }
   | { type: "Ahead"; data: { count: number } }
   | { type: "Behind"; data: { count: number } }
   | { type: "Diverged"; data: { ahead: number; behind: number } };
 
-export interface WorkspacePartialStatus {
+interface WorkspacePartialStatus {
   current: Workspace;
   has_conflicts: boolean;
   has_changes: boolean;
@@ -37,7 +37,7 @@ export interface WorkspaceSidebarStatus {
   last_activity_at?: string | null;
 }
 
-export interface WorkspaceNode {
+interface WorkspaceNode {
   status: WorkspacePartialStatus;
   parent_id: number | null;
   child_ids: number[];
@@ -59,13 +59,6 @@ export interface WorkspaceStatus {
     timestamp: string;
     message: string;
   }[];
-}
-
-export interface RepoStatus {
-  has_changes: boolean;
-  has_conflicts: boolean;
-  remote_sync: RemoteSyncStatus;
-  fetch_error: string | null;
 }
 
 export interface RepoBranch {
@@ -137,13 +130,7 @@ export interface JjRebaseResult {
   message: string;
 }
 
-export interface BookmarkConflictResolutionResult {
-  success: boolean;
-  message: string;
-  preserved_change_ids: string[];
-}
-
-export interface BookmarkConflictCommit {
+interface BookmarkConflictCommit {
   commit_id: string;
   short_commit_id: string;
   change_id: string;
@@ -153,7 +140,7 @@ export interface BookmarkConflictCommit {
   diff_summary: string;
 }
 
-export interface WorkspaceBookmarkConflict {
+interface WorkspaceBookmarkConflict {
   workspace_id: number;
   workspace_name: string;
   workspace_path: string;
@@ -182,7 +169,7 @@ export interface JjLogCommit {
   has_conflicts?: boolean;
 }
 
-export interface ResolveTarget {
+interface ResolveTarget {
   change_id: string;
   commit_id: string;
   description: string;
@@ -234,14 +221,6 @@ export interface JjCommitsAhead {
   total_count: number;
 }
 
-export interface JjMergeResult {
-  success: boolean;
-  message: string;
-  has_conflicts: boolean;
-  conflicted_files: string[];
-  merge_commit_id: string | null;
-}
-
 export type MergeStrategy = "merge" | "squash" | "rebase";
 
 export interface JjFileDiff {
@@ -271,14 +250,6 @@ export interface DirectoryEntry {
   status?: string | null;
 }
 
-export interface CachedDirectoryEntry {
-  name: string;
-  path: string;
-  is_directory: boolean;
-  relative_path: string;
-  modified_at?: string | null;
-}
-
 export interface FileSearchResult {
   file_path: string;
   relative_path: string;
@@ -299,12 +270,6 @@ export interface PrerequisiteStatus {
 export interface JjBranch {
   name: string;
   is_current: boolean;
-}
-
-export interface BookmarkTrackingResult {
-  tracked: string[];
-  failed: [string, string][];
-  already_tracked: string[];
 }
 
 export interface PullWorkspaceResult {
@@ -337,43 +302,9 @@ export interface SingleRebaseResult {
   bookmark_conflicts?: WorkspaceBookmarkConflict[];
 }
 
-export interface FileView {
-  id: number;
-  workspace_path: string;
-  file_path: string;
-  viewed_at: string;
-  content_hash: string;
-}
-
 export interface DiffCacheEntry {
   data: string;
   timestamp: number;
-}
-
-export interface BranchDiffLine {
-  kind: "context" | "addition" | "deletion";
-  old_line?: number | null;
-  new_line?: number | null;
-  content: string;
-}
-
-export interface BranchDiffFileDiff {
-  path: string;
-  lines: BranchDiffLine[];
-}
-
-export interface BranchDiffFileChange {
-  path: string;
-  status: string;
-}
-
-export interface BranchCommitInfo {
-  hash: string;
-  abbreviated_hash: string;
-  message: string;
-  author_name: string;
-  author_email: string;
-  timestamp: string;
 }
 
 export interface LineComment {
@@ -483,7 +414,7 @@ export type ConflictStyle =
   | "git_diff3"
   | "unknown";
 
-export type ConflictLineKind = "marker" | "content";
+type ConflictLineKind = "marker" | "content";
 export type ConflictLineRole =
   | "start"
   | "base"
@@ -493,14 +424,14 @@ export type ConflictLineRole =
   | "right"
   | "unknown";
 
-export interface ConflictLineView {
+interface ConflictLineView {
   raw: string;
   kind: ConflictLineKind;
   role: ConflictLineRole;
   file_line: number;
 }
 
-export interface ConflictComparisonView {
+interface ConflictComparisonView {
   left_line_indexes: number[];
   base_line_indexes: number[];
   right_line_indexes: number[];
