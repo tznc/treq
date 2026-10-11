@@ -2057,33 +2057,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setSessionSelectedFile(options?.selectedFilePath ?? null);
   };
 
-  // A session started away from the visible terminal (a tracker kickoff, or a
-  // dialog pointed at another workspace) gets a toast instead of a jump.
-  const announceSessionStarted = async (
-    sessionId: number,
-    workspaceId: number | null,
-  ) => {
-    const known =
-      workspaceId == null || workspaces.some((ws) => ws.id === workspaceId)
-        ? workspaces
-        : await fetchAndCache(["workspaces", queryRepoKey], () =>
-            getWorkspaces(dataRepoPath),
-          ).catch(() => workspaces);
-    const workspace = known.find((ws) => ws.id === workspaceId) ?? null;
-    addToast({
-      title: "Session started",
-      description: `in ${workspace?.branch_name ?? effectiveDefaultBranch}`,
-      type: "success",
-      action: {
-        label: "Open",
-        onClick: () => {
-          handleSelectWorkspace(workspace);
-          setActiveSessionId(toPaneSessionId(repoPath, sessionId));
-        },
-      },
-    });
-  };
-
   const handleSessionCreated = (sessionData: {
     sessionId: number;
     workspaceId?: number | null;
@@ -2104,12 +2077,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     const paneId = toPaneSessionId(repoPath, sessionData.sessionId);
     setActiveSessionId(paneId);
-    const targetWorkspaceId = sessionData.workspaceId ?? null;
-    const onScreen =
-      isSessionView && (selectedWorkspace?.id ?? null) === targetWorkspaceId;
-    if (!onScreen) {
-      void announceSessionStarted(sessionData.sessionId, targetWorkspaceId);
-    }
     if (
       sessionData.pendingPrompt ||
       sessionData.permissionMode ||

@@ -65,7 +65,7 @@ describe("session started feedback", () => {
     restoreAgents();
   });
 
-  it("confirms a Linear kickoff and opens the session's workspace on request", async () => {
+  it("starts a Linear session without showing a toast", async () => {
     render(<Dashboard />);
     await user.click(await screen.findByTestId("linear-sidebar-item"));
     await user.click(await screen.findByRole("button", { name: "Kick off" }));
@@ -76,28 +76,19 @@ describe("session started feedback", () => {
     );
     await user.click(within(dialog).getByRole("button", { name: /^edit$/i }));
 
-    const toast = (await screen.findByText("Session started")).closest(
-      '[role="status"]',
-    ) as HTMLElement;
-    expect(toast).toHaveTextContent(`in ${ISSUE.branch_name}`);
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(screen.getByTestId("linear-panel")).toBeInTheDocument();
-
-    await user.click(within(toast).getByRole("button", { name: "Open" }));
-
+    expect(screen.queryByText("Session started")).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByTestId(`workspace-sidebar-item-${ISSUE.branch_name}`),
+    );
+    const pane = await screen.findByTestId("workspace-terminal-pane");
     expect(
-      await screen.findByTestId("show-workspace-header"),
-    ).toHaveTextContent(ISSUE.branch_name);
-    const pane = screen.getByTestId("workspace-terminal-pane");
-    expect(
-      await within(pane).findByText(
-        /prompt: Rework it$/,
-        {},
-        { timeout: 15000 },
-      ),
+      await within(pane).findByText("prompt: Rework it", {}, { timeout: 15000 }),
     ).toBeInTheDocument();
   }, 60000);
 
-  it("confirms a session started in a workspace that is not on screen", async () => {
+  it("starts a session in another workspace without showing a toast", async () => {
     await createWorkspace(repoPath, "feat/elsewhere");
     render(<Dashboard />);
     await screen.findByTestId("show-workspace-header");
@@ -115,9 +106,15 @@ describe("session started feedback", () => {
     );
     await user.click(within(dialog).getByRole("button", { name: /^edit$/i }));
 
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(screen.queryByText("Session started")).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByTestId("workspace-sidebar-item-feat/elsewhere"),
+    );
+    const pane = await screen.findByTestId("workspace-terminal-pane");
     expect(
-      (await screen.findByText("Session started")).closest('[role="status"]'),
-    ).toHaveTextContent("in feat/elsewhere");
+      await within(pane).findByText("prompt: Do the thing", {}, { timeout: 15000 }),
+    ).toBeInTheDocument();
   }, 60000);
 
   it("stays quiet when the new session's terminal is already on screen", async () => {
