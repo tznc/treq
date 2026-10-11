@@ -177,4 +177,23 @@ describe("AccountSettings", () => {
       screen.getByText("Couldn't load usage: [http_502] exec failed"),
     ).toBeInTheDocument();
   });
+
+  it("shows a signing-in state while a deep-link token is exchanged", () => {
+    useAuthStore.setState({ user: null, signingIn: true });
+    render(<AccountSettings />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Signing you in…");
+    expect(
+      screen.queryByRole("button", { name: "Sign in with Browser" }),
+    ).toBeNull();
+  });
+
+  it("shows why the last sign-in failed", () => {
+    useAuthStore.setState({ user: null, signInError: "Token expired" });
+    render(<AccountSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Sign-in failed: Token expired",
+    );
+  });
 });
