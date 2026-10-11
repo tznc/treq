@@ -209,6 +209,7 @@ describe("ShowWorkspace - Create PR", () => {
         false,
       );
     });
+    expect(await screen.findByText("Pull request created")).toBeVisible();
   });
 
   it("pushes committed changes before creating a PR when the branch is ahead of remote", async () => {
@@ -239,6 +240,7 @@ describe("ShowWorkspace - Create PR", () => {
     expect(
       vi.mocked(pushWorkspaceToRemote).mock.invocationCallOrder[0],
     ).toBeLessThan(vi.mocked(ghCreatePr).mock.invocationCallOrder[0]);
+    expect(await screen.findByText("Pull request created")).toBeVisible();
   });
 
   it("keeps Create PR disabled until the new PR's status has loaded", async () => {
