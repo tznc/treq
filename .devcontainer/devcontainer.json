@@ -1,0 +1,44 @@
+{
+  "name": "Treq",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24"
+    },
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "stable"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "remoteUser": "vscode",
+  "mounts": [
+    "source=treq-node-modules-${devcontainerId},target=${containerWorkspaceFolder}/node_modules,type=volume",
+    "source=treq-target-${devcontainerId},target=${containerWorkspaceFolder}/target,type=volume"
+  ],
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "forwardPorts": [1420, 6006],
+  "portsAttributes": {
+    "1420": {
+      "label": "Treq frontend",
+      "onAutoForward": "notify"
+    },
+    "6006": {
+      "label": "Storybook",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tauri-apps.tauri-vscode",
+        "biomejs.biome"
+      ],
+      "settings": {
+        "rust-analyzer.cargo.features": ["tauri-test"]
+      }
+    }
+  }
+}
