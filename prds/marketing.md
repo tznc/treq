@@ -19,7 +19,7 @@ Approved by the owner on 2026-09-27:
 1. No cash budget. Marketing is organic only.
 2. Four marketing hours per week.
 3. Treq supports macOS, Windows, and Linux. Every page states all three platforms.
-4. Collect emails for the private alpha, with explicit consent.
+4. ~~Collect emails for the private alpha, with explicit consent.~~ Superseded on 2026-10-11 by decision 13.
 
 Approved by the owner on 2026-10-05:
 
@@ -28,15 +28,19 @@ Approved by the owner on 2026-10-05:
 7. Managed cloud workspaces require Pro or Team.
 8. Pro has a 14-day trial. Checkout requires a card.
 9. A Team plan costs US$199 per month for 5 members, plus US$8 per month for each extra member. An organization owns the subscription and the GitHub App installation.
-10. The private alpha covers managed cloud workspaces and SSH Remote Development. Joining the waitlist requires a Treq account.
+10. ~~The private alpha covers managed cloud workspaces and SSH Remote Development. Joining the waitlist requires a Treq account.~~ Superseded on 2026-10-11 by decision 13.
 11. Service usage is measured from Supabase accounts.
 12. GitHub Discussions is the primary community channel. A Discord server is also a community channel, but it is deferred and not a priority.
+
+Approved by the owner on 2026-10-11:
+
+13. No alpha waitlist. Managed cloud workspaces launch directly to Pro and Team subscribers as soon as they meet the [Remote Development](./remote-development.md) acceptance criteria.
 
 ## Summary
 
 Treq is the open-source Stacking Agent Development Environment. Each coding agent gets its own workspace, branches stack, and Treq rebases dependent work when the base moves. The desktop app is free, including GitHub and Linear through local tools. Pro is a cloud subscription at US$15 per user per month with a 14-day trial. It adds the features that need a server: the GitHub App and its merge queue, managed cloud workspaces, mobile access, and Linear OAuth. Team covers 5 members for US$199 per month, and each extra member is US$8 per month.
 
-Marketing has one job: bring engineers who run several coding agents on one repository to the download, and move the ones who want the cloud features onto Pro or Team. Organic search carries acquisition. Roadmap milestones supply the launch moments. The alpha waitlist collects signed-in engineers who want cloud workspaces early. There is no cash budget, so every channel runs on founder time.
+Marketing has one job: bring engineers who run several coding agents on one repository to the download, and move the ones who want the cloud features onto Pro or Team. Organic search carries acquisition. Roadmap milestones supply the launch moments. There is no cash budget, so every channel runs on founder time.
 
 ## Product truth
 
@@ -77,7 +81,6 @@ These run on treq.dev and the Supabase service, so they do not wait for a deskto
 
 - Managed cloud workspaces. See [Remote Development](./remote-development.md).
 - Mobile apps. See [Mobile](./mobile.md).
-- The alpha waitlist.
 
 ### Site copy that conflicts with product truth
 
@@ -127,9 +130,8 @@ The Team plan and the trial are approved decisions. Any further price change, di
 | --- | --- | --- | --- |
 | 1 | Organic search | Learn articles, comparison pages, free tools under `/tools/`, skills directory | biz-tools daily keyword report and weekly Draft content PRs |
 | 2 | GitHub | README, release notes, changelog, GitHub Discussions | Release notes are GitHub auto-generated |
-| 3 | Alpha waitlist | Join from the dashboard after sign-in, alpha invitations, alpha update emails | Waitlist counts reported in the GTM digest |
-| 4 | Developer communities | One post per launch moment, written for that community's rules | None. The owner posts by hand. |
-| 5 | Integration directories | GitHub Marketplace listing, Linear integration listing | None |
+| 3 | Developer communities | One post per launch moment, written for that community's rules | None. The owner posts by hand. |
+| 4 | Integration directories | GitHub Marketplace listing, Linear integration listing | None |
 
 Organic search leads because it compounds and costs founder time, not cash. The free tools and the skills directory attract searchers who are not yet looking for Treq. Each of those pages must link to the relevant Learn article and to the download.
 
@@ -167,21 +169,11 @@ Each roadmap milestone gets one launch:
 | Milestone | Roadmap target | Launch assets |
 | --- | --- | --- |
 | Windows and Linux builds | v0.3.0 | Changelog entry, community post |
-| Pro checkout and Team plan | After v0.3.0 | Changelog entry, pricing page, email to the alpha waitlist |
+| Pro checkout and Team plan | After v0.3.0 | Changelog entry, pricing page |
 | Workspace Checks | 2026 Q3 | Changelog entry, Learn article on quality gates for agent output, community post |
-| SSH Remote Development and cloud workspaces | 2026 Q4 | Changelog entry, docs, Learn article, community post, alpha invitations |
+| SSH Remote Development and cloud workspaces | 2026 Q4 | Changelog entry, docs, Learn article, community post |
 
-A launch waits for the feature to ship and for the site copy to match it. A roadmap date never overrides that rule. Alpha waitlist members hear about each launch first.
-
-## Alpha waitlist
-
-The private alpha covers managed cloud workspaces and SSH Remote Development. Engineers join the waitlist from the dashboard after they sign in. Joining gives marketing an account, so every waitlist member also counts as a signup.
-
-- The join step states the purpose, which is alpha invitations and alpha updates, and asks for explicit consent. The consent record stores the date and the form version.
-- Emails go to the account email from sign-in.
-- Each email includes a one-click unsubscribe. An unsubscribe stops every later send and keeps the account.
-- Waitlist status is stored apart from billing. Store only the account ID, the consent record, and the page the user joined from. Do not add tracking pixels.
-- The owner invites waitlist members in batches and approves each send by hand.
+A launch waits for the feature to ship and for the site copy to match it. A roadmap date never overrides that rule.
 
 ## Phases and exit gates
 
@@ -189,7 +181,7 @@ The phases match `gtm.phases` for `treq` in biz-tools `config.yaml`. The weekly 
 
 | Phase | Exit gates |
 | --- | --- |
-| Foundation: measurement and content engine | Search Console, Bing, and GA4 collection enabled in biz-tools. Stripe collection enabled for subscriptions. Every site-copy conflict in [Product truth](#product-truth) fixed. Alpha waitlist live with consent and unsubscribe. Draft content producing reviewed pull requests weekly for 4 consecutive weeks. A baseline of weekly organic clicks and weekly download clicks recorded. |
+| Foundation: measurement and content engine | Search Console, Bing, and GA4 collection enabled in biz-tools. Stripe collection enabled for subscriptions. Every site-copy conflict in [Product truth](#product-truth) fixed. Draft content producing reviewed pull requests weekly for 4 consecutive weeks. A baseline of weekly organic clicks and weekly download clicks recorded. |
 | Acquisition: organic growth | Weekly organic clicks reach twice the foundation baseline. At least five Learn or comparison pages each bring 20 or more clicks per week. |
 | Conversion: Free to paid | The first 10 paying Pro or Team subscriptions. Monthly churn measured for three months. |
 
@@ -206,7 +198,6 @@ The desktop app has no telemetry, and marketing must not add any. The funnel is 
 | Download intent | GA4 | Outbound clicks to GitHub Releases |
 | Download | GitHub Releases API | Asset download counts per release |
 | Sign up | Supabase | New accounts per week |
-| Join alpha | Supabase | Waitlist joins and unsubscribes per week |
 | Connect | Supabase | Accounts and organizations with a GitHub App installation |
 | Trial | Stripe | New trials and trials that convert to paid |
 | Buy | Stripe | New Pro and Team subscriptions, net revenue, refunds |
@@ -221,7 +212,7 @@ biz-tools has adapters for Search Console, Bing, GA4, and Stripe, and a daily ke
 1. The GTM automation branch merged, so drafting, the digest, and gates run.
 2. Working credentials and valid workflow files, so scheduled collection runs.
 3. A GitHub Releases adapter that records asset download counts per release.
-4. A Supabase adapter that reports weekly accounts, GitHub App installations, waitlist joins, and unsubscribes as aggregate counts. It must not export personal data.
+4. A Supabase adapter that reports weekly accounts, GitHub App installations, and managed cloud workspaces as aggregate counts. It must not export personal data.
 5. A Stripe adapter that reads subscriptions, so the digest can report trials, Pro and Team counts, and churn.
 6. A GA4 outbound-click event for the download link, so the digest can count download intent.
 7. Metric gates in biz-tools config for the acquisition phase, once the baseline exists.
