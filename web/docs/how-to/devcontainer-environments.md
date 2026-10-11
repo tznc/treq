@@ -16,7 +16,13 @@ A repository with a `.devcontainer/devcontainer.json` (or `.devcontainer.json`) 
 
 - A running Docker engine (Docker Desktop or equivalent).
 - The Dev Containers CLI on `PATH`: `npm install -g @devcontainers/cli`.
-- The agent CLIs you want to run (Claude Code, Codex, and so on) installed and signed in **inside the container**. Add them to your `devcontainer.json`, for example with a Dev Container Feature.
+- Other agent CLIs you want to run (Codex, Cursor and so on) installed inside the container, for example with a Dev Container Feature in your `devcontainer.json`.
+
+## Claude Code in the container
+
+When Treq starts the container it adds the [Claude Code feature](https://github.com/anthropics/devcontainer-features) (and the Node feature it needs, unless your config already has one). Claude Code keeps its sign-in and settings in a Docker volume named `treq-claude-config`, mounted at `/treq/claude-config` and set as `CLAUDE_CONFIG_DIR` in every Treq terminal. Sign in once from a container terminal (run `claude`); every repository's container and every rebuild reuses that sign-in.
+
+To manage Claude Code yourself, list `ghcr.io/anthropics/devcontainer-features/claude-code` in your `devcontainer.json`; Treq then leaves the feature to your config but still mounts the config volume.
 
 ## Switch environment
 

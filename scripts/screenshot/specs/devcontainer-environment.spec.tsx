@@ -9,6 +9,7 @@ import path from "node:path";
 import userEvent from "@testing-library/user-event";
 import { expect, it, onTestFinished } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
+import { setRepoSetting } from "../../../src/lib/api";
 import { installFakeAgents } from "../../../test/fake-agent";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
@@ -60,6 +61,9 @@ it.skipIf(!hasDevcontainerTooling)(
       }),
     );
     onTestFinished(() => removeContainer(repoPath));
+    // Alpine has no Node build for the Claude Code feature; the fake agent
+    // stands in for it.
+    await setRepoSetting(repoPath, "devcontainer_claude_code", "false");
     openRepo(repoPath);
 
     const user = userEvent.setup();
