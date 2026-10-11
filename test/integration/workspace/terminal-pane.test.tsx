@@ -1,23 +1,17 @@
 // @include-parallel
 import * as React from "react";
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createTestRepo,
   findSidebarBranchElement,
   openRepo,
 } from "../../utils";
-import {
-  createWorkspace,
-  getWorkspaces,
-  setSetting,
-} from "../../../src/lib/api";
-import { previewSettingKey } from "../../../src/lib/features";
+import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 import { useZoomSettingsStore } from "../../../src/stores/zoomSettingsStore";
 import { useTerminalSettingsStore } from "../../../src/stores/terminalSettingsStore";
-import { useFeaturePreviewStore } from "../../../src/stores/featurePreviewStore";
 
 async function setupWorkspace(branchName: string) {
   const { repoPath } = createTestRepo(false);
@@ -127,100 +121,6 @@ describe("WorkspaceTerminalPane integration", () => {
         document.querySelector('[data-terminal-id^="agent-"]'),
       ).not.toBeInTheDocument();
     });
-  });
-
-  it("queues follow-up messages and shows count with editable popover", async () => {
-    const { workspace } = await setupWorkspace("feat/terminal-message-queue");
-
-    render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
-    await screen.findByTestId("workspace-terminal-pane");
-
-    await user.keyboard("{Meta>}]{/Meta}");
-
-    const terminalPanel = await waitFor(() => {
-      const el = document.querySelector('[data-terminal-id^="agent-"]');
-      expect(el).not.toBeNull();
-      return el as HTMLElement;
-    });
-
-    expect(
-      within(terminalPanel).getByTestId("agent-message-queue"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("agent-message-queue-composer"),
-    ).not.toBeInTheDocument();
-
-    await user.click(
-      within(terminalPanel).getByTestId("agent-message-queue-button"),
-    );
-    const composer = await screen.findByTestId("agent-message-queue-composer");
-    await user.type(composer, "first queued follow-up{Enter}");
-    await user.type(
-      await screen.findByTestId("agent-message-queue-composer"),
-      "second queued follow-up{Enter}",
-    );
-
-    expect(
-      await within(terminalPanel).findByTestId("agent-message-queue-count"),
-    ).toHaveTextContent("2");
-    expect(
-      within(terminalPanel).getByTestId("agent-message-queue-button"),
-    ).toBeInTheDocument();
-
-    const dialog = await screen.findByTestId("agent-message-queue-dialog");
-    expect(dialog).toHaveAttribute("data-position", "terminal-center");
-    expect(
-      within(dialog).getByText("first queued follow-up"),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("second queued follow-up"),
-    ).toBeInTheDocument();
-
-    const removeButtons = within(dialog).getAllByLabelText(
-      /remove queued message/i,
-    );
-    await user.click(removeButtons[1]);
-
-    expect(
-      await within(terminalPanel).findByTestId("agent-message-queue-count"),
-    ).toHaveTextContent("1");
-  });
-
-  it("hides the message queue when the agentMessageQueue preview is off", async () => {
-    onTestFinished(() =>
-      setSetting(previewSettingKey("agentMessageQueue"), "true"),
-    );
-    await setSetting(previewSettingKey("agentMessageQueue"), "false");
-    useFeaturePreviewStore.setState({
-      flags: {
-        ...useFeaturePreviewStore.getState().flags,
-        agentMessageQueue: false,
-      },
-    });
-    const { workspace } = await setupWorkspace("feat/terminal-queue-flag-off");
-
-    render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
-    await screen.findByTestId("workspace-terminal-pane");
-
-    await user.keyboard("{Meta>}]{/Meta}");
-
-    const terminalPanel = await waitFor(() => {
-      const el = document.querySelector('[data-terminal-id^="agent-"]');
-      expect(el).not.toBeNull();
-      return el as HTMLElement;
-    });
-
-    expect(
-      within(terminalPanel).getByRole("button", { name: "Close session" }),
-    ).toBeInTheDocument();
-    expect(
-      within(terminalPanel).queryByTestId("agent-message-queue"),
-    ).not.toBeInTheDocument();
-    expect(
-      within(terminalPanel).queryByTestId("agent-message-queue-button"),
-    ).not.toBeInTheDocument();
   });
 
   it("double-clicking a terminal scrolls it fully into view", async () => {

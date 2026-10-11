@@ -18,7 +18,6 @@ describe("preview features", () => {
       "jiraIntegration",
       "logs",
       "browser",
-      "agentMessageQueue",
     ]);
     for (const feature of PREVIEW_FEATURES) {
       expect(feature.docsPath.startsWith("/docs/")).toBe(true);
@@ -35,7 +34,6 @@ describe("preview features", () => {
     expect(FEATURES.jiraIntegration).toBe(false);
     expect(FEATURES.logs).toBe(false);
     expect(FEATURES.browser).toBe(false);
-    expect(FEATURES.agentMessageQueue).toBe(false);
   });
 
   it("defaults every preview flag on in test and dev", () => {
@@ -47,7 +45,6 @@ describe("preview features", () => {
     expect(previewFeatureDefault("jiraIntegration")).toBe(true);
     expect(previewFeatureDefault("logs")).toBe(true);
     expect(previewFeatureDefault("browser")).toBe(true);
-    expect(previewFeatureDefault("agentMessageQueue")).toBe(true);
   });
 
   it("honors stored true/false over the startup default", () => {
