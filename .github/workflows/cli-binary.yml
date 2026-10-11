@@ -1,10 +1,14 @@
 name: CLI Binary
 
+# Runs after merge, not on PRs: it is a full macOS release build plus app
+# bundle, and macOS runners are the scarcest.
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths:
       - "src-tauri/src/lib.rs"
       - ".github/workflows/cli-binary.yml"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -32,7 +36,9 @@ jobs:
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
     runs-on: macos-latest
-    timeout-minutes: 15
+    # Main-only, and it saves the cache the next run restores, so it gets
+    # room for a cold release build (over 20 minutes).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -48,12 +54,10 @@ jobs:
         with:
           toolchain: stable
 
-      # The workspace root (not src-tauri/) owns target/. warm-caches.yml
-      # saves this cache on main.
+      # The workspace root (not src-tauri/) owns target/.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: cli-macos
-          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
 

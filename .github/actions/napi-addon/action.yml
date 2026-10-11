@@ -37,6 +37,11 @@ runs:
         workspaces: |
           . -> target
 
+    # mold links the cdylib several times faster than ld.
+    - name: Use mold linker
+      if: steps.napi-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+      uses: rui314/setup-mold@v1
+
     - name: Build NAPI addon
       if: steps.napi-cache.outputs.cache-hit != 'true'
       shell: bash
