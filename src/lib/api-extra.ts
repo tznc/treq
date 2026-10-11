@@ -759,25 +759,6 @@ export const shiftMutableCommitsToNow = async (
 
 export const getTreqBinDir = (): Promise<string> => invoke("get_treq_bin_dir");
 
-export type AppUpdateCheckResult = {
-  supported: boolean;
-  available: boolean;
-  currentVersion: string;
-  latestVersion: string | null;
-  downloadUrl: string | null;
-};
-
-/** Compare the running build against https://treq.dev/version (Mac install only). */
-export const checkForAppUpdate = (): Promise<AppUpdateCheckResult> =>
-  invoke("check_for_app_update");
-
-/**
- * Download + replace the macOS .app bundle, then relaunch.
- * Rejects on non-macOS builds.
- */
-export const installAppUpdate = (downloadUrl: string): Promise<void> =>
-  invoke("install_app_update", { downloadUrl });
-
 /** Settings parsed from a repository's `.treq/config.yaml`, if present. */
 export interface RepoYamlConfig {
   branch_name_pattern: string | null;
