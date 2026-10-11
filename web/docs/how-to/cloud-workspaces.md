@@ -30,7 +30,7 @@ On the Free plan, **Create cloud workspace** returns a **PRO** badge, the server
 3. Wait while the card reports each stage: **Creating cloud workspace...**, **Installing Treq, JJ, Git, and agents...**, **Configuring access...**, and **Verifying readiness...**.
 4. When the card shows **Ready**, the workspace accepts connections.
 
-You can reach the same card from **Open via SSH** on the start screen or **File → Open via SSH...**. In the **Connect a remote repository** dialog, choose **Treq-managed cloud workspace**. Choose **Your own VM** instead to connect a machine you run.
+You can also start from **Open cloud workspace** on the start screen or **File → Open via SSH...**. Both open the cloud workspace setup directly. With the Remote SSH preview turned on, the start screen button reads **Open via SSH** and the **Connect a remote repository** dialog lets you choose **Treq-managed cloud workspace** or **Your own VM**.
 
 If creation fails before a machine exists, the button reads **Retry cloud workspace creation**.
 
