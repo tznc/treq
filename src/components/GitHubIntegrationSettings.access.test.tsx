@@ -1,10 +1,8 @@
-// @include-parallel
-import * as React from "react";
-import { render, screen, waitFor } from "../test-utils";
+import { render, screen, waitFor } from "../../test/test-utils";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { GitHubIntegrationSettings } from "../../src/components/GitHubIntegrationSettings";
+import { GitHubIntegrationSettings } from "./GitHubIntegrationSettings";
 
 const auth = vi.hoisted(() => ({
   user: { id: "user-1" } as object | null,
@@ -16,9 +14,8 @@ const auth = vi.hoisted(() => ({
 const query = vi.hoisted(() => vi.fn());
 const mockFeatures = vi.hoisted(() => ({ mergeQueue: false }));
 
-vi.mock("../../src/lib/features", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/lib/features")>();
+vi.mock("../lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/features")>();
   return {
     ...actual,
     FEATURES: Object.assign(mockFeatures, {
@@ -28,15 +25,15 @@ vi.mock("../../src/lib/features", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/stores/authStore", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/stores/authStore")>();
-  const { createAuthStoreMock } = await import("../mocks/zustandAuthStore");
+vi.mock("../stores/authStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../stores/authStore")>();
+  const { createAuthStoreMock } = await import(
+    "../../test/mocks/zustandAuthStore"
+  );
   return { ...actual, useAuthStore: createAuthStoreMock(auth) };
 });
-vi.mock("../../src/lib/supabase", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("../../src/lib/supabase")>();
+vi.mock("../lib/supabase", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/supabase")>();
   return {
     ...original,
     supabase: { from: () => ({ select: query }) },
