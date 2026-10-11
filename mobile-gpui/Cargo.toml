@@ -20,7 +20,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 treq = { path = "../src-tauri", features = ["embed"] }
 tauri = { version = "2.12", features = ["unstable"] }
-tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "ccr-abfcd600-eoaphz", features = ["mobile"] }
+# Pinned by commit: the branch it came from (ccr-abfcd600-eoaphz) was rewritten,
+# so a branch source no longer names this code.
+tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", rev = "0ed7515ee2b5884ec40a9ebaccaaf27060254cb6", features = ["mobile"] }
 gpui-kit = "0.7.1"
 tauri-plugin-deep-link = "2.4.7"
 tauri-plugin-opener = "2.5.2"

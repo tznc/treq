@@ -11175,7 +11175,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-gpui"
 version = "0.1.0"
-source = "git+https://github.com/ziinc/tauri-gpui?branch=ccr-abfcd600-eoaphz#0ed7515ee2b5884ec40a9ebaccaaf27060254cb6"
+source = "git+https://github.com/ziinc/tauri-gpui?rev=0ed7515ee2b5884ec40a9ebaccaaf27060254cb6#0ed7515ee2b5884ec40a9ebaccaaf27060254cb6"
 dependencies = [
  "anyhow",
  "arboard",
