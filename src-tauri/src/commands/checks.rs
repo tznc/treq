@@ -81,4 +81,3 @@ pub async fn run_logs_sql(
   .await
   .map_err(|e| e.to_string())?
 }
-
