@@ -91,11 +91,8 @@ export const AgentTerminalPanel = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const {
-    isModelLoaded,
-    autoCommand,
-    prepareError,
-  } = useAgentAutoCommand(sessionData);
+  const { isModelLoaded, autoCommand, prepareError } =
+    useAgentAutoCommand(sessionData);
 
   const terminalId = agentTerminalId(sessionData.sessionId);
   const isHidden = collapsed;
