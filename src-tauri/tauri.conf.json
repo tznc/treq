@@ -113,6 +113,30 @@
             }
           ]
         },
+        "desc": {
+          "description": "Print a workspace's description, or replace it from a file or stdin. Treq uses it as the pull request body",
+          "afterHelp": "Examples:\n  treq desc\n  treq desc feat/login\n  treq desc -f pr.md\n  printf '## Summary\\n...' | treq desc -f -",
+          "args": [
+            {
+              "name": "workspace_name",
+              "index": 1,
+              "takesValue": true,
+              "description": "Workspace branch name (omit to use the current workspace)"
+            },
+            {
+              "name": "file",
+              "short": "f",
+              "takesValue": true,
+              "description": "Replace the description with this file's contents, or '-' to read stdin. Empty input clears it"
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takesValue": true,
+              "description": "Supporting repository (path or directory name) to act on"
+            }
+          ]
+        },
         "st": {
           "description": "Show workspace status",
           "args": [

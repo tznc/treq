@@ -646,6 +646,7 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
   let success = match subcommand.name.as_str() {
     "add" => workspace_handlers::handle_workspace_add(&subcommand.matches),
     "set" => workspace_handlers::handle_workspace_set(&subcommand.matches),
+    "desc" => workspace_handlers::handle_workspace_desc(&subcommand.matches),
     "st" => workspace_handlers::handle_workspace_status(&subcommand.matches),
     "diff" => workspace_handlers::handle_workspace_diff(&subcommand.matches),
     "mv" => workspace_handlers::handle_workspace_move(&subcommand.matches),
@@ -717,6 +718,7 @@ pub(super) fn is_supported_cli_command(name: &str) -> bool {
     name,
     "add"
       | "set"
+      | "desc"
       | "st"
       | "diff"
       | "mv"

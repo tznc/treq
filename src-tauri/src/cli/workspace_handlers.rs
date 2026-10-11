@@ -277,6 +277,70 @@ pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
   }
 }
 
+/// `treq desc`: print the workspace description, or replace it with `-f`.
+/// The description is the body of the pull request Treq creates for the
+/// workspace, so agents keep it current the way they would a PR description.
+pub(super) fn handle_workspace_desc(matches: &Matches) -> bool {
+  let result = super::resolve_command_repo(matches).and_then(|repo_path| {
+    let workspace =
+      resolve_named_or_cwd_workspace(&repo_path, get_arg_value(matches, "workspace_name"))?;
+    match get_arg_value(matches, "file") {
+      None => {
+        print!("{}", workspace.description.unwrap_or_default());
+        Ok(())
+      }
+      Some(source) => {
+        let text = read_description_input(&source, &mut std::io::stdin())?;
+        let updated = set_workspace_description_for_cli(&repo_path, &workspace, &text)?;
+        println!("Updated description: {}", updated.branch_name);
+        Ok(())
+      }
+    }
+  });
+  match result {
+    Ok(()) => true,
+    Err(e) => {
+      super::log_cli_error(&format!("Error: {}", e));
+      false
+    }
+  }
+}
+
+/// Reads a description from `source`: a file path, or `-` for stdin.
+pub(super) fn read_description_input(
+  source: &str,
+  stdin: &mut impl std::io::Read,
+) -> Result<String, String> {
+  if source == "-" {
+    let mut text = String::new();
+    stdin
+      .read_to_string(&mut text)
+      .map_err(|e| format!("failed to read stdin: {e}"))?;
+    return Ok(text);
+  }
+  std::fs::read_to_string(source).map_err(|e| format!("failed to read '{source}': {e}"))
+}
+
+/// Replaces the workspace description; blank text clears it.
+pub(super) fn set_workspace_description_for_cli(
+  repo_path: &str,
+  workspace: &local_db::Workspace,
+  text: &str,
+) -> Result<local_db::Workspace, String> {
+  let description = if text.trim().is_empty() {
+    core::MaybeEmptyParam::EmptyValue
+  } else {
+    core::MaybeEmptyParam::Some(text.to_string())
+  };
+  core::update_workspace_with_title(
+    repo_path,
+    workspace.id,
+    core::MaybeEmptyParam::Omitted,
+    core::MaybeEmptyParam::Omitted,
+    description,
+  )
+}
+
 fn resolve_named_or_cwd_workspace(
   repo_path: &str,
   workspace_name: Option<String>,

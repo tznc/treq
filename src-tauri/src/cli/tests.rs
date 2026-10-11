@@ -33,6 +33,7 @@ fn unknown_subcommand_is_not_handled_by_cli_dispatch() {
 fn supports_new_top_level_commands() {
   assert!(is_supported_cli_command("add"));
   assert!(is_supported_cli_command("set"));
+  assert!(is_supported_cli_command("desc"));
   assert!(is_supported_cli_command("st"));
   assert!(is_supported_cli_command("mv"));
   assert!(is_supported_cli_command("agent"));
@@ -1194,6 +1195,82 @@ mod commit_outcomes {
       err.contains("committed to 'feat/push'") && err.contains("push failed"),
       "{err}"
     );
+  }
+}
+
+#[test]
+fn desc_is_handled_by_cli_dispatch() {
+  let subcommand = make_subcommand("desc");
+  assert!(handle_cli_command(&subcommand).is_some());
+}
+
+#[test]
+fn desc_parses_optional_workspace_file_and_repo() {
+  let sub = parsed_subcommand(&["treq", "desc", "feat/x", "-f", "-", "-r", "svc"]);
+  let value = |name: &str| sub.matches.args.get(name).and_then(|a| a.value.as_str());
+  assert_eq!(value("workspace_name"), Some("feat/x"));
+  assert_eq!(value("file"), Some("-"));
+  assert_eq!(value("repo"), Some("svc"));
+  assert!(parsed_subcommand(&["treq", "desc"])
+    .matches
+    .args
+    .get("workspace_name")
+    .is_none_or(|a| a.value.is_null()));
+}
+
+mod description_input {
+  use super::super::workspace_handlers::read_description_input;
+  use std::io::Cursor;
+
+  #[test]
+  fn dash_reads_stdin() {
+    let mut stdin = Cursor::new("## Summary\n- a\n");
+    let text = read_description_input("-", &mut stdin).unwrap();
+    assert_eq!(text, "## Summary\n- a\n");
+  }
+
+  #[test]
+  fn a_path_reads_the_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("pr.md");
+    std::fs::write(&path, "body").unwrap();
+    let text = read_description_input(path.to_str().unwrap(), &mut Cursor::new("")).unwrap();
+    assert_eq!(text, "body");
+  }
+
+  #[test]
+  fn a_missing_file_is_an_error() {
+    let err = read_description_input("/nonexistent/pr.md", &mut Cursor::new("")).unwrap_err();
+    assert!(err.contains("/nonexistent/pr.md"), "{err}");
+  }
+}
+
+#[cfg(feature = "tauri-test")]
+mod description_updates {
+  use super::super::workspace_handlers::set_workspace_description_for_cli;
+  use crate::e2e_test_helpers::TestRepo;
+  use crate::local_db;
+
+  #[test]
+  fn replaces_the_description_with_multiline_markdown() {
+    let repo = TestRepo::new().unwrap();
+    let ws = repo.create_workspace_simple("feat/desc").unwrap();
+    let body = "## Summary\n\n- Adds X\n\n## Testing\n- cargo test\n";
+    let updated = set_workspace_description_for_cli(&repo.repo_path, &ws, body).unwrap();
+    assert_eq!(updated.description.as_deref(), Some(body));
+    let stored = local_db::get_workspace_by_id(&repo.repo_path, ws.id)
+      .unwrap()
+      .unwrap();
+    assert_eq!(stored.description.as_deref(), Some(body));
+  }
+
+  #[test]
+  fn blank_input_clears_the_description() {
+    let repo = TestRepo::new().unwrap();
+    let ws = repo.create_workspace_simple("feat/clear-desc").unwrap();
+    set_workspace_description_for_cli(&repo.repo_path, &ws, "old").unwrap();
+    let updated = set_workspace_description_for_cli(&repo.repo_path, &ws, "  \n").unwrap();
+    assert_eq!(updated.description, None);
   }
 }
 

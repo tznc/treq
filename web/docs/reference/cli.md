@@ -64,6 +64,29 @@ treq set <workspace_name> [-d <description>] [-l <title>] [-t <target_branch>]
 - `-l, --title`: set the workspace title.
 - `-t, --target-branch`: set the target branch.
 
+### `treq desc`
+
+Print or replace a workspace description. When you create a pull request for the workspace in Treq, the description is the PR body, so agents keep it current the way they would a PR description.
+
+```bash
+treq desc [workspace_name] [-f <file|->]
+```
+
+- `workspace_name`: workspace branch name. Omit it to use the current workspace.
+- `-f, --file`: replace the description with this file's contents, or `-` to read stdin. Empty input clears it.
+- `-r, --repo`: supporting repository to act on.
+
+With no `-f`, Treq prints the description and nothing else.
+
+Example:
+
+```bash
+treq desc -f - <<'EOF'
+## Summary
+- Adds rate limiting to the login endpoint
+EOF
+```
+
 ### `treq st`
 
 Show workspace status.

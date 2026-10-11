@@ -2,11 +2,13 @@
 name: treq
 description: >-
   Work inside a Treq agent terminal: use the treq CLI to create and inspect
-  workspaces, send files or text to the user in the Treq UI, notify the user
-  with treq notify, and create commits with treq commit. Use this skill for
-  every Treq agent session, whenever you need another workspace, should show
-  the user a file or preview, finish a task or need the user's input, need to
-  record a commit, or are finishing inplace conflict resolution.
+  workspaces, keep the workspace description current with treq desc (it
+  becomes the pull request body), send files or text to the user in the Treq
+  UI, notify the user with treq notify, and create commits with treq commit.
+  Use this skill for every Treq agent session, whenever you need another
+  workspace, change what the workspace does, should show the user a file or
+  preview, finish a task or need the user's input, need to record a commit,
+  or are finishing inplace conflict resolution.
 ---
 
 # Treq
@@ -18,7 +20,7 @@ manage other workspaces. Those commands may write under `.treq/workspaces/`
 outside the current working directory.
 
 Run `treq --help` if a flag is unclear. Prefer `treq` over raw `git` or `jj`
-for workspace, commit, send, notify, and resolve operations.
+for workspace, description, commit, send, notify, and resolve operations.
 
 ## Workspaces
 
@@ -54,6 +56,37 @@ branch. When stacking more work on an existing workspace, pass its branch to
 confirm the new workspace appears below its target. If it does not, correct the
 metadata with `treq set <workspace_name> -t <target_branch>` before continuing.
 
+## Workspace description
+
+Each workspace has a description. When the user creates a pull request for
+the workspace in Treq, the description becomes the PR body. Maintain it the
+way you would maintain a PR description.
+
+```bash
+treq desc [<workspace_name>]
+treq desc [<workspace_name>] -f <file>
+treq desc [<workspace_name>] -f - <<'EOF'
+<markdown>
+EOF
+```
+
+- With no `-f`, it prints the description and nothing else.
+- `-f <file>` replaces the description with the file's contents; `-f -`
+  reads stdin. Empty input clears it.
+- Omit the workspace name to use the workspace you are in. `-r <repo>`
+  works as on the other commands.
+
+Read the description before you start: it often holds the task. Update it
+after each reviewable change, and before you report the task done. Rewrite
+the whole description each time; do not append a log of updates.
+
+- Describe the change as it stands now, for a reviewer who has not seen the
+  conversation: what changed, why, and how it was tested.
+- Keep any sections or links the user wrote, unless they are now wrong.
+- Use Markdown. Keep it short; the diff carries the detail.
+- If the repository has a pull request template (for example
+  `.github/pull_request_template.md`), follow its headings.
+
 ## Supporting repositories
 
 When the system prompt lists supporting repositories, you may read them but
@@ -68,8 +101,8 @@ treq diff -r <repo> <workspace_name>
 ```
 
 - `<repo>` is the supporting repository's path or directory name.
-- `-r` works on `add`, `set`, `st`, `diff`, `agent`, and `commit`. `mv` takes
-  `--repo` because `-r` is its range flag.
+- `-r` works on `add`, `set`, `desc`, `st`, `diff`, `agent`, and `commit`.
+  `mv` takes `--repo` because `-r` is its range flag.
 - `treq agent` needs a workspace branch. It cannot start an agent in a home
   repository.
 - `treq agent` returns once the agent is started. Poll `treq st -r` to follow
