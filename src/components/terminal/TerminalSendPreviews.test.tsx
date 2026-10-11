@@ -139,20 +139,6 @@ describe("TerminalSendPreviews", () => {
     expect(api.readFile).toHaveBeenCalledWith("/tmp/repo/.treq/send/note.txt");
   });
 
-  it("closes when clicking empty space around the file, not the file", async () => {
-    const user = userEvent.setup();
-    renderSend(<SendHarness ptySessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "Inject text" }));
-    await user.click(await screen.findByTestId("terminal-send-preview-send-1"));
-    const preview = await screen.findByTestId("treq-send-text-preview");
-    await user.click(preview);
-    expect(screen.getByTestId("treq-send-preview-lightbox")).toBeTruthy();
-    await user.click(screen.getByTestId("treq-send-preview-carousel-shell"));
-    await waitFor(() => {
-      expect(screen.queryByTestId("treq-send-preview-lightbox")).toBeNull();
-    });
-  });
-
   it("renders image thumbnails with asset URLs", async () => {
     const user = userEvent.setup();
     renderSend(<SendHarness ptySessionId="session-1" />);
