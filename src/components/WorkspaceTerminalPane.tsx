@@ -6,6 +6,7 @@ import { type AgentSessionData } from "./terminal/types";
 import { type RemoteTerminalTarget } from "./RemoteTerminalPanel";
 import { WorkspaceTerminalPaneView } from "./WorkspaceTerminalPaneView";
 import { resolveTerminalWorkspace } from "./workspace-terminal-pane/resolveTerminalWorkspace";
+import { resizeTerminalPair } from "./workspace-terminal-pane/resizeTerminalPair";
 import { useScrollContainerWidth } from "./workspace-terminal-pane/useScrollContainerWidth";
 import { useScrollTerminalIntoView } from "./workspace-terminal-pane/useScrollTerminalIntoView";
 import { useTerminalPaneHeightResize } from "./workspace-terminal-pane/useTerminalPaneHeightResize";
@@ -320,26 +321,12 @@ const WorkspaceTerminalPaneInner = ({
       const rightCurrentWidth =
         prev.get(rightId) ?? rightEl.getBoundingClientRect().width;
 
-      // Calculate new widths
-      let newLeftWidth = leftCurrentWidth + deltaX;
-      let newRightWidth = rightCurrentWidth - deltaX;
-
-      // Enforce minimum widths
-      if (newLeftWidth < minWidth) {
-        const diff = minWidth - newLeftWidth;
-        newLeftWidth = minWidth;
-        newRightWidth -= diff;
-      }
-      if (newRightWidth < minWidth) {
-        const diff = minWidth - newRightWidth;
-        newRightWidth = minWidth;
-        newLeftWidth -= diff;
-      }
-
-      // Don't update if either would be below minimum
-      if (newLeftWidth < minWidth || newRightWidth < minWidth) {
-        return prev;
-      }
+      const { left: newLeftWidth, right: newRightWidth } = resizeTerminalPair(
+        leftCurrentWidth,
+        rightCurrentWidth,
+        deltaX,
+        minWidth,
+      );
 
       newWidths.set(leftId, newLeftWidth);
       newWidths.set(rightId, newRightWidth);
