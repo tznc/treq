@@ -81,6 +81,7 @@ export const TaskInputToolbar: React.FC<TaskInputToolbarProps> = ({
           <div className="ml-1 flex items-center gap-1.5">
             <Switch
               id={newWorkspaceSwitchId}
+              className="h-4 w-7 [&>span]:h-3 [&>span]:w-3 [&>span[data-checked]]:translate-x-3"
               checked={newWorkspace.checked}
               onCheckedChange={newWorkspace.onCheckedChange}
             />
