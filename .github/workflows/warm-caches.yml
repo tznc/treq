@@ -1,0 +1,197 @@
+name: Warm caches
+
+# ci.yml and cli-binary.yml only run on pull_request, and an Actions cache
+# saved from a PR can only be read by that PR. These jobs build on main and
+# save under the default branch, which every PR can read, so a PR's first
+# run starts warm. PR jobs restore these caches but never save their own.
+#
+# rust-cache keys hash every CARGO*/RUST* env var, so each job's env must
+# match its consumer's exactly, or the keys never meet.
+#
+# These jobs get 30 minutes, not the 15 PR jobs get: they exist to absorb
+# cold builds so PR jobs don't have to.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/actions/napi-addon/**"
+      - ".github/workflows/warm-caches.yml"
+  workflow_dispatch:
+
+# Merges can land faster than a cold build. Queue instead of cancelling, so
+# a run always finishes and saves.
+concurrency:
+  group: warm-caches
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Consumer: ci.yml test-js / test:integration (via the napi-addon action).
+  napi:
+    name: NAPI addon
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: install dependencies (ubuntu only)
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          version: webkit-4.1-1
+          execute_install_scripts: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: ./.github/actions/napi-addon
+
+  # Consumer: ci.yml verify-rust / clippy.
+  clippy:
+    name: clippy
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+          toolchain: stable
+
+      - name: install dependencies (ubuntu only)
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          version: webkit-4.1-1
+          execute_install_scripts: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: clippy
+          workspaces: |
+            . -> target
+
+      - name: Build clippy artifacts
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets --all-features
+
+  # Consumer: ci.yml test-rust (both platforms).
+  test-build:
+    name: test build / ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+          toolchain: stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          version: webkit-4.1-1
+          execute_install_scripts: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          workspaces: |
+            . -> target
+
+      - name: Build test binaries
+        working-directory: src-tauri
+        run: cargo nextest run --locked --no-run
+
+  # Consumer: cli-binary.yml sandboxed-cli. That workflow sets no CARGO env,
+  # so neither does this job.
+  cli-macos:
+    name: CLI release build / macos-latest
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cli-macos
+          workspaces: |
+            . -> target
+
+      - name: Build frontend assets
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build release CLI binary
+        run: cargo build --release --locked --bin treq --target aarch64-apple-darwin
