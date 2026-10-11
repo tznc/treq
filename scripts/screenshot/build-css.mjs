@@ -27,18 +27,6 @@ const xtermCssPath = path.join(
 	"css",
 	"xterm.css",
 );
-const datepickerCssPath = path.join(
-	repoRoot,
-	"node_modules",
-	"react-datepicker",
-	"dist",
-	"react-datepicker.css",
-);
-const datepickerThemeCssPath = path.join(
-	repoRoot,
-	"src",
-	"components",
-);
 const prismThemeCssPath = path.join(
 	repoRoot,
 	"node_modules",
@@ -62,12 +50,6 @@ const xtermCss = fs.existsSync(xtermCssPath)
 const prismThemeCss = fs.existsSync(prismThemeCssPath)
 	? fs.readFileSync(prismThemeCssPath, "utf8")
 	: "";
-const datepickerCss = fs.existsSync(datepickerCssPath)
-	? fs.readFileSync(datepickerCssPath, "utf8")
-	: "";
-const datepickerThemeCss = fs.existsSync(datepickerThemeCssPath)
-	? fs.readFileSync(datepickerThemeCssPath, "utf8")
-	: "";
 
 // Captures are rasterized from a file:// page, where the app's server-absolute
 // /fonts/*.woff2 URLs would resolve against the filesystem root and 404. Point
@@ -81,7 +63,7 @@ const css = result.css.replace(
 
 fs.writeFileSync(
 	outFile,
-	`${xtermCss}\n${prismThemeCss}\n${datepickerCss}\n${datepickerThemeCss}\n${css}\n`,
+	`${xtermCss}\n${prismThemeCss}\n${css}\n`,
 );
 
 console.log(`Wrote compiled CSS -> ${path.relative(repoRoot, outFile)}`);
