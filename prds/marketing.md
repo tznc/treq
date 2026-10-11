@@ -68,6 +68,7 @@ A preview feature is off by default. Users turn it on under Settings > Feature P
 - Preview: Workspace Checks.
 - Preview: Linear integration: view issues, create workspaces from issues, and auto-kickoff on a label. A personal API key is free. OAuth is Pro.
 - Preview: SSH Remote Development.
+- Managed cloud workspaces, outside the preview. They need Pro or Team, so they wait on `stripePayments` as well.
 
 ### Merged, waiting on the owner to turn on
 
@@ -79,7 +80,6 @@ These run on treq.dev and the Supabase service, so they do not wait for a deskto
 
 ### Not shipped
 
-- Managed cloud workspaces. See [Remote Development](./remote-development.md).
 - Mobile apps. See [Mobile](./mobile.md).
 
 ### Site copy that conflicts with product truth
