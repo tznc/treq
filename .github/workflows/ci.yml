@@ -9,6 +9,10 @@ env:
   CARGO_INCREMENTAL: 0
   # Skip debug info for test binaries: faster builds, smaller artifacts
   CARGO_PROFILE_TEST_DEBUG: 0
+  # The NAPI addon builds with the dev profile, which keeps full debug info
+  # for workspace crates. Line tables keep backtraces readable for less
+  # compile and link time.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 on:
   pull_request:
@@ -56,35 +60,22 @@ jobs:
               - ".tool-versions"
               - ".github/workflows/ci.yml"
 
-  verify-js:
-    # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
+  # One job for the quick lint/format/type checks. Each check takes seconds;
+  # as separate jobs each one paid ~30s of setup and its own runner.
+  # Every check runs even if an earlier one fails (!cancelled()).
+  verify:
     needs: detect-changes
     if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            task: check
-          - platform: ubuntu-22.04
-            task: check:format
-          - platform: ubuntu-22.04
-            task: lint
-            rust: true
-          - platform: ubuntu-22.04
-            task: knip
-    name: verify-js / ${{ matrix.task }} / ${{ matrix.platform }}
-    runs-on: ${{ matrix.platform }}
+    name: verify / ubuntu-22.04
+    runs-on: ubuntu-22.04
     env:
-      # Matrix entries flagged rust: true also run on Rust-only changes.
-      RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
+      JS: ${{ needs.detect-changes.outputs.js_changed }}
+      RUST: ${{ needs.detect-changes.outputs.rust_changed }}
     steps:
       - uses: actions/checkout@v4
-        if: env.RUN_TASK == 'true'
 
       - name: Setup Node.js
-        if: env.RUN_TASK == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -92,12 +83,36 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        if: env.RUN_TASK == 'true'
         run: npm ci
 
-      - name: Run JS task
-        if: env.RUN_TASK == 'true'
-        run: npm run ${{ matrix.task }}
+      - name: check
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run check
+
+      - name: check:format
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run check:format
+
+      # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: npm run lint
+
+      - name: knip
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run knip
+
+      - name: Install rustfmt
+        if: ${{ !cancelled() && env.RUST == 'true' }}
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          components: rustfmt
+          toolchain: stable
+
+      - name: rustfmt
+        if: ${{ !cancelled() && env.RUST == 'true' }}
+        working-directory: src-tauri
+        run: cargo fmt --check
 
   test-js:
     # test:integration drives the Rust commands via NAPI, so it also runs on
@@ -276,20 +291,14 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # No separate `check`: clippy --all-targets runs the same checks.
-        task: [fmt, clippy]
-    name: verify-rust / ${{ matrix.task }} / ubuntu-22.04
+    # No separate `cargo check`: clippy --all-targets runs the same checks.
+    # rustfmt runs in the verify job.
+    name: verify-rust / clippy / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      # fmt only needs rustfmt; Node, WebKit, npm ci and the cache are for
-      # clippy.
       - name: Setup Node.js
-        if: matrix.task != 'fmt'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -299,14 +308,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@v1
         with:
-          components: rustfmt, clippy
+          components: clippy
           toolchain: stable
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
       - name: install dependencies (ubuntu only)
-        if: matrix.task != 'fmt'
         # WebKit/GTK is needed to *link* treq/tauri.
         uses: awalsh128/cache-apt-pkgs-action@v1.6.1
         with:
@@ -315,33 +323,23 @@ jobs:
           execute_install_scripts: true
 
       - name: Install dependencies
-        if: matrix.task != 'fmt'
         run: npm ci
 
       # Restores the cache warm-caches.yml saves on main. PR runs don't save:
       # a PR's cache can only be read by that PR, and the multi-GB saves
       # evict main's caches from the repo's 10 GB quota.
       - uses: Swatinem/rust-cache@v2
-        if: matrix.task != 'fmt'
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
 
-      - name: Run Rust task
+      - name: clippy
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1
-        run: |
-          case "${{ matrix.task }}" in
-            fmt)
-              cargo fmt --check
-              ;;
-            clippy)
-              cargo clippy --locked --all-targets --all-features -- -D warnings
-              ;;
-          esac
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test-rust:
     needs: detect-changes
