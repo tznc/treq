@@ -1639,9 +1639,7 @@ export const ShowWorkspace = ({
                           Push
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>
-                        Push to remote
-                      </TooltipContent>
+                      <TooltipContent>Push to remote</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}
