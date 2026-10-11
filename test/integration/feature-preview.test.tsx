@@ -46,7 +46,6 @@ describe("feature preview settings", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Remote SSH" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Logs" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Checks" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Browser" })).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Trello integration" }),
@@ -81,11 +80,10 @@ describe("feature preview settings", () => {
     expect(screen.queryByTestId("jira-sidebar-item")).toBeNull();
   });
 
-  it("hides Logs, Checks, and the Diff/Browser switcher when disabled", async () => {
+  it("hides Logs and the Diff/Browser switcher when disabled", async () => {
     await createWorkspace(repoPath, "feat/hidden-previews");
     await openFeaturePreview();
     await user.click(screen.getByRole("switch", { name: "Logs" }));
-    await user.click(screen.getByRole("switch", { name: "Checks" }));
     await user.click(screen.getByRole("switch", { name: "Browser" }));
     await user.click(screen.getByRole("button", { name: "Close" }));
 
