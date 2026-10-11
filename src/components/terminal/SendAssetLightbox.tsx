@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -45,6 +46,13 @@ import {
 } from "./SendAssetLightboxCarousel";
 
 export { revealInFileManagerLabel } from "./SendAssetLightboxCarousel";
+
+/** True when the click landed outside every visible piece of the lightbox. */
+function isLightboxBackdrop(target: EventTarget | null) {
+  return (
+    target instanceof Element && !target.closest("[data-lightbox-content]")
+  );
+}
 
 interface SendAssetLightboxProps {
   assets: TreqSendAsset[];
@@ -148,6 +156,8 @@ export function SendAssetLightbox({
       maxHeight: "none",
     };
   };
+
+  const mouseDownOnBackdropRef = useRef(false);
 
   const requestClose = () => {
     if (hasUnsent) {
@@ -315,7 +325,10 @@ export function SendAssetLightbox({
 
   const lightboxControls = (
     <div className="flex max-w-full flex-wrap items-center justify-center gap-2">
-      <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/15 bg-black/40 p-1 shadow-lg backdrop-blur">
+      <div
+        data-lightbox-content
+        className="flex shrink-0 items-center gap-1 rounded-full border border-white/15 bg-black/40 p-1 shadow-lg backdrop-blur"
+      >
         {showingImage && (
           <>
             <Button
@@ -385,7 +398,11 @@ export function SendAssetLightbox({
           <X className="h-4 w-4" />
         </Button>
       </div>
-      <form className="min-w-56 max-w-md flex-1" onSubmit={onReviewSubmit}>
+      <form
+        data-lightbox-content
+        className="min-w-56 max-w-md flex-1"
+        onSubmit={onReviewSubmit}
+      >
         <Input
           value={generalComment}
           onChange={(event) => setGeneralComment(event.target.value)}
@@ -414,13 +431,29 @@ export function SendAssetLightbox({
       <div
         data-testid="treq-send-preview-carousel-shell"
         className="relative z-10 min-w-[75vw] w-[90vw] px-3"
+        onMouseDown={(event) => {
+          mouseDownOnBackdropRef.current = isLightboxBackdrop(event.target);
+        }}
+        onClick={(event) => {
+          // The shell covers most of the screen; treat clicks on its empty
+          // space like clicks on the backdrop behind it.
+          if (
+            mouseDownOnBackdropRef.current &&
+            isLightboxBackdrop(event.target)
+          ) {
+            requestClose();
+          }
+        }}
       >
         <div
           data-testid="treq-send-preview-header"
           className="mb-3 flex flex-col items-center gap-1.5"
         >
           {current && (
-            <p className="max-w-full truncate text-center text-sm text-white/80">
+            <p
+              data-lightbox-content
+              className="max-w-full truncate text-center text-sm text-white/80"
+            >
               {current.title}
             </p>
           )}
