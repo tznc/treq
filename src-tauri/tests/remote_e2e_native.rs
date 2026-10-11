@@ -91,6 +91,52 @@ async fn json_post(
   (status, json)
 }
 
+/// `ensure`, `wake` and `reprovision` answer 402 `pro_required` without Pro.
+/// Grants it through the RPCs the Stripe webhook calls, as
+/// `scripts/service-qa/billing.ts` does.
+async fn grant_pro(cfg: &NativeCfg, user_id: &str, suffix: &str) {
+  let customer_id = format!("cus_e2e{suffix}");
+  let period_end = chrono::Utc::now() + chrono::Duration::days(30);
+  for (name, args) in [
+    (
+      "billing_record_checkout_completed",
+      serde_json::json!({
+        "p_event_id": format!("evt_e2e{suffix}a"),
+        "p_customer_id": customer_id,
+        "p_owner_type": "user",
+        "p_owner_id": user_id,
+      }),
+    ),
+    (
+      "billing_record_subscription_event",
+      serde_json::json!({
+        "p_event_id": format!("evt_e2e{suffix}b"),
+        "p_event_type": "customer.subscription.created",
+        "p_event_created": chrono::Utc::now().to_rfc3339(),
+        "p_subscription_id": format!("sub_e2e{suffix}"),
+        "p_customer_id": customer_id,
+        "p_plan": "pro",
+        "p_status": "active",
+        "p_current_period_end": period_end.to_rfc3339(),
+        "p_cancel_at_period_end": false,
+        "p_trial_end": null,
+      }),
+    ),
+  ] {
+    let (status, body) = json_post(
+      &format!("{}/rest/v1/rpc/{name}", cfg.url.trim_end_matches('/')),
+      &cfg.service_role_key,
+      &[("apikey", cfg.service_role_key.as_str())],
+      args,
+    )
+    .await;
+    assert!(
+      status == 200 && body == serde_json::json!("applied"),
+      "{name} failed: HTTP {status} {body}"
+    );
+  }
+}
+
 fn write_client_key(dir: &std::path::Path) -> (String, String) {
   use getrandom::SysRng;
   use rand_core::UnwrapErr;
@@ -174,6 +220,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
   );
   let created_json: Value = created.json().await.expect("create user json");
   let user_id = created_json["id"].as_str().unwrap_or_default().to_string();
+  let billing_suffix = uuid::Uuid::new_v4().simple().to_string()[..16].to_string();
 
   let sign_in = admin
     .post(format!(
@@ -197,6 +244,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
     user_id: String,
     access: String,
     anon_key: String,
+    billing_suffix: String,
   }
   impl Drop for UserCleanup {
     fn drop(&mut self) {
@@ -205,6 +253,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
       let user_id = self.user_id.clone();
       let access = self.access.clone();
       let anon = self.anon_key.clone();
+      let billing_suffix = self.billing_suffix.clone();
       let _ = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
           .enable_all()
@@ -218,6 +267,19 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
             serde_json::json!({ "action": "delete", "idempotency_key": format!("treq-e2e-{}", uuid::Uuid::new_v4()) }),
           )
           .await;
+          // Deleting the user does not cascade to billing rows.
+          for path in [
+            format!("billing_subscriptions?owner_id=eq.{user_id}"),
+            format!("billing_customers?owner_id=eq.{user_id}"),
+            format!("billing_events?stripe_event_id=in.(evt_e2e{billing_suffix}a,evt_e2e{billing_suffix}b)"),
+          ] {
+            let _ = reqwest::Client::new()
+              .delete(format!("{}/rest/v1/{path}", url.trim_end_matches('/')))
+              .header("apikey", &key)
+              .bearer_auth(&key)
+              .send()
+              .await;
+          }
           let _ = reqwest::Client::new()
             .delete(format!("{}/auth/v1/admin/users/{user_id}", url.trim_end_matches('/')))
             .header("apikey", &key)
@@ -235,7 +297,9 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
     user_id,
     access: access.clone(),
     anon_key: cfg.anon_key.clone(),
+    billing_suffix: billing_suffix.clone(),
   };
+  grant_pro(&cfg, &cleanup.user_id, &billing_suffix).await;
 
   let instance_url = format!(
     "{}/functions/v1/remote-instance",
@@ -355,10 +419,13 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
       key_reference: key_path.clone(),
       certificate: Some(cert_line.to_string()),
     },
-    transport: Default::default(),
+    // Sprites have no raw TCP ingress: the response routes SSH through the
+    // `remote-ssh-relay` Edge Function.
+    transport: serde_json::from_value(endpoint_json["transport"].clone()).unwrap_or_default(),
   };
 
   let pool = SshConnectionPool::new();
+  pool.set_relay_access_token(Some(access.clone()));
   let repo_a = "/home/treq/e2e-repo-a".to_string();
   let repo_b = "/home/treq/e2e-repo-b".to_string();
   exec_typed(
@@ -455,6 +522,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
   // Plain reconnect: a fresh connection pool reaches the same repository.
   drop(pool);
   let pool2 = SshConnectionPool::new();
+  pool2.set_relay_access_token(Some(access.clone()));
   let inspect_again = exec_typed(
     &pool2,
     &endpoint,
@@ -511,6 +579,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
     "wake must not recreate the VM"
   );
   let pool_after_wake = SshConnectionPool::new();
+  pool_after_wake.set_relay_access_token(Some(access.clone()));
   let inspect_after_wake = exec_typed(
     &pool_after_wake,
     &endpoint,
@@ -603,6 +672,7 @@ async fn native_certificate_auth_two_repos_mutations_pty_reconnect_and_reprovisi
     generation: generation_after,
   };
   let pool3 = SshConnectionPool::new();
+  pool3.set_relay_access_token(Some(access.clone()));
   let after_repro = exec_typed(
     &pool3,
     &endpoint,

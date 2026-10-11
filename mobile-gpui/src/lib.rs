@@ -8,8 +8,9 @@
 mod auth;
 mod backend;
 mod config;
-mod control_plane;
-mod managed;
+// Public for the live control-plane suite in `tests/sprites_e2e.rs`.
+pub mod control_plane;
+pub mod managed;
 mod remote;
 mod store;
 mod terminal;
