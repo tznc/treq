@@ -72,7 +72,7 @@ export function TextAssetLineReview({
   return (
     <div
       data-testid="treq-send-text-preview"
-      className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-lg bg-zinc-900 opacity-100 shadow-2xl font-mono text-sm leading-relaxed text-zinc-100"
+      className="max-h-[80vh] w-full max-w-6xl overflow-auto rounded-lg bg-zinc-900 opacity-100 shadow-2xl font-mono text-sm leading-relaxed text-zinc-100"
     >
       {lines.map((line, index) => {
         const lineNumber = index + 1;
