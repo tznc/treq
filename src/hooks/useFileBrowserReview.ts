@@ -22,7 +22,11 @@ interface UseFileBrowserReviewParams {
   repoPath: string | null;
   workspaceId: number | undefined;
   onCreateAgentWithReview:
-    | ((review: string, mode: "plan" | "acceptEdits") => Promise<void>)
+    | ((
+        review: string,
+        mode: "plan" | "acceptEdits",
+        useIdleAgent?: boolean,
+      ) => Promise<void>)
     | undefined;
   addToast: ReturnType<typeof useToast>["addToast"];
 }
@@ -156,12 +160,15 @@ export function useFileBrowserReview({
   const formatMarkdown = () =>
     formatReviewMarkdown({ comments, finalReviewComment });
 
-  const handleRequestChanges = async (mode: "plan" | "acceptEdits") => {
+  const handleRequestChanges = async (
+    mode: "plan" | "acceptEdits",
+    useIdleAgent = false,
+  ) => {
     setSendingReview(true);
     try {
       const markdown = formatMarkdown();
       if (onCreateAgentWithReview) {
-        await onCreateAgentWithReview(markdown, mode);
+        await onCreateAgentWithReview(markdown, mode, useIdleAgent);
       } else {
         addToast({
           title: "No handler provided",

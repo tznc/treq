@@ -227,8 +227,8 @@ export function BrowserPanel({
           handleCancelReview();
           setShowCancelDialog(false);
         }}
-        onRequestChanges={(mode) => {
-          handleRequestChanges(mode);
+        onRequestChanges={(mode, useIdleAgent) => {
+          handleRequestChanges(mode, useIdleAgent);
           setPopoverOpen(false);
         }}
       />

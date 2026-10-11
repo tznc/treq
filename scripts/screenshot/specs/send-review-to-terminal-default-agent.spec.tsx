@@ -50,8 +50,8 @@ it("send review to terminal opens a codex terminal when repo default_agent=codex
 	await user.click(await screen.findByText(BRANCH_NAME));
 	await screen.findByTestId("show-workspace-header");
 
-	// Open an agent terminal before starting the review. Once it is no longer
-	// streaming, this is the existing idle terminal that Edit must reuse.
+	// Open an agent terminal before starting the review. Edit must not reuse
+	// it: reviews open a new terminal unless the user opts into the idle agent.
 	await user.click(
 		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
 			name: "Start agent",
@@ -98,7 +98,7 @@ it("send review to terminal opens a codex terminal when repo default_agent=codex
 		expectations: [
 			'The "Finish review" popover is open showing the "Finish your review" heading.',
 			'Three action buttons are visible: "Copy" on the left, "Plan" and "Edit" on the right.',
-			'The diff pane for example.ts is visible in the background.',
+			'An unchecked "Send to idle agent if one is available" checkbox is above the buttons.',
 		],
 	});
 
@@ -106,13 +106,12 @@ it("send review to terminal opens a codex terminal when repo default_agent=codex
 	// pick up default_agent=codex and pass agent:"codex" to onSessionCreated.
 	await user.click(await screen.findByRole("button", { name: /^edit$/i }));
 
-	// Wait for the already-open terminal to remain mounted. Reusing it must not
-	// create a second Code Review session.
+	// The review opens a second, Codex terminal next to the existing one.
 	await waitFor(
 		async () => {
 			expect(
 				document.querySelectorAll('[data-terminal-id^="agent-"]').length,
-			).toBe(1);
+			).toBe(2);
 		},
 		{ timeout: 10000 },
 	);
@@ -121,19 +120,8 @@ it("send review to terminal opens a codex terminal when repo default_agent=codex
 		name: "send-review-codex-02-terminal",
 		expectations: [
 			'The terminal pane at the bottom is open.',
-			'The existing agent terminal remains the only agent terminal after choosing "Edit".',
-			'The existing terminal is active and focused after receiving the review.',
-		],
-	});
-
-	// Capture a second view of the completed Edit flow so the terminal focus
-	// state is part of the visual regression evidence.
-	await captureDocument(document, {
-		name: "send-review-codex-03-edit-terminal",
-		expectations: [
-			'The terminal pane remains open after choosing "Edit".',
-			'The already-open agent terminal remains visible rather than a new review terminal being created.',
-			'The review flow returns focus to that existing terminal after sending.',
+			'A second agent terminal was created for the review next to the existing one.',
+			'The new review terminal carries the Codex brand icon.',
 		],
 	});
 }, 60000);

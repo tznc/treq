@@ -21,7 +21,7 @@ test('lists Free, Pro and Team with their prices', async ({ page }) => {
   await expect(pro).toContainText('$15');
   await expect(pro).toContainText('/user/month');
   await expect(pro).toContainText('14-day free trial');
-  await expect(pro).toContainText('Managed cloud workspace (private alpha)');
+  await expect(pro).toContainText('Managed cloud workspace');
   await expect(pro).toContainText('Linear OAuth');
   await expect(pro).not.toContainText(/mobile/i);
 

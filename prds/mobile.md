@@ -14,6 +14,10 @@ Mobile is primarily a remote-control and review surface for repositories reachab
 
 See [Remote Development](./remote-development.md) for the remote repository, trust, mutation, terminal, and managed-compute contracts.
 
+## Direction: GPUI shell
+
+The mobile shell is moving from the React frontend to a native [GPUI](https://www.gpui.rs) interface in [`mobile-gpui/`](../mobile-gpui/README.md). It is experimental, and it is the current path forward. It runs inside a Tauri Android app and links the shared Rust core (`treq_lib`) directly, so it still shares repository, remote transport, command, authentication, and domain logic with desktop. Where this document says "React frontend", read it as the shared application shell, which for mobile is now GPUI.
+
 ## Goals
 
 - Ship Android and iOS from the existing Tauri codebase.

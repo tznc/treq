@@ -4,7 +4,7 @@
 
 Draft.
 
-This document defines how Treq sells Pro and Team, how the service decides who is entitled to the cloud features, and how organizations share a GitHub App installation. The plan decisions come from [Marketing](./marketing.md#approved-decisions). This document covers the mechanism.
+This document defines how Treq sells Pro and Team, how the service decides who is entitled to the cloud features, and how organizations share a GitHub App installation. The plan decisions come from [Treq go-to-market](https://github.com/tznc/biz-tools/blob/main/docs/gtm/treq.md#approved-decisions) in biz-tools. This document covers the mechanism.
 
 ## Goals
 
