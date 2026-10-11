@@ -19,15 +19,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  detect-rust-changes:
+  # One job for both filters: each extra job waits for its own runner before
+  # anything downstream can start.
+  detect-changes:
     timeout-minutes: 15
-    name: detect rust changes
+    name: detect changes
     runs-on: ubuntu-22.04
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
+      js_changed: ${{ steps.filter.outputs.js }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check for src-tauri/Cargo changes
+      - name: Check for Rust and JS/TS changes
         id: filter
         uses: dorny/paths-filter@v3
         with:
@@ -37,20 +40,6 @@ jobs:
               - "crates/tauri-test-macros/**"
               - "Cargo.toml"
               - "Cargo.lock"
-
-  detect-js-changes:
-    timeout-minutes: 15
-    name: detect js changes
-    runs-on: ubuntu-22.04
-    outputs:
-      js_changed: ${{ steps.filter.outputs.js }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check for JS/TS source and tooling config changes
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
@@ -69,8 +58,8 @@ jobs:
 
   verify-js:
     # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
-    needs: [detect-js-changes, detect-rust-changes]
-    if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -89,7 +78,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       # Matrix entries flagged rust: true also run on Rust-only changes.
-      RUN_TASK: ${{ needs.detect-js-changes.outputs.js_changed == 'true' || matrix.rust == true }}
+      RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
     steps:
       - uses: actions/checkout@v4
         if: env.RUN_TASK == 'true'
@@ -113,8 +102,8 @@ jobs:
   test-js:
     # test:integration drives the Rust commands via NAPI, so it also runs on
     # Rust changes.
-    needs: [detect-js-changes, detect-rust-changes]
-    if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -131,7 +120,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       # Matrix entries flagged rust: true also run on Rust-only changes.
-      RUN_TASK: ${{ needs.detect-js-changes.outputs.js_changed == 'true' || matrix.rust == true }}
+      RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
     steps:
       - uses: actions/checkout@v4
         if: env.RUN_TASK == 'true'
@@ -284,8 +273,8 @@ jobs:
           fi
 
   verify-rust:
-    needs: detect-rust-changes
-    if: needs.detect-rust-changes.outputs.rust_changed == 'true'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -355,8 +344,8 @@ jobs:
           esac
 
   test-rust:
-    needs: detect-rust-changes
-    if: needs.detect-rust-changes.outputs.rust_changed == 'true'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rust_changed == 'true'
     timeout-minutes: 15
     strategy:
       fail-fast: false
