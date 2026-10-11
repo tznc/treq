@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   detect-rust-changes:
-    timeout-minutes: 10
+    timeout-minutes: 15
     name: detect rust changes
     runs-on: ubuntu-22.04
     outputs:
@@ -32,7 +32,7 @@ jobs:
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

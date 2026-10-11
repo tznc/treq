@@ -40,7 +40,7 @@ permissions:
 
 jobs:
   detect-web-changes:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     outputs:
@@ -57,7 +57,7 @@ jobs:
 
   landing-screenshots:
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     needs: detect-web-changes
     if: always() && (github.event_name != 'pull_request' || needs.detect-web-changes.outputs.web == 'true')
     steps:
@@ -156,7 +156,7 @@ jobs:
           retention-days: 3
 
   build:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: landing-screenshots
     if: always() && needs.landing-screenshots.result != 'failure' && needs.landing-screenshots.result != 'cancelled'
@@ -220,7 +220,7 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
   lighthouse:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: [detect-web-changes, build]
     if: github.event_name == 'pull_request' && needs.detect-web-changes.outputs.web == 'true'

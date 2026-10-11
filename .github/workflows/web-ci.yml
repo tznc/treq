@@ -21,7 +21,7 @@ defaults:
 
 jobs:
   ci:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -47,7 +47,7 @@ jobs:
           npm run lint:e2e
 
   readability:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
       run:

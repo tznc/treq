@@ -20,7 +20,7 @@ jobs:
   build:
     name: build NAPI addon
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

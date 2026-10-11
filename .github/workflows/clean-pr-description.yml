@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   clean-description:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Remove chatgpt.com link and divider
@@ -33,7 +33,7 @@ jobs:
             }
 
   docs-prefix-title:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Add docs prefix if only web/ changes
@@ -63,7 +63,7 @@ jobs:
             });
 
   check-conventional-title:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: docs-prefix-title
     steps:

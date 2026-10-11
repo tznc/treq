@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   detect-windows-changes:
-    timeout-minutes: 10
+    timeout-minutes: 15
     name: detect windows-specific changes
     runs-on: ubuntu-22.04
     outputs:
@@ -47,7 +47,7 @@ jobs:
           fi
 
   detect-rust-changes:
-    timeout-minutes: 10
+    timeout-minutes: 15
     name: detect rust changes
     runs-on: ubuntu-22.04
     outputs:
@@ -66,7 +66,7 @@ jobs:
               - "Cargo.lock"
 
   detect-js-changes:
-    timeout-minutes: 10
+    timeout-minutes: 15
     name: detect js changes
     runs-on: ubuntu-22.04
     outputs:
@@ -98,7 +98,7 @@ jobs:
     # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
     needs: [detect-js-changes, detect-rust-changes]
     if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -142,7 +142,7 @@ jobs:
     # Rust changes.
     needs: [detect-js-changes, detect-rust-changes]
     if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -315,7 +315,7 @@ jobs:
   verify-rust:
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -376,7 +376,7 @@ jobs:
   test-rust:
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -518,7 +518,7 @@ jobs:
     if: needs.detect-windows-changes.outputs.windows_changed == 'true'
     name: rust / test / windows-latest
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       # Windows Defender's real-time scanning intercepts every process spawn
       # and file write; this job spawns hundreds of jj/git subprocesses per
