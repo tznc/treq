@@ -1230,7 +1230,11 @@ export const ShowWorkspace = ({
                     offerNewWorkspace={!workspace}
                   />
                   {workspace && workspaceDescription && (
-                    <WorkspaceDescription description={workspaceDescription} />
+                    <WorkspaceDescription
+                      repoPath={effectiveRepoPath}
+                      workspaceId={workspace.id}
+                      description={workspaceDescription}
+                    />
                   )}
                   {/* Stack — shown for any workspace in a multi-workspace
 										    stack, including the root (whose target is the default

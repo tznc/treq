@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
-import { createWorkspace, updateWorkspace } from "../../../src/lib/api";
+import {
+  createWorkspace,
+  getWorkspaces,
+  updateWorkspace,
+} from "../../../src/lib/api";
 import { render, screen, within } from "../../test-utils";
 import {
   createTestRepo,
@@ -58,5 +62,49 @@ describe("ShowWorkspace - description", () => {
     expect(within(panel).getByText(/Fix the flaky/)).toHaveClass(
       "whitespace-pre-wrap",
     );
+  });
+
+  it("edits the description in place and saves it", async () => {
+    const panel = await openWorkspaceWithDescription("Old task");
+
+    await user.click(
+      within(panel).getByRole("button", { name: "Edit workspace description" }),
+    );
+    const textarea = within(panel).getByRole("textbox", {
+      name: "Workspace description",
+    });
+    expect(textarea).toHaveValue("Old task");
+    await user.clear(textarea);
+    await user.type(textarea, "## Plan{Enter}{Enter}- Ship it");
+    await user.click(within(panel).getByRole("button", { name: "Save" }));
+
+    expect(
+      await within(panel).findByRole("heading", { name: "Plan" }),
+    ).toBeVisible();
+    expect(within(panel).queryByRole("textbox")).not.toBeInTheDocument();
+    const [saved] = (await getWorkspaces(repoPath)).filter(
+      (w) => w.branch_name === "feat/desc",
+    );
+    expect(saved.description).toBe("## Plan\n\n- Ship it");
+  });
+
+  it("discards edits on Cancel", async () => {
+    const panel = await openWorkspaceWithDescription("Keep me");
+
+    await user.click(
+      within(panel).getByRole("button", { name: "Edit workspace description" }),
+    );
+    await user.type(
+      within(panel).getByRole("textbox", { name: "Workspace description" }),
+      " changed",
+    );
+    await user.click(within(panel).getByRole("button", { name: "Cancel" }));
+
+    expect(panel).toHaveTextContent("Keep me");
+    expect(panel).not.toHaveTextContent("changed");
+    const [saved] = (await getWorkspaces(repoPath)).filter(
+      (w) => w.branch_name === "feat/desc",
+    );
+    expect(saved.description).toBe("Keep me");
   });
 });
