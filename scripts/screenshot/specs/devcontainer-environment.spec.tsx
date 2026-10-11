@@ -36,12 +36,12 @@ const removeContainer = (repoPath: string) => {
 };
 
 const openNewShell = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.keyboard("{Meta>}k{/Meta}");
-  await user.type(
-    await screen.findByPlaceholderText(/search|type a command/i),
-    "New Shell Terminal",
+  await user.hover(screen.getByTestId("home-repo-row"));
+  await user.click(
+    await within(screen.getByTestId("home-repo-row")).findByRole("button", {
+      name: "Open shell",
+    }),
   );
-  await user.click(await screen.findByText("New Shell Terminal"));
 };
 
 it.skipIf(!hasDevcontainerTooling)(
@@ -114,6 +114,10 @@ it.skipIf(!hasDevcontainerTooling)(
         ).not.toBeNull(),
       { timeout: 15000 },
     );
+    const containerShell = pane().querySelector<HTMLElement>(
+      '[data-terminal-id^="shell-"]',
+    )!;
+    await user.click(containerShell.querySelector<HTMLElement>(".xterm")!);
     await user.keyboard("head -1 /etc/os-release; whoami{Enter}");
     await within(pane()).findByText(
       /NAME="Alpine Linux"/,
@@ -142,11 +146,14 @@ it.skipIf(!hasDevcontainerTooling)(
         ).toHaveLength(2),
       { timeout: 15000 },
     );
+    const localShell = pane().querySelectorAll<HTMLElement>(
+      '[data-terminal-id^="shell-"]',
+    )[1];
+    await user.click(localShell.querySelector<HTMLElement>(".xterm")!);
     await user.keyboard("head -1 /etc/os-release{Enter}");
     await waitFor(
       () => {
-        const shells = pane().querySelectorAll('[data-terminal-id^="shell-"]');
-        expect(shells[1]?.textContent).toMatch(/NAME="(?!Alpine)/);
+        expect(localShell.textContent).toMatch(/NAME="(?!Alpine)/);
       },
       { timeout: 30000 },
     );
