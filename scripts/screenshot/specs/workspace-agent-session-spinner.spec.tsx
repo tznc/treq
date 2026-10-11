@@ -39,6 +39,9 @@ it("shows the right git-state pip for sessioned and session-less workspaces", as
   const sessionCleanId = await createWorkspace(repoPath, "feat/session-clean");
   const sessionDirtyId = await createWorkspace(repoPath, "feat/session-dirty");
   const sessionConflictId = await createWorkspace(repoPath, "feat/session-conflict");
+  const longBranch =
+    "feat/a-very-long-workspace-name-that-should-truncate-at-the-end";
+  const sessionLongId = await createWorkspace(repoPath, longBranch);
 
   const workspaces = await getWorkspaces(repoPath);
   const byId = (id: number) => workspaces.find((w) => w.id === id)!;
@@ -125,6 +128,31 @@ it("shows the right git-state pip for sessioned and session-less workspaces", as
     () =>
       expect(
         screen.queryByTestId(`workspace-status-indicator-${sessionCleanId}`),
+      ).not.toBeInTheDocument(),
+    { timeout: 15000 },
+  );
+
+  // A long name truncates at its end, and the spinner sits centered on the
+  // row rather than dropping below it.
+  await openAgentSession(longBranch);
+  const longSpinner = await screen.findByTestId(
+    `workspace-status-indicator-${sessionLongId}`,
+  );
+  expect(longSpinner).toHaveAttribute("aria-label", "Agent working");
+  await captureDocument(document, {
+    name: "workspace-agent-session-spinner-05-long-name",
+    clipSelector: '[data-testid="workspace-sidebar"]',
+    deviceScaleFactor: 2,
+    expectations: [
+      "The long feat/a-very-long-workspace-name... row shows the start of its name and ends with an ellipsis.",
+      "That row's gray spinner is vertically centered on the row's text, not below it.",
+      "The truncated name stops short of the spinner without overlapping it.",
+    ],
+  });
+  await waitFor(
+    () =>
+      expect(
+        screen.queryByTestId(`workspace-status-indicator-${sessionLongId}`),
       ).not.toBeInTheDocument(),
     { timeout: 15000 },
   );
