@@ -32,6 +32,8 @@ import {
 } from "./remote-dispatch";
 import { transportCreateCommit } from "./repository-adapter";
 import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
+import { remoteActionKeys } from "./remote-idempotency";
+import { transportResolveCommit } from "./repository-adapter-mutations";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -76,6 +78,7 @@ function sentMutations(): TreqCommandRequest[] {
 }
 
 beforeEach(() => {
+  remoteActionKeys.release();
   vi.mocked(invoke).mockReset();
   vi.mocked(dispatch).mockReset();
   vi.mocked(dispatchMutationOverSsh).mockReset();
@@ -205,6 +208,41 @@ describe("remote repository mutations", () => {
     expect(firstKey).not.toBe(secondKey);
     expect(vi.mocked(dispatchMutationOverSsh).mock.calls[0][0]).toBe(endpoint);
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("reuses the key when retrying after an ambiguous outcome", async () => {
+    vi.mocked(dispatchMutationOverSsh)
+      .mockResolvedValueOnce({ status: "ambiguous", reason: "reset" })
+      .mockRejectedValueOnce(new Error("connection lost"));
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow("reset");
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow("lost");
+    await createCommit(ROOT, 7, "wip");
+    await createCommit(ROOT, 7, "wip");
+
+    const keys = sentMutations().map(
+      (request) => (request as { idempotency_key: string }).idempotency_key,
+    );
+    // No confirmed outcome until the third send, so it reuses the first key;
+    // its success releases the key for the next action.
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).toBe(keys[0]);
+    expect(keys[3]).not.toBe(keys[0]);
+  });
+
+  it("keeps pending keys apart by inputs and endpoint generation", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValue({
+      status: "ambiguous",
+      reason: "reset",
+    });
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow();
+    await expect(createCommit(ROOT, 7, "other")).rejects.toThrow();
+    setActiveRepositorySingleton({ ...remoteRepo(), endpointGeneration: 2 });
+    await expect(createCommit(ROOT, 7, "wip")).rejects.toThrow();
+
+    const keys = sentMutations().map(
+      (request) => (request as { idempotency_key: string }).idempotency_key,
+    );
+    expect(new Set(keys).size).toBe(3);
   });
 
   it("surfaces an ambiguous mutation as an error instead of success", async () => {
@@ -389,5 +427,47 @@ describe("remote repositories without an endpoint", () => {
     expect(invoke).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
     expect(dispatchMutationOverSsh).not.toHaveBeenCalled();
+  });
+});
+
+describe("transportResolveCommit", () => {
+  it("returns the VM's result, including remaining conflicts", async () => {
+    const result = {
+      success: false,
+      message: "Conflicts remain",
+      change_id: "qpvuntsm",
+      remaining_conflicts: ["a.rs"],
+    };
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "applied",
+      value: result,
+    });
+    await expect(
+      transportResolveCommit(ROOT, "qpvuntsm", ["1"], vi.fn()),
+    ).resolves.toEqual(result);
+  });
+
+  it("reports success once the VM log shows the revision conflict-free", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "already_applied",
+    });
+    await expect(
+      transportResolveCommit(ROOT, "qpvuntsm", ["1"], vi.fn()),
+    ).resolves.toEqual({
+      success: true,
+      message: "Resolved qpvuntsm",
+      change_id: "qpvuntsm",
+      remaining_conflicts: [],
+    });
+  });
+
+  it("surfaces an ambiguous reconnect instead of guessing", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "ambiguous",
+      reason: "reset",
+    });
+    await expect(
+      transportResolveCommit(ROOT, "qpvuntsm", ["1"], vi.fn()),
+    ).rejects.toThrow("reset");
   });
 });

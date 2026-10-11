@@ -794,24 +794,11 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
     TreqCommandRequest::ResolveConflict { repo, revision, .. } => {
       let revision = revision.clone();
       Some(MutationVerification {
-        read_request: TreqCommandRequest::ListConflicts {
+        read_request: TreqCommandRequest::ListCommits {
           repo: repo.clone(),
           workspace: None,
         },
-        check: Box::new(move |value| {
-          let Some(items) = value.as_array() else {
-            return MutationVerificationOutcome::Ambiguous;
-          };
-          let still_conflicted = items.iter().any(|item| {
-            item.as_str() == Some(revision.as_str())
-              || json_str(item, "path") == Some(revision.as_str())
-          });
-          if still_conflicted {
-            MutationVerificationOutcome::NotApplied
-          } else {
-            MutationVerificationOutcome::AlreadyApplied
-          }
-        }),
+        check: Box::new(move |value| check_resolve_conflict(value, &revision)),
       })
     }
     TreqCommandRequest::GitBookmarkTrack { repo, bookmark, .. } => {
@@ -915,6 +902,34 @@ fn check_create_commit(
 
 /// Change ids may be shown at different prefix lengths; treat a shorter id as
 /// matching when it is a prefix of the longer one.
+/// Decides whether a `ResolveConflict` landed by reading the revision's
+/// `has_conflicts` flag from the home-repo log. `ListConflicts` cannot answer
+/// this: it lists file paths, not change ids. A revision the log does not
+/// show (or a non-change-id like `@`) stays ambiguous.
+fn check_resolve_conflict(
+  value: &serde_json::Value,
+  revision: &str,
+) -> MutationVerificationOutcome {
+  let Some(items) = value.get("commits").and_then(|v| v.as_array()) else {
+    return MutationVerificationOutcome::Ambiguous;
+  };
+  let tentative = value
+    .get("tentative_working_copy")
+    .and_then(|v| v.get("commit"));
+  let Some(commit) = items
+    .iter()
+    .chain(tentative)
+    .find(|item| json_str(item, "change_id").is_some_and(|id| change_ids_match(id, revision)))
+  else {
+    return MutationVerificationOutcome::Ambiguous;
+  };
+  match commit.get("has_conflicts").and_then(|v| v.as_bool()) {
+    Some(false) => MutationVerificationOutcome::AlreadyApplied,
+    Some(true) => MutationVerificationOutcome::NotApplied,
+    None => MutationVerificationOutcome::Ambiguous,
+  }
+}
+
 fn change_ids_match(a: &str, b: &str) -> bool {
   if a.is_empty() || b.is_empty() {
     return false;
@@ -3993,6 +4008,49 @@ mod tests {
       path: "a.txt".into(),
     };
     assert!(verification_for(&request).is_none());
+  }
+
+  #[test]
+  fn resolve_conflict_verifies_against_the_revision_conflict_flag() {
+    let request = TreqCommandRequest::ResolveConflict {
+      repo: "/r".into(),
+      revision: "qpvuntsm".into(),
+      sides: vec!["1".into()],
+      idempotency_key: "k".into(),
+    };
+    let verification = verification_for(&request).expect("ResolveConflict has a recipe");
+    assert!(matches!(
+      verification.read_request,
+      TreqCommandRequest::ListCommits {
+        workspace: None,
+        ..
+      }
+    ));
+    let log = |has_conflicts: bool| {
+      serde_json::json!({
+        "commits": [
+          { "change_id": "zzzzzzzz", "has_conflicts": true },
+          { "change_id": "qpvuntsmwlqt", "has_conflicts": has_conflicts },
+        ]
+      })
+    };
+    assert_eq!(
+      (verification.check)(&log(false)),
+      MutationVerificationOutcome::AlreadyApplied
+    );
+    assert_eq!(
+      (verification.check)(&log(true)),
+      MutationVerificationOutcome::NotApplied
+    );
+    // The old recipe matched change ids against `ListConflicts` file paths.
+    assert_eq!(
+      (verification.check)(&serde_json::json!(["src/a.rs"])),
+      MutationVerificationOutcome::Ambiguous
+    );
+    assert_eq!(
+      (verification.check)(&serde_json::json!({ "commits": [] })),
+      MutationVerificationOutcome::Ambiguous
+    );
   }
 
   #[test]

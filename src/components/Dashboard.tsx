@@ -127,10 +127,8 @@ import {
   type SavedRemoteRepositoryRecord,
   type UserManagedEndpointRecord,
 } from "../lib/remote-endpoints";
-import {
-  dispatchMutationOverSsh,
-  dispatchOverSsh,
-} from "../lib/remote-dispatch";
+import { dispatchOverSsh } from "../lib/remote-dispatch";
+import { dispatchKeyedMutationOverSsh } from "../lib/remote-idempotency";
 import {
   LAST_OPENED_REMOTE_REPO_ID_KEY,
   canonicalizeRemotePath,
@@ -645,13 +643,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setExplicitEndpointError(undefined);
     setRemoteRepoBusy(true);
     try {
-      const result = await dispatchMutationOverSsh<RepositoryInspection>(
+      const result = await dispatchKeyedMutationOverSsh<RepositoryInspection>(
         activeSshEndpoint,
         {
           kind: "CloneRepo",
           repo_url: explicitEndpointCloneUrl.trim(),
           destination: canonicalizeRemotePath(explicitEndpointRepoPath),
-          idempotency_key: `clone-${activeSshEndpoint.id}-${Date.now()}`,
         },
       );
       if (result.status === "ambiguous") {
@@ -677,12 +674,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setExplicitEndpointError(undefined);
     setRemoteRepoBusy(true);
     try {
-      const result = await dispatchMutationOverSsh<RepositoryInspection>(
+      const result = await dispatchKeyedMutationOverSsh<RepositoryInspection>(
         activeSshEndpoint,
         {
           kind: "InitRepo",
           repo: canonicalizeRemotePath(explicitEndpointRepoPath),
-          idempotency_key: `init-${activeSshEndpoint.id}-${Date.now()}`,
         },
       );
       if (result.status === "ambiguous") {

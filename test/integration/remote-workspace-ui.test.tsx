@@ -188,14 +188,18 @@ describe("remote workspace UI", () => {
       });
     });
 
-    expect(
-      await screen.findByRole("dialog", {
-        name: "Remote change could not be verified",
-      }),
-    ).toBeTruthy();
+    const dialog = await screen.findByRole("dialog", {
+      name: "Remote change could not be verified",
+    });
     expect(screen.getByTestId("remote-ambiguous-reason")).toHaveTextContent(
       "Could not tell whether the remote commit landed.",
     );
+
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Refresh" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await screen.findByTestId("show-workspace-header");
   });
 
   it("isolates cache identity across endpoint generations", async () => {

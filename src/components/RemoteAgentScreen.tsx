@@ -5,7 +5,7 @@ import {
   dispatchMutationOverSsh,
 } from "../lib/remote-dispatch";
 import type { SshEndpoint } from "../lib/api-types-remote";
-import { useActionIdempotencyKeys } from "../lib/remote-idempotency";
+import { dispatchKeyedMutationOverSsh } from "../lib/remote-idempotency";
 import {
   MutationButton,
   describeMutationOutcome,
@@ -44,7 +44,6 @@ export function RemoteAgentScreen({
   const [input, setInput] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const actionKeys = useActionIdempotencyKeys();
 
   const {
     data: status,
@@ -73,22 +72,14 @@ export function RemoteAgentScreen({
   async function startAgent() {
     setActionError(null);
     setBusy(true);
-    const idempotencyKey = actionKeys.keyFor("agent-start", [
-      repo,
-      workspace,
-      agent,
-      prompt,
-    ]);
     try {
-      const result = await dispatchMutationOverSsh(endpoint, {
+      const result = await dispatchKeyedMutationOverSsh(endpoint, {
         kind: "AgentStart",
         repo,
         workspace,
         agent,
         prompt,
-        idempotency_key: idempotencyKey,
       });
-      actionKeys.settle(idempotencyKey, result);
       if (result.status === "ambiguous") {
         setActionError(`Could not confirm the agent started: ${result.reason}`);
       }
@@ -104,20 +95,13 @@ export function RemoteAgentScreen({
     if (!input.trim()) return;
     setActionError(null);
     setBusy(true);
-    const idempotencyKey = actionKeys.keyFor("agent-input", [
-      repo,
-      workspace,
-      input,
-    ]);
     try {
-      const result = await dispatchMutationOverSsh(endpoint, {
+      const result = await dispatchKeyedMutationOverSsh(endpoint, {
         kind: "AgentInput",
         repo,
         workspace,
         input,
-        idempotency_key: idempotencyKey,
       });
-      actionKeys.settle(idempotencyKey, result);
       if (result.status === "ambiguous") {
         setActionError(
           `Could not confirm the input was sent: ${result.reason}`,

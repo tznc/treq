@@ -3,19 +3,51 @@
 // after network loss").
 //
 // The VM uses the key to recognise a repeat of a command it has already
-// run. A key built from `Date.now()` changes on every tap, so when a user
-// taps "Confirm" again after an ambiguous result the VM sees a new command
-// and can run it twice. The key must instead belong to the user's action:
-// the same inputs, retried before any confirmed outcome, reuse the same
-// key. A confirmed outcome ends the action, so the next tap starts a new
-// one with a new key.
+// run. A key built from `Date.now()` or a fresh UUID changes on every tap, so
+// when a user taps "Confirm" again after an ambiguous result the VM sees a
+// new command and can run it twice. The key must instead belong to the
+// user's action: the same inputs, retried before any confirmed outcome,
+// reuse the same key. A confirmed outcome ends the action, so the next tap
+// starts a new one with a new key.
+//
+// The store is module-level so a pending key outlives the component that
+// sent it: the mobile repo view remounts on resume and reconnect, and the
+// desktop adapter has no component at all.
 
-import { useState } from "react";
-import type { MutationDispatchResult } from "./remote-dispatch";
+import type { SshEndpoint } from "./api-types-remote";
+import {
+  dispatchMutationOverSsh,
+  type MutationDispatchResult,
+  type TreqCommandRequest,
+} from "./remote-dispatch";
+
+/** A mutation request whose idempotency key the store fills in. */
+export type UnkeyedRequest =
+  Extract<TreqCommandRequest, { idempotency_key: string }> extends infer R
+    ? R extends unknown
+      ? Omit<R, "idempotency_key">
+      : never
+    : never;
+
+/** JSON with object keys sorted, so property order never changes a fingerprint. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(
+          Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)),
+        )
+      : inner,
+  );
+}
+
+interface PendingKey {
+  key: string;
+  scope: string;
+}
 
 export class ActionIdempotencyKeys {
   /** Unconfirmed actions: input fingerprint -> the key they were sent with. */
-  private readonly pending = new Map<string, string>();
+  private readonly pending = new Map<string, PendingKey>();
   private readonly newId: () => string;
 
   constructor(newId: () => string = () => crypto.randomUUID()) {
@@ -24,34 +56,79 @@ export class ActionIdempotencyKeys {
 
   /**
    * The key for an action with these inputs. Returns the earlier key while
-   * an action with the same inputs has no confirmed outcome; otherwise
-   * starts a new action.
+   * an action with the same inputs has no confirmed outcome, however long
+   * that takes: elapsed time does not show the earlier attempt never landed.
+   * `scope` names the endpoint generation and repository, so a key never
+   * crosses to another VM.
    */
-  keyFor(prefix: string, inputs: readonly unknown[]): string {
-    const fingerprint = JSON.stringify([prefix, ...inputs]);
-    let key = this.pending.get(fingerprint);
-    if (!key) {
-      key = `${prefix}:${this.newId()}`;
-      this.pending.set(fingerprint, key);
-    }
+  keyFor(prefix: string, inputs: readonly unknown[], scope = ""): string {
+    const fingerprint = canonicalJson([scope, prefix, ...inputs]);
+    const entry = this.pending.get(fingerprint);
+    if (entry) return entry.key;
+    const key = `${prefix}:${this.newId()}`;
+    this.pending.set(fingerprint, { key, scope });
     return key;
   }
 
   /**
    * Records the outcome of the dispatch sent with `key`. Only a confirmed
-   * outcome ends the action: after an ambiguous result or an error the user
-   * may retry, and that retry must carry the same key.
+   * outcome ends the action: after an ambiguous result the user may retry,
+   * and that retry must carry the same key. A thrown dispatch never reaches
+   * here, so its key is kept too: the error may be a dropped connection with
+   * an unknown outcome, and reusing a key after a structured failure is
+   * harmless because the VM abandons the claim on failure.
    */
   settle(key: string, result: MutationDispatchResult<unknown>): void {
-    if (result.status === "ambiguous") return;
-    for (const [fingerprint, pendingKey] of this.pending) {
-      if (pendingKey === key) this.pending.delete(fingerprint);
+    for (const [fingerprint, entry] of this.pending) {
+      if (entry.key === key && result.status !== "ambiguous") {
+        this.pending.delete(fingerprint);
+      }
+    }
+  }
+
+  /**
+   * Drops the pending actions in `scope`, or all of them. Only for resetting
+   * state between tests: no UI event shows that an unconfirmed attempt never
+   * landed. A retry that carries the key ends the action once the VM
+   * confirms its outcome (it replays a stored result if the first landed).
+   */
+  release(scope?: string): void {
+    for (const [fingerprint, entry] of this.pending) {
+      if (scope === undefined || entry.scope === scope) {
+        this.pending.delete(fingerprint);
+      }
     }
   }
 }
 
-/** One `ActionIdempotencyKeys` per component instance. */
-export function useActionIdempotencyKeys(): ActionIdempotencyKeys {
-  const [keys] = useState(() => new ActionIdempotencyKeys());
-  return keys;
+/** The app-wide store shared by the desktop adapter and the mobile screens. */
+export const remoteActionKeys = new ActionIdempotencyKeys();
+
+/** The pending-key scope for mobile actions sent to this endpoint generation. */
+export function endpointScope(endpoint: SshEndpoint): string {
+  const generation =
+    endpoint.source.type === "managed" ? endpoint.source.generation : 0;
+  return `${endpoint.id}#${generation}`;
+}
+
+/**
+ * Sends a keyed mutation over SSH with the shared store's key for these
+ * inputs on this endpoint generation, so a retry after the screen remounts
+ * (resume, reconnect) still reuses the key of the unconfirmed attempt.
+ */
+export async function dispatchKeyedMutationOverSsh<T = unknown>(
+  endpoint: SshEndpoint,
+  request: UnkeyedRequest,
+): Promise<MutationDispatchResult<T>> {
+  const key = remoteActionKeys.keyFor(
+    request.kind,
+    [request],
+    endpointScope(endpoint),
+  );
+  const result = await dispatchMutationOverSsh<T>(endpoint, {
+    ...request,
+    idempotency_key: key,
+  } as TreqCommandRequest);
+  remoteActionKeys.settle(key, result);
+  return result;
 }

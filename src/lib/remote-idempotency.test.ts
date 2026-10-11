@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ActionIdempotencyKeys } from "./remote-idempotency";
 
 function counter() {
@@ -40,6 +40,40 @@ describe("ActionIdempotencyKeys", () => {
     const b = keys.keyFor("rebase", ["/r", "ws", "dev"]);
     expect(a).not.toBe(b);
     expect(keys.keyFor("rebase", ["/r", "ws", "main"])).toBe(a);
+  });
+
+  it("fingerprints object inputs independently of property order", () => {
+    const keys = new ActionIdempotencyKeys(counter());
+    const a = keys.keyFor("GitPush", [{ repo: "/r", workspace: "7" }]);
+    expect(keys.keyFor("GitPush", [{ workspace: "7", repo: "/r" }])).toBe(a);
+  });
+
+  it("keeps an ambiguous attempt's key across a long reconnect", () => {
+    vi.useFakeTimers();
+    try {
+      const keys = new ActionIdempotencyKeys(counter());
+      const first = keys.keyFor("SplitCommit", ["/r", "abc"]);
+      keys.settle(first, { status: "ambiguous", reason: "reset" });
+      vi.advanceTimersByTime(6 * 60 * 60 * 1000);
+      // Elapsed time does not show the first attempt never landed.
+      expect(keys.keyFor("SplitCommit", ["/r", "abc"])).toBe(first);
+      keys.settle(first, { status: "already_applied" });
+      expect(keys.keyFor("SplitCommit", ["/r", "abc"])).not.toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases pending keys by scope, or all of them", () => {
+    const keys = new ActionIdempotencyKeys(counter());
+    const a = keys.keyFor("GitPush", ["/r"], "repo-a");
+    const b = keys.keyFor("GitPush", ["/r"], "repo-b");
+    expect(a).not.toBe(b);
+    keys.release("repo-a");
+    expect(keys.keyFor("GitPush", ["/r"], "repo-a")).not.toBe(a);
+    expect(keys.keyFor("GitPush", ["/r"], "repo-b")).toBe(b);
+    keys.release();
+    expect(keys.keyFor("GitPush", ["/r"], "repo-b")).not.toBe(b);
   });
 
   it("does not build keys from the clock", () => {
