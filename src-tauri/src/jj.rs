@@ -5928,7 +5928,7 @@ pub fn jj_rebase_workspace_bookmark_onto_deferred_checkout(
   )
 }
 
-// home-head-test: workspace_bookmark_rebase
+// home-head-test: workspace_bookmark_rebase, stacked_workspace_rebase_keeps_home_on_branch, stacked_workspace_rebase_moves_chained_working_copies
 fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   workspace_path: &str,
   workspace_branch: &str,
@@ -5994,6 +5994,43 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     if !commits_to_move.iter().any(|id| id == wc_commit.id()) {
       commits_to_move.insert(0, wc_commit.id().clone());
     }
+  }
+  // Other working copies sitting on moved commits move with them: the home
+  // repo on the branch this workspace is stacked on, and stacked workspaces
+  // with no commits yet, which chain on each other's working copies. Left
+  // out, the move reparents them onto the lineage's old base, which takes
+  // home off its branch and splits the stack. A working copy with commits on
+  // top stays, since moving it alone would split those commits off it.
+  let wc_commits = revset::ResolvedRevsetExpression::commits(
+    loaded
+      .repo
+      .view()
+      .wc_commit_ids()
+      .values()
+      .cloned()
+      .collect(),
+  );
+  let mut moved: HashSet<_> = commits_to_move.iter().cloned().collect();
+  let mut pending = wc_commits
+    .minus(&wc_commits.children().minus(&wc_commits).ancestors())
+    .evaluate(loaded.repo.as_ref())
+    .map_err(|e| JjError::IoError(format!("Failed to find working copies to move: {}", e)))?
+    .iter()
+    .commits(loaded.repo.store())
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
+  pending.retain(|wc_commit| !moved.contains(wc_commit.id()));
+  // Repeat until nothing joins: a working copy can sit on another one that
+  // only joins in this loop. Each joins after its parents, so inserting it at
+  // the front keeps the list children-first, the order `compute_move_commits`
+  // expects.
+  while let Some(index) = pending
+    .iter()
+    .position(|wc_commit| wc_commit.parent_ids().iter().all(|id| moved.contains(id)))
+  {
+    let wc_commit = pending.swap_remove(index);
+    moved.insert(wc_commit.id().clone());
+    commits_to_move.insert(0, wc_commit.id().clone());
   }
 
   let mut tx = loaded.repo.start_transaction();
