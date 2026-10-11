@@ -74,6 +74,7 @@ export function useTerminalSessionSummaries({
         kind: "agent" as const,
         name: t.data.sessionName,
         branchName: t.data.workspaceName ?? null,
+        repoPath: t.data.repoPath,
         isMainRepo: !t.data.workspaceName,
         agent: t.data.agent,
         isStreaming,

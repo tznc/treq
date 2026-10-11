@@ -73,6 +73,36 @@ describe("buildTreqAgentSystemPrompt", () => {
   });
 });
 
+describe("buildTreqAgentSystemPrompt with supporting repositories", () => {
+  it("lists supporting repositories as read-only with treq -r delegation", () => {
+    const prompt = buildTreqAgentSystemPrompt({
+      repoPath: "/repos/app",
+      workspacePath: null,
+      supportingRepoPaths: ["/repos/api", "/repos/web"],
+    });
+
+    expect(prompt).toContain(
+      "Supporting repositories: /repos/api, /repos/web.",
+    );
+    expect(prompt).toContain(
+      "You may read files in supporting repositories but must not write to them directly.",
+    );
+    expect(prompt).toContain("treq add -r <repo> <branch>");
+    expect(prompt).toContain('treq agent -r <repo> <branch> "<prompt>"');
+    expect(prompt).not.toMatch(/[\r\n]/);
+  });
+
+  it("omits supporting repository guidance when none are linked", () => {
+    const prompt = buildTreqAgentSystemPrompt({
+      repoPath: "/repos/app",
+      workspacePath: null,
+      supportingRepoPaths: [],
+    });
+
+    expect(prompt).not.toContain("Supporting repositories");
+  });
+});
+
 describe("buildClaudeFilesystemSettings", () => {
   it("allows workspace reads and writes while denying the home repository", () => {
     expect(
@@ -99,6 +129,36 @@ describe("buildClaudeFilesystemSettings", () => {
       filesystem: {
         allowRead: ["/repos/treq"],
         allowWrite: ["/repos/treq"],
+      },
+    });
+  });
+});
+
+describe("buildClaudeFilesystemSettings with supporting repositories", () => {
+  it("allows reading supporting repositories without writing them", () => {
+    expect(
+      buildClaudeFilesystemSettings({
+        repoPath: "/repos/app",
+        workspacePath: "/repos/app/.treq/workspaces/feat",
+        supportingRepoPaths: ["/repos/api"],
+      }),
+    ).toEqual({
+      filesystem: {
+        denyRead: ["/repos/app"],
+        allowRead: ["/repos/app/.treq/workspaces/feat", "/repos/api"],
+        allowWrite: ["/repos/app/.treq/workspaces/feat"],
+      },
+    });
+    expect(
+      buildClaudeFilesystemSettings({
+        repoPath: "/repos/app",
+        workspacePath: null,
+        supportingRepoPaths: ["/repos/api"],
+      }),
+    ).toEqual({
+      filesystem: {
+        allowRead: ["/repos/app", "/repos/api"],
+        allowWrite: ["/repos/app"],
       },
     });
   });

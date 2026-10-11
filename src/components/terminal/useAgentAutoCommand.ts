@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { getSessionModel, getTreqBinDir } from "../../lib/api";
+import {
+  getSessionModel,
+  getTreqBinDir,
+  listSupportingRepos,
+} from "../../lib/api";
 import { prepareAgentAutoCommand } from "../../lib/prepareAgentAutoCommand";
 import { useToast } from "../ui/toast";
-import type { AgentSessionData } from "./types";
+import { type AgentSessionData, dbSessionIdOf } from "./types";
 
 // `restarted` is set once the agent has been relaunched in place (after a
 // model change). The relaunch starts a fresh agent without the session's
@@ -18,13 +22,21 @@ export const useAgentAutoCommand = (
   >(undefined);
 
   const { data: loadedModel, isLoading: modelLoading } = useSWR(
-    ["session-model", sessionData.repoPath, sessionData.sessionId],
-    () => getSessionModel(sessionData.repoPath, sessionData.sessionId),
+    ["session-model", sessionData.repoPath, dbSessionIdOf(sessionData)],
+    () => getSessionModel(sessionData.repoPath, dbSessionIdOf(sessionData)),
   );
   const { data: treqBinDir = null, isLoading: binLoading } = useSWR(
     "treq-bin-dir",
     getTreqBinDir,
   );
+
+  const { data: supportingRepos, isLoading: supportingLoading } = useSWR(
+    ["supporting-repos", sessionData.repoPath],
+    () => listSupportingRepos(sessionData.repoPath),
+  );
+  const supportingRepoPaths = (supportingRepos ?? [])
+    .filter((repo) => repo.exists)
+    .map((repo) => repo.path);
 
   const sessionModel =
     sessionModelOverride === undefined
@@ -35,12 +47,13 @@ export const useAgentAutoCommand = (
 
   const pendingPrompt = restarted ? undefined : sessionData.pendingPrompt;
   const { data: prepared, error: prepareErr } = useSWR(
-    isModelLoaded && treqBinDirReady
+    isModelLoaded && treqBinDirReady && !supportingLoading
       ? [
           "agent-auto-command",
           sessionData.agent ?? "claude",
           sessionData.workspacePath,
           sessionData.repoPath,
+          supportingRepoPaths.join("\n"),
           sessionModel,
           treqBinDir,
           pendingPrompt,
@@ -52,6 +65,7 @@ export const useAgentAutoCommand = (
         agent: sessionData.agent ?? "claude",
         workspacePath: sessionData.workspacePath,
         repoPath: sessionData.repoPath,
+        supportingRepoPaths,
         sessionModel,
         permissionMode: sessionData.permissionMode,
         pendingPrompt,

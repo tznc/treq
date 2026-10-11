@@ -84,6 +84,8 @@ pub(crate) struct AppState {
   watcher_manager: WatcherManager,
   window_repo_paths: Mutex<HashMap<String, String>>,
   window_last_focused_at: Mutex<HashMap<String, u64>>,
+  /// Supporting repository paths shown in each window, by window label.
+  window_supporting_repo_paths: Mutex<HashMap<String, Vec<String>>>,
   dispatch_instance_id: String,
   dispatch_started_at: u64,
   dispatch_endpoint: String,
@@ -107,6 +109,7 @@ impl AppState {
       watcher_manager,
       window_repo_paths: Mutex::new(HashMap::new()),
       window_last_focused_at: Mutex::new(HashMap::new()),
+      window_supporting_repo_paths: Mutex::new(HashMap::new()),
       dispatch_instance_id,
       dispatch_started_at,
       dispatch_endpoint,
@@ -569,10 +572,15 @@ pub fn run() {
             .accelerator("CmdOrCtrl+Alt+O")
             .build(app)?;
 
+          let add_repository_item =
+            MenuItemBuilder::with_id("add_repository", "Add Repository...").build(app)?;
+
           let file_menu = SubmenuBuilder::new(app, "File")
             .item(&open_item)
             .item(&open_new_window_item)
             .item(&open_ssh_item)
+            .separator()
+            .item(&add_repository_item)
             .build()?;
 
           // Edit menu with native shortcuts
@@ -693,10 +701,15 @@ pub fn run() {
             .accelerator("CmdOrCtrl+Alt+O")
             .build(app)?;
 
+          let add_repository_item =
+            MenuItemBuilder::with_id("add_repository", "Add Repository...").build(app)?;
+
           let file_menu = SubmenuBuilder::new(app, "File")
             .item(&open_item)
             .item(&open_new_window_item)
             .item(&open_ssh_item)
+            .separator()
+            .item(&add_repository_item)
             .build()?;
 
           // Go menu items
@@ -767,6 +780,7 @@ pub fn run() {
           "open" => schedule_open_repo(app.clone()),
           "open_new_window" => schedule_open_repo_in_new_window(app.clone()),
           "open_ssh" => emit_to_focused(app, "menu-open-ssh", ()),
+          "add_repository" => emit_to_focused(app, "menu-add-repository", ()),
           "open_web_inspector" =>
           {
             #[cfg(debug_assertions)]
@@ -950,6 +964,10 @@ pub fn run() {
       commands::remote_set_relay_access_token,
       commands::remote_cutoff_reason,
       commands::set_window_repo_path,
+      commands::set_window_supporting_repo_paths,
+      commands::list_supporting_repos,
+      commands::add_supporting_repo,
+      commands::remove_supporting_repo,
       commands::rebase_home_repo_branch,
       commands::dry_run_home_repo_rebase,
       commands::get_git_remote_url,
