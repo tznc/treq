@@ -8,10 +8,20 @@ permissions:
   pull-requests: write
 
 jobs:
-  clean-description:
+  # One job, not four: each was a separate runner on every push. Steps run
+  # in order, so the title check sees the docs prefix the step before adds.
+  # Keeps the old title-check job id in case it is a required check.
+  check-conventional-title:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
+      - name: Remove codex label
+        if: github.event.action == 'opened'
+        uses: actions-ecosystem/action-remove-labels@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: codex
+
       - name: Remove chatgpt.com link and divider
         uses: actions/github-script@v7
         with:
@@ -32,10 +42,6 @@ jobs:
               });
             }
 
-  docs-prefix-title:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
       - name: Add docs prefix if only web/ changes
         uses: actions/github-script@v7
         with:
@@ -62,11 +68,6 @@ jobs:
               title: `docs: ${title}`,
             });
 
-  check-conventional-title:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    needs: docs-prefix-title
-    steps:
       - name: Enforce conventional commit title
         uses: actions/github-script@v7
         with:
