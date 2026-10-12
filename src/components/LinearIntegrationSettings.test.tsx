@@ -35,9 +35,6 @@ vi.mock("../lib/supabase", async (importOriginal) => {
 vi.mock("../lib/api-linear", () => ({
   getLinearApiKey: vi.fn(async () => null),
   setLinearApiKey: vi.fn(),
-  getLinearAutoKickoffLabel: vi.fn(async () => null),
-  setLinearAutoKickoffLabel: vi.fn(),
-  linearStartAutoKickoffPolling: vi.fn(),
 }));
 
 describe("Linear OAuth connect", () => {

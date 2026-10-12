@@ -1,4 +1,3 @@
-use crate::tracker::{KickoffLedger, KickoffPoller, MAX_KICKOFF_ATTEMPTS};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -97,8 +96,8 @@ pub struct LinearProxySession {
 }
 
 // The frontend pushes the Supabase session on sign-in and every token
-// refresh. The auto-kickoff poller reads it here too, so OAuth-connected
-// repos work without a Tauri command in flight. It is never logged.
+// refresh so OAuth-connected repos reach Linear through the proxy. It is
+// never logged.
 static PROXY_SESSION: RwLock<Option<LinearProxySession>> = RwLock::new(None);
 
 /// Sets, or clears on sign-out, the session used for the OAuth proxy.
@@ -162,8 +161,8 @@ struct LinearGraphqlError {
 
 const LINEAR_GRAPHQL_URL: &str = "https://api.linear.app/graphql";
 
-// reqwest has no default timeout. Without one, a stalled Linear request holds
-// the auto-kickoff poller thread forever and stops kickoffs for every repo.
+// reqwest has no default timeout. Without one, a stalled Linear request hangs
+// the caller forever.
 // Connecting fails fast; a connected request may take a while, since a large
 // issue page or a busy proxy can be slow to answer.
 const LINEAR_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -528,60 +527,6 @@ async fn fetch_issue_pages(
     MAX_ISSUE_PAGES * ISSUE_PAGE_SIZE as usize
   );
   Ok(issues)
-}
-
-// The poller prunes its ledger against this list, so a partial list would
-// make it forget handled issues and kick them off again. The cap is high and
-// exceeding it is an error rather than a silent truncation.
-const MAX_LABELED_ISSUE_PAGES: usize = 50;
-
-/// Open issues carrying `label`, for auto-kickoff. Filtering happens in
-/// Linear so issues outside the panel's page window are still found, and
-/// completed or canceled issues never start a workspace.
-fn kickoff_issue_filter(label: &str) -> serde_json::Value {
-  serde_json::json!({
-    "labels": { "some": { "name": { "eqIgnoreCase": label } } },
-    "state": { "type": { "nin": ["completed", "canceled"] } },
-  })
-}
-
-#[derive(Deserialize)]
-struct LinearIssueIdsData {
-  issues: LinearIssueIdsConnection,
-}
-
-#[derive(Deserialize)]
-struct LinearIssueIdsConnection {
-  nodes: Vec<LinearSubIssueNode>,
-  #[serde(default, rename = "pageInfo")]
-  page_info: LinearPageInfo,
-}
-
-pub async fn linear_list_labeled_issue_ids_impl(
-  client: &LinearClientSource,
-  label: &str,
-) -> Result<Vec<String>, String> {
-  let filter = kickoff_issue_filter(label);
-  let mut ids = Vec::new();
-  let mut after: Option<String> = None;
-  for _ in 0..MAX_LABELED_ISSUE_PAGES {
-    let data: LinearIssueIdsData = linear_graphql(
-      client,
-      &issue_page_body("id", Some(&filter), after.as_deref()),
-      "labeled issues",
-    )
-    .await?;
-    let page = data.issues;
-    ids.extend(page.nodes.into_iter().map(|node| node.id));
-    match next_cursor(page.page_info) {
-      Some(cursor) => after = Some(cursor),
-      None => return Ok(ids),
-    }
-  }
-  Err(format!(
-    "More than {} open issues carry the label \"{label}\"; skipping auto-kickoff",
-    MAX_LABELED_ISSUE_PAGES * ISSUE_PAGE_SIZE as usize
-  ))
 }
 
 fn next_cursor(page_info: LinearPageInfo) -> Option<String> {
@@ -1041,65 +986,6 @@ pub async fn linear_apply_review_suggestion_impl(
   crate::local_db::resolve_agent_review_comment(repo_path, &comment.id)
 }
 
-fn poll_linear_kickoff(repo_path: &str) -> Result<(), String> {
-  let db = crate::tracker::open_app_db()?;
-
-  if !crate::core::feature_preview::is_enabled(
-    &db,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  ) {
-    return Ok(());
-  }
-
-  let label = db
-    .get_repo_setting(repo_path, "linear_auto_kickoff_label")
-    .map_err(|e| format!("Failed to read linear_auto_kickoff_label: {e}"))?;
-
-  let label = match label {
-    Some(l) if !l.is_empty() => l,
-    _ => return Ok(()),
-  };
-
-  let client = resolve_linear_client(repo_path, &db)?;
-
-  let rt =
-    tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create async runtime: {e}"))?;
-
-  let labeled_ids = rt.block_on(linear_list_labeled_issue_ids_impl(&client, &label))?;
-
-  let mut ledger = KickoffLedger::load(&db, repo_path, HANDLED_KEY, FAILURES_KEY)?;
-  for issue_id in ledger.due(&labeled_ids) {
-    match rt.block_on(kickoff_linear_issue_internal(repo_path, &client, &issue_id)) {
-      Ok(_) => ledger.record_success(&issue_id),
-      Err(e) => {
-        let attempts = ledger.record_failure(&issue_id);
-        log::warn!(
-          "linear-kickoff: attempt {attempts}/{MAX_KICKOFF_ATTEMPTS} failed for {issue_id}: {e}"
-        );
-      }
-    }
-  }
-  ledger.save(&db, repo_path, HANDLED_KEY, FAILURES_KEY)
-}
-
-const HANDLED_KEY: &str = "linear_handled_issue_ids";
-const FAILURES_KEY: &str = "linear_kickoff_failures";
-
-async fn kickoff_linear_issue_internal(
-  repo_path: &str,
-  client: &LinearClientSource,
-  issue_id: &str,
-) -> Result<crate::commands::linear::LinearKickoffResult, String> {
-  let issue = linear_get_issue_impl(client, issue_id).await?;
-  crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, &issue).await
-}
-
-static GLOBAL_KICKOFF_POLLER: std::sync::OnceLock<KickoffPoller> = std::sync::OnceLock::new();
-
-pub fn kickoff_poller() -> &'static KickoffPoller {
-  GLOBAL_KICKOFF_POLLER.get_or_init(|| KickoffPoller::new("linear", poll_linear_kickoff))
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1196,20 +1082,6 @@ mod tests {
       .as_str()
       .unwrap()
       .contains("pageInfo { hasNextPage endCursor }"));
-  }
-
-  #[test]
-  fn kickoff_filter_matches_label_and_skips_closed_issues() {
-    let body = issue_page_body("id", Some(&kickoff_issue_filter(HOSTILE)), None);
-    let query = body["query"].as_str().unwrap();
-    assert!(!query.contains(HOSTILE));
-    assert!(query.contains("nodes { id }"));
-    let filter = &body["variables"]["filter"];
-    assert_eq!(filter["labels"]["some"]["name"]["eqIgnoreCase"], HOSTILE);
-    assert_eq!(
-      filter["state"]["type"]["nin"],
-      serde_json::json!(["completed", "canceled"])
-    );
   }
 
   #[test]
@@ -1648,110 +1520,6 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(issues.len(), MAX_ISSUE_PAGES);
-  }
-
-  fn labeled_node(id: &str, label: &str, state_type: &str) -> serde_json::Value {
-    serde_json::json!({
-      "id": id,
-      "identifier": id.to_uppercase(),
-      "title": format!("Issue {id}"),
-      "branchName": format!("branch-{id}"),
-      "url": format!("https://linear.app/t/issue/{id}"),
-      "state": { "name": state_type, "type": state_type },
-      "labels": { "nodes": [{ "name": label }] },
-    })
-  }
-
-  fn nodes_page(nodes: Vec<serde_json::Value>, next: Option<&str>) -> serde_json::Value {
-    serde_json::json!({
-      "data": { "issues": {
-        "nodes": nodes,
-        "pageInfo": { "hasNextPage": next.is_some(), "endCursor": next },
-      } }
-    })
-  }
-
-  fn kickoff_filter_matcher(label: &str) -> wiremock::matchers::BodyPartialJsonMatcher {
-    wiremock::matchers::body_partial_json(serde_json::json!({
-      "variables": { "filter": kickoff_issue_filter(label) }
-    }))
-  }
-
-  #[tokio::test]
-  async fn kickoff_finds_labeled_issues_outside_the_first_unfiltered_page() {
-    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
-    let server = MockServer::start().await;
-    // Linear only returns the labeled issue when asked for it; an
-    // unfiltered first page is full of other issues.
-    Mock::given(method("POST"))
-      .and(kickoff_filter_matcher("agent"))
-      .respond_with(ResponseTemplate::new(200).set_body_json(nodes_page(
-        vec![labeled_node("old-labeled", "agent", "unstarted")],
-        None,
-      )))
-      .with_priority(1)
-      .mount(&server)
-      .await;
-    Mock::given(method("POST"))
-      .respond_with(ResponseTemplate::new(200).set_body_json(nodes_page(
-        vec![labeled_node("recent", "bug", "started")],
-        Some("more"),
-      )))
-      .with_priority(2)
-      .mount(&server)
-      .await;
-    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
-
-    let ids = linear_list_labeled_issue_ids_impl(&api_key("lin_api_test"), "agent")
-      .await
-      .unwrap();
-    assert_eq!(ids, ["old-labeled"]);
-  }
-
-  #[tokio::test]
-  async fn kickoff_skips_closed_labeled_issues() {
-    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-      .and(kickoff_filter_matcher("agent"))
-      .respond_with(ResponseTemplate::new(200).set_body_json(nodes_page(vec![], None)))
-      .with_priority(1)
-      .mount(&server)
-      .await;
-    Mock::given(method("POST"))
-      .respond_with(ResponseTemplate::new(200).set_body_json(nodes_page(
-        vec![
-          labeled_node("done", "agent", "completed"),
-          labeled_node("dropped", "agent", "canceled"),
-        ],
-        None,
-      )))
-      .with_priority(2)
-      .mount(&server)
-      .await;
-    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
-
-    let ids = linear_list_labeled_issue_ids_impl(&api_key("lin_api_test"), "agent")
-      .await
-      .unwrap();
-    assert!(ids.is_empty(), "{ids:?}");
-  }
-
-  #[tokio::test]
-  async fn kickoff_refuses_a_partial_list_instead_of_truncating() {
-    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-      .respond_with(ResponseTemplate::new(200).set_body_json(nodes_page(
-        vec![labeled_node("x", "agent", "unstarted")],
-        Some("again"),
-      )))
-      .mount(&server)
-      .await;
-    let _guard = use_mock_endpoint(&server, Duration::from_secs(5));
-
-    let result = linear_list_labeled_issue_ids_impl(&api_key("lin_api_test"), "agent").await;
-    assert!(result.is_err(), "{result:?}");
   }
 
   #[tokio::test]

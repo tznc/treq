@@ -243,19 +243,6 @@ pub fn linear_set_proxy_session(supabase_url: Option<String>, access_token: Opti
   crate::linear::set_proxy_session(supabase_url, access_token);
 }
 
-#[tauri::command]
-pub fn linear_start_auto_kickoff_polling(
-  state: State<'_, AppState>,
-  repo_path: String,
-) -> Result<(), String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  crate::linear::kickoff_poller().watch_repo(&repo_path);
-  Ok(())
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;

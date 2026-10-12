@@ -59,34 +59,6 @@ it("captures the Linear integration settings", async () => {
     expectations: [
       "The Settings page Integrations tab is open with a Linear section.",
       "An API key input control and an 'Add API Key' (or similar) button are visible for the free-tier flow.",
-      "An auto-kickoff label input control is visible below the API key section.",
-    ],
-  });
-
-  await user.click(screen.getByRole("button", { name: /add label/i }));
-  const labelInput = screen.getByPlaceholderText("e.g. ready-to-work");
-  await user.type(labelInput, "ready-for-dev");
-  await user.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText("Auto-kickoff label saved");
-  await screen.findByText(/Issues with label "ready-for-dev" auto-open a workspace/);
-
-  await captureDocument(document, {
-    name: "linear-integration-05-auto-kickoff-label-saved",
-    expectations: [
-      "A success toast confirms the auto-kickoff label was saved.",
-      "The Auto-kickoff Label row now describes issues with label 'ready-for-dev' auto-opening a workspace, instead of the empty-state helper text.",
-    ],
-  });
-
-  // Leave and re-enter the tab to prove the label persisted, not just local state.
-  await user.click(await screen.findByRole("tab", { name: /application/i }));
-  await user.click(await screen.findByRole("tab", { name: /integrations/i }));
-  await screen.findByText(/Issues with label "ready-for-dev" auto-open a workspace/);
-
-  await captureDocument(document, {
-    name: "linear-integration-06-auto-kickoff-label-persisted",
-    expectations: [
-      "After switching away to Application and back to Integrations, the Auto-kickoff Label row still shows the saved label 'ready-for-dev', proving it was persisted rather than only held in local state.",
     ],
   });
 }, 60000);
