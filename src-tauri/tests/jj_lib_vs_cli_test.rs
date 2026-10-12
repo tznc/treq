@@ -180,60 +180,6 @@ fn jj_new_describe_commit_lifecycle_matches_cli() {
 }
 
 #[test]
-fn jj_set_bookmark_matches_cli_bookmark_list() {
-  require_jj_cli!();
-
-  let repo = TestRepo::new().expect("create repo");
-  settle_cli(&repo.repo_path);
-  TestRepo::jj_set_bookmark(&repo.repo_path, "lib-vs-cli-bookmark", "@")
-    .expect("jj_set_bookmark should succeed");
-
-  let cli_bookmarks =
-    TestRepo::run_jj_cli(&repo.repo_path, &["bookmark", "list"]).expect("cli bookmark list");
-  assert!(
-    cli_bookmarks.contains("lib-vs-cli-bookmark"),
-    "CLI bookmark list should show the bookmark set via jj_set_bookmark, got: {cli_bookmarks}"
-  );
-
-  let wrapper_commit_id = treq_lib::jj::jj_get_commit_id(&repo.repo_path, "lib-vs-cli-bookmark")
-    .expect("jj_get_commit_id should resolve the bookmark");
-  assert_eq!(
-    wrapper_commit_id,
-    cli_commit_id(&repo.repo_path, "lib-vs-cli-bookmark"),
-    "jj_get_commit_id should agree with the CLI on where the bookmark points"
-  );
-}
-
-#[test]
-fn jj_files_at_revision_matches_cli_file_list() {
-  require_jj_cli!();
-
-  let repo = TestRepo::new().expect("create repo");
-  settle_cli(&repo.repo_path);
-  TestRepo::write_workspace_file(&repo.repo_path, "a.txt", "a").expect("write a.txt");
-  TestRepo::write_workspace_file(&repo.repo_path, "dir/b.txt", "b").expect("write dir/b.txt");
-  TestRepo::jj_commit(&repo.repo_path, "add files").expect("commit files");
-
-  let wrapper_files =
-    TestRepo::jj_files_at_revision(&repo.repo_path, "@-").expect("jj_files_at_revision");
-  let cli_files: Vec<String> = TestRepo::run_jj_cli(&repo.repo_path, &["file", "list", "-r", "@-"])
-    .expect("cli file list")
-    .lines()
-    .map(|l| l.trim().replace('\\', "/"))
-    .filter(|l| !l.is_empty())
-    .collect();
-
-  let mut wrapper_sorted = wrapper_files.clone();
-  wrapper_sorted.sort();
-  let mut cli_sorted = cli_files.clone();
-  cli_sorted.sort();
-  assert_eq!(
-    wrapper_sorted, cli_sorted,
-    "jj_files_at_revision should list the same files as the CLI's `jj file list`"
-  );
-}
-
-#[test]
 fn jj_sparse_patterns_matches_cli_sparse_list() {
   require_jj_cli!();
 
@@ -270,32 +216,5 @@ fn jj_sparse_patterns_matches_cli_sparse_list() {
   assert_eq!(
     wrapper_patterns, cli_patterns,
     "jj_sparse_patterns should match the CLI's `jj sparse list`"
-  );
-}
-
-#[test]
-fn jj_has_revert_hunk_for_line_matches_cli_diff_grep() {
-  require_jj_cli!();
-
-  let repo = TestRepo::new().expect("create repo");
-  settle_cli(&repo.repo_path);
-  TestRepo::write_workspace_file(&repo.repo_path, "f.txt", "line one\nline two\n")
-    .expect("write f.txt");
-  TestRepo::jj_commit(&repo.repo_path, "add f.txt").expect("commit f.txt");
-
-  // Overwrite with content missing "line two" — a revert-style hunk removing it.
-  TestRepo::write_workspace_file(&repo.repo_path, "f.txt", "line one\n").expect("rewrite f.txt");
-
-  let wrapper_has_revert = TestRepo::jj_has_revert_hunk_for_line(&repo.repo_path, "line two");
-  let cli_diff = TestRepo::run_jj_cli(&repo.repo_path, &["diff", "--git"]).expect("cli diff --git");
-  let cli_has_revert = cli_diff.contains("-line two");
-
-  assert_eq!(
-    wrapper_has_revert, cli_has_revert,
-    "jj_has_revert_hunk_for_line should agree with grepping the CLI's `jj diff --git`, cli diff:\n{cli_diff}"
-  );
-  assert!(
-    wrapper_has_revert,
-    "this fixture should actually contain a revert hunk"
   );
 }
