@@ -1,0 +1,6 @@
+# CI runs `cargo nextest run --profile ci`.
+[profile.ci]
+# Retry a failing test once. A test that passes on the retry shows as FLAKY
+# in the output and doesn't fail the run.
+retries = 1
+fail-fast = false

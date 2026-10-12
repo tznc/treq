@@ -196,4 +196,4 @@ jobs:
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1
-        run: cargo nextest run --locked --no-fail-fast
+        run: cargo nextest run --locked --profile ci
