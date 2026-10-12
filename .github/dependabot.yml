@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs with the version in a trailing comment.
+  # Dependabot bumps both together in one grouped PR a week.
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci

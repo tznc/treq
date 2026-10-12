@@ -31,13 +31,13 @@ runs:
 
     - name: Install Rust stable
       if: steps.napi-cache.outputs.cache-hit != 'true' || inputs.warm == 'true'
-      uses: dtolnay/rust-toolchain@v1
+      uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
       with:
         toolchain: stable
 
     # shared-key: without it the key includes the job id, so the cache main
     # saves from warm-caches.yml would never match the PR job in ci.yml.
-    - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       id: rust-cache
       if: steps.napi-cache.outputs.cache-hit != 'true' || inputs.warm == 'true'
       with:
@@ -49,7 +49,7 @@ runs:
     # mold links the cdylib several times faster than ld.
     - name: Use mold linker
       if: (steps.napi-cache.outputs.cache-hit != 'true' || (inputs.warm == 'true' && steps.rust-cache.outputs.cache-hit != 'true')) && runner.os == 'Linux'
-      uses: rui314/setup-mold@v1
+      uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
 
     # Warm mode builds on a dependency-cache miss so rust-cache's post step
     # saves a full target/, not just what a partial restore left.

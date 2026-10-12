@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Check for Rust and JS/TS changes
         id: filter
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             rust:
@@ -117,7 +117,7 @@ jobs:
 
       - name: Install rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           components: rustfmt
           toolchain: stable
@@ -170,7 +170,7 @@ jobs:
         # WebKit/GTK is needed to *dlopen* libtreq_lib.so in integration tests
         # even on a NAPI cache hit.
         if: env.RUN_TASK == 'true' && (matrix.platform == 'ubuntu-22.04' && matrix.task == 'test:integration')
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: webkit-4.1-1
@@ -314,17 +314,19 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           components: rustfmt, clippy
           toolchain: stable
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest
 
       # mold links the large test binaries several times faster than ld.
       - name: Use mold linker
-        uses: rui314/setup-mold@v1
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
@@ -332,7 +334,7 @@ jobs:
       - name: install dependencies (ubuntu only)
         # WebKit/GTK is needed to *link* treq/tauri and to *dlopen*
         # libtreq_lib.so in tests.
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: webkit-4.1-1
@@ -420,7 +422,7 @@ jobs:
       # Restores the cache warm-caches.yml saves on main. PR runs don't save:
       # a PR's cache can only be read by that PR, and the multi-GB saves
       # evict main's caches from the repo's 10 GB quota.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}

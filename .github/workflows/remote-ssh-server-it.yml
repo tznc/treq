@@ -243,11 +243,11 @@ jobs:
           ssh "${ssh_opts[@]}" 'treq --version'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
           workspaces: |
@@ -256,7 +256,7 @@ jobs:
       # Needed to link `treq` at all (see ci.yml's identical step) - not
       # needed to run it, since the real binary never leaves this runner.
       - name: install dependencies (ubuntu only)
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: webkit-4.1-1

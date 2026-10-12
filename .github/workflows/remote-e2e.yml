@@ -50,18 +50,20 @@ jobs:
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: denoland/setup-deno@v2
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         if: steps.gate.outputs.run == 'true'
         with:
           deno-version: v2.x
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         if: steps.gate.outputs.run == 'true'
+        with:
+          toolchain: stable
       - name: Install Linux build dependencies
         if: steps.gate.outputs.run == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: steps.gate.outputs.run == 'true'
         with:
           cache-on-failure: true
