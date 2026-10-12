@@ -20,9 +20,7 @@ import {
   WORKSPACE_STATUS_DOT_BG_CLASS,
   WORKSPACE_STATUS_DOT_TEXT_CLASS,
 } from "../lib/workspace-status-indicator";
-import {
-  getWorkspaceTitle as getWorkspaceTitleFromUtils,
-} from "../lib/workspace-utils";
+import { getWorkspaceTitle as getWorkspaceTitleFromUtils } from "../lib/workspace-utils";
 import {
   getChangeFilesDragData,
   isChangeFilesDrag,

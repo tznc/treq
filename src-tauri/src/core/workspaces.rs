@@ -1593,13 +1593,13 @@ pub fn workspace_status(
 #[cfg(test)]
 mod tests {
   use super::{
-    merge_linear_issue_metadata_json, merge_tracker_item_metadata_json,
-    parse_hunk_spec, parse_workspace_metadata, plan_workspace_target_move,
+    merge_linear_issue_metadata_json, merge_tracker_item_metadata_json, parse_hunk_spec,
+    parse_workspace_metadata, plan_workspace_target_move,
     resolve_workspace_diff_base_revision_from_last_rebased,
     resolve_workspace_diff_conflict_marker_style,
     resolve_workspace_diff_tip_revision_from_workspace_state,
-    resolve_workspace_diff_workspace_revision, HunkSpec, WorkspaceMetadata,
-    WorkspaceMoveRequest, WorkspaceTargetMoveStep,
+    resolve_workspace_diff_workspace_revision, HunkSpec, WorkspaceMetadata, WorkspaceMoveRequest,
+    WorkspaceTargetMoveStep,
   };
   use crate::jj;
   use crate::local_db::Workspace;
