@@ -2,7 +2,7 @@
 name: treq
 description: >-
   Work inside a Treq agent terminal: use the treq CLI to create and inspect
-  workspaces, keep the workspace description current with treq desc (it
+  workspaces, keep the workspace description current with treq set -d (it
   becomes the pull request body), send files or text to the user in the Treq
   UI, notify the user with treq notify, and create commits with treq commit.
   Use this skill for every Treq agent session, whenever you need another
@@ -34,7 +34,7 @@ treq st <workspace_name>
 treq diff
 treq diff <workspace_name>
 treq add <branch_name> [-d <description>] [-l <title>] [-s <source_branch>] [-p <sparse_path>]... [-k <symlink_path>]...
-treq set <workspace_name> [-d <description>] [-l <title>] [-t <target_branch>]
+treq set [<workspace_name>] [-d <description>] [-l <title>] [-t <target_branch>]
 treq mv <source> <destination> -f <file> [-f <file> ...]
 treq mv <source> <destination> -c <commit> [-c <commit> ...]
 ```
@@ -63,16 +63,15 @@ the workspace in Treq, the description becomes the PR body. Maintain it the
 way you would maintain a PR description.
 
 ```bash
-treq desc [<workspace_name>]
-treq desc [<workspace_name>] -f <file>
-treq desc [<workspace_name>] -f - <<'EOF'
+treq st [<workspace_name>]
+treq set [<workspace_name>] -d - <<'EOF'
 <markdown>
 EOF
 ```
 
-- With no `-f`, it prints the description and nothing else.
-- `-f <file>` replaces the description with the file's contents; `-f -`
-  reads stdin. Empty input clears it.
+- `treq st` shows the description with the rest of the workspace status.
+- `-d -` reads the new description from stdin; `-d '<text>'` also works for
+  one line. Empty input clears it.
 - Omit the workspace name to use the workspace you are in. `-r <repo>`
   works as on the other commands.
 
@@ -101,7 +100,7 @@ treq diff -r <repo> <workspace_name>
 ```
 
 - `<repo>` is the supporting repository's path or directory name.
-- `-r` works on `add`, `set`, `desc`, `st`, `diff`, `agent`, and `commit`.
+- `-r` works on `add`, `set`, `st`, `diff`, `agent`, and `commit`.
   `mv` takes `--repo` because `-r` is its range flag.
 - `treq agent` needs a workspace branch. It cannot start an agent in a home
   repository.

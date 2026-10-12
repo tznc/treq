@@ -62,7 +62,7 @@ export function CreatePrButtonGroup({
     return null;
   }
 
-  // Agents rewrite the description with `treq desc` while the view is open,
+  // Agents rewrite the description with `treq set -d` while the view is open,
   // so read it at click time rather than from the polled workspace list.
   const latestBody = async () => {
     const fresh = await getWorkspaces(repoPath).catch(() => null);

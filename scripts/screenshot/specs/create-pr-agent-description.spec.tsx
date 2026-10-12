@@ -32,7 +32,7 @@ const AGENT_BODY =
   "## Summary\n\n- Rate-limit the login endpoint\n\n## Testing\n- cargo test";
 
 // Scenario: the workspace view is already open when the agent rewrites the
-// description with `treq desc -f -`. One click on Create PR must send the
+// description with `treq set -d -`. One click on Create PR must send the
 // agent's text as the PR body, not the description the view loaded with.
 it("captures Create PR sending the description an agent just wrote", async () => {
   const { repoPath } = createTestRepo(true);

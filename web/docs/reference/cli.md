@@ -53,35 +53,24 @@ treq add feat/deps -k node_modules -k target
 
 ### `treq set`
 
-Update workspace metadata.
+Update workspace metadata. When you create a pull request for the workspace in Treq, the description is the PR body, so agents keep it current the way they would a PR description.
 
 ```bash
-treq set <workspace_name> [-d <description>] [-l <title>] [-t <target_branch>]
-```
-
-- `workspace_name`: workspace branch name.
-- `-d, --description`: set the workspace description.
-- `-l, --title`: set the workspace title.
-- `-t, --target-branch`: set the target branch.
-
-### `treq desc`
-
-Print or replace a workspace description. When you create a pull request for the workspace in Treq, the description is the PR body, so agents keep it current the way they would a PR description.
-
-```bash
-treq desc [workspace_name] [-f <file|->]
+treq set [workspace_name] [-d <description|->] [-l <title>] [-t <target_branch>]
 ```
 
 - `workspace_name`: workspace branch name. Omit it to use the current workspace.
-- `-f, --file`: replace the description with this file's contents, or `-` to read stdin. Empty input clears it.
+- `-d, --description`: set the workspace description. `-` reads it from stdin; empty input clears it.
+- `-l, --title`: set the workspace title.
+- `-t, --target-branch`: set the target branch.
 - `-r, --repo`: supporting repository to act on.
 
-With no `-f`, Treq prints the description and nothing else.
+`treq st` prints the description with the rest of the workspace status.
 
 Example:
 
 ```bash
-treq desc -f - <<'EOF'
+treq set -d - <<'EOF'
 ## Summary
 - Adds rate limiting to the login endpoint
 EOF

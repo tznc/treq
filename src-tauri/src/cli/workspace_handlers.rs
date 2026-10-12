@@ -197,15 +197,6 @@ fn run_setup_script_for_cli(repo_path: &str, workspace_id: i64, workspace_path: 
 }
 
 pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
-  let workspace_name = match get_arg_value(matches, "workspace_name") {
-    Some(name) => name,
-    None => {
-      super::log_cli_error("Error: workspace name is required");
-      eprintln!("Usage: treq set <workspace_name> [-d description] [-l title] [-t target_branch]");
-      return false;
-    }
-  };
-
   let description = get_arg_value(matches, "description");
   let title = get_arg_value(matches, "title");
   let target_branch = get_arg_value(matches, "target-branch");
@@ -225,21 +216,23 @@ pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
     }
   };
 
-  // Look up workspace by branch name
-  let workspace = match local_db::get_workspace_by_branch(&repo_path, &workspace_name) {
-    Ok(Some(ws)) => ws,
-    Ok(None) => {
-      super::log_cli_error(&format!("Error: workspace '{}' not found", workspace_name));
-      return false;
-    }
-    Err(e) => {
-      super::log_cli_error(&format!("Error looking up workspace: {}", e));
-      return false;
-    }
-  };
+  let workspace =
+    match resolve_named_or_cwd_workspace(&repo_path, get_arg_value(matches, "workspace_name")) {
+      Ok(ws) => ws,
+      Err(e) => {
+        super::log_cli_error(&format!("Error: {}", e));
+        return false;
+      }
+    };
 
   let description_param = match description {
-    Some(i) => core::MaybeEmptyParam::Some(i),
+    Some(value) => match description_param_from_arg(&value, &mut std::io::stdin()) {
+      Ok(param) => param,
+      Err(e) => {
+        super::log_cli_error(&format!("Error: {}", e));
+        return false;
+      }
+    },
     None => core::MaybeEmptyParam::Omitted,
   };
   let title_param = match title {
@@ -277,68 +270,27 @@ pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
   }
 }
 
-/// `treq desc`: print the workspace description, or replace it with `-f`.
-/// The description is the body of the pull request Treq creates for the
-/// workspace, so agents keep it current the way they would a PR description.
-pub(super) fn handle_workspace_desc(matches: &Matches) -> bool {
-  let result = super::resolve_command_repo(matches).and_then(|repo_path| {
-    let workspace =
-      resolve_named_or_cwd_workspace(&repo_path, get_arg_value(matches, "workspace_name"))?;
-    match get_arg_value(matches, "file") {
-      None => {
-        print!("{}", workspace.description.unwrap_or_default());
-        Ok(())
-      }
-      Some(source) => {
-        let text = read_description_input(&source, &mut std::io::stdin())?;
-        let updated = set_workspace_description_for_cli(&repo_path, &workspace, &text)?;
-        println!("Updated description: {}", updated.branch_name);
-        Ok(())
-      }
-    }
-  });
-  match result {
-    Ok(()) => true,
-    Err(e) => {
-      super::log_cli_error(&format!("Error: {}", e));
-      false
-    }
-  }
-}
-
-/// Reads a description from `source`: a file path, or `-` for stdin.
-pub(super) fn read_description_input(
-  source: &str,
+/// Turns a `-d` value into a description update: `-` reads it from stdin,
+/// and blank text clears it. The description is the body of the pull request
+/// Treq creates for the workspace.
+pub(super) fn description_param_from_arg(
+  value: &str,
   stdin: &mut impl std::io::Read,
-) -> Result<String, String> {
-  if source == "-" {
+) -> Result<core::MaybeEmptyParam<String>, String> {
+  let text = if value == "-" {
     let mut text = String::new();
     stdin
       .read_to_string(&mut text)
       .map_err(|e| format!("failed to read stdin: {e}"))?;
-    return Ok(text);
-  }
-  std::fs::read_to_string(source).map_err(|e| format!("failed to read '{source}': {e}"))
-}
-
-/// Replaces the workspace description; blank text clears it.
-pub(super) fn set_workspace_description_for_cli(
-  repo_path: &str,
-  workspace: &local_db::Workspace,
-  text: &str,
-) -> Result<local_db::Workspace, String> {
-  let description = if text.trim().is_empty() {
+    text
+  } else {
+    value.to_string()
+  };
+  Ok(if text.trim().is_empty() {
     core::MaybeEmptyParam::EmptyValue
   } else {
-    core::MaybeEmptyParam::Some(text.to_string())
-  };
-  core::update_workspace_with_title(
-    repo_path,
-    workspace.id,
-    core::MaybeEmptyParam::Omitted,
-    core::MaybeEmptyParam::Omitted,
-    description,
-  )
+    core::MaybeEmptyParam::Some(text)
+  })
 }
 
 fn resolve_named_or_cwd_workspace(

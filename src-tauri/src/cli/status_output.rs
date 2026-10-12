@@ -24,8 +24,15 @@ fn compare_sidebar_recency(
 
 pub(crate) fn format_workspace_metadata_lines(workspace: &Workspace, indent: &str) -> Vec<String> {
   let mut lines = vec![format!("{indent}Title: {}", workspace.title)];
-  if let Some(description) = workspace.description.as_deref() {
-    lines.push(format!("{indent}Description: {description}"));
+  match workspace.description.as_deref() {
+    Some(description) if description.contains('\n') => {
+      lines.push(format!("{indent}Description:"));
+      for line in description.trim_end().lines() {
+        lines.push(format!("{indent}  {line}").trim_end().to_string());
+      }
+    }
+    Some(description) => lines.push(format!("{indent}Description: {description}")),
+    None => {}
   }
   lines
 }
@@ -365,6 +372,28 @@ mod tests {
       vec![
         "  Title: Add authentication",
         "  Description: Support passkeys"
+      ]
+    );
+  }
+
+  #[test]
+  fn formats_a_multiline_description_as_an_indented_block() {
+    let current = workspace(
+      1,
+      "feat/auth",
+      "Add authentication",
+      Some("## Summary\n\n- Support passkeys\n"),
+      Some("main"),
+    );
+
+    assert_eq!(
+      format_workspace_metadata_lines(&current, "  "),
+      vec![
+        "  Title: Add authentication",
+        "  Description:",
+        "    ## Summary",
+        "",
+        "    - Support passkeys",
       ]
     );
   }
