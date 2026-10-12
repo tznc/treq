@@ -179,4 +179,39 @@ describe("ShowWorkspace - View PR", () => {
       await within(header).findByRole("button", { name: /view pr.*draft/i }),
     ).toBeVisible();
   });
+
+  it("names View PR with the closed and merged states", async () => {
+    await setupPushedWorkspaceWithGitHub();
+    vi.mocked(getCachedPrInfo).mockResolvedValue({
+      number: 10,
+      title: "Closed",
+      state: "CLOSED",
+      url: "https://github.com/acme/treq/pull/10",
+      head_ref_name: "feat/create-pr",
+      base_ref_name: "main",
+      merge_state_status: null,
+    });
+    const view = render(<Dashboard />);
+
+    let header = await openWorkspace("feat/create-pr");
+    expect(
+      await within(header).findByRole("button", { name: /view pr.*closed/i }),
+    ).toBeVisible();
+
+    view.unmount();
+    vi.mocked(getCachedPrInfo).mockResolvedValue({
+      number: 11,
+      title: "Merged",
+      state: "MERGED",
+      url: "https://github.com/acme/treq/pull/11",
+      head_ref_name: "feat/create-pr",
+      base_ref_name: "main",
+      merge_state_status: null,
+    });
+    render(<Dashboard />);
+    header = await openWorkspace("feat/create-pr");
+    expect(
+      await within(header).findByRole("button", { name: /view pr.*merged/i }),
+    ).toBeVisible();
+  });
 });
