@@ -50,6 +50,8 @@ Audit the code yourself, or follow the public history of changes. These files ar
 
 ## Learn More
 
+- [Privacy Policy](/privacy)
+- [Terms of Service](/terms)
 - [Under the Hood](/docs/under-the-hood)
 - [GitHub Integration](/docs/concepts/github-integration)
 - [Connecting GitHub](/docs/how-to/connecting-github)

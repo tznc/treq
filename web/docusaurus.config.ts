@@ -314,6 +314,14 @@ const config: Config = {
               label: 'Discussions',
               href: 'https://github.com/tznc/treq/discussions',
             },
+            {
+              label: 'Terms of Service',
+              to: '/terms',
+            },
+            {
+              label: 'Privacy Policy',
+              to: '/privacy',
+            },
           ],
         },
       ],

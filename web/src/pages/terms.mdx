@@ -1,0 +1,140 @@
+---
+title: Terms of Service
+description: The terms that govern Treq accounts, paid plans, and hosted services.
+hide_table_of_contents: true
+wrapperClassName: legal-page
+---
+
+import ContentPageLayout from '@site/src/components/ContentPageLayout';
+
+export const toc = [
+  { id: 'scope', value: 'Scope', level: 2 },
+  { id: 'accounts', value: 'Accounts', level: 2 },
+  { id: 'plans-and-billing', value: 'Plans and Billing', level: 2 },
+  { id: 'organizations-and-team', value: 'Organizations and Team', level: 2 },
+  { id: 'cloud-workspaces', value: 'Cloud Workspaces', level: 2 },
+  { id: 'your-content', value: 'Your Content', level: 2 },
+  { id: 'acceptable-use', value: 'Acceptable Use', level: 2 },
+  { id: 'third-party-services', value: 'Third-Party Services', level: 2 },
+  { id: 'preview-features', value: 'Preview Features', level: 2 },
+  { id: 'suspension-and-termination', value: 'Suspension and Termination', level: 2 },
+  { id: 'disclaimers', value: 'Disclaimers', level: 2 },
+  { id: 'limitation-of-liability', value: 'Limitation of Liability', level: 2 },
+  { id: 'governing-law', value: 'Governing Law', level: 2 },
+  { id: 'changes-to-these-terms', value: 'Changes to These Terms', level: 2 },
+  { id: 'contact', value: 'Contact', level: 2 },
+];
+
+<ContentPageLayout toc={toc} breadcrumbs={[{label: 'Home', href: '/'}, {label: 'Terms of Service'}]}>
+
+# Terms of Service
+
+_Last updated: 12 October 2026_
+
+These terms are an agreement between you and Treq ("Treq", "we", "us"). They apply when you create a Treq account, buy a paid plan, or use a hosted Treq service. By doing any of those, you accept these terms. If you accept them for an organization, you confirm that you can bind that organization.
+
+## Scope
+
+Treq has two parts.
+
+- **The desktop app and CLI** are open source under the [Apache License 2.0](https://github.com/tznc/treq/blob/main/LICENSE). That license governs your use of the software. These terms do not restrict it.
+- **The hosted services** run on Treq's servers: accounts, the Treq GitHub App and its merge queue, Linear OAuth, managed cloud workspaces, mobile access to those workspaces, and the web dashboard. These terms govern the hosted services.
+
+Our [Privacy Policy](/privacy) explains what data the hosted services handle.
+
+## Accounts
+
+- You sign in with Google, GitHub, or an email and password. You keep your credentials secure and are responsible for activity under your account.
+- You give accurate information and keep your email address current. We send billing and security notices to it.
+- You must be at least 16 years old, or the age of digital consent where you live if that is higher.
+- One person per account. Do not share an account between people.
+
+## Plans and Billing
+
+| Plan | Price | What it includes |
+| --- | --- | --- |
+| Free | US$0 | The desktop app and CLI, GitHub through your local `gh` CLI, and Linear through your personal API key. |
+| Pro | US$15 per user per month | The hosted services listed under [Scope](#scope) for one user. |
+| Team | US$199 per month for up to 5 members, plus US$8 per month for each additional member | Pro for every member of one organization. |
+
+- **Payment.** Stripe processes all payments. Plans bill monthly in advance in US dollars until you cancel. Prices exclude taxes, which we add where the law requires.
+- **Pro trial.** A new Pro subscription includes a 14-day free trial. Each customer gets one trial. A card is required to start it. The first charge happens when the trial ends unless you cancel before then. Team has no trial.
+- **Cancellation.** Cancel at any time from the Subscription tab of the [dashboard](/dashboard), which opens the Stripe customer portal. Cancellation takes effect at the end of the current billing period. Paid features stay on until then.
+- **Refunds.** Fees are not refundable, including for partial months, except where the law requires otherwise.
+- **Failed payments.** If a payment fails, Stripe retries it and your paid features stay on while it does. If the retries fail, the subscription ends and the paid features stop.
+- **Price changes.** We give at least 30 days' notice by email before a price change takes effect on an existing subscription. The new price applies from your next billing period after the notice ends. You can cancel before then.
+
+## Organizations and Team
+
+- The person who creates an organization becomes its owner. Owners buy Team, invite and remove members, and manage billing.
+- Team bills one seat per member. Adding or removing a member changes the seat count, and Stripe prorates the difference on the next invoice. Pending invites are not billed.
+- A member's Pro access through Team ends as soon as they leave or are removed. A member's own Pro subscription is separate and is unaffected.
+- An organization owns the GitHub App installations attached to it. Deleting an organization detaches them.
+- Deleting an account or an organization does not cancel its Stripe subscription. Cancel it in the customer portal first.
+
+## Cloud Workspaces
+
+- A managed cloud workspace is a virtual machine that Treq provisions for you on our infrastructure provider. You control what runs on it.
+- When your paid plan ends, the workspace stops and cannot be woken. We keep its disk for 30 days, then delete it. Resubscribing within 30 days restores access.
+- We apply resource limits to cloud workspaces. We tell you about a limit when you reach it.
+- Back up anything you need. Cloud workspaces are not a backup service.
+
+## Your Content
+
+- Your code, repositories, issues, and files stay yours.
+- You give Treq permission to host, copy, transmit, and process your content only as needed to run the hosted services for you. For example, the merge queue reads pull request state to merge it, and a cloud workspace stores your checkout on its disk.
+- We do not use your content to train machine learning models.
+- You confirm you have the rights to the content you put into the hosted services.
+
+## Acceptable Use
+
+You must not use the hosted services to:
+
+- break the law or infringe anyone's rights;
+- mine cryptocurrency, send spam, or run denial-of-service, scanning, or other attacks;
+- host malware, phishing pages, or content that exploits children;
+- access other users' data, or probe, bypass, or overload Treq's security, rate limits, or entitlement checks;
+- resell or share access to the hosted services outside your plan.
+
+Testing the security of the open-source code on your own machine is welcome. Report vulnerabilities in the hosted services through [GitHub Security Advisories](https://github.com/tznc/treq/security/advisories/new).
+
+## Third-Party Services
+
+The hosted services connect to GitHub, Linear, and AI coding agents that you choose. Their own terms govern your use of them. You are responsible for the actions you or your agents take through those connections, such as merging a pull request or editing an issue. We are not responsible for third-party services.
+
+## Preview Features
+
+Features labeled preview, alpha, or beta are incomplete. They can change or be removed without notice and may lose data. Do not rely on them for critical work.
+
+## Suspension and Termination
+
+- You can stop using Treq at any time. To delete your account, email us at the address under [Contact](#contact).
+- We can suspend or close an account that breaks these terms, puts other users or the service at risk, or is required to be closed by law. Where we can, we tell you first and give you a chance to fix the problem and export your data.
+- If we discontinue a paid hosted service, we give at least 30 days' notice and refund any prepaid fees for the period after it stops.
+
+## Disclaimers
+
+The hosted services are provided "as is" and "as available". To the extent the law allows, we disclaim all warranties, including merchantability, fitness for a particular purpose, and non-infringement. We do not promise the services will be uninterrupted or error-free.
+
+## Limitation of Liability
+
+To the extent the law allows:
+
+- Treq is not liable for indirect, incidental, special, consequential, or punitive damages, or for lost profits, revenue, or data.
+- Treq's total liability for any claim about the hosted services is limited to the fees you paid Treq in the 12 months before the claim, or US$100 if that is greater.
+
+Nothing in these terms limits liability that the law does not allow to be limited.
+
+## Governing Law
+
+The laws of Singapore govern these terms. The courts of Singapore have exclusive jurisdiction over any dispute about them, unless the law where you live gives you the right to bring a claim in your local courts.
+
+## Changes to These Terms
+
+We can update these terms. For a material change, we email account holders at least 30 days before it takes effect. The date at the top of this page shows the latest version. If you keep using the hosted services after a change takes effect, you accept the new terms.
+
+## Contact
+
+Email [legal@treq.dev](mailto:legal@treq.dev) about these terms.
+
+</ContentPageLayout>
