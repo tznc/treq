@@ -16,9 +16,16 @@ import { LogFeed, type PrefixColumn } from "./LogFeed";
 import { LogsTimeseriesChart } from "./LogsTimeseriesChart";
 import { buildLogLinesPrompt } from "../lib/logs-prompt";
 import { agentChatToLogRecords } from "../lib/agentChatLogs";
+import {
+  type ChecksTarget,
+  useWorkspaceChecks,
+} from "../hooks/useWorkspaceChecks";
+import { WorkspaceChecksPanel } from "./checks/WorkspaceChecksPanel";
 
 interface Props {
   repoPath: string;
+  /** Workspace whose workflow checks are listed above the check logs. */
+  checksTarget?: ChecksTarget | null;
   onSendToAgent?: (prompt: string) => void;
 }
 
@@ -26,7 +33,7 @@ type View = "browse" | "explorer";
 type SourceGroup = "checks" | "agent-chats" | "app-setup";
 
 /** Repo-level check and agent logs, plus app-level setup script logs. */
-export function LogsTab({ repoPath, onSendToAgent }: Props) {
+export function LogsTab({ repoPath, checksTarget, onSendToAgent }: Props) {
   const [source, setSource] = useState<SourceGroup>("checks");
   const [view, setView] = useState<View>("browse");
   const browsing = source === "checks" && view === "browse";
@@ -86,30 +93,42 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
           prefixColumns={[RUN_COLUMN]}
         />
       ) : browsing ? (
-        <FilteredLogs
-          swrKey={["repo-logs", repoPath]}
-          fetchLogs={(filters) => getRepoLogs(repoPath, filters)}
-          fetchBuckets={(filters) =>
-            getLogTimeseries(repoPath, { ...filters, bucketSeconds: 1 })
-          }
-          searchLabel="Search logs"
-          testId="repo-logs-output"
-          lineTestId="repo-log-line"
-          emptyMessage="No check logs recorded yet. Run a workflow check from the Checks tab of any workspace to populate this table."
-          promptLabel="my check logs"
-          onSendToAgent={onSendToAgent}
-          prefixColumns={[
-            RUN_COLUMN,
-            {
-              header: "Job",
-              className: "w-[10ch] text-blue-600 dark:text-blue-400",
-              render: (record) => record.job_id,
-            },
-          ]}
-        />
+        <>
+          {checksTarget && <ChecksSection target={checksTarget} />}
+          <FilteredLogs
+            swrKey={["repo-logs", repoPath]}
+            fetchLogs={(filters) => getRepoLogs(repoPath, filters)}
+            fetchBuckets={(filters) =>
+              getLogTimeseries(repoPath, { ...filters, bucketSeconds: 1 })
+            }
+            searchLabel="Search logs"
+            testId="repo-logs-output"
+            lineTestId="repo-log-line"
+            emptyMessage="No check logs recorded yet. Run a workflow check from a workspace to populate this table."
+            promptLabel="my check logs"
+            onSendToAgent={onSendToAgent}
+            prefixColumns={[
+              RUN_COLUMN,
+              {
+                header: "Job",
+                className: "w-[10ch] text-blue-600 dark:text-blue-400",
+                render: (record) => record.job_id,
+              },
+            ]}
+          />
+        </>
       ) : (
         <LogsSqlExplorer repoPath={repoPath} onSendToAgent={onSendToAgent} />
       )}
+    </div>
+  );
+}
+
+function ChecksSection({ target }: { target: ChecksTarget }) {
+  const checks = useWorkspaceChecks(target);
+  return (
+    <div className="max-h-[50%] shrink-0 overflow-auto border-b">
+      <WorkspaceChecksPanel target={target} checks={checks} />
     </div>
   );
 }

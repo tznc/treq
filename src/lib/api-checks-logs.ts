@@ -2,9 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentChat,
   AgentChatSummary,
+  JobResult,
   LogBucket,
   LogRecordView,
+  RunSummary,
+  SetupScriptStatus,
   SqlResult,
+  WorkflowInfo,
 } from "./api-types";
 import { assertLocalOperation } from "./repository-adapter";
 import { invalidateQueries, setQueryData } from "./swr-cache";
@@ -12,6 +16,91 @@ import { invalidateQueries, setQueryData } from "./swr-cache";
 // Checks / logs API
 
 const CHECKS_AND_LOGS = "Checks and logs";
+
+export const listWorkflows = async (
+  repoPath: string,
+): Promise<WorkflowInfo[]> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("list_workflows", { repoPath });
+};
+
+export const runWorkflowJob = async (
+  repoPath: string,
+  filename: string,
+  jobId: string,
+  workspaceId: number,
+  workspacePath: string,
+): Promise<JobResult> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("run_workflow_job", {
+    repoPath,
+    filename,
+    jobId,
+    workspaceId,
+    workspacePath,
+  });
+};
+
+export const runWorkflow = async (
+  repoPath: string,
+  filename: string,
+  workspaceId: number,
+  workspacePath: string,
+): Promise<JobResult[]> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("run_workflow", {
+    repoPath,
+    filename,
+    workspaceId,
+    workspacePath,
+  });
+};
+
+export const isRepoTrusted = async (repoPath: string): Promise<boolean> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("is_repo_trusted", { repoPath });
+};
+
+export const trustRepo = async (repoPath: string): Promise<void> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("trust_repo", { repoPath });
+};
+
+export const listWorkflowRuns = async (
+  repoPath: string,
+  workspaceId: number,
+  filename: string,
+  limit?: number,
+): Promise<RunSummary[]> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("list_workflow_runs", {
+    repoPath,
+    workspaceId,
+    filename,
+    limit: limit ?? null,
+  });
+};
+
+export const getWorkspaceSetupStatus = async (
+  repoPath: string,
+  workspaceId: number,
+): Promise<SetupScriptStatus> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("get_workspace_setup_status", { repoPath, workspaceId });
+};
+
+export const rerunWorkspaceSetupScript = async (
+  repoPath: string,
+  workspaceId: number,
+  workspacePath: string,
+): Promise<JobResult> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("rerun_workspace_setup_script", {
+    repoPath,
+    workspaceId,
+    workspacePath,
+  });
+};
 
 export const getRepoLogs = async (
   repoPath: string,

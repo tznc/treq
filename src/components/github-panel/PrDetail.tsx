@@ -29,6 +29,7 @@ import {
   openOrCreateWorkspaceFromPr,
 } from "../../lib/api";
 import { MarkdownContent } from "../MarkdownContent";
+import { PrWorkspaceChecks } from "./PrWorkspaceChecks";
 import { compareCiChecksBySeverity } from "../../lib/ci-status";
 import {
   CheckEntryRow,
@@ -269,6 +270,13 @@ export function PrDetailPanel({
                   ))}
               </div>
             </div>
+          )}
+
+          {existingWorkspace && (
+            <PrWorkspaceChecks
+              workspace={existingWorkspace}
+              onOpenWorkspace={onOpenWorkspace}
+            />
           )}
 
           {pr.body && (

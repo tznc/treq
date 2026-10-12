@@ -118,6 +118,12 @@ import {
 import { ViewPrButton } from "./ViewPrButton";
 import { WorkspaceStackPanel } from "./WorkspaceStackPanel";
 import { MergeQueueButton } from "./workspace-header/MergeQueueButton";
+import { WorkspaceChecksButton } from "./workspace-header/WorkspaceChecksButton";
+import { checksTargetOf } from "../hooks/useWorkspaceChecks";
+import {
+  clearOpenWorkspaceLogsRequest,
+  useOpenLogsRequest,
+} from "../lib/open-logs-request";
 import {
   type WorkspaceTrackerMetadata,
   WorkspaceTrackerBadges,
@@ -227,6 +233,7 @@ export const ShowWorkspace = ({
 
   const { addToast } = useToast();
   const logsEnabled = usePreviewFeature("logs");
+  const checksTarget = checksTargetOf(workspace);
   const { fontSize } = useTerminalSettingsStore();
 
   const { data: remoteInfo } = useGitRemoteInfo(effectiveRepoPath || undefined);
@@ -298,6 +305,14 @@ export const ShowWorkspace = ({
     setActiveTab("overview");
     setChangedFiles(new Map());
   }, [workspace?.id]);
+
+  // Runs after the reset above, so a Logs request for this workspace wins.
+  const openLogsFor = useOpenLogsRequest((state) => state.workspaceId);
+  useEffect(() => {
+    if (openLogsFor === null || openLogsFor !== workspace?.id) return;
+    clearOpenWorkspaceLogsRequest();
+    if (logsEnabled) setActiveTab("logs");
+  }, [openLogsFor, workspace?.id, logsEnabled]);
 
   // After a child refresh (e.g. post-commit), re-check if workspace now has commits
   const handleRefreshingChange = (r: boolean) => {
@@ -1402,6 +1417,7 @@ export const ShowWorkspace = ({
         ) : activeTab === "logs" ? (
           <LogsTab
             repoPath={effectiveRepoPath ?? ""}
+            checksTarget={checksTarget}
             onSendToAgent={handleSendLogsToAgent}
           />
         ) : reviewSubView.showBrowser ? (
@@ -1717,6 +1733,14 @@ export const ShowWorkspace = ({
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
+              )}
+              {checksTarget && (
+                <WorkspaceChecksButton
+                  target={checksTarget}
+                  onOpenLogs={
+                    logsEnabled ? () => setActiveTab("logs") : undefined
+                  }
+                />
               )}
               {/* Merge queue button (build flag + repo opt-in) */}
               {workspace &&

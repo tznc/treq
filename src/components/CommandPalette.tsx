@@ -8,6 +8,7 @@ import { CmdkFooter } from "./ui/cmdk-footer";
 import { Workspace } from "../lib/api";
 import { getFullWorkspacePath } from "../lib/utils";
 import { usePrInfoViaGh } from "../hooks/useMergeQueueStatus";
+import { useChecksCommands } from "./checks/useChecksCommands";
 import {
   AppWindow,
   ChevronsUpDown,
@@ -116,6 +117,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     repoPath || undefined,
     currentWorkspace?.branch_name,
   );
+
+  const checksCommands = useChecksCommands(currentWorkspace);
 
   // Build command items
   const items: CommandItem[] = (() => {
@@ -292,6 +295,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         });
       }
     }
+
+    result.push(...checksCommands);
 
     if (currentWorkspace && workspacePrInfo) {
       result.push({

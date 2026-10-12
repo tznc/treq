@@ -14,6 +14,7 @@ Treq organizes work around workspaces inside your Git repository. Each workspace
 - [Commit Management](/docs/concepts/commit-management) covers full and file-level commits.
 - [Changes and Reviews](/docs/concepts/changes-and-reviews) describes workspace diffs, local comments, and agent handoff.
 - [GitHub Integration](/docs/concepts/github-integration) covers pull requests, CI checks, and review threads.
+- [Workspace Checks](/docs/concepts/checks) covers check workflows, trust, run history, and where to run them.
 - [Linear Integration](/docs/concepts/linear-integration) covers Linear issues and creating workspaces from them.
 - [Agent Sessions](/docs/concepts/agent-sessions) covers supported agents, task modes, and workspace isolation.
 - [Logs](/docs/concepts/logs) covers check, agent chat, and app setup logs, and the SQL explorer.
