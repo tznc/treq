@@ -158,11 +158,9 @@ describe("GitHubPanel issue pagination", () => {
     await user.click(screen.getByRole("button", { name: /load more/i }));
 
     expect(await screen.findByText("Issue 1")).toBeVisible();
-    expect(api.ghListIssues.mock.calls.map((call) => call[3] ?? null)).toEqual([
-      null,
-      "cursor-1",
-      "cursor-2",
-    ]);
+    for (const n of [2, 3, 4, 5]) {
+      expect(screen.getByText(`Issue ${n}`)).toBeVisible();
+    }
     expect(
       screen.queryByRole("button", { name: /load more/i }),
     ).not.toBeInTheDocument();

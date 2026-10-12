@@ -65,7 +65,9 @@ describe("FileBrowser polling", () => {
       await Promise.resolve();
     });
 
-    expect(api.readFile).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId("code-line")[0]).toHaveTextContent(
+      "const value = 1;",
+    );
     expect(screen.getByPlaceholderText("Add a comment...")).toHaveValue(
       "keep this draft",
     );
@@ -102,7 +104,9 @@ describe("FileBrowser polling", () => {
     await user.click(fileEntry);
 
     await waitFor(() => {
-      expect(vi.mocked(api.readFile).mock.calls.length).toBeGreaterThan(1);
+      expect(screen.getAllByTestId("code-line")[0]).toHaveTextContent(
+        "const value = 2;",
+      );
     });
     expect(await screen.findByPlaceholderText("Add a comment...")).toHaveValue(
       "keep this draft",
