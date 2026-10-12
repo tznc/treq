@@ -36,7 +36,7 @@ jobs:
     # The soak waits up to six hours for a Sprite to go cold.
     timeout-minutes: ${{ github.event.inputs.soak == 'true' && 420 || 90 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Skip when dedicated credentials are absent
         id: gate
         env:
