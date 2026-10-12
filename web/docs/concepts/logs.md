@@ -14,7 +14,7 @@ The **Log source** menu at the top of the tab picks what to show.
 
 | Source | What it shows |
 | --- | --- |
-| Checks | Output from workflow checks run in any workspace of the repository, with run number and job. |
+| Checks | Output from workflow checks run in any workspace of the repository, with run number and job. With a workspace open, the workflows and their Run buttons sit above the log browser. See [Workspace Checks](/docs/concepts/checks). |
 | Agent | The recorded conversation of one agent terminal. Pick the terminal from the **Agent terminal** menu. Shell terminals are not recorded. |
 | App setup | Output from the app setup script set in Application settings, with run number. |
 
