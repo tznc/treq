@@ -1,12 +1,11 @@
-// @include-parallel
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { act, fireEvent, render, screen, waitFor } from "../test-utils";
-import * as api from "../../src/lib/api";
-import { FileBrowser } from "../../src/components/FileBrowser";
+import { act, fireEvent, render, screen, waitFor } from "../../test/test-utils";
+import * as api from "../lib/api";
+import { FileBrowser } from "./FileBrowser";
 
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
   return {
     ...actual,
     ensureWorkspaceIndexed: vi.fn().mockResolvedValue(undefined),
@@ -103,7 +102,7 @@ describe("FileBrowser polling", () => {
     await user.click(fileEntry);
 
     await waitFor(() => {
-      expect(api.readFile.mock.calls.length).toBeGreaterThan(1);
+      expect(vi.mocked(api.readFile).mock.calls.length).toBeGreaterThan(1);
     });
     expect(await screen.findByPlaceholderText("Add a comment...")).toHaveValue(
       "keep this draft",

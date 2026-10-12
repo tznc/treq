@@ -1,9 +1,7 @@
-// @include-parallel
 import userEvent from "@testing-library/user-event";
-import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PrDetailPanel } from "../../src/components/github-panel/PrDetail";
-import { render, screen, waitFor } from "../test-utils";
+import { PrDetailPanel } from "./PrDetail";
+import { render, screen, waitFor } from "../../../test/test-utils";
 
 const api = vi.hoisted(() => ({
   ghViewPr: vi.fn(),
@@ -15,12 +13,12 @@ const api = vi.hoisted(() => ({
   ghCreatePrComment: vi.fn(),
 }));
 
-vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
+vi.mock("../../hooks/useMergeQueueStatus", () => ({
   usePrChecksForPr: () => ({ data: null, isLoading: false }),
 }));
 
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/api")>();
   return {
     ...original,
     ghViewPr: api.ghViewPr,
