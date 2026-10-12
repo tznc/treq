@@ -1,13 +1,15 @@
 //! Adding a self-managed SSH host, with explicit host-key trust.
 //!
 //! Treq pins the host key by its SHA256 fingerprint and rejects the host if
-//! the key ever changes, so the user confirms the fingerprint once here.
+//! the key ever changes. The user never types the fingerprint: Continue reads
+//! the key the host presents and asks the user to confirm it once.
 
+use gpui_kit::component::Disableable as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     v_flex, ActiveTheme, IconName, Sizable,
   },
   *,
@@ -36,10 +38,11 @@ pub struct AddHostScreen {
   hostname: Entity<InputState>,
   port: Entity<InputState>,
   username: Entity<InputState>,
-  fingerprint: Entity<InputState>,
   identity: Entity<InputState>,
   /// The endpoint awaiting trust confirmation.
   pending: Option<UserManagedEndpoint>,
+  /// Reading the host key the host presents.
+  probing: bool,
   error: Option<String>,
   public_key: load::Load<String>,
   scroll: ScrollHandle,
@@ -58,14 +61,26 @@ impl AddHostScreen {
         state
       })
     };
+    let hostname = input("Hostname or IP", "", window, cx);
+    let username = input("Username", "", window, cx);
+    let identity = input("Identity", DEFAULT_IDENTITY, window, cx);
+    // Re-render on edits so Continue enables as soon as the form is complete.
+    for field in [&hostname, &username, &identity] {
+      cx.subscribe(field, |_, _, event: &InputEvent, cx| {
+        if let InputEvent::Change = event {
+          cx.notify();
+        }
+      })
+      .detach();
+    }
     Self {
       name: input("Name (e.g. Workstation)", "", window, cx),
-      hostname: input("Hostname or IP", "", window, cx),
+      hostname,
       port: input("Port", "22", window, cx),
-      username: input("Username", "", window, cx),
-      fingerprint: input("Host key fingerprint (SHA256:...)", "", window, cx),
-      identity: input("Identity", DEFAULT_IDENTITY, window, cx),
+      username,
+      identity,
       pending: None,
+      probing: false,
       error: None,
       public_key: load::Load::Idle,
       scroll: ScrollHandle::new(),
@@ -76,10 +91,50 @@ impl AddHostScreen {
     input.read(cx).value().trim().to_string()
   }
 
+  /// Whether Continue is enabled: a host, a user and a key are filled in.
+  fn complete(&self, cx: &App) -> bool {
+    [&self.hostname, &self.username, &self.identity]
+      .iter()
+      .all(|input| !Self::value(input, cx).is_empty())
+  }
+
+  /// Reads the host's key and asks the user to confirm it.
+  fn probe(&mut self, cx: &mut Context<Self>) {
+    let endpoint = match self.validate(cx) {
+      Ok(endpoint) => endpoint,
+      Err(error) => {
+        self.error = Some(error);
+        return cx.notify();
+      }
+    };
+    self.error = None;
+    self.probing = true;
+    let (hostname, port) = (endpoint.hostname.clone(), endpoint.port);
+    load::run(
+      cx,
+      async move {
+        treq_lib::core::remote_ssh_host_key_probe::probe_host_key_fingerprint(&hostname, port).await
+      },
+      move |this, result, _| {
+        this.probing = false;
+        match result {
+          Ok(fingerprint) => {
+            this.pending = Some(UserManagedEndpoint {
+              host_key_fingerprint: fingerprint,
+              ..endpoint
+            })
+          }
+          Err(error) => this.error = Some(error),
+        }
+      },
+    );
+    cx.notify();
+  }
+
+  /// The endpoint the form describes, without its host key yet.
   fn validate(&self, cx: &App) -> Result<UserManagedEndpoint, String> {
     let hostname = Self::value(&self.hostname, cx);
     let username = Self::value(&self.username, cx);
-    let fingerprint = Self::value(&self.fingerprint, cx);
     let identity = Self::value(&self.identity, cx);
     let port = Self::value(&self.port, cx);
     if hostname.is_empty() {
@@ -92,11 +147,6 @@ impl AddHostScreen {
       .ok_or("The port must be a number from 1 to 65535.")?;
     if username.is_empty() {
       return Err("Enter the username.".into());
-    }
-    if !fingerprint.starts_with("SHA256:") || fingerprint.len() <= "SHA256:".len() {
-      return Err(
-        "The fingerprint must look like SHA256:… (ssh-keyscan host | ssh-keygen -lf -).".into(),
-      );
     }
     if identity.is_empty() {
       return Err("Enter the identity to authenticate with.".into());
@@ -113,7 +163,7 @@ impl AddHostScreen {
       hostname,
       port,
       username,
-      host_key_fingerprint: fingerprint,
+      host_key_fingerprint: String::new(),
       auth_identity_reference: identity,
       alias: None,
       created_at: now.to_rfc3339(),
@@ -180,7 +230,6 @@ impl Render for AddHostScreen {
       .child(field("Hostname", &self.hostname))
       .child(field("Port", &self.port))
       .child(field("Username", &self.username))
-      .child(field("Host key fingerprint", &self.fingerprint))
       .child(field("Identity", &self.identity))
       .children(self.error.clone().map(|e| widgets::error_text(e, cx)));
 
@@ -191,16 +240,9 @@ impl Render for AddHostScreen {
                     .large()
                     .w_full()
                     .label("Continue")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        match this.validate(cx) {
-                            Ok(endpoint) => {
-                                this.error = None;
-                                this.pending = Some(endpoint);
-                            }
-                            Err(error) => this.error = Some(error),
-                        }
-                        cx.notify();
-                    })),
+                    .loading(self.probing)
+                    .disabled(self.probing || !self.complete(cx))
+                    .on_click(cx.listener(|this, _, _, cx| this.probe(cx))),
             ),
             Some(endpoint) => widgets::card(cx)
                 .p_4()
@@ -209,7 +251,7 @@ impl Render for AddHostScreen {
                 .child(div().font_weight(FontWeight::SEMIBOLD).child("Confirm host trust"))
                 .child(widgets::muted(
                     format!(
-                        "You are about to trust {}@{}:{} with host key fingerprint {}. Treq will reject this host if the key ever changes, unless you confirm a new fingerprint yourself.",
+                        "You are about to trust {}@{}:{} with host key fingerprint {}. Treq will reject this host if the key ever changes. Compare it with ssh-keygen -lf on the host before trusting it.",
                         endpoint.username, endpoint.hostname, endpoint.port, endpoint.host_key_fingerprint
                     ),
                     cx,
