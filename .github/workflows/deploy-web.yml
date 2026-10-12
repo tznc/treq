@@ -31,11 +31,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
+  actions: read
   contents: read
   pull-requests: write
 
 jobs:
+  # Production builds only. PR previews reuse main's latest screenshots (see
+  # the build job), which saves the NAPI build and capture on every PR.
   landing-screenshots:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -184,12 +188,25 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}
         run: uv run .github/scripts/check_readability.py
+      - name: Find main's latest landing screenshots
+        id: main-shots
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The nightly run keeps a fresh artifact on main (3-day retention).
+        run: |
+          run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow deploy-web.yml \
+            --branch main --status success --limit 1 --json databaseId -q '.[0].databaseId')
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
       - name: Download landing screenshots
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: landing-screenshots
           path: /tmp/landing-screenshots
+          run-id: ${{ steps.main-shots.outputs.run-id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Build docs
         env:
           DOCUSAURUS_ENABLE_GTAG: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
