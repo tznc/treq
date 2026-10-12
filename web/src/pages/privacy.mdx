@@ -1,0 +1,116 @@
+---
+title: Privacy Policy
+description: What data Treq's hosted services collect, why, who processes it, and how long it is kept.
+hide_table_of_contents: true
+wrapperClassName: legal-page
+---
+
+import ContentPageLayout from '@site/src/components/ContentPageLayout';
+
+export const toc = [
+  { id: 'summary', value: 'Summary', level: 2 },
+  { id: 'the-desktop-app', value: 'The Desktop App', level: 2 },
+  { id: 'data-we-collect', value: 'Data We Collect', level: 2 },
+  { id: 'how-we-use-data', value: 'How We Use Data', level: 2 },
+  { id: 'service-providers', value: 'Service Providers', level: 2 },
+  { id: 'retention', value: 'Retention', level: 2 },
+  { id: 'your-rights', value: 'Your Rights', level: 2 },
+  { id: 'security', value: 'Security', level: 2 },
+  { id: 'changes-to-this-policy', value: 'Changes to This Policy', level: 2 },
+  { id: 'contact', value: 'Contact', level: 2 },
+];
+
+<ContentPageLayout toc={toc} breadcrumbs={[{label: 'Home', href: '/'}, {label: 'Privacy Policy'}]}>
+
+# Privacy Policy
+
+_Last updated: 12 October 2026_
+
+This policy explains what personal data Treq ("Treq", "we", "us") handles when you use treq.dev, a Treq account, or a hosted Treq service. The [Terms of Service](/terms) define the hosted services.
+
+## Summary
+
+- The desktop app keeps your code and data on your machine and sends no telemetry.
+- An account stores your email, name, and avatar. Paid plans add billing records. Stripe holds your card details. We never see them.
+- Hosted features only touch the GitHub, Linear, and workspace data they need to work.
+- We do not sell personal data, show ads, or train models on your content.
+
+## The Desktop App
+
+The desktop app and CLI run locally. Repositories, workspaces, review comments, terminal sessions, and settings stay on your computer. The app sends no feature usage, crash reports, or performance metrics. Git and Linear traffic goes directly from your machine to those hosts.
+
+The app contacts Treq's servers only after you sign in, and only to check your plan or use a hosted feature. [Security and Privacy](/docs/security-and-privacy) has the technical details.
+
+## Data We Collect
+
+| Data | When | Source |
+| --- | --- | --- |
+| **Account:** email, name, avatar URL, sign-in provider | You create an account | You, or Google or GitHub when you sign in with them |
+| **Billing:** Stripe customer ID, plan, subscription status, trial and renewal dates | You start a trial or buy a plan | Stripe |
+| **Organizations:** organization name, members and roles, invitee emails, invite times | You create or join an organization | You and your organization's owners |
+| **GitHub App:** installation ID, account or organization name, repository names, pull request numbers, titles, and status for queued pull requests | You install the Treq GitHub App or use the merge queue | GitHub |
+| **Linear:** OAuth access token, and the issue data requested through the proxy | You connect Linear with OAuth | Linear |
+| **Cloud workspaces:** files, repositories, and processes on the workspace, device public keys, SSH certificates, connection logs | You use a managed cloud workspace or mobile access | You and your devices |
+| **Website analytics:** pages visited, referrer, browser, approximate location from an anonymized IP | You visit treq.dev | Google Analytics |
+| **Support:** what you send us | You email us or open a GitHub issue or discussion | You |
+
+Linear tokens are readable only by Treq's server functions, never by the app or other users. Device private keys for cloud workspaces never leave your device.
+
+## How We Use Data
+
+- **Run the hosted services.** Sign you in, decide which features your plan includes, merge queued pull requests, proxy Linear requests, and provision and connect cloud workspaces.
+- **Bill you.** Create checkout sessions, keep subscription state in sync with Stripe, and send receipts through Stripe.
+- **Keep the service secure.** Detect abuse, enforce resource limits, and investigate incidents.
+- **Communicate.** Send account, billing, security, and policy notices. We send product news only if you opt in.
+- **Improve Treq.** Count aggregate usage, such as signups and active subscriptions. These counts contain no personal data.
+
+Where the GDPR or a similar law applies, our legal bases are performing our contract with you, our legitimate interest in running and securing the service, legal obligations such as tax records, and your consent for website analytics.
+
+## Service Providers
+
+These providers process personal data for us under their own data protection terms.
+
+| Provider | Purpose |
+| --- | --- |
+| Supabase, on AWS in Singapore | Database, authentication, and server functions |
+| Stripe | Payments, invoices, tax, and the customer portal |
+| Fly.io | Managed cloud workspace hosting |
+| Cloudflare | Hosting for treq.dev |
+| Google | Sign in with Google, and website analytics |
+| GitHub | Sign in with GitHub, the Treq GitHub App, and source hosting |
+| Linear | Linear OAuth |
+
+We disclose personal data to others only when the law requires it, to protect people's safety or Treq's rights, or as part of a merger or sale of Treq. In a sale, this policy keeps applying to data collected under it.
+
+## Retention
+
+| Data | Kept until |
+| --- | --- |
+| Account and organization data | You delete the account or organization |
+| Cloud workspace disk | 7 days after your paid plan ends, or when you delete the workspace |
+| Pending organization invites | 7 days after they are sent |
+| Billing records | As long as tax and accounting law requires, typically 5 to 7 years |
+| Cloud workspace audit and connection logs | 1 to 7 days, depending on your plan |
+| Website analytics | Google Analytics' configured retention period |
+
+## Your Rights
+
+You can ask us to access, correct, export, or delete your personal data, or object to how we use it. Email the address under [Contact](#contact). We reply within 30 days. Depending on where you live, you can also complain to your data protection authority.
+
+- Manage billing details and download invoices in the customer portal, from the Subscription tab of the [dashboard](/dashboard).
+- Uninstall the Treq GitHub App in your GitHub settings, and revoke Treq's Linear access in your Linear settings.
+- Block website analytics with your browser's tracking protection or an ad blocker. treq.dev works without it.
+
+## Security
+
+We encrypt data in transit with TLS and at rest. Report a vulnerability through [GitHub Security Advisories](https://github.com/tznc/treq/security/advisories/new).
+
+## Changes to This Policy
+
+For a material change, we email account holders at least 30 days before it takes effect. The date at the top of this page shows the latest version.
+
+## Contact
+
+Email [privacy@treq.dev](mailto:privacy@treq.dev) about this policy or your data.
+
+</ContentPageLayout>

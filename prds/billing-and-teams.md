@@ -16,7 +16,7 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 ## Non-goals
 
 - Usage-based billing, add-ons, or more than two paid plans.
-- Per-seat billing for Team. Team is a flat price.
+- A member cap on Team. Team covers 5 members in its base price and bills each extra member as a seat.
 - Invoicing outside Stripe, purchase orders, or annual plans.
 - Billing inside the desktop or mobile app. Purchases happen on treq.dev.
 
