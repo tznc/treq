@@ -9,6 +9,9 @@
 export const REMOTE_MERGE_REASON =
   "Merging a remote workspace is not available yet. Push the branch and merge it from your hosting provider instead.";
 
+export const REMOTE_FILE_TREE_REASON =
+  "Browsing the file tree is not available for remote repositories yet. Use Go to file to open a file.";
+
 export interface ActionCapability {
   supported: boolean;
   reason?: string;

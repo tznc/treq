@@ -8,16 +8,19 @@ import {
   getWorkspaceDiff,
   getWorkspaceFileHunks,
   jjGetCommitsAhead,
+  jjRestoreAll,
   jjRestoreFile,
+  jjRestoreSnapshot,
+  jjSnapshotWorkingCopy,
   jjSplit,
-  loadFileBrowserReview,
   mergeWorkspace,
   moveWorkspaceChanges,
   readFile,
   renameWorkspace,
-  saveFileBrowserReview,
   searchWorkspaceFiles,
   setWorkspaceTargetBranch,
+  undoRepoOperation,
+  switchRepoBranch,
 } from "./api";
 import {
   localActiveRepository,
@@ -31,6 +34,7 @@ import {
   type TreqCommandRequest,
 } from "./remote-dispatch";
 import { transportCreateCommit } from "./repository-adapter";
+import { repoStateScope } from "./repo-state-scope";
 import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
 import { remoteActionKeys } from "./remote-idempotency";
 import { transportResolveCommit } from "./repository-adapter-mutations";
@@ -164,11 +168,13 @@ describe("remote repository reads", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("keeps a remote file-browser review draft off the local database", async () => {
-    await saveFileBrowserReview(ROOT, 7, [], "summary");
-    const saved = await loadFileBrowserReview(ROOT, 7);
-    expect(saved?.summary_text).toBe("summary");
-    expect(invoke).not.toHaveBeenCalled();
+  it("keys remote review state by descriptor, never by the remote path", () => {
+    const scope = "treq-remote-state:ssh:endpoint-1:gen1:/srv/project";
+    expect(repoStateScope(ROOT)).toBe(scope);
+    expect(repoStateScope(WORKSPACE_DIR)).toBe(
+      `${scope}/.treq/workspaces/feat-a`,
+    );
+    expect(repoStateScope("/home/me/project")).toBe("/home/me/project");
   });
 });
 
@@ -336,6 +342,66 @@ describe("remote repository mutations", () => {
         workspace: "7",
         target_branch: "feat-b",
       },
+    ]);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("never invents a snapshot id when the VM returns no value", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "already_applied",
+    });
+    // The id is the undo handle `jjRestoreSnapshot` takes.
+    await expect(jjSnapshotWorkingCopy(WORKSPACE_DIR)).rejects.toThrow(
+      /ambiguous/,
+    );
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "applied",
+      value: "0a1b",
+    });
+    await expect(jjSnapshotWorkingCopy(WORKSPACE_DIR)).resolves.toBe("0a1b");
+  });
+
+  it("reports an already-applied discard as success", async () => {
+    vi.mocked(dispatchMutationOverSsh).mockResolvedValueOnce({
+      status: "already_applied",
+    });
+    await expect(jjRestoreAll(ROOT)).resolves.toMatch(/Already applied/);
+  });
+
+  it("snapshots, discards, and restores a remote working copy", async () => {
+    await jjSnapshotWorkingCopy(WORKSPACE_DIR);
+    await jjRestoreAll(ROOT);
+    await jjRestoreSnapshot(WORKSPACE_DIR, "0a1b");
+    expect(sentMutations()).toEqual([
+      { kind: "SnapshotWorkingCopy", repo: ROOT, workspace: "7" },
+      { kind: "RestoreAll", repo: ROOT, workspace: null },
+      {
+        kind: "RestoreSnapshot",
+        repo: ROOT,
+        workspace: "7",
+        snapshot_id: "0a1b",
+      },
+    ]);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("undoes a remote operation through the typed command", async () => {
+    await undoRepoOperation(ROOT, 7, "0a1b");
+    expect(sentMutations()).toEqual([
+      {
+        kind: "UndoOperation",
+        repo: ROOT,
+        workspace: "7",
+        operation_id: "0a1b",
+      },
+    ]);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("switches the remote repository branch through the typed command", async () => {
+    await switchRepoBranch(ROOT, "feat-b");
+    expect(sentMutations()).toEqual([
+      { kind: "SwitchRepoBranch", repo: ROOT, bookmark: "feat-b" },
     ]);
     expect(invoke).not.toHaveBeenCalled();
   });

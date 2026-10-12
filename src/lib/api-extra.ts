@@ -21,27 +21,34 @@ import type {
 import type { ConflictCommentRecord } from "./api-types-review";
 import {
   assertLocalOperation,
-  remoteRepositoryContaining,
   transportReadFile,
   transportSearchWorkspaceFiles,
 } from "./repository-adapter";
+import { repoStateScope } from "./repo-state-scope";
 import {
   transportAbandonCommit,
   transportDescribeCommit,
   transportGetCommitDescription,
   transportMoveCommit,
   transportResolveCommit,
+  transportUndoOperation,
+  transportUndoCommit,
+  transportRevertCommit,
+  transportStashWorkspaceChanges,
 } from "./repository-adapter-mutations";
+import { localRepoPathOrNull } from "./local-only";
 import { currentWindowLabel } from "./window-label";
 
 export * from "./api-pr-status";
 
-export const setGitSubmoduleSynced = (
+export const setGitSubmoduleSynced = async (
   repoPath: string,
   path: string,
   enabled: boolean,
-): Promise<void> =>
-  invoke("set_git_submodule_synced", { repoPath, path, enabled });
+): Promise<void> => {
+  assertLocalOperation(repoPath, "Syncing a git submodule");
+  return invoke("set_git_submodule_synced", { repoPath, path, enabled });
+};
 
 export const startResolveConflicts = async (
   repoPath: string,
@@ -252,16 +259,18 @@ export const remotePtyReattach = (
 export const readFile = (path: string): Promise<string> =>
   transportReadFile(path, () => invoke("read_file", { path }));
 
-export const writeSendReviewImage = (
+export const writeSendReviewImage = async (
   repoPath: string,
   suggestedName: string,
   contentsBase64: string,
-): Promise<string> =>
-  invoke("write_send_review_image", {
+): Promise<string> => {
+  assertLocalOperation(repoPath, "Sending review images");
+  return invoke("write_send_review_image", {
     repoPath,
     suggestedName,
     contentsBase64,
   });
+};
 
 export const writeAgentCliFiles = (
   prompt: string,
@@ -284,11 +293,21 @@ export const writeAgentCliFiles = (
 export const cleanupAgentCliFiles = (paths: string[]): Promise<void> =>
   invoke("cleanup_agent_cli_files", { paths });
 
-export const getFileModifiedAt = (path: string): Promise<string | null> =>
-  invoke("get_file_modified_at", { path });
+const FILE_TREE = "Browsing the file tree";
 
-export const listDirectory = (path: string): Promise<DirectoryEntry[]> =>
-  invoke("list_directory", { path });
+export const getFileModifiedAt = async (
+  path: string,
+): Promise<string | null> => {
+  assertLocalOperation(path, FILE_TREE);
+  return invoke("get_file_modified_at", { path });
+};
+
+export const listDirectory = async (
+  path: string,
+): Promise<DirectoryEntry[]> => {
+  assertLocalOperation(path, FILE_TREE);
+  return invoke("list_directory", { path });
+};
 
 export interface DirectoryBatchResult {
   path: string;
@@ -296,25 +315,31 @@ export interface DirectoryBatchResult {
   error?: string;
 }
 
-export const listDirectoriesBatch = (
+export const listDirectoriesBatch = async (
   paths: string[],
-): Promise<DirectoryBatchResult[]> =>
-  invoke("list_directories_batch", { paths });
+): Promise<DirectoryBatchResult[]> => {
+  for (const path of paths) assertLocalOperation(path, FILE_TREE);
+  return invoke("list_directories_batch", { paths });
+};
 
-export const lsWorkspaceWithStatus = (
+export const lsWorkspaceWithStatus = async (
   repoPath: string,
   workspaceId: number | null,
-): Promise<DirectoryEntry[]> =>
-  invoke("ls_workspace_with_status", { repoPath, workspaceId });
+): Promise<DirectoryEntry[]> => {
+  assertLocalOperation(repoPath, FILE_TREE);
+  return invoke("ls_workspace_with_status", { repoPath, workspaceId });
+};
 
 // Kept as the typed frontend counterpart of the registered Tauri command.
 // eslint-disable-next-line local/no-unused-exported-ts-functions, local/require-tauri-api-exports-used
-export const listDirectoryCached = (
+export const listDirectoryCached = async (
   repoPath: string,
   workspaceId: number | null,
   parentPath: string,
-): Promise<CachedDirectoryEntry[]> =>
-  invoke("list_directory_cached", { repoPath, workspaceId, parentPath });
+): Promise<CachedDirectoryEntry[]> => {
+  assertLocalOperation(repoPath, FILE_TREE);
+  return invoke("list_directory_cached", { repoPath, workspaceId, parentPath });
+};
 
 export const searchWorkspaceFiles = (
   repoPath: string,
@@ -344,7 +369,12 @@ export const createSession = (
   repoPath: string,
   workspaceId: number | null,
   name: string,
-): Promise<number> => invoke("create_session", { repoPath, workspaceId, name });
+): Promise<number> =>
+  invoke("create_session", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+    name,
+  });
 
 export type AgentDispatchAcknowledgmentStatus = "accepted" | "rejected";
 
@@ -359,17 +389,19 @@ export const acknowledgeAgentDispatch = (
     reason: reason ?? null,
   });
 export const getSessions = (repoPath: string): Promise<Session[]> =>
-  invoke("get_sessions", { repoPath });
+  invoke("get_sessions", { repoPath: repoStateScope(repoPath) });
 
 export const updateSessionAccess = (
   repoPath: string,
   id: number,
-): Promise<void> => invoke("update_session_access", { repoPath, id });
+): Promise<void> =>
+  invoke("update_session_access", { repoPath: repoStateScope(repoPath), id });
 
 export const getSessionModel = (
   repoPath: string,
   id: number,
-): Promise<string | null> => invoke("get_session_model", { repoPath, id });
+): Promise<string | null> =>
+  invoke("get_session_model", { repoPath: repoStateScope(repoPath), id });
 
 // Prompt history API
 export const addPromptHistory = (
@@ -380,7 +412,7 @@ export const addPromptHistory = (
   agent?: string | null,
 ): Promise<number> =>
   invoke("add_prompt_history", {
-    repoPath,
+    repoPath: repoStateScope(repoPath),
     workspaceId,
     sessionId,
     promptText,
@@ -389,61 +421,95 @@ export const addPromptHistory = (
 
 export const getPromptHistory = (
   repoPath: string,
-): Promise<PromptHistoryEntry[]> => invoke("get_prompt_history", { repoPath });
+): Promise<PromptHistoryEntry[]> =>
+  invoke("get_prompt_history", { repoPath: repoStateScope(repoPath) });
 
 export const getWorkspaceStartingPrompt = (
   repoPath: string,
   workspaceId: number,
 ): Promise<PromptHistoryEntry | null> =>
-  invoke("get_workspace_starting_prompt", { repoPath, workspaceId });
+  invoke("get_workspace_starting_prompt", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  });
 
 // Stash API — immutable local gist storage for working-copy change sets
+const STASH = "Stashing";
+
 export const stashWorkspaceChanges = (
   repoPath: string,
   workspaceId: number | null,
 ): Promise<StashEntry> =>
-  invoke("stash_workspace_changes", { repoPath, workspaceId });
+  transportStashWorkspaceChanges(repoPath, workspaceId, () =>
+    invoke("stash_workspace_changes", { repoPath, workspaceId }),
+  );
 
-export const stashCommit = (
+export const stashCommit = async (
   repoPath: string,
   workspaceId: number | null,
   changeId: string,
-): Promise<StashEntry> =>
-  invoke("stash_commit", { repoPath, workspaceId, changeId });
+): Promise<StashEntry> => {
+  assertLocalOperation(repoPath, STASH);
+  return invoke("stash_commit", { repoPath, workspaceId, changeId });
+};
 
-export const listStashes = (repoPath: string): Promise<StashEntry[]> =>
-  invoke("list_stashes", { repoPath });
+export const listStashes = async (repoPath: string): Promise<StashEntry[]> => {
+  assertLocalOperation(repoPath, STASH);
+  return invoke("list_stashes", { repoPath });
+};
 
-export const deleteStash = (repoPath: string, stashId: number): Promise<void> =>
-  invoke("delete_stash", { repoPath, stashId });
+export const deleteStash = async (
+  repoPath: string,
+  stashId: number,
+): Promise<void> => {
+  assertLocalOperation(repoPath, STASH);
+  return invoke("delete_stash", { repoPath, stashId });
+};
 
-export const applyStash = (
+export const applyStash = async (
   repoPath: string,
   stashId: number,
   targetBranch: string,
-): Promise<void> => invoke("apply_stash", { repoPath, stashId, targetBranch });
+): Promise<void> => {
+  assertLocalOperation(repoPath, STASH);
+  return invoke("apply_stash", { repoPath, stashId, targetBranch });
+};
 
-export const getStashDiff = (
+export const getStashDiff = async (
   repoPath: string,
   stashId: number,
-): Promise<JjRevisionDiff> => invoke("get_stash_diff", { repoPath, stashId });
+): Promise<JjRevisionDiff> => {
+  assertLocalOperation(repoPath, STASH);
+  return invoke("get_stash_diff", { repoPath, stashId });
+};
 
-export const exportStashGitPatch = (
+export const exportStashGitPatch = async (
   repoPath: string,
   stashId: number,
-): Promise<string> => invoke("export_stash_git_patch", { repoPath, stashId });
+): Promise<string> => {
+  assertLocalOperation(repoPath, STASH);
+  return invoke("export_stash_git_patch", { repoPath, stashId });
+};
 
 export const markFileViewed = (
   workspacePath: string,
   filePath: string,
   contentHash: string,
 ): Promise<void> =>
-  invoke("mark_file_viewed", { workspacePath, filePath, contentHash });
+  invoke("mark_file_viewed", {
+    workspacePath: repoStateScope(workspacePath),
+    filePath,
+    contentHash,
+  });
 
 export const unmarkFileViewed = (
   workspacePath: string,
   filePath: string,
-): Promise<void> => invoke("unmark_file_viewed", { workspacePath, filePath });
+): Promise<void> =>
+  invoke("unmark_file_viewed", {
+    workspacePath: repoStateScope(workspacePath),
+    filePath,
+  });
 
 // Diff cache API (in-memory stub implementation)
 const diffCache = new Map<string, { data: string; timestamp: number }>();
@@ -463,7 +529,10 @@ export const loadPendingReview = (
   repoPath: string,
   workspaceId: number,
 ): Promise<PendingReview | null> =>
-  invoke("load_pending_review", { repoPath, workspaceId }).then((review) => {
+  invoke("load_pending_review", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  }).then((review) => {
     if (!review) return null;
     const normalized = { ...review } as PendingReview & {
       comments: unknown;
@@ -492,7 +561,7 @@ export const savePendingReview = (
   conflictComments?: ConflictCommentRecord[],
 ): Promise<number> =>
   invoke("save_pending_review", {
-    repoPath,
+    repoPath: repoStateScope(repoPath),
     workspaceId,
     comments: JSON.stringify(comments),
     viewedFiles: viewedFiles ? JSON.stringify(viewedFiles) : null,
@@ -506,79 +575,51 @@ export const savePendingReview = (
 export const clearPendingReview = (
   repoPath: string,
   workspaceId: number,
-): Promise<void> => invoke("clear_pending_review", { repoPath, workspaceId });
-
-// The file browser's draft review lives in the repository's `.treq/local.db`.
-// No typed command exposes that table on a remote host, so a remote draft is
-// kept in memory for this session instead of writing a local database for a
-// path that only exists remotely.
-const remoteFileBrowserReviews = new Map<string, FileBrowserPendingReview>();
-
-function remoteReviewKey(repoPath: string, workspaceId: number): string | null {
-  return remoteRepositoryContaining(repoPath)
-    ? JSON.stringify([repoPath, workspaceId])
-    : null;
-}
+): Promise<void> =>
+  invoke("clear_pending_review", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  });
 
 export const loadFileBrowserReview = async (
   repoPath: string,
   workspaceId: number,
-): Promise<FileBrowserPendingReview | null> => {
-  const remoteKey = remoteReviewKey(repoPath, workspaceId);
-  if (remoteKey) return remoteFileBrowserReviews.get(remoteKey) ?? null;
-  return invoke("load_file_browser_review", { repoPath, workspaceId }).then(
-    (review) => {
-      if (!review) return null;
-      const normalized = { ...review } as FileBrowserPendingReview & {
-        comments: unknown;
-      };
-      if (typeof normalized.comments === "string") {
-        normalized.comments = JSON.parse(normalized.comments);
-      }
-      return normalized as FileBrowserPendingReview;
-    },
-  );
-};
+): Promise<FileBrowserPendingReview | null> =>
+  invoke("load_file_browser_review", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  }).then((review) => {
+    if (!review) return null;
+    const normalized = { ...review } as FileBrowserPendingReview & {
+      comments: unknown;
+    };
+    if (typeof normalized.comments === "string") {
+      normalized.comments = JSON.parse(normalized.comments);
+    }
+    return normalized as FileBrowserPendingReview;
+  });
 
 export const saveFileBrowserReview = async (
   repoPath: string,
   workspaceId: number,
   comments: LineComment[],
   summaryText?: string,
-): Promise<number> => {
-  const remoteKey = remoteReviewKey(repoPath, workspaceId);
-  if (remoteKey) {
-    const now = new Date().toISOString();
-    const previous = remoteFileBrowserReviews.get(remoteKey);
-    remoteFileBrowserReviews.set(remoteKey, {
-      id: previous?.id ?? remoteFileBrowserReviews.size + 1,
-      workspace_id: workspaceId,
-      comments,
-      summary_text: summaryText ?? null,
-      created_at: previous?.created_at ?? now,
-      updated_at: now,
-    });
-    return remoteFileBrowserReviews.get(remoteKey)!.id;
-  }
-  return invoke("save_file_browser_review", {
-    repoPath,
+): Promise<number> =>
+  invoke("save_file_browser_review", {
+    repoPath: repoStateScope(repoPath),
     workspaceId,
     comments: JSON.stringify(comments),
     summaryText: summaryText ?? null,
   });
-};
 
 export const clearFileBrowserReview = async (
   repoPath: string,
   workspaceId: number,
-): Promise<void> => {
-  const remoteKey = remoteReviewKey(repoPath, workspaceId);
-  if (remoteKey) {
-    remoteFileBrowserReviews.delete(remoteKey);
-    return;
-  }
-  return invoke("clear_file_browser_review", { repoPath, workspaceId });
-};
+): Promise<void> =>
+  invoke("clear_file_browser_review", {
+    repoPath: repoStateScope(repoPath),
+    workspaceId,
+  });
 
 // File Watcher API
 export const startFileWatcher = (
@@ -625,52 +666,40 @@ export const abandonCommit = (
     }),
   );
 
-export const undoRepoOperation = async (
+export const undoRepoOperation = (
   repoPath: string,
   workspaceId: number | null,
   operationId: string,
-): Promise<string> => {
-  assertLocalOperation(repoPath, "Undoing an operation");
-  return invoke("undo_repo_operation", {
-    repoPath,
-    workspaceId,
-    operationId,
-  });
-};
+): Promise<string> =>
+  transportUndoOperation(repoPath, workspaceId, operationId, () =>
+    invoke("undo_repo_operation", { repoPath, workspaceId, operationId }),
+  );
 
 /**
  * Undo the latest commit in a workspace's own lineage (not the working copy,
  * not a commit on the target branch). Must be undone sequentially from the tip.
  */
-export const undoCommit = async (
+export const undoCommit = (
   repoPath: string,
   workspaceId: number,
   commitChangeId: string,
-): Promise<void> => {
-  assertLocalOperation(repoPath, "Undoing a commit");
-  return invoke("undo_commit", {
-    repoPath,
-    workspaceId,
-    commitChangeId,
-  });
-};
+): Promise<void> =>
+  transportUndoCommit({ repoPath, workspaceId, commitChangeId }, () =>
+    invoke("undo_commit", { repoPath, workspaceId, commitChangeId }),
+  );
 
 /**
  * Revert a commit by creating a new commit that reverses its changes on top
  * of the workspace's current tip. Can target any commit except the working copy.
  */
-export const revertCommit = async (
+export const revertCommit = (
   repoPath: string,
   workspaceId: number,
   commitChangeId: string,
-): Promise<void> => {
-  assertLocalOperation(repoPath, "Reverting a commit");
-  return invoke("revert_commit", {
-    repoPath,
-    workspaceId,
-    commitChangeId,
-  });
-};
+): Promise<void> =>
+  transportRevertCommit({ repoPath, workspaceId, commitChangeId }, () =>
+    invoke("revert_commit", { repoPath, workspaceId, commitChangeId }),
+  );
 
 export const getCommitDescription = (
   repoPath: string,
@@ -880,7 +909,7 @@ export const listSkillCatalog = (
   catalogUrl?: string | null,
 ): Promise<SkillCatalogView> =>
   invoke("list_skill_catalog", {
-    repoPath: repoPath ?? null,
+    repoPath: localRepoPathOrNull(repoPath),
     catalogUrl: catalogUrl ?? null,
   });
 

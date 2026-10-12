@@ -5,6 +5,7 @@ import type {
   GhReviewThread,
 } from "./api-types";
 import { invoke } from "@tauri-apps/api/core";
+import { assertLocalOperation } from "./repository-adapter";
 
 export const GH_LIST_PAGE_SIZE = 30;
 
@@ -24,18 +25,20 @@ export const ghViewIssue = (
 ): Promise<GhIssue> => invoke("gh_view_issue", { repoFullName, issueNumber });
 
 /** Opens (or creates) the `github-<number>-<slug>` workspace for an issue. */
-export const githubOpenOrCreateWorkspaceFromIssue = (
+export const githubOpenOrCreateWorkspaceFromIssue = async (
   repoPath: string,
   number: number,
   title: string,
   url: string,
-): Promise<{ workspace_id: number; created: boolean }> =>
-  invoke("github_open_or_create_workspace_from_issue", {
+): Promise<{ workspace_id: number; created: boolean }> => {
+  assertLocalOperation(repoPath, "Opening a GitHub issue");
+  return invoke("github_open_or_create_workspace_from_issue", {
     repoPath,
     number,
     title,
     url,
   });
+};
 
 export const ghCreateIssue = (
   repoFullName: string,

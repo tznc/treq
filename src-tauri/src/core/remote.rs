@@ -230,6 +230,12 @@ pub enum TreqCommandRequest {
     repo: String,
     workspace: String,
   },
+  /// Forgets the workspace and removes its directory but keeps its record,
+  /// like the local `archive_workspace` command.
+  ArchiveWorkspace {
+    repo: String,
+    workspace: String,
+  },
   MoveWorkspaceChanges {
     repo: String,
     workspace: String,
@@ -247,6 +253,12 @@ pub enum TreqCommandRequest {
     target_branch: String,
     idempotency_key: String,
   },
+  /// Moves the repository's own working copy onto `bookmark`. Switching to
+  /// the current branch again is a no-op, so it takes no idempotency key.
+  SwitchRepoBranch {
+    repo: String,
+    bookmark: String,
+  },
   // -- Phase 5: file mutations -------------------------------------------------
   RestoreFile {
     repo: String,
@@ -258,6 +270,29 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     path: String,
     patch_base64: String,
+    idempotency_key: String,
+  },
+  /// Records the working copy so a later discard can be undone. Returns the
+  /// snapshot id `RestoreSnapshot` takes.
+  SnapshotWorkingCopy {
+    repo: String,
+    workspace: Option<String>,
+  },
+  RestoreAll {
+    repo: String,
+    workspace: Option<String>,
+  },
+  /// Undoes a discard by restoring the working copy to a snapshot.
+  RestoreSnapshot {
+    repo: String,
+    workspace: Option<String>,
+    snapshot_id: String,
+  },
+  /// Moves the working copy's changes into a new stash entry, stored in the
+  /// repository's own `.treq/local.db` like the local command's.
+  StashWorkspaceChanges {
+    repo: String,
+    workspace: Option<String>,
     idempotency_key: String,
   },
   // -- Phase 5: commit mutations ------------------------------------------------
@@ -304,7 +339,28 @@ pub enum TreqCommandRequest {
     target_workspace: String,
     idempotency_key: String,
   },
+  /// Abandons the workspace's tip commit, like the local `undo_commit`.
+  UndoCommit {
+    repo: String,
+    workspace: String,
+    commit: String,
+  },
   AbandonCommit {
+    repo: String,
+    workspace: String,
+    commit: String,
+    idempotency_key: String,
+  },
+  /// Undoes `operation_id` (e.g. the id an abandon returned). The operation
+  /// must still be the head, so a repeat fails instead of undoing twice.
+  UndoOperation {
+    repo: String,
+    workspace: Option<String>,
+    operation_id: String,
+  },
+  /// Adds a commit reversing `commit` on top of the workspace's tip. A
+  /// repeat would add a second revert, so it needs an idempotency key.
+  RevertCommit {
     repo: String,
     workspace: String,
     commit: String,
@@ -321,10 +377,22 @@ pub enum TreqCommandRequest {
   GitFetch {
     repo: String,
   },
+  /// Fetches and rebases a workspace onto its remote branch, like the local
+  /// `pull_workspace_from_remote` command. Without a workspace it only
+  /// fetches. Pulling again is a no-op, so it takes no idempotency key.
+  PullWorkspace {
+    repo: String,
+    workspace: Option<String>,
+  },
   GitBookmarkTrack {
     repo: String,
     bookmark: String,
     remote_name: String,
+  },
+  /// GitHub owner/name parsed from the repository's origin remote, the same
+  /// read the local `get_git_remote_url` command does. `null` when absent.
+  GitRemoteInfo {
+    repo: String,
   },
   GitPush {
     repo: String,
@@ -437,6 +505,7 @@ impl TreqCommandRequest {
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
       | Self::ProbeRepo { .. }
+      | Self::GitRemoteInfo { .. }
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
@@ -450,17 +519,27 @@ impl TreqCommandRequest {
       | Self::RenameWorkspace { .. }
       | Self::UpdateWorkspace { .. }
       | Self::DeleteWorkspace { .. }
+      | Self::ArchiveWorkspace { .. }
       | Self::MoveWorkspaceChanges { .. }
       | Self::RebaseWorkspace { .. }
+      | Self::SwitchRepoBranch { .. }
       | Self::RestoreFile { .. }
       | Self::PatchFile { .. }
+      | Self::SnapshotWorkingCopy { .. }
+      | Self::RestoreAll { .. }
+      | Self::RestoreSnapshot { .. }
+      | Self::StashWorkspaceChanges { .. }
       | Self::CreateCommit { .. }
       | Self::DescribeCommit { .. }
       | Self::SplitCommit { .. }
       | Self::MoveCommit { .. }
+      | Self::UndoCommit { .. }
       | Self::AbandonCommit { .. }
+      | Self::UndoOperation { .. }
+      | Self::RevertCommit { .. }
       | Self::ResolveConflict { .. }
       | Self::GitFetch { .. }
+      | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitPush { .. }
       | Self::AgentStart { .. }
@@ -484,10 +563,12 @@ impl TreqCommandRequest {
       | Self::MoveWorkspaceChanges { .. }
       | Self::RebaseWorkspace { .. }
       | Self::PatchFile { .. }
+      | Self::StashWorkspaceChanges { .. }
       | Self::CreateCommit { .. }
       | Self::SplitCommit { .. }
       | Self::MoveCommit { .. }
       | Self::AbandonCommit { .. }
+      | Self::RevertCommit { .. }
       | Self::ResolveConflict { .. }
       | Self::GitPush { .. }
       | Self::AgentStart { .. }
@@ -512,10 +593,19 @@ impl TreqCommandRequest {
       | Self::ProbeRepo { .. }
       | Self::UpdateWorkspace { .. }
       | Self::DeleteWorkspace { .. }
+      | Self::ArchiveWorkspace { .. }
+      | Self::SwitchRepoBranch { .. }
       | Self::RestoreFile { .. }
+      | Self::SnapshotWorkingCopy { .. }
+      | Self::RestoreAll { .. }
+      | Self::RestoreSnapshot { .. }
       | Self::DescribeCommit { .. }
+      | Self::UndoOperation { .. }
+      | Self::UndoCommit { .. }
       | Self::GitFetch { .. }
+      | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
+      | Self::GitRemoteInfo { .. }
       | Self::AgentStatus { .. }
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
@@ -550,18 +640,29 @@ impl TreqCommandRequest {
       Self::RenameWorkspace { .. } => "RenameWorkspace",
       Self::UpdateWorkspace { .. } => "UpdateWorkspace",
       Self::DeleteWorkspace { .. } => "DeleteWorkspace",
+      Self::ArchiveWorkspace { .. } => "ArchiveWorkspace",
       Self::MoveWorkspaceChanges { .. } => "MoveWorkspaceChanges",
       Self::RebaseWorkspace { .. } => "RebaseWorkspace",
+      Self::SwitchRepoBranch { .. } => "SwitchRepoBranch",
       Self::RestoreFile { .. } => "RestoreFile",
       Self::PatchFile { .. } => "PatchFile",
+      Self::SnapshotWorkingCopy { .. } => "SnapshotWorkingCopy",
+      Self::RestoreAll { .. } => "RestoreAll",
+      Self::RestoreSnapshot { .. } => "RestoreSnapshot",
+      Self::StashWorkspaceChanges { .. } => "StashWorkspaceChanges",
       Self::CreateCommit { .. } => "CreateCommit",
       Self::DescribeCommit { .. } => "DescribeCommit",
       Self::SplitCommit { .. } => "SplitCommit",
       Self::MoveCommit { .. } => "MoveCommit",
+      Self::UndoCommit { .. } => "UndoCommit",
       Self::AbandonCommit { .. } => "AbandonCommit",
+      Self::UndoOperation { .. } => "UndoOperation",
+      Self::RevertCommit { .. } => "RevertCommit",
       Self::ResolveConflict { .. } => "ResolveConflict",
       Self::GitFetch { .. } => "GitFetch",
+      Self::PullWorkspace { .. } => "PullWorkspace",
       Self::GitBookmarkTrack { .. } => "GitBookmarkTrack",
+      Self::GitRemoteInfo { .. } => "GitRemoteInfo",
       Self::GitPush { .. } => "GitPush",
       Self::AgentStart { .. } => "AgentStart",
       Self::AgentInput { .. } => "AgentInput",
@@ -597,18 +698,29 @@ impl TreqCommandRequest {
     "RenameWorkspace",
     "UpdateWorkspace",
     "DeleteWorkspace",
+    "ArchiveWorkspace",
     "MoveWorkspaceChanges",
     "RebaseWorkspace",
+    "SwitchRepoBranch",
     "RestoreFile",
     "PatchFile",
+    "SnapshotWorkingCopy",
+    "RestoreAll",
+    "RestoreSnapshot",
+    "StashWorkspaceChanges",
     "CreateCommit",
     "DescribeCommit",
     "SplitCommit",
     "MoveCommit",
+    "UndoCommit",
     "AbandonCommit",
+    "UndoOperation",
+    "RevertCommit",
     "ResolveConflict",
     "GitFetch",
+    "PullWorkspace",
     "GitBookmarkTrack",
+    "GitRemoteInfo",
     "GitPush",
     "AgentStart",
     "AgentInput",
@@ -696,7 +808,9 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         }),
       })
     }
-    TreqCommandRequest::DeleteWorkspace { repo, workspace } => {
+    // Archived workspaces drop out of `ListWorkspaces` just like deleted ones.
+    TreqCommandRequest::DeleteWorkspace { repo, workspace }
+    | TreqCommandRequest::ArchiveWorkspace { repo, workspace } => {
       let workspace = workspace.clone();
       Some(MutationVerification {
         read_request: TreqCommandRequest::ListWorkspaces { repo: repo.clone() },
@@ -742,6 +856,19 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         }),
       })
     }
+    TreqCommandRequest::SwitchRepoBranch { repo, bookmark } => {
+      let bookmark = bookmark.clone();
+      Some(MutationVerification {
+        read_request: TreqCommandRequest::InspectRepository { repo: repo.clone() },
+        check: Box::new(move |value| match value.get("current_branch") {
+          Some(serde_json::Value::String(current)) if *current == bookmark => {
+            MutationVerificationOutcome::AlreadyApplied
+          }
+          Some(_) => MutationVerificationOutcome::NotApplied,
+          None => MutationVerificationOutcome::Ambiguous,
+        }),
+      })
+    }
     // Matching on the message alone is not enough: repeated messages such as
     // "wip" would make an older commit look like this one. Without the
     // pre-commit working-copy change id there is no precise check, so the
@@ -763,11 +890,17 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         check: Box::new(move |value| check_create_commit(value, &base_change_id, &message)),
       })
     }
+    // Undoing a commit abandons it too: its change id leaves the log.
     TreqCommandRequest::AbandonCommit {
       repo,
       workspace,
       commit,
       ..
+    }
+    | TreqCommandRequest::UndoCommit {
+      repo,
+      workspace,
+      commit,
     } => {
       let commit = commit.clone();
       Some(MutationVerification {
@@ -801,6 +934,20 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         check: Box::new(move |value| check_resolve_conflict(value, &revision)),
       })
     }
+    // Discarding everything leaves no changed files to list. A nonempty
+    // working copy does not prove the discard never ran: an agent or another
+    // client may have written new edits after it landed, and RestoreAll has
+    // no idempotency key, so rerunning it would discard those edits.
+    TreqCommandRequest::RestoreAll { repo, workspace } => Some(MutationVerification {
+      read_request: TreqCommandRequest::ListChanges {
+        repo: repo.clone(),
+        workspace: workspace.clone(),
+      },
+      check: Box::new(|value| match value.as_array() {
+        Some(items) if items.is_empty() => MutationVerificationOutcome::AlreadyApplied,
+        _ => MutationVerificationOutcome::Ambiguous,
+      }),
+    }),
     TreqCommandRequest::GitBookmarkTrack { repo, bookmark, .. } => {
       let bookmark = bookmark.clone();
       Some(MutationVerification {
@@ -1294,6 +1441,10 @@ impl TreqCommandRequest {
         fields.workspace = Some(workspace);
         ("workspace", "delete", repo)
       }
+      Self::ArchiveWorkspace { repo, workspace } => {
+        fields.workspace = Some(workspace);
+        ("workspace", "archive", repo)
+      }
       Self::MoveWorkspaceChanges {
         repo,
         workspace,
@@ -1325,6 +1476,10 @@ impl TreqCommandRequest {
         fields.target = Some(target_branch);
         fields.idempotency_key = Some(idempotency_key);
         ("workspace", "rebase", repo)
+      }
+      Self::SwitchRepoBranch { repo, bookmark } => {
+        fields.value = Some(bookmark.clone());
+        ("repo", "switch-branch", repo)
       }
       Self::ListChanges { repo, workspace } => {
         fields.workspace = workspace.as_deref();
@@ -1408,6 +1563,32 @@ impl TreqCommandRequest {
         fields.idempotency_key = Some(idempotency_key);
         ("file", "patch", repo)
       }
+      Self::SnapshotWorkingCopy { repo, workspace } => {
+        fields.workspace = workspace.as_deref();
+        ("workspace", "snapshot", repo)
+      }
+      Self::RestoreAll { repo, workspace } => {
+        fields.workspace = workspace.as_deref();
+        ("workspace", "restore-all", repo)
+      }
+      Self::RestoreSnapshot {
+        repo,
+        workspace,
+        snapshot_id,
+      } => {
+        fields.workspace = workspace.as_deref();
+        fields.target = Some(snapshot_id);
+        ("workspace", "restore-snapshot", repo)
+      }
+      Self::StashWorkspaceChanges {
+        repo,
+        workspace,
+        idempotency_key,
+      } => {
+        fields.workspace = workspace.as_deref();
+        fields.idempotency_key = Some(idempotency_key);
+        ("workspace", "stash", repo)
+      }
       Self::ListCommits { repo, workspace } => {
         fields.workspace = workspace.as_deref();
         ("commits", "list", repo)
@@ -1475,6 +1656,15 @@ impl TreqCommandRequest {
         fields.idempotency_key = Some(idempotency_key);
         ("commits", "move", repo)
       }
+      Self::UndoCommit {
+        repo,
+        workspace,
+        commit,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(commit);
+        ("commits", "undo", repo)
+      }
       Self::AbandonCommit {
         repo,
         workspace,
@@ -1485,6 +1675,26 @@ impl TreqCommandRequest {
         fields.target = Some(commit);
         fields.idempotency_key = Some(idempotency_key);
         ("commits", "abandon", repo)
+      }
+      Self::UndoOperation {
+        repo,
+        workspace,
+        operation_id,
+      } => {
+        fields.workspace = workspace.as_deref();
+        fields.target = Some(operation_id);
+        ("commits", "undo-operation", repo)
+      }
+      Self::RevertCommit {
+        repo,
+        workspace,
+        commit,
+        idempotency_key,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(commit);
+        fields.idempotency_key = Some(idempotency_key);
+        ("commits", "revert", repo)
       }
       Self::ListConflicts { repo, workspace } => {
         fields.workspace = workspace.as_deref();
@@ -1506,6 +1716,11 @@ impl TreqCommandRequest {
         ("conflicts", "resolve", repo)
       }
       Self::GitFetch { repo } => ("git", "fetch", repo),
+      Self::PullWorkspace { repo, workspace } => {
+        fields.workspace = workspace.as_deref();
+        ("git", "pull", repo)
+      }
+      Self::GitRemoteInfo { repo } => ("git", "remote-info", repo),
       Self::GitBookmarkTrack {
         repo,
         bookmark,
@@ -2067,6 +2282,10 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
       json(crate::core::workspaces::delete_workspace(&repo, &id))
     }
+    TreqCommandRequest::ArchiveWorkspace { repo, workspace } => {
+      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      json(crate::core::workspaces::archive_workspace(&repo, &id))
+    }
     TreqCommandRequest::MoveWorkspaceChanges {
       repo,
       workspace,
@@ -2123,6 +2342,9 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
+    TreqCommandRequest::SwitchRepoBranch { repo, bookmark } => {
+      json(crate::core::repo::switch_repo_branch(&repo, &bookmark))
+    }
     TreqCommandRequest::RestoreFile {
       repo,
       workspace,
@@ -2134,6 +2356,23 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         &path,
       ))
     }
+    TreqCommandRequest::SnapshotWorkingCopy { repo, workspace } => {
+      json(crate::core::snapshot_working_copy(&resolve_workspace_path(
+        &repo,
+        workspace_id(workspace.as_ref())?,
+      )?))
+    }
+    TreqCommandRequest::RestoreAll { repo, workspace } => json(crate::core::discard_all_changes(
+      &resolve_workspace_path(&repo, workspace_id(workspace.as_ref())?)?,
+    )),
+    TreqCommandRequest::RestoreSnapshot {
+      repo,
+      workspace,
+      snapshot_id,
+    } => json(crate::core::restore_working_copy_snapshot(
+      &resolve_workspace_path(&repo, workspace_id(workspace.as_ref())?)?,
+      &snapshot_id,
+    )),
     TreqCommandRequest::PatchFile {
       repo,
       workspace,
@@ -2151,6 +2390,22 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
           workspace_id(workspace.as_ref())?,
           &path,
           &patch_base64,
+        ))
+      },
+    ),
+    TreqCommandRequest::StashWorkspaceChanges {
+      repo,
+      workspace,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "stash.workspace",
+      Some(idempotency_key.as_str()),
+      request_snapshot.as_ref().expect("stash is a mutation"),
+      || {
+        json(crate::core::stash::stash_workspace_changes(
+          &repo,
+          workspace_id(workspace.as_ref())?,
         ))
       },
     ),
@@ -2262,6 +2517,14 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
+    TreqCommandRequest::UndoCommit {
+      repo,
+      workspace,
+      commit,
+    } => {
+      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
+      json(crate::core::commits::undo_commit(&repo, id, &commit))
+    }
     TreqCommandRequest::AbandonCommit {
       repo,
       workspace,
@@ -2278,6 +2541,33 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         let id =
           workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
         json(crate::core::commits::abandon_commit(&repo, id, &commit))
+      },
+    ),
+    TreqCommandRequest::UndoOperation {
+      repo,
+      workspace,
+      operation_id,
+    } => json(crate::core::commits::undo_repo_operation(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      &operation_id,
+    )),
+    TreqCommandRequest::RevertCommit {
+      repo,
+      workspace,
+      commit,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "commit.revert",
+      Some(idempotency_key.as_str()),
+      request_snapshot
+        .as_ref()
+        .expect("RevertCommit is a mutation"),
+      || {
+        let id =
+          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
+        json(crate::core::commits::revert_commit(&repo, id, &commit))
       },
     ),
     TreqCommandRequest::ResolveConflict {
@@ -2304,6 +2594,19 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
+    // The desktop conflict-marker setting lives in the client's app
+    // database, which the VM does not have, so pulls use the default style.
+    TreqCommandRequest::PullWorkspace { repo, workspace } => {
+      json(crate::core::workspaces::pull_workspace_from_remote(
+        &repo,
+        workspace_id(workspace.as_ref())?,
+        crate::core::DEFAULT_CONFLICT_MARKER_STYLE,
+      ))
+    }
+    TreqCommandRequest::GitRemoteInfo { repo } => {
+      require_existing_repo(&repo)?;
+      json(crate::github::get_git_remote_url_impl(&repo))
+    }
     TreqCommandRequest::GitFetch { repo } => {
       json(crate::jj::jj_git_fetch(&repo).map_err(|error| format!("jj_command_failed: {error}")))
     }
@@ -3948,6 +4251,44 @@ mod tests {
   }
 
   #[test]
+  fn archive_workspace_verification_treats_absence_as_applied() {
+    let verification = verification_for(&TreqCommandRequest::ArchiveWorkspace {
+      repo: "/r".into(),
+      workspace: "42".into(),
+    })
+    .expect("ArchiveWorkspace has a verification recipe");
+    let check = verification.check;
+    let present = serde_json::json!([{ "id": 42 }]);
+    assert_eq!(check(&present), MutationVerificationOutcome::NotApplied);
+    let gone = serde_json::json!([{ "id": 7 }]);
+    assert_eq!(check(&gone), MutationVerificationOutcome::AlreadyApplied);
+  }
+
+  #[test]
+  fn switch_repo_branch_verification_reads_the_current_branch() {
+    let check = verification_for(&TreqCommandRequest::SwitchRepoBranch {
+      repo: "/r".into(),
+      bookmark: "feat".into(),
+    })
+    .expect("SwitchRepoBranch has a verification recipe")
+    .check;
+    let on = |branch: serde_json::Value| check(&serde_json::json!({ "current_branch": branch }));
+    assert_eq!(
+      on("feat".into()),
+      MutationVerificationOutcome::AlreadyApplied
+    );
+    assert_eq!(on("main".into()), MutationVerificationOutcome::NotApplied);
+    assert_eq!(
+      on(serde_json::Value::Null),
+      MutationVerificationOutcome::NotApplied
+    );
+    assert_eq!(
+      check(&serde_json::json!({})),
+      MutationVerificationOutcome::Ambiguous
+    );
+  }
+
+  #[test]
   fn rename_workspace_verification_reads_the_current_branch() {
     let verification = verification_for(&TreqCommandRequest::RenameWorkspace {
       repo: "/r".into(),
@@ -3995,6 +4336,21 @@ mod tests {
       (verification.check)(&serde_json::json!({})),
       MutationVerificationOutcome::Ambiguous
     );
+  }
+
+  #[test]
+  fn undo_commit_verification_treats_a_missing_change_as_applied() {
+    let check = verification_for(&TreqCommandRequest::UndoCommit {
+      repo: "/r".into(),
+      workspace: "1".into(),
+      commit: "abc".into(),
+    })
+    .expect("UndoCommit has a verification recipe")
+    .check;
+    let present = serde_json::json!({ "commits": [{ "change_id": "abc" }] });
+    assert_eq!(check(&present), MutationVerificationOutcome::NotApplied);
+    let gone = serde_json::json!({ "commits": [{ "change_id": "xyz" }] });
+    assert_eq!(check(&gone), MutationVerificationOutcome::AlreadyApplied);
   }
 
   #[test]
@@ -4049,6 +4405,31 @@ mod tests {
     );
     assert_eq!(
       (verification.check)(&serde_json::json!({ "commits": [] })),
+      MutationVerificationOutcome::Ambiguous
+    );
+  }
+
+  #[test]
+  fn restore_all_verification_never_reruns_over_remaining_changes() {
+    let request = TreqCommandRequest::RestoreAll {
+      repo: "/r".into(),
+      workspace: Some("1".into()),
+    };
+    let check = verification_for(&request).expect("recipe").check;
+    assert_eq!(
+      check(&serde_json::json!([])),
+      MutationVerificationOutcome::AlreadyApplied
+    );
+    // The discard landed but its reply was lost, and an agent wrote a new
+    // file before reconnect verification. `NotApplied` would make
+    // `retry_after_reconnect` resend RestoreAll and delete that edit.
+    let edited_after_discard = serde_json::json!([{ "path": "agent-new.txt" }]);
+    assert_eq!(
+      check(&edited_after_discard),
+      MutationVerificationOutcome::Ambiguous
+    );
+    assert_eq!(
+      check(&serde_json::json!({})),
       MutationVerificationOutcome::Ambiguous
     );
   }
@@ -4227,7 +4608,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 45);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 56);
   }
 
   #[test]

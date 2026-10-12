@@ -6,9 +6,12 @@
 /* eslint-disable max-params -- each wrapper mirrors its local invoke arity plus the fallback */
 
 import type {
+  BranchStatus,
   JjRebaseResult,
+  PullWorkspaceResult,
   RenameWorkspaceResult,
   ResolveCommitResult,
+  StashEntry,
   Workspace,
 } from "./api-types";
 import {
@@ -18,9 +21,11 @@ import {
   remoteMutation,
   RemoteOperationUnsupportedError,
   resolveRemoteLocation,
+  transportListRepoBranches,
   workspaceArg,
 } from "./repository-adapter";
 import type { ActiveRepository } from "./active-repository";
+import type { TreqCommandRequest } from "./remote-dispatch";
 
 interface MoveRequest {
   files: string[];
@@ -84,11 +89,12 @@ export async function transportDeleteWorkspace(
   repoPath: string,
   id: number,
   local: () => Promise<void>,
+  kind: "DeleteWorkspace" | "ArchiveWorkspace" = "DeleteWorkspace",
 ): Promise<void> {
   const repo = activeForPath(repoPath);
   if (!repo) return local();
   await remoteMutation(repo, {
-    kind: "DeleteWorkspace",
+    kind,
     repo: repo.canonicalPath,
     workspace: String(id),
   });
@@ -176,6 +182,29 @@ export async function transportPushWorkspace(
   return result ?? ALREADY_APPLIED;
 }
 
+export async function transportPullWorkspace(
+  repoPath: string,
+  workspaceId: number | null,
+  local: () => Promise<PullWorkspaceResult>,
+): Promise<PullWorkspaceResult> {
+  const repo = activeForPath(repoPath);
+  if (!repo) return local();
+  const result = await remoteMutation<PullWorkspaceResult>(repo, {
+    kind: "PullWorkspace",
+    repo: repo.canonicalPath,
+    workspace: workspaceArg(workspaceId),
+  });
+  return (
+    result ?? {
+      success: true,
+      message: ALREADY_APPLIED,
+      was_diverged: false,
+      commits_rebased: 0,
+      has_conflicts: false,
+    }
+  );
+}
+
 interface WorkspaceUpdate {
   targetBranch?: string;
   title?: string;
@@ -226,6 +255,21 @@ export async function transportSetWorkspaceTargetBranch(
   };
 }
 
+export async function transportSwitchRepoBranch(
+  repoPath: string,
+  bookmark: string,
+  local: () => Promise<string>,
+): Promise<string> {
+  const repo = activeForPath(repoPath);
+  if (!repo) return local();
+  const result = await remoteMutation<string>(repo, {
+    kind: "SwitchRepoBranch",
+    repo: repo.canonicalPath,
+    bookmark,
+  });
+  return result ?? ALREADY_APPLIED;
+}
+
 export async function transportRestoreFile(
   workspacePath: string,
   filePath: string,
@@ -240,6 +284,35 @@ export async function transportRestoreFile(
     path: filePath,
   });
   return result ?? ALREADY_APPLIED;
+}
+
+/**
+ * Runs a whole-working-copy mutation (snapshot, discard all, restore a
+ * snapshot) addressed by a workspace path in the active remote repository.
+ * Pass `requireValue` when the caller consumes the returned value (a
+ * snapshot id): without the VM's value it throws instead of returning a
+ * placeholder.
+ */
+export async function transportWorkingCopyMutation(
+  workspacePath: string,
+  request: (repo: string, workspace: string | null) => TreqCommandRequest,
+  local: () => Promise<string>,
+  { requireValue = false }: { requireValue?: boolean } = {},
+): Promise<string> {
+  const location = await resolveRemoteLocation(workspacePath);
+  if (!location) return local();
+  const { repo, workspace } = location;
+  const result = await remoteMutation<string>(
+    repo,
+    request(repo.canonicalPath, workspace),
+  );
+  if (result !== undefined) return result;
+  if (requireValue) {
+    throw new Error(
+      "ambiguous: the VM did not return a value for this working-copy operation; try again",
+    );
+  }
+  return ALREADY_APPLIED;
 }
 
 /**
@@ -270,6 +343,23 @@ export async function transportSplitWorkingCopy(
     message,
   });
   return result ?? ALREADY_APPLIED;
+}
+
+/** Stashes a workspace's working copy; the entry lives on the remote host. */
+export async function transportStashWorkspaceChanges(
+  repoPath: string,
+  workspaceId: number | null,
+  local: () => Promise<StashEntry>,
+): Promise<StashEntry> {
+  const repo = activeForPath(repoPath);
+  if (!repo) return local();
+  const entry = await remoteKeyedMutation<StashEntry>(repo, {
+    kind: "StashWorkspaceChanges",
+    repo: repo.canonicalPath,
+    workspace: workspaceArg(workspaceId),
+  });
+  if (!entry) throw new Error("stash_ambiguous: stash state unknown");
+  return entry;
 }
 
 export async function transportResolveCommit(
@@ -319,6 +409,20 @@ export async function transportMoveCommit(
   });
 }
 
+export async function transportUndoCommit(
+  target: CommitTarget,
+  local: () => Promise<void>,
+): Promise<void> {
+  const repo = activeForPath(target.repoPath);
+  if (!repo) return local();
+  await remoteMutation(repo, {
+    kind: "UndoCommit",
+    repo: repo.canonicalPath,
+    workspace: String(target.workspaceId),
+    commit: target.commitChangeId,
+  });
+}
+
 export async function transportAbandonCommit(
   target: CommitTarget,
   local: () => Promise<string>,
@@ -332,6 +436,37 @@ export async function transportAbandonCommit(
     commit: target.commitChangeId,
   });
   return result ?? "";
+}
+
+export async function transportUndoOperation(
+  repoPath: string,
+  workspaceId: number | null,
+  operationId: string,
+  local: () => Promise<string>,
+): Promise<string> {
+  const repo = activeForPath(repoPath);
+  if (!repo) return local();
+  const result = await remoteMutation<string>(repo, {
+    kind: "UndoOperation",
+    repo: repo.canonicalPath,
+    workspace: workspaceArg(workspaceId),
+    operation_id: operationId,
+  });
+  return result ?? ALREADY_APPLIED;
+}
+
+export async function transportRevertCommit(
+  target: CommitTarget,
+  local: () => Promise<void>,
+): Promise<void> {
+  const repo = activeForPath(target.repoPath);
+  if (!repo) return local();
+  await remoteKeyedMutation(repo, {
+    kind: "RevertCommit",
+    repo: repo.canonicalPath,
+    workspace: String(target.workspaceId),
+    commit: target.commitChangeId,
+  });
 }
 
 export async function transportDescribeCommit(
@@ -376,4 +511,19 @@ export async function transportGetCommitDescription(
     throw new Error(`commit_not_found: ${id}`);
   }
   return match.description;
+}
+
+/** Whether a branch exists, from the typed `ListBranches` read. Remote-tracking refs are not reported yet. */
+export async function transportCheckBranchExists(
+  repoPath: string,
+  branchName: string,
+  local: () => Promise<BranchStatus>,
+): Promise<BranchStatus> {
+  if (!activeForPath(repoPath)) return local();
+  const branches = await transportListRepoBranches<{ name: string }[]>(
+    repoPath,
+    async () => [],
+  );
+  const exists = branches.some(({ name }) => name === branchName);
+  return { local_exists: exists, remote_exists: false };
 }
