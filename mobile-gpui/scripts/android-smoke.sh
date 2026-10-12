@@ -80,16 +80,14 @@ sleep 2
 
 # Open "Use your own SSH host", the bottom landing button (24 dp page padding,
 # 52 dp tall), for side-by-side review with the desktop add-host dialog. GPUI
-# has no accessibility tree, so the tap is positional. The window dump records
-# the insets used, to correct the offset if the layout moves.
+# has no accessibility tree, so the tap is positional; the app draws
+# edge-to-edge, so the offset is from the bottom of the screen. The window dump
+# is kept to correct the offset if the layout moves.
 adb shell dumpsys window > "$OUT/dumpsys-window.txt" || true
 density=$(adb shell wm density | awk '/Physical/ {print $3}' | tr -d '\r')
 dp() { echo $(( $1 * density / 160 )); }
-nav_bar=$(grep -oE 'type=navigationBars[^}]*frame=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' "$OUT/dumpsys-window.txt" \
-  | head -1 | sed -E 's/.*frame=\[[0-9]+,([0-9]+)\]\[[0-9]+,([0-9]+)\]/\2 \1/' | awk '{print $1 - $2}')
-nav_bar=${nav_bar:-$(dp 48)}
 dismiss_dialogs
-adb shell input tap $((width / 2)) $((height - nav_bar - $(dp 50)))
+adb shell input tap $((width / 2)) $((height - $(dp 50)))
 sleep 3
 shot 04-add-host
 adb shell input swipe $((width / 2)) $((height * 80 / 100)) $((width / 2)) $((height * 30 / 100)) 300
