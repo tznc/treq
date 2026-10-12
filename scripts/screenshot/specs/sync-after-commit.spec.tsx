@@ -151,12 +151,19 @@ it("captures workspace state before and after syncing a fresh commit", async () 
 		expect(screen.getAllByText("Committed").length).toBeGreaterThan(0);
 		expect(screen.queryByRole("button", { name: /^Changes$/ })).not.toBeInTheDocument();
 	});
+	// Third: the review is not flagged stale (no amber "changed since you
+	// started reviewing" banner needing a Reload).
+	await new Promise((resolve) => setTimeout(resolve, 1500));
+	expect(
+		screen.queryByText(/changed\s+since you started reviewing/),
+	).not.toBeInTheDocument();
 
 	await captureDocument(document, {
 		name: "sync-after-commit-03-review-after-sync",
 		expectations: [
 			"The Changes tab is active and synced.txt appears only under a 'Committed' section.",
 			"There is no 'Changes' section — synced.txt has not reverted to being an uncommitted current change.",
+			"No amber 'files changed since you started reviewing' banner with a Reload button is shown.",
 		],
 	});
 }, 90000);
