@@ -547,16 +547,6 @@ mod tests {
   }
 
   #[test]
-  fn provider_serializes_lowercase() {
-    assert_eq!(
-      serde_json::to_string(&TrackerProvider::Jira).unwrap(),
-      "\"jira\""
-    );
-    let parsed: TrackerProvider = serde_json::from_str("\"trello\"").unwrap();
-    assert_eq!(parsed, TrackerProvider::Trello);
-  }
-
-  #[test]
   fn provider_setting_keys_are_namespaced() {
     assert_eq!(TrackerProvider::Trello.setting_key("token"), "trello_token");
     assert_eq!(

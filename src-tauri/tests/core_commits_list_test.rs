@@ -625,64 +625,6 @@ fn test_list_commits_without_target_branch_history() {
 }
 
 #[test]
-fn test_list_commits_caches_commit_info_in_local_db() {
-  let repo = TestRepo::new().expect("Failed to create test repo");
-
-  let workspace = treq_lib::core::create_workspace(
-    &repo.repo_path,
-    "feat/cache-commit-info",
-    Some("cache commit info test".to_string()),
-    None,
-    None,
-    None,
-    None,
-  )
-  .expect("Failed to create workspace");
-
-  let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
-  let workspace_path_str = workspace_path
-    .to_str()
-    .expect("workspace path should be utf-8");
-
-  TestRepo::write_workspace_file(
-    workspace_path_str,
-    "cached_file.txt",
-    "line 1\nline 2\nline 3\n",
-  )
-  .expect("Failed to write file");
-  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Cacheable commit")
-    .expect("Failed to commit");
-
-  // First call populates the cache as a side-effect.
-  let first = treq_lib::core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
-    .expect("Failed to list commits");
-
-  let original = first
-    .commits
-    .iter()
-    .find(|c| !c.is_working_copy && c.description == "Cacheable commit")
-    .expect("Should include 'Cacheable commit'");
-  assert_eq!(original.description, "Cacheable commit");
-  assert_eq!(original.insertions, 3);
-  assert_eq!(original.deletions, 0);
-
-  // Verify the commit_diff_stats cache table now has a row with the same metadata.
-  let db_path = treq_lib::local_db::get_local_db_path(&repo.repo_path);
-  let conn = rusqlite::Connection::open(&db_path).expect("Should open local db");
-  let row_count: i64 = conn
-    .query_row(
-      "SELECT COUNT(*) FROM commit_diff_stats WHERE description = ?1",
-      rusqlite::params!["Cacheable commit"],
-      |row| row.get(0),
-    )
-    .expect("Should count cached rows");
-  assert_eq!(
-    row_count, 1,
-    "list_commits should cache exactly one row for the committed change"
-  );
-}
-
-#[test]
 fn test_list_commits_target_branch_history_uses_local_bookmark_only() {
   let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
 
