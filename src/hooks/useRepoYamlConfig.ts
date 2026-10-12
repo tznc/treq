@@ -4,7 +4,7 @@ import { loadRepoYamlConfig } from "../lib/api";
 import type { RepoYamlConfig } from "../lib/api-extra";
 import { invalidateQueries } from "../lib/swr-cache";
 
-export const repoYamlConfigKey = (repoPath: string | undefined) =>
+const repoYamlConfigKey = (repoPath: string | undefined) =>
   repoPath ? (["repo-yaml-config", repoPath] as const) : null;
 
 /**

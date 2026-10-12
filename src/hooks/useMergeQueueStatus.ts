@@ -26,7 +26,7 @@ import { invalidateQueries, pollMs, setQueryData } from "../lib/swr-cache";
 import { useMutation } from "./useMutation";
 
 /** Query key for the per-repo merge queue opt-in. */
-export const mergeQueueEnabledKey = (repoFullName: string | undefined) => [
+const mergeQueueEnabledKey = (repoFullName: string | undefined) => [
   "merge-queue-enabled",
   repoFullName,
 ];
@@ -38,7 +38,7 @@ export const cachedPrStatusesKey = (repoPath: string | undefined) => [
 ];
 
 /** Query key for the Rust-side cached CI statuses map for a repo. */
-export const cachedPrCiStatusesKey = (repoPath: string | undefined) => [
+const cachedPrCiStatusesKey = (repoPath: string | undefined) => [
   "cached-pr-ci-statuses",
   repoPath,
 ];

@@ -14,9 +14,9 @@ import {
 } from "./remote-endpoints";
 
 export const LAST_OPENED_REMOTE_REPO_ID_KEY = "last_opened_remote_repo_id";
-export const REMOTE_RECENT_REPO_IDS_KEY = "remote_recent_repository_ids";
+const REMOTE_RECENT_REPO_IDS_KEY = "remote_recent_repository_ids";
 /** Legacy blob. Never restore from this without the trust sequence. */
-export const LAST_OPENED_REMOTE_REPO_KEY = "last_opened_remote_repo";
+const LAST_OPENED_REMOTE_REPO_KEY = "last_opened_remote_repo";
 
 const DESCRIPTOR_SECRET_KEYS = [
   "private_key",
@@ -30,7 +30,7 @@ const DESCRIPTOR_SECRET_KEYS = [
   "sshKey",
 ] as const;
 
-export type RestoreFailureReason =
+type RestoreFailureReason =
   | "reconnect_failed"
   | "host_key_mismatch"
   | "generation_mismatch"
@@ -70,7 +70,7 @@ export function canonicalizeRemotePath(path: string): string {
   return joined;
 }
 
-export function descriptorId(
+function descriptorId(
   endpointId: string,
   generation: number,
   canonicalPath: string,

@@ -681,5 +681,3 @@ export const ChangesDiffViewer = ({
 };
 
 ChangesDiffViewer.displayName = "ChangesDiffViewer";
-
-export default ChangesDiffViewer;

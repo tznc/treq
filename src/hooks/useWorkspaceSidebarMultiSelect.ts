@@ -35,7 +35,7 @@ function bindModifierKeyListeners() {
 
 bindModifierKeyListeners();
 
-export function isModifierMouseEvent(
+function isModifierMouseEvent(
   event: React.MouseEvent | React.PointerEvent,
 ): boolean {
   return (

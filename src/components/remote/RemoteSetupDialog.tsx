@@ -13,12 +13,9 @@ import type {
 import { Button } from "../ui/button";
 import { CloudWorkspaceCard } from "./CloudWorkspaceCard";
 import { RemoteUserManagedSetupPanel } from "./RemoteUserManagedSetupPanel";
-import type {
-  LocalKeyIdentity,
-  UserManagedFormValues,
-} from "./remoteSetupLabels";
+import type { UserManagedFormValues } from "./remoteSetupLabels";
 
-export type { LocalKeyIdentity, UserManagedFormValues };
+export type { UserManagedFormValues };
 
 export type RemoteSetupMode = "choice" | "managed" | "user_managed";
 

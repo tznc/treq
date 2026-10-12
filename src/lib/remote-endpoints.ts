@@ -124,9 +124,7 @@ export async function replaceSavedRemoteRepositories(
 }
 
 /** Builds the trusted-host-key record from a user-entered fingerprint. */
-export function trustedHostKeyFromFingerprint(
-  fingerprint: string,
-): TrustedHostKey {
+function trustedHostKeyFromFingerprint(fingerprint: string): TrustedHostKey {
   return {
     algorithm: "unknown",
     fingerprint_sha256: fingerprint,
@@ -134,9 +132,7 @@ export function trustedHostKeyFromFingerprint(
   };
 }
 
-export function publicKeyAuthentication(
-  keyReference: string,
-): SshAuthentication {
+function publicKeyAuthentication(keyReference: string): SshAuthentication {
   return { type: "public_key", key_reference: keyReference };
 }
 

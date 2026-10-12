@@ -5,12 +5,12 @@ export interface GhLabel {
   color: string;
 }
 
-export interface GhAuthor {
+interface GhAuthor {
   login: string;
   avatar_url?: string | null;
 }
 
-export interface GhIssueComment {
+interface GhIssueComment {
   id: string;
   body: string;
   author: GhAuthor;
@@ -54,7 +54,7 @@ export interface GhPullRequest {
   is_draft?: boolean;
 }
 
-export interface GhReviewComment {
+interface GhReviewComment {
   id: string;
   body: string;
   author: GhAuthor;

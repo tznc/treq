@@ -25,9 +25,9 @@ export interface SqlResult {
   row_count: number;
 }
 
-export type AgentChatRole = "user" | "agent";
+type AgentChatRole = "user" | "agent";
 
-export interface AgentChatMessage {
+interface AgentChatMessage {
   id: number;
   role: AgentChatRole;
   message: string;

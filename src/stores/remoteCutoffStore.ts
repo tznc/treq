@@ -16,7 +16,7 @@ import { remoteClearCutoff, remoteCutOffManaged } from "../lib/api-extra";
 import type { CutoffReason } from "../lib/remote-cert-lifecycle";
 import { supabase } from "../lib/supabase";
 
-export const REMOTE_CUTOFF_EVENT = "remote://cutoff";
+const REMOTE_CUTOFF_EVENT = "remote://cutoff";
 
 interface RemoteCutoffEventPayload {
   endpoint_id: string;

@@ -2,12 +2,12 @@ import { githubOpenOrCreateWorkspaceFromIssue } from "./api";
 import { linearOpenOrCreateWorkspaceFromIssue } from "./api-linear";
 import type { IssueAttachment } from "./promptAttachments";
 
-export type SubItemResult = {
+type SubItemResult = {
   id: string;
   workspaceId: number;
   created: boolean;
 };
-export type SubItemFailure = { id: string; error: string };
+type SubItemFailure = { id: string; error: string };
 
 export type IssueWorkspace = {
   workspaceId: number;

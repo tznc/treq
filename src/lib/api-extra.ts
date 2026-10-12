@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
-  CachedDirectoryEntry,
   DiffCacheEntry,
   DirectoryEntry,
   FileBrowserPendingReview,
@@ -29,7 +28,6 @@ import {
   transportAbandonCommit,
   transportDescribeCommit,
   transportGetCommitDescription,
-  transportMoveCommit,
   transportResolveCommit,
   transportUndoOperation,
   transportUndoCommit,
@@ -330,17 +328,6 @@ export const lsWorkspaceWithStatus = async (
   return invoke("ls_workspace_with_status", { repoPath, workspaceId });
 };
 
-// Kept as the typed frontend counterpart of the registered Tauri command.
-// eslint-disable-next-line local/no-unused-exported-ts-functions, local/require-tauri-api-exports-used
-export const listDirectoryCached = async (
-  repoPath: string,
-  workspaceId: number | null,
-  parentPath: string,
-): Promise<CachedDirectoryEntry[]> => {
-  assertLocalOperation(repoPath, FILE_TREE);
-  return invoke("list_directory_cached", { repoPath, workspaceId, parentPath });
-};
-
 export const searchWorkspaceFiles = (
   repoPath: string,
   workspaceId: number | null,
@@ -633,26 +620,6 @@ export const stopFileWatcher = (
   workspacePath: string,
 ): Promise<void> => invoke("stop_file_watcher", { workspaceId, workspacePath });
 
-// Wrapper required by local/require-tauri-api-command-wrappers; moveCommitToExistingWorkspace
-// is not yet called from the UI.
-export const moveCommitToExistingWorkspace = (
-  repoPath: string,
-  sourceWorkspaceId: number,
-  commitChangeId: string,
-  targetWorkspaceId: number,
-): Promise<void> =>
-  transportMoveCommit(
-    { repoPath, workspaceId: sourceWorkspaceId, commitChangeId },
-    targetWorkspaceId,
-    () =>
-      invoke("move_commit_to_existing_workspace", {
-        repoPath,
-        sourceWorkspaceId,
-        commitChangeId,
-        targetWorkspaceId,
-      }),
-  );
-
 export const abandonCommit = (
   repoPath: string,
   workspaceId: number,
@@ -812,16 +779,6 @@ export const remoteDispatchMutationOverSsh = <T = unknown>(
   invoke("remote_dispatch_mutation_over_ssh", { endpoint, request });
 
 /**
- * Snapshot of this session's SSH transport telemetry (PRD Phase 7 "Client
- * and transport telemetry"). Kept as the typed frontend counterpart of the
- * registered Tauri command; a diagnostics panel to display it is future
- * work.
- */
-// eslint-disable-next-line local/no-unused-exported-ts-functions, local/require-tauri-api-exports-used
-export const remoteTransportMetrics = <T = unknown>(): Promise<T> =>
-  invoke("remote_transport_metrics");
-
-/**
  * Forces the native SSH transport's hard cutoff for `endpointId` (PRD "Hard
  * cutoff on revocation or expiry"): tears down open exec/PTY channels and
  * refuses further commands until {@link remoteClearCutoff} is called. Called
@@ -857,16 +814,6 @@ export const remoteSetRelayAccessToken = (
   token: string | null,
 ): Promise<void> => invoke("remote_set_relay_access_token", { token });
 
-/**
- * Returns the current cutoff reason for `endpointId`, if any - the
- * synchronous counterpart to the `remote://cutoff` event, for a component
- * that wants to check state on mount.
- */
-// eslint-disable-next-line local/no-unused-exported-ts-functions, local/require-tauri-api-exports-used
-export const remoteCutoffReason = (
-  endpointId: string,
-): Promise<string | null> => invoke("remote_cutoff_reason", { endpointId });
-
 export type SkillInstallScope = "application" | "repository";
 
 export interface InstalledSkill {
@@ -876,7 +823,7 @@ export interface InstalledSkill {
   scope: SkillInstallScope;
 }
 
-export interface SkillCatalogFile {
+interface SkillCatalogFile {
   path: string;
   size: number;
   binary: boolean;

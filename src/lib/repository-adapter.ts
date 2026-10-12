@@ -40,7 +40,7 @@ type SshActiveRepository = ActiveRepository & {
 };
 
 /** Raised for a remote repository whose SSH endpoint is not resolved. */
-export class RemoteEndpointUnresolvedError extends Error {
+class RemoteEndpointUnresolvedError extends Error {
   constructor(displayName: string) {
     super(
       `endpoint_unresolved: ${displayName} has no SSH endpoint; reopen it from the remote setup dialog`,

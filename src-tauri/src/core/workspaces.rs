@@ -3685,21 +3685,6 @@ pub fn pull_workspace_from_remote(
   })
 }
 
-pub fn resolve_workspace_bookmark_conflict(
-  repo_path: &str,
-  workspace_id: i64,
-  workspace_path: &str,
-  branch_name: &str,
-) -> Result<jj::BookmarkConflictResolutionResult, String> {
-  let target = format!("{branch_name}@origin");
-  let result = jj::jj_resolve_bookmark_conflict_losslessly(workspace_path, branch_name, &target)
-    .map_err(|e| e.to_string())?;
-  let tip = jj::jj_get_commit_id(workspace_path, branch_name).map_err(|e| e.to_string())?;
-  local_db::update_workspace_last_rebased_commit(repo_path, workspace_id, &tip)
-    .map_err(|e| format!("Failed to update workspace rebase state: {e}"))?;
-  Ok(result)
-}
-
 /// Point `branch_name` at the workspace tip (`@-` when `@` is the empty WC commit).
 fn advance_bookmark_to_working_copy_tip(
   workspace_path: &str,

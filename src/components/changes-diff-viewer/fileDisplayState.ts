@@ -34,7 +34,7 @@ export interface FileDisplayState {
   totalChangedLines: number;
 }
 
-export function fileSectionDomId(filePath: string): string {
+function fileSectionDomId(filePath: string): string {
   return `file-section-${filePath.replace(/[^a-zA-Z0-9]/g, "-")}`;
 }
 
