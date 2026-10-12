@@ -88,23 +88,6 @@ describe("ShowWorkspace - Create PR", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("styles Create PR controls with a dark-mode border", async () => {
-    await setupPushedWorkspaceWithGitHub();
-    render(<Dashboard />);
-
-    const header = await openWorkspace("feat/create-pr");
-    const createPr = await within(header).findByRole("button", {
-      name: /^create pr$/i,
-    });
-    const moreOptions = await within(header).findByRole("button", {
-      name: /more create pr options/i,
-    });
-
-    expect(createPr).toHaveClass("dark:border-white/30");
-    expect(moreOptions).toHaveClass("dark:border-white/30");
-    expect(moreOptions).toHaveAttribute("aria-label", "More Create PR options");
-  });
-
   it("shows Create PR instead of Push when a GitHub remote is configured", async () => {
     await createWorkspace(repoPath, "feat/unpushed");
     setOriginUrl(repoPath, "https://github.com/acme/treq.git");

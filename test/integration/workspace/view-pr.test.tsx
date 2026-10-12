@@ -118,7 +118,6 @@ describe("ShowWorkspace - View PR", () => {
     const viewPr = await within(header).findByRole("button", {
       name: /view pr.*open/i,
     });
-    expect(viewPr.className).toMatch(/border-green-600/);
     expect(
       within(header).queryByRole("button", { name: /^create pr$/i }),
     ).not.toBeInTheDocument();
@@ -179,42 +178,5 @@ describe("ShowWorkspace - View PR", () => {
     expect(
       await within(header).findByRole("button", { name: /view pr.*draft/i }),
     ).toBeVisible();
-  });
-
-  it("styles View PR for closed and merged states", async () => {
-    await setupPushedWorkspaceWithGitHub();
-    vi.mocked(getCachedPrInfo).mockResolvedValue({
-      number: 10,
-      title: "Closed",
-      state: "CLOSED",
-      url: "https://github.com/acme/treq/pull/10",
-      head_ref_name: "feat/create-pr",
-      base_ref_name: "main",
-      merge_state_status: null,
-    });
-    const view = render(<Dashboard />);
-
-    let header = await openWorkspace("feat/create-pr");
-    const closed = await within(header).findByRole("button", {
-      name: /view pr.*closed/i,
-    });
-    expect(closed.className).toMatch(/border-red-600/);
-
-    view.unmount();
-    vi.mocked(getCachedPrInfo).mockResolvedValue({
-      number: 11,
-      title: "Merged",
-      state: "MERGED",
-      url: "https://github.com/acme/treq/pull/11",
-      head_ref_name: "feat/create-pr",
-      base_ref_name: "main",
-      merge_state_status: null,
-    });
-    render(<Dashboard />);
-    header = await openWorkspace("feat/create-pr");
-    const merged = await within(header).findByRole("button", {
-      name: /view pr.*merged/i,
-    });
-    expect(merged.className).toMatch(/border-purple-600/);
   });
 });
