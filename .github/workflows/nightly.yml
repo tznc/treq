@@ -226,6 +226,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run tauri -- android init --ci
+          scripts/apply-icons.sh
           npm run tauri -- android build --debug --apk --target aarch64 --ci
           apk=$(find gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
           test -n "$apk"
@@ -300,6 +301,7 @@ jobs:
           command -v xcodegen >/dev/null || brew install xcodegen
           npm install --no-audit --no-fund
           npm run tauri -- ios init --ci
+          scripts/apply-icons.sh
           npm run tauri -- ios build --debug --target aarch64-sim --no-sign --ci
           app=$(find gen/apple/build -name '*.app' -path '*arm64-sim*' -maxdepth 3 | head -n 1)
           test -n "$app"

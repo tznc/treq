@@ -42,6 +42,7 @@ cargo test --lib
 
 npm install
 npm run tauri -- android init  # generates gen/android (not committed)
+scripts/apply-icons.sh         # Treq icon (init uses the Tauri default)
 npm run tauri -- android build --debug --apk --target aarch64
 ```
 

@@ -108,6 +108,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run tauri -- android init --ci
+          scripts/apply-icons.sh
           npm run tauri -- android build --debug --apk --target aarch64 --target x86_64 --ci
           apk=$(find gen/android/app/build/outputs/apk -name '*universal-debug.apk' | head -1)
           ls -la "$apk"
