@@ -1,11 +1,4 @@
-import {
-  attachConsole,
-  debug,
-  error,
-  info,
-  trace,
-  warn,
-} from "@tauri-apps/plugin-log";
+import { attachConsole, error, info, warn } from "@tauri-apps/plugin-log";
 
 /**
  * Initialize logging - attaches console to receive Rust logs in browser devtools
@@ -70,6 +63,4 @@ function forwardConsole(
     });
   };
 }
-
 // Re-export log functions for direct usage
-export { warn, debug, trace, info, error };

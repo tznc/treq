@@ -18,7 +18,7 @@
 use crate::core::remote::{MutationRetryOutcome, RemoteCommandError, TreqCommandRequest};
 use crate::core::remote_control_plane::SshEndpoint;
 use crate::core::remote_ssh_transport::{
-  CancellationToken, CutoffReason, ExecLimits, SshConnectionPool, SshTransportMetricsSnapshot,
+  CancellationToken, CutoffReason, ExecLimits, SshConnectionPool,
 };
 use crate::AppState;
 use serde::Serialize;
@@ -203,17 +203,6 @@ pub async fn remote_set_relay_access_token(
   Ok(())
 }
 
-/// Returns the current cutoff reason for `endpoint_id`, if any, so the UI can
-/// synchronously check state (e.g. on mount) instead of relying solely on the
-/// `remote://cutoff` event.
-#[tauri::command]
-pub async fn remote_cutoff_reason(
-  endpoint_id: String,
-  state: State<'_, RemoteExecState>,
-) -> Result<Option<CutoffReasonDto>, String> {
-  Ok(state.0.cutoff_reason(&endpoint_id).await.map(Into::into))
-}
-
 /// Frontend-facing shape of [`MutationRetryOutcome`], so the UI can render
 /// each of the PRD's three post-reconnect cases (treat-as-complete,
 /// retry-with-idempotency-key already performed, or surface-ambiguity) from
@@ -267,19 +256,6 @@ pub async fn remote_dispatch_mutation_over_ssh(
     MutationRetryOutcome::AlreadyApplied => MutationDispatchResult::AlreadyApplied,
     MutationRetryOutcome::Ambiguous { reason } => MutationDispatchResult::Ambiguous { reason },
   })
-}
-
-/// Returns a snapshot of this session's SSH transport telemetry (PRD Phase 7
-/// "Client and transport telemetry" — DNS/TCP and negotiation/auth duration,
-/// host-key mismatches, pooled connection reuse, reconnects, exec channel
-/// duration and exit categories, PTY start/exit, and version-mismatch
-/// counts). A future diagnostics panel can poll this; it is not wired into
-/// any UI component here.
-#[tauri::command]
-pub fn remote_transport_metrics(
-  state: State<'_, RemoteExecState>,
-) -> Result<SshTransportMetricsSnapshot, String> {
-  Ok(state.0.metrics_snapshot())
 }
 
 #[cfg(test)]

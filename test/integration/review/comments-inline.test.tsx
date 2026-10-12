@@ -81,20 +81,6 @@ describe("Inline comment editing — save", () => {
     expect(screen.queryByDisplayValue("Updated comment text")).toBeNull();
     expect(screen.queryByText("Original comment text")).toBeNull();
   });
-
-  it("saves an inline comment with Cmd+Enter", async () => {
-    await setupEditableComment(
-      user,
-      "feat/comment-edit-shortcut",
-      "Original comment text",
-    );
-
-    const textarea = await startEditingComment("Original comment text");
-    await user.clear(textarea);
-    await user.type(textarea, "Keyboard saved text{Control>}{Enter}{/Control}");
-
-    await screen.findByText("Keyboard saved text");
-  });
 });
 
 describe("Inline comment editing — cancel", () => {

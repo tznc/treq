@@ -18,7 +18,6 @@ pub mod core;
 pub mod db;
 pub mod file_indexer;
 pub mod github;
-pub mod jira;
 pub mod jj;
 #[cfg(feature = "gui")]
 pub mod linear;
@@ -35,7 +34,6 @@ pub mod review_aggregate;
 pub mod send_dispatch;
 pub mod telemetry;
 pub mod tracker;
-pub mod trello;
 pub mod unified_patch;
 
 #[cfg(feature = "gui")]
@@ -92,9 +90,6 @@ use crate::core::remote_pty::PtyLaunchSpec;
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::core::skills::SkillInstallScope;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::tracker::TrackerProvider;
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use commands::RemoteExecState;
@@ -879,7 +874,6 @@ pub fn run() {
       commands::pull_workspace_from_remote,
       commands::merge_workspace,
       commands::move_workspace_changes,
-      commands::move_commit_to_existing_workspace,
       commands::abandon_commit,
       commands::undo_commit,
       commands::revert_commit,
@@ -889,7 +883,6 @@ pub fn run() {
       commands::update_workspace,
       commands::set_workspace_target_branch,
       commands::check_and_rebase_workspaces,
-      commands::resolve_workspace_bookmark_conflict,
       commands::ensure_workspace_indexed,
       commands::get_setting,
       commands::get_settings_batch,
@@ -951,14 +944,12 @@ pub fn run() {
       commands::read_file,
       commands::write_send_review_image,
       commands::write_agent_cli_files,
-      commands::cleanup_agent_cli_files,
       commands::get_file_modified_at,
       commands::list_directory,
       commands::list_directories_batch,
       commands::ls_workspace_with_status,
       commands::list_gitignored_path_suggestions,
       commands::get_workspace_readme,
-      commands::list_directory_cached,
       commands::search_workspace_files,
       commands::create_session,
       commands::get_sessions,
@@ -1004,12 +995,10 @@ pub fn run() {
       commands::remote_dispatch_local,
       commands::remote_dispatch_over_ssh,
       commands::remote_dispatch_mutation_over_ssh,
-      commands::remote_transport_metrics,
       commands::remote_force_cutoff,
       commands::remote_clear_cutoff,
       commands::remote_cut_off_managed,
       commands::remote_set_relay_access_token,
-      commands::remote_cutoff_reason,
       commands::set_window_repo_path,
       commands::set_window_supporting_repo_paths,
       commands::list_supporting_repos,
@@ -1059,11 +1048,6 @@ pub fn run() {
       commands::linear_list_document_comments,
       commands::linear_prepare_review,
       commands::linear_apply_review_suggestion,
-      commands::tracker_list_containers,
-      commands::tracker_list_items,
-      commands::tracker_get_viewer,
-      commands::tracker_open_or_create_workspace_from_item,
-      commands::tracker_start_auto_kickoff_polling,
       commands::load_repo_yaml_config,
       commands::get_run_logs,
       commands::get_repo_logs,

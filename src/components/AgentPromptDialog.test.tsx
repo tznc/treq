@@ -148,8 +148,6 @@ describe("AgentPromptDialog", () => {
   it.each([
     ["github", "#42", "Opens a workspace for #42"],
     ["linear", "ENG-101", "Opens a workspace for ENG-101"],
-    ["trello", "#12", "Opens a workspace for #12"],
-    ["jira", "ENG-42", "Opens a workspace for ENG-42"],
   ] as const)("replaces the workspace picker with the issue's workspace for a %s issue", async (source, key, line) => {
     const user = userEvent.setup();
     render(
@@ -192,7 +190,7 @@ describe("AgentPromptDialog", () => {
         workspaces={[workspace]}
         onSessionCreated={vi.fn()}
         initialIssue={{
-          source: "jira",
+          source: "linear",
           id: "1",
           key: "ENG-42",
           url: "https://example.test/1",
@@ -204,7 +202,7 @@ describe("AgentPromptDialog", () => {
     );
 
     expect(
-      screen.getByText("Opens a workspace for ENG-42 and its subtasks"),
+      screen.getByText("Opens a workspace for ENG-42 and its sub-issues"),
     ).toBeTruthy();
   });
 });

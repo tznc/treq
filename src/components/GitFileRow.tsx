@@ -2,7 +2,7 @@ import { Minus, Plus, Undo2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { FileContextMenu } from "./FileContextMenu";
 
-export interface JjFileChange {
+interface JjFileChange {
   path: string;
   status: string;
   previous_path?: string | null;

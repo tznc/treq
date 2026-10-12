@@ -7,11 +7,9 @@ import {
   cursorPromptFileContents,
   mergeClaudeLocalSettings,
 } from "./agentCommand";
-import { cleanupAgentCliFiles, readFile, writeAgentCliFiles } from "./api";
+import { readFile, writeAgentCliFiles } from "./api";
 
-export const parseJsonObject = (
-  raw: string,
-): Record<string, unknown> | null => {
+const parseJsonObject = (raw: string): Record<string, unknown> | null => {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -110,6 +108,3 @@ export const prepareAgentAutoCommand = async ({
     skillWriteWarning,
   };
 };
-
-export const discardAgentCliFiles = (paths: string[]): Promise<void> =>
-  cleanupAgentCliFiles(paths);

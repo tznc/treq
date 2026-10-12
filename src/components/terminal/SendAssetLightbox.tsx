@@ -45,8 +45,6 @@ import {
   revealInFileManagerLabel,
 } from "./SendAssetLightboxCarousel";
 
-export { revealInFileManagerLabel } from "./SendAssetLightboxCarousel";
-
 /** True when the click landed outside every visible piece of the lightbox. */
 function isLightboxBackdrop(target: EventTarget | null) {
   return (

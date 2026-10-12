@@ -1,10 +1,10 @@
-//! Opens or creates the workspace for a GitHub issue, the same way Linear,
-//! Trello and Jira items get one: a branch named after the issue, targeting
+//! Opens or creates the workspace for a GitHub issue, the same way Linear
+//! issues get one: a branch named after the issue, targeting
 //! the repo's default branch, with the issue recorded in workspace metadata.
 
 use crate::local_db;
 
-/// `github-<number>-<title-slug>`, matching the Trello and Jira branch names.
+/// `github-<number>-<title-slug>`, built with the shared tracker branch naming.
 pub fn github_issue_branch_name(number: u64, title: &str) -> String {
   crate::tracker::branch_name(&format!("github-{number}"), title)
 }

@@ -34,7 +34,7 @@ mod tests {
 
   fn setup() -> (TempDir, Database, String) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let db = Database::new(temp_dir.path().join("treq.db")).expect("Failed to open db");
+    let db = Database::new(":memory:".into()).expect("Failed to open db");
     db.init().expect("Failed to init db");
     let repo_path = temp_dir.path().join("repo").to_string_lossy().to_string();
     (temp_dir, db, repo_path)

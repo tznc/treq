@@ -15,7 +15,7 @@ export interface ReviewPromptVars {
  * prompt can use the same `{target_type}` / `{target_id}` / `{diff_summary}`
  * placeholders.
  */
-export const DEFAULT_REVIEW_PROMPT = `You are reviewing the current changes in this repository.
+const DEFAULT_REVIEW_PROMPT = `You are reviewing the current changes in this repository.
 
 What is under review: {diff_summary}
 
@@ -65,10 +65,7 @@ When you are done, print a one-paragraph summary of what you reviewed and how
 many comments you left.`;
 
 /** Fill `{target_type}` / `{target_id}` / `{diff_summary}` placeholders. */
-export function renderReviewPrompt(
-  template: string,
-  vars: ReviewPromptVars,
-): string {
+function renderReviewPrompt(template: string, vars: ReviewPromptVars): string {
   return template
     .split("{target_type}")
     .join(vars.targetType)
@@ -106,7 +103,7 @@ export function workspaceDiffSummary(
  * apply here. Placeholders: `{target_type}`, `{target_id}`, `{diff_summary}`
  * (what is reviewed) and `{snapshot_dir}` (where the app wrote the text).
  */
-export const DEFAULT_LINEAR_REVIEW_PROMPT = `You are reviewing Linear content: {diff_summary}.
+const DEFAULT_LINEAR_REVIEW_PROMPT = `You are reviewing Linear content: {diff_summary}.
 
 treq copied the text under review into {snapshot_dir}:
 - INDEX.md lists the files below, who wrote each comment, and which passage a
