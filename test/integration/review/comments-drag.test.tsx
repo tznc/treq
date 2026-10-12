@@ -24,48 +24,9 @@ describe("Multi-line selection in diff viewer", () => {
     user = userEvent.setup();
   });
 
-  it("should highlight lines during forward drag selection", async () => {
-    await setupWorkspaceWithDiff("feat/drag-fwd");
-    await openReviewTab(user, "feat/drag-fwd");
-    await waitForFileAndLines();
-
-    const [, line2, line3, line4] = getDiffLines();
-
-    fireEvent.mouseDown(getClickableArea(line2), { button: 0 });
-    fireEvent.mouseOver(line3);
-    fireEvent.mouseEnter(line3);
-    fireEvent.mouseOver(line4);
-    fireEvent.mouseEnter(line4);
-    fireEvent.mouseUp(line4);
-
-    await waitFor(() => {
-      expect(line2.className).toContain("bg-blue-500/10");
-      expect(line3.className).toContain("bg-blue-500/10");
-      expect(line4.className).toContain("bg-blue-500/10");
-    });
-  });
-
-  it("should highlight lines during backward drag selection", async () => {
-    await setupWorkspaceWithDiff("feat/drag-bwd");
-    await openReviewTab(user, "feat/drag-bwd");
-    await waitForFileAndLines();
-
-    const [, line2, , line4] = getDiffLines();
-
-    fireEvent.mouseDown(getClickableArea(line4), { button: 0 });
-    fireEvent.mouseOver(line2);
-    fireEvent.mouseEnter(line2);
-    fireEvent.mouseUp(line2);
-
-    await waitFor(() => {
-      expect(line2.className).toContain("bg-blue-500/10");
-      expect(line4.className).toContain("bg-blue-500/10");
-    });
-  });
-
-  it("should keep lines selected after mouseup", async () => {
-    await setupWorkspaceWithDiff("feat/drag-persist");
-    await openReviewTab(user, "feat/drag-persist");
+  it("highlights the dragged lines in either direction and keeps them after mouseup", async () => {
+    await setupWorkspaceWithDiff("feat/drag-select");
+    await openReviewTab(user, "feat/drag-select");
     await waitForFileAndLines();
 
     const [, line2, line3, line4] = getDiffLines();
@@ -89,6 +50,16 @@ describe("Multi-line selection in diff viewer", () => {
     expect(line2.className).toContain("bg-blue-500/10");
     expect(line3.className).toContain("bg-blue-500/10");
     expect(line4.className).toContain("bg-blue-500/10");
+
+    fireEvent.mouseDown(getClickableArea(line4), { button: 0 });
+    fireEvent.mouseOver(line2);
+    fireEvent.mouseEnter(line2);
+    fireEvent.mouseUp(line2);
+
+    await waitFor(() => {
+      expect(line2.className).toContain("bg-blue-500/10");
+      expect(line4.className).toContain("bg-blue-500/10");
+    });
   });
 
   it("should open comment input when clicking + after multi-line selection", async () => {

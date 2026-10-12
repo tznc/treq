@@ -52,3 +52,7 @@ Tests never run a real agent CLI. To start agent sessions with a working termina
 - `test/fake-agent/fake-agent.sh` stands in for `claude`, `codex`, `cursor-agent` and `copilot`. It prints `fake-agent: <cli>`, `mode:`, `model:`, `session:`, `ready` and `prompt:` lines, then echoes each typed line as `received: <line>`.
 - The helper sets `TREQ_TEST_PTY=1`, so the backend spawns a real PTY without a Tauri `AppHandle`. PTY output reaches the mocked `listen()` through `test/test-event-bus.ts`, and xterm renders it, so `within(pane).findByText("mode: plan")` works.
 - Without the helper, PTYs do not spawn in tests (the previous behavior).
+
+## Unit environments
+
+`src/**/*.test.ts` runs in the lean `unit-node` project (`setup.node.ts`). A test that needs `window`/`document` goes in `domTestFiles` in `vitest.unit.projects.ts` to run under jsdom with the full `setup.ts`; `.test.tsx` always runs under jsdom.
