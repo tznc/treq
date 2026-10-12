@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::{JjVerifier, TestRepo};
+use common::{JjVerifier, TestRepo};
 use treq_lib::local_db::Workspace;
 
 #[test]

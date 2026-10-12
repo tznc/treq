@@ -1,5 +1,5 @@
-mod e2e_test_helpers;
-use e2e_test_helpers::TestRepo;
+mod common;
+use common::TestRepo;
 
 fn remote_branch_messages(repo: &TestRepo, branch_name: &str) -> String {
   let remote_path = repo.remote_path();

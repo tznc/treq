@@ -1,9 +1,9 @@
 //! Concurrent `treq commits create` processes on one workspace must not
 //! fork the working-copy change or conflict the workspace bookmark.
 #![cfg(desktop)]
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use std::process::{Command, Stdio};
 use treq_lib::core::remote::TreqCommandRequest;
 

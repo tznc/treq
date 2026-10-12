@@ -1,9 +1,9 @@
 //! Switching branches and committing in the home repo must leave git on that
 //! branch (HEAD attached, index matching the commit), so `git status` and the
 //! app's branch display agree with jj.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use treq_lib::core::{get_repo_current_branch, switch_repo_branch};
 
 fn git(repo: &TestRepo, args: &[&str]) -> String {

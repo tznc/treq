@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use serde_json::Value;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;

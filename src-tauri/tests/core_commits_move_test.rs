@@ -1,8 +1,8 @@
 //! Moving a commit to another workspace must take it out of the source
 //! history, not leave it there with an inverse diff in the working copy.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::{JjVerifier, TestRepo};
+use common::{JjVerifier, TestRepo};
 use treq_lib::core::move_commit_to_existing_workspace as move_commit;
 
 fn source_with_commit(repo: &TestRepo) -> (treq_lib::local_db::Workspace, String, String) {

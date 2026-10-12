@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use treq_lib::core::list_repo_branches;
 
 /// Regression: `list_repo_branches` (which calls `jj_util_import_git_refs`) used to panic with

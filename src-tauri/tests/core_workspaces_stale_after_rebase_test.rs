@@ -6,9 +6,9 @@
 /// rewrites the WC-commit of **every** sibling workspace in the repo.  Those siblings'
 /// on-disk trees are never updated, so the next `jj` snapshot inverts every rewritten
 /// commit into their working copy.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use treq_lib::jj;
 
 // ─── shared helpers ──────────────────────────────────────────────────────────

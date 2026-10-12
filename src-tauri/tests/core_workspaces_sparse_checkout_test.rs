@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 /// Creating a workspace with sparse patterns materializes only matching paths.
 #[test]

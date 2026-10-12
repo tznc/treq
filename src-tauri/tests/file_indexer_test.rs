@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use tempfile::TempDir;
 
 fn setup_jj_repo(temp_dir: &TempDir) -> String {

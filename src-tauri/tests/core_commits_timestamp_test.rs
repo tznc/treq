@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 fn parse_millis(timestamp: &str) -> i64 {
   chrono::DateTime::parse_from_rfc3339(timestamp)

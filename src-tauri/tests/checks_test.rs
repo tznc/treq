@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::{TestRepo, FAILING_WORKFLOW, PASSING_WORKFLOW};
+use common::{TestRepo, FAILING_WORKFLOW, PASSING_WORKFLOW};
 use treq_lib::core;
 
 #[test]

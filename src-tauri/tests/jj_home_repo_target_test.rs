@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use treq_lib::core::list_commits;
 use treq_lib::jj::{
   jj_dry_run_home_repo_rebase, jj_get_home_repo_diverged_log, jj_rebase_home_repo_branch,

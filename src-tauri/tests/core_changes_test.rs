@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 fn get_change_id(cwd: &str, rev: &str) -> Result<String, String> {
   TestRepo::jj_change_id(cwd, rev)

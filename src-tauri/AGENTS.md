@@ -8,7 +8,7 @@
 
 ## Rust tests
 
-Unit tests live inline in a `#[cfg(test)] mod tests` next to the code. Integration tests against real jj repos live in `tests/`; `tests/e2e_test_helpers.rs` provides `TestRepo`, a real jj repo in a `TempDir`.
+Unit tests live inline in a `#[cfg(test)] mod tests` next to the code. Integration tests against real jj repos live in `tests/`; `tests/common/mod.rs` provides `TestRepo`, a real jj repo in a `TempDir`.
 
 - Use `tempfile::TempDir` for any filesystem operations; never hardcode paths
 - Test one behaviour per `#[test]` function

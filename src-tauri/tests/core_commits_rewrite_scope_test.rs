@@ -1,9 +1,9 @@
 //! `abandon_commit` / `describe_commit` take a revision string from the CLI and
 //! the remote exec channel, so they must refuse commits outside the workspace's
 //! own editable lineage instead of rewriting (or panicking on) them.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 fn main_commit_id(repo: &TestRepo) -> String {
   TestRepo::run_git(&repo.repo_path, &["rev-parse", repo.default_branch()])

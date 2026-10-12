@@ -6,9 +6,9 @@
 //! and, when it differs from `@-`, checks `@` out onto it without touching
 //! disk. A HEAD left behind by a jj-side rewrite therefore turns every file the
 //! rewrite changed into a phantom working-copy change.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use treq_lib::core::{self, MergeCommit, HOME_MOVE_ENDPOINT};
 use treq_lib::jj;
 

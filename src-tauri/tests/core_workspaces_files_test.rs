@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 #[test]
 fn test_ls_workspace_lists_top_level_entries_and_respects_gitignore() {

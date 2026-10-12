@@ -1,5 +1,5 @@
-mod e2e_test_helpers;
-use e2e_test_helpers::TestRepo;
+mod common;
+use common::TestRepo;
 
 #[test]
 fn bookmark_track_errors_when_remote_bookmark_missing() {

@@ -1,8 +1,8 @@
 //! `jj_split` on a workspace working copy: the two halves must be distinct
 //! changes, and selecting a path with no changes must be refused.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 #[test]
 fn split_gives_halves_distinct_change_ids_without_prior_snapshot() {

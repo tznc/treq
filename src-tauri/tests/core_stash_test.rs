@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 fn snapshot_disk_into_wc(workspace_path: &str) -> Vec<treq_lib::jj::JjFileChange> {
   treq_lib::jj::jj_get_changed_files(workspace_path).expect("jj_get_changed_files should not panic")

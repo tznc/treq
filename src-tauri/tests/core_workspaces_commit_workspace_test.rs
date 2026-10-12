@@ -1,5 +1,5 @@
-mod e2e_test_helpers;
-use e2e_test_helpers::TestRepo;
+mod common;
+use common::TestRepo;
 
 fn assert_raw_jj_log_has_working_copy_commit(workspace_path: &str, expected_message: &str) {
   let log = TestRepo::jj_log_descriptions(workspace_path, "::@", Some(15)).expect("jj log failed");
@@ -141,10 +141,9 @@ fn test_commit_home_repo_advances_branch() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch();
 
-  let before =
-    e2e_test_helpers::JjVerifier::get_bookmark_commit_id(&repo.repo_path, default_branch)
-      .expect("query bookmark")
-      .expect("main bookmark should exist after init");
+  let before = common::JjVerifier::get_bookmark_commit_id(&repo.repo_path, default_branch)
+    .expect("query bookmark")
+    .expect("main bookmark should exist after init");
 
   repo
     .create_file("home.txt", "home\n")
@@ -153,7 +152,7 @@ fn test_commit_home_repo_advances_branch() {
   treq_lib::jj::jj_commit(&repo.repo_path, "home repo commit")
     .expect("jj_commit on home repo failed");
 
-  let after = e2e_test_helpers::JjVerifier::get_bookmark_commit_id(&repo.repo_path, default_branch)
+  let after = common::JjVerifier::get_bookmark_commit_id(&repo.repo_path, default_branch)
     .expect("query bookmark")
     .expect("main bookmark should still exist");
 
@@ -211,21 +210,19 @@ fn test_commit_workspace_advances_branch() {
   let ws_dir = repo.workspaces_dir().join(&workspace.workspace_path);
   let ws_dir_str = ws_dir.to_string_lossy().to_string();
 
-  let before =
-    e2e_test_helpers::JjVerifier::get_bookmark_commit_id(&repo.repo_path, &workspace.branch_name)
-      .expect("query bookmark")
-      .expect("workspace bookmark should exist after create_workspace");
+  let before = common::JjVerifier::get_bookmark_commit_id(&repo.repo_path, &workspace.branch_name)
+    .expect("query bookmark")
+    .expect("workspace bookmark should exist after create_workspace");
 
-  e2e_test_helpers::TestRepo::write_workspace_file(&ws_dir_str, "data.txt", "hello\n")
+  common::TestRepo::write_workspace_file(&ws_dir_str, "data.txt", "hello\n")
     .expect("write workspace file");
 
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "workspace advance")
     .expect("commit_workspace failed");
 
-  let after =
-    e2e_test_helpers::JjVerifier::get_bookmark_commit_id(&repo.repo_path, &workspace.branch_name)
-      .expect("query bookmark")
-      .expect("workspace bookmark should still exist");
+  let after = common::JjVerifier::get_bookmark_commit_id(&repo.repo_path, &workspace.branch_name)
+    .expect("query bookmark")
+    .expect("workspace bookmark should still exist");
 
   assert_ne!(
     before, after,

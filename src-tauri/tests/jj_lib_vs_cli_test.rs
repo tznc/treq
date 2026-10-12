@@ -1,4 +1,4 @@
-//! Differential tests: verify the jj-lib-backed test helpers in e2e_test_helpers.rs
+//! Differential tests: verify the jj-lib-backed test helpers in tests/common/mod.rs
 //! (which replaced `jj` CLI subprocess calls in the rest of the test suite) actually
 //! agree with the real `jj` CLI's view of a repo.
 //!
@@ -12,9 +12,9 @@
 //! oracle is available, it doesn't require one to exist.
 #![cfg(unix)]
 
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 /// Whether the real `jj` CLI is reachable. Tests skip (rather than fail) when it
 /// isn't, since this file's job is cross-checking against it when present, not

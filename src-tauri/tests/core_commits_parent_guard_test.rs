@@ -1,8 +1,8 @@
 //! A workspace stacked on another workspace's bookmark sees the parent's
 //! commits in its `::@`. No history edit run from the child may rewrite them.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 use treq_lib::core;
 
 const GUARD: &str = "belongs to parent branch 'feat/b'";

@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::{JjVerifier, TestRepo};
+use common::{JjVerifier, TestRepo};
 use std::fs;
 use std::path::Path;
 use treq_lib::jj;

@@ -1,7 +1,7 @@
 /// Retry safety for existing and partially initialized workspace directories.
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 // ─── Test A: orphaned directory recovery ─────────────────────────────────────
 //
@@ -81,7 +81,7 @@ fn test_create_workspace_rejects_fully_tracked_workspace() {
   assert!(jj_dir.exists(), ".jj must exist after first creation");
   let marker = jj_dir.parent().unwrap().join("keep-me.txt");
   std::fs::write(&marker, "existing work").expect("write marker");
-  let before = e2e_test_helpers::JjVerifier::get_commit_id_for_rev(&repo.repo_path, branch)
+  let before = common::JjVerifier::get_commit_id_for_rev(&repo.repo_path, branch)
     .expect("read bookmark target")
     .expect("bookmark should resolve");
 
@@ -105,7 +105,7 @@ fn test_create_workspace_rejects_fully_tracked_workspace() {
     std::fs::read_to_string(marker).expect("marker retained"),
     "existing work"
   );
-  let after = e2e_test_helpers::JjVerifier::get_commit_id_for_rev(&repo.repo_path, branch)
+  let after = common::JjVerifier::get_commit_id_for_rev(&repo.repo_path, branch)
     .expect("read bookmark target")
     .expect("bookmark should resolve");
   assert_eq!(after, before, "bookmark must not move on retry");

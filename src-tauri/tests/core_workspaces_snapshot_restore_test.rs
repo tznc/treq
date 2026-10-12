@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::TestRepo;
+use common::TestRepo;
 
 /// Forces jj to scan disk into the working-copy commit's tree, the same way
 /// the app's file-list loader (`jj_get_changed_files`) does on every poll.

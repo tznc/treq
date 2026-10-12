@@ -6,8 +6,8 @@ use std::path::Path;
 use treq_lib::core;
 use treq_lib::jj;
 
-mod e2e_test_helpers;
-use e2e_test_helpers::TestRepo;
+mod common;
+use common::TestRepo;
 
 fn workspace_full_path(repo: &TestRepo, workspace: &treq_lib::local_db::Workspace) -> String {
   repo

@@ -1,6 +1,6 @@
-mod e2e_test_helpers;
+mod common;
 
-use e2e_test_helpers::{JjVerifier, TestRepo};
+use common::{JjVerifier, TestRepo};
 
 /// After `jj_restore_file`, the file on disk must match the parent commit's
 /// content AND the working copy must be clean.
