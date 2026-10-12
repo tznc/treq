@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "../test-utils";
 import userEvent from "@testing-library/user-event";
 import * as api from "../../src/lib/api";
-import { ChangesDiffViewer } from "../../src/components/ChangesDiffViewer";
+import { ChangesDiffViewer } from "../../src/components/changes-diff-viewer/ChangesDiffViewerMain";
 
 vi.mock("../../src/lib/api", async () => {
   const actual = await vi.importActual("../../src/lib/api");

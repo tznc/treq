@@ -17,7 +17,7 @@ let capturedProps: {
   onShowCommittedChangesChange?: (show: boolean) => void;
 } | null = null;
 
-vi.mock("./ChangesDiffViewer", () => ({
+vi.mock("./changes-diff-viewer/ChangesDiffViewerMain", () => ({
   ChangesDiffViewer: (props: {
     showCommittedChanges: boolean;
     onShowCommittedChangesChange?: (show: boolean) => void;

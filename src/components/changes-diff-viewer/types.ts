@@ -134,13 +134,6 @@ export interface CommitInputProps {
   workspacePath: string;
 }
 
-export interface HighlightedLineProps {
-  content: string;
-  language: string | null;
-  searchQuery?: string;
-  searchHighlightOffset?: number;
-}
-
 export interface FileRowComponentProps {
   file: ParsedFileChange;
   allFileHunks: Map<string, FileHunksData>;

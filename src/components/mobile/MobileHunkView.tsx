@@ -1,7 +1,7 @@
 import { cn } from "../../lib/utils";
 import type { JjDiffHunk } from "../../lib/api";
 import { AgentReviewInlineList } from "../changes-diff-viewer/AgentReviewContext";
-import { computeHunkLineNumbers } from "../changes-diff-viewer/utils";
+import { computeHunkLineNumbers } from "../diff/hunk-lines";
 
 interface MobileHunkViewProps {
   hunk: JjDiffHunk;

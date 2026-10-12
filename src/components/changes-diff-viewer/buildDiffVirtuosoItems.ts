@@ -1,6 +1,6 @@
 import type { ConflictRegion, JjDiffHunk, JjFileChange } from "../../lib/api";
 import type { ParsedFileChange } from "../../lib/git-utils";
-import { computeHunkLineNumbers, parseHunkHeader } from "./utils";
+import { computeHunkLineNumbers, parseHunkHeader } from "../diff/hunk-lines";
 import { getFileDisplayState, type FileBodyKind } from "./fileDisplayState";
 import type { FileHunksData, LineComment, PendingComment } from "./types";
 

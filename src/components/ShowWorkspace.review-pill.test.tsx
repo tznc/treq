@@ -16,7 +16,7 @@ vi.mock("./LinearCommitHistory", () => ({
 
 let onChangedFilesChange: ((files: ParsedFileChange[]) => void) | undefined;
 
-vi.mock("./ChangesDiffViewer", () => ({
+vi.mock("./changes-diff-viewer/ChangesDiffViewerMain", () => ({
   ChangesDiffViewer: (props: {
     onChangedFilesChange?: (files: ParsedFileChange[]) => void;
   }) => {

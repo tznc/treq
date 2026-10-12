@@ -6,37 +6,9 @@ import { FileCommentSection } from "./FileCommentSection";
 import { FileRowHeader } from "./FileRowHeader";
 import { GithubCommentCard } from "./GithubCommentCard";
 import { buildQuotedPendingComment, getQuoteProp } from "./utils";
-import { highlightCode } from "../../lib/syntax-highlight";
-import { highlightInHtml } from "../../lib/text-search";
 import { isBinaryFile } from "../../lib/git-utils";
 import { isDeletedFileStatus } from "../../lib/conflict-deleted-sides";
-import {
-  FILE_COMMENT_HUNK_ID,
-  type FileRowComponentProps,
-  type HighlightedLineProps,
-} from "./types";
-
-const HighlightedLine: React.FC<HighlightedLineProps> = ({
-  content,
-  language,
-  searchQuery,
-  searchHighlightOffset,
-}) => {
-  const html = (() => {
-    let result = highlightCode(content, language);
-    if (searchQuery) {
-      const { html: highlighted } = highlightInHtml(
-        result,
-        searchQuery,
-        searchHighlightOffset ?? -1,
-      );
-      result = highlighted;
-    }
-    return result;
-  })();
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
-};
-HighlightedLine.displayName = "HighlightedLine";
+import { FILE_COMMENT_HUNK_ID, type FileRowComponentProps } from "./types";
 
 const FileRowComponent: React.FC<FileRowComponentProps> = (props) => {
   const {
@@ -320,4 +292,4 @@ const FileRowComponent: React.FC<FileRowComponentProps> = (props) => {
 };
 FileRowComponent.displayName = "FileRowComponent";
 
-export { FileRowComponent, HighlightedLine };
+export { FileRowComponent };

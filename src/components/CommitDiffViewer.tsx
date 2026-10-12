@@ -34,7 +34,13 @@ import {
   undoRepoOperation,
 } from "../lib/api";
 import { resolvableConflictedCommits } from "../lib/resolvable-conflicted-commits";
-import { getLanguageFromPath, highlightCode } from "../lib/syntax-highlight";
+import { getLanguageFromPath } from "../lib/syntax-highlight";
+import { HighlightedLine } from "./diff/HighlightedLine";
+import {
+  computeHunkLineNumbers,
+  getLinePrefix,
+  getLineTypeClass,
+} from "./diff/hunk-lines";
 import {
   cn,
   formatDayLabel,
@@ -148,18 +154,6 @@ function getCommitHeadline(commit: JjLogCommit): string {
     ? headline
     : "Working copy";
 }
-
-// Parse hunk header to extract starting line numbers
-const parseHunkHeader = (
-  header: string,
-): { oldStart: number; newStart: number } => {
-  const match = header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-  if (!match) return { oldStart: 1, newStart: 1 };
-  return {
-    oldStart: parseInt(match[1], 10),
-    newStart: parseInt(match[2], 10),
-  };
-};
 
 export const CommitDiffViewer = ({
   repoPath,
@@ -1593,24 +1587,6 @@ function CommitDiffContent({
     });
   };
 
-  // Compute line numbers for a hunk
-  const computeHunkLineNumbers = (hunk: JjDiffHunk) => {
-    const { oldStart, newStart } = parseHunkHeader(hunk.header);
-    let oldLine = oldStart;
-    let newLine = newStart;
-
-    return hunk.lines.map((line) => {
-      if (line.startsWith("+")) {
-        return { old: undefined, new: newLine++ };
-      } else if (line.startsWith("-")) {
-        return { old: oldLine++, new: undefined };
-      } else {
-        const result = { old: oldLine++, new: newLine++ };
-        return result;
-      }
-    });
-  };
-
   const buildSelectionRange = (
     filePath: string,
     fromHunk: number,
@@ -2011,10 +1987,8 @@ function HunkView({
   onCommentSubmit,
   onCommentCancel,
 }: HunkViewProps) {
-  const { oldStart, newStart } = parseHunkHeader(hunk.header);
+  const lineNumbers = computeHunkLineNumbers(hunk);
   const language = getLanguageFromPath(filePath);
-  let oldLine = oldStart;
-  let newLine = newStart;
 
   return (
     <div className="font-mono">
@@ -2024,23 +1998,9 @@ function HunkView({
       </div>
       {/* Hunk lines */}
       {hunk.lines.map((line, i) => {
-        let oldNum: number | undefined;
-        let newNum: number | undefined;
-        let bgClass = "";
-        let prefix = " ";
-
-        if (line.startsWith("+")) {
-          newNum = newLine++;
-          bgClass = "bg-emerald-500/20";
-          prefix = "+";
-        } else if (line.startsWith("-")) {
-          oldNum = oldLine++;
-          bgClass = "bg-red-500/20";
-          prefix = "-";
-        } else {
-          oldNum = oldLine++;
-          newNum = newLine++;
-        }
+        const { old: oldNum, new: newNum } = lineNumbers[i] ?? {};
+        const bgClass = getLineTypeClass(line);
+        const prefix = getLinePrefix(line);
 
         const actualLineNum = newNum ?? oldNum ?? i + 1;
         const selected = isLineSelected(filePath, hunkIndex, i);
@@ -2112,12 +2072,7 @@ function HunkView({
                 </span>
               )}
               <span className="flex-1 whitespace-pre overflow-x-auto">
-                <span
-                  // biome-ignore lint/security/noDangerouslySetInnerHtml: Prism escapes source text before adding token markup.
-                  dangerouslySetInnerHTML={{
-                    __html: highlightCode(line.slice(1), language),
-                  }}
-                />
+                <HighlightedLine content={line.slice(1)} language={language} />
               </span>
             </div>
 
