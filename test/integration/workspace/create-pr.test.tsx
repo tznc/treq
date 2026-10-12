@@ -1,4 +1,4 @@
-// @include-serial
+// @include-parallel
 import { openUrl } from "@tauri-apps/plugin-opener";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
