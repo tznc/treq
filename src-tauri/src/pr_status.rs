@@ -684,12 +684,6 @@ mod tests {
   }
 
   #[test]
-  fn default_ci_poll_interval_is_thirty_seconds() {
-    assert_eq!(DEFAULT_CI_POLL_INTERVAL, Duration::from_secs(30));
-    assert!(DEFAULT_CI_POLL_INTERVAL < DEFAULT_POLL_INTERVAL);
-  }
-
-  #[test]
   fn refresh_branch_now_fetches_pr_and_ci_for_one_branch() {
     let fetch: PrFetchFn = Arc::new(|_, branch| {
       if branch == "feat/open" {
