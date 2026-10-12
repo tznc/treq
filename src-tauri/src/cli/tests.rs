@@ -1244,6 +1244,51 @@ mod commit_outcomes {
   }
 }
 
+#[test]
+fn set_parses_an_optional_workspace_and_stdin_description() {
+  let sub = parsed_subcommand(&["treq", "set", "-d", "-", "-r", "svc"]);
+  let value = |name: &str| sub.matches.args.get(name).and_then(|a| a.value.as_str());
+  assert_eq!(value("description"), Some("-"));
+  assert_eq!(value("repo"), Some("svc"));
+  assert!(sub
+    .matches
+    .args
+    .get("workspace_name")
+    .is_none_or(|a| a.value.is_null()));
+}
+
+mod description_arg {
+  use super::super::workspace_handlers::description_param_from_arg;
+  use crate::core::MaybeEmptyParam;
+  use std::io::Cursor;
+
+  #[test]
+  fn dash_reads_stdin() {
+    let mut stdin = Cursor::new("## Summary\n- a\n");
+    let param = description_param_from_arg("-", &mut stdin).unwrap();
+    assert!(matches!(param, MaybeEmptyParam::Some(text) if text == "## Summary\n- a\n"));
+  }
+
+  #[test]
+  fn other_values_are_used_as_is() {
+    let param =
+      description_param_from_arg("Support passkeys", &mut Cursor::new("ignored")).unwrap();
+    assert!(matches!(param, MaybeEmptyParam::Some(text) if text == "Support passkeys"));
+  }
+
+  #[test]
+  fn blank_text_clears_the_description() {
+    assert!(matches!(
+      description_param_from_arg("", &mut Cursor::new("")).unwrap(),
+      MaybeEmptyParam::EmptyValue
+    ));
+    assert!(matches!(
+      description_param_from_arg("-", &mut Cursor::new("  \n")).unwrap(),
+      MaybeEmptyParam::EmptyValue
+    ));
+  }
+}
+
 mod repo_root_detection {
   use super::super::find_repo_root;
   use std::fs;

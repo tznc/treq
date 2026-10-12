@@ -106,6 +106,7 @@ import {
 } from "./ui/dropdown-menu";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { WorkspaceDescription } from "./WorkspaceDescription";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import {
@@ -1013,6 +1014,26 @@ export const ShowWorkspace = ({
   };
 
   /** Opens a fresh agent session seeded with the selected log content. */
+  const workspaceMetadata = workspace?.metadata
+    ? (() => {
+        try {
+          return JSON.parse(workspace.metadata) as WorkspaceTrackerMetadata & {
+            title?: string;
+            description?: string;
+          };
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+  const workspaceTitle =
+    workspace?.title ||
+    workspaceMetadata?.title ||
+    workspace?.branch_name ||
+    null;
+  const workspaceDescription =
+    workspace?.description || workspaceMetadata?.description || null;
+
   const handleSendLogsToAgent = async (prompt: string) => {
     try {
       await startAgentSession("Logs", prompt, "plan");
@@ -1213,6 +1234,13 @@ export const ShowWorkspace = ({
                     onSessionCreated={onSessionCreated}
                     offerNewWorkspace={!workspace}
                   />
+                  {workspace && workspaceDescription && (
+                    <WorkspaceDescription
+                      repoPath={effectiveRepoPath}
+                      workspaceId={workspace.id}
+                      description={workspaceDescription}
+                    />
+                  )}
                   {/* Stack — shown for any workspace in a multi-workspace
 										    stack, including the root (whose target is the default
 										    branch, not another workspace). The panel returns null
@@ -1445,34 +1473,6 @@ export const ShowWorkspace = ({
   const branchTitle = workspace?.branch_name || mainRepoBranch || "main";
   const hasSyncChanges =
     !!syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0);
-
-  const workspaceMetadata = workspace?.metadata
-    ? (() => {
-        try {
-          return JSON.parse(workspace.metadata) as WorkspaceTrackerMetadata & {
-            title?: string;
-            description?: string;
-          };
-        } catch {
-          return null;
-        }
-      })()
-    : null;
-  const workspaceTitle =
-    workspace?.title ||
-    workspaceMetadata?.title ||
-    workspace?.branch_name ||
-    null;
-  const workspaceDescription =
-    workspace?.description || workspaceMetadata?.description || null;
-
-  // Truncate description at 100 characters
-  const truncatedDescription =
-    workspaceDescription && workspaceDescription.length > 100
-      ? `${workspaceDescription.substring(0, 100)}...`
-      : workspaceDescription;
-
-  const isTruncated = workspaceDescription && workspaceDescription.length > 100;
 
   return (
     <>
@@ -1904,27 +1904,6 @@ export const ShowWorkspace = ({
               <h1 className="text-sm font-medium text-foreground">
                 {workspaceTitle}
               </h1>
-            </div>
-          )}
-          {/* Row 3: Description (if workspace description exists) */}
-          {workspace && workspaceDescription && (
-            <div className="flex items-center px-1">
-              {isTruncated ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                      {truncatedDescription}
-                    </span>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-96">
-                    <p className="text-sm">{workspaceDescription}</p>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  {truncatedDescription}
-                </span>
-              )}
             </div>
           )}
         </div>

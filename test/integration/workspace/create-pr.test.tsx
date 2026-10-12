@@ -209,6 +209,7 @@ describe("ShowWorkspace - Create PR", () => {
         false,
       );
     });
+    expect(await screen.findByText("Pull request created")).toBeVisible();
   });
 
   it("pushes committed changes before creating a PR when the branch is ahead of remote", async () => {
@@ -239,6 +240,7 @@ describe("ShowWorkspace - Create PR", () => {
     expect(
       vi.mocked(pushWorkspaceToRemote).mock.invocationCallOrder[0],
     ).toBeLessThan(vi.mocked(ghCreatePr).mock.invocationCallOrder[0]);
+    expect(await screen.findByText("Pull request created")).toBeVisible();
   });
 
   it("keeps Create PR disabled until the new PR's status has loaded", async () => {
@@ -365,5 +367,33 @@ describe("ShowWorkspace - Create PR", () => {
     expect(openUrl).toHaveBeenCalledWith(
       "https://github.com/acme/treq/pull/42",
     );
+  });
+
+  it("uses a description an agent updated after the workspace view loaded", async () => {
+    const { workspace } = await setupPushedWorkspaceWithGitHub();
+    render(<Dashboard />);
+
+    const header = await openWorkspace("feat/create-pr");
+    const createPr = await findEnabledCreatePr(header);
+    const agentBody = "## Summary\n\n- Updated by the agent";
+    await updateWorkspace(
+      repoPath,
+      workspace.id,
+      undefined,
+      undefined,
+      agentBody,
+    );
+    await user.click(createPr);
+
+    await waitFor(() => {
+      expect(ghCreatePr).toHaveBeenCalledWith(
+        "acme/treq",
+        expect.any(String),
+        agentBody,
+        expect.any(String),
+        "feat/create-pr",
+        false,
+      );
+    });
   });
 });

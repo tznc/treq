@@ -4,7 +4,7 @@ import { ChevronDown, Github, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useCreateWorkspacePr } from "../hooks/useCreateWorkspacePr";
 import { useGitRemoteInfo, usePrInfoViaGh } from "../hooks/useMergeQueueStatus";
-import { pushWorkspaceToRemote } from "../lib/api";
+import { getWorkspaces, pushWorkspaceToRemote } from "../lib/api";
 import type { Workspace } from "../lib/api-types";
 import {
   buildGitHubComparePrUrl,
@@ -62,12 +62,20 @@ export function CreatePrButtonGroup({
     return null;
   }
 
-  const createPr = (draft: boolean) =>
+  // Agents rewrite the description with `treq set -d` while the view is open,
+  // so read it at click time rather than from the polled workspace list.
+  const latestBody = async () => {
+    const fresh = await getWorkspaces(repoPath).catch(() => null);
+    const current = fresh?.find((w) => w.id === workspace.id);
+    return current ? (current.description ?? "") : body;
+  };
+
+  const createPr = async (draft: boolean) =>
     createWorkspacePr({
       repoFullName: remoteInfo.full_name,
       branchName: workspace.branch_name,
       baseBranch,
-      body,
+      body: await latestBody(),
       draft,
       prepare: async () => {
         if (needsPush) {
@@ -91,7 +99,7 @@ export function CreatePrButtonGroup({
           baseBranch,
           headBranch: workspace.branch_name,
           title,
-          body,
+          body: await latestBody(),
         }),
       );
     } catch (err) {
@@ -121,7 +129,7 @@ export function CreatePrButtonGroup({
               size="sm"
               className="gap-1 rounded-r-none bg-[#24292f] text-white hover:bg-[#1b1f23] dark:border-white/30"
               disabled={disabled}
-              onClick={() => createPr(false)}
+              onClick={() => void createPr(false)}
             >
               {creating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />

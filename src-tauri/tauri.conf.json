@@ -78,20 +78,20 @@
           ]
         },
         "set": {
-          "description": "Update workspace settings",
+          "description": "Update workspace settings. The description is used as the pull request body",
+          "afterHelp": "Examples:\n  treq set feat/login -l 'Login page'\n  treq set -d - < pr.md\n  printf '## Summary\\n...' | treq set -d -\n  treq set -d ''",
           "args": [
             {
               "name": "workspace_name",
               "index": 1,
               "takesValue": true,
-              "required": true,
-              "description": "Workspace branch name"
+              "description": "Workspace branch name (omit to use the current workspace)"
             },
             {
               "name": "description",
               "short": "d",
               "takesValue": true,
-              "description": "Set description"
+              "description": "Set description; '-' reads it from stdin, empty clears it"
             },
             {
               "name": "title",

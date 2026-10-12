@@ -197,15 +197,6 @@ fn run_setup_script_for_cli(repo_path: &str, workspace_id: i64, workspace_path: 
 }
 
 pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
-  let workspace_name = match get_arg_value(matches, "workspace_name") {
-    Some(name) => name,
-    None => {
-      super::log_cli_error("Error: workspace name is required");
-      eprintln!("Usage: treq set <workspace_name> [-d description] [-l title] [-t target_branch]");
-      return false;
-    }
-  };
-
   let description = get_arg_value(matches, "description");
   let title = get_arg_value(matches, "title");
   let target_branch = get_arg_value(matches, "target-branch");
@@ -225,21 +216,23 @@ pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
     }
   };
 
-  // Look up workspace by branch name
-  let workspace = match local_db::get_workspace_by_branch(&repo_path, &workspace_name) {
-    Ok(Some(ws)) => ws,
-    Ok(None) => {
-      super::log_cli_error(&format!("Error: workspace '{}' not found", workspace_name));
-      return false;
-    }
-    Err(e) => {
-      super::log_cli_error(&format!("Error looking up workspace: {}", e));
-      return false;
-    }
-  };
+  let workspace =
+    match resolve_named_or_cwd_workspace(&repo_path, get_arg_value(matches, "workspace_name")) {
+      Ok(ws) => ws,
+      Err(e) => {
+        super::log_cli_error(&format!("Error: {}", e));
+        return false;
+      }
+    };
 
   let description_param = match description {
-    Some(i) => core::MaybeEmptyParam::Some(i),
+    Some(value) => match description_param_from_arg(&value, &mut std::io::stdin()) {
+      Ok(param) => param,
+      Err(e) => {
+        super::log_cli_error(&format!("Error: {}", e));
+        return false;
+      }
+    },
     None => core::MaybeEmptyParam::Omitted,
   };
   let title_param = match title {
@@ -275,6 +268,29 @@ pub(super) fn handle_workspace_set(matches: &Matches) -> bool {
       false
     }
   }
+}
+
+/// Turns a `-d` value into a description update: `-` reads it from stdin,
+/// and blank text clears it. The description is the body of the pull request
+/// Treq creates for the workspace.
+pub(super) fn description_param_from_arg(
+  value: &str,
+  stdin: &mut impl std::io::Read,
+) -> Result<core::MaybeEmptyParam<String>, String> {
+  let text = if value == "-" {
+    let mut text = String::new();
+    stdin
+      .read_to_string(&mut text)
+      .map_err(|e| format!("failed to read stdin: {e}"))?;
+    text
+  } else {
+    value.to_string()
+  };
+  Ok(if text.trim().is_empty() {
+    core::MaybeEmptyParam::EmptyValue
+  } else {
+    core::MaybeEmptyParam::Some(text)
+  })
 }
 
 fn resolve_named_or_cwd_workspace(
