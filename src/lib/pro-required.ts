@@ -3,7 +3,7 @@
 // its "Upgrade to Pro" affordance in place of an error. Keep in sync with
 // web/src/lib/pro-required.ts.
 
-export const PRO_REQUIRED_CODE = "pro_required";
+const PRO_REQUIRED_CODE = "pro_required";
 
 // The SQLSTATE set_merge_queue_enabled raises. PostgREST answers it with
 // HTTP 402 and passes the code through.

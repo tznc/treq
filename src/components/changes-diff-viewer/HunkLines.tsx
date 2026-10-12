@@ -450,6 +450,4 @@ const HunkLines: React.FC<HunkLinesProps> = (props) => {
   );
 };
 HunkLines.displayName = "HunkLines";
-
-export { HunkLines };
 export type { HunkLinesProps };

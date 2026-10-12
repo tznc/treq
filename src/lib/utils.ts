@@ -7,7 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // Sanitize text for branch names.
-export function sanitizeForBranchName(text: string): string {
+function sanitizeForBranchName(text: string): string {
   let sanitized = text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, "")

@@ -1,7 +1,7 @@
 import { initRepo, setSetting, setWindowRepoPath } from "./api";
 import { invalidateQueries } from "./swr-cache";
 
-export interface OpenRepositoryToast {
+interface OpenRepositoryToast {
   title: string;
   description: string;
   type: "success" | "error";

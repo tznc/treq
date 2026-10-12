@@ -1,7 +1,7 @@
 /**
  * Status colors for different change types (works with jj and git)
  */
-export const STATUS_COLORS = {
+const STATUS_COLORS = {
   "??": {
     bg: "bg-green-500",
     text: "text-green-500",

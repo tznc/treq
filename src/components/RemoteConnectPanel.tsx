@@ -33,7 +33,7 @@ import {
  * shorter trip away (a notification, the app switcher) keeps an open
  * terminal or form as it was.
  */
-export const REMOUNT_AFTER_HIDDEN_MS = 30_000;
+const REMOUNT_AFTER_HIDDEN_MS = 30_000;
 
 interface OpenRepo {
   path: string;

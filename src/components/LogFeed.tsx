@@ -6,12 +6,12 @@ import { cn } from "../lib/utils";
 import { useLineSelection } from "../hooks/useLineSelection";
 import { SearchOverlay } from "./SearchOverlay";
 
-export function severityClass(severityText: string): string {
+function severityClass(severityText: string): string {
   if (severityText === "ERROR") return "text-red-600 dark:text-red-400";
   if (severityText === "WARN") return "text-amber-600 dark:text-amber-400";
   return "text-foreground";
 }
-export function formatTimestamp(timestamp: string): string {
+function formatTimestamp(timestamp: string): string {
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.getTime())) return timestamp;
   return parsed.toISOString().slice(11, 23);

@@ -12,8 +12,6 @@
     "skillsInstallation": false,
     "remoteSsh": false,
     "linearIntegration": false,
-    "trelloIntegration": false,
-    "jiraIntegration": false,
     "logs": false,
     "browser": false
   },

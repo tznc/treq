@@ -20,7 +20,6 @@ const TooltipTrigger = ({
 TooltipTrigger.displayName = "TooltipTrigger";
 
 const TooltipPortal = TooltipPrimitive.Portal;
-const TooltipArrow = TooltipPrimitive.Arrow;
 
 const TooltipContent = ({
   className,
@@ -61,11 +60,4 @@ const TooltipContent = ({
 );
 TooltipContent.displayName = "TooltipContent";
 
-export {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
-  TooltipPortal,
-  TooltipArrow,
-};
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };

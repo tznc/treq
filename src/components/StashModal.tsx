@@ -37,9 +37,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { useToast } from "./ui/toast";
 
 /** Target branch value that applies onto the home repo working copy. */
-export const HOME_STASH_APPLY_TARGET = ".";
+const HOME_STASH_APPLY_TARGET = ".";
 
-export interface StashApplyTarget {
+interface StashApplyTarget {
   branch: string;
   label: string;
 }

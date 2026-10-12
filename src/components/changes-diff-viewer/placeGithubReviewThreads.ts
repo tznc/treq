@@ -26,7 +26,7 @@ function lineSideOf(ln: { new?: number; old?: number }): "old" | "new" {
  * Review tab often shows committed PR hunks while GitHub may still mark the
  * thread outdated after a force-push that left the line intact.
  */
-export function tryPlaceThread(
+function tryPlaceThread(
   thread: GhReviewThread,
   hunkMaps: Array<Map<string, FileHunksData>>,
 ): string | null {
