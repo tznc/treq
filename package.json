@@ -16,7 +16,6 @@
     "trelloIntegration": false,
     "jiraIntegration": false,
     "logs": false,
-    "checks": false,
     "browser": false,
     "agentMessageQueue": false
   },

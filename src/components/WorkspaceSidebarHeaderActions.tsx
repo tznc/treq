@@ -1,4 +1,4 @@
-import { Images, Settings, type LucideIcon } from "lucide-react";
+import { Settings, type LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 function SidebarIconButton({
@@ -40,24 +40,13 @@ function SidebarIconButton({
 
 export function WorkspaceSidebarHeaderActions({
   currentPage,
-  onOpenArtifacts,
   openSettings,
 }: {
   currentPage?: string;
-  onOpenArtifacts?: () => void;
   openSettings?: (tab?: string) => void;
 }) {
   return (
     <>
-      {onOpenArtifacts && (
-        <SidebarIconButton
-          label="Artifacts"
-          testId="artifacts-sidebar-button"
-          active={currentPage === "artifacts"}
-          icon={Images}
-          onClick={onOpenArtifacts}
-        />
-      )}
       {openSettings && (
         <SidebarIconButton
           label="Settings"

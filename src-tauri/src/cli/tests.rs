@@ -1,3 +1,4 @@
+use super::args::{Matches, SubcommandMatches};
 use super::{
   dispatch_agent_request, handle_cli_command, is_supported_cli_command, normalize_repo_path,
   parse_agent_mode, parse_agent_mode_or_default, parse_remote_command_request,
@@ -13,14 +14,13 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
-use tauri_plugin_cli::{Matches, SubcommandMatches};
 use tempfile::TempDir;
 
 fn make_subcommand(name: &str) -> SubcommandMatches {
-  let mut sub = SubcommandMatches::default();
-  sub.name = name.to_string();
-  sub.matches = Matches::default();
-  sub
+  SubcommandMatches {
+    name: name.to_string(),
+    matches: Matches::default(),
+  }
 }
 
 #[test]
@@ -525,8 +525,10 @@ fn dispatch_agent_request_surfaces_ack_timeout_error() {
 fn remote_matches(pairs: &[(&str, &str)]) -> Matches {
   let mut matches = Matches::default();
   for (name, value) in pairs {
-    let mut arg = tauri_plugin_cli::ArgData::default();
-    arg.value = Value::String((*value).to_string());
+    let arg = super::args::ArgData {
+      value: Value::String((*value).to_string()),
+      occurrences: 0,
+    };
     matches.args.insert((*name).to_string(), arg);
   }
   matches
@@ -1503,7 +1505,7 @@ mod notify {
   use crate::cli::workspace_handlers::parse_notify_args;
   use crate::notify_dispatch::NotifyEvent;
 
-  fn notify_matches(args: &[&str]) -> tauri_plugin_cli::Matches {
+  fn notify_matches(args: &[&str]) -> crate::cli::args::Matches {
     let argv = ["treq", "notify"].into_iter().chain(args.iter().copied());
     crate::cli::args::parse(argv)
       .expect("notify arguments parse")

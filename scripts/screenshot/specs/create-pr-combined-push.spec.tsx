@@ -65,7 +65,7 @@ function setOriginUrl(repoPath: string, remoteUrl: string) {
 }
 
 // Scenario: a workspace branch that has never been pushed, in a repo with a
-// GitHub remote. Previously this showed "Push to remote" and only offered
+// GitHub remote. Previously this showed "Push" and only offered
 // "Create PR" as a second step after that push landed. Now "Create PR" shows
 // immediately and pushes the branch itself before creating the PR, so this
 // captures that combined flow: at-rest, mid-flight, and settled.
@@ -119,12 +119,12 @@ it("captures Create PR pushing an unpushed branch before creating the PR", async
   });
   await waitFor(() => expect(createPrButton).toBeEnabled());
   expect(
-    within(header).queryByRole("button", { name: /push to remote/i }),
+    within(header).queryByRole("button", { name: /^push$/i }),
   ).not.toBeInTheDocument();
   await captureDocument(document, {
     name: "create-pr-combined-push-01-at-rest",
     expectations: [
-      "The workspace header shows a dark 'Create PR' button with a GitHub icon -- there is no separate 'Push to remote' button, even though this branch has never been pushed.",
+      "The workspace header shows a dark 'Create PR' button with a GitHub icon -- there is no separate 'Push' button, even though this branch has never been pushed.",
     ],
   });
 

@@ -4,15 +4,33 @@
 //! opens the GTK event loop: without a display the CLI panicked, and the exit
 //! code handed to `AppHandle::exit` from `setup` never reached the process. So
 //! the CLI builds the same clap command from the `plugins.cli` section of
-//! `tauri.conf.json` and maps its matches to the plugin's `Matches` type, which
-//! the handlers already take.
+//! `tauri.conf.json` and maps its matches to `Matches`, the same shape the
+//! plugin produces. The types live here so the CLI builds without Tauri.
 
 use std::collections::HashMap;
 
 use clap::{Arg as ClapArg, ArgAction, ArgMatches, Command};
 use serde::Deserialize;
 use serde_json::Value;
-use tauri_plugin_cli::{ArgData, Matches, SubcommandMatches};
+
+/// One argument's value: a string, an array, a bool for a flag, or null.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ArgData {
+  pub value: Value,
+  pub occurrences: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SubcommandMatches {
+  pub name: String,
+  pub matches: Matches,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Matches {
+  pub args: HashMap<String, ArgData>,
+  pub subcommand: Option<Box<SubcommandMatches>>,
+}
 
 const TAURI_CONFIG: &str = include_str!("../../tauri.conf.json");
 
@@ -119,10 +137,10 @@ fn to_matches(config: &CommandConfig, matches: &ArgMatches) -> Matches {
   }
   if let Some((name, sub_matches)) = matches.subcommand() {
     if let Some(sub_config) = config.subcommands.get(name) {
-      let mut subcommand = SubcommandMatches::default();
-      subcommand.name = name.to_string();
-      subcommand.matches = to_matches(sub_config, sub_matches);
-      result.subcommand = Some(Box::new(subcommand));
+      result.subcommand = Some(Box::new(SubcommandMatches {
+        name: name.to_string(),
+        matches: to_matches(sub_config, sub_matches),
+      }));
     }
   }
   result

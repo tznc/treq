@@ -4,52 +4,20 @@ import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
   openRepo,
-  resolveWorkspacePath,
-  writeRepoFile,
+  seedSetupScriptLogs,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
-import {
-  createWorkspace,
-  getWorkspaces,
-  runWorkflowJob,
-  trustRepo,
-} from "../../../src/lib/api";
 import { captureDocument } from "../capture";
 
-const LOGGING_WORKFLOW = `
-name: Pull request checks
-on:
-  workflow_dispatch: {}
-jobs:
-  build:
-    name: Build Job
-    steps:
-      - name: Compile
-        run: "echo 'Compiling treq v0.1.3'; echo 'warning: unused variable x'"
-      - name: Test
-        run: "echo 'running 2 tests'; echo 'error: assertion failed' 1>&2"
-`;
+const SETUP_SCRIPT =
+  "echo 'Compiling treq v0.1.3'; echo 'warning: unused variable x'; echo 'running 2 tests'; echo 'error: assertion failed' 1>&2";
 
 it("captures the home repo Logs tab and the level multi-select", async () => {
   const { repoPath } = createTestRepo(false);
   openRepo(repoPath);
-  const workspaceId = await createWorkspace(repoPath, "feat/logs");
-  await writeRepoFile(repoPath, ".treq/workflows/ci.yaml", LOGGING_WORKFLOW);
-  await trustRepo(repoPath);
-  // Seed log rows by running the check in the workspace. Checks run from a
-  // PR's Checks tab in the app; running one is setup here, not the subject.
-  const workspace = (await getWorkspaces(repoPath)).find(
-    (candidate) => candidate.id === workspaceId,
-  );
-  if (!workspace) throw new Error("feat/logs workspace not found");
-  await runWorkflowJob(
-    repoPath,
-    "ci.yaml",
-    "build",
-    workspaceId,
-    resolveWorkspacePath(repoPath, workspace.workspace_path),
-  );
+  // Seed log rows with a workspace setup script run.
+  await seedSetupScriptLogs(repoPath, "feat/logs", SETUP_SCRIPT, 4);
 
   const user = userEvent.setup();
   render(<Dashboard />);
@@ -124,7 +92,7 @@ it("captures the home repo Logs tab and the level multi-select", async () => {
     expectations: [
       "A SQL editor shows a multi-line GROUP BY query against the logs view, in a monospace font.",
       'A "Templates" dropdown button sits above the editor.',
-      'A result grid is rendered below with column headers "job_id" and "errors", and a row containing "build".',
+      'A result grid is rendered below with column headers "job_id" and "errors", and a row containing "setup".',
       'A row count line such as "1 row" appears above the grid.',
     ],
   });

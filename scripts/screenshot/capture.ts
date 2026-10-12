@@ -56,7 +56,7 @@ export type CaptureOptions = {
   deviceScaleFactor?: number;
   /**
    * Non-empty: what a viewer should be able to confirm by looking at this
-   * screenshot, e.g. "The 'Push to remote' button is not visible in the
+   * screenshot, e.g. "The 'Push' button is not visible in the
    * header" or "A green toast reading 'Pushed to remote' is shown". These
    * are checked visually against the PNG, not against the DOM.
    */

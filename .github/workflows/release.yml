@@ -148,3 +148,60 @@ jobs:
       - name: Verify packaged macOS bundle
         if: runner.os == 'macOS'
         run: bash scripts/verify-macos-bundle.sh "${{ matrix.app_bundle }}"
+
+  # Headless `treq` CLI for Linux hosts without a desktop (devcontainers,
+  # remote VMs). Built without the `gui` feature and linked statically
+  # against musl, so it runs on any distro, Alpine included.
+  linux-cli:
+    needs: release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "ubuntu-22.04"
+            target: "x86_64-unknown-linux-musl"
+            arch: "x86_64"
+          - platform: "ubuntu-22.04-arm"
+            target: "aarch64-unknown-linux-musl"
+            arch: "aarch64"
+    runs-on: ${{ matrix.platform }}
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: install musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: ". -> target"
+          key: ${{ matrix.target }}
+
+      - name: Build only the rlib for the CLI
+        run: |
+          sed -i 's/^crate-type = .*/crate-type = ["rlib"]/' src-tauri/Cargo.toml
+          grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
+
+      - name: Build headless CLI
+        run: cargo build --release --locked --no-default-features --bin treq --target ${{ matrix.target }}
+
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BIN="target/${{ matrix.target }}/release/treq"
+          "$BIN" --help | grep -F "Usage: treq"
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          ASSET="treq-cli-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          tar -czf "$ASSET" -C "$(dirname "$BIN")" treq
+          gh release upload "v${VERSION}" "$ASSET" --clobber

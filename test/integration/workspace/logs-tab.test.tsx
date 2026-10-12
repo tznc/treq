@@ -4,32 +4,19 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import {
   createWorkspace,
-  getWorkspaces,
   recordAgentChatScreen,
   recordAgentChatUserMessage,
   registerAgentChat,
-  runWorkflow,
-  trustRepo,
 } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../test-utils";
 import {
   createTestRepo,
   findSidebarBranchElement,
   openRepo,
-  writeRepoFile,
+  seedSetupScriptLogs,
 } from "../../utils";
 
-const LOGGING_WORKFLOW = `
-name: Logging CI
-on:
-  workflow_dispatch: {}
-jobs:
-  build:
-    name: Build Job
-    steps:
-      - name: Emit output
-        run: "echo hello-from-logs; echo 'error: broke' 1>&2"
-`;
+const SETUP_SCRIPT = "echo hello-from-logs; echo 'error: broke' 1>&2";
 
 let user: ReturnType<typeof userEvent.setup>;
 
@@ -41,20 +28,7 @@ async function openLogsTab() {
 }
 
 async function seedLogs(repoPath: string, branch: string) {
-  await createWorkspace(repoPath, branch);
-  await writeRepoFile(repoPath, ".treq/workflows/ci.yaml", LOGGING_WORKFLOW);
-  await trustRepo(repoPath);
-
-  const workspace = (await getWorkspaces(repoPath)).find(
-    (item) => item.branch_name === branch,
-  );
-  if (!workspace) throw new Error("workspace was not created");
-  await runWorkflow(
-    repoPath,
-    "ci.yaml",
-    workspace.id,
-    workspace.workspace_path,
-  );
+  await seedSetupScriptLogs(repoPath, branch, SETUP_SCRIPT, 2);
 }
 
 describe("Home repo Logs tab", () => {
@@ -155,7 +129,7 @@ describe("Home repo Logs tab", () => {
       );
 
       const table = await screen.findByTestId("sql-results");
-      await within(table).findByText("build");
+      await within(table).findByText("setup");
     });
 
     it("rejects a non-read-only query with an error", async () => {
@@ -178,6 +152,7 @@ describe("Home repo Logs tab", () => {
       const error = await screen.findByTestId("sql-error");
       expect(error.textContent).toMatch(/read-only/i);
     });
+
     it("renders a timeseries chart above the feed", async () => {
       openRepo(seededRepoPath);
 

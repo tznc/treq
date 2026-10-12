@@ -316,20 +316,6 @@ export const listDirectoryCached = (
 ): Promise<CachedDirectoryEntry[]> =>
   invoke("list_directory_cached", { repoPath, workspaceId, parentPath });
 
-export interface SendArtifactRecord {
-  id: string;
-  repo: string;
-  pty_session_id?: string | null;
-  media_type: string;
-  path: string;
-  title?: string | null;
-  received_at: number;
-}
-
-export const listSendArtifacts = (
-  repoPath: string,
-): Promise<SendArtifactRecord[]> => invoke("list_send_artifacts", { repoPath });
-
 export const searchWorkspaceFiles = (
   repoPath: string,
   workspaceId: number | null,
@@ -384,12 +370,6 @@ export const getSessionModel = (
   repoPath: string,
   id: number,
 ): Promise<string | null> => invoke("get_session_model", { repoPath, id });
-
-export const setSessionModel = (
-  repoPath: string,
-  id: number,
-  model: string | null,
-): Promise<void> => invoke("set_session_model", { repoPath, id, model });
 
 // Prompt history API
 export const addPromptHistory = (

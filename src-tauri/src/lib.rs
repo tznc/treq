@@ -1,4 +1,7 @@
+// The app side of dispatch (listener, responses) is unused by the headless CLI.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod agent_dispatch;
+#[cfg(feature = "gui")]
 mod agent_runtime;
 pub mod auto_rebase;
 pub mod auto_review;
@@ -7,6 +10,7 @@ pub mod binary_paths;
 // `tauri-plugin-cli`, which has no Android/iOS implementation.
 #[cfg(desktop)]
 mod cli;
+#[cfg(feature = "gui")]
 mod commands;
 mod commit_timestamps;
 pub mod conflict_markers;
@@ -16,11 +20,14 @@ pub mod file_indexer;
 pub mod github;
 pub mod jira;
 pub mod jj;
+#[cfg(feature = "gui")]
 pub mod linear;
 pub mod local_db;
 pub mod lock_ext;
 pub mod notify_dispatch;
+#[cfg(feature = "gui")]
 mod open_new_window;
+#[cfg(feature = "gui")]
 pub mod pr_status;
 pub mod pty;
 pub mod repo_config;
@@ -31,53 +38,76 @@ pub mod tracker;
 pub mod trello;
 pub mod unified_patch;
 
+#[cfg(feature = "gui")]
 use agent_runtime::{
   parse_agent_request_from_url, route_agent_deep_link, route_agent_dispatch_request,
   start_agent_ipc_listener, start_instance_registry_heartbeat,
 };
+#[cfg(feature = "gui")]
 use commands::file_watcher::WatcherManager;
+#[cfg(feature = "gui")]
 use db::Database;
+#[cfg(feature = "gui")]
 use pty::PtyManager;
+#[cfg(feature = "gui")]
 use std::collections::HashMap;
+#[cfg(feature = "gui")]
 use std::sync::Mutex;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+#[cfg(feature = "gui")]
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
+#[cfg(feature = "gui")]
 use tauri_plugin_log::{Target, TargetKind};
 
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 extern crate self as treq_lib;
 
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 mod e2e_test_helpers;
 
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 mod tauri_test_bridge;
 
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 pub(crate) mod test_pty_events;
 
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::commands::CutoffReasonDto;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::core::remote::TreqCommandRequest;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::core::remote_control_plane::SshEndpoint;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::core::remote_pty::PtyLaunchSpec;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::core::skills::SkillInstallScope;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::tracker::TrackerProvider;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use commands::RemoteExecState;
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use commands::RemotePtyState;
 
+#[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 #[tauri_test::setup(init = tauri_test_bridge::init_test_state)]
 pub struct TauriTestApp;
 
+#[cfg(feature = "gui")]
 pub(crate) struct AppState {
   db: Mutex<Database>,
   pty_manager: PtyManager,
@@ -93,6 +123,7 @@ pub(crate) struct AppState {
   _telemetry: telemetry::TelemetryGuards,
 }
 
+#[cfg(feature = "gui")]
 impl AppState {
   pub(crate) fn new(
     db: Database,
@@ -121,6 +152,7 @@ impl AppState {
 /// Picks which webview a menu event targets, following the same rule as
 /// `emit_to_focused`: the currently focused window, falling back to the
 /// most recently focused one that still exists.
+#[cfg(feature = "gui")]
 fn resolve_menu_target_label(app: &AppHandle) -> Option<String> {
   let windows = app.webview_windows();
   let focused: Vec<String> = windows
@@ -145,6 +177,7 @@ fn resolve_menu_target_label(app: &AppHandle) -> Option<String> {
 ///
 /// On macOS the menu bar unfocuses every window, so this never broadcasts
 /// globally — a broadcast would run folder pickers in every open webview.
+#[cfg(feature = "gui")]
 pub fn emit_to_focused<S: serde::Serialize + Clone>(app: &AppHandle, event: &str, payload: S) {
   let Some(label) = resolve_menu_target_label(app) else {
     return;
@@ -153,6 +186,7 @@ pub fn emit_to_focused<S: serde::Serialize + Clone>(app: &AppHandle, event: &str
 }
 
 /// What a `treq://` deep link asks the app to do.
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[derive(Debug, PartialEq, Eq)]
 enum DeepLinkKind {
@@ -165,6 +199,7 @@ enum DeepLinkKind {
 
 /// Sorts a deep link by what it asks for. An auth callback is matched by the
 /// same rule as `authCallbackToken` in `src/lib/auth-deep-link.ts`.
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn classify_deep_link(url: &str) -> DeepLinkKind {
   if url.starts_with("treq://agent/start?") {
@@ -183,6 +218,7 @@ fn classify_deep_link(url: &str) -> DeepLinkKind {
 }
 
 /// Brings the window a menu event would target to the front.
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn focus_target_window(app: &AppHandle) {
   let Some(window) = resolve_menu_target_label(app).and_then(|l| app.get_webview_window(&l)) else {
@@ -200,6 +236,7 @@ fn focus_target_window(app: &AppHandle) {
 /// one already showing. The target webview is resolved and retained before
 /// the picker steals window focus, and the picker itself is shown after
 /// leaving the AppKit menu-tracking loop.
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn schedule_open_repo(app: AppHandle) {
   if !open_new_window::OPEN_REPO_GATE.try_begin() {
@@ -222,6 +259,7 @@ fn schedule_open_repo(app: AppHandle) {
   });
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn pick_folder_and_notify(app: AppHandle, label: String) {
   use tauri_plugin_dialog::DialogExt;
@@ -251,6 +289,7 @@ fn pick_folder_and_notify(app: AppHandle, label: String) {
     });
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn schedule_open_repo_in_new_window(app: AppHandle) {
   if !open_new_window::OPEN_NEW_WINDOW_GATE.try_begin() {
@@ -272,6 +311,7 @@ fn schedule_open_repo_in_new_window(app: AppHandle) {
   });
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn pick_folder_and_open_new_window(app: AppHandle) {
   use tauri_plugin_dialog::DialogExt;
@@ -323,6 +363,7 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
 
 /// Web page a menu item opens in the browser, on every desktop platform.
 /// Menu items handled inside the app return `None`.
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn menu_item_url(menu_id: &str) -> Option<&'static str> {
   match menu_id {
@@ -332,6 +373,7 @@ fn menu_item_url(menu_id: &str) -> Option<&'static str> {
   }
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn is_cli_process<I, S>(args: I) -> bool
 where
@@ -346,6 +388,7 @@ where
   !first_arg.starts_with("treq://") && !first_arg.starts_with("-psn_")
 }
 
+#[cfg(feature = "gui")]
 #[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
 pub fn run() {
   telemetry::install_panic_hook();
@@ -913,7 +956,6 @@ pub fn run() {
       commands::get_file_modified_at,
       commands::list_directory,
       commands::list_directories_batch,
-      commands::list_send_artifacts,
       commands::ls_workspace_with_status,
       commands::list_gitignored_path_suggestions,
       commands::get_workspace_readme,
@@ -923,7 +965,6 @@ pub fn run() {
       commands::get_sessions,
       commands::update_session_access,
       commands::get_session_model,
-      commands::set_session_model,
       commands::add_prompt_history,
       commands::get_prompt_history,
       commands::get_workspace_starting_prompt,
@@ -1023,14 +1064,6 @@ pub fn run() {
       commands::tracker_open_or_create_workspace_from_item,
       commands::tracker_start_auto_kickoff_polling,
       commands::load_repo_yaml_config,
-      commands::list_workflows,
-      commands::run_workflow_job,
-      commands::run_workflow,
-      commands::is_repo_trusted,
-      commands::trust_repo,
-      commands::list_workflow_runs,
-      commands::get_workspace_setup_status,
-      commands::rerun_workspace_setup_script,
       commands::get_run_logs,
       commands::get_repo_logs,
       commands::run_logs_sql,
@@ -1065,7 +1098,14 @@ pub fn run() {
     });
 }
 
-#[cfg(test)]
+/// Without the desktop app, `treq` is only the command-line interface.
+#[cfg(not(feature = "gui"))]
+pub fn run() {
+  telemetry::install_panic_hook();
+  std::process::exit(cli::args::run(std::env::args_os()));
+}
+
+#[cfg(all(test, feature = "gui"))]
 mod tests {
   use super::agent_runtime::{
     build_agent_deep_link_url, extract_repo_from_agent_deep_link, parse_agent_request_from_url,

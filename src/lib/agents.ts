@@ -3,8 +3,6 @@ interface AgentInfo {
   label: string;
   /** Has a plan mode, offered as "Plan" next to Edit. */
   hasPlanMode: boolean;
-  /** Takes a model choice, offered in the terminal header. */
-  hasModelPicker: boolean;
 }
 
 /**
@@ -13,14 +11,13 @@ interface AgentInfo {
  * new agent is added here (and its launch command in agentCommand.ts).
  */
 export const AGENTS = [
-  { id: "claude", label: "Claude", hasPlanMode: true, hasModelPicker: true },
-  { id: "codex", label: "Codex", hasPlanMode: false, hasModelPicker: false },
-  { id: "cursor", label: "Cursor", hasPlanMode: true, hasModelPicker: false },
+  { id: "claude", label: "Claude", hasPlanMode: true },
+  { id: "codex", label: "Codex", hasPlanMode: false },
+  { id: "cursor", label: "Cursor", hasPlanMode: true },
   {
     id: "copilot",
     label: "Copilot",
     hasPlanMode: false,
-    hasModelPicker: false,
   },
 ] as const satisfies readonly AgentInfo[];
 

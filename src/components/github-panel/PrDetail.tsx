@@ -29,7 +29,6 @@ import {
   openOrCreateWorkspaceFromPr,
 } from "../../lib/api";
 import { MarkdownContent } from "../MarkdownContent";
-import { ChecksTab } from "../ChecksTab";
 import { compareCiChecksBySeverity } from "../../lib/ci-status";
 import {
   CheckEntryRow,
@@ -268,21 +267,6 @@ export function PrDetailPanel({
                   .map((check) => (
                     <CheckEntryRow key={check.name} check={check} />
                   ))}
-              </div>
-            </div>
-          )}
-
-          {existingWorkspace && (
-            <div className="space-y-2">
-              <h3 className="text-base font-semibold uppercase tracking-widest text-muted-foreground">
-                Treq checks
-              </h3>
-              <div className="border border-border rounded-md overflow-hidden min-h-48">
-                <ChecksTab
-                  repoPath={repoPath}
-                  workspaceId={existingWorkspace.id}
-                  workspacePath={existingWorkspace.workspace_path}
-                />
               </div>
             </div>
           )}

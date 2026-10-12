@@ -50,7 +50,6 @@ it("starts a prompt-dialog session on the repo default model", async () => {
 			name: "agent-session-default-model-01-opus",
 			expectations: [
 				`An agent terminal pane is open with a tab titled "${PROMPT}".`,
-				"The model selector at the right of the terminal header reads 'Opus' (the repo default), not 'Default' or 'Sonnet'.",
 				"The terminal body shows the fake agent's output, including the lines 'fake-agent: claude' and 'model: opus'.",
 			],
 		});

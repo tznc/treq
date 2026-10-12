@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use tauri_plugin_cli::Matches;
+use super::args::Matches;
 
 use crate::core;
 use crate::local_db;
