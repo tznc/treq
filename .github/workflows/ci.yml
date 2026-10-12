@@ -32,8 +32,11 @@ jobs:
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
       js_changed: ${{ steps.filter.outputs.js }}
+    # No checkout: on pull_request, paths-filter lists the changed files
+    # through the GitHub API.
+    permissions:
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
       - name: Check for Rust and JS/TS changes
         id: filter
         uses: dorny/paths-filter@v3
