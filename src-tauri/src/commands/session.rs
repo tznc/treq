@@ -31,11 +31,6 @@ pub fn get_session_model(repo_path: String, id: i64) -> Result<Option<String>, S
 }
 
 #[tauri::command]
-pub fn set_session_model(repo_path: String, id: i64, model: Option<String>) -> Result<(), String> {
-  local_db::set_session_model(&repo_path, id, model)
-}
-
-#[tauri::command]
 pub fn add_prompt_history(
   repo_path: String,
   workspace_id: Option<i64>,

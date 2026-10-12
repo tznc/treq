@@ -12,12 +12,10 @@ import {
   looksLikeShellPrompt,
 } from "../../lib/agentMessageQueue";
 import {
-  ptyClose,
   ptyWrite,
   recordAgentChatScreen,
   recordAgentChatUserMessage,
   registerAgentChat,
-  setSessionModel,
 } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { usePreviewFeature } from "../../stores/featurePreviewStore";
@@ -26,10 +24,8 @@ import {
   type ConsolidatedTerminalHandle,
 } from "../ConsolidatedTerminal";
 import { AgentIcon } from "../icons/AgentIcons";
-import { ModelSelector } from "../ModelSelector";
 import { Button } from "../ui/button";
 import { Kbd, KbdGroup } from "../ui/kbd";
-import { useToast } from "../ui/toast";
 import {
   Tooltip,
   TooltipContent,
@@ -51,7 +47,6 @@ import {
 } from "./terminalOutputTail";
 import { type AgentSessionData, dbSessionIdOf } from "./types";
 import { useAgentAutoCommand } from "./useAgentAutoCommand";
-import { agentInfo, DEFAULT_AGENT } from "../../lib/agents";
 import { agentTerminalId } from "./agentTerminalId";
 
 export interface AgentTerminalPanelProps {
@@ -93,19 +88,11 @@ export const AgentTerminalPanel = ({
   workspaceName,
   onNavigateToWorkspace,
 }: AgentTerminalPanelProps) => {
-  const { addToast } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isChangingModel, setIsChangingModel] = useState(false);
-  const [terminalInstanceKey, setTerminalInstanceKey] = useState(0);
-  const {
-    sessionModel,
-    setSessionModelState,
-    isModelLoaded,
-    autoCommand,
-    prepareError,
-  } = useAgentAutoCommand(sessionData, terminalInstanceKey > 0);
+  const { isModelLoaded, autoCommand, prepareError } =
+    useAgentAutoCommand(sessionData);
 
   const terminalId = agentTerminalId(sessionData.sessionId);
   const isHidden = collapsed;
@@ -178,7 +165,6 @@ export const AgentTerminalPanel = ({
     update: updateQueuedMessage,
     markBusy,
     markIdle,
-    clear: clearQueuedMessages,
   } = useAgentMessageQueue({
     ptySessionId: sessionData.ptySessionId,
     write: writeAgentMessage,
@@ -257,40 +243,6 @@ export const AgentTerminalPanel = ({
     }
   };
 
-  // Model change handler
-  const handleModelChange = async (newModel: string) => {
-    setIsChangingModel(true);
-    try {
-      const modelToSave = newModel === "default" ? null : newModel;
-      await setSessionModel(
-        sessionData.repoPath,
-        dbSessionIdOf(sessionData),
-        modelToSave,
-      );
-      // Relaunch the agent with the new model. The old PTY is closed before
-      // the model state changes so the terminal remounts once, into a new PTY.
-      clearQueuedMessages();
-      processOutputTailRef.current = createTerminalOutputTail();
-      markBusy();
-      await ptyClose(sessionData.ptySessionId).catch(console.error);
-      setSessionModelState(modelToSave);
-      setTerminalInstanceKey((prev) => prev + 1);
-      addToast({
-        title: "Terminal Restarting",
-        description: `Using model: ${modelToSave || "default"}`,
-        type: "info",
-      });
-      setIsChangingModel(false);
-    } catch (error) {
-      addToast({
-        title: "Failed to change model",
-        description: error instanceof Error ? error.message : String(error),
-        type: "error",
-      });
-      setIsChangingModel(false);
-    }
-  };
-
   return (
     <div
       data-terminal-id={terminalId}
@@ -335,14 +287,6 @@ export const AgentTerminalPanel = ({
               open={queuePopoverOpen}
               onOpenChange={setQueuePopoverOpen}
               overlayContainer={terminalBodyEl}
-            />
-          )}
-          {/* Model selector — Claude only */}
-          {agentInfo(sessionData.agent ?? DEFAULT_AGENT).hasModelPicker && (
-            <ModelSelector
-              currentModel={sessionModel}
-              onModelChange={handleModelChange}
-              disabled={isChangingModel}
             />
           )}
           {/* Search button */}
@@ -424,7 +368,7 @@ export const AgentTerminalPanel = ({
                 }}
               />
               <ConsolidatedTerminal
-                key={`${sessionData.ptySessionId}-${terminalInstanceKey}`}
+                key={sessionData.ptySessionId}
                 ref={(el) => {
                   if (el) {
                     terminalRefs.current.set(terminalId, el);

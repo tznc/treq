@@ -385,12 +385,6 @@ export const getSessionModel = (
   id: number,
 ): Promise<string | null> => invoke("get_session_model", { repoPath, id });
 
-export const setSessionModel = (
-  repoPath: string,
-  id: number,
-  model: string | null,
-): Promise<void> => invoke("set_session_model", { repoPath, id, model });
-
 // Prompt history API
 export const addPromptHistory = (
   repoPath: string,

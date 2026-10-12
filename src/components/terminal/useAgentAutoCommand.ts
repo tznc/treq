@@ -9,18 +9,8 @@ import { prepareAgentAutoCommand } from "../../lib/prepareAgentAutoCommand";
 import { useToast } from "../ui/toast";
 import { type AgentSessionData, dbSessionIdOf } from "./types";
 
-// `restarted` is set once the agent has been relaunched in place (after a
-// model change). The relaunch starts a fresh agent without the session's
-// original task, which the first launch already ran.
-export const useAgentAutoCommand = (
-  sessionData: AgentSessionData,
-  restarted = false,
-) => {
+export const useAgentAutoCommand = (sessionData: AgentSessionData) => {
   const { addToast } = useToast();
-  const [sessionModelOverride, setSessionModelState] = useState<
-    string | null | undefined
-  >(undefined);
-
   const { data: loadedModel, isLoading: modelLoading } = useSWR(
     ["session-model", sessionData.repoPath, dbSessionIdOf(sessionData)],
     () => getSessionModel(sessionData.repoPath, dbSessionIdOf(sessionData)),
@@ -38,14 +28,11 @@ export const useAgentAutoCommand = (
     .filter((repo) => repo.exists)
     .map((repo) => repo.path);
 
-  const sessionModel =
-    sessionModelOverride === undefined
-      ? (loadedModel ?? null)
-      : sessionModelOverride;
+  const sessionModel = loadedModel ?? null;
   const isModelLoaded = !modelLoading;
   const treqBinDirReady = !binLoading;
 
-  const pendingPrompt = restarted ? undefined : sessionData.pendingPrompt;
+  const { pendingPrompt } = sessionData;
   const { data: prepared, error: prepareErr } = useSWR(
     isModelLoaded && treqBinDirReady && !supportingLoading
       ? [
@@ -93,8 +80,6 @@ export const useAgentAutoCommand = (
   }, [prepareErr, prepared?.skillWriteWarning, addToast]);
 
   return {
-    sessionModel,
-    setSessionModelState,
     isModelLoaded,
     autoCommand: prepared?.command ?? null,
     prepareError,
