@@ -44,12 +44,12 @@ it("captures the header sync indicator before and after committing from the Chan
 	await within(header).findByText(BRANCH_NAME);
 
 	await user.click(
-		await within(header).findByRole("button", { name: /push to remote/i }),
+		await within(header).findByRole("button", { name: /^push$/i }),
 	);
 	await screen.findByText("Pushed to remote");
 	await waitFor(() => {
 		expect(
-			screen.queryByRole("button", { name: /push to remote/i }),
+			screen.queryByRole("button", { name: /^push$/i }),
 		).not.toBeInTheDocument();
 	});
 

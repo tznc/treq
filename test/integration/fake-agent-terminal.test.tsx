@@ -46,7 +46,9 @@ describe("fake agent terminal", () => {
     expect(
       within(pane).getByText("prompt: Add a changelog entry"),
     ).toBeInTheDocument();
-    expect(await within(pane).findByText("ready")).toBeInTheDocument();
+    expect(
+      await within(pane).findByText("ready", {}, { timeout: 15000 }),
+    ).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(within(pane).queryByText(/^received:/)).not.toBeInTheDocument();
   }, 30000);

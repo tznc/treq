@@ -1,4 +1,4 @@
-import { createCommit } from "../src/lib/api";
+import { createCommit, createWorkspace, getRepoLogs } from "../src/lib/api";
 import { dispatchRefreshWorkspaceChanges } from "../src/lib/change-file-drag";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -371,4 +371,27 @@ export function setOriginUrl(repoPath: string, remoteUrl: string) {
     config += `\n[remote "origin"]\n\turl = ${remoteUrl}\n`;
   }
   fs.writeFileSync(configPath, config);
+}
+
+// Seeds check log rows by configuring a workspace setup script and creating a
+// workspace, then waits for the background setup run to record its lines.
+export async function seedSetupScriptLogs(
+  repoPath: string,
+  branch: string,
+  script: string,
+  expectedLines: number,
+): Promise<void> {
+  await writeRepoFile(
+    repoPath,
+    ".treq/config.yaml",
+    `setup_script: ${JSON.stringify(script)}\n`,
+  );
+  await createWorkspace(repoPath, branch);
+  await waitFor(
+    async () => {
+      const logs = await getRepoLogs(repoPath);
+      expect(logs.length).toBeGreaterThanOrEqual(expectedLines);
+    },
+    { timeout: 20_000 },
+  );
 }

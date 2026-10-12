@@ -1,9 +1,17 @@
 name: NAPI addon
 description: >
   Restore the compiled tauri-test NAPI addon from cache, or build it and save
-  it. Shared by ci.yml (PRs, consumers) and napi-cache.yml (main, producer)
+  it. Shared by ci.yml (PRs, consumers) and warm-caches.yml (main, producer)
   so both compute the same cache keys. Expects the WebKit/GTK apt packages
   and `npm ci` to have run first.
+
+inputs:
+  warm:
+    description: >
+      Producer mode (warm-caches.yml). Rebuild when the Rust dependency cache
+      misses even if the addon itself is cached, so main always saves the
+      dependency cache that PRs touching Rust need.
+    default: "false"
 
 runs:
   using: composite
@@ -22,23 +30,31 @@ runs:
         key: napi-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src-tauri/Cargo.toml', 'src-tauri/build.rs', 'src-tauri/src/**', 'src-tauri/tests/**', 'src-tauri/package.json', 'crates/tauri-test-macros/**') }}
 
     - name: Install Rust stable
-      if: steps.napi-cache.outputs.cache-hit != 'true'
+      if: steps.napi-cache.outputs.cache-hit != 'true' || inputs.warm == 'true'
       uses: dtolnay/rust-toolchain@v1
       with:
         toolchain: stable
 
     # shared-key: without it the key includes the job id, so the cache main
-    # saves from napi-cache.yml would never match the PR job in ci.yml.
+    # saves from warm-caches.yml would never match the PR job in ci.yml.
     - uses: Swatinem/rust-cache@v2
-      if: steps.napi-cache.outputs.cache-hit != 'true'
+      id: rust-cache
+      if: steps.napi-cache.outputs.cache-hit != 'true' || inputs.warm == 'true'
       with:
         shared-key: napi-addon
-        cache-on-failure: true
+        save-if: ${{ github.ref == 'refs/heads/main' }}
         workspaces: |
           . -> target
 
+    # mold links the cdylib several times faster than ld.
+    - name: Use mold linker
+      if: (steps.napi-cache.outputs.cache-hit != 'true' || (inputs.warm == 'true' && steps.rust-cache.outputs.cache-hit != 'true')) && runner.os == 'Linux'
+      uses: rui314/setup-mold@v1
+
+    # Warm mode builds on a dependency-cache miss so rust-cache's post step
+    # saves a full target/, not just what a partial restore left.
     - name: Build NAPI addon
-      if: steps.napi-cache.outputs.cache-hit != 'true'
+      if: steps.napi-cache.outputs.cache-hit != 'true' || (inputs.warm == 'true' && steps.rust-cache.outputs.cache-hit != 'true')
       shell: bash
       run: |
         npm run build:napi

@@ -28,7 +28,6 @@ import {
 } from "./test-event-bus";
 
 process.env.TREQ_DISABLE_AUTO_REBASE = "1";
-process.env.TREQ_DISABLE_AUTO_UPDATE = "1";
 
 const testAppDataDir = path.join(os.tmpdir(), `treq-screenshot-${Date.now()}`);
 process.env.TREQ_APP_DATA_DIR = testAppDataDir;

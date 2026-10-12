@@ -15,13 +15,29 @@ name = "treq_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-tauri-test = ["dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
+default = ["gui"]
+# The desktop app. Without it the crate builds only the `treq` CLI, with no
+# Tauri, GTK or WebKit, for Linux hosts and containers without a display.
+gui = [
+  "dep:tauri",
+  "dep:tauri-build",
+  "dep:tauri-plugin-opener",
+  "dep:tauri-plugin-dialog",
+  "dep:tauri-plugin-log",
+  "dep:tauri-plugin-deep-link",
+  "dep:tauri-plugin-notification",
+  "dep:tauri-plugin-keystore",
+  "dep:tauri-plugin-biometric",
+  "dep:tauri-plugin-cli",
+  "dep:tauri-plugin-single-instance",
+]
+tauri-test = ["gui", "dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
 embed = []
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 napi-build = "2"
 
 [target.'cfg(unix)'.dependencies]
@@ -31,22 +47,22 @@ libc = "0.2"
 # `treq` command-line entry point it backs only exists on desktop, so mobile
 # builds leave it out entirely (see `#[cfg(desktop)]` on `mod cli` in lib.rs).
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-cli = "2.4.1"
+tauri-plugin-cli = { version = "2.4.1", optional = true }
 # Parses CLI args before Tauri starts (see `cli::args`); same version the plugin uses.
-clap = "4"
-tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+clap = { version = "4", features = ["string"] }
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
 
 [dependencies]
-tauri = { version = "2.10.3", features = ["protocol-asset", "unstable"] }
+tauri = { version = "2.10.3", features = ["protocol-asset", "unstable"], optional = true }
 tauri-test = { version = "0.2.1", optional = true }
 napi = { version = "2", default-features = false, features = ["napi8", "async", "serde-json"], optional = true }
 napi-derive = { version = "2", optional = true }
-tauri-plugin-opener = "2.5.2"
-tauri-plugin-dialog = "2.7.0"
-tauri-plugin-log = "2.8.0"
-tauri-plugin-deep-link = "2.4.7"
+tauri-plugin-opener = { version = "2.5.2", optional = true }
+tauri-plugin-dialog = { version = "2.7.0", optional = true }
+tauri-plugin-log = { version = "2.8.0", optional = true }
+tauri-plugin-deep-link = { version = "2.4.7", optional = true }
 # OS notifications when an agent finishes. 2.5 requires tauri 2.12.
-tauri-plugin-notification = "~2.4"
+tauri-plugin-notification = { version = "~2.4", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -83,8 +99,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 bytes = "1"
 getrandom = "0.4"
-tauri-plugin-keystore = "2.1.0-alpha.1"
-tauri-plugin-biometric = "2"
+tauri-plugin-keystore = { version = "2.1.0-alpha.1", optional = true }
+tauri-plugin-biometric = { version = "2", optional = true }
 
 [dev-dependencies]
 mockall = "0.14.0"

@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   assetsForPtySession,
-  mergeSendAssets,
   normalizeSendMediaType,
   parseTreqSendPayload,
-  sendRecordToAsset,
 } from "./treqSend";
 
 describe("treqSend helpers", () => {
@@ -72,30 +70,5 @@ describe("treqSend helpers", () => {
     expect(
       assetsForPtySession(assets, "session-b", true).map((a) => a.id),
     ).toEqual(["2"]);
-  });
-
-  it("maps persisted records and merges live over historical by id", () => {
-    const mapped = sendRecordToAsset({
-      id: "send-1",
-      repo: "/r",
-      pty_session_id: "pty",
-      media_type: "image",
-      path: "/r/a.png",
-      title: "a.png",
-      received_at: 10,
-    });
-    expect(mapped).toMatchObject({
-      id: "send-1",
-      mediaType: "image",
-      ptySessionId: "pty",
-      receivedAt: 10,
-    });
-    const merged = mergeSendAssets(
-      [mapped],
-      [{ ...mapped, title: "live", receivedAt: 20 }],
-    );
-    expect(merged).toHaveLength(1);
-    expect(merged[0].title).toBe("live");
-    expect(merged[0].receivedAt).toBe(20);
   });
 });

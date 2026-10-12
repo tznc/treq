@@ -185,7 +185,7 @@ pub fn device_key_provider(
   })
 }
 
-#[cfg(not(mobile))]
+#[cfg(all(not(mobile), feature = "gui"))]
 pub async fn ensure_device_key(_app: &tauri::AppHandle) -> Result<DeviceKeyInfo, String> {
   Err(
     "Device key storage is only available on mobile builds; desktop uses local SSH identities \

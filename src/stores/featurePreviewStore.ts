@@ -26,7 +26,6 @@ function defaultFlags(): PreviewFlags {
     trelloIntegration: previewFeatureDefault("trelloIntegration"),
     jiraIntegration: previewFeatureDefault("jiraIntegration"),
     logs: previewFeatureDefault("logs"),
-    checks: previewFeatureDefault("checks"),
     browser: previewFeatureDefault("browser"),
     agentMessageQueue: previewFeatureDefault("agentMessageQueue"),
   };

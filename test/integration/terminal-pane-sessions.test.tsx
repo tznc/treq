@@ -1,3 +1,4 @@
+// @include-parallel
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
@@ -94,24 +95,6 @@ describe("terminal pane sessions", () => {
     const [alpha, beta] = agentColumns();
     await waitFor(() => expect(alpha).toHaveAttribute("data-active", "true"));
     expect(beta).toHaveAttribute("data-active", "false");
-  }, 60000);
-
-  it("restarts the agent on a model change without sending the task again", async () => {
-    render(<Dashboard />);
-    await screen.findByTestId("show-workspace-header");
-    await submitTask("Refactor the parser");
-    await within(pane()).findByText("ready", {}, { timeout: 15000 });
-
-    await user.click(
-      within(agentColumns()[0]).getByRole("button", { name: /^Model:/ }),
-    );
-    await user.click(await screen.findByRole("menuitem", { name: /^Opus$/ }));
-
-    await within(pane()).findByText("model: opus", {}, { timeout: 15000 });
-    expect(within(pane()).getByText("prompt: <none>")).toBeInTheDocument();
-    expect(
-      within(pane()).queryByText("prompt: Refactor the parser"),
-    ).not.toBeInTheDocument();
   }, 60000);
 
   it("has no Reset or Scroll to bottom buttons in the agent header", async () => {

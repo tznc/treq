@@ -47,32 +47,6 @@ Then decide what a failure does. The simplest rule is that a red gate sends the 
 
 When agents work in [parallel](/learn/parallel-coding-agents), each one needs its own gate run against its own files. A shared checkout produces results that belong to no one change.
 
-## Workspace Checks in Treq
-
-Treq's **Workspace Checks** run this kind of gate inside a [workspace](/docs/concepts/workspaces). You define workflows as YAML files in `.treq/workflows/`. Each workflow has jobs, and each job has steps with a shell command. A step passes when its command exits zero. The first failing step stops its job.
-
-```yaml
-name: CI
-jobs:
-  verify:
-    name: Verify
-    steps:
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Unit tests
-        run: npm test
-```
-
-From a pull request that belongs to a workspace, **Run All** runs every job in a workflow, with up to 4 jobs at once. A step that runs longer than 60 seconds is terminated and counts as failed. Treq stores each run with the stdout and stderr of every step, so you can read why a gate failed or hand the log to the agent. Each stacked workspace has its own run history, so each layer of a [stack](/learn/concepts/git/stacked-prs) can pass its gate before you review the next one.
-
-Treq asks you to trust a repository before it runs its workflows, because the workflow files contain shell commands. When a run passes and the workspace has uncommitted changes, Treq commits them with a `treq-autosave:` message. Workspace Checks do not run the fix loop for you. They report the result and you decide what to do next.
-
-:::note[Preview in v0.3.0]
-
-Workspace Checks are a feature preview in v0.3.0 and are off by default. Turn them on in Settings under **Feature Preview**. The latest published release before it is v0.2.0, which does not include them. See the [Workspace Checks docs](/docs/concepts/checks) for setup, and [install Treq](/docs/getting-started/installation) for downloads.
-
-:::
-
 ## Engineering Considerations
 
 Gates measure what you wrote down. A change can pass every command and still be wrong, so write gates for the failures you have seen before and add one after each new escape.
@@ -90,4 +64,3 @@ Gate time adds to every agent loop. Keep the workspace gate under a few minutes 
 - [Human in the Loop AI Code Review](/learn/ai-code-review): the human checkpoint after the gates pass
 - [What is AI Code Review?](/learn/concepts/ai-engineering/ai-code-review): add AI findings on top of command results
 - [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs): a checklist for agent pull requests
-- [Workspace Checks](/docs/concepts/checks): configure and run checks in Treq

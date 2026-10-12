@@ -1,4 +1,4 @@
-// @include-serial
+// @include-parallel
 import { openUrl } from "@tauri-apps/plugin-opener";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
@@ -84,7 +84,7 @@ describe("ShowWorkspace - Create PR", () => {
       await within(header).findByRole("button", { name: /^create pr$/i }),
     ).toBeVisible();
     expect(
-      within(header).queryByRole("button", { name: /push to remote/i }),
+      within(header).queryByRole("button", { name: /^push$/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -105,7 +105,7 @@ describe("ShowWorkspace - Create PR", () => {
     expect(moreOptions).toHaveAttribute("aria-label", "More Create PR options");
   });
 
-  it("shows Create PR instead of Push to remote when a GitHub remote is configured", async () => {
+  it("shows Create PR instead of Push when a GitHub remote is configured", async () => {
     await createWorkspace(repoPath, "feat/unpushed");
     setOriginUrl(repoPath, "https://github.com/acme/treq.git");
     render(<Dashboard />);
@@ -116,7 +116,7 @@ describe("ShowWorkspace - Create PR", () => {
       await within(header).findByRole("button", { name: /^create pr$/i }),
     ).toBeVisible();
     expect(
-      within(header).queryByRole("button", { name: /push to remote/i }),
+      within(header).queryByRole("button", { name: /^push$/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -155,7 +155,7 @@ describe("ShowWorkspace - Create PR", () => {
     await findEnabledCreatePr(reopenedHeader);
   });
 
-  it("keeps Push to remote when the branch is not on remote and there's no GitHub remote", async () => {
+  it("keeps Push when the branch is not on remote and there's no GitHub remote", async () => {
     await createWorkspace(repoPath, "feat/unpushed");
     setOriginUrl(repoPath, "https://gitlab.com/acme/treq.git");
     render(<Dashboard />);
@@ -163,7 +163,7 @@ describe("ShowWorkspace - Create PR", () => {
     const header = await openWorkspace("feat/unpushed");
 
     expect(
-      await within(header).findByRole("button", { name: /push to remote/i }),
+      await within(header).findByRole("button", { name: /^push$/i }),
     ).toBeVisible();
     expect(
       within(header).queryByRole("button", { name: /^create pr$/i }),
@@ -333,7 +333,7 @@ describe("ShowWorkspace - Create PR", () => {
 
     await waitFor(() => {
       expect(
-        within(header).queryByRole("button", { name: /push to remote/i }),
+        within(header).queryByRole("button", { name: /^push$/i }),
       ).not.toBeInTheDocument();
     });
     expect(

@@ -9,45 +9,37 @@ env:
   CARGO_INCREMENTAL: 0
   # Skip debug info for test binaries: faster builds, smaller artifacts
   CARGO_PROFILE_TEST_DEBUG: 0
+  # The NAPI addon builds with the dev profile, which keeps full debug info
+  # for workspace crates. Line tables keep backtraces readable for less
+  # compile and link time.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 on:
   pull_request:
+    # ready_for_review runs the heavy jobs that drafts skip.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A new push supersedes the previous run; free its runners for other PRs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-  detect-windows-changes:
-    name: detect windows-specific changes
-    runs-on: ubuntu-22.04
-    outputs:
-      windows_changed: ${{ steps.detect.outputs.windows_changed }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # The windows-rust job is slow (45m timeout) and only ever catches
-      # bugs in code that branches on the Windows target. Skip it unless
-      # the diff actually touches windows-specific cfg branching so most
-      # PRs don't pay for it.
-      - name: Check for windows-specific branching in the diff
-        id: detect
-        run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          if git diff --unified=0 "$base...$head" -- 'src-tauri/**/*.rs' \
-              | grep -qE '^\+.*(cfg\(target_os = "windows"\)|cfg\(windows\)|cfg!\(windows\)|cfg!\(target_os = "windows"\))'; then
-            echo "windows_changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "windows_changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  detect-rust-changes:
-    name: detect rust changes
+  # One job for both filters: each extra job waits for its own runner before
+  # anything downstream can start.
+  detect-changes:
+    timeout-minutes: 15
+    name: detect changes
     runs-on: ubuntu-22.04
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
+      js_changed: ${{ steps.filter.outputs.js }}
+    # No checkout: on pull_request, paths-filter lists the changed files
+    # through the GitHub API.
+    permissions:
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Check for src-tauri/Cargo changes
+      - name: Check for Rust and JS/TS changes
         id: filter
         uses: dorny/paths-filter@v3
         with:
@@ -57,19 +49,6 @@ jobs:
               - "crates/tauri-test-macros/**"
               - "Cargo.toml"
               - "Cargo.lock"
-
-  detect-js-changes:
-    name: detect js changes
-    runs-on: ubuntu-22.04
-    outputs:
-      js_changed: ${{ steps.filter.outputs.js }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check for JS/TS source and tooling config changes
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
@@ -86,39 +65,22 @@ jobs:
               - ".tool-versions"
               - ".github/workflows/ci.yml"
 
-  verify-js:
-    # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
-    needs: [detect-js-changes, detect-rust-changes]
-    if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: ${{ matrix.timeout-minutes }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            task: check
-            timeout-minutes: 15
-          - platform: ubuntu-22.04
-            task: check:format
-            timeout-minutes: 15
-          - platform: ubuntu-22.04
-            task: lint
-            timeout-minutes: 15
-            rust: true
-          - platform: ubuntu-22.04
-            task: knip
-            timeout-minutes: 15
-    name: verify-js / ${{ matrix.task }} / ${{ matrix.platform }}
-    runs-on: ${{ matrix.platform }}
+  # One job for the quick lint/format/type checks. Each check takes seconds;
+  # as separate jobs each one paid ~30s of setup and its own runner.
+  # Every check runs even if an earlier one fails (!cancelled()).
+  verify:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
+    timeout-minutes: 15
+    name: verify / ubuntu-22.04
+    runs-on: ubuntu-22.04
     env:
-      # Matrix entries flagged rust: true also run on Rust-only changes.
-      RUN_TASK: ${{ needs.detect-js-changes.outputs.js_changed == 'true' || matrix.rust == true }}
+      JS: ${{ needs.detect-changes.outputs.js_changed }}
+      RUST: ${{ needs.detect-changes.outputs.rust_changed }}
     steps:
       - uses: actions/checkout@v4
-        if: env.RUN_TASK == 'true'
 
       - name: Setup Node.js
-        if: env.RUN_TASK == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -126,19 +88,45 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        if: env.RUN_TASK == 'true'
         run: npm ci
 
-      - name: Run JS task
-        if: env.RUN_TASK == 'true'
-        run: npm run ${{ matrix.task }}
+      - name: check
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run check
 
+      - name: check:format
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run check:format
+
+      # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: npm run lint
+
+      - name: knip
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run knip
+
+      - name: Install rustfmt
+        if: ${{ !cancelled() && env.RUST == 'true' }}
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          components: rustfmt
+          toolchain: stable
+
+      - name: rustfmt
+        if: ${{ !cancelled() && env.RUST == 'true' }}
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+  # Heavy jobs (test-js, verify-rust, test-rust) skip draft PRs; marking the
+  # PR ready for review runs them.
   test-js:
     # test:integration drives the Rust commands via NAPI, so it also runs on
     # Rust changes.
-    needs: [detect-js-changes, detect-rust-changes]
-    if: needs.detect-js-changes.outputs.js_changed == 'true' || needs.detect-rust-changes.outputs.rust_changed == 'true'
-    timeout-minutes: ${{ matrix.timeout-minutes }}
+    needs: detect-changes
+    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true') }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -146,20 +134,15 @@ jobs:
           # Unit tests: mocked Tauri, no NAPI/jj. Parallel file execution.
           - platform: ubuntu-22.04
             task: test:unit
-            timeout-minutes: 15
           # Integration tests: NAPI + real jj repos. Serial file execution.
           - platform: ubuntu-22.04
             task: test:integration
-            timeout-minutes: 30
             rust: true
-          - platform: windows-latest
-            task: test:unit
-            timeout-minutes: 15
     name: test-js / ${{ matrix.task }} / ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     env:
       # Matrix entries flagged rust: true also run on Rust-only changes.
-      RUN_TASK: ${{ needs.detect-js-changes.outputs.js_changed == 'true' || matrix.rust == true }}
+      RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
     steps:
       - uses: actions/checkout@v4
         if: env.RUN_TASK == 'true'
@@ -297,7 +280,7 @@ jobs:
           restore-keys: |
             vitest-fsmc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
 
-      # Restores the addon built on main (napi-cache.yml) or builds it.
+      # Restores the addon built on main (warm-caches.yml) or builds it.
       - name: NAPI addon
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
         uses: ./.github/actions/napi-addon
@@ -312,29 +295,20 @@ jobs:
           fi
 
   verify-rust:
-    needs: detect-rust-changes
-    if: needs.detect-rust-changes.outputs.rust_changed == 'true'
+    needs: detect-changes
+    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [fmt, check, clippy]
-    name: verify-rust / ${{ matrix.task }} / ubuntu-22.04
+    # No separate `cargo check`: clippy --all-targets runs the same checks.
+    # rustfmt runs in the verify job.
+    name: verify-rust / clippy / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@v1
         with:
-          components: rustfmt, clippy
+          components: clippy
           toolchain: stable
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
@@ -348,51 +322,36 @@ jobs:
           version: webkit-4.1-1
           execute_install_scripts: true
 
-      - name: Install dependencies
-        run: npm ci
-
+      # Restores the cache warm-caches.yml saves on main. PR runs don't save:
+      # a PR's cache can only be read by that PR, and the multi-GB saves
+      # evict main's caches from the repo's 10 GB quota.
       - uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
+          shared-key: clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
 
-      - name: Run Rust task
+      - name: clippy
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1
-        run: |
-          case "${{ matrix.task }}" in
-            fmt)
-              cargo fmt --check
-              ;;
-            check)
-              cargo check --locked
-              ;;
-            clippy)
-              cargo clippy --locked --all-targets --all-features -- -D warnings
-              ;;
-          esac
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test-rust:
-    needs: detect-rust-changes
-    if: needs.detect-rust-changes.outputs.rust_changed == 'true'
+    needs: detect-changes
+    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-22.04, macos-latest]
+        platform: [ubuntu-22.04]
+    # macOS runs after merge in warm-caches.yml: macOS runners are the
+    # scarcest and slowest, and the tests rarely differ by platform.
     name: test-rust / test / ${{ matrix.platform }}
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@v1
@@ -402,6 +361,11 @@ jobs:
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+
+      # mold links the large test binaries several times faster than ld.
+      - name: Use mold linker
+        if: runner.os == 'Linux'
+        uses: rui314/setup-mold@v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
@@ -495,134 +459,11 @@ jobs:
           jj --version
           gh --version
 
-      - name: Install dependencies
-        run: npm ci
-
+      # Restores the test build warm-caches.yml saves on main; see verify-rust.
       - uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
-          workspaces: |
-            . -> target
-
-      - name: Run Rust task
-        working-directory: src-tauri
-        env:
-          RUST_BACKTRACE: 1
-        run: cargo nextest run --locked --no-fail-fast
-
-  # Windows rust tests are slow (45m) and only ever catch bugs in code that
-  # branches on the Windows target, so they're gated on detect-windows-changes
-  # finding windows-specific cfg branching in the diff instead of running on
-  # every PR.
-  windows-rust-tests:
-    needs: detect-windows-changes
-    if: needs.detect-windows-changes.outputs.windows_changed == 'true'
-    name: rust / test / windows-latest
-    runs-on: windows-latest
-    timeout-minutes: 45
-    steps:
-      # Windows Defender's real-time scanning intercepts every process spawn
-      # and file write; this job spawns hundreds of jj/git subprocesses per
-      # test run, so this materially cuts wall time. Exclude the workspace
-      # before checkout writes anything into it.
-      - name: Disable Defender scanning
-        shell: pwsh
-        run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          components: rustfmt
-          toolchain: stable
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
-      # windows-latest runners ship LLVM (lld-link.exe) but link.exe from MSVC
-      # is the default; switch to lld for a much faster linker on Windows.
-      - name: Use lld linker
-        run: |
-          echo "RUSTFLAGS=-C linker=lld-link" >> "$GITHUB_ENV"
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      # Runners already ship git + gh. Only jj needs installing; cache the
-      # release binary.
-      - name: Resolve jj release tag
-        id: jj
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          tag=$(curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/jj-vcs/jj/releases/latest | jq -r .tag_name)
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Restore jj CLI cache
-        id: jj-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-bin
-          key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
-
-      - name: Install jj CLI
-        if: steps.jj-cache.outputs.cache-hit != 'true'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          JJ_TAG: ${{ steps.jj.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p .ci-bin
-          asset="jj-${JJ_TAG}-x86_64-pc-windows-msvc.zip"
-          tmp=$(mktemp -d)
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/${asset}" \
-            -o "$tmp/jj.zip"
-          unzip -q "$tmp/jj.zip" -d "$tmp"
-          jj_bin=$(find "$tmp" -type f -name jj.exe | head -n 1)
-          test -n "$jj_bin"
-          install -m 755 "$jj_bin" .ci-bin/jj.exe
-
-      - name: Save jj CLI cache
-        if: steps.jj-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: .ci-bin
-          key: ${{ steps.jj-cache.outputs.cache-primary-key }}
-
-      - name: Add jj to PATH
-        run: echo "$GITHUB_WORKSPACE/.ci-bin" >> "$GITHUB_PATH"
-
-      - name: Verify tool versions
-        run: |
-          git --version
-          jj --version
-          gh --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
 

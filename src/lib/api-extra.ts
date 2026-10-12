@@ -316,20 +316,6 @@ export const listDirectoryCached = (
 ): Promise<CachedDirectoryEntry[]> =>
   invoke("list_directory_cached", { repoPath, workspaceId, parentPath });
 
-export interface SendArtifactRecord {
-  id: string;
-  repo: string;
-  pty_session_id?: string | null;
-  media_type: string;
-  path: string;
-  title?: string | null;
-  received_at: number;
-}
-
-export const listSendArtifacts = (
-  repoPath: string,
-): Promise<SendArtifactRecord[]> => invoke("list_send_artifacts", { repoPath });
-
 export const searchWorkspaceFiles = (
   repoPath: string,
   workspaceId: number | null,
@@ -384,12 +370,6 @@ export const getSessionModel = (
   repoPath: string,
   id: number,
 ): Promise<string | null> => invoke("get_session_model", { repoPath, id });
-
-export const setSessionModel = (
-  repoPath: string,
-  id: number,
-  model: string | null,
-): Promise<void> => invoke("set_session_model", { repoPath, id, model });
 
 // Prompt history API
 export const addPromptHistory = (
@@ -758,25 +738,6 @@ export const shiftMutableCommitsToNow = async (
 };
 
 export const getTreqBinDir = (): Promise<string> => invoke("get_treq_bin_dir");
-
-export type AppUpdateCheckResult = {
-  supported: boolean;
-  available: boolean;
-  currentVersion: string;
-  latestVersion: string | null;
-  downloadUrl: string | null;
-};
-
-/** Compare the running build against https://treq.dev/version (Mac install only). */
-export const checkForAppUpdate = (): Promise<AppUpdateCheckResult> =>
-  invoke("check_for_app_update");
-
-/**
- * Download + replace the macOS .app bundle, then relaunch.
- * Rejects on non-macOS builds.
- */
-export const installAppUpdate = (downloadUrl: string): Promise<void> =>
-  invoke("install_app_update", { downloadUrl });
 
 /** Settings parsed from a repository's `.treq/config.yaml`, if present. */
 export interface RepoYamlConfig {

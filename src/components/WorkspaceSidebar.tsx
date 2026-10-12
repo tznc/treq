@@ -82,7 +82,6 @@ interface WorkspaceSidebarProps {
   onOpenLinear?: () => void;
   onOpenTrello?: () => void;
   onOpenJira?: () => void;
-  onOpenArtifacts?: () => void;
   currentPage?: string;
   onAddBefore?: (workspace: Workspace) => void;
   onAddAfter?: (workspace: Workspace) => void;
@@ -122,7 +121,6 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   onOpenLinear,
   onOpenTrello,
   onOpenJira,
-  onOpenArtifacts,
   currentPage,
   onAddAfter,
   onMoveWorkspace,
@@ -186,8 +184,7 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
     currentPage !== "linear" &&
     currentPage !== "trello" &&
     currentPage !== "jira" &&
-    currentPage !== "settings" &&
-    currentPage !== "artifacts";
+    currentPage !== "settings";
   const isActiveRepo = (path: string | undefined) =>
     !isMultiRepo || path === repoPath;
   const isHomeSelected = (path: string | undefined) =>
@@ -318,7 +315,6 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
             </button>
             <WorkspaceSidebarHeaderActions
               currentPage={currentPage}
-              onOpenArtifacts={onOpenArtifacts}
               openSettings={openSettings}
             />
           </div>
