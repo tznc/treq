@@ -1,8 +1,7 @@
-// @include-parallel
 import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GitHubPanel } from "../../src/components/GitHubPanel";
-import { render, screen } from "../test-utils";
+import { GitHubPanel } from "../GitHubPanel";
+import { render, screen } from "../../../test/test-utils";
 
 const remoteInfo = vi.hoisted(() => ({
   data: null as { full_name: string; owner: string; name: string } | null,
@@ -17,15 +16,15 @@ const api = vi.hoisted(() => ({
   getWorkspaces: vi.fn(),
 }));
 
-vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
+vi.mock("../../hooks/useMergeQueueStatus", () => ({
   useGitRemoteInfo: () => remoteInfo,
   usePrChecksForPr: () => ({ data: null, isLoading: false }),
   useMergeQueueEnabled: () => ({ data: false, isLoading: false }),
   useSetMergeQueueEnabled: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDequeueBranches: () => ({ mutate: vi.fn(), isPending: false }),
 }));
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/api")>();
   return { ...original, ...api };
 });
 

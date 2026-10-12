@@ -1,11 +1,9 @@
-// @include-parallel
 import userEvent from "@testing-library/user-event";
-import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { IssueDetailPanel } from "../../src/components/github-panel/IssueDetail";
-import { CreatePrForm } from "../../src/components/github-panel/CreatePrForm";
-import { PrDetailPanel } from "../../src/components/github-panel/PrDetail";
-import { render, screen, waitFor } from "../test-utils";
+import { IssueDetailPanel } from "./IssueDetail";
+import { CreatePrForm } from "./CreatePrForm";
+import { PrDetailPanel } from "./PrDetail";
+import { render, screen, waitFor } from "../../../test/test-utils";
 
 const api = vi.hoisted(() => ({
   ghViewIssue: vi.fn(),
@@ -23,8 +21,8 @@ const api = vi.hoisted(() => ({
   openOrCreateWorkspaceFromPr: vi.fn(),
 }));
 
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/api")>();
   return {
     ...original,
     ghViewIssue: api.ghViewIssue,

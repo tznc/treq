@@ -1,9 +1,7 @@
-// @include-parallel
 import userEvent from "@testing-library/user-event";
-import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GitHubPanel } from "../../src/components/GitHubPanel";
-import { render, screen, waitFor, within } from "../test-utils";
+import { GitHubPanel } from "../GitHubPanel";
+import { render, screen, waitFor, within } from "../../../test/test-utils";
 
 const api = vi.hoisted(() => ({
   ghListIssues: vi.fn(),
@@ -13,7 +11,7 @@ const api = vi.hoisted(() => ({
   getWorkspaces: vi.fn(),
 }));
 
-vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
+vi.mock("../../hooks/useMergeQueueStatus", () => ({
   useGitRemoteInfo: () => ({
     data: { full_name: "acme/treq", owner: "acme", name: "treq" },
     isLoading: false,
@@ -23,8 +21,8 @@ vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
   useSetMergeQueueEnabled: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDequeueBranches: () => ({ mutate: vi.fn(), isPending: false }),
 }));
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/api")>();
   return { ...original, ...api };
 });
 

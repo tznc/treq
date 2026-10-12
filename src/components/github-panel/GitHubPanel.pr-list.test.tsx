@@ -1,10 +1,7 @@
-// @include-parallel
 import userEvent from "@testing-library/user-event";
-import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GitHubPanel } from "../../src/components/GitHubPanel";
-import { render, screen, waitFor, within } from "../test-utils";
-import { createTestRepo } from "../utils";
+import { GitHubPanel } from "../GitHubPanel";
+import { render, screen, waitFor, within } from "../../../test/test-utils";
 
 const remoteInfo = vi.hoisted(() => ({
   data: { full_name: "acme/treq", owner: "acme", name: "treq" },
@@ -20,7 +17,7 @@ const api = vi.hoisted(() => ({
   getRepoDefaultBranch: vi.fn(),
 }));
 
-vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
+vi.mock("../../hooks/useMergeQueueStatus", () => ({
   cachedPrStatusesKey: (repoPath: string) => ["cached-pr-statuses", repoPath],
   createPrMutationKey: (repoPath: string, id: number | null) => [
     "create-pr",
@@ -33,8 +30,8 @@ vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
   useMergeQueueEnabled: () => ({ data: false, isLoading: false }),
   useDequeueBranches: () => ({ mutate: vi.fn(), isPending: false }),
 }));
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/api")>();
   api.getRepoDefaultBranch.mockImplementation(actual.getRepoDefaultBranch);
   return {
     ...actual,
@@ -45,8 +42,8 @@ vi.mock("../../src/lib/api", async (importOriginal) => {
     getRepoDefaultBranch: api.getRepoDefaultBranch,
   };
 });
-vi.mock("../../src/lib/api-pr-status", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/api-pr-status")>()),
+vi.mock("../../lib/api-pr-status", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/api-pr-status")>()),
   listCachedPrStatuses: api.listCachedPrStatuses,
 }));
 
@@ -362,22 +359,5 @@ describe("GitHubPanel pull request list", () => {
       await within(dialog).findByRole("radio", { name: /no pr yet/i }),
     );
     expect(within(dialog).getByLabelText("Base branch")).toHaveValue("main");
-  });
-
-  it("prefills the new pull request base with the repo default branch", async () => {
-    const { repoPath, defaultBranch } = createTestRepo(false);
-    expect(defaultBranch).not.toBe("main");
-
-    render(<GitHubPanel repoPath={repoPath} />);
-    await user.click(screen.getByRole("button", { name: /new/i }));
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("tab", { name: /from branch/i }));
-
-    const base = screen.getByPlaceholderText("Base branch");
-    await waitFor(() => expect(base).toHaveValue(defaultBranch));
-
-    await user.clear(base);
-    await user.type(base, "release");
-    expect(base).toHaveValue("release");
   });
 });

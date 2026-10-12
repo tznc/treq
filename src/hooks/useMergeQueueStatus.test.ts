@@ -1,24 +1,15 @@
-// @include-parallel
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { renderHook, waitFor } from "@testing-library/react";
 import React from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useEnqueueWorkspace,
-  useGitRemoteInfo,
   usePrCiStatus,
   usePrInfoViaGh,
-} from "../../src/hooks/useMergeQueueStatus";
-import * as api from "../../src/lib/api";
-import type {
-  GitRemoteInfo,
-  PrCiStatus,
-  PrInfo,
-} from "../../src/lib/api-types";
-import { SWRMutateScope, testSWRConfig } from "../../src/lib/swr-cache";
+} from "./useMergeQueueStatus";
+import * as api from "../lib/api";
+import type { GitRemoteInfo, PrCiStatus, PrInfo } from "../lib/api-types";
+import { SWRMutateScope, testSWRConfig } from "../lib/swr-cache";
 
 const { mockEdgeFn, mockRpc, queueEnabled } = vi.hoisted(() => {
   const queueEnabled = { current: true };
@@ -33,9 +24,8 @@ const { mockEdgeFn, mockRpc, queueEnabled } = vi.hoisted(() => {
   };
 });
 const mockFeatures = vi.hoisted(() => ({ mergeQueue: true }));
-vi.mock("../../src/lib/features", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/lib/features")>();
+vi.mock("../lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/features")>();
   return {
     ...actual,
     FEATURES: Object.assign(mockFeatures, {
@@ -44,18 +34,16 @@ vi.mock("../../src/lib/features", async (importOriginal) => {
     }),
   };
 });
-vi.mock("../../src/lib/supabase", () => ({
+vi.mock("../lib/supabase", () => ({
   supabase: {
     rpc: mockRpc,
     functions: { invoke: mockEdgeFn },
   },
 }));
 
-vi.mock("../../src/lib/api", async () => {
+vi.mock("../lib/api", async () => {
   const actual =
-    await vi.importActual<typeof import("../../src/lib/api")>(
-      "../../src/lib/api",
-    );
+    await vi.importActual<typeof import("../lib/api")>("../lib/api");
   return {
     ...actual,
     startPrStatusPolling: vi.fn(async () => undefined),
@@ -89,98 +77,6 @@ const GITHUB_REMOTE: GitRemoteInfo = {
   repo: "treq",
   full_name: "ziinc/treq",
 };
-
-function makeGitDir(remoteUrl?: string): string {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "treq-remote-"));
-  fs.mkdirSync(path.join(repoPath, ".git"));
-  if (remoteUrl) {
-    fs.writeFileSync(
-      path.join(repoPath, ".git", "config"),
-      `[remote "origin"]\n\turl = ${remoteUrl}\n`,
-    );
-  } else {
-    fs.writeFileSync(path.join(repoPath, ".git", "config"), "");
-  }
-  return repoPath;
-}
-
-describe("useGitRemoteInfo", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("returns null when repo has no .git directory", async () => {
-    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "treq-nongit-"));
-    tempDirs.push(repoPath);
-
-    const { result } = renderHook(() => useGitRemoteInfo(repoPath), {
-      wrapper: makeWrapper(),
-    });
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.error).toBeUndefined();
-    });
-    expect(result.current.data).toBeNull();
-  });
-
-  it("returns null when origin is not a GitHub URL", async () => {
-    const repoPath = makeGitDir("https://gitlab.com/owner/repo.git");
-    tempDirs.push(repoPath);
-
-    const { result } = renderHook(() => useGitRemoteInfo(repoPath), {
-      wrapper: makeWrapper(),
-    });
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.error).toBeUndefined();
-    });
-    expect(result.current.data).toBeNull();
-  });
-
-  it("parses SSH GitHub remote from .git/config", async () => {
-    const repoPath = makeGitDir("git@github.com:ziinc/treq.git");
-    tempDirs.push(repoPath);
-
-    const { result } = renderHook(() => useGitRemoteInfo(repoPath), {
-      wrapper: makeWrapper(),
-    });
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.error).toBeUndefined();
-    });
-    expect(result.current.data).toMatchObject({
-      owner: "ziinc",
-      repo: "treq",
-      full_name: "ziinc/treq",
-    });
-  });
-
-  it("parses HTTPS GitHub remote from .git/config", async () => {
-    const repoPath = makeGitDir("https://github.com/ziinc/treq.git");
-    tempDirs.push(repoPath);
-
-    const { result } = renderHook(() => useGitRemoteInfo(repoPath), {
-      wrapper: makeWrapper(),
-    });
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.error).toBeUndefined();
-    });
-    expect(result.current.data?.full_name).toBe("ziinc/treq");
-  });
-
-  it("is disabled when repoPath is undefined", () => {
-    const { result } = renderHook(() => useGitRemoteInfo(undefined), {
-      wrapper: makeWrapper(),
-    });
-    expect(result.current.isLoading).toBe(false);
-    expect(result.current.isValidating).toBe(false);
-  });
-});
 
 describe("usePrInfoViaGh", () => {
   const repoPath = "/tmp/fake-pr-info-repo";

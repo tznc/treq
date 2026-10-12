@@ -1,9 +1,7 @@
-// @include-parallel
 import userEvent from "@testing-library/user-event";
-import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GitHubPanel } from "../../src/components/GitHubPanel";
-import { render, screen, within } from "../test-utils";
+import { GitHubPanel } from "../GitHubPanel";
+import { render, screen, within } from "../../../test/test-utils";
 
 const auth = vi.hoisted(() => ({
   user: { id: "user-1" } as object | null,
@@ -40,9 +38,8 @@ const queueEnabled = vi.hoisted(() => ({
 
 const mockFeatures = vi.hoisted(() => ({ mergeQueue: true }));
 
-vi.mock("../../src/lib/features", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/lib/features")>();
+vi.mock("../../lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/features")>();
   return {
     ...actual,
     FEATURES: Object.assign(mockFeatures, {
@@ -52,13 +49,15 @@ vi.mock("../../src/lib/features", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/stores/authStore", async (importOriginal) => {
+vi.mock("../../stores/authStore", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/stores/authStore")>();
-  const { createAuthStoreMock } = await import("../mocks/zustandAuthStore");
+    await importOriginal<typeof import("../../stores/authStore")>();
+  const { createAuthStoreMock } = await import(
+    "../../../test/mocks/zustandAuthStore"
+  );
   return { ...actual, useAuthStore: createAuthStoreMock(auth) };
 });
-vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
+vi.mock("../../hooks/useMergeQueueStatus", () => ({
   useGitRemoteInfo: () => remoteInfo,
   usePrChecksForPr: () => ({ data: null, isLoading: false }),
   useMergeQueueEnabled: () => ({
@@ -74,8 +73,8 @@ vi.mock("../../src/hooks/useMergeQueueStatus", () => ({
     isPending: false,
   }),
 }));
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/api")>();
   return {
     ...original,
     ghListIssues: api.ghListIssues,
@@ -85,9 +84,8 @@ vi.mock("../../src/lib/api", async (importOriginal) => {
     openOrCreateWorkspaceFromPr: api.openOrCreateWorkspaceFromPr,
   };
 });
-vi.mock("../../src/lib/supabase", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("../../src/lib/supabase")>();
+vi.mock("../../lib/supabase", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/supabase")>();
   return {
     ...original,
     supabase: { rpc: supabaseRpc },
