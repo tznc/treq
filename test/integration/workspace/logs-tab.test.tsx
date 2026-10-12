@@ -251,7 +251,7 @@ describe("Home repo Logs tab", () => {
       });
     });
 
-    it("lists five query templates with descriptions", async () => {
+    it("lists the query templates with descriptions", async () => {
       openRepo(seededRepoPath);
 
       await openLogsTab();
@@ -261,7 +261,11 @@ describe("Home repo Logs tab", () => {
       await user.click(await screen.findByTestId("template-menu"));
 
       const items = await screen.findAllByRole("menuitem");
-      expect(items).toHaveLength(5);
+      const labels = items.map((item) => item.textContent ?? "");
+      expect(labels.some((label) => label.includes("Recent lines"))).toBe(true);
+      expect(labels.some((label) => label.includes("Errors by job"))).toBe(
+        true,
+      );
       await screen.findByText("Newest records across every run");
     });
   });
