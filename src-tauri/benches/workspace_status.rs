@@ -2,7 +2,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::fs;
 use std::process::Command;
 
-#[path = "../tests/e2e_test_helpers.rs"]
+#[path = "../tests/common/mod.rs"]
 mod e2e_test_helpers;
 use e2e_test_helpers::TestRepo;
 

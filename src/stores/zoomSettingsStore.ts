@@ -2,12 +2,12 @@ import { create } from "zustand";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { setSetting } from "../lib/api";
 
-export const DEFAULT_ZOOM = 100;
+const DEFAULT_ZOOM = 100;
 export const ZOOM_STEP = 5;
 export const MIN_ZOOM = 50;
 export const MAX_ZOOM = 200;
 
-export function clampZoom(value: number): number {
+function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 }
 

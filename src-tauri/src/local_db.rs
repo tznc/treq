@@ -1682,42 +1682,6 @@ pub fn set_session_model(repo_path: &str, id: i64, model: Option<String>) -> Res
 
 // Workspace Files Cache Functions
 
-/// Get cached directory listing for a specific parent path
-pub fn get_cached_directory_listing(
-  repo_path: &str,
-  workspace_id: Option<i64>,
-  parent_path: &str,
-) -> Result<Vec<CachedWorkspaceFile>, String> {
-  let conn = get_connection(repo_path)?;
-  let mut stmt = conn
-        .prepare(
-            "SELECT id, workspace_id, file_path, relative_path, is_directory, parent_path, cached_at, mtime
-             FROM workspace_files
-             WHERE workspace_id IS ?1 AND parent_path IS ?2
-             ORDER BY is_directory DESC, relative_path",
-        )
-        .map_err(|e| format!("Failed to prepare query: {}", e))?;
-
-  let files = stmt
-    .query_map(params![workspace_id, parent_path], |row| {
-      Ok(CachedWorkspaceFile {
-        id: row.get(0)?,
-        workspace_id: row.get(1)?,
-        file_path: row.get(2)?,
-        relative_path: row.get(3)?,
-        is_directory: row.get::<_, i64>(4)? != 0,
-        parent_path: row.get(5)?,
-        cached_at: row.get(6)?,
-        mtime: row.get(7)?,
-      })
-    })
-    .map_err(|e| format!("Failed to query cached files: {}", e))?;
-
-  files
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
-}
-
 fn escape_like_character(character: char, pattern: &mut String) {
   if matches!(character, '%' | '_' | '^') {
     pattern.push('^');

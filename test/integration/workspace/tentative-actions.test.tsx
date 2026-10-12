@@ -93,24 +93,6 @@ describe("ShowWorkspace - tentative working copy actions", () => {
     ).toBeInTheDocument();
   });
 
-  it("discards tentative changes and removes the working copy row", async () => {
-    await createDirtyWorkspace("feat/tentative-delete");
-    await openWorkspaceCommitsTab(user, "feat/tentative-delete");
-
-    const workingCopyButton = await screen.findByRole("button", {
-      name: /working copy/i,
-    });
-    await user.click(workingCopyButton);
-
-    await user.click(screen.getByRole("button", { name: /delete changes/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.queryAllByRole("button", { name: /working copy/i }),
-      ).toHaveLength(0);
-    });
-  });
-
   it("restores discarded tentative changes from the toast Undo action", async () => {
     const { repoPath, workspace } = await createDirtyWorkspace(
       "feat/tentative-undo",

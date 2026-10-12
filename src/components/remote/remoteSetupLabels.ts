@@ -1,21 +1,4 @@
-import type {
-  ManagedInstanceState,
-  RegionCode,
-  SizePreset,
-} from "../../lib/api-types-remote";
-
-export const REGION_LABELS: Record<RegionCode, string> = {
-  us_east: "US East",
-  us_west: "US West",
-  eu_west: "Europe West",
-  ap_southeast: "Asia Pacific Southeast",
-};
-
-export const SIZE_LABELS: Record<SizePreset, string> = {
-  small: "Small",
-  medium: "Medium",
-  large: "Large",
-};
+import type { ManagedInstanceState } from "../../lib/api-types-remote";
 
 export const STAGE_LABELS: Record<ManagedInstanceState, string> = {
   unprovisioned: "Not provisioned",
@@ -32,12 +15,6 @@ export const STAGE_LABELS: Record<ManagedInstanceState, string> = {
   deleting: "Deleting...",
   deleted: "Deleted",
 };
-
-export interface LocalKeyIdentity {
-  reference: string;
-  label: string;
-  fingerprint: string;
-}
 
 export interface UserManagedFormValues {
   display_name: string;

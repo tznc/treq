@@ -3,6 +3,7 @@ import {
   getWorkspaceChangedFiles,
   getWorkspaceDiff,
   getWorkspaceFileHunksBatch,
+  type WorkspaceFileHunksBatchFile,
 } from "../../../lib/api";
 import {
   type ParsedFileChange,
@@ -290,8 +291,7 @@ export function useFileLoading({
         ...(priorityPaths.length > 0 ? [priorityPaths] : []),
         ...chunkPaths(remainingPaths, 32),
       ];
-      const results: import("../../../lib/api").WorkspaceFileHunksBatchFile[] =
-        [];
+      const results: WorkspaceFileHunksBatchFile[] = [];
       const loadBatch = async (index: number): Promise<void> => {
         const batch = batches[index];
         if (!batch) return;

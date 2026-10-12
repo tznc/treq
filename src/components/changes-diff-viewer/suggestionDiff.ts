@@ -1,13 +1,13 @@
 import { diffLines, diffWordsWithSpace } from "diff";
 
 /** One inline run within a suggestion diff row. */
-export interface SuggestionDiffSegment {
+interface SuggestionDiffSegment {
   text: string;
   /** True when this run is the part that actually changed on the row. */
   changed: boolean;
 }
 
-export type SuggestionDiffRowType = "unchanged" | "removed" | "added";
+type SuggestionDiffRowType = "unchanged" | "removed" | "added";
 
 /** One rendered row of a suggestion diff, in GitHub suggestion style. */
 export interface SuggestionDiffRow {

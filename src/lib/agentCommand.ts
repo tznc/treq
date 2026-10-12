@@ -13,7 +13,7 @@ interface AgentPathContext {
   supportingRepoPaths?: string[];
 }
 
-export interface AgentCliFiles {
+interface AgentCliFiles {
   promptPath: string;
   settingsPath?: string;
   skillDir?: string;

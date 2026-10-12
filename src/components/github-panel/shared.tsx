@@ -4,7 +4,6 @@ import {
   CircleDot,
   ExternalLink,
   GitMerge,
-  GitPullRequest,
   GitPullRequestDraft,
   Loader2,
 } from "lucide-react";
@@ -337,8 +336,6 @@ export function ErrorState({
     </div>
   );
 }
-
-export { CircleDot, GitPullRequest };
 
 /** Returns an `onError` factory that reports a failed gh action as an error toast. */
 /** gh failures reach the UI as an Error or as the Tauri command's string. */

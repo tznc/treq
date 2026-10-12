@@ -55,7 +55,7 @@ export function CursorIcon({ className, ...props }: AgentIconProps) {
 }
 
 /** GitHub Copilot mark (currentColor). */
-export function CopilotIcon({ className, ...props }: AgentIconProps) {
+function CopilotIcon({ className, ...props }: AgentIconProps) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"

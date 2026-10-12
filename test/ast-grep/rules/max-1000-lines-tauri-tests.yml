@@ -7,7 +7,7 @@ message: >
 files:
   - "src-tauri/tests/**/*_test.rs"
 ignores:
-  - "src-tauri/tests/core_workspaces_test.rs"
+  - "src-tauri/tests/it/core_workspaces_test.rs"
 rule:
   kind: source_file
   # Triggers when a file has 1001+ lines.

@@ -33,25 +33,6 @@ export interface DeviceKeyInfo {
   fingerprint_sha256: string;
 }
 
-export interface RemoteReadinessCheck {
-  name: string;
-  available: boolean;
-  detail: string;
-  /**
-   * Distinct structured error code for this check, when it failed for a
-   * reason more specific than a generic unavailability (PRD "Resource
-   * quotas"). `"disk_quota_exceeded"` marks the base-disk-quota readiness
-   * check failing; absent for ordinary checks.
-   */
-  code?: string | null;
-}
-
-export interface RemoteReadiness {
-  host: string;
-  connected: boolean;
-  checks: RemoteReadinessCheck[];
-}
-
 export interface RemoteRepoProbe {
   host: string;
   path: string;
@@ -87,7 +68,7 @@ export type RepositoryLocation =
   | { type: "local"; path: string }
   | { type: "ssh"; host: string; path: string };
 
-export interface RepositoryDescriptor {
+interface RepositoryDescriptor {
   id: string;
   location: RepositoryLocation;
   display_name: string;
@@ -136,73 +117,9 @@ export type ManagedInstanceState =
 
 export type SizePreset = "small" | "medium" | "large";
 
-// PRD "Resource quotas" / Goal 3: the fixed per-user base allocation
-// enforced at provisioning and on an ongoing basis in this delivery.
-// Purchasing more as a plan add-on is explicitly deferred, so `small` is
-// the only currently-selectable preset. Mirrors
-// `core::remote_provider::BASE_ALLOCATION` in src-tauri.
-export const BASE_ALLOCATION = {
-  preset: "small" as SizePreset,
-  vcpus: 1,
-  memory_gb: 2,
-  storage_gb: 5,
-} as const;
-
-/**
- * Structured error a mutation may return when it is blocked by the base
- * resource allocation (PRD: "the failure must be a distinct, structured
- * readiness or mutation error so the UI can explain the quota rather than
- * surfacing a generic filesystem or provider failure"). The provisioning
- * path uses `"size_preset_exceeds_base_allocation"`; the ongoing
- * disk-quota check surfaced through readiness/mutations uses
- * `"disk_quota_exceeded"`.
- */
-export interface QuotaExceededError {
-  error: string;
-  code: "size_preset_exceeds_base_allocation" | "disk_quota_exceeded";
-  base_allocation?: typeof BASE_ALLOCATION;
-}
-
-export function isQuotaExceededError(
-  value: unknown,
-): value is QuotaExceededError {
-  if (typeof value !== "object" || value === null) return false;
-  const { code } = value as { code?: unknown };
-  return (
-    code === "size_preset_exceeds_base_allocation" ||
-    code === "disk_quota_exceeded"
-  );
-}
-
-export interface SizePresetInfo {
-  preset: SizePreset;
-  label: string;
-  vcpus: number;
-  memory_gb: number;
-  storage_gb: number;
-}
-
 export type RegionCode = "us_east" | "us_west" | "eu_west" | "ap_southeast";
 
-export interface RegionInfo {
-  code: RegionCode;
-  label: string;
-}
-
-export type ProviderKind = "fly_sprites";
-
-export interface BootManifestAgent {
-  name: string;
-  version: string;
-}
-
-export interface BootManifest {
-  manifest_version: number;
-  treq_version: string;
-  jj_version: string;
-  git_version: string;
-  agents: BootManifestAgent[];
-}
+type ProviderKind = "fly_sprites";
 
 export interface ManagedInstanceRecord {
   instance_id: string;
@@ -249,7 +166,7 @@ export type SshAuthentication =
   | { type: "certificate"; key_reference: string; certificate?: string }
   | { type: "public_key"; key_reference: string };
 
-export type SshEndpointSource =
+type SshEndpointSource =
   | { type: "managed"; provider: string; generation: number }
   | { type: "user_managed" }
   | { type: "explicit_alias"; alias: string };
@@ -272,7 +189,7 @@ export interface SshEndpoint {
  * their endpoints use `relay`: a WebSocket to the `remote-ssh-relay` Edge
  * Function. SSH stays end to end either way.
  */
-export type SshTransport = { type: "direct" } | { type: "relay"; url: string };
+type SshTransport = { type: "direct" } | { type: "relay"; url: string };
 
 /**
  * Allow-listed remote agent identifiers (mirrors `RemoteAgentId` in
@@ -292,11 +209,7 @@ export type PtyLaunchSpec =
   | { type: "shell" }
   | { type: "agent"; agent: RemoteAgentId; args: string[] };
 
-export type OperationStatus =
-  | "pending"
-  | "in_progress"
-  | "succeeded"
-  | "failed";
+type OperationStatus = "pending" | "in_progress" | "succeeded" | "failed";
 
 export interface OperationResponse {
   operation_id: string;
@@ -376,35 +289,4 @@ export interface IssueCertificateResponse {
   serial: string;
   expires_at: string;
   endpoint: SshEndpoint;
-}
-
-/**
- * Registers a fully explicit user-owned VM endpoint. `alias` is set only when
- * the user explicitly chose alias mode; it must never be populated purely
- * from `~/.ssh/config` discovery/autocomplete (see `listSshHosts`).
- */
-export interface RegisterEndpointRequest {
-  display_name: string;
-  hostname: string;
-  port: number;
-  username: string;
-  host_key_fingerprint: string;
-  auth_identity_reference: string;
-  alias: string | null;
-  idempotency_key: string;
-}
-
-export interface RegisterRepositoryRequest {
-  endpoint_id: string;
-  remote_path: string;
-  display_name: string;
-  idempotency_key: string;
-}
-
-export interface ListRegionsResponse {
-  regions: RegionCode[];
-}
-
-export interface ListSizePresetsResponse {
-  presets: SizePreset[];
 }

@@ -1,9 +1,6 @@
 import type { AgentKind } from "../../lib/agents";
 import type { ConsolidatedTerminalHandle } from "../ConsolidatedTerminal";
 
-// Minimum width for each terminal panel (used when multiple terminals)
-export const MIN_TERMINAL_WIDTH = 300;
-
 export interface AgentSessionData {
   /**
    * Identifies the session in the terminal pane. The pane can show sessions

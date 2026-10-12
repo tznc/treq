@@ -393,22 +393,6 @@ interface CommitTarget {
   commitChangeId: string;
 }
 
-export async function transportMoveCommit(
-  target: CommitTarget,
-  targetWorkspaceId: number,
-  local: () => Promise<void>,
-): Promise<void> {
-  const repo = activeForPath(target.repoPath);
-  if (!repo) return local();
-  await remoteKeyedMutation(repo, {
-    kind: "MoveCommit",
-    repo: repo.canonicalPath,
-    workspace: String(target.workspaceId),
-    commit: target.commitChangeId,
-    target_workspace: String(targetWorkspaceId),
-  });
-}
-
 export async function transportUndoCommit(
   target: CommitTarget,
   local: () => Promise<void>,

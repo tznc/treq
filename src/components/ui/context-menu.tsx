@@ -21,13 +21,7 @@ const ContextMenuTrigger = ({
   );
 ContextMenuTrigger.displayName = "ContextMenuTrigger";
 
-const ContextMenuGroup = MenuPrimitive.Group;
-
-const ContextMenuPortal = ContextMenuPrimitive.Portal;
-
 const ContextMenuSub = MenuPrimitive.SubmenuRoot;
-
-const ContextMenuRadioGroup = MenuPrimitive.RadioGroup;
 
 const ContextMenuSubTrigger = ({
   className,
@@ -237,15 +231,8 @@ export {
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuCheckboxItem,
-  ContextMenuRadioItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
-  ContextMenuShortcut,
-  ContextMenuGroup,
-  ContextMenuPortal,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
-  ContextMenuRadioGroup,
 };
