@@ -1,0 +1,26 @@
+name: Clean up PR caches
+
+# A PR's caches are scoped to refs/pull/N/merge, so nothing else can restore
+# them once it closes. Deleting them keeps the 10GB repo quota for main's
+# warm caches, which GitHub would otherwise evict first when it fills up.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    # Fork PRs get a read-only token and can't delete caches.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the PR's caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: |
+          gh cache list -R "$GITHUB_REPOSITORY" --ref "$REF" --limit 1000 --json id -q '.[].id' |
+            xargs -r -n1 gh cache delete -R "$GITHUB_REPOSITORY"
