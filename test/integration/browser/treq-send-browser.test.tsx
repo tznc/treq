@@ -41,11 +41,7 @@ describe("treq send --browser integration", () => {
     vi.spyOn(api, "openBrowserWebview").mockResolvedValue(undefined);
     vi.spyOn(api, "navigateBrowserWebview").mockResolvedValue(undefined);
     vi.spyOn(api, "closeBrowserWebview").mockResolvedValue(undefined);
-    vi.spyOn(api, "setBrowserSelectMode").mockResolvedValue(undefined);
     vi.spyOn(api, "syncBrowserWebviewBounds").mockResolvedValue(undefined);
-    vi.spyOn(api, "listenBrowserElementPicked").mockImplementation(() =>
-      Promise.resolve(() => {}),
-    );
     vi.spyOn(api, "listenBrowserUrlChanged").mockImplementation(() =>
       Promise.resolve(() => {}),
     );

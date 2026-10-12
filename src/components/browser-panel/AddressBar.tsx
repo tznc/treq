@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MousePointerClick, RotateCw } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { cn } from "../../lib/utils";
@@ -9,8 +9,6 @@ export interface AddressBarProps {
   url: string;
   onNavigate: (url: string) => void;
   onReload: () => void;
-  selectMode: boolean;
-  onToggleSelectMode: () => void;
   disabled?: boolean;
 }
 
@@ -18,8 +16,6 @@ export function AddressBar({
   url,
   onNavigate,
   onReload,
-  selectMode,
-  onToggleSelectMode,
   disabled,
 }: AddressBarProps) {
   const [draft, setDraft] = useState(url);
@@ -68,21 +64,6 @@ export function AddressBar({
           <RotateCw className="w-3.5 h-3.5" />
         </Button>
       </div>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        aria-pressed={selectMode}
-        onClick={onToggleSelectMode}
-        disabled={disabled}
-        className={cn(
-          "gap-1.5",
-          selectMode && "bg-accent text-accent-foreground",
-        )}
-      >
-        <MousePointerClick className="w-3.5 h-3.5" />
-        Select
-      </Button>
       {!isValid && draft.trim().length > 0 && (
         <span className="text-xs text-destructive whitespace-nowrap truncate">
           Only http://localhost, http://127.0.0.1 and file:// URLs are supported
