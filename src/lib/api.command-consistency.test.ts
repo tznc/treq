@@ -1,4 +1,3 @@
-// @include-parallel
 import { describe, expect, it } from "vitest";
 import fs from "fs";
 import path from "path";

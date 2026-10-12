@@ -1,15 +1,14 @@
-// @include-parallel
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { IssueDetailPanel } from "../../src/components/github-panel/IssueDetail";
-import { render, screen } from "../test-utils";
+import { IssueDetailPanel } from "./IssueDetail";
+import { render, screen } from "../../../test/test-utils";
 
 const api = vi.hoisted(() => ({
   ghViewIssue: vi.fn(),
 }));
 
-vi.mock("../../src/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/lib/api")>();
+vi.mock("../../lib/api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/api")>();
   return {
     ...original,
     ghViewIssue: api.ghViewIssue,
