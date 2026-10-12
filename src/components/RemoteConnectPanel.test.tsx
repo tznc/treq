@@ -189,12 +189,16 @@ describe("RemoteConnectPanel", () => {
     );
 
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalled());
-    const [[endpoint]] = dispatch.mock.calls;
-    expect(endpoint.authentication).toEqual({
-      type: "certificate",
-      key_reference: DEVICE_KEYSTORE_KEY_REFERENCE,
-      certificate: "ssh-ed25519-cert-v01@openssh.com AAAA issued",
-    });
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authentication: {
+          type: "certificate",
+          key_reference: DEVICE_KEYSTORE_KEY_REFERENCE,
+          certificate: "ssh-ed25519-cert-v01@openssh.com AAAA issued",
+        },
+      }),
+      expect.anything(),
+    );
   });
 
   it("shows a dedicated state when secure storage / biometrics isn't set up", async () => {
@@ -292,16 +296,17 @@ describe("RemoteConnectPanel", () => {
     await user.click(await screen.findByRole("button", { name: /\/srv\/app/ }));
 
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalled());
-    const [[endpoint, request]] = dispatch.mock.calls;
-    expect(endpoint).toMatchObject({
-      id: "home-box",
-      hostname: "box.local",
-      authentication: {
-        type: "public_key",
-        key_reference: "/home/me/.ssh/id_ed25519.pub",
-      },
-    });
-    expect(request).toEqual({ kind: "ProbeRepo", repo: "/srv/app" });
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "home-box",
+        hostname: "box.local",
+        authentication: expect.objectContaining({
+          type: "public_key",
+          key_reference: "/home/me/.ssh/id_ed25519.pub",
+        }),
+      }),
+      { kind: "ProbeRepo", repo: "/srv/app" },
+    );
   });
 
   it("remembers the endpoint, repository and screen but never the certificate", async () => {
