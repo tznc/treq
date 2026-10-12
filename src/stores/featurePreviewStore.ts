@@ -26,7 +26,6 @@ function defaultFlags(): PreviewFlags {
     jiraIntegration: previewFeatureDefault("jiraIntegration"),
     logs: previewFeatureDefault("logs"),
     browser: previewFeatureDefault("browser"),
-    agentMessageQueue: previewFeatureDefault("agentMessageQueue"),
   };
 }
 

@@ -15,8 +15,7 @@
     "trelloIntegration": false,
     "jiraIntegration": false,
     "logs": false,
-    "browser": false,
-    "agentMessageQueue": false
+    "browser": false
   },
   "env": {
     "dev": {

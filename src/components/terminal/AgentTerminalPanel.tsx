@@ -5,12 +5,6 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useAgentMessageQueue } from "../../hooks/useAgentMessageQueue";
-import {
-  formatAgentMessageForPty,
-  looksLikeAgentUserQuestion,
-  looksLikeShellPrompt,
-} from "../../lib/agentMessageQueue";
 import {
   ptyWrite,
   recordAgentChatScreen,
@@ -18,7 +12,6 @@ import {
   registerAgentChat,
 } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { usePreviewFeature } from "../../stores/featurePreviewStore";
 import {
   ConsolidatedTerminal,
   type ConsolidatedTerminalHandle,
@@ -32,7 +25,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { AgentMessageQueue } from "./AgentMessageQueue";
 import {
   type AgentChatRecorder,
   createAgentChatRecorder,
@@ -40,11 +32,6 @@ import {
 import { TerminalSearchOverlay } from "./TerminalSearchOverlay";
 import { TerminalSendPreviews } from "./TerminalSendPreviews";
 import { TerminalWorkspaceLabel } from "./TerminalWorkspaceLabel";
-import {
-  appendTerminalOutput,
-  createTerminalOutputTail,
-  terminalQuestionWindow,
-} from "./terminalOutputTail";
 import { type AgentSessionData, dbSessionIdOf } from "./types";
 import { useAgentAutoCommand } from "./useAgentAutoCommand";
 import { agentTerminalId } from "./agentTerminalId";
@@ -97,11 +84,6 @@ export const AgentTerminalPanel = ({
   const terminalId = agentTerminalId(sessionData.sessionId);
   const isHidden = collapsed;
 
-  const [queuePopoverOpen, setQueuePopoverOpen] = useState(false);
-  const [terminalBodyEl, setTerminalBodyEl] = useState<HTMLDivElement | null>(
-    null,
-  );
-  const processOutputTailRef = useRef(createTerminalOutputTail());
   const chatRecorderRef = useRef<AgentChatRecorder | null>(null);
 
   useEffect(() => {
@@ -151,55 +133,26 @@ export const AgentTerminalPanel = ({
     terminalRefs,
   ]);
 
-  const messageQueueEnabled = usePreviewFeature("agentMessageQueue");
   const writeAgentMessage = async (sessionId: string, data: string) => {
     const text = data.replace(/\r$/, "");
     await chatRecorderRef.current?.userMessage(text);
     await ptyWrite(sessionId, data);
   };
 
-  const {
-    messages: queuedMessages,
-    enqueue: enqueueMessage,
-    remove: removeQueuedMessage,
-    update: updateQueuedMessage,
-    markBusy,
-    markIdle,
-  } = useAgentMessageQueue({
-    ptySessionId: sessionData.ptySessionId,
-    write: writeAgentMessage,
-  });
-
-  const handleEnqueueMessage = (text: string) => {
-    enqueueMessage(text);
-    setQueuePopoverOpen(true);
-  };
-
-  // With the queue preview off, reviews go straight to the agent.
   const handleSendReview = (text: string) => {
-    if (messageQueueEnabled) return handleEnqueueMessage(text);
-    const data = formatAgentMessageForPty(text);
-    writeAgentMessage(sessionData.ptySessionId, data).catch(console.error);
+    writeAgentMessage(sessionData.ptySessionId, `${text}\r`).catch(
+      console.error,
+    );
   };
   // Handle terminal output — agent is busy while streaming process output.
   const handleTerminalOutput = (output: string, fromProcess?: boolean) => {
     if (fromProcess !== false) {
-      processOutputTailRef.current = appendTerminalOutput(
-        processOutputTailRef.current,
-        output,
-      );
-      markBusy();
       chatRecorderRef.current?.output();
     }
     onTerminalOutput?.(output, fromProcess);
   };
 
   const handleTerminalIdle = () => {
-    const outputWindow = terminalQuestionWindow(processOutputTailRef.current);
-    markIdle({
-      awaitingQuestion: looksLikeAgentUserQuestion(outputWindow),
-      shellPrompt: looksLikeShellPrompt(outputWindow),
-    });
     chatRecorderRef.current?.idle();
     onTerminalIdle?.();
   };
@@ -278,17 +231,6 @@ export const AgentTerminalPanel = ({
           />
         </div>
         <div className="flex items-center gap-1">
-          {messageQueueEnabled && (
-            <AgentMessageQueue
-              messages={queuedMessages}
-              onEnqueue={handleEnqueueMessage}
-              onRemove={removeQueuedMessage}
-              onUpdate={updateQueuedMessage}
-              open={queuePopoverOpen}
-              onOpenChange={setQueuePopoverOpen}
-              overlayContainer={terminalBodyEl}
-            />
-          )}
           {/* Search button */}
           <TooltipProvider>
             <Tooltip>
@@ -336,7 +278,6 @@ export const AgentTerminalPanel = ({
       </div>
 
       <div
-        ref={setTerminalBodyEl}
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-r border-border"
         style={{ backgroundColor: "#1e1e1e" }}
       >
