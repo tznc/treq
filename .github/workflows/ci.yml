@@ -49,6 +49,7 @@ jobs:
               - "crates/tauri-test-macros/**"
               - "Cargo.toml"
               - "Cargo.lock"
+              - ".config/nextest.toml"
               - ".github/workflows/ci.yml"
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
@@ -443,4 +444,4 @@ jobs:
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1
-        run: cargo nextest run --locked --no-fail-fast
+        run: cargo nextest run --locked --profile ci
