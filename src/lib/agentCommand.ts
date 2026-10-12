@@ -61,34 +61,72 @@ export const buildTreqAgentSystemPrompt = ({
   ].join(" ");
 };
 
-/** Workspace/home filesystem allow and deny lists for Claude `--settings`. */
-export const buildClaudeFilesystemSettings = ({
-  workspacePath,
-  repoPath,
+/**
+ * Claude permission rule path for an absolute path. Absolute paths take a
+ * leading `//`; Windows paths match in POSIX form, so `C:\a` becomes `//c/a`.
+ */
+export const absolutePathRule = (path: string): string => {
+  const posix = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const drive = /^([A-Za-z]):\//.exec(posix);
+  return drive ? `//${drive[1].toLowerCase()}${posix.slice(2)}` : `/${posix}`;
+};
+
+/**
+ * Claude `--settings` permissions that hold the agent to its working directory.
+ *
+ * Claude only enforces filesystem limits for its file tools through permission
+ * rules: `sandbox.filesystem` covers Bash alone, and only with the sandbox on.
+ * The working directory is the workspace (or the home repository), so blocking
+ * reads outside it also fences off the home repository and sibling workspaces.
+ * Edits outside it are not auto-accepted, so they still prompt. Supporting
+ * repositories become extra working directories, with edits denied.
+ */
+export const buildClaudePermissionSettings = ({
   supportingRepoPaths = [],
 }: AgentPathContext) => ({
-  filesystem: workspacePath
-    ? {
-        denyRead: [repoPath],
-        allowRead: [workspacePath, ...supportingRepoPaths],
-        allowWrite: [workspacePath],
-      }
-    : {
-        allowRead: [repoPath, ...supportingRepoPaths],
-        allowWrite: [repoPath],
-      },
+  permissions: {
+    blockReadsOutsideWorkingDirectories: true,
+    additionalDirectories: [...supportingRepoPaths],
+    deny: supportingRepoPaths.map(
+      (path) => `Edit(${absolutePathRule(path)}/**)`,
+    ),
+  },
 });
 
-/** Overlay Treq filesystem restrictions onto `.claude/settings.local.json`, without sandbox. */
+const stringArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+
+const mergeUnique = (existing: unknown, added: string[]): string[] => [
+  ...new Set([...stringArray(existing), ...added]),
+];
+
+/** Overlay Treq permission rules onto `.claude/settings.local.json`, without sandbox. */
 export const mergeClaudeLocalSettings = (
   existing: Record<string, unknown> | null,
-  filesystemSettings: ReturnType<typeof buildClaudeFilesystemSettings>,
+  { permissions }: ReturnType<typeof buildClaudePermissionSettings>,
 ): Record<string, unknown> => {
   const rest = { ...existing };
   delete rest.sandbox;
+  const existingPermissions =
+    rest.permissions &&
+    typeof rest.permissions === "object" &&
+    !Array.isArray(rest.permissions)
+      ? (rest.permissions as Record<string, unknown>)
+      : {};
   return {
     ...rest,
-    filesystem: filesystemSettings.filesystem,
+    permissions: {
+      ...existingPermissions,
+      blockReadsOutsideWorkingDirectories:
+        permissions.blockReadsOutsideWorkingDirectories,
+      additionalDirectories: mergeUnique(
+        existingPermissions.additionalDirectories,
+        permissions.additionalDirectories,
+      ),
+      deny: mergeUnique(existingPermissions.deny, permissions.deny),
+    },
   };
 };
 

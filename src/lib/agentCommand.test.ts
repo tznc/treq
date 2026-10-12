@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  absolutePathRule,
   appendAgentPrompt,
   buildAgentAutoCommand,
-  buildClaudeFilesystemSettings,
+  buildClaudePermissionSettings,
   buildTreqAgentSystemPrompt,
   claudeLocalSettingsPath,
   cursorPromptFileContents,
@@ -103,95 +104,95 @@ describe("buildTreqAgentSystemPrompt with supporting repositories", () => {
   });
 });
 
-describe("buildClaudeFilesystemSettings", () => {
-  it("allows workspace reads and writes while denying the home repository", () => {
+describe("absolutePathRule", () => {
+  it("prefixes POSIX paths with a double slash and drops trailing slashes", () => {
+    expect(absolutePathRule("/repos/api/")).toBe("//repos/api");
+  });
+
+  it("converts Windows drive paths to the POSIX rule form", () => {
+    expect(absolutePathRule("C:\\Users\\dev\\api")).toBe("//c/Users/dev/api");
+  });
+});
+
+describe("buildClaudePermissionSettings", () => {
+  it("blocks reads outside the working directory", () => {
     expect(
-      buildClaudeFilesystemSettings({
+      buildClaudePermissionSettings({
         repoPath: "/repos/treq",
         workspacePath: "/repos/treq/.treq/workspaces/fix-parser",
       }),
     ).toEqual({
-      filesystem: {
-        denyRead: ["/repos/treq"],
-        allowRead: ["/repos/treq/.treq/workspaces/fix-parser"],
-        allowWrite: ["/repos/treq/.treq/workspaces/fix-parser"],
+      permissions: {
+        blockReadsOutsideWorkingDirectories: true,
+        additionalDirectories: [],
+        deny: [],
       },
     });
   });
 
-  it("allows home repository reads and writes without workspace exclusions", () => {
+  it("lets supporting repositories be read but not edited", () => {
     expect(
-      buildClaudeFilesystemSettings({
-        repoPath: "/repos/treq",
-        workspacePath: null,
-      }),
-    ).toEqual({
-      filesystem: {
-        allowRead: ["/repos/treq"],
-        allowWrite: ["/repos/treq"],
-      },
-    });
-  });
-});
-
-describe("buildClaudeFilesystemSettings with supporting repositories", () => {
-  it("allows reading supporting repositories without writing them", () => {
-    expect(
-      buildClaudeFilesystemSettings({
+      buildClaudePermissionSettings({
         repoPath: "/repos/app",
         workspacePath: "/repos/app/.treq/workspaces/feat",
         supportingRepoPaths: ["/repos/api"],
       }),
     ).toEqual({
-      filesystem: {
-        denyRead: ["/repos/app"],
-        allowRead: ["/repos/app/.treq/workspaces/feat", "/repos/api"],
-        allowWrite: ["/repos/app/.treq/workspaces/feat"],
+      permissions: {
+        blockReadsOutsideWorkingDirectories: true,
+        additionalDirectories: ["/repos/api"],
+        deny: ["Edit(//repos/api/**)"],
       },
     });
-    expect(
-      buildClaudeFilesystemSettings({
-        repoPath: "/repos/app",
-        workspacePath: null,
-        supportingRepoPaths: ["/repos/api"],
-      }),
-    ).toEqual({
-      filesystem: {
-        allowRead: ["/repos/app", "/repos/api"],
-        allowWrite: ["/repos/app"],
-      },
+  });
+
+  it("never emits the ignored top-level filesystem or sandbox keys", () => {
+    const settings = buildClaudePermissionSettings({
+      repoPath: "/repos/treq",
+      workspacePath: null,
     });
+    expect(settings).not.toHaveProperty("filesystem");
+    expect(settings).not.toHaveProperty("sandbox");
   });
 });
 
 describe("mergeClaudeLocalSettings", () => {
-  it("overlays filesystem restrictions and drops sandbox keys", () => {
-    const filesystem = buildClaudeFilesystemSettings({
-      repoPath: "/repos/treq",
-      workspacePath: "/repos/treq/.treq/workspaces/fix-parser",
+  it("merges permission rules with local ones and drops sandbox keys", () => {
+    const permissions = buildClaudePermissionSettings({
+      repoPath: "/repos/app",
+      workspacePath: "/repos/app/.treq/workspaces/feat",
+      supportingRepoPaths: ["/repos/api"],
     });
     expect(
       mergeClaudeLocalSettings(
         {
           extra: true,
-          sandbox: { enabled: true, filesystem: { allowRead: ["/old"] } },
+          sandbox: { enabled: true },
+          permissions: {
+            allow: ["Bash(npm test)"],
+            deny: ["Read(./.env)", "Edit(//repos/api/**)"],
+            additionalDirectories: ["/shared"],
+          },
         },
-        filesystem,
+        permissions,
       ),
     ).toEqual({
       extra: true,
-      filesystem: filesystem.filesystem,
+      permissions: {
+        allow: ["Bash(npm test)"],
+        deny: ["Read(./.env)", "Edit(//repos/api/**)"],
+        additionalDirectories: ["/shared", "/repos/api"],
+        blockReadsOutsideWorkingDirectories: true,
+      },
     });
   });
 
-  it("uses filesystem restrictions alone when no local file exists", () => {
-    const filesystem = buildClaudeFilesystemSettings({
+  it("uses Treq permission rules alone when no local file exists", () => {
+    const permissions = buildClaudePermissionSettings({
       repoPath: "/repos/treq",
       workspacePath: null,
     });
-    expect(mergeClaudeLocalSettings(null, filesystem)).toEqual({
-      filesystem: filesystem.filesystem,
-    });
+    expect(mergeClaudeLocalSettings(null, permissions)).toEqual(permissions);
   });
 });
 
@@ -219,7 +220,7 @@ describe("buildAgentAutoCommand", () => {
     skillDir: "/tmp/treq-agent-skills-1",
   };
 
-  it("points Claude at filesystem settings and the prompt file", () => {
+  it("points Claude at the permission settings and the prompt file", () => {
     const command = buildAgentAutoCommand({
       agent: "claude",
       files: { ...files, claudeSkillPath: "/ws/.claude/skills/treq" },

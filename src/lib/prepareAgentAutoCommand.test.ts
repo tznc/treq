@@ -24,7 +24,7 @@ describe("prepareAgentAutoCommand", () => {
     vi.mocked(api.writeAgentCliFiles).mockReset();
   });
 
-  it("writes filesystem restrictions without a sandbox key", async () => {
+  it("writes permission rules without a sandbox key", async () => {
     vi.mocked(api.writeAgentCliFiles).mockResolvedValueOnce(writtenFiles);
 
     await prepareAgentAutoCommand({
@@ -37,10 +37,10 @@ describe("prepareAgentAutoCommand", () => {
 
     const settingsJson = vi.mocked(api.writeAgentCliFiles).mock.calls[0]?.[1];
     expect(JSON.parse(settingsJson as string)).toEqual({
-      filesystem: {
-        denyRead: ["/repo"],
-        allowRead: ["/ws"],
-        allowWrite: ["/ws"],
+      permissions: {
+        blockReadsOutsideWorkingDirectories: true,
+        additionalDirectories: [],
+        deny: [],
       },
     });
     expect(settingsJson).not.toContain("sandbox");

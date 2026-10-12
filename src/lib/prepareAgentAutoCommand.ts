@@ -1,7 +1,7 @@
 import type { AgentKind } from "./agents";
 import {
   buildAgentAutoCommand,
-  buildClaudeFilesystemSettings,
+  buildClaudePermissionSettings,
   buildTreqAgentSystemPrompt,
   claudeLocalSettingsPath,
   cursorPromptFileContents,
@@ -64,7 +64,7 @@ export const prepareAgentAutoCommand = async ({
     settingsJson = JSON.stringify(
       mergeClaudeLocalSettings(
         existing,
-        buildClaudeFilesystemSettings(agentPathContext),
+        buildClaudePermissionSettings(agentPathContext),
       ),
       null,
       2,
