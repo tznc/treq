@@ -1,11 +1,5 @@
-import type { ReactElement, Ref } from "react";
-import type {
-  ConflictRegion,
-  GhReviewThread,
-  JjDiffHunk,
-  JjFileChange,
-  LineComment as ApiLineComment,
-} from "../../lib/api";
+import type { Ref } from "react";
+import type { ConflictRegion, GhReviewThread, JjDiffHunk } from "../../lib/api";
 import type { Workspace } from "../../lib/api-types";
 import type { AgentReviewComment } from "../../lib/api-types-review";
 import type { ParsedFileChange } from "../../lib/git-utils";
@@ -14,7 +8,6 @@ import {
   type LineComment,
   type PendingComment,
 } from "../../lib/review";
-import type { useToast } from "../ui/toast";
 
 export { FILE_COMMENT_HUNK_ID };
 export type { LineComment, PendingComment };
@@ -133,56 +126,6 @@ export interface CommitInputProps {
   totalFileCount?: number;
   workspacePath: string;
 }
-
-export interface FileRowComponentProps {
-  file: ParsedFileChange;
-  allFileHunks: Map<string, FileHunksData>;
-  overrideFileHunks?: Map<string, FileHunksData>;
-  collapsedFiles: Set<string>;
-  viewedFiles: Map<string, { viewedAt: string; contentHash: string }>;
-  expandedLargeDiffs: Set<string>;
-  diffFontSize: number;
-  readOnly: boolean;
-  /** True when this row renders a committed-only Review-tab change. */
-  isCommitted?: boolean;
-  fileActionTarget: string | null;
-  selectedUnstagedFiles: Set<string>;
-  actualConflictedFiles: string[];
-  workspacePath: string;
-  toggleFileCollapse: (filePath: string) => void;
-  toggleLargeDiff: (filePath: string) => void;
-  handleMarkFileViewed: (filePath: string) => void;
-  handleUnmarkFileViewed: (filePath: string) => void;
-  handleDiscardFiles: (filePath: string) => void;
-  handleContextMenu: (e: React.MouseEvent) => void;
-  renderHunkLines: (
-    hunk: JjDiffHunk,
-    hunkIndex: number,
-    filePath: string,
-  ) => ReactElement;
-  addToast: ReturnType<typeof useToast>["addToast"];
-  getOutdatedCommentsForFile: (filePath: string) => LineComment[];
-  getFileCommentsForFile: (filePath: string) => LineComment[];
-  deleteComment: (commentId: string) => void;
-  getThreadsForLine: (query: CommentLineQuery) => GhReviewThread[];
-  getUnplacedThreadsForFile: (filePath: string) => GhReviewThread[];
-  collapsedThreadIds: Set<string>;
-  toggleThreadCollapse: (threadId: string) => void;
-  showCommentInput: boolean;
-  pendingComment: PendingComment | null;
-  editingCommentId: string | null;
-  setPendingComment: React.Dispatch<
-    React.SetStateAction<PendingComment | null>
-  >;
-  setShowCommentInput: React.Dispatch<React.SetStateAction<boolean>>;
-  addComment: (text: string) => void;
-  cancelComment: () => void;
-  startEditComment: (commentId: string) => void;
-  cancelEditComment: () => void;
-  saveEditComment: (commentId: string, text: string) => void;
-}
-
-export type { ApiLineComment, JjFileChange };
 
 export interface HunkLinesProps {
   hunk: JjDiffHunk;

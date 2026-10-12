@@ -1,4 +1,4 @@
-export const AGENT_CHAT_CAPTURE_INTERVAL_MS = 1_000;
+const AGENT_CHAT_CAPTURE_INTERVAL_MS = 1_000;
 
 interface AgentChatRecorderOptions {
   register: () => Promise<unknown>;

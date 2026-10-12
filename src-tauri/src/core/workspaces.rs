@@ -175,7 +175,7 @@ pub struct WorkspaceMetadata {
   pub linear_issue_url: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub linear_issue_title: Option<String>,
-  /// Issue-tracker item this workspace was kicked off from (`trello`, `jira`).
+  /// Issue-tracker item this workspace was kicked off from (e.g. `github`).
   #[serde(skip_serializing_if = "Option::is_none")]
   pub tracker_provider: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -2611,19 +2611,19 @@ mod tests {
     let existing = merge_linear_issue_metadata_json(None, "ENG-1", "https://l/ENG-1", "L").unwrap();
     let result = merge_tracker_item_metadata_json(
       Some(&existing),
-      "jira",
-      "OPS-7",
-      "https://acme.atlassian.net/browse/OPS-7",
+      "github",
+      "#7",
+      "https://github.com/acme/app/issues/7",
       "Rotate keys",
     )
     .unwrap();
     let parsed: WorkspaceMetadata = serde_json::from_str(&result).unwrap();
     assert_eq!(parsed.linear_issue_key.as_deref(), Some("ENG-1"));
-    assert_eq!(parsed.tracker_provider.as_deref(), Some("jira"));
-    assert_eq!(parsed.tracker_item_key.as_deref(), Some("OPS-7"));
+    assert_eq!(parsed.tracker_provider.as_deref(), Some("github"));
+    assert_eq!(parsed.tracker_item_key.as_deref(), Some("#7"));
     assert_eq!(
       parsed.tracker_item_url.as_deref(),
-      Some("https://acme.atlassian.net/browse/OPS-7")
+      Some("https://github.com/acme/app/issues/7")
     );
     assert_eq!(parsed.tracker_item_title.as_deref(), Some("Rotate keys"));
   }
@@ -3683,21 +3683,6 @@ pub fn pull_workspace_from_remote(
     commits_rebased,
     has_conflicts,
   })
-}
-
-pub fn resolve_workspace_bookmark_conflict(
-  repo_path: &str,
-  workspace_id: i64,
-  workspace_path: &str,
-  branch_name: &str,
-) -> Result<jj::BookmarkConflictResolutionResult, String> {
-  let target = format!("{branch_name}@origin");
-  let result = jj::jj_resolve_bookmark_conflict_losslessly(workspace_path, branch_name, &target)
-    .map_err(|e| e.to_string())?;
-  let tip = jj::jj_get_commit_id(workspace_path, branch_name).map_err(|e| e.to_string())?;
-  local_db::update_workspace_last_rebased_commit(repo_path, workspace_id, &tip)
-    .map_err(|e| format!("Failed to update workspace rebase state: {e}"))?;
-  Ok(result)
 }
 
 /// Point `branch_name` at the workspace tip (`@-` when `@` is the empty WC commit).

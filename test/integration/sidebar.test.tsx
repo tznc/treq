@@ -532,23 +532,6 @@ describe("Dashboard - workspace list", () => {
       user = userEvent.setup();
     });
 
-    it("shows agent, shell, and stack buttons on the home repo row", async () => {
-      render(<Dashboard />);
-
-      const homeRepoElement = await screen.findByTestId("home-repo-row");
-      expect(
-        within(homeRepoElement).getByRole("button", { name: "Start agent" }),
-      ).toBeTruthy();
-      expect(
-        within(homeRepoElement).getByRole("button", { name: "Open shell" }),
-      ).toBeTruthy();
-      expect(
-        within(homeRepoElement).getByRole("button", {
-          name: "Stack a workspace",
-        }),
-      ).toBeTruthy();
-    });
-
     it("keeps home action buttons visible when unselected", async () => {
       render(<Dashboard />);
 

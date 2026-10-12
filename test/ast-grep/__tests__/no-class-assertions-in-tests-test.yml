@@ -1,0 +1,23 @@
+id: no-class-assertions-in-tests
+valid:
+  - |
+    expect(screen.getByRole("button", { name: "Review 2" })).toBeVisible();
+  - |
+    expect(pill).toHaveTextContent("3");
+  - |
+    render(<div className="bg-muted" />);
+  - |
+    const cls = node.className;
+invalid:
+  - |
+    expect(pill).toHaveClass("bg-destructive");
+  - |
+    expect(pill).not.toHaveClass("bg-muted");
+  - |
+    expect(pill?.className).toContain("bg-yellow-500");
+  - |
+    expect(line.className).toMatch(/bg-blue-500/);
+  - |
+    expect(row.classList.contains("selected")).toBe(true);
+  - |
+    const cls = indicator.getAttribute("class") ?? "";

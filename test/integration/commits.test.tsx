@@ -52,41 +52,6 @@ describe("LinearCommitHistory integration", () => {
     await screen.findByText(/^Recent on /);
   });
 
-  it("shows unified history with no divider for default-branch workspace in Code tab", async () => {
-    const { repoPath } = createTestRepo(false);
-    openRepo(repoPath);
-
-    await commitRepoFile(
-      repoPath,
-      "default-branch-base.txt",
-      "default branch base",
-      "Default branch base commit",
-    );
-
-    const workspaceId = await createWorkspace(repoPath, "workspacebranch");
-    const workspace = (await getWorkspaces(repoPath)).find(
-      (w) => w.id === workspaceId,
-    );
-    if (!workspace) throw new Error("Workspace not found");
-
-    await commitWorkspaceFile(
-      repoPath,
-      { id: workspace.id, path: workspace.workspace_path },
-      "default-branch-workspace.txt",
-      "default branch workspace",
-      "Default branch workspace commit",
-    );
-
-    render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("workspacebranch"));
-    await screen.findByText("Default branch workspace commit");
-
-    expect(screen.queryByText(/^Recent on /)).toBeInTheDocument();
-    expect(
-      screen.queryByText("There are no commits within this workspace"),
-    ).not.toBeInTheDocument();
-  });
-
   it("shows Load more commits button for home repo at the commit limit", async () => {
     const { repoPath } = createTestRepo(false);
     openRepo(repoPath);

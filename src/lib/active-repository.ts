@@ -5,7 +5,7 @@ import type {
 } from "./api-types-remote";
 import { remoteRepoIdentity } from "./remote-query-keys";
 
-export type RepositoryTransport =
+type RepositoryTransport =
   | { type: "local" }
   | { type: "ssh"; endpoint: SshEndpoint }
   /** A remote repository with no resolved endpoint. Every operation on it fails closed. */

@@ -1,14 +1,13 @@
 import { githubOpenOrCreateWorkspaceFromIssue } from "./api";
 import { linearOpenOrCreateWorkspaceFromIssue } from "./api-linear";
-import { trackerOpenOrCreateWorkspaceFromItem } from "./api-tracker";
 import type { IssueAttachment } from "./promptAttachments";
 
-export type SubItemResult = {
+type SubItemResult = {
   id: string;
   workspaceId: number;
   created: boolean;
 };
-export type SubItemFailure = { id: string; error: string };
+type SubItemFailure = { id: string; error: string };
 
 export type IssueWorkspace = {
   workspaceId: number;
@@ -46,16 +45,9 @@ async function openOne(
       );
       return { workspaceId: result.workspace_id, created: result.created };
     }
-    case "linear": {
-      const result = await linearOpenOrCreateWorkspaceFromIssue(repoPath, id);
-      return { workspaceId: result.workspace_id, created: result.created };
-    }
     default: {
-      // Trello and Jira share the tracker_* commands.
-      const result = await trackerOpenOrCreateWorkspaceFromItem(repoPath, {
-        provider: source,
-        id,
-      });
+      // "linear", the only other source.
+      const result = await linearOpenOrCreateWorkspaceFromIssue(repoPath, id);
       return { workspaceId: result.workspace_id, created: result.created };
     }
   }

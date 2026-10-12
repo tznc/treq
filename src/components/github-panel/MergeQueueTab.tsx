@@ -28,8 +28,6 @@ import {
   mergeLocalDiffStats,
 } from "./merge-queue-parts";
 
-export { MergeQueueUpsell } from "./merge-queue-parts";
-
 interface MergeQueueListProps {
   repoPath: string;
   queueLoading: boolean;

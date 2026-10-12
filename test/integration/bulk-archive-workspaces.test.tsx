@@ -57,8 +57,8 @@ describe("bulk archive workspaces", () => {
       expect(
         screen.queryByText(/archive 2 workspaces/i),
       ).not.toBeInTheDocument();
-      expect(alpha).toHaveClass("opacity-50");
-      expect(beta).toHaveClass("opacity-50");
+      expect(alpha).toHaveAttribute("aria-disabled", "true");
+      expect(beta).toHaveAttribute("aria-disabled", "true");
       expect(
         alpha.querySelector('[data-testid="workspace-archive-spinner"]'),
       ).toBeTruthy();

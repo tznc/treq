@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "../../lib/utils";
 
-export type TextareaProps = React.ComponentProps<"textarea"> & {
+type TextareaProps = React.ComponentProps<"textarea"> & {
   /** Grow and shrink the height to fit the content instead of a fixed size. */
   autoResize?: boolean;
 };

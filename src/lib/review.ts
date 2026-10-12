@@ -75,10 +75,7 @@ export function toApiLineComment(c: LineComment): ApiLineComment {
   };
 }
 
-export function formatCommentMarkdown(
-  comment: LineComment,
-  filePath: string,
-): string {
+function formatCommentMarkdown(comment: LineComment, filePath: string): string {
   if (comment.hunkId === FILE_COMMENT_HUNK_ID) {
     return `${filePath}\n> ${comment.text}\n\n`;
   }
