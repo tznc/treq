@@ -70,44 +70,9 @@ jobs:
         with:
           warm: "true"
 
-  # Consumer: ci.yml verify-rust / clippy.
-  clippy:
-    name: clippy
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    env:
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_TEST_DEBUG: 0
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          components: rustfmt, clippy
-          toolchain: stable
-
-      - name: install dependencies (ubuntu only)
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
-        with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: webkit-4.1-1
-          execute_install_scripts: true
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: clippy
-          workspaces: |
-            . -> target
-
-      - name: Build clippy artifacts
-        working-directory: src-tauri
-        run: cargo clippy --locked --all-targets --all-features
-
-  # Consumer: ci.yml test-rust (ubuntu).
-  test-build:
-    name: test build / ubuntu-22.04
+  # Consumer: ci.yml test-rust (clippy + tests, ubuntu).
+  rust:
+    name: clippy + test build / ubuntu-22.04
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -141,6 +106,10 @@ jobs:
           shared-key: test
           workspaces: |
             . -> target
+
+      - name: Build clippy artifacts
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets --all-features
 
       - name: Build test binaries
         working-directory: src-tauri
