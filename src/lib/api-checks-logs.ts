@@ -2,79 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentChat,
   AgentChatSummary,
-  JobResult,
   LogBucket,
   LogRecordView,
-  RunSummary,
-  SetupScriptStatus,
   SqlResult,
-  WorkflowInfo,
 } from "./api-types";
 import { invalidateQueries, setQueryData } from "./swr-cache";
 
 // Checks / logs API
-
-export const listWorkflows = (repoPath: string): Promise<WorkflowInfo[]> =>
-  invoke("list_workflows", { repoPath });
-
-export const runWorkflowJob = (
-  repoPath: string,
-  filename: string,
-  jobId: string,
-  workspaceId: number,
-  workspacePath: string,
-): Promise<JobResult> =>
-  invoke("run_workflow_job", {
-    repoPath,
-    filename,
-    jobId,
-    workspaceId,
-    workspacePath,
-  });
-
-export const runWorkflow = (
-  repoPath: string,
-  filename: string,
-  workspaceId: number,
-  workspacePath: string,
-): Promise<JobResult[]> =>
-  invoke("run_workflow", { repoPath, filename, workspaceId, workspacePath });
-
-export const isRepoTrusted = (repoPath: string): Promise<boolean> =>
-  invoke("is_repo_trusted", { repoPath });
-
-export const trustRepo = (repoPath: string): Promise<void> =>
-  invoke("trust_repo", { repoPath });
-
-export const listWorkflowRuns = (
-  repoPath: string,
-  workspaceId: number,
-  filename: string,
-  limit?: number,
-): Promise<RunSummary[]> =>
-  invoke("list_workflow_runs", {
-    repoPath,
-    workspaceId,
-    filename,
-    limit: limit ?? null,
-  });
-
-export const getWorkspaceSetupStatus = (
-  repoPath: string,
-  workspaceId: number,
-): Promise<SetupScriptStatus> =>
-  invoke("get_workspace_setup_status", { repoPath, workspaceId });
-
-export const rerunWorkspaceSetupScript = (
-  repoPath: string,
-  workspaceId: number,
-  workspacePath: string,
-): Promise<JobResult> =>
-  invoke("rerun_workspace_setup_script", {
-    repoPath,
-    workspaceId,
-    workspacePath,
-  });
 
 export const getRepoLogs = (
   repoPath: string,
