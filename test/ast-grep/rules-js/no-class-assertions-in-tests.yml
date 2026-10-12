@@ -20,9 +20,6 @@ ignores:
   - "test/integration/review/conflict.test.tsx"
   - "test/integration/sidebar-branch-switch-click-lock.test.tsx"
   - "test/integration/sidebar.test.tsx"
-  - "test/integration/workspace-sidebar-hover-actions.test.tsx"
-  - "test/integration/workspace/create-pr.test.tsx"
-  - "test/integration/workspace/view-pr.test.tsx"
   - "test/integration/workspace/workspace-description.test.tsx"
 rule:
   any:
