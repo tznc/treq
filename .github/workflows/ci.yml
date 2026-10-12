@@ -66,8 +66,9 @@ jobs:
               - ".tool-versions"
               - ".github/workflows/ci.yml"
 
-  # One job for the quick lint/format/type checks. Each check takes seconds;
-  # as separate jobs each one paid ~30s of setup and its own runner.
+  # One job for the quick lint/format/type checks and the unit tests. Each
+  # check takes seconds; as separate jobs each one paid ~30s of setup and its
+  # own runner.
   # Every check runs even if an earlier one fails (!cancelled()).
   verify:
     needs: detect-changes
@@ -108,6 +109,12 @@ jobs:
         if: ${{ !cancelled() && env.JS == 'true' }}
         run: npm run knip
 
+      # Unit tests: mocked Tauri, no NAPI/jj, about 2 min. They share this
+      # job's npm ci instead of paying for their own runner.
+      - name: test:unit
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run test:unit
+
       - name: Install rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
         uses: dtolnay/rust-toolchain@v1
@@ -132,9 +139,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Unit tests: mocked Tauri, no NAPI/jj. Parallel file execution.
-          - platform: ubuntu-22.04
-            task: test:unit
+          # Unit tests run in the verify job.
           # Integration tests: NAPI + real jj repos. Serial file execution.
           - platform: ubuntu-22.04
             task: test:integration
