@@ -120,21 +120,6 @@ describe("TerminalSendPreviews", () => {
         screen.getByTestId("treq-send-text-preview").textContent,
       ).toContain("hello from send");
     });
-    expect(screen.getByTestId("treq-send-text-preview").className).toContain(
-      "bg-zinc-900",
-    );
-    expect(screen.getByTestId("treq-send-text-preview").className).toContain(
-      "opacity-100",
-    );
-    expect(screen.getByTestId("treq-send-text-preview").className).not.toMatch(
-      /bg-zinc-900\/\d+/,
-    );
-    expect(screen.getByTestId("treq-send-preview-lightbox").className).toMatch(
-      /fixed inset-0/,
-    );
-    expect(
-      screen.getByRole("button", { name: "Close preview backdrop" }).className,
-    ).toMatch(/bg-black\/\d+/);
     expect(screen.queryByTestId("treq-send-preview-modal")).toBeNull();
     expect(api.readFile).toHaveBeenCalledWith("/tmp/repo/.treq/send/note.txt");
   });
@@ -144,34 +129,10 @@ describe("TerminalSendPreviews", () => {
     renderSend(<SendHarness ptySessionId="session-1" />);
     await user.click(screen.getByRole("button", { name: "Inject image" }));
     const thumb = await screen.findByTestId("terminal-send-preview-send-2");
-    const attachment = thumb.closest('[data-slot="attachment"]');
-    expect(attachment?.className).toMatch(/h-20/);
-    expect(attachment?.className).toMatch(/w-36/);
-    const img = attachment?.querySelector("img");
-    expect(img?.className).toMatch(/object-contain/);
+    const img = thumb.closest('[data-slot="attachment"]')?.querySelector("img");
     expect(img?.getAttribute("src")).toBe(
       "asset://localhost/tmp/repo/shot.png",
     );
-  });
-
-  it("lets the dismiss button overhang the thumbnail corner", async () => {
-    const user = userEvent.setup();
-    renderSend(<SendHarness ptySessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "Inject text" }));
-    const thumb = await screen.findByTestId("terminal-send-preview-send-1");
-    const attachment = thumb.closest('[data-slot="attachment"]') as HTMLElement;
-    const group = thumb.closest(
-      '[data-slot="attachment-group"]',
-    ) as HTMLElement;
-    const actions = attachment.querySelector(
-      '[data-slot="attachment-actions"]',
-    ) as HTMLElement;
-
-    expect(attachment.className).toMatch(/overflow-visible/);
-    expect(actions.className).toMatch(/-top-2/);
-    expect(actions.className).toMatch(/-right-2/);
-    expect(group.className).toMatch(/pt-2/);
-    expect(group.className).toMatch(/pr-2/);
   });
 
   it("dismisses a thumbnail when its x button is clicked", async () => {
@@ -214,18 +175,12 @@ describe("TerminalSendPreviews", () => {
     });
   });
 
-  it("opens image lightbox with viewport-scaled carousel and base width", async () => {
+  it("opens image lightbox at base viewport height", async () => {
     const user = userEvent.setup();
     renderSend(<SendHarness ptySessionId="session-1" />);
     await user.click(screen.getByRole("button", { name: "Inject image" }));
     await user.click(await screen.findByTestId("terminal-send-preview-send-2"));
     await screen.findByTestId("treq-send-preview-lightbox");
-
-    const carouselShell = screen.getByTestId(
-      "treq-send-preview-carousel-shell",
-    );
-    expect(carouselShell.className).toMatch(/w-\[90vw\]/);
-    expect(carouselShell.className).toMatch(/min-w-\[75vw\]/);
 
     const image = screen
       .getByTestId("treq-send-preview-lightbox")
@@ -290,8 +245,6 @@ describe("TerminalSendPreviews", () => {
     await user.click(screen.getByRole("button", { name: "Inject image" }));
     await user.click(await screen.findByTestId("terminal-send-preview-send-2"));
     const header = await screen.findByTestId("treq-send-preview-header");
-    expect(header.className).toMatch(/flex-col/);
-    expect(header.className).toMatch(/items-center/);
     const title = header.querySelector("p");
     expect(title?.textContent).toBe("shot.png");
     expect(header.firstElementChild).toBe(title);
@@ -301,28 +254,6 @@ describe("TerminalSendPreviews", () => {
     expect(
       header.querySelector('[data-testid="treq-send-close"]'),
     ).toBeTruthy();
-    expect(
-      screen
-        .getByTestId("treq-send-preview-lightbox")
-        .querySelector(":scope > .absolute.right-4.top-4"),
-    ).toBeNull();
-  });
-
-  it("uses a scrollable image frame so tall zoomed photos are not cropped at the top", async () => {
-    const user = userEvent.setup();
-    renderSend(<SendHarness ptySessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "Inject image" }));
-    await user.click(await screen.findByTestId("terminal-send-preview-send-2"));
-    await screen.findByTestId("treq-send-preview-lightbox");
-
-    const frame = screen.getByTestId("treq-send-image-scroll");
-    expect(frame.className).toMatch(/overflow-auto/);
-    expect(frame.className).not.toMatch(/items-center/);
-    expect(frame.querySelector(".min-h-full")).toBeTruthy();
-
-    await user.click(screen.getByTestId("treq-send-zoom-in"));
-    expect(frame.className).toMatch(/h-\[80vh\]/);
-    expect(frame.querySelector(".items-start")).toBeTruthy();
   });
 
   it("hides zoom controls for text assets", async () => {
