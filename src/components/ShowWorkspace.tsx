@@ -1067,19 +1067,6 @@ export const ShowWorkspace = ({
   const handleStartAgentReview = (prompt: string, agent?: string) =>
     createAgentWithReview(prompt, "acceptEdits", "AI Review", agent);
 
-  const handleCreateAgentWithPageReview = (
-    reviewMarkdown: string,
-    mode: "plan" | "acceptEdits",
-    useIdleAgent = false,
-  ) =>
-    createAgentWithReview(
-      reviewMarkdown,
-      mode,
-      "Page Review",
-      undefined,
-      useIdleAgent,
-    );
-
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">
       <div
@@ -1419,9 +1406,6 @@ export const ShowWorkspace = ({
           />
         ) : reviewSubView.showBrowser ? (
           <BrowserPanel
-            repoPath={effectiveRepoPath}
-            workspaceId={workspace?.id}
-            onCreateAgentWithReview={handleCreateAgentWithPageReview}
             openRequest={reviewSubView.openRequest}
             toolbarSlot={reviewSubView.toolbarSlot}
           />

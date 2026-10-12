@@ -1,7 +1,6 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { v4 as uuidv4 } from "uuid";
 import {
   closeBrowserWebview,
   listenBrowserUrlChanged,
@@ -10,23 +9,12 @@ import {
   syncBrowserWebviewBounds,
 } from "../../lib/api";
 import { useToast } from "../ui/toast";
-import { CommentInput } from "../CommentInput";
 import { AddressBar } from "./AddressBar";
-import { BrowserReviewActionBar } from "./BrowserReviewActionBar";
-import { useBrowserElementPicker } from "./hooks/useBrowserElementPicker";
-import { useBrowserReview } from "./hooks/useBrowserReview";
-import type { BrowserPanelProps, ElementComment } from "./types";
+import type { BrowserPanelProps } from "./types";
 
 const DEFAULT_URL = "http://localhost:3000";
 
-export function BrowserPanel({
-  repoPath,
-  workspaceId,
-  onCreateAgentWithReview,
-  onReviewSubmitted,
-  openRequest,
-  toolbarSlot,
-}: BrowserPanelProps) {
+export function BrowserPanel({ openRequest, toolbarSlot }: BrowserPanelProps) {
   const { addToast } = useToast();
   const [url, setUrl] = useState(DEFAULT_URL);
   const [webviewOpen, setWebviewOpen] = useState(false);
@@ -37,30 +25,6 @@ export function BrowserPanel({
   // packaged app always runs inside Tauri and keeps using the native
   // webview, which is what makes click-to-select possible.
   const runningInTauri = useMemo(() => isTauri(), []);
-
-  const {
-    comments,
-    summary,
-    setSummary,
-    sendingReview,
-    addComment,
-    deleteComment,
-    handleRequestChanges,
-    handleCancelReview,
-  } = useBrowserReview({
-    url,
-    repoPath,
-    workspaceId,
-    onCreateAgentWithReview,
-    onReviewSubmitted,
-    addToast,
-  });
-
-  const { selectMode, pendingPick, toggleSelectMode, clearPendingPick } =
-    useBrowserElementPicker(webviewOpen);
-
-  const [popoverOpen, setPopoverOpen] = useState(false);
-  const [showCancelDialog, setShowCancelDialog] = useState(false);
 
   const syncBounds = useCallback(() => {
     if (!runningInTauri) return;
@@ -153,36 +117,8 @@ export function BrowserPanel({
     handleNavigate(openRequest.url);
   }, [openRequest?.id, handleNavigate]);
 
-  const handleSubmitComment = useCallback(
-    (text: string) => {
-      if (!pendingPick) return;
-      const comment: ElementComment = {
-        id: uuidv4(),
-        selector: pendingPick.selector,
-        tag: pendingPick.tag,
-        textPreview: pendingPick.textPreview,
-        htmlSnippet: pendingPick.htmlSnippet,
-        x: pendingPick.x,
-        y: pendingPick.y,
-        width: pendingPick.width,
-        height: pendingPick.height,
-        text,
-        createdAt: new Date().toISOString(),
-      };
-      addComment(comment);
-      clearPendingPick();
-    },
-    [pendingPick, addComment, clearPendingPick],
-  );
-
   const addressBar = (
-    <AddressBar
-      url={url}
-      onNavigate={handleNavigate}
-      onReload={handleReload}
-      selectMode={selectMode}
-      onToggleSelectMode={toggleSelectMode}
-    />
+    <AddressBar url={url} onNavigate={handleNavigate} onReload={handleReload} />
   );
 
   return (
@@ -191,7 +127,7 @@ export function BrowserPanel({
       <div className="flex-1 min-h-0 relative" ref={previewRef}>
         {!webviewOpen && (
           <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-            Enter a localhost URL or a local HTML file to start reviewing.
+            Enter a localhost URL or a local HTML file to preview it.
           </div>
         )}
         {webviewOpen && !runningInTauri && (
@@ -202,36 +138,6 @@ export function BrowserPanel({
           />
         )}
       </div>
-      {pendingPick && (
-        <div className="border-t px-2 py-1">
-          <div className="px-2 pt-1 text-xs text-muted-foreground font-mono truncate">
-            {pendingPick.selector} ({pendingPick.tag})
-          </div>
-          <CommentInput
-            onSubmit={handleSubmitComment}
-            onCancel={clearPendingPick}
-          />
-        </div>
-      )}
-      <BrowserReviewActionBar
-        comments={comments}
-        summary={summary}
-        setSummary={setSummary}
-        sendingReview={sendingReview}
-        popoverOpen={popoverOpen}
-        setPopoverOpen={setPopoverOpen}
-        showCancelDialog={showCancelDialog}
-        setShowCancelDialog={setShowCancelDialog}
-        onDeleteComment={deleteComment}
-        onCancelReview={() => {
-          handleCancelReview();
-          setShowCancelDialog(false);
-        }}
-        onRequestChanges={(mode, useIdleAgent) => {
-          handleRequestChanges(mode, useIdleAgent);
-          setPopoverOpen(false);
-        }}
-      />
     </div>
   );
 }
