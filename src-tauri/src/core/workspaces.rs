@@ -175,7 +175,7 @@ pub struct WorkspaceMetadata {
   pub linear_issue_url: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub linear_issue_title: Option<String>,
-  /// Issue-tracker item this workspace was kicked off from (`trello`, `jira`).
+  /// Issue-tracker item this workspace was kicked off from (e.g. `github`).
   #[serde(skip_serializing_if = "Option::is_none")]
   pub tracker_provider: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -2611,19 +2611,19 @@ mod tests {
     let existing = merge_linear_issue_metadata_json(None, "ENG-1", "https://l/ENG-1", "L").unwrap();
     let result = merge_tracker_item_metadata_json(
       Some(&existing),
-      "jira",
-      "OPS-7",
-      "https://acme.atlassian.net/browse/OPS-7",
+      "github",
+      "#7",
+      "https://github.com/acme/app/issues/7",
       "Rotate keys",
     )
     .unwrap();
     let parsed: WorkspaceMetadata = serde_json::from_str(&result).unwrap();
     assert_eq!(parsed.linear_issue_key.as_deref(), Some("ENG-1"));
-    assert_eq!(parsed.tracker_provider.as_deref(), Some("jira"));
-    assert_eq!(parsed.tracker_item_key.as_deref(), Some("OPS-7"));
+    assert_eq!(parsed.tracker_provider.as_deref(), Some("github"));
+    assert_eq!(parsed.tracker_item_key.as_deref(), Some("#7"));
     assert_eq!(
       parsed.tracker_item_url.as_deref(),
-      Some("https://acme.atlassian.net/browse/OPS-7")
+      Some("https://github.com/acme/app/issues/7")
     );
     assert_eq!(parsed.tracker_item_title.as_deref(), Some("Rotate keys"));
   }

@@ -3,12 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const linearApi = vi.hoisted(() => ({
   linearOpenOrCreateWorkspaceFromIssue: vi.fn(),
 }));
-const trackerApi = vi.hoisted(() => ({
-  trackerOpenOrCreateWorkspaceFromItem: vi.fn(),
-}));
 
 vi.mock("./api-linear", () => linearApi);
-vi.mock("./api-tracker", () => trackerApi);
 vi.mock("./api", () => ({ githubOpenOrCreateWorkspaceFromIssue: vi.fn() }));
 
 import { openOrCreateIssueWorkspace } from "./issueWorkspace";
@@ -84,7 +80,6 @@ function controlledBackend() {
 describe("openOrCreateIssueWorkspace", () => {
   beforeEach(() => {
     linearApi.linearOpenOrCreateWorkspaceFromIssue.mockReset();
-    trackerApi.trackerOpenOrCreateWorkspaceFromItem.mockReset();
   });
 
   it("creates one workspace per backend call, parent first, one at a time", async () => {
@@ -163,31 +158,6 @@ describe("openOrCreateIssueWorkspace", () => {
     await Promise.all([first, second]);
 
     expect(backend.calls.map((c) => c[1])).toEqual(["one", "one-child", "two"]);
-    expect(backend.maxInFlight()).toBe(1);
-  });
-
-  it("opens tracker sub-items one call at a time too", async () => {
-    const backend = controlledBackend();
-    trackerApi.trackerOpenOrCreateWorkspaceFromItem.mockImplementation(
-      backend.call,
-    );
-
-    const done = openOrCreateIssueWorkspace("/repo", {
-      source: "jira",
-      id: "ENG-42",
-      key: "ENG-42",
-      url: "https://jira.example/browse/ENG-42",
-      title: "Parent",
-      includeSubItems: true,
-      subItemIds: ["ENG-43"],
-    });
-    await backend.settle();
-    await done;
-
-    expect(backend.calls).toEqual([
-      ["/repo", { provider: "jira", id: "ENG-42" }],
-      ["/repo", { provider: "jira", id: "ENG-43" }],
-    ]);
     expect(backend.maxInFlight()).toBe(1);
   });
 });

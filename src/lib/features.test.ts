@@ -13,8 +13,6 @@ describe("preview features", () => {
       "skillsInstallation",
       "remoteSsh",
       "linearIntegration",
-      "trelloIntegration",
-      "jiraIntegration",
       "logs",
       "browser",
     ]);
@@ -28,8 +26,6 @@ describe("preview features", () => {
     expect(FEATURES.skillsInstallation).toBe(false);
     expect(FEATURES.remoteSsh).toBe(false);
     expect(FEATURES.linearIntegration).toBe(false);
-    expect(FEATURES.trelloIntegration).toBe(false);
-    expect(FEATURES.jiraIntegration).toBe(false);
     expect(FEATURES.logs).toBe(false);
     expect(FEATURES.browser).toBe(false);
   });
@@ -38,8 +34,6 @@ describe("preview features", () => {
     expect(previewFeatureDefault("skillsInstallation")).toBe(true);
     expect(previewFeatureDefault("remoteSsh")).toBe(true);
     expect(previewFeatureDefault("linearIntegration")).toBe(true);
-    expect(previewFeatureDefault("trelloIntegration")).toBe(true);
-    expect(previewFeatureDefault("jiraIntegration")).toBe(true);
     expect(previewFeatureDefault("logs")).toBe(true);
     expect(previewFeatureDefault("browser")).toBe(true);
   });

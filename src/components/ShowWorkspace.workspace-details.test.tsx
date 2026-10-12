@@ -194,39 +194,3 @@ describe("Workspace details popover", () => {
     );
   });
 });
-
-describe("Tracker item badge", () => {
-  it("links the workspace header to the Jira issue it was kicked off from", async () => {
-    const api = await import("../lib/api");
-    vi.mocked(api.getWorkspaceStartingPrompt).mockResolvedValue(null);
-    renderWorkspace(undefined, {
-      ...workspace,
-      metadata: JSON.stringify({
-        tracker_provider: "jira",
-        tracker_item_key: "ENG-42",
-        tracker_item_url: "https://acme.atlassian.net/browse/ENG-42",
-        tracker_item_title: "Add Jira integration",
-      }),
-    });
-
-    const badge = await screen.findByTestId("tracker-item-badge");
-    expect(badge).toHaveTextContent("ENG-42");
-    expect(badge).toHaveAttribute("title", "Add Jira integration");
-  });
-
-  it("ignores metadata from an unknown tracker", async () => {
-    const api = await import("../lib/api");
-    vi.mocked(api.getWorkspaceStartingPrompt).mockResolvedValue(null);
-    renderWorkspace(undefined, {
-      ...workspace,
-      metadata: JSON.stringify({
-        tracker_provider: "asana",
-        tracker_item_key: "A-1",
-        tracker_item_url: "https://app.asana.com/0/1",
-      }),
-    });
-
-    await screen.findByTestId("workspace-details-button");
-    expect(screen.queryByTestId("tracker-item-badge")).toBeNull();
-  });
-});

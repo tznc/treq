@@ -97,13 +97,10 @@ import {
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
 import { useLinearAutoKickoff } from "../hooks/useLinearAutoKickoff";
-import { useTrackerAutoKickoff } from "../hooks/useTrackerAutoKickoff";
-import { TRACKER_PROVIDERS, type TrackerProvider } from "../lib/trackers";
 import { openRepositoryAtPath as openRepositoryAtPathShared } from "../lib/open-repository";
 import {
   issueFromGitHub,
   issueFromLinear,
-  issueFromTrackerItem,
   type IssueAttachment,
 } from "../lib/promptAttachments";
 import {
@@ -182,7 +179,6 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { GitHubPanel } from "./GitHubPanel";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 import { LinearPanel } from "./LinearPanel";
-import { TrackerPanel } from "./TrackerPanel";
 import { MergePreviewPage } from "./MergePreviewPage";
 import { Onboarding } from "./Onboarding";
 import { PromptHistoryModal } from "./PromptHistoryModal";
@@ -247,8 +243,7 @@ type ViewMode =
   | "settings"
   | "merge-preview"
   | "github"
-  | "linear"
-  | TrackerProvider;
+  | "linear";
 
 type SessionOpenOptions = {
   initialPrompt?: string;
@@ -303,12 +298,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [location, navigate] = useLocation();
   const remoteSshEnabled = usePreviewFeature("remoteSsh");
   const linearIntegrationEnabled = usePreviewFeature("linearIntegration");
-  const trelloIntegrationEnabled = usePreviewFeature("trelloIntegration");
-  const jiraIntegrationEnabled = usePreviewFeature("jiraIntegration");
-  const trackerEnabled: Record<TrackerProvider, boolean> = {
-    trello: trelloIntegrationEnabled,
-    jira: jiraIntegrationEnabled,
-  };
   const previousViewModeRef = useRef<ViewMode>(
     initialViewMode === "settings" ? "show-workspace" : initialViewMode,
   );
@@ -770,16 +759,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     dataRepoPath,
     linearIntegrationEnabled && !isRemoteActive,
   );
-  useTrackerAutoKickoff(
-    "trello",
-    dataRepoPath,
-    trelloIntegrationEnabled && !isRemoteActive,
-  );
-  useTrackerAutoKickoff(
-    "jira",
-    dataRepoPath,
-    jiraIntegrationEnabled && !isRemoteActive,
-  );
   const cutoffReason = useRemoteCutoffStore((s) =>
     activeRepository?.endpointId
       ? s.cutoffs[activeRepository.endpointId]
@@ -1199,14 +1178,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     navigate(LINEAR_BASE_PATH);
   };
 
-  const openTracker = (provider: TrackerProvider) => {
-    if (viewMode !== provider) {
-      previousViewModeRef.current = viewMode;
-    }
-    setViewMode(provider);
-    navigate(TRACKER_PROVIDERS[provider].basePath);
-  };
-
   const openGitHubPr = (prNumber: number, prState: string) => {
     if (viewMode !== "github") {
       previousViewModeRef.current = viewMode;
@@ -1231,25 +1202,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
       setViewMode("linear");
     }
-    // A disabled tracker's route falls back to the previous view, so a stale
-    // URL or turning the preview off mid-view never leaves a blank pane.
-    const trackerRouteEnabled: Record<TrackerProvider, boolean> = {
-      trello: trelloIntegrationEnabled,
-      jira: jiraIntegrationEnabled,
-    };
-    for (const { id, basePath } of Object.values(TRACKER_PROVIDERS)) {
-      const enabled = trackerRouteEnabled[id];
-      if (viewMode === id && (!enabled || !location.startsWith(basePath))) {
-        setViewMode(previousViewModeRef.current);
-      }
-      if (enabled && location.startsWith(basePath) && viewMode !== id) {
-        if (viewMode !== "github") {
-          previousViewModeRef.current = viewMode;
-        }
-        setViewMode(id);
-      }
-    }
-  }, [location, viewMode, trelloIntegrationEnabled, jiraIntegrationEnabled]);
+  }, [location, viewMode]);
 
   // The reverse also happens: leaving "github" through a non-URL action (e.g.
   // clicking a workspace in the sidebar) should clear the now-stale
@@ -1261,13 +1214,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       previousViewModeForUrlRef.current === "github" && viewMode !== "github";
     const leftLinear =
       previousViewModeForUrlRef.current === "linear" && viewMode !== "linear";
-    const leftTracker = Object.values(TRACKER_PROVIDERS).find(
-      ({ id }) => previousViewModeForUrlRef.current === id && viewMode !== id,
-    );
     previousViewModeForUrlRef.current = viewMode;
-    if (leftTracker && location.startsWith(leftTracker.basePath)) {
-      navigate("/", { replace: true });
-    }
     if (leftGitHub && location.startsWith(GITHUB_BASE_PATH)) {
       navigate("/", { replace: true });
     }
@@ -2499,13 +2446,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return next;
     });
     if (prompt) {
-      addPromptHistory(
-        sessionRepoPath,
-        workspaceId,
-        sessionId,
-        prompt,
-        agent,
-      )
+      addPromptHistory(sessionRepoPath, workspaceId, sessionId, prompt, agent)
         .then(() => {
           void invalidateQueries(["prompt-history"]);
           invalidateQueries(["workspace-starting-prompt"]);
@@ -3017,20 +2958,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             onDropChangeFiles={handleDropChangeFiles}
             onOpenGitHub={openGitHub}
             onOpenLinear={linearIntegrationEnabled ? openLinear : undefined}
-            onOpenTrello={
-              trelloIntegrationEnabled ? () => openTracker("trello") : undefined
-            }
-            onOpenJira={
-              jiraIntegrationEnabled ? () => openTracker("jira") : undefined
-            }
             currentPage={
               viewMode === "settings"
                 ? "settings"
                 : viewMode === "github"
                   ? "github"
-                  : viewMode === "linear" ||
-                      viewMode === "trello" ||
-                      viewMode === "jira"
+                  : viewMode === "linear"
                     ? viewMode
                     : viewMode === "session" || viewMode === "show-workspace"
                       ? "session"
@@ -3343,19 +3276,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }}
                 />
               )}
-
-              {/* Trello / Jira Panels */}
-              {(viewMode === "trello" || viewMode === "jira") &&
-                trackerEnabled[viewMode] && (
-                  <TrackerPanel
-                    key={viewMode}
-                    provider={viewMode}
-                    repoPath={dataRepoPath}
-                    onStartPromptFromItem={(item) =>
-                      handleStartPromptFromIssue(issueFromTrackerItem(item))
-                    }
-                  />
-                )}
 
               {/* Merge Preview View */}
               {viewMode === "merge-preview" && mergeWorkspace && (
