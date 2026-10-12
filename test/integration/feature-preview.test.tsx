@@ -5,15 +5,7 @@ import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
 import { act, render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
-import {
-  createWorkspace,
-<<<<<<< HEAD
-  scheduleWorkspaces,
-=======
-  runWorkflow,
->>>>>>> e591c89 (Remove workspace scheduling feature)
-  setSetting,
-} from "../../src/lib/api";
+import { createWorkspace, setSetting } from "../../src/lib/api";
 import {
   trackerListItems,
   trackerStartAutoKickoffPolling,
@@ -106,7 +98,6 @@ describe("feature preview settings", () => {
     );
     expect(screen.queryByRole("tab", { name: /^skills$/i })).toBeNull();
   });
-
 });
 
 describe("tracker preview routes", () => {
