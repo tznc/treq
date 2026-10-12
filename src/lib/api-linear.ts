@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getRepoSetting, setRepoSetting } from "./api";
 
-export type LinearState = {
+type LinearState = {
   name: string;
   type: string;
 };
@@ -11,7 +11,7 @@ export type LinearUser = {
   name: string;
 };
 
-export type LinearProjectRef = {
+type LinearProjectRef = {
   id: string;
   name: string;
 };

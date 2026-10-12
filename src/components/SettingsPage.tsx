@@ -24,7 +24,6 @@ import {
 } from "./AccountSettings";
 import { GitHubIntegrationSettings } from "./GitHubIntegrationSettings";
 import { LinearIntegrationSettings } from "./LinearIntegrationSettings";
-import { TrackerIntegrationSettings } from "./TrackerIntegrationSettings";
 import { RepoYamlConfigCard } from "./RepoYamlConfigCard";
 import { FeaturePreviewSettings } from "./FeaturePreviewSettings";
 import { SkillLibrarySettings } from "./SkillLibrarySettings";
@@ -86,8 +85,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const setZoom = useZoomSettingsStore((s) => s.setZoom);
   const skillsInstallation = usePreviewFeature("skillsInstallation");
   const linearIntegration = usePreviewFeature("linearIntegration");
-  const trelloIntegration = usePreviewFeature("trelloIntegration");
-  const jiraIntegration = usePreviewFeature("jiraIntegration");
 
   useEffect(() => {
     if (!skillsInstallation && currentTab === "skills") {
@@ -450,18 +447,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     <GitHubIntegrationSettings repoPath={repoPath} />
                     {linearIntegration && (
                       <LinearIntegrationSettings repoPath={repoPath} />
-                    )}
-                    {trelloIntegration && (
-                      <TrackerIntegrationSettings
-                        provider="trello"
-                        repoPath={repoPath}
-                      />
-                    )}
-                    {jiraIntegration && (
-                      <TrackerIntegrationSettings
-                        provider="jira"
-                        repoPath={repoPath}
-                      />
                     )}
                   </div>
                 </TabsContent>

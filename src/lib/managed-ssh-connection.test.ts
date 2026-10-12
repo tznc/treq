@@ -244,8 +244,8 @@ describe("connectManagedInstance", () => {
 
     expect(deps.issueCertificate).toHaveBeenCalledWith("inst-1", "key-1");
     expect(deps.activateEndpoint).toHaveBeenCalledTimes(1);
-    const [[activated]] = (deps.activateEndpoint as ReturnType<typeof vi.fn>)
-      .mock.calls;
+    const activated = result.endpoint;
+    expect(deps.activateEndpoint).toHaveBeenCalledWith(activated);
     expect(activated.instance_id).toBe("inst-1");
     expect(activated.source).toEqual({
       type: "managed",
@@ -260,17 +260,15 @@ describe("connectManagedInstance", () => {
       key_reference: "ref",
       certificate: "ssh-ed25519-cert-v01@openssh.com AAAA...",
     });
-    expect(result.endpoint).toBe(activated);
   });
 
   it("composes the endpoint from the local key reference and the issued certificate", async () => {
-    await connectManagedInstance(deps, {
+    const { endpoint: activated } = await connectManagedInstance(deps, {
       region: "us_east",
       size: "small",
       keyReference: "/home/user/.ssh/id_ed25519.pub",
     });
-    const [[activated]] = (deps.activateEndpoint as ReturnType<typeof vi.fn>)
-      .mock.calls;
+    expect(deps.activateEndpoint).toHaveBeenCalledWith(activated);
     expect(activated).toEqual(
       composeManagedEndpoint(
         makeCertResponse().endpoint,

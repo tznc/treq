@@ -18,7 +18,6 @@ import {
   AttachmentTrigger,
 } from "../ui/attachment";
 import { SendAssetLightbox } from "./SendAssetLightbox";
-export { revealInFileManagerLabel } from "./SendAssetLightbox";
 
 interface TerminalSendPreviewsProps {
   ptySessionId: string;

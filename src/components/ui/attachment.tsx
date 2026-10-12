@@ -99,55 +99,6 @@ function AttachmentMedia({
   );
 }
 
-function AttachmentContent({
-  className,
-  ...props
-}: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="attachment-content"
-      className={cn(
-        "max-w-full min-w-0 flex-1 leading-tight group-data-[orientation=vertical]/attachment:px-1",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-function AttachmentTitle({
-  className,
-  ...props
-}: React.ComponentProps<"span">) {
-  return (
-    <span
-      data-slot="attachment-title"
-      className={cn(
-        "block max-w-full min-w-0 truncate font-medium group-data-[state=processing]/attachment:shimmer group-data-[state=uploading]/attachment:shimmer",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-function AttachmentDescription({
-  className,
-  ...props
-}: React.ComponentProps<"span">) {
-  return (
-    <span
-      data-slot="attachment-description"
-      className={cn(
-        "mt-0.5 block min-w-0 truncate text-xs text-muted-foreground group-data-[state=error]/attachment:text-destructive/80",
-        "max-w-full",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 function AttachmentActions({
   className,
   ...props
@@ -218,9 +169,6 @@ export {
   Attachment,
   AttachmentGroup,
   AttachmentMedia,
-  AttachmentContent,
-  AttachmentTitle,
-  AttachmentDescription,
   AttachmentActions,
   AttachmentAction,
   AttachmentTrigger,

@@ -63,20 +63,6 @@ pub enum PtyBackend {
   Screen,
 }
 
-impl PtyBackend {
-  /// Reserved for callers that need the backend's binary name directly
-  /// (e.g. a future `pty-remote list --backend` diagnostic); not currently
-  /// called from this module's own start/attach/stop/list paths, which
-  /// each match on `PtyBackend` explicitly.
-  #[allow(dead_code)]
-  fn binary(self) -> &'static str {
-    match self {
-      Self::Tmux => "tmux",
-      Self::Screen => "screen",
-    }
-  }
-}
-
 /// Detects the best available backend. Prefers tmux (richer scripting for
 /// list/resize/kill by name); falls back to screen; `None` when neither is
 /// on `PATH`.

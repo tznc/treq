@@ -4,7 +4,6 @@ import {
   formatPromptWithIssue,
   issueFromGitHub,
   issueFromLinear,
-  issueFromTrackerItem,
   type IssueAttachment,
 } from "./promptAttachments";
 
@@ -48,12 +47,6 @@ describe("formatPromptWithIssue", () => {
     expect(at("linear", "ENG-101")).toBe(
       "do it\n\nLinear issue ENG-101: https://example.test/x",
     );
-    expect(at("trello", "#12")).toBe(
-      "do it\n\nTrello card #12: https://example.test/x",
-    );
-    expect(at("jira", "ENG-42")).toBe(
-      "do it\n\nJira issue ENG-42: https://example.test/x",
-    );
   });
 });
 
@@ -87,20 +80,6 @@ describe("issue adapters", () => {
       includeSubItems: true,
       subItemIds: ["child-1"],
     });
-  });
-
-  it("maps a Trello or Jira item to its provider as the source", () => {
-    expect(
-      issueFromTrackerItem({
-        provider: "jira",
-        id: "10001",
-        key: "ENG-42",
-        url: "https://acme.atlassian.net/browse/ENG-42",
-        title: "Add Jira integration",
-        includeSubItems: false,
-        subItemIds: [],
-      }).source,
-    ).toBe("jira");
   });
 
   it("describes sub-items with each source's own noun", () => {

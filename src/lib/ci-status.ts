@@ -17,7 +17,7 @@ interface CiStateStyle {
  * the workspace header's CiStatusIndicator and the GitHub panel's PR detail
  * "Checks" list, so both surfaces always look and mean the same thing.
  */
-export const CI_STATE_STYLES: Record<CiState, CiStateStyle> = {
+const CI_STATE_STYLES: Record<CiState, CiStateStyle> = {
   success: {
     label: "CI passed",
     Icon: CheckCircle2,

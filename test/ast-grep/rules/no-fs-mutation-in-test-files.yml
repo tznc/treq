@@ -3,12 +3,12 @@ language: rust
 severity: warning
 message: >
   Do not use direct filesystem mutation in a *_test.rs file. Use e2e test helpers and helpers on `TestRepo`  to avoid direct filesystem mutation.
-  See @src-tauri/tests/e2e_test_helpers.rs for more details.
+  See @src-tauri/tests/common/mod.rs for more details.
 files:
   - "src-tauri/**/*_test.rs"
 ignores:
   # - "**/*_tests.rs"
-  - "**/e2e_test_helpers.rs"
+  - "**/tests/common/mod.rs"
 rule:
   any:
     - pattern: fs::write($$$)

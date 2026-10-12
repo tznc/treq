@@ -61,10 +61,10 @@ export const SECURE_STORAGE_UNAVAILABLE_PREFIX = "secure_storage_unavailable:";
 // Mobile does not provision (mobile PRD, "Non-goals": owning managed-VM
 // provisioning inside the mobile UI), so an account without an instance is
 // sent to desktop.
-export const NO_MANAGED_INSTANCE_MESSAGE =
+const NO_MANAGED_INSTANCE_MESSAGE =
   "No managed instance for this account yet. Set one up from Treq on desktop, then connect here.";
 
-export type MobileConnectionStatus =
+type MobileConnectionStatus =
   | "idle"
   | "connecting"
   | "connected"

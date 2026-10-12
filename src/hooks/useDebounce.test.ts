@@ -1,83 +1,64 @@
-import { describe, expect, it } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { useDebounce } from "./useDebounce";
 
 describe("useDebounce", () => {
-  it("should return initial value immediately", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns the initial value immediately", () => {
     const { result } = renderHook(() => useDebounce("test", 100));
     expect(result.current).toBe("test");
   });
 
-  it("should debounce value changes by delay", async () => {
+  it("updates only after the delay elapses", () => {
     const { result, rerender } = renderHook(
       ({ value, delay }) => useDebounce(value, delay),
-      {
-        initialProps: { value: "initial", delay: 100 },
-      },
+      { initialProps: { value: "initial", delay: 100 } },
     );
 
-    // Initial value
-    expect(result.current).toBe("initial");
-
-    // Change value
     rerender({ value: "updated", delay: 100 });
-
-    // Value should still be initial (not yet debounced)
     expect(result.current).toBe("initial");
 
-    // Wait for debounce
-    await waitFor(
-      () => {
-        expect(result.current).toBe("updated");
-      },
-      { timeout: 200 },
-    );
+    act(() => {
+      vi.advanceTimersByTime(99);
+    });
+    expect(result.current).toBe("initial");
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(result.current).toBe("updated");
   });
 
-  it("should reset timer on rapid changes", async () => {
+  it("resets the timer on rapid changes", () => {
     const { result, rerender } = renderHook(
       ({ value, delay }) => useDebounce(value, delay),
-      {
-        initialProps: { value: "initial", delay: 100 },
-      },
+      { initialProps: { value: "initial", delay: 100 } },
     );
 
-    // Change value multiple times rapidly
     rerender({ value: "change1", delay: 100 });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
+    act(() => {
+      vi.advanceTimersByTime(60);
+    });
     rerender({ value: "change2", delay: 100 });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
+    act(() => {
+      vi.advanceTimersByTime(60);
+    });
     rerender({ value: "final", delay: 100 });
-
-    // Value should still be initial (timer keeps resetting)
+    act(() => {
+      vi.advanceTimersByTime(99);
+    });
     expect(result.current).toBe("initial");
 
-    // Wait for debounce to complete
-    await waitFor(
-      () => {
-        expect(result.current).toBe("final");
-      },
-      { timeout: 200 },
-    );
-  });
-
-  it("should handle different delays", async () => {
-    const { result, rerender } = renderHook(
-      ({ value, delay }) => useDebounce(value, delay),
-      {
-        initialProps: { value: "test", delay: 50 },
-      },
-    );
-
-    rerender({ value: "updated", delay: 50 });
-
-    await waitFor(
-      () => {
-        expect(result.current).toBe("updated");
-      },
-      { timeout: 150 },
-    );
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(result.current).toBe("final");
   });
 });

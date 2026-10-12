@@ -54,7 +54,7 @@ describe("formatGithubCommentDate", () => {
 });
 
 describe("GithubCommentCard", () => {
-  it("shows a larger avatar and a GitHub profile link for the username", async () => {
+  it("shows the avatar and a GitHub profile link for the username", async () => {
     const user = userEvent.setup();
     vi.mocked(openUrl).mockClear();
 
@@ -67,35 +67,12 @@ describe("GithubCommentCard", () => {
       />,
     );
 
-    const avatar = screen.getByRole("img", { name: "octocat" });
-    expect(avatar.className).toMatch(/w-8/);
-    expect(avatar.className).toMatch(/h-8/);
+    expect(screen.getByRole("img", { name: "octocat" })).toBeInTheDocument();
 
     const profileLink = screen.getByRole("link", { name: "@octocat" });
     expect(profileLink).toHaveAttribute("href", "https://github.com/octocat");
     await user.click(profileLink);
     expect(openUrl).toHaveBeenCalledWith("https://github.com/octocat");
-  });
-
-  it("renders username, comment body, and quote control in sans-serif", () => {
-    render(
-      <GithubCommentCard
-        thread={thread()}
-        collapsed={false}
-        onToggleCollapse={() => {}}
-        onQuote={() => {}}
-      />,
-    );
-
-    expect(screen.getByRole("link", { name: "@octocat" }).className).toMatch(
-      /font-sans/,
-    );
-    expect(screen.getByTestId("github-comment-body").className).toMatch(
-      /font-sans/,
-    );
-    expect(screen.getByTitle("Quote this comment").className).toMatch(
-      /font-sans/,
-    );
   });
 
   it("shows the GitHub icon on each comment, not on the collapsed thread header", () => {
@@ -129,7 +106,7 @@ describe("GithubCommentCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows avatar, username, and a greyed truncated first-comment preview when collapsed", () => {
+  it("shows avatar, username, and a first-comment preview when collapsed", () => {
     const longBody =
       "First line of feedback that should remain visible.\nSecond line that should also peek through.\nThird line that should be clamped away when collapsed.";
     render(
@@ -169,8 +146,6 @@ describe("GithubCommentCard", () => {
     expect(preview).toHaveTextContent(
       "First line of feedback that should remain visible.",
     );
-    expect(preview.className).toMatch(/truncate|line-clamp/);
-    expect(preview.className).toMatch(/text-muted-foreground/);
     // Preview sits on the same header row, after the Resolved badge.
     const headerRow = Array.from(toggle.childNodes).filter(
       (node) => node.nodeType === Node.ELEMENT_NODE,

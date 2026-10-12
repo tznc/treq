@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { setSetting } from "../lib/api";
 
-export const DEFAULT_TERMINAL_FONT_SIZE = 14;
+const DEFAULT_TERMINAL_FONT_SIZE = 14;
 export const MIN_TERMINAL_FONT_SIZE = 8;
 export const MAX_TERMINAL_FONT_SIZE = 32;
 

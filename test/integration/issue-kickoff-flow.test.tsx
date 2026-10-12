@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace, getSessions, getWorkspaces } from "../../src/lib/api";
 import type { LinearIssue } from "../../src/lib/api-linear";
-import type { TrackerItem } from "../../src/lib/api-tracker";
 import { render, screen, waitFor, within } from "../test-utils";
 import {
   createTestRepo,
@@ -20,10 +19,6 @@ const external = vi.hoisted(() => ({
   linearListTeams: vi.fn(),
   linearGetViewer: vi.fn(),
   linearOpenOrCreateWorkspaceFromIssue: vi.fn(),
-  trackerListContainers: vi.fn(),
-  trackerListItems: vi.fn(),
-  trackerGetViewer: vi.fn(),
-  trackerOpenOrCreateWorkspaceFromItem: vi.fn(),
 }));
 
 vi.mock("../../src/lib/api", async (importOriginal) => ({
@@ -43,15 +38,6 @@ vi.mock("../../src/lib/api-linear", async (importOriginal) => ({
   linearOpenOrCreateWorkspaceFromIssue:
     external.linearOpenOrCreateWorkspaceFromIssue,
 }));
-vi.mock("../../src/lib/api-tracker", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/api-tracker")>()),
-  trackerListContainers: external.trackerListContainers,
-  trackerListItems: external.trackerListItems,
-  trackerGetViewer: external.trackerGetViewer,
-  trackerOpenOrCreateWorkspaceFromItem:
-    external.trackerOpenOrCreateWorkspaceFromItem,
-}));
-
 const GITHUB_ISSUE = {
   number: 42,
   title: "Fix the login redirect",
@@ -77,21 +63,6 @@ const LINEAR_ISSUE: LinearIssue = {
   sub_issue_ids: [],
   url: "https://linear.app/acme/issue/ENG-101",
 };
-
-const trackerItem = (key: string, branch: string): TrackerItem => ({
-  id: key,
-  key,
-  title: `Tracker item ${key}`,
-  description: "",
-  url: `https://tracker.test/${key}`,
-  status: { name: "To Do", category: "todo" },
-  labels: [],
-  assignees: [],
-  container: { id: "c1", name: "Board", key: "B" },
-  branch_name: branch,
-  parent_id: null,
-  sub_item_ids: [],
-});
 
 type Case = {
   source: string;
@@ -144,34 +115,6 @@ const CASES: Case[] = [
       await user.click(await screen.findByRole("button", { name: "Kick off" }));
     },
   },
-  ...(["trello", "jira"] as const).map((provider) => {
-    const key = provider === "trello" ? "#12" : "ENG-42";
-    const item = trackerItem(key, `${provider}-item-branch`);
-    return {
-      source: provider === "trello" ? "Trello" : "Jira",
-      label: provider === "trello" ? "Trello" : "Jira",
-      key,
-      branch: item.branch_name,
-      setup: () => {
-        external.trackerListContainers.mockResolvedValue([item.container]);
-        external.trackerListItems.mockResolvedValue([item]);
-        external.trackerGetViewer.mockResolvedValue({ id: "me", name: "Me" });
-        external.trackerOpenOrCreateWorkspaceFromItem.mockImplementation(
-          async (path: string) => ({
-            item_id: item.id,
-            workspace_id: await createWorkspace(path, item.branch_name),
-            created: true,
-          }),
-        );
-      },
-      open: async (user: ReturnType<typeof userEvent.setup>) => {
-        await user.click(await screen.findByTestId(`${provider}-sidebar-item`));
-        await user.click(
-          await screen.findByRole("button", { name: "Kick off" }),
-        );
-      },
-    };
-  }),
 ];
 
 describe.each(CASES)("$source issue kickoff", (c) => {

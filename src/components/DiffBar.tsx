@@ -1,7 +1,7 @@
 import type { WorkspaceDiffStats } from "../lib/workspace-stack";
 
 /** Half-width of each side of the bar (insertions grow left, deletions right). */
-export const DIFF_BAR_HALF_WIDTH_PX = 14;
+const DIFF_BAR_HALF_WIDTH_PX = 14;
 
 /**
  * Gerrit-style relative +/- bar used on the Code tab stack card and the

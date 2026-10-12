@@ -22,8 +22,6 @@ function defaultFlags(): PreviewFlags {
     skillsInstallation: previewFeatureDefault("skillsInstallation"),
     remoteSsh: previewFeatureDefault("remoteSsh"),
     linearIntegration: previewFeatureDefault("linearIntegration"),
-    trelloIntegration: previewFeatureDefault("trelloIntegration"),
-    jiraIntegration: previewFeatureDefault("jiraIntegration"),
     logs: previewFeatureDefault("logs"),
     browser: previewFeatureDefault("browser"),
   };

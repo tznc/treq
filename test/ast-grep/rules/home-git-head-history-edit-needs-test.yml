@@ -5,7 +5,7 @@ message: >
   This function rewrites history or updates a working copy after a rewrite, so
   it can move the colocated home repo's `@` away from Git HEAD. Put a
   `// home-head-test: <test_fn>[, <test_fn>...]` line directly above the `fn`
-  naming tests in `src-tauri/tests/jj_home_git_head_sync_test.rs` that drive
+  naming tests in `src-tauri/tests/it/jj_home_git_head_sync_test.rs` that drive
   this path.
 note: >
   A HEAD left behind by a rewrite makes every file the rewrite changed show up
