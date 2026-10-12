@@ -7,11 +7,12 @@ on:
   pull_request:
     types: [closed]
 
-permissions:
-  actions: write
+permissions: {}
 
 jobs:
   cleanup:
+    permissions:
+      actions: write
     # Fork PRs get a read-only token and can't delete caches.
     if: github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 5
