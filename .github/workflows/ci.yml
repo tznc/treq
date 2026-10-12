@@ -49,6 +49,7 @@ jobs:
               - "crates/tauri-test-macros/**"
               - "Cargo.toml"
               - "Cargo.lock"
+              - ".github/workflows/ci.yml"
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
