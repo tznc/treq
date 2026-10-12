@@ -83,6 +83,9 @@ sleep 2
 # has no accessibility tree, so the tap is positional; the app draws
 # edge-to-edge, so the offset is from the bottom of the screen. The window dump
 # is kept to correct the offset if the layout moves.
+# Back on the landing page closes the app, so bring it back first.
+adb shell am start -n "$PKG/.MainActivity"
+sleep 4
 adb shell dumpsys window > "$OUT/dumpsys-window.txt" || true
 density=$(adb shell wm density | awk '/Physical/ {print $3}' | tr -d '\r')
 dp() { echo $(( $1 * density / 160 )); }
