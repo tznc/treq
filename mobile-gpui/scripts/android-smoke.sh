@@ -92,10 +92,38 @@ dp() { echo $(( $1 * density / 160 )); }
 dismiss_dialogs
 adb shell input tap $((width / 2)) $((height - $(dp 50)))
 sleep 3
-shot 04-add-host
+shot 04-add-host-empty
+
+# Fill the host and username (field centres in dp from the top of a 640 dp
+# screen), then read the host key. github.com:22 is reachable from the
+# emulator, so the probe returns a real fingerprint. Back hides the keyboard
+# only while it is shown; otherwise it would leave the screen.
+hide_keyboard() {
+  if adb shell dumpsys input_method | grep -q "mInputShown=true"; then
+    adb shell input keyevent 4
+    sleep 1
+  fi
+}
+type_into() {
+  adb shell input tap $((width / 2)) "$(dp "$1")"
+  sleep 1
+  adb shell input text "$2"
+  sleep 1
+  hide_keyboard
+}
+type_into 258 github.com
+type_into 412 git
+shot 05-add-host-filled
 adb shell input swipe $((width / 2)) $((height * 80 / 100)) $((width / 2)) $((height * 30 / 100)) 300
 sleep 2
-shot 05-add-host-scrolled
+shot 06-add-host-filled-scrolled
+adb shell input tap $((width / 2)) "$(dp 408)"
+sleep 10
+shot 07-add-host-confirm
+adb shell input swipe $((width / 2)) $((height * 80 / 100)) $((width / 2)) $((height * 30 / 100)) 300
+sleep 2
+shot 08-add-host-confirm-scrolled
+hide_keyboard
 adb shell input keyevent 4
 sleep 2
 
