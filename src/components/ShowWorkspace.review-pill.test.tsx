@@ -150,7 +150,7 @@ function reviewPill() {
   return tab.querySelector('[data-testid="review-change-count"]');
 }
 
-describe("ShowWorkspace Changes tab pill colors", () => {
+describe("ShowWorkspace Changes tab review count", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     onChangedFilesChange = undefined;
@@ -165,7 +165,7 @@ describe("ShowWorkspace Changes tab pill colors", () => {
     vi.mocked(api.getWorkspaceChangedFiles).mockResolvedValue([]);
   });
 
-  it("shows a yellow pill for uncommitted changes", async () => {
+  it("shows the review count for uncommitted changes", async () => {
     vi.mocked(api.getWorkspaceStatus).mockResolvedValue(
       status({ has_changes: true }),
     );
@@ -201,13 +201,10 @@ describe("ShowWorkspace Changes tab pill colors", () => {
       const pill = reviewPill();
       expect(pill).toBeTruthy();
       expect(pill).toHaveTextContent("1");
-      expect(pill?.className).toContain("bg-yellow-500");
-      expect(pill?.className).not.toContain("bg-destructive");
-      expect(pill?.className).not.toContain("bg-muted");
     });
   });
 
-  it("shows a grey pill for committed changes only", async () => {
+  it("shows the review count for committed changes only", async () => {
     vi.mocked(api.getWorkspaceStatus).mockResolvedValue(
       status({
         has_changes: false,
@@ -241,13 +238,10 @@ describe("ShowWorkspace Changes tab pill colors", () => {
       const pill = reviewPill();
       expect(pill).toBeTruthy();
       expect(pill).toHaveTextContent("1");
-      expect(pill?.className).toContain("bg-muted");
-      expect(pill?.className).not.toContain("bg-yellow-500");
-      expect(pill?.className).not.toContain("bg-destructive");
     });
   });
 
-  it("shows a red pill when there are conflicts", async () => {
+  it("shows the review count when there are conflicts", async () => {
     vi.mocked(api.getWorkspaceStatus).mockResolvedValue(
       status({
         has_conflicts: true,
@@ -293,9 +287,7 @@ describe("ShowWorkspace Changes tab pill colors", () => {
     await waitFor(() => {
       const pill = reviewPill();
       expect(pill).toBeTruthy();
-      expect(pill?.className).toContain("bg-destructive/20");
-      expect(pill?.className).toContain("text-destructive");
-      expect(pill?.className).not.toContain("bg-yellow-500");
+      expect(pill).toHaveTextContent("1");
     });
   });
 
@@ -332,7 +324,6 @@ describe("ShowWorkspace Changes tab pill colors", () => {
     await waitFor(() => {
       const pill = reviewPill();
       expect(pill).toHaveTextContent("3");
-      expect(pill?.className).toContain("bg-muted");
     });
   });
 });

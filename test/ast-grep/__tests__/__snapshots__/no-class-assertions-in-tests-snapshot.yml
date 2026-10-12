@@ -1,0 +1,80 @@
+id: no-class-assertions-in-tests
+snapshots:
+  ? |
+    const cls = indicator.getAttribute("class") ?? "";
+  : labels:
+    - source: indicator.getAttribute("class")
+      style: primary
+      start: 12
+      end: 43
+  ? |
+    expect(line.className).toMatch(/bg-blue-500/);
+  : labels:
+    - source: line.className
+      style: primary
+      start: 7
+      end: 21
+    - source: expect
+      style: secondary
+      start: 0
+      end: 6
+    - source: expect(line.className)
+      style: secondary
+      start: 0
+      end: 22
+    - source: className
+      style: secondary
+      start: 12
+      end: 21
+  ? |
+    expect(pill).not.toHaveClass("bg-muted");
+  : labels:
+    - source: expect(pill).not.toHaveClass("bg-muted")
+      style: primary
+      start: 0
+      end: 40
+  ? |
+    expect(pill).toHaveClass("bg-destructive");
+  : labels:
+    - source: expect(pill).toHaveClass("bg-destructive")
+      style: primary
+      start: 0
+      end: 42
+  ? |
+    expect(pill?.className).toContain("bg-yellow-500");
+  : labels:
+    - source: pill?.className
+      style: primary
+      start: 7
+      end: 22
+    - source: expect
+      style: secondary
+      start: 0
+      end: 6
+    - source: expect(pill?.className)
+      style: secondary
+      start: 0
+      end: 23
+    - source: className
+      style: secondary
+      start: 13
+      end: 22
+  ? |
+    expect(row.classList.contains("selected")).toBe(true);
+  : labels:
+    - source: row.classList
+      style: primary
+      start: 7
+      end: 20
+    - source: expect
+      style: secondary
+      start: 0
+      end: 6
+    - source: expect(row.classList.contains("selected"))
+      style: secondary
+      start: 0
+      end: 42
+    - source: classList
+      style: secondary
+      start: 11
+      end: 20
