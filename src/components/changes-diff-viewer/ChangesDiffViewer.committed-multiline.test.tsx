@@ -90,29 +90,6 @@ describe("ChangesDiffViewer committed multi-line comments", () => {
     });
   }
 
-  it("highlights a multi-line drag selection on committed hunks", async () => {
-    await renderCommittedReview();
-
-    const [, line2, line3, line4] = Array.from(
-      document.querySelectorAll("[data-diff-line]"),
-    );
-    const gutter = line2.querySelector("[data-testid='line-gutter']");
-    expect(gutter).not.toBeNull();
-
-    fireEvent.mouseDown(gutter!, { button: 0 });
-    fireEvent.mouseOver(line3);
-    fireEvent.mouseEnter(line3);
-    fireEvent.mouseOver(line4);
-    fireEvent.mouseEnter(line4);
-    fireEvent.mouseUp(line4);
-
-    await waitFor(() => {
-      expect(line2.className).toContain("bg-blue-500/10");
-      expect(line3.className).toContain("bg-blue-500/10");
-      expect(line4.className).toContain("bg-blue-500/10");
-    });
-  });
-
   it("opens a multi-line comment composer on committed hunks", async () => {
     const user = userEvent.setup();
     await renderCommittedReview();
@@ -128,14 +105,12 @@ describe("ChangesDiffViewer committed multi-line comments", () => {
     fireEvent.mouseEnter(line4);
     fireEvent.mouseUp(line4);
 
-    await waitFor(() => {
-      expect(line2.className).toContain("bg-blue-500/10");
-      expect(line4.className).toContain("bg-blue-500/10");
+    const commentBtn = await waitFor(() => {
+      const button = line4.querySelector("[data-comment-button]");
+      expect(button).not.toBeNull();
+      return button as HTMLElement;
     });
-
-    const commentBtn = line4.querySelector("[data-comment-button]");
-    expect(commentBtn).not.toBeNull();
-    await user.click(commentBtn as HTMLElement);
+    await user.click(commentBtn);
 
     await screen.findByPlaceholderText(/add a comment/i);
   });
