@@ -121,6 +121,10 @@ pub struct AgentReviewComment {
   pub source: String,
   pub created_at: String,
   pub resolved_at: Option<String>,
+  /// The exact text of `start_line..=end_line` when the comment was written.
+  /// Set for Linear targets, whose suggestions are applied by text match.
+  #[serde(default)]
+  pub quoted_text: Option<String>,
 }
 
 /// Pending review session for the FileBrowser, kept separate from `PendingReview`
@@ -509,6 +513,28 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
         [],
       )
       .map_err(|e| format!("Failed to add agent_review_comments source column: {}", e))?;
+  }
+
+  // Migration: add `quoted_text` (the exact reviewed text a comment covers).
+  // Linear targets apply a suggestion by finding this text in the live
+  // Linear content, since their line numbers only hold for one snapshot.
+  let has_agent_review_quoted_text_column: Result<i64, _> = conn.query_row(
+    "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'quoted_text'",
+    [],
+    |row| row.get(0),
+  );
+  if matches!(has_agent_review_quoted_text_column, Ok(0)) {
+    conn
+      .execute(
+        "ALTER TABLE agent_review_comments ADD COLUMN quoted_text TEXT",
+        [],
+      )
+      .map_err(|e| {
+        format!(
+          "Failed to add agent_review_comments quoted_text column: {}",
+          e
+        )
+      })?;
   }
 
   conn.execute(
@@ -1899,7 +1925,7 @@ pub fn clear_pending_review(repo_path: &str, workspace_id: i64) -> Result<(), St
 
 const AGENT_REVIEW_COMMENT_SELECT: &str =
   "SELECT id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side,
-            comment_text, suggested_replacement, status, source, created_at, resolved_at
+            comment_text, suggested_replacement, status, source, created_at, resolved_at, quoted_text
      FROM agent_review_comments";
 
 fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewComment> {
@@ -1919,6 +1945,7 @@ fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewC
     source: row.get(12)?,
     created_at: row.get(13)?,
     resolved_at: row.get(14)?,
+    quoted_text: row.get(15)?,
   })
 }
 
@@ -1936,6 +1963,7 @@ pub fn create_agent_review_comment(
   comment_text: &str,
   suggested_replacement: Option<&str>,
   source: &str,
+  quoted_text: Option<&str>,
 ) -> Result<AgentReviewComment, String> {
   let conn = get_connection(repo_path)?;
   let comment = AgentReviewComment {
@@ -1954,11 +1982,12 @@ pub fn create_agent_review_comment(
     source: source.to_string(),
     created_at: Utc::now().to_rfc3339(),
     resolved_at: None,
+    quoted_text: quoted_text.map(|s| s.to_string()),
   };
 
   conn.execute(
-        "INSERT INTO agent_review_comments (id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side, comment_text, suggested_replacement, status, source, created_at, resolved_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT INTO agent_review_comments (id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side, comment_text, suggested_replacement, status, source, created_at, resolved_at, quoted_text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             comment.id,
             comment.repo_path,
@@ -1975,6 +2004,7 @@ pub fn create_agent_review_comment(
             comment.source,
             comment.created_at,
             comment.resolved_at,
+            comment.quoted_text,
         ],
     )
     .map_err(|e| format!("Failed to insert agent review comment: {}", e))?;

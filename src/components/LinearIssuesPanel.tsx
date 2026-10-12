@@ -337,6 +337,7 @@ export const LinearIssuesSection: React.FC<{
               issues={rootIssues}
               subissuesMap={subissuesMap}
               onKickoff={handleKickoff}
+              onContentChanged={() => void refetch()}
             />
           )}
 

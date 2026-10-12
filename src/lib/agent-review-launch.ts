@@ -1,9 +1,12 @@
 import { getRepoSetting } from "./api";
+import { type LinearReviewSnapshot, linearPrepareReview } from "./api-linear";
 import {
   AGENT_REVIEW_TARGET_WORKSPACE_DIFF,
+  buildLinearReviewPrompt,
   buildReviewPrompt,
   workspaceDiffSummary,
 } from "./agent-review-prompt";
+import type { LinearReviewTargetType } from "./api-types-review";
 
 /**
  * Payload of the backend's `auto-review-triggered` event. The backend only
@@ -85,4 +88,43 @@ export function autoReviewSummary(
   return branchName
     ? `${what} on the ${branchName} workspace diff`
     : `${what} on the current workspace diff`;
+}
+
+export interface LinearReviewRequest {
+  repoPath: string;
+  targetType: LinearReviewTargetType;
+  /** Linear id of the issue, project or document. */
+  targetId: string;
+  snapshot: LinearReviewSnapshot;
+}
+
+const LINEAR_KIND_LABEL: Record<LinearReviewTargetType, string> = {
+  linear_issue: "issue",
+  linear_project: "project",
+  linear_document: "document",
+};
+
+/**
+ * Writes the Linear text under review to its snapshot directory and renders
+ * the Linear review prompt. Uses the repository's review agent, like a code
+ * review does.
+ */
+export async function prepareLinearReview({
+  repoPath,
+  targetType,
+  targetId,
+  snapshot,
+}: LinearReviewRequest): Promise<ReviewLaunch> {
+  const [snapshotDir, reviewAgent] = await Promise.all([
+    linearPrepareReview(repoPath, { targetType, targetId, snapshot }),
+    getRepoSetting(repoPath, "review_agent").catch(() => null),
+  ]);
+  const comments = snapshot.comments.length;
+  const prompt = buildLinearReviewPrompt({
+    targetType,
+    targetId,
+    snapshotDir,
+    diffSummary: `the Linear ${LINEAR_KIND_LABEL[targetType]} "${snapshot.title}" and its ${comments} comment${comments === 1 ? "" : "s"}`,
+  });
+  return { prompt, agent: reviewAgent || undefined };
 }

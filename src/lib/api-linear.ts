@@ -152,3 +152,40 @@ export const linearListDocumentComments = (
   documentId: string,
 ): Promise<LinearComment[]> =>
   invoke("linear_list_document_comments", { repoPath, documentId });
+
+/** What a Linear review covers, as written to the agent's snapshot. */
+export type LinearReviewSnapshot = {
+  title: string;
+  url: string;
+  body: string;
+  comments: {
+    id: string;
+    author?: string | null;
+    created_at?: string | null;
+    quoted_text?: string | null;
+    body: string;
+  }[];
+};
+
+/** Writes the review snapshot and returns its directory. */
+export const linearPrepareReview = (
+  repoPath: string,
+  {
+    targetType,
+    targetId,
+    snapshot,
+  }: { targetType: string; targetId: string; snapshot: LinearReviewSnapshot },
+): Promise<string> =>
+  invoke("linear_prepare_review", {
+    repoPath,
+    targetType,
+    targetId,
+    snapshot,
+  });
+
+/** Replaces the reviewed passage in Linear with the comment's suggestion. */
+export const linearApplyReviewSuggestion = (
+  repoPath: string,
+  commentId: string,
+): Promise<void> =>
+  invoke("linear_apply_review_suggestion", { repoPath, commentId });

@@ -687,7 +687,7 @@
           ]
         },
         "agent-review": {
-          "description": "Local-only review comments left on a diff or file",
+          "description": "Local-only review comments left on a diff, a file, or Linear content",
           "afterHelp": "Example:\n  treq agent-review add --target-id 1 --file src/main.rs --start-line 3 --side new --comment \"unchecked unwrap\"",
           "args": [
             {
@@ -700,17 +700,17 @@
             {
               "name": "target-type",
               "takesValue": true,
-              "description": "What was reviewed: workspace_diff or file_browser_file"
+              "description": "What was reviewed: workspace_diff, file_browser_file, linear_issue, linear_project or linear_document"
             },
             {
               "name": "target-id",
               "takesValue": true,
-              "description": "Identifier within the target type (workspace id, or absolute file path)"
+              "description": "Identifier within the target type (workspace id, absolute file path, or Linear id)"
             },
             {
               "name": "file",
               "takesValue": true,
-              "description": "File path the comment is anchored to"
+              "description": "File path the comment is anchored to (for Linear targets: body.md or comments/<id>.md in the review snapshot)"
             },
             {
               "name": "start-line",

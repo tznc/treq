@@ -176,15 +176,25 @@ export function setWorkspaceTargetBranchRaw(
 export function seedAgentReviewComment(
   repoPath: string,
   opts: {
-    workspaceId: number;
+    /** Workspace whose diff is reviewed; ignored when `targetId` is set. */
+    workspaceId?: number;
+    /** Defaults to `workspace_diff`. */
+    targetType?: string;
+    targetId?: string;
     filePath: string;
     startLine: number;
     endLine?: number;
     side?: "old" | "new";
     commentText: string;
     suggestedReplacement?: string;
+    /** Exact reviewed text, as `treq agent-review add` stores for Linear. */
+    quotedText?: string;
   },
 ): void {
+  const targetType = opts.targetType ?? "workspace_diff";
+  const targetId = opts.targetId ?? String(opts.workspaceId);
+  const nullable = (value: string | undefined) =>
+    value === undefined ? "NULL" : `'${value.replace(/'/g, "''")}'`;
   const dbPath = path.join(repoPath, ".treq", "local.db");
   const id = randomUUID();
   const esc = (s: string) => s.replace(/'/g, "''");
@@ -193,11 +203,11 @@ export function seedAgentReviewComment(
     [
       dbPath,
       `INSERT INTO agent_review_comments
-        (id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side, comment_text, suggested_replacement, status, source, created_at, resolved_at)
-        VALUES ('${id}', '${esc(repoPath)}', 'workspace_diff', '${opts.workspaceId}', '${esc(opts.filePath)}', NULL,
+        (id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side, comment_text, suggested_replacement, status, source, created_at, resolved_at, quoted_text)
+        VALUES ('${id}', '${esc(repoPath)}', '${esc(targetType)}', '${esc(targetId)}', '${esc(opts.filePath)}', NULL,
         ${opts.startLine}, ${opts.endLine ?? opts.startLine}, ${opts.side ? `'${opts.side}'` : "NULL"},
         '${esc(opts.commentText)}', ${opts.suggestedReplacement ? `'${esc(opts.suggestedReplacement)}'` : "NULL"},
-        'open', 'local-agent', '${new Date().toISOString()}', NULL);`,
+        'open', 'local-agent', '${new Date().toISOString()}', NULL, ${nullable(opts.quotedText)});`,
     ],
     { stdio: "pipe" },
   );

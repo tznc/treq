@@ -2461,25 +2461,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
    */
   const launchAgentSession = async ({
     workspace,
+    homeRepoPath,
     prompt,
     mode,
     agent,
     sessionName,
   }: {
-    workspace: Workspace;
+    /** `null` starts the session in the home repository of `repoPath`. */
+    workspace: Workspace | null;
+    /** Home repository for a `null` workspace; defaults to the one on screen. */
+    homeRepoPath?: string;
     prompt?: string;
     mode?: "plan" | "acceptEdits";
     agent?: AgentKind;
     sessionName?: string;
   }): Promise<number> => {
-    const sessionId = await getOrCreateSession(workspace.id, {
+    const workspaceId = workspace?.id ?? null;
+    const sessionRepoPath = workspace?.repo_path ?? homeRepoPath ?? repoPath;
+    const sessionId = await getOrCreateSession(workspaceId, {
       forceNew: true,
       agent,
       name: sessionName,
-      repoPath: workspace.repo_path,
+      repoPath: sessionRepoPath,
     });
-    activateRepo(workspace.repo_path);
-    const paneId = toPaneSessionId(workspace.repo_path, sessionId);
+    activateRepo(sessionRepoPath);
+    const paneId = toPaneSessionId(sessionRepoPath, sessionId);
     setActiveSessionId(paneId);
     setSelectedWorkspace(workspace);
     setViewMode("show-workspace");
@@ -2494,8 +2500,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
     if (prompt) {
       addPromptHistory(
-        workspace.repo_path,
-        workspace.id,
+        sessionRepoPath,
+        workspaceId,
         sessionId,
         prompt,
         agent,
@@ -3320,6 +3326,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   onStartPromptFromIssue={(issue) =>
                     handleStartPromptFromIssue(issueFromLinear(issue))
                   }
+                  // Linear content is not tied to a workspace, so the review
+                  // runs in the home repository, where the agent can still
+                  // check the text against the code.
+                  onStartAgentReview={async ({ prompt, agent }) => {
+                    await launchAgentSession({
+                      workspace: null,
+                      // The repository the panel wrote the snapshot into,
+                      // so the agent's comments land where the panel reads.
+                      homeRepoPath: dataRepoPath,
+                      prompt,
+                      mode: "acceptEdits",
+                      agent: toAgentKind(agent),
+                      sessionName: "AI Review",
+                    });
+                  }}
                 />
               )}
 

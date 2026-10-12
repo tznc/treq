@@ -12,6 +12,7 @@ pub mod feature_preview;
 pub mod files;
 pub mod github_issues;
 pub mod idempotency_store;
+pub mod linear_review;
 pub mod prerequisites;
 pub mod pty_remote_supervisor;
 pub mod remote;

@@ -282,3 +282,34 @@ mod tests {
     assert!(!result.created);
   }
 }
+
+/// Writes what a Linear review covers into the snapshot directory the review
+/// agent reads and anchors its comments on. Returns that directory.
+#[tauri::command]
+pub fn linear_prepare_review(
+  repo_path: String,
+  target_type: String,
+  target_id: String,
+  snapshot: crate::core::linear_review::LinearReviewSnapshot,
+) -> Result<String, String> {
+  crate::core::linear_review::write_snapshot(&repo_path, &target_type, &target_id, &snapshot)
+    .map(|dir| dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn linear_apply_review_suggestion(
+  state: State<'_, AppState>,
+  repo_path: String,
+  comment_id: String,
+) -> Result<(), String> {
+  crate::commands::feature_preview::require(
+    &state,
+    crate::core::feature_preview::PreviewFeature::LinearIntegration,
+  )?;
+  let client_source = {
+    let db = state.db.lock_or_recover();
+    crate::linear::resolve_linear_client(&repo_path, &db)?
+  };
+
+  crate::linear::linear_apply_review_suggestion_impl(&client_source, &repo_path, &comment_id).await
+}
