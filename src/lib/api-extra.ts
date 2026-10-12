@@ -36,7 +36,7 @@ import {
   transportRevertCommit,
   transportStashWorkspaceChanges,
 } from "./repository-adapter-mutations";
-import { localReadOr, localRepoPathOrNull } from "./local-only";
+import { localRepoPathOrNull } from "./local-only";
 import { currentWindowLabel } from "./window-label";
 
 export * from "./api-pr-status";
