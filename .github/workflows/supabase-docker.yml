@@ -12,14 +12,20 @@ on:
       - ".github/workflows/supabase-docker.yml"
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   self-hosted:
+    permissions:
+      contents: read
     name: single-tenant self-hosted image
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Prepare nested Docker networking
         run: bash supabase/docker/prepare-network.sh

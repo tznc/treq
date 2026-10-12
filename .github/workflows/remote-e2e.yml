@@ -30,13 +30,19 @@ concurrency:
   group: remote-e2e-live
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   live:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     # The soak waits up to six hours for a Sprite to go cold.
     timeout-minutes: ${{ github.event.inputs.soak == 'true' && 420 || 90 }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Skip when dedicated credentials are absent
         id: gate
         env:

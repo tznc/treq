@@ -24,11 +24,12 @@ concurrency:
   group: deploy-supabase
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   deploy:
+    permissions:
+      contents: read
     name: db push + functions deploy
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -39,6 +40,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
         with:

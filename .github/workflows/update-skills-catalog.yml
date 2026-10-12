@@ -11,16 +11,17 @@ defaults:
     shell: bash
     working-directory: web
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   update-catalog:
+    permissions:
+      contents: write
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5 # zizmor: ignore[artipacked] the job pushes the catalog commit
 
       - name: Setup Node
         uses: actions/setup-node@v5

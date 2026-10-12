@@ -1,0 +1,16 @@
+# zizmor (https://docs.zizmor.sh) checks workflows for security problems.
+# CI runs it in the verify job with --min-severity medium.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # GitHub's own actions may stay on version tags; Dependabot bumps them.
+        "actions/*": ref-pin
+        "*": hash-pin
+  # These publishing workflows restore caches only main's runs can write:
+  # PR runs save under refs/pull/N/merge, which main and release runs never
+  # read. Poisoning one would need push access to main already.
+  cache-poisoning:
+    ignore:
+      - deploy-web.yml
+      - mobile.yml

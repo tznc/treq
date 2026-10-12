@@ -19,12 +19,18 @@ on:
         type: string
         default: "2"
 
+permissions: {}
+
 jobs:
   cleanup:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
@@ -37,13 +43,15 @@ jobs:
           TREQ_REMOTE_E2E_CLEANUP_TARGET: ${{ secrets.TREQ_REMOTE_E2E_CLEANUP_TARGET }}
           TREQ_SPRITES_E2E_CLEANUP_API_TOKEN: ${{ secrets.TREQ_SPRITES_E2E_CLEANUP_API_TOKEN }}
           TREQ_SPRITES_E2E_CLEANUP_API_URL: ${{ secrets.TREQ_SPRITES_E2E_CLEANUP_API_URL }}
+          MIN_AGE_HOURS: ${{ github.event.inputs.min_age_hours || '2' }}
+          APPLY: ${{ github.event.inputs.apply }}
         run: |
           if [ -z "$SUPABASE_TEST_URL" ] || [ -z "$SUPABASE_TEST_SERVICE_ROLE_KEY" ]; then
             echo "SKIP: dedicated test-project cleanup secrets are not configured"
             exit 0
           fi
-          extra=(--min-age-hours="${{ github.event.inputs.min_age_hours || '2' }}")
-          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
+          extra=(--min-age-hours="$MIN_AGE_HOURS")
+          if [ "$APPLY" = "true" ]; then
             extra+=(--apply)
           else
             extra+=(--dry-run)

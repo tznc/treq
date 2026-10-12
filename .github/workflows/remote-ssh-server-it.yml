@@ -36,14 +36,20 @@ on:
       - ".github/workflows/remote-ssh-server-it.yml"
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   remote-ssh-server-it:
+    permissions:
+      contents: read
     name: Real sshd integration
     runs-on: ubuntu-22.04
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Restrict test private key permissions
         run: chmod 600 src-tauri/tests/fixtures/remote_ssh_it/id_ed25519
@@ -161,7 +167,7 @@ jobs:
 
       - name: Wait for sshd to accept connections
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if (exec 3<>"/dev/tcp/127.0.0.1/2222") 2>/dev/null; then
               exec 3<&- 3>&-
               echo "sshd is accepting connections"
@@ -182,7 +188,7 @@ jobs:
           # which (with pipefail) aborts the pipeline before the empty-check
           # even runs. Retry instead of trusting the first attempt.
           fingerprints=""
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             fingerprints=$(ssh-keyscan -p 2222 127.0.0.1 2>/dev/null \
               | ssh-keygen -lf - -E sha256 2>/dev/null | awk '{print $2}' | sort | paste -sd, - || true)
             if [ -n "$fingerprints" ]; then
@@ -203,7 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -i "$SSH_KEY" -p 2222 treq@127.0.0.1)
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if ssh "${ssh_opts[@]}" 'true'; then
               break
             fi

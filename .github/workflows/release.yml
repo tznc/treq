@@ -7,6 +7,8 @@ defaults:
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -15,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Delete pre-existing draft release for this version
@@ -66,6 +69,8 @@ jobs:
     environment: prod
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -171,6 +176,8 @@ jobs:
     environment: prod
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1

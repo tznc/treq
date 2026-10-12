@@ -36,9 +36,13 @@ defaults:
   run:
     shell: bash
 
+permissions: {}
+
 jobs:
   # Consumer: ci.yml test-js / test:integration (via the napi-addon action).
   napi:
+    permissions:
+      contents: read
     name: NAPI addon
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -48,6 +52,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -72,6 +78,8 @@ jobs:
 
   # Consumer: ci.yml test-rust (clippy + tests, ubuntu).
   rust:
+    permissions:
+      contents: read
     name: clippy + test build / ubuntu-22.04
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -81,6 +89,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
@@ -120,6 +130,8 @@ jobs:
   # PRs only run test-rust on ubuntu. The macOS run happens here, after
   # merge, and also keeps its own cache warm.
   test-macos:
+    permissions:
+      contents: read
     name: test-rust / test / macos-latest
     runs-on: macos-latest
     timeout-minutes: 30
@@ -129,6 +141,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1

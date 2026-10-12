@@ -21,13 +21,19 @@ defaults:
     shell: bash
     working-directory: web
 
+permissions: {}
+
 jobs:
   e2e:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Setup Node
         uses: actions/setup-node@v5
         with:

@@ -16,8 +16,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   detect-rust-changes:
+    permissions:
+      contents: read
     timeout-minutes: 15
     name: detect rust changes
     runs-on: ubuntu-22.04
@@ -25,6 +29,8 @@ jobs:
       rust_changed: ${{ steps.filter.outputs.rust }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Check for src-tauri changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -34,6 +40,8 @@ jobs:
               - "src-tauri/**"
 
   sandboxed-cli:
+    permissions:
+      contents: read
     name: Sandboxed macOS CLI
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
@@ -43,6 +51,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -86,6 +96,8 @@ jobs:
           bash scripts/verify-macos-bundle.sh target/aarch64-apple-darwin/release/bundle/macos/Treq.app
 
   headless-linux-cli:
+    permissions:
+      contents: read
     name: Headless Linux CLI
     needs: detect-rust-changes
     if: needs.detect-rust-changes.outputs.rust_changed == 'true'
@@ -93,6 +105,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1

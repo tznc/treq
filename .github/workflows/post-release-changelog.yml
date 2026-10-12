@@ -4,6 +4,8 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
   update-changelog:
     timeout-minutes: 15
@@ -12,7 +14,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5 # zizmor: ignore[artipacked] the job pushes the changelog commit
         with:
           fetch-depth: 1
 
@@ -41,9 +43,11 @@ jobs:
           } > web/src/pages/changelog.mdx
 
       - name: Commit and push changelog
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md web/src/pages/changelog.mdx
-          git diff --cached --quiet || git commit -m "chore: update changelog for ${{ github.event.release.tag_name }}"
+          git diff --cached --quiet || git commit -m "chore: update changelog for $TAG_NAME"
           git push origin HEAD:main

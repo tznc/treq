@@ -18,6 +18,8 @@ on:
       - ".github/workflows/mobile.yml"
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   # Signed release builds. These need real signing material, which forked
   # PRs never have (GitHub does not expose secrets to fork PR runs at all,
@@ -53,6 +55,8 @@ jobs:
   # not been produced or tested. See prds/mobile.md Phase 2 for the same
   # caveat tracked in the PRD.
   android-release:
+    permissions:
+      contents: read
     name: Android (signed release)
     runs-on: ubuntu-22.04
     if: >-
@@ -61,6 +65,8 @@ jobs:
     environment: prod
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Check required secrets are configured
         id: secrets_check
@@ -177,6 +183,8 @@ jobs:
         run: rm -f src-tauri/gen/android/keystore.properties
 
   ios-release:
+    permissions:
+      contents: read
     name: iOS (signed archive)
     runs-on: macos-latest
     if: >-
@@ -185,6 +193,8 @@ jobs:
     environment: prod
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Check required secrets are configured
         id: secrets_check
@@ -264,6 +274,8 @@ jobs:
           # Make this keychain visible to codesign alongside the runner's
           # default keychains, rather than replacing the search list.
           EXISTING_KEYCHAINS=$(security list-keychains -d user | sed 's/"//g')
+          # Word splitting is intended: each keychain path is its own argument.
+          # shellcheck disable=SC2086
           security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING_KEYCHAINS
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles

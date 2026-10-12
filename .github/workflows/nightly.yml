@@ -9,13 +9,19 @@ on:
     - cron: "0 9 * * *" # 09:00 UTC daily
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   check:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Skip if main hasn't changed since last nightly
         id: check
@@ -86,6 +92,8 @@ jobs:
     environment: prod
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -172,6 +180,8 @@ jobs:
       NDK_VERSION: 27.0.12077973
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Free disk space
         run: |
@@ -258,6 +268,8 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
@@ -323,6 +335,8 @@ jobs:
   # Windows tests run nightly instead of on PRs: they are slow and only ever
   # catch bugs in code that branches on the Windows target.
   windows-rust-tests:
+    permissions:
+      contents: read
     needs: check
     if: needs.check.outputs.should_run == 'true'
     name: rust / test / windows-latest
@@ -341,6 +355,8 @@ jobs:
         run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
 
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -446,6 +462,8 @@ jobs:
         run: cargo nextest run --locked --no-fail-fast
 
   windows-js-unit:
+    permissions:
+      contents: read
     needs: check
     if: needs.check.outputs.should_run == 'true'
     name: test-js / test:unit / windows-latest
@@ -453,6 +471,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5

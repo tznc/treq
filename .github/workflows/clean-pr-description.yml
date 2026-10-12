@@ -1,17 +1,18 @@
 name: PR Cleanup
 
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] API calls only; never checks out or runs PR code.
     types: [opened, edited, synchronize]
 
-permissions:
-  pull-requests: write
+permissions: {}
 
 jobs:
   # One job, not four: each was a separate runner on every push. Steps run
   # in order, so the title check sees the docs prefix the step before adds.
   # Keeps the old title-check job id in case it is a required check.
   check-conventional-title:
+    permissions:
+      pull-requests: write
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:

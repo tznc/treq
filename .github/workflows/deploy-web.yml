@@ -30,15 +30,14 @@ concurrency:
   group: ${{ github.event_name == 'pull_request' && format('deploy-web-pr-{0}', github.event.pull_request.number) || 'deploy-web' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  actions: read
-  contents: read
-  pull-requests: write
+permissions: {}
 
 jobs:
   # Production builds only. PR previews reuse main's latest screenshots (see
   # the build job), which saves the NAPI build and capture on every PR.
   landing-screenshots:
+    permissions:
+      contents: read
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -46,6 +45,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          persist-credentials: false
           # A release event checks out the tag; deploy main instead so an older
           # tag never rolls the site back.
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
@@ -138,6 +138,9 @@ jobs:
           retention-days: 3
 
   build:
+    permissions:
+      actions: read
+      contents: read
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: landing-screenshots
@@ -153,6 +156,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          persist-credentials: false
           # A release event checks out the tag; deploy main instead so an older
           # tag never rolls the site back.
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
@@ -234,6 +238,8 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
   lighthouse:
+    permissions:
+      pull-requests: write
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: build
