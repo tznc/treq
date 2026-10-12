@@ -117,8 +117,9 @@ shot 05-add-host-filled
 adb shell input swipe $((width / 2)) $((height * 80 / 100)) $((width / 2)) $((height * 30 / 100)) 300
 sleep 2
 shot 06-add-host-filled-scrolled
-adb shell input tap $((width / 2)) "$(dp 408)"
-sleep 10
+# A 0 ms tap right after a scroll is dropped by GPUI; hold it briefly instead.
+adb shell input swipe $((width / 2)) "$(dp 408)" $((width / 2)) "$(dp 408)" 120
+sleep 20
 shot 07-add-host-confirm
 adb shell input swipe $((width / 2)) $((height * 80 / 100)) $((width / 2)) $((height * 30 / 100)) 300
 sleep 2
