@@ -94,8 +94,9 @@ jobs:
           cache: "npm"
 
       - name: install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: install dependencies (ubuntu only)
@@ -104,7 +105,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
           workspaces: ". -> target"
@@ -121,7 +122,7 @@ jobs:
           grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
           rm src-tauri/Cargo.toml.bak
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           # Nightlies trade a slightly larger binary for a much faster link.
           # Cargo.toml's release profile (fat LTO, 1 codegen unit) is kept
@@ -178,11 +179,12 @@ jobs:
           df -h /
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           targets: aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
           key: nightly-android
@@ -195,7 +197,7 @@ jobs:
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: platform-tools
 
@@ -258,11 +260,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
           key: nightly-ios
@@ -347,13 +350,15 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           components: rustfmt
           toolchain: stable
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest
 
       # windows-latest runners ship LLVM (lld-link.exe) but link.exe from MSVC
       # is the default; switch to lld for a much faster linker on Windows.
@@ -362,7 +367,7 @@ jobs:
           echo "RUSTFLAGS=-C linker=lld-link" >> "$GITHUB_ENV"
 
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - name: Configure sccache
         run: |
@@ -428,7 +433,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
           workspaces: |

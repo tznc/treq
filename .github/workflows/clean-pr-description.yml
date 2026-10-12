@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Remove codex label
         if: github.event.action == 'opened'
-        uses: actions-ecosystem/action-remove-labels@v1
+        uses: actions-ecosystem/action-remove-labels@2ce5d41b4b6aa8503e285553f75ed56e0a40bae0 # v1.3.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           labels: codex
