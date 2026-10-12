@@ -117,7 +117,9 @@ mod tests {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
-    let error = probe_host_key_fingerprint("127.0.0.1", port).await.unwrap_err();
+    let error = probe_host_key_fingerprint("127.0.0.1", port)
+      .await
+      .unwrap_err();
     assert!(error.contains("could not reach"), "{error}");
   }
 }
