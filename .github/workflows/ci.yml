@@ -16,6 +16,8 @@ env:
 
 on:
   pull_request:
+    # ready_for_review runs the heavy jobs that drafts skip.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # A new push supersedes the previous run; free its runners for other PRs.
 concurrency:
@@ -117,11 +119,13 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --check
 
+  # Heavy jobs (test-js, verify-rust, test-rust) skip draft PRs; marking the
+  # PR ready for review runs them.
   test-js:
     # test:integration drives the Rust commands via NAPI, so it also runs on
     # Rust changes.
     needs: detect-changes
-    if: needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true'
+    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true') }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -292,7 +296,7 @@ jobs:
 
   verify-rust:
     needs: detect-changes
-    if: needs.detect-changes.outputs.rust_changed == 'true'
+    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 15
     # No separate `cargo check`: clippy --all-targets runs the same checks.
     # rustfmt runs in the verify job.
@@ -336,7 +340,7 @@ jobs:
 
   test-rust:
     needs: detect-changes
-    if: needs.detect-changes.outputs.rust_changed == 'true'
+    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
