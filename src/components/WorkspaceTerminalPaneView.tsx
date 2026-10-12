@@ -16,6 +16,8 @@ import { ShellTerminalPanel } from "./terminal/ShellTerminalPanel";
 import { RemoteTerminalPanel } from "./RemoteTerminalPanel";
 import { type TerminalWithWorkspace } from "./workspace-terminal-pane/types";
 import { agentTerminalId } from "./terminal/agentTerminalId";
+import { EnvironmentSelector } from "./EnvironmentSelector";
+import type { RepoEnvironment } from "../hooks/useRepoEnvironment";
 
 interface WorkspaceTerminalPaneViewProps {
   paneRef: React.RefObject<HTMLDivElement | null>;
@@ -48,6 +50,8 @@ interface WorkspaceTerminalPaneViewProps {
   onTerminalDoubleClick: (terminalId: string) => void;
   onTerminalOutput?: (terminalId: string, fromProcess?: boolean) => void;
   onTerminalIdle?: (terminalId: string) => void;
+  /** Where new terminals start; omitted while the devcontainers preview is off. */
+  environment?: RepoEnvironment | null;
 }
 
 export const WorkspaceTerminalPaneView: React.FC<
@@ -79,6 +83,7 @@ export const WorkspaceTerminalPaneView: React.FC<
   onTerminalDoubleClick,
   onTerminalOutput,
   onTerminalIdle,
+  environment,
 }) => (
   <div
     ref={paneRef as React.Ref<HTMLDivElement>}
@@ -142,6 +147,12 @@ export const WorkspaceTerminalPaneView: React.FC<
             >
               <ChevronUp className="w-3 h-3" />
             </PaneControlButton>
+          )}
+          {!collapsed && environment && (
+            <EnvironmentSelector
+              env={environment}
+              className="h-5 px-1.5 text-[11px] [&_svg]:h-3 [&_svg]:w-3"
+            />
           )}
           {!collapsed && maximized && (
             <PaneControlButton

@@ -3102,6 +3102,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     ? getFullWorkspacePath(selectedWorkspace)
                     : dataRepoPath
                 }
+                repoPath={isRemoteActive ? undefined : dataRepoPath}
                 currentBranch={effectiveDefaultBranch}
                 agentSessions={agentSessionsForPane}
                 activeAgentSessionId={isSessionView ? activeSessionId : null}

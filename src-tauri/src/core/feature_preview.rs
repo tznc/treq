@@ -12,6 +12,7 @@ pub enum PreviewFeature {
   LinearIntegration,
   Logs,
   Browser,
+  Devcontainers,
 }
 
 impl PreviewFeature {
@@ -22,6 +23,7 @@ impl PreviewFeature {
       Self::LinearIntegration => "linearIntegration",
       Self::Logs => "logs",
       Self::Browser => "browser",
+      Self::Devcontainers => "devcontainers",
     }
   }
 

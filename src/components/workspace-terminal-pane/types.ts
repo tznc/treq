@@ -19,6 +19,8 @@ export interface ShellTerminalData {
 export interface WorkspaceTerminalPaneProps {
   ref?: Ref<WorkspaceTerminalPaneHandle>;
   workingDirectory: string;
+  /** Local repository whose environment setting new terminals follow. */
+  repoPath?: string;
   remoteHost?: string;
   onSessionError?: (message: string) => void;
   currentBranch?: string | null;

@@ -8,6 +8,7 @@ export const PREVIEW_FEATURE_IDS = [
   "linearIntegration",
   "logs",
   "browser",
+  "devcontainers",
 ] as const;
 
 export type PreviewFeatureId = (typeof PREVIEW_FEATURE_IDS)[number];
@@ -43,6 +44,12 @@ export const PREVIEW_FEATURES: readonly PreviewFeature[] = [
     id: "browser",
     title: "Browser",
     docsPath: "/docs/concepts/browser",
+  },
+
+  {
+    id: "devcontainers",
+    title: "Devcontainer environments",
+    docsPath: "/docs/how-to/devcontainer-environments",
   },
 ];
 
