@@ -7,13 +7,7 @@ import { isProSubscription } from "../lib/subscription";
 import { FEATURES } from "../lib/features";
 import { isProRequiredError } from "../lib/pro-required";
 import { supabase, WEB_URL } from "../lib/supabase";
-import {
-  getLinearApiKey,
-  setLinearApiKey,
-  getLinearAutoKickoffLabel,
-  setLinearAutoKickoffLabel,
-  linearStartAutoKickoffPolling,
-} from "../lib/api-linear";
+import { getLinearApiKey, setLinearApiKey } from "../lib/api-linear";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useToastStore } from "../stores/toastStore";
@@ -47,10 +41,6 @@ export const LinearIntegrationSettings: React.FC<
   const [apiKeyEditing, setApiKeyEditing] = useState(false);
   const [apiKeySaving, setApiKeySaving] = useState(false);
 
-  const [autoKickoffLabel, setAutoKickoffLabel] = useState<string | null>(null);
-  const [autoKickoffLabelEditing, setAutoKickoffLabelEditing] = useState(false);
-  const [autoKickoffLabelSaving, setAutoKickoffLabelSaving] = useState(false);
-
   const [authLoading, setAuthLoading] = useState(false);
 
   useSWR(
@@ -63,16 +53,6 @@ export const LinearIntegrationSettings: React.FC<
     // dedupingInterval: 0 -- otherwise a quick unmount/remount (e.g. tab
     // away and back within Settings) skips the fetcher and the field is
     // left showing its unset default instead of the persisted value.
-    { revalidateOnFocus: false, dedupingInterval: 0 },
-  );
-
-  useSWR(
-    repoPath ? ["linear-auto-kickoff-label", repoPath] : null,
-    async () => {
-      const label = await getLinearAutoKickoffLabel(repoPath!);
-      setAutoKickoffLabel(label);
-      setAutoKickoffLabelEditing(false);
-    },
     { revalidateOnFocus: false, dedupingInterval: 0 },
   );
 
@@ -94,28 +74,6 @@ export const LinearIntegrationSettings: React.FC<
       });
     } finally {
       setApiKeySaving(false);
-    }
-  };
-
-  const handleSaveAutoKickoffLabel = async () => {
-    if (!repoPath || !autoKickoffLabel) return;
-    try {
-      setAutoKickoffLabelSaving(true);
-      await setLinearAutoKickoffLabel(repoPath, autoKickoffLabel);
-      setAutoKickoffLabelEditing(false);
-      void linearStartAutoKickoffPolling(repoPath);
-      addToast({
-        title: "Auto-kickoff label saved",
-        type: "success",
-      });
-    } catch (err) {
-      addToast({
-        title: "Error saving auto-kickoff label",
-        description: err instanceof Error ? err.message : String(err),
-        type: "error",
-      });
-    } finally {
-      setAutoKickoffLabelSaving(false);
     }
   };
 
@@ -247,48 +205,6 @@ export const LinearIntegrationSettings: React.FC<
               </Button>
             </SettingRow>
           )}
-
-          <SettingRow
-            title="Auto-kickoff Label"
-            description={
-              autoKickoffLabel
-                ? `Issues with label "${autoKickoffLabel}" auto-open a workspace`
-                : "Label name that triggers automatic workspace creation"
-            }
-          >
-            {autoKickoffLabelEditing ? (
-              <div className="flex gap-2 shrink-0">
-                <Input
-                  placeholder="e.g. ready-to-work"
-                  value={autoKickoffLabel || ""}
-                  onChange={(e) => setAutoKickoffLabel(e.target.value)}
-                  className="w-64"
-                  disabled={autoKickoffLabelSaving}
-                />
-                <Button
-                  size="sm"
-                  onClick={handleSaveAutoKickoffLabel}
-                  disabled={autoKickoffLabelSaving || !autoKickoffLabel}
-                >
-                  {autoKickoffLabelSaving ? (
-                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                  ) : null}
-                  Save
-                </Button>
-              </div>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setAutoKickoffLabelEditing(true);
-                  setAutoKickoffLabel(autoKickoffLabel || "");
-                }}
-              >
-                {autoKickoffLabel ? "Update" : "Add"} Label
-              </Button>
-            )}
-          </SettingRow>
 
           {apiKey && isPro && (
             <div className="py-3">

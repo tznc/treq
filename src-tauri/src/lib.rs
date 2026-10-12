@@ -1034,7 +1034,6 @@ pub fn run() {
       commands::linear_list_teams,
       commands::linear_list_issues,
       commands::linear_open_or_create_workspace_from_issue,
-      commands::linear_start_auto_kickoff_polling,
       commands::linear_get_viewer,
       commands::linear_set_proxy_session,
       commands::linear_list_projects,

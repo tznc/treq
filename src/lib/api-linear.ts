@@ -96,21 +96,6 @@ export const setLinearApiKey = (
   apiKey: string,
 ): Promise<void> => setRepoSetting(repoPath, "linear_api_key", apiKey);
 
-export const getLinearAutoKickoffLabel = (
-  repoPath: string,
-): Promise<string | null> =>
-  getRepoSetting(repoPath, "linear_auto_kickoff_label");
-
-export const setLinearAutoKickoffLabel = (
-  repoPath: string,
-  label: string,
-): Promise<void> =>
-  setRepoSetting(repoPath, "linear_auto_kickoff_label", label);
-
-export const linearStartAutoKickoffPolling = (
-  repoPath: string,
-): Promise<void> => invoke("linear_start_auto_kickoff_polling", { repoPath });
-
 /**
  * Gives the Rust Linear client the Supabase session it sends to the
  * `linear-proxy` Edge Function; `null` clears it on sign-out. Used by
