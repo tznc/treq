@@ -116,8 +116,12 @@ mod tests {
     assert!(!package_json_default(PreviewFeature::SkillsInstallation));
     assert!(!package_json_default(PreviewFeature::RemoteSsh));
     assert!(!package_json_default(PreviewFeature::LinearIntegration));
-    assert!(!package_json_default(PreviewFeature::Logs));
     assert!(!package_json_default(PreviewFeature::Browser));
+  }
+
+  #[test]
+  fn package_json_enables_logs_by_default() {
+    assert!(package_json_default(PreviewFeature::Logs));
   }
 
   #[test]
