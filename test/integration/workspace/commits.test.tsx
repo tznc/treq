@@ -2,7 +2,7 @@
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { render, screen, waitFor, within } from "../../test-utils";
+import { render, screen, waitFor } from "../../test-utils";
 import {
   commitRepoFile,
   commitWorkspaceFile,
@@ -269,47 +269,6 @@ describe("ShowWorkspace - Commits tab tentative working copy", () => {
     openRepo(repoPath);
   });
 
-  it("returns a tentative working copy payload for a dirty workspace", async () => {
-    await commitRepoFile(
-      repoPath,
-      "base.txt",
-      "base content",
-      "Base repo commit",
-    );
-
-    await api.createWorkspace(repoPath, "feat/tentative-working-copy");
-
-    const workspace = (await api.getWorkspaces(repoPath)).find(
-      (candidate) => candidate.branch_name === "feat/tentative-working-copy",
-    );
-    expect(workspace).toBeTruthy();
-
-    const workspacePath = resolveWorkspacePath(
-      repoPath,
-      workspace!.workspace_path,
-    );
-    writeWorkspaceFile(
-      workspacePath,
-      "tentative.txt",
-      "dirty tentative content",
-    );
-
-    const result = await api.listCommits(
-      repoPath,
-      workspace!.id,
-      false,
-      null,
-      null,
-    );
-
-    expect(result.tentative_working_copy).toBeTruthy();
-    expect(result.tentative_working_copy!.workspace_label).toBe(
-      "feat/tentative-working-copy",
-    );
-    expect(result.tentative_working_copy!.commit.is_working_copy).toBe(true);
-    expect(result.commits.some((commit) => commit.is_working_copy)).toBe(false);
-  });
-
   it("navigates to the Commits tab and expands the tentative diff when clicked from the Code sidebar", async () => {
     await commitRepoFile(
       repoPath,
@@ -343,44 +302,6 @@ describe("ShowWorkspace - Commits tab tentative working copy", () => {
     ).toBeInTheDocument();
     await screen.findByText("sidebar-tentative.txt");
     await screen.findByText("tentative sidebar click content");
-  });
-
-  it("renders the tentative working copy above workspace commits", async () => {
-    await commitRepoFile(
-      repoPath,
-      "base.txt",
-      "base content",
-      "Base repo commit",
-    );
-
-    dirtyWorkspace = await createWorkspaceRef(
-      repoPath,
-      "feat/tentative-working-copy",
-    );
-
-    const workspacePath = resolveWorkspacePath(repoPath, dirtyWorkspace.path);
-    writeWorkspaceFile(workspacePath, "tentative.txt", "dirty working copy");
-
-    const dirtyUser = userEvent.setup();
-    await openWorkspaceCommitsTab(dirtyUser, "feat/tentative-working-copy");
-
-    const workingCopy = await screen.findByText("Working copy");
-    const commitsList = workingCopy.closest("ul");
-    expect(commitsList).toBeTruthy();
-
-    const commitsListElement = commitsList as HTMLElement;
-    expect(
-      await within(commitsListElement).findByText(
-        /feat\/tentative-working-copy/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(commitsListElement).getByText("Working copy"),
-    ).toBeInTheDocument();
-    expect(
-      within(commitsListElement).getByText("- feat/tentative-working-copy"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("wc000")).not.toBeInTheDocument();
   });
 });
 

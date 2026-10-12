@@ -1,0 +1,41 @@
+id: no-class-assertions-in-tests
+language: tsx
+severity: error
+message: >
+  Do not assert on CSS classes in tests. A class name is styling, not behaviour:
+  it breaks on harmless restyles and passes when the UI is wrong. Assert what a
+  user sees instead (text, role, accessible name, visibility, counts).
+files:
+  - "src/**/*.test.tsx"
+  - "test/**/*.test.tsx"
+ignores:
+  - "src/components/CommittedChangesSection.test.tsx"
+  - "src/components/MarkdownContent.test.tsx"
+  - "src/components/terminal/TerminalSendPreviews.test.tsx"
+  - "src/components/ui/button.test.tsx"
+  - "test/integration/bulk-archive-workspaces.test.tsx"
+  - "test/integration/code/filebrowser.test.tsx"
+  - "test/integration/file-browser.test.tsx"
+  - "test/integration/review/comments-drag.test.tsx"
+  - "test/integration/review/conflict.test.tsx"
+  - "test/integration/sidebar-branch-switch-click-lock.test.tsx"
+  - "test/integration/sidebar.test.tsx"
+  - "test/integration/workspace-sidebar-hover-actions.test.tsx"
+  - "test/integration/workspace/create-pr.test.tsx"
+  - "test/integration/workspace/view-pr.test.tsx"
+  - "test/integration/workspace/workspace-description.test.tsx"
+rule:
+  any:
+    - pattern: expect($$$).toHaveClass($$$)
+    - pattern: expect($$$).not.toHaveClass($$$)
+    - pattern: $EL.getAttribute("class")
+    - kind: member_expression
+      has:
+        field: property
+        regex: "^(className|classList)$"
+      inside:
+        stopBy: end
+        kind: call_expression
+        has:
+          field: function
+          regex: "^expect$"

@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
-export const LOG_LEVELS = ["info", "warning", "error"] as const;
+const LOG_LEVELS = ["info", "warning", "error"] as const;
 
 interface Props {
   /** Selected levels; empty means no filter (all levels shown). */

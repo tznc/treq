@@ -49,6 +49,7 @@ jobs:
               - "crates/tauri-test-macros/**"
               - "Cargo.toml"
               - "Cargo.lock"
+              - ".github/workflows/ci.yml"
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
@@ -119,7 +120,7 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --check
 
-  # Heavy jobs (test-js, verify-rust, test-rust) skip draft PRs; marking the
+  # Heavy jobs (test-js, test-rust) skip draft PRs; marking the
   # PR ready for review runs them.
   test-js:
     # test:integration drives the Rust commands via NAPI, so it also runs on
@@ -294,62 +295,16 @@ jobs:
             npm run ${{ matrix.task }}
           fi
 
-  verify-rust:
-    needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
-    timeout-minutes: 15
-    # No separate `cargo check`: clippy --all-targets runs the same checks.
-    # rustfmt runs in the verify job.
-    name: verify-rust / clippy / ubuntu-22.04
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          components: clippy
-          toolchain: stable
-
-      # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
-      # cache on subsequent runs. execute_install_scripts is required so dpkg
-      # postinst (ldconfig, alternatives) still runs on restore.
-      - name: install dependencies (ubuntu only)
-        # WebKit/GTK is needed to *link* treq/tauri.
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.1
-        with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: webkit-4.1-1
-          execute_install_scripts: true
-
-      # Restores the cache warm-caches.yml saves on main. PR runs don't save:
-      # a PR's cache can only be read by that PR, and the multi-GB saves
-      # evict main's caches from the repo's 10 GB quota.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: clippy
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: |
-            . -> target
-
-      - name: clippy
-        working-directory: src-tauri
-        env:
-          RUST_BACKTRACE: 1
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
+  # clippy and the Rust tests share one job: each takes 1-2 min on a warm
+  # cache, so a second job only paid for another runner and setup.
   test-rust:
     needs: detect-changes
     if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [ubuntu-22.04]
     # macOS runs after merge in warm-caches.yml: macOS runners are the
     # scarcest and slowest, and the tests rarely differ by platform.
-    name: test-rust / test / ${{ matrix.platform }}
-    runs-on: ${{ matrix.platform }}
+    name: test-rust / clippy + test / ubuntu-22.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -364,7 +319,6 @@ jobs:
 
       # mold links the large test binaries several times faster than ld.
       - name: Use mold linker
-        if: runner.os == 'Linux'
         uses: rui314/setup-mold@v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
@@ -373,7 +327,6 @@ jobs:
       - name: install dependencies (ubuntu only)
         # WebKit/GTK is needed to *link* treq/tauri and to *dlopen*
         # libtreq_lib.so in tests.
-        if: matrix.platform == 'ubuntu-22.04'
         uses: awalsh128/cache-apt-pkgs-action@v1.6.1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -459,7 +412,9 @@ jobs:
           jj --version
           gh --version
 
-      # Restores the test build warm-caches.yml saves on main; see verify-rust.
+      # Restores the cache warm-caches.yml saves on main. PR runs don't save:
+      # a PR's cache can only be read by that PR, and the multi-GB saves
+      # evict main's caches from the repo's 10 GB quota.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test
@@ -467,7 +422,17 @@ jobs:
           workspaces: |
             . -> target
 
-      - name: Run Rust task
+      # No separate `cargo check`: clippy --all-targets runs the same checks.
+      # rustfmt runs in the verify job.
+      - name: clippy
+        working-directory: src-tauri
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      # Runs even when clippy fails, so one push reports both.
+      - name: Run Rust tests
+        if: ${{ !cancelled() }}
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1

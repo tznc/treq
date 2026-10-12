@@ -4,15 +4,6 @@ use ignore::WalkBuilder;
 pub type DirectoryEntry = crate::core::WorkspaceEntry;
 
 #[derive(serde::Serialize)]
-pub struct CachedDirectoryEntry {
-  pub name: String,
-  pub path: String,
-  pub is_directory: bool,
-  pub relative_path: String,
-  pub modified_at: Option<String>,
-}
-
-#[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectoryBatchResult {
   pub path: String,
@@ -92,11 +83,6 @@ pub fn write_agent_cli_files(
   cwd: Option<String>,
 ) -> Result<crate::core::AgentCliFiles, String> {
   crate::core::write_agent_cli_files(&prompt, settings_json.as_deref(), cwd.as_deref())
-}
-
-#[tauri::command]
-pub fn cleanup_agent_cli_files(paths: Vec<String>) -> Result<(), String> {
-  crate::core::cleanup_agent_cli_files(&paths)
 }
 
 #[tauri::command]
@@ -201,71 +187,6 @@ pub fn get_workspace_readme(
   workspace_id: Option<i64>,
 ) -> Result<Option<String>, String> {
   crate::core::get_workspace_readme(&repo_path, workspace_id)
-}
-
-#[tauri::command]
-pub fn list_directory_cached(
-  repo_path: String,
-  workspace_id: Option<i64>,
-  parent_path: String,
-) -> Result<Vec<CachedDirectoryEntry>, String> {
-  use std::path::Path;
-
-  // Try cache first
-  if let Ok(cached) = local_db::get_cached_directory_listing(&repo_path, workspace_id, &parent_path)
-  {
-    if !cached.is_empty() {
-      // Convert to CachedDirectoryEntry format
-      let entries: Vec<CachedDirectoryEntry> = cached
-        .into_iter()
-        .map(|file| {
-          let name = Path::new(&file.file_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&file.relative_path)
-            .to_string();
-          let modified_at = modified_at_rfc3339(&file.file_path);
-          CachedDirectoryEntry {
-            name,
-            path: file.file_path,
-            is_directory: file.is_directory,
-            relative_path: file.relative_path,
-            modified_at,
-          }
-        })
-        .collect();
-      return Ok(entries);
-    }
-  }
-
-  // Cache miss: fall back to live filesystem
-  let live_entries = list_directory(parent_path.clone())?;
-
-  // Convert live entries to cached format
-  let entries: Vec<CachedDirectoryEntry> = live_entries
-    .into_iter()
-    .map(|entry| {
-      // Compute relative path
-      let base = Path::new(&parent_path);
-      let full_path = Path::new(&entry.path);
-      let relative = full_path
-        .strip_prefix(base)
-        .ok()
-        .and_then(|p| p.to_str())
-        .unwrap_or(&entry.name)
-        .to_string();
-
-      CachedDirectoryEntry {
-        name: entry.name,
-        path: entry.path,
-        is_directory: entry.is_directory,
-        relative_path: relative,
-        modified_at: entry.modified_at,
-      }
-    })
-    .collect();
-
-  Ok(entries)
 }
 
 #[derive(serde::Serialize)]

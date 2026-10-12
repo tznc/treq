@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { setSetting } from "../lib/api";
 
-export const DEFAULT_DIFF_FONT_SIZE = 11;
+const DEFAULT_DIFF_FONT_SIZE = 11;
 export const MIN_DIFF_FONT_SIZE = 8;
 export const MAX_DIFF_FONT_SIZE = 16;
 

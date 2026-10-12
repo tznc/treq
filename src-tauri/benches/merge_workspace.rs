@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 
-#[path = "../tests/e2e_test_helpers.rs"]
+#[path = "../tests/common/mod.rs"]
 mod e2e_test_helpers;
 use e2e_test_helpers::TestRepo;
 

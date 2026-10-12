@@ -1,4 +1,4 @@
-use crate::jj::{self, JjRebaseResult};
+use crate::jj::JjRebaseResult;
 use crate::local_db::Workspace;
 use crate::lock_ext::LockExt;
 use crate::AppState;
@@ -505,31 +505,6 @@ pub async fn pull_workspace_from_remote(
   result
 }
 
-/// Resolve a conflicted bookmark while preserving every local-only change.
-#[tauri::command]
-pub async fn resolve_workspace_bookmark_conflict(
-  repo_path: String,
-  workspace_id: i64,
-  workspace_path: String,
-  branch_name: String,
-) -> Result<jj::BookmarkConflictResolutionResult, String> {
-  tauri::async_runtime::spawn_blocking(move || {
-    crate::core::resolve_workspace_bookmark_conflict(
-      &repo_path,
-      workspace_id,
-      &workspace_path,
-      &branch_name,
-    )
-  })
-  .await
-  .map_err(|e| {
-    format!(
-      "Failed to join resolve_workspace_bookmark_conflict task: {}",
-      e
-    )
-  })?
-}
-
 /// Rename a workspace's branch/bookmark.
 /// Supports dry_run mode for validation without performing the rename.
 #[tauri::command]
@@ -556,21 +531,6 @@ pub fn move_workspace_changes(
   request: crate::core::WorkspaceMoveRequest,
 ) -> Result<crate::core::WorkspaceMoveResult, String> {
   crate::core::move_workspace_changes(&repo_path, &source_branch, &destination_branch, request)
-}
-
-#[tauri::command]
-pub fn move_commit_to_existing_workspace(
-  repo_path: String,
-  source_workspace_id: i64,
-  commit_change_id: String,
-  target_workspace_id: i64,
-) -> Result<(), String> {
-  crate::core::move_commit_to_existing_workspace(
-    &repo_path,
-    source_workspace_id,
-    &commit_change_id,
-    target_workspace_id,
-  )
 }
 
 #[tauri::command]

@@ -155,10 +155,9 @@ describe("Send review to terminal respects default agent setting", () => {
     await capturedOnCreateAgentWithReview!("review text", "plan");
 
     expect(onSessionCreated).toHaveBeenCalledOnce();
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.agent).toBeUndefined();
+    expect(onSessionCreated).not.toHaveBeenCalledWith(
+      expect.objectContaining({ agent: expect.anything() }),
+    );
   });
 
   it("passes agent=codex when repo default_agent is codex", async () => {
@@ -174,10 +173,9 @@ describe("Send review to terminal respects default agent setting", () => {
     await capturedOnCreateAgentWithReview!("review text", "plan");
 
     expect(onSessionCreated).toHaveBeenCalledOnce();
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.agent).toBe("codex");
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "codex" }),
+    );
   });
 
   it("passes agent=cursor when repo default_agent is cursor", async () => {
@@ -193,10 +191,9 @@ describe("Send review to terminal respects default agent setting", () => {
     await capturedOnCreateAgentWithReview!("review text", "acceptEdits");
 
     expect(onSessionCreated).toHaveBeenCalledOnce();
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.agent).toBe("cursor");
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "cursor" }),
+    );
   });
 
   it("repo setting takes precedence over app-level default_agent", async () => {
@@ -212,10 +209,9 @@ describe("Send review to terminal respects default agent setting", () => {
     await capturedOnCreateAgentWithReview!("review text", "plan");
 
     expect(onSessionCreated).toHaveBeenCalledOnce();
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.agent).toBe("codex");
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "codex" }),
+    );
   });
 
   it("falls back to app-level default_agent when no repo setting", async () => {
@@ -231,10 +227,9 @@ describe("Send review to terminal respects default agent setting", () => {
     await capturedOnCreateAgentWithReview!("review text", "plan");
 
     expect(onSessionCreated).toHaveBeenCalledOnce();
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.agent).toBe("codex");
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "codex" }),
+    );
   });
 
   it("includes the review markdown in the pending prompt", async () => {
@@ -250,11 +245,13 @@ describe("Send review to terminal respects default agent setting", () => {
     const reviewText = "## Code Review\n\nPlease fix the bug.";
     await capturedOnCreateAgentWithReview!(reviewText, "plan");
 
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.pendingPrompt).toBe(reviewText);
-    expect(sessionInfo.permissionMode).toBe("plan");
+    expect(onSessionCreated).toHaveBeenCalledOnce();
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingPrompt: reviewText,
+        permissionMode: "plan",
+      }),
+    );
   });
 
   it("identifies the review agent workspace without passing its path", async () => {
@@ -265,11 +262,10 @@ describe("Send review to terminal respects default agent setting", () => {
 
     await capturedOnCreateAgentWithReview!("review text", "plan");
 
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.workspaceId).toBe(7);
-    expect(sessionInfo.workspacePath).toBeNull();
+    expect(onSessionCreated).toHaveBeenCalledOnce();
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: 7, workspacePath: null }),
+    );
   });
 
   it("sends Edit to an existing idle agent when the user opts in", async () => {
@@ -316,11 +312,12 @@ describe("Send review to terminal respects default agent setting", () => {
 
     expect(onSendToIdleAgent).not.toHaveBeenCalled();
     expect(onSessionCreated).toHaveBeenCalledOnce();
-    const [sessionInfo] = onSessionCreated.mock.calls[0] as [
-      SessionCreationInfo,
-    ];
-    expect(sessionInfo.pendingPrompt).toBe("review prompt");
-    expect(sessionInfo.permissionMode).toBe("acceptEdits");
-    expect(sessionInfo.agent).toBe("codex");
+    expect(onSessionCreated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingPrompt: "review prompt",
+        permissionMode: "acceptEdits",
+        agent: "codex",
+      }),
+    );
   });
 });

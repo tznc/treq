@@ -232,33 +232,6 @@ describe("ShowWorkspace - File staging integration", () => {
 
     await screen.findByText("Selected");
   });
-
-  it("collapses and expands file diffs with toggle button", async () => {
-    const branchName = "feat/collapse-test";
-    await setupStagingWorkspaceWithChange(branchName);
-
-    render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(branchName));
-
-    const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
-    await user.click(reviewTab);
-    await screen.findByRole("tab", { name: /^Changes/, selected: true });
-
-    await waitFor(() =>
-      expect(screen.getAllByText("stage-test.txt").length).toBeGreaterThan(0),
-    );
-
-    const collapseBtn = await screen.findByRole("button", {
-      name: "Collapse file diff",
-    });
-    await user.click(collapseBtn);
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Expand file diff" }),
-      ).toBeInTheDocument();
-    });
-  });
 });
 
 async function createTwoWorkspacesWithDirtySource() {

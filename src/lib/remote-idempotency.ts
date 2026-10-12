@@ -105,7 +105,7 @@ export class ActionIdempotencyKeys {
 export const remoteActionKeys = new ActionIdempotencyKeys();
 
 /** The pending-key scope for mobile actions sent to this endpoint generation. */
-export function endpointScope(endpoint: SshEndpoint): string {
+function endpointScope(endpoint: SshEndpoint): string {
   const generation =
     endpoint.source.type === "managed" ? endpoint.source.generation : 0;
   return `${endpoint.id}#${generation}`;

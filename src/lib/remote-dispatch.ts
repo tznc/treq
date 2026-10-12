@@ -20,7 +20,7 @@ import {
 import type { SshEndpoint, PtyLaunchSpec } from "./api-types-remote";
 
 /** Mirrors `core::workspaces::HunkSpec` for non-interactive split/move. */
-export interface RemoteHunkSpec {
+interface RemoteHunkSpec {
   file_path: string;
   start_line: number;
   end_line: number;

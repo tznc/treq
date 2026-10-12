@@ -27,7 +27,7 @@ export const AgentReviewContext = createContext<AgentReviewContextValue | null>(
   null,
 );
 
-export function useAgentReview(): AgentReviewContextValue | null {
+function useAgentReview(): AgentReviewContextValue | null {
   return useContext(AgentReviewContext);
 }
 

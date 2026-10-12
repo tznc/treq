@@ -8,8 +8,6 @@ import {
 const ICON_CLASS: Record<IssueSource, string> = {
   github: "text-green-600 dark:text-green-400",
   linear: "text-violet-600 dark:text-violet-400",
-  trello: "text-sky-600 dark:text-sky-400",
-  jira: "text-sky-600 dark:text-sky-400",
 };
 
 /** The chip for an issue attached to a prompt, the same for every tracker. */

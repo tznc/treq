@@ -241,10 +241,7 @@ export function getDescendants(
  *
  * Returns the branch_name of the root workspace.
  */
-export function getStackRoot(
-  workspaces: Workspace[],
-  branchName: string,
-): string {
+function getStackRoot(workspaces: Workspace[], branchName: string): string {
   const workspaceByBranch = new Map<string, Workspace>();
   for (const ws of workspaces) {
     workspaceByBranch.set(ws.branch_name, ws);

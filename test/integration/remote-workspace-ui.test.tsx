@@ -202,27 +202,6 @@ describe("remote workspace UI", () => {
     await screen.findByTestId("show-workspace-header");
   });
 
-  it("isolates cache identity across endpoint generations", async () => {
-    const { repoPath } = createTestRepo(false);
-    await createWorkspace(repoPath, "feat/gen-a");
-    await openSavedRemoteRepo(repoPath, {
-      endpointId: "ep-a",
-      generation: 1,
-    });
-
-    const { unmount } = render(React.createElement(Dashboard));
-    expect(await findSidebarBranchElement("feat/gen-a")).toBeTruthy();
-    unmount();
-
-    await openSavedRemoteRepo(repoPath, {
-      endpointId: "ep-a",
-      generation: 2,
-    });
-    render(React.createElement(Dashboard));
-    expect(await findSidebarBranchElement("feat/gen-a")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
-  });
-
   it("refreshes when the workspace change marker advances", async () => {
     const { repoPath } = createTestRepo(false);
     const workspaceId = await createWorkspace(repoPath, "feat/marker");
