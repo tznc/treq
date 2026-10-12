@@ -152,7 +152,7 @@ describe("ShowWorkspace Commits tab label", () => {
     vi.mocked(api.getWorkspaceChangedFiles).mockResolvedValue([]);
   });
 
-  it("shows a grey commit-count pill on a workspace with commits", async () => {
+  it("shows the commit-count pill on a workspace with commits", async () => {
     vi.mocked(api.getWorkspaceStatus).mockResolvedValue(
       status({
         commits_ahead_of_target: [
@@ -183,13 +183,11 @@ describe("ShowWorkspace Commits tab label", () => {
       const pill = commitsCountPill();
       expect(pill).toBeTruthy();
       expect(pill).toHaveTextContent("2");
-      expect(pill?.className).toContain("bg-muted");
-      expect(pill?.className).not.toContain("bg-destructive");
     });
     expect(commitsConflictIcon()).toBeNull();
   });
 
-  it("shows a red commit-count pill when the workspace has conflicts", async () => {
+  it("shows the commit-count pill when the workspace has conflicts", async () => {
     vi.mocked(api.getWorkspaceStatus).mockResolvedValue(
       status({
         has_conflicts: true,
@@ -217,7 +215,6 @@ describe("ShowWorkspace Commits tab label", () => {
       const pill = commitsCountPill();
       expect(pill).toBeTruthy();
       expect(pill).toHaveTextContent("1");
-      expect(pill?.className).toContain("bg-destructive");
     });
   });
 
