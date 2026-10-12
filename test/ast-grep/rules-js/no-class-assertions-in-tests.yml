@@ -11,8 +11,6 @@ files:
 ignores:
   - "src/components/CommittedChangesSection.test.tsx"
   - "src/components/MarkdownContent.test.tsx"
-  - "src/components/terminal/TerminalSendPreviews.test.tsx"
-  - "src/components/ui/button.test.tsx"
   - "test/integration/bulk-archive-workspaces.test.tsx"
   - "test/integration/code/filebrowser.test.tsx"
   - "test/integration/file-browser.test.tsx"
