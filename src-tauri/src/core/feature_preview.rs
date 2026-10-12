@@ -8,7 +8,6 @@ const PACKAGE_JSON: &str = include_str!("../../../package.json");
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewFeature {
   SkillsInstallation,
-  WorkspaceScheduling,
   RemoteSsh,
   LinearIntegration,
   TrelloIntegration,
@@ -21,7 +20,6 @@ impl PreviewFeature {
   pub fn as_str(self) -> &'static str {
     match self {
       Self::SkillsInstallation => "skillsInstallation",
-      Self::WorkspaceScheduling => "workspaceScheduling",
       Self::RemoteSsh => "remoteSsh",
       Self::LinearIntegration => "linearIntegration",
       Self::TrelloIntegration => "trelloIntegration",
@@ -120,7 +118,6 @@ mod tests {
   #[test]
   fn package_json_preview_flags_default_off() {
     assert!(!package_json_default(PreviewFeature::SkillsInstallation));
-    assert!(!package_json_default(PreviewFeature::WorkspaceScheduling));
     assert!(!package_json_default(PreviewFeature::RemoteSsh));
     assert!(!package_json_default(PreviewFeature::LinearIntegration));
     assert!(!package_json_default(PreviewFeature::TrelloIntegration));
@@ -148,10 +145,10 @@ mod tests {
   #[test]
   fn require_errors_when_disabled() {
     let (_dir, db) = temp_db();
-    db.set_setting(&PreviewFeature::WorkspaceScheduling.setting_key(), "false")
+    db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "false")
       .expect("set");
-    let err = require(&db, PreviewFeature::WorkspaceScheduling).expect_err("disabled");
-    assert!(err.contains("workspaceScheduling"));
+    let err = require(&db, PreviewFeature::RemoteSsh).expect_err("disabled");
+    assert!(err.contains("remoteSsh"));
   }
 
   #[test]

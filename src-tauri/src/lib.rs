@@ -887,7 +887,6 @@ pub fn run() {
       commands::list_workspace_statuses,
       commands::get_workspace_status,
       commands::update_workspace,
-      commands::schedule_workspaces,
       commands::set_workspace_target_branch,
       commands::check_and_rebase_workspaces,
       commands::resolve_workspace_bookmark_conflict,

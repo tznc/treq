@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Workspace } from "./api-types";
-import {
-  addHours,
-  followingMondayAtNine,
-  getWorkspaceDisplayTitle,
-  isWorkspaceHidden,
-  nextWeekdayAt,
-} from "./workspace-utils";
+import { getWorkspaceDisplayTitle } from "./workspace-utils";
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
@@ -48,49 +42,5 @@ describe("getWorkspaceDisplayTitle", () => {
       branch_name: "docs/ai",
     });
     expect(getWorkspaceDisplayTitle(workspace)).toBe("docs/ai");
-  });
-});
-
-describe("isWorkspaceHidden", () => {
-  const now = Date.parse("2026-08-14T12:00:00.000Z");
-
-  it("is hidden when hidden_until is in the future", () => {
-    expect(
-      isWorkspaceHidden({ hidden_until: "2026-08-15T09:00:00.000Z" }, now),
-    ).toBe(true);
-  });
-
-  it("is visible when hidden_until has passed or is missing", () => {
-    expect(
-      isWorkspaceHidden({ hidden_until: "2026-08-14T11:00:00.000Z" }, now),
-    ).toBe(false);
-    expect(isWorkspaceHidden({}, now)).toBe(false);
-    expect(isWorkspaceHidden({ hidden_until: null }, now)).toBe(false);
-  });
-});
-
-describe("schedule date helpers", () => {
-  it("adds hours to a local timestamp", () => {
-    const from = new Date("2026-08-14T12:00:00");
-    expect(addHours(from, 4).getHours()).toBe(16);
-  });
-
-  it("picks the next weekday at the given hour, including today when upcoming", () => {
-    const fridayMorning = new Date(2026, 7, 14, 8, 0, 0); // Friday
-    const friday = nextWeekdayAt(fridayMorning, 5, 17);
-    expect(friday.getDay()).toBe(5);
-    expect(friday.getDate()).toBe(14);
-    expect(friday.getHours()).toBe(17);
-
-    const fridayEvening = new Date(2026, 7, 14, 18, 0, 0);
-    const nextFriday = nextWeekdayAt(fridayEvening, 5, 17);
-    expect(nextFriday.getDate()).toBe(21);
-  });
-
-  it("following Monday is never today", () => {
-    const monday = new Date(2026, 7, 10, 8, 0, 0);
-    const next = followingMondayAtNine(monday);
-    expect(next.getDay()).toBe(1);
-    expect(next.getDate()).toBe(17);
   });
 });

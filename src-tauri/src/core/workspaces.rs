@@ -1432,7 +1432,6 @@ pub fn workspace_status(
         moved_files: None,
         not_on_remote: matches!(rs.remote_sync, RemoteSyncStatus::NotOnRemote),
         sparse_patterns: None,
-        hidden_until: None,
         archived: false,
       };
 
@@ -1594,13 +1593,13 @@ pub fn workspace_status(
 #[cfg(test)]
 mod tests {
   use super::{
-    is_workspace_hidden, merge_linear_issue_metadata_json, merge_tracker_item_metadata_json,
-    parse_hunk_spec, parse_workspace_metadata, plan_workspace_target_move,
+    merge_linear_issue_metadata_json, merge_tracker_item_metadata_json, parse_hunk_spec,
+    parse_workspace_metadata, plan_workspace_target_move,
     resolve_workspace_diff_base_revision_from_last_rebased,
     resolve_workspace_diff_conflict_marker_style,
     resolve_workspace_diff_tip_revision_from_workspace_state,
-    resolve_workspace_diff_workspace_revision, schedule_workspaces, HunkSpec, WorkspaceMetadata,
-    WorkspaceMoveRequest, WorkspaceTargetMoveStep,
+    resolve_workspace_diff_workspace_revision, HunkSpec, WorkspaceMetadata, WorkspaceMoveRequest,
+    WorkspaceTargetMoveStep,
   };
   use crate::jj;
   use crate::local_db::Workspace;
@@ -1625,7 +1624,6 @@ mod tests {
       moved_files: None,
       not_on_remote: false,
       sparse_patterns: None,
-      hidden_until: None,
       archived: false,
     }
   }
@@ -2609,61 +2607,6 @@ mod tests {
   }
 
   #[test]
-  fn is_workspace_hidden_when_scheduled_date_is_in_the_future() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-08-14T12:00:00Z")
-      .unwrap()
-      .with_timezone(&chrono::Utc);
-    assert!(is_workspace_hidden(Some("2026-08-15T09:00:00Z"), now));
-    assert!(!is_workspace_hidden(Some("2026-08-14T11:00:00Z"), now));
-    assert!(!is_workspace_hidden(None, now));
-    assert!(!is_workspace_hidden(Some("not-a-date"), now));
-  }
-
-  #[test]
-  fn schedule_workspaces_sets_hidden_until_and_preserves_directory() {
-    let temp_dir = TempDir::new().expect("temp dir");
-    let repo_path = temp_dir.path().to_str().unwrap();
-    let workspace_dir = temp_dir
-      .path()
-      .join(".treq")
-      .join("workspaces")
-      .join("feat-alpha");
-    fs::create_dir_all(&workspace_dir).expect("workspace dir");
-    let workspace_path = workspace_dir.to_str().unwrap().to_string();
-
-    let id = crate::local_db::add_workspace(
-      repo_path,
-      "feat-alpha".to_string(),
-      workspace_path.clone(),
-      "feat/alpha".to_string(),
-      None,
-      None,
-      None,
-    )
-    .expect("add workspace");
-
-    let until = "2026-12-01T09:00:00Z";
-    let updated = schedule_workspaces(repo_path, &[id], Some(until)).expect("schedule");
-    assert_eq!(updated[0].hidden_until.as_deref(), Some(until));
-    assert!(
-      workspace_dir.exists(),
-      "workspace directory must be preserved"
-    );
-
-    let cleared = schedule_workspaces(repo_path, &[id], None).expect("unschedule");
-    assert_eq!(cleared[0].hidden_until, None);
-    assert!(workspace_dir.exists());
-  }
-
-  #[test]
-  fn schedule_workspaces_rejects_empty_ids_and_invalid_dates() {
-    let temp_dir = TempDir::new().expect("temp dir");
-    let repo_path = temp_dir.path().to_str().unwrap();
-    assert!(schedule_workspaces(repo_path, &[], Some("2026-12-01T09:00:00Z")).is_err());
-    assert!(schedule_workspaces(repo_path, &[1], Some("tomorrow")).is_err());
-  }
-
-  #[test]
   fn merge_tracker_item_metadata_preserves_linear_fields() {
     let existing = merge_linear_issue_metadata_json(None, "ENG-1", "https://l/ENG-1", "L").unwrap();
     let result = merge_tracker_item_metadata_json(
@@ -3214,53 +3157,6 @@ pub fn update_workspace_with_title(
   local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get updated workspace: {}", e))?
     .ok_or_else(|| "Workspace not found after update".to_string())
-}
-
-/// Hide workspaces locally until `hidden_until` (RFC3339). Pass `None` to show them again.
-/// Workspace directories are left on disk.
-pub fn schedule_workspaces(
-  repo_path: &str,
-  workspace_ids: &[i64],
-  hidden_until: Option<&str>,
-) -> Result<Vec<local_db::Workspace>, String> {
-  if workspace_ids.is_empty() {
-    return Err("No workspaces to schedule".to_string());
-  }
-
-  let normalized = match hidden_until {
-    Some(value) if value.trim().is_empty() => None,
-    Some(value) => {
-      chrono::DateTime::parse_from_rfc3339(value)
-        .map_err(|err| format!("Invalid schedule date: {err}"))?;
-      Some(value)
-    }
-    None => None,
-  };
-
-  let mut updated = Vec::with_capacity(workspace_ids.len());
-  for id in workspace_ids {
-    local_db::get_workspace_by_id(repo_path, *id)
-      .map_err(|e| format!("Failed to get workspace: {e}"))?
-      .ok_or_else(|| format!("Workspace {id} not found"))?;
-    local_db::update_workspace_hidden_until(repo_path, *id, normalized)
-      .map_err(|e| format!("Failed to schedule workspace: {e}"))?;
-    updated.push(
-      local_db::get_workspace_by_id(repo_path, *id)
-        .map_err(|e| format!("Failed to get scheduled workspace: {e}"))?
-        .ok_or_else(|| format!("Workspace {id} not found after schedule"))?,
-    );
-  }
-  Ok(updated)
-}
-
-pub fn is_workspace_hidden(hidden_until: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> bool {
-  let Some(raw) = hidden_until.filter(|value| !value.is_empty()) else {
-    return false;
-  };
-  match chrono::DateTime::parse_from_rfc3339(raw) {
-    Ok(until) => until.with_timezone(&chrono::Utc) > now,
-    Err(_) => false,
-  }
 }
 
 /// Renames a workspace's jj bookmark/branch.

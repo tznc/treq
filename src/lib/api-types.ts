@@ -12,7 +12,6 @@ export interface Workspace {
   not_on_remote: boolean;
   sparse_patterns?: string[] | null;
   /** RFC3339. Hidden in the sidebar until this time. */
-  hidden_until?: string | null;
   /** True when the workspace directory was archived; the DB row is kept. */
   archived?: boolean;
 }

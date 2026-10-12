@@ -2,7 +2,6 @@ import { Draggable } from "@hello-pangea/dnd";
 import {
   Archive,
   Bot,
-  CalendarClock,
   GitBranch,
   Layers2,
   Link,
@@ -12,7 +11,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { type QueueEntryStatus, type Workspace } from "../lib/api";
-import { clearWorkspaceSchedule } from "../lib/clear-workspace-schedule";
 import type { PrInfo } from "../lib/api-types";
 import { useRemoteCapabilities } from "../lib/active-repository-context";
 import { cn, getFullWorkspacePath } from "../lib/utils";
@@ -22,19 +20,14 @@ import {
   WORKSPACE_STATUS_DOT_BG_CLASS,
   WORKSPACE_STATUS_DOT_TEXT_CLASS,
 } from "../lib/workspace-status-indicator";
-import {
-  getWorkspaceTitle as getWorkspaceTitleFromUtils,
-  isWorkspaceHidden,
-} from "../lib/workspace-utils";
+import { getWorkspaceTitle as getWorkspaceTitleFromUtils } from "../lib/workspace-utils";
 import {
   getChangeFilesDragData,
   isChangeFilesDrag,
   type ChangeFilesMoveRequest,
 } from "../lib/change-file-drag";
-import { usePreviewFeature } from "../stores/featurePreviewStore";
 import { Button } from "./ui/button";
 import { SidebarMenuItem } from "./ui/sidebar";
-import { useToast } from "./ui/toast";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -150,8 +143,6 @@ export const WorkspaceSidebarItem: React.FC<WorkspaceSidebarItemProps> = ({
 }) => {
   const caps = useRemoteCapabilities();
   const workspace = node.status.current;
-  const { addToast } = useToast();
-  const workspaceScheduling = usePreviewFeature("workspaceScheduling");
   const isSelected =
     selectedWorkspaceIds?.has(workspace.id) ||
     selectedWorkspaceId === workspace.id;
@@ -164,7 +155,6 @@ export const WorkspaceSidebarItem: React.FC<WorkspaceSidebarItemProps> = ({
     hasChanges: node.status.has_changes ?? false,
     isAgentSessionStreaming: hasActiveAgentSession && isAgentSessionStreaming,
   });
-  const isHidden = isWorkspaceHidden(workspace);
   const workspaceTitle = getWorkspaceTitleFromUtils(workspace);
   const prStatus = hasRemote && prInfo ? prIconStyle(prInfo) : null;
   const [isChangeDropTarget, setIsChangeDropTarget] = useState(false);
@@ -209,11 +199,6 @@ export const WorkspaceSidebarItem: React.FC<WorkspaceSidebarItemProps> = ({
                           "bg-primary/10":
                             dragSnapshot.combineTargetFor || isChangeDropTarget,
                           "opacity-50": dragSnapshot.isDragging,
-                          "opacity-60":
-                            isHidden &&
-                            !dragSnapshot.isDragging &&
-                            !archiving &&
-                            !exiting,
                           "text-destructive": isConflicted,
                           "opacity-50 pointer-events-none cursor-not-allowed":
                             archiving,
@@ -291,12 +276,6 @@ export const WorkspaceSidebarItem: React.FC<WorkspaceSidebarItemProps> = ({
                             : "text-muted-foreground",
                         )}
                       />
-                      {workspaceScheduling && isHidden && (
-                        <CalendarClock
-                          className="w-3 h-3 text-muted-foreground shrink-0 mr-1"
-                          aria-label="Scheduled hidden"
-                        />
-                      )}
                       {statusIndicator &&
                         (() => {
                           const testId =
@@ -451,27 +430,6 @@ export const WorkspaceSidebarItem: React.FC<WorkspaceSidebarItemProps> = ({
                   <Pencil className="w-4 h-4 mr-2" />
                   Rename Workspace
                 </ContextMenuItem>
-                {workspaceScheduling &&
-                  repoPath &&
-                  isWorkspaceHidden(workspace) && (
-                    <ContextMenuItem
-                      data-testid="remove-schedule-menu-item"
-                      onClick={() => {
-                        void clearWorkspaceSchedule(repoPath, [
-                          workspace.id,
-                        ]).then(() => {
-                          addToast({
-                            title: "Workspace unscheduled",
-                            description: "Shown in the sidebar again.",
-                            type: "success",
-                          });
-                        });
-                      }}
-                    >
-                      <CalendarClock className="w-4 h-4 mr-2" />
-                      Remove schedule
-                    </ContextMenuItem>
-                  )}
                 <ContextMenuSeparator />
                 <PathContextMenuItems
                   relativePath={

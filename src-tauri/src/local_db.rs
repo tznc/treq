@@ -26,9 +26,6 @@ pub struct Workspace {
   pub moved_files: Option<Vec<String>>,
   pub not_on_remote: bool,
   pub sparse_patterns: Option<Vec<String>>,
-  /// RFC3339 timestamp. The workspace is hidden in the sidebar until this time.
-  #[serde(default)]
-  pub hidden_until: Option<String>,
   /// True when the workspace directory was archived; the DB row is kept.
   #[serde(default)]
   pub archived: bool,
@@ -68,8 +65,7 @@ fn workspace_from_row(repo_path: &str, row: &Row<'_>) -> rusqlite::Result<Worksp
     description: row.get(11)?,
     moved_files,
     sparse_patterns,
-    hidden_until: row.get(13)?,
-    archived: row.get::<_, i64>(14)? != 0,
+    archived: row.get::<_, i64>(13)? != 0,
   })
 }
 
@@ -253,7 +249,6 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
   let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN moved_files TEXT", []);
   let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN refreshed_at TEXT", []);
   let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN sparse_patterns TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN hidden_until TEXT", []);
 
   conn
     .execute(
@@ -976,7 +971,7 @@ pub fn prune_stale_instance_registry(
   Ok(())
 }
 
-const WORKSPACE_SELECT_COLUMNS: &str = "id, workspace_name, workspace_path, branch_name, created_at, refreshed_at, metadata, target_branch, COALESCE(not_on_remote, 0), COALESCE(title, branch_name), moved_files, description, sparse_patterns, hidden_until, COALESCE(archived, 0)";
+const WORKSPACE_SELECT_COLUMNS: &str = "id, workspace_name, workspace_path, branch_name, created_at, refreshed_at, metadata, target_branch, COALESCE(not_on_remote, 0), COALESCE(title, branch_name), moved_files, description, sparse_patterns, COALESCE(archived, 0)";
 
 pub fn get_workspaces(repo_path: &str) -> Result<Vec<Workspace>, String> {
   let conn = get_connection(repo_path)?;
@@ -1169,21 +1164,6 @@ pub fn clear_workspace_description(repo_path: &str, id: i64) -> Result<(), Strin
       [id],
     )
     .map_err(|e| format!("Failed to clear workspace description: {}", e))?;
-  Ok(())
-}
-
-pub fn update_workspace_hidden_until(
-  repo_path: &str,
-  id: i64,
-  hidden_until: Option<&str>,
-) -> Result<(), String> {
-  let conn = get_connection(repo_path)?;
-  conn
-    .execute(
-      "UPDATE workspaces SET hidden_until = ?1 WHERE id = ?2",
-      params![hidden_until, id],
-    )
-    .map_err(|e| format!("Failed to update workspace hidden_until: {}", e))?;
   Ok(())
 }
 
@@ -2887,7 +2867,6 @@ mod tests {
       Some("test description")
     );
     assert!(workspaces[0].target_branch.is_none());
-    assert!(workspaces[0].hidden_until.is_none());
 
     let db_path = get_local_db_path(repo_path);
     assert!(

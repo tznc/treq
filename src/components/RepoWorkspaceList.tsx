@@ -17,7 +17,6 @@ import {
 import type { PrInfo, QueueEntryStatus } from "../lib/api-types";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
 import { FEATURES } from "../lib/features";
-import { cn } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 import { pollMs } from "../lib/swr-cache";
 import {
@@ -27,9 +26,6 @@ import {
   getEntireStack,
   type WorkspaceSidebarStatusWithAgentDetail,
 } from "../lib/workspace-tree";
-import { isWorkspaceHidden } from "../lib/workspace-utils";
-import { usePreviewFeature } from "../stores/featurePreviewStore";
-import { HiddenWorkspacesToggle } from "./HiddenWorkspacesToggle";
 import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
 import type { TerminalSessionSummary } from "./terminal/types";
 import {
@@ -100,7 +96,6 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
   terminalSessions,
   onDropChangeFiles,
 }) => {
-  const workspaceScheduling = usePreviewFeature("workspaceScheduling");
   const { data: workspaces = [], isLoading: workspacesPending } = useSWR(
     cacheKey ? ["workspaces", cacheKey] : null,
     () => getWorkspaces(repoPath || ""),
@@ -181,21 +176,12 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
   })();
   const workspacesForSelection = statuses.map((s) => s.current);
   const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-
-  const visibleStatuses = (() => {
-    if (!workspaceScheduling || showHidden) return statuses;
-    return statuses.filter((status) => !isWorkspaceHidden(status.current));
-  })();
-  const hiddenCount = workspaceScheduling
-    ? statuses.filter((status) => isWorkspaceHidden(status.current)).length
-    : 0;
 
   const flattenedNodes = (() => {
     const isMergedBranch = (branchName: string) =>
       (prStatusesByBranch as Record<string, PrInfo | null>)[branchName]
         ?.state === "MERGED";
-    const tree = buildWorkspaceTree(visibleStatuses, isMergedBranch);
+    const tree = buildWorkspaceTree(statuses, isMergedBranch);
     return flattenWorkspaceTree(tree);
   })();
 
@@ -259,11 +245,7 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
         {groupLabel ? (
           <SidebarGroupLabel
             asChild
-            className={cn(
-              "uppercase tracking-widest cursor-pointer",
-              // Leave room for the scheduled-workspaces toggle.
-              workspaceScheduling && "pr-8",
-            )}
+            className="uppercase tracking-widest cursor-pointer"
           >
             <button
               type="button"
@@ -284,13 +266,6 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
           <SidebarGroupLabel className="uppercase tracking-widest">
             Workspaces
           </SidebarGroupLabel>
-        )}
-        {workspaceScheduling && !collapsed && (
-          <HiddenWorkspacesToggle
-            showHidden={showHidden}
-            hiddenCount={hiddenCount}
-            onToggle={() => setShowHidden((value) => !value)}
-          />
         )}
         <SidebarGroupContent hidden={collapsed}>
           <DragDropContext onDragEnd={handleDragEnd}>

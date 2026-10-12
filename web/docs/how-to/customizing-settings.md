@@ -17,7 +17,6 @@ Feature Preview lists experimental features. Each title opens the docs page for 
 | Feature | Docs |
 | --- | --- |
 | Skills installation | [Installing Skills from the Library](/docs/how-to/installing-skills) |
-| Workspace scheduling | [Scheduling Workspaces](/docs/how-to/scheduling-workspaces) |
 | Remote SSH | [Remote SSH Workspaces](/docs/how-to/remote-ssh-workspaces) |
 
 Release builds start from the shipped default. Dev builds start with every preview feature on. Turning a switch off hides the UI and rejects the matching backend commands.

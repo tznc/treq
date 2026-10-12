@@ -644,19 +644,6 @@ export const updateWorkspace = (
       }),
   );
 
-export const scheduleWorkspaces = async (
-  repoPath: string,
-  workspaceIds: number[],
-  hiddenUntil: string | null,
-): Promise<Workspace[]> => {
-  assertLocalOperation(repoPath, "Scheduling workspaces");
-  return invoke("schedule_workspaces", {
-    repoPath,
-    workspaceIds,
-    hiddenUntil,
-  });
-};
-
 export const setWorkspaceTargetBranch = (
   repoPath: string,
   workspacePath: string,

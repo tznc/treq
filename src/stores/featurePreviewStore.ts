@@ -20,7 +20,6 @@ type PreviewFlags = Record<PreviewFeatureId, boolean>;
 function defaultFlags(): PreviewFlags {
   return {
     skillsInstallation: previewFeatureDefault("skillsInstallation"),
-    workspaceScheduling: previewFeatureDefault("workspaceScheduling"),
     remoteSsh: previewFeatureDefault("remoteSsh"),
     linearIntegration: previewFeatureDefault("linearIntegration"),
     trelloIntegration: previewFeatureDefault("trelloIntegration"),
