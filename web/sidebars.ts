@@ -59,6 +59,7 @@ const sidebars: SidebarsConfig = {
         'concepts/terminal-sessions',
         'concepts/commit-management',
         'concepts/github-integration',
+        'concepts/logs',
       ],
     },
     {

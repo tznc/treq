@@ -16,4 +16,5 @@ Treq organizes work around workspaces inside your Git repository. Each workspace
 - [GitHub Integration](/docs/concepts/github-integration) covers pull requests, CI checks, and review threads.
 - [Linear Integration](/docs/concepts/linear-integration) covers Linear issues, auto-kickoff, and workspace creation.
 - [Agent Sessions](/docs/concepts/agent-sessions) covers supported agents, task modes, and workspace isolation.
+- [Logs](/docs/concepts/logs) covers check, agent chat, and app setup logs, and the SQL explorer.
 - [Terminal Sessions](/docs/concepts/terminal-sessions) explains how shells and agents run in a workspace.

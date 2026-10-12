@@ -12,7 +12,7 @@
     "skillsInstallation": false,
     "remoteSsh": false,
     "linearIntegration": false,
-    "logs": false,
+    "logs": true,
     "browser": false
   },
   "env": {

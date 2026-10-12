@@ -26,7 +26,7 @@ describe("preview features", () => {
     expect(FEATURES.skillsInstallation).toBe(false);
     expect(FEATURES.remoteSsh).toBe(false);
     expect(FEATURES.linearIntegration).toBe(false);
-    expect(FEATURES.logs).toBe(false);
+    expect(FEATURES.logs).toBe(true);
     expect(FEATURES.browser).toBe(false);
   });
 
