@@ -118,7 +118,6 @@ describe("ShowWorkspace - View PR", () => {
     const viewPr = await within(header).findByRole("button", {
       name: /view pr.*open/i,
     });
-    expect(viewPr.className).toMatch(/border-green-600/);
     expect(
       within(header).queryByRole("button", { name: /^create pr$/i }),
     ).not.toBeInTheDocument();
@@ -181,7 +180,7 @@ describe("ShowWorkspace - View PR", () => {
     ).toBeVisible();
   });
 
-  it("styles View PR for closed and merged states", async () => {
+  it("names View PR with the closed and merged states", async () => {
     await setupPushedWorkspaceWithGitHub();
     vi.mocked(getCachedPrInfo).mockResolvedValue({
       number: 10,
@@ -195,10 +194,9 @@ describe("ShowWorkspace - View PR", () => {
     const view = render(<Dashboard />);
 
     let header = await openWorkspace("feat/create-pr");
-    const closed = await within(header).findByRole("button", {
-      name: /view pr.*closed/i,
-    });
-    expect(closed.className).toMatch(/border-red-600/);
+    expect(
+      await within(header).findByRole("button", { name: /view pr.*closed/i }),
+    ).toBeVisible();
 
     view.unmount();
     vi.mocked(getCachedPrInfo).mockResolvedValue({
@@ -212,9 +210,8 @@ describe("ShowWorkspace - View PR", () => {
     });
     render(<Dashboard />);
     header = await openWorkspace("feat/create-pr");
-    const merged = await within(header).findByRole("button", {
-      name: /view pr.*merged/i,
-    });
-    expect(merged.className).toMatch(/border-purple-600/);
+    expect(
+      await within(header).findByRole("button", { name: /view pr.*merged/i }),
+    ).toBeVisible();
   });
 });

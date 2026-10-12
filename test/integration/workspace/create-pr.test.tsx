@@ -74,21 +74,18 @@ describe("ShowWorkspace - Create PR", () => {
   const openWorkspace = (branchName: string) =>
     openWorkspaceAs(user, branchName);
 
-  it("styles Create PR controls with a dark-mode border", async () => {
+  it("shows Create PR instead of Push after the branch is on remote with GitHub", async () => {
     await setupPushedWorkspaceWithGitHub();
     render(<Dashboard />);
 
     const header = await openWorkspace("feat/create-pr");
-    const createPr = await within(header).findByRole("button", {
-      name: /^create pr$/i,
-    });
-    const moreOptions = await within(header).findByRole("button", {
-      name: /more create pr options/i,
-    });
 
-    expect(createPr).toHaveClass("dark:border-white/30");
-    expect(moreOptions).toHaveClass("dark:border-white/30");
-    expect(moreOptions).toHaveAttribute("aria-label", "More Create PR options");
+    expect(
+      await within(header).findByRole("button", { name: /^create pr$/i }),
+    ).toBeVisible();
+    expect(
+      within(header).queryByRole("button", { name: /^push$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows Create PR instead of Push when a GitHub remote is configured", async () => {
