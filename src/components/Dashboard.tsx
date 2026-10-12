@@ -2499,13 +2499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return next;
     });
     if (prompt) {
-      addPromptHistory(
-        sessionRepoPath,
-        workspaceId,
-        sessionId,
-        prompt,
-        agent,
-      )
+      addPromptHistory(sessionRepoPath, workspaceId, sessionId, prompt, agent)
         .then(() => {
           void invalidateQueries(["prompt-history"]);
           invalidateQueries(["workspace-starting-prompt"]);
