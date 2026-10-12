@@ -459,7 +459,16 @@ fn test_workspace_list_statuses_includes_last_activity_at_from_wc_tip() {
   treq_lib::core::commit_workspace(&repo.repo_path, older.id, "older commit")
     .expect("Failed to commit older workspace");
 
-  std::thread::sleep(std::time::Duration::from_millis(1100));
+  let unix_secs = || {
+    std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .expect("clock after epoch")
+      .as_secs()
+  };
+  let older_second = unix_secs();
+  while unix_secs() == older_second {
+    std::thread::sleep(std::time::Duration::from_millis(10));
+  }
 
   let newer = treq_lib::core::create_workspace(
     &repo.repo_path,

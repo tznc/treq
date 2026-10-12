@@ -41,6 +41,23 @@ fn wait_for_output(output: &Arc<Mutex<String>>, needle: &str, timeout_ms: u64) -
   }
 }
 
+/// Helper: wait until the buffer holds any output (the shell prompt), or the timeout passes.
+fn wait_for_shell_ready(output: &Arc<Mutex<String>>, timeout_ms: u64) {
+  wait_for_output_len_above(output, 0, timeout_ms);
+}
+
+/// Helper: wait until the buffer grows past `len` bytes (with timeout).
+fn wait_for_output_len_above(output: &Arc<Mutex<String>>, len: usize, timeout_ms: u64) -> bool {
+  let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+  while std::time::Instant::now() < deadline {
+    if output.lock().unwrap().len() > len {
+      return true;
+    }
+    thread::sleep(Duration::from_millis(20));
+  }
+  false
+}
+
 #[cfg(unix)]
 fn is_process_alive(pid: u32) -> bool {
   Command::new("kill")
@@ -159,8 +176,7 @@ fn test_session_lifecycle_and_io() {
     "Process should be alive after create. pid={pid}"
   );
 
-  // Wait for shell prompt to appear
-  thread::sleep(Duration::from_millis(500));
+  wait_for_shell_ready(&output, 5000);
 
   // --- write_to_session ---
   manager
@@ -290,8 +306,9 @@ fn test_multiple_concurrent_sessions() {
   assert!(manager.session_exists("multi-b"));
   assert!(manager.session_exists("multi-c"));
 
-  // Wait for shells to be ready
-  thread::sleep(Duration::from_millis(500));
+  wait_for_shell_ready(&output_a, 5000);
+  wait_for_shell_ready(&output_b, 5000);
+  wait_for_shell_ready(&output_c, 5000);
 
   // Write unique commands to each session
   manager
@@ -361,8 +378,8 @@ fn test_session_isolation() {
     )
     .expect("create session B");
 
-  // Wait for shells
-  thread::sleep(Duration::from_millis(500));
+  wait_for_shell_ready(&output_a, 5000);
+  wait_for_shell_ready(&output_b, 5000);
 
   // Write a unique marker to session A only
   manager
@@ -375,8 +392,16 @@ fn test_session_isolation() {
     "Session A should have the marker"
   );
 
-  // Give session B some time to receive any cross-contaminated output
-  thread::sleep(Duration::from_millis(500));
+  // Round-trip a command through session B so its reader has drained
+  // everything sent before it
+  manager
+    .write_to_session("iso-b", "echo ISOLATION_B_DRAINED\n")
+    .expect("write to B");
+  assert!(
+    wait_for_output(&output_b, "ISOLATION_B_DRAINED", 5000),
+    "Session B output: {}",
+    output_b.lock().unwrap()
+  );
 
   // Session B should NOT contain the marker from session A
   let b_output = output_b.lock().unwrap();
@@ -491,8 +516,7 @@ fn test_echo_suppression_filtering() {
     )
     .expect("create_session should succeed");
 
-  // Wait for shell to be ready
-  thread::sleep(Duration::from_millis(500));
+  wait_for_shell_ready(&output, 5000);
 
   // --- filtered command echo, followed by visible output ---
   // Simulates the real workflow: set_auto_command + write the matching command.
@@ -501,11 +525,13 @@ fn test_echo_suppression_filtering() {
   manager
     .set_auto_command(session_id, suppress_cmd)
     .expect("set_auto_command");
+  let len_before = output.lock().unwrap().len();
   manager
     .write_to_session(session_id, &format!("{}\n", suppress_cmd))
     .expect("write filtered command");
 
-  thread::sleep(Duration::from_millis(300));
+  // Output after the hidden echo (the next prompt) means the filter has resolved
+  wait_for_output_len_above(&output, len_before, 5000);
 
   manager
     .write_to_session(session_id, "echo VISIBLE_AFTER\n")
@@ -531,11 +557,12 @@ fn test_echo_suppression_filtering() {
   manager
     .set_auto_command(session_id, trigger_cmd)
     .expect("set_auto_command");
+  let len_before = output.lock().unwrap().len();
   manager
     .write_to_session(session_id, &format!("{}\n", trigger_cmd))
     .expect("write trigger command");
 
-  thread::sleep(Duration::from_millis(500));
+  wait_for_output_len_above(&output, len_before, 5000);
 
   manager
     .write_to_session(session_id, "echo AFTER_EMPTY_LINES\n")
@@ -590,8 +617,8 @@ fn test_suppress_echo_at_creation_filters_initial_prompt() {
     .write_to_session("test-creation-filter", &format!("{}\n", filter_cmd))
     .expect("write filtered command");
 
-  // Wait for it to be processed
-  thread::sleep(Duration::from_millis(300));
+  // Output after the hidden echo (the next prompt) means the filter has resolved
+  wait_for_output_len_above(&output, 0, 5000);
 
   // Write a follow-up command to verify output works
   manager
