@@ -22,7 +22,7 @@ runs:
     # we care about; including `lts/*` patch versions busted the cache.
     - name: Restore NAPI addon cache
       id: napi-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: |
           target/debug/libtreq_lib.so
@@ -64,7 +64,7 @@ runs:
     - name: Save NAPI addon cache
       if: steps.napi-cache.outputs.cache-hit != 'true'
       continue-on-error: true
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5
       with:
         path: |
           target/debug/libtreq_lib.so

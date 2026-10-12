@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Restrict test private key permissions
         run: chmod 600 src-tauri/tests/fixtures/remote_ssh_it/id_ed25519

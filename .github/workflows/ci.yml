@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Check for Rust and JS/TS changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             rust:
@@ -66,8 +66,9 @@ jobs:
               - ".tool-versions"
               - ".github/workflows/ci.yml"
 
-  # One job for the quick lint/format/type checks. Each check takes seconds;
-  # as separate jobs each one paid ~30s of setup and its own runner.
+  # One job for the quick lint/format/type checks and the unit tests. Each
+  # check takes seconds; as separate jobs each one paid ~30s of setup and its
+  # own runner.
   # Every check runs even if an earlier one fails (!cancelled()).
   verify:
     needs: detect-changes
@@ -79,10 +80,10 @@ jobs:
       JS: ${{ needs.detect-changes.outputs.js_changed }}
       RUST: ${{ needs.detect-changes.outputs.rust_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: npm
@@ -108,6 +109,12 @@ jobs:
         if: ${{ !cancelled() && env.JS == 'true' }}
         run: npm run knip
 
+      # Unit tests: mocked Tauri, no NAPI/jj, about 2 min. They share this
+      # job's npm ci instead of paying for their own runner.
+      - name: test:unit
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run test:unit
+
       - name: Install rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
         uses: dtolnay/rust-toolchain@v1
@@ -132,9 +139,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Unit tests: mocked Tauri, no NAPI/jj. Parallel file execution.
-          - platform: ubuntu-22.04
-            task: test:unit
+          # Unit tests run in the verify job.
           # Integration tests: NAPI + real jj repos. Serial file execution.
           - platform: ubuntu-22.04
             task: test:integration
@@ -145,13 +150,13 @@ jobs:
       # Matrix entries flagged rust: true also run on Rust-only changes.
       RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: env.RUN_TASK == 'true'
 
       - name: Setup Node.js
         if: env.RUN_TASK == 'true'
         id: setup-node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           # Pin major so NAPI cache keys stay stable across LTS patch bumps.
           node-version: "24"
@@ -188,7 +193,7 @@ jobs:
       - name: Restore jj CLI cache
         id: jj-cache
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -238,7 +243,7 @@ jobs:
       - name: Save jj CLI cache
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration' && steps.jj-cache.outputs.cache-hit != 'true')
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
@@ -274,7 +279,7 @@ jobs:
       # older commit is safe to reuse; the key only picks the newest one.
       - name: Vitest module cache
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: node_modules/.experimental-vitest-cache
           key: vitest-fsmc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
@@ -306,7 +311,7 @@ jobs:
     name: test-rust / clippy + test / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@v1
@@ -348,7 +353,7 @@ jobs:
 
       - name: Restore jj CLI cache
         id: jj-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -398,7 +403,7 @@ jobs:
       - name: Save jj CLI cache
         if: steps.jj-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
