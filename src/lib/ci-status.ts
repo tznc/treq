@@ -14,7 +14,7 @@ interface CiStateStyle {
 
 /**
  * Single source of truth for CI status colors/icons/labels, shared between
- * the workspace header's CiStatusIndicator and the GitHub panel's PR detail
+ * the workspace header's Checks popover and the GitHub panel's PR detail
  * "Checks" list, so both surfaces always look and mean the same thing.
  */
 const CI_STATE_STYLES: Record<CiState, CiStateStyle> = {

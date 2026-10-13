@@ -104,7 +104,7 @@ export function LabelChip({ name, color }: GhLabel) {
   );
 }
 
-/** One row of the PR page's "Checks" list, styled identically to the workspace header's CiStatusIndicator. */
+/** One row of the PR page's "Checks" list, styled identically to the workspace header's Checks popover. */
 export function CheckEntryRow({ check }: { check: PrCheckEntry }) {
   const state = ciStateForBucket(check.bucket);
   const { Icon, textClassName } = ciStatusStyle(state);

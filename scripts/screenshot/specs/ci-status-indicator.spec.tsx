@@ -146,7 +146,7 @@ async function setupPushedWorkspace(user: ReturnType<typeof userEvent.setup>) {
   });
 }
 
-it("captures CI passing next to the View PR button", async () => {
+it("captures CI passing in the header Checks button", async () => {
   const user = userEvent.setup();
   stubPr();
   mockGetCachedPrCiStatus.mockResolvedValue(ciStatus());
@@ -154,17 +154,17 @@ it("captures CI passing next to the View PR button", async () => {
   await setupPushedWorkspace(user);
 
   await screen.findByRole("button", { name: /view pr/i });
-  await screen.findByRole("button", { name: /ci passed: 2\/2/i });
+  await screen.findByRole("button", { name: "Checks: GitHub 2/2" });
   await captureDocument(document, {
     name: "ci-status-indicator-01-success",
     expectations: [
-      'A small green outlined pill button reading "2/2" with a check-circle icon sits immediately to the left of the green "View PR" button.',
-      "The two buttons sit on the same row with normal spacing, not overlapping or wrapped onto separate lines.",
+      'The workspace header has an outlined "Checks" button with a green check-circle icon and green "GH 2/2" text.',
+      'The Checks button and the green "View PR" button sit on the same header row, not overlapping or wrapped.',
     ],
   });
 }, 120000);
 
-it("captures CI failing next to the View PR button", async () => {
+it("captures CI failing in the header Checks button", async () => {
   const user = userEvent.setup();
   stubPr();
   mockGetCachedPrCiStatus.mockResolvedValue(
@@ -192,17 +192,17 @@ it("captures CI failing next to the View PR button", async () => {
   await setupPushedWorkspace(user);
 
   await screen.findByRole("button", { name: /view pr/i });
-  await screen.findByRole("button", { name: /ci failed: 1\/2/i });
+  await screen.findByRole("button", { name: "Checks: GitHub 1/2" });
   await captureDocument(document, {
     name: "ci-status-indicator-02-failure",
     expectations: [
-      'A small red outlined pill button reading "1/2" with an X-circle icon sits immediately to the left of the "View PR" button.',
-      "The failure indicator is clearly a different color (red) than a passing indicator would be (green).",
+      'The header "Checks" button shows a red X-circle icon and red "GH 1/2" text.',
+      "The failure state is clearly a different color (red) than a passing state would be (green).",
     ],
   });
 }, 120000);
 
-it("captures CI still running (pending) next to the View PR button", async () => {
+it("captures CI still running (pending) in the header Checks button", async () => {
   const user = userEvent.setup();
   stubPr();
   mockGetCachedPrCiStatus.mockResolvedValue(
@@ -230,12 +230,12 @@ it("captures CI still running (pending) next to the View PR button", async () =>
   await setupPushedWorkspace(user);
 
   await screen.findByRole("button", { name: /view pr/i });
-  await screen.findByRole("button", { name: /ci running: 1\/2/i });
+  await screen.findByRole("button", { name: "Checks: GitHub 1/2" });
   await captureDocument(document, {
     name: "ci-status-indicator-03-pending",
     expectations: [
-      'A small yellow outlined pill button reading "1/2" with a loader icon sits immediately to the left of the "View PR" button.',
-      "The pending indicator is visually distinct in color (yellow) from both the green success and red failure states.",
+      'The header "Checks" button shows a spinning loader icon and yellow "GH 1/2" text.',
+      "The pending state is visually distinct in color (yellow) from both the green success and red failure states.",
     ],
   });
 }, 120000);
@@ -276,9 +276,12 @@ it("captures the CI checks dropdown with time-taken instead of job status text",
   await setupPushedWorkspace(user);
 
   await user.click(
-    await screen.findByRole("button", { name: /ci failed: 1\/3/i }),
+    await screen.findByRole("button", { name: "Checks: GitHub 1/3" }),
   );
-  const checkButtons = screen.getAllByRole("button", {
+  const section = within(
+    await screen.findByRole("region", { name: "GitHub checks" }),
+  );
+  const checkButtons = section.getAllByRole("button", {
     name: /^(test|lint|build)/i,
   });
   expect(checkButtons.map((button) => button.textContent)).toEqual([
@@ -294,7 +297,7 @@ it("captures the CI checks dropdown with time-taken instead of job status text",
     expectations: [
       'An open Checks popover lists rows as failed → pending → success: "test" (5m 56s), then "lint" (45s), then "build" (12s).',
       "Each row still shows a colored status icon (red, yellow, green) so status is conveyed by icon, not label text.",
-      'The popover header reads "Checks" and sits near the workspace header CI pill that triggered it.',
+      'The popover section title reads "GitHub checks · 1/3" and the popover opens below the header Checks button.',
     ],
   });
 }, 120000);

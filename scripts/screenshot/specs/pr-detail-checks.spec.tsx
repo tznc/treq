@@ -8,7 +8,7 @@ import { captureDocument } from "../capture";
 // (ghViewPr / getPrChecksForPr), which the desktop harness can't reach in
 // this environment. Those two boundaries are stubbed; the panel and its
 // "Checks" section -- which shares its data shape, rollup, and styling with
-// the workspace header's CiStatusIndicator -- are the real components.
+// the workspace header's Checks popover -- are the real components.
 const api = vi.hoisted(() => ({
 	ghViewPr: vi.fn(),
 	getPrChecksForPr: vi.fn(),

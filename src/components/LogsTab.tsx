@@ -17,19 +17,10 @@ import { LogFeed, type PrefixColumn } from "./LogFeed";
 import { LogsTimeseriesChart } from "./LogsTimeseriesChart";
 import { buildLogLinesPrompt } from "../lib/logs-prompt";
 import { agentChatToLogRecords } from "../lib/agentChatLogs";
-import {
-  type ChecksTarget,
-  useWorkspaceChecks,
-} from "../hooks/useWorkspaceChecks";
-import {
-  CheckWorkflowFilter,
-  LogsChecksActions,
-} from "./checks/LogsChecksControls";
+import { CheckWorkflowFilter } from "./checks/CheckWorkflowFilter";
 
 interface Props {
   repoPath: string;
-  /** Workspace the check run controls run against. */
-  checksTarget?: ChecksTarget | null;
   onSendToAgent?: (prompt: string) => void;
 }
 
@@ -37,7 +28,7 @@ type View = "browse" | "explorer";
 type SourceGroup = "checks" | "agent-chats" | "app-setup";
 
 /** Repo-level check and agent logs, plus app-level setup script logs. */
-export function LogsTab({ repoPath, checksTarget, onSendToAgent }: Props) {
+export function LogsTab({ repoPath, onSendToAgent }: Props) {
   const [source, setSource] = useState<SourceGroup>("checks");
   const [view, setView] = useState<View>("browse");
   const browsing = source === "checks" && view === "browse";
@@ -97,11 +88,7 @@ export function LogsTab({ repoPath, checksTarget, onSendToAgent }: Props) {
           prefixColumns={[RUN_COLUMN]}
         />
       ) : browsing ? (
-        <ChecksLogs
-          repoPath={repoPath}
-          checksTarget={checksTarget ?? null}
-          onSendToAgent={onSendToAgent}
-        />
+        <ChecksLogs repoPath={repoPath} onSendToAgent={onSendToAgent} />
       ) : (
         <LogsSqlExplorer repoPath={repoPath} onSendToAgent={onSendToAgent} />
       )}
@@ -109,18 +96,15 @@ export function LogsTab({ repoPath, checksTarget, onSendToAgent }: Props) {
   );
 }
 
-/** Repo-wide check logs, filterable by workflow, with run controls. */
+/** Repo-wide check logs, filterable by workflow. */
 function ChecksLogs({
   repoPath,
-  checksTarget,
   onSendToAgent,
 }: {
   repoPath: string;
-  checksTarget: ChecksTarget | null;
   onSendToAgent?: (prompt: string) => void;
 }) {
   const [workflow, setWorkflow] = useState("");
-  const checks = useWorkspaceChecks(checksTarget);
   // Same key as useWorkspaceChecks, so the list is shared when both fetch.
   const { data: workflows = [] } = useSWR(["workflows", repoPath], () =>
     listWorkflows(repoPath),
@@ -141,18 +125,13 @@ function ChecksLogs({
         })
       }
       filterControls={
-        <>
-          {workflows.length > 0 && (
-            <CheckWorkflowFilter
-              workflows={workflows}
-              value={workflow}
-              onChange={setWorkflow}
-            />
-          )}
-          {checksTarget && (
-            <LogsChecksActions checks={checks} workflow={workflow} />
-          )}
-        </>
+        workflows.length > 0 && (
+          <CheckWorkflowFilter
+            workflows={workflows}
+            value={workflow}
+            onChange={setWorkflow}
+          />
+        )
       }
       searchLabel="Search logs"
       testId="repo-logs-output"
@@ -160,7 +139,7 @@ function ChecksLogs({
       emptyMessage={
         workflow
           ? "No logs recorded for this check yet."
-          : "No check logs recorded yet. Run a workflow check from a workspace to populate this table."
+          : "No check logs recorded yet. Run checks from the Checks button in a workspace header to populate this table."
       }
       promptLabel="my check logs"
       onSendToAgent={onSendToAgent}

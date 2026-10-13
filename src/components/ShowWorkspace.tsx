@@ -86,7 +86,6 @@ import { BrowserPanel } from "./browser-panel/BrowserPanel";
 import { useReviewSubView } from "./browser-panel/useReviewSubView";
 import { LocDiffMarker } from "./LocDiffMarker";
 import { LogsTab } from "./LogsTab";
-import { CiStatusIndicator } from "./CiStatusIndicator";
 import { CommitDiffViewer } from "./CommitDiffViewer";
 import { CreatePrButtonGroup } from "./CreatePrButtonGroup";
 import { FileBrowser } from "./FileBrowser";
@@ -1427,7 +1426,6 @@ export const ShowWorkspace = ({
           <LogsTab
             key={logsKey}
             repoPath={effectiveRepoPath ?? ""}
-            checksTarget={checksTarget}
             onSendToAgent={handleSendLogsToAgent}
           />
         ) : reviewSubView.showBrowser ? (
@@ -1664,10 +1662,6 @@ export const ShowWorkspace = ({
                 workspace.branch_name !== defaultBranch &&
                 effectiveRepoPath && (
                   <>
-                    <CiStatusIndicator
-                      repoPath={effectiveRepoPath}
-                      branchName={workspace.branch_name}
-                    />
                     <ViewPrButton
                       repoPath={effectiveRepoPath}
                       branchName={workspace.branch_name}
@@ -1747,6 +1741,11 @@ export const ShowWorkspace = ({
               {checksTarget && (
                 <WorkspaceChecksButton
                   target={checksTarget}
+                  prBranch={
+                    workspace && workspace.branch_name !== defaultBranch
+                      ? workspace.branch_name
+                      : undefined
+                  }
                   onOpenLogs={logsEnabled ? openCheckLogs : undefined}
                 />
               )}

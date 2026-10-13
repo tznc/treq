@@ -48,7 +48,7 @@ Use **New** on the PR list when you need a manual title, body, base, and head in
 
 ## Read CI Status
 
-When CI checks are available, Treq will display the status of each check within the PR details panel.
+When CI checks are available, Treq shows the status of each check in the PR detail panel. In a workspace whose branch has a pull request, the **Checks** button in the header shows a count such as `GH 4/5`, and its popover has a **GitHub checks** section that lists each check.
 
 Treq does not merge a PR automatically once CI checks pass.
 

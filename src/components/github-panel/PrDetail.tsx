@@ -11,7 +11,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { CiStatusButton } from "../CiStatusIndicator";
+import { CiStatusButton } from "../CiStatusButton";
 import {
   invalidatePrStatuses,
   usePrChecksForPr,

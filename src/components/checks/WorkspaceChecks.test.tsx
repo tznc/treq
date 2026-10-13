@@ -1,6 +1,6 @@
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "../../../test/test-utils";
+import { render, screen, waitFor, within } from "../../../test/test-utils";
 import * as api from "../../lib/api";
 import type { RunSummary, Workspace, WorkflowInfo } from "../../lib/api-types";
 import { useWorkspaceChecks } from "../../hooks/useWorkspaceChecks";
@@ -8,7 +8,7 @@ import { useOpenLogsRequest } from "../../lib/open-logs-request";
 import { useFeaturePreviewStore } from "../../stores/featurePreviewStore";
 import { CommandPalette } from "../CommandPalette";
 import { PrWorkspaceChecks } from "../github-panel/PrWorkspaceChecks";
-import { WorkspaceChecksIndicator } from "./WorkspaceChecksIndicator";
+import { ChecksPopover } from "./ChecksPopover";
 import { WorkspaceChecksPanel } from "./WorkspaceChecksPanel";
 
 vi.mock("../../lib/api", async () => {
@@ -65,7 +65,7 @@ function Harness({ indicator }: { indicator?: () => void }) {
   const checks = useWorkspaceChecks(TARGET);
   return (
     <>
-      <WorkspaceChecksIndicator checks={checks} onOpenDetails={indicator} />
+      <ChecksPopover checks={checks} onOpenLogs={indicator} />
       <WorkspaceChecksPanel checks={checks} />
     </>
   );
@@ -147,28 +147,55 @@ describe("WorkspaceChecksPanel", () => {
   });
 });
 
-describe("WorkspaceChecksIndicator", () => {
-  it("summarizes the latest runs, runs all and opens details", async () => {
+describe("ChecksPopover", () => {
+  it("summarizes the latest runs, runs all and opens logs", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
     render(<Harness indicator={onOpen} />);
 
-    const indicator = await screen.findByTestId("workspace-checks-indicator");
-    await waitFor(() => expect(indicator.dataset.state).toBe("failed"));
+    const trigger = await screen.findByTestId("workspace-checks-button");
+    await waitFor(() => expect(trigger.dataset.checksState).toBe("failed"));
+    expect(trigger.textContent).toContain("0/2");
+    await user.click(trigger);
+
+    const popover = await screen.findByTestId("checks-popover");
+    const rows = within(popover).getAllByTestId("checks-popover-workflow");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "CIrun #9 failed",
+      "Lintnot run",
+    ]);
     await user.click(
-      screen.getByRole("button", { name: "Checks 0/2, open in Logs" }),
+      within(popover).getByRole("button", { name: "Run all checks" }),
+    );
+    expect(api.runWorkflow).toHaveBeenCalledTimes(2);
+
+    await user.click(
+      within(popover).getByRole("button", { name: "View logs" }),
     );
     expect(onOpen).toHaveBeenCalledOnce();
-
-    await user.click(screen.getByRole("button", { name: "Run all checks" }));
-    expect(api.runWorkflow).toHaveBeenCalledTimes(2);
   });
 
-  it("renders nothing without workflows", async () => {
+  it("offers Trust Repository and disables Run all while untrusted", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.isRepoTrusted).mockResolvedValue(false);
+    render(<Harness />);
+    await user.click(await screen.findByTestId("workspace-checks-button"));
+    const popover = await screen.findByTestId("checks-popover");
+    const runAll = within(popover).getByRole("button", {
+      name: "Run all checks",
+    });
+    expect((runAll as HTMLButtonElement).disabled).toBe(true);
+    await user.click(
+      await within(popover).findByRole("button", { name: "Trust Repository" }),
+    );
+    expect(api.trustRepo).toHaveBeenCalledWith("/repo");
+  });
+
+  it("renders nothing without workflows or PR checks", async () => {
     vi.mocked(api.listWorkflows).mockResolvedValue([]);
     render(<Harness />);
     await screen.findByText(/No workflows found/);
-    expect(screen.queryByTestId("workspace-checks-indicator")).toBeNull();
+    expect(screen.queryByTestId("workspace-checks-button")).toBeNull();
   });
 });
 

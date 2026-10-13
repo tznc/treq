@@ -2,14 +2,27 @@ import { waitFor } from "@testing-library/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CiStatusIndicator } from "./CiStatusIndicator";
-import * as api from "../lib/api";
-import type { PrCiStatus } from "../lib/api-types";
-import { render, screen } from "../../test/test-utils";
+import { WorkspaceChecksButton } from "./WorkspaceChecksButton";
+import * as api from "../../lib/api";
+import type { PrCiStatus } from "../../lib/api-types";
+import { render, screen, within } from "../../../test/test-utils";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const TARGET = { repoPath: "/repo", workspaceId: 1, workspacePath: "/ws" };
+
+// No Treq workflows, so only the PR's GitHub checks show.
+function renderButton() {
+  vi.spyOn(api, "listWorkflows").mockResolvedValue([]);
+  vi.spyOn(api, "isRepoTrusted").mockResolvedValue(true);
+  vi.spyOn(api, "getWorkspaceSetupStatus").mockResolvedValue({
+    configured: false,
+    status: "none",
+  } as never);
+  render(<WorkspaceChecksButton target={TARGET} prBranch="feat" />);
+}
 
 const baseStatus: PrCiStatus = {
   state: "success",
@@ -28,13 +41,13 @@ const baseStatus: PrCiStatus = {
   ],
 };
 
-describe("CiStatusIndicator", () => {
+describe("WorkspaceChecksButton GitHub checks", () => {
   it("renders nothing while there is no CI status", async () => {
     const spy = vi.spyOn(api, "getCachedPrCiStatus").mockResolvedValue(null);
     vi.spyOn(api, "startPrStatusPolling").mockResolvedValue(undefined);
     vi.spyOn(api, "refreshPrBranchStatus").mockResolvedValue(undefined);
 
-    render(<CiStatusIndicator repoPath="/repo" branchName="feat" />);
+    renderButton();
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
@@ -44,15 +57,15 @@ describe("CiStatusIndicator", () => {
     vi.spyOn(api, "startPrStatusPolling").mockResolvedValue(undefined);
     vi.spyOn(api, "refreshPrBranchStatus").mockResolvedValue(undefined);
 
-    render(<CiStatusIndicator repoPath="/repo" branchName="feat" />);
+    renderButton();
 
-    expect(await screen.findByText("2/2")).toBeInTheDocument();
+    expect(await screen.findByText("GH 2/2")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /CI passed: 2\/2/ }),
+      screen.getByRole("button", { name: "Checks: GitHub 2/2" }),
     ).toBeInTheDocument();
   });
 
-  it("shows failing check names when CI failed", async () => {
+  it("shows the failed state when CI failed", async () => {
     vi.spyOn(api, "getCachedPrCiStatus").mockResolvedValue({
       ...baseStatus,
       state: "failure",
@@ -66,11 +79,12 @@ describe("CiStatusIndicator", () => {
     vi.spyOn(api, "startPrStatusPolling").mockResolvedValue(undefined);
     vi.spyOn(api, "refreshPrBranchStatus").mockResolvedValue(undefined);
 
-    render(<CiStatusIndicator repoPath="/repo" branchName="feat" />);
+    renderButton();
 
     expect(
-      await screen.findByRole("button", { name: /CI failed: 1\/2/ }),
-    ).toBeInTheDocument();
+      await screen.findByTestId("workspace-checks-button"),
+    ).toHaveTextContent("GH 1/2");
+    expect(screen.getByTestId("run-status-failed")).toBeInTheDocument();
   });
 
   it("lists checks as failed, then pending, then success", async () => {
@@ -106,12 +120,15 @@ describe("CiStatusIndicator", () => {
     vi.spyOn(api, "startPrStatusPolling").mockResolvedValue(undefined);
     vi.spyOn(api, "refreshPrBranchStatus").mockResolvedValue(undefined);
 
-    render(<CiStatusIndicator repoPath="/repo" branchName="feat" />);
+    renderButton();
     await user.click(
-      await screen.findByRole("button", { name: /CI failed: 1\/3/ }),
+      await screen.findByRole("button", { name: "Checks: GitHub 1/3" }),
     );
 
-    const checkButtons = screen.getAllByRole("button", {
+    const section = within(
+      await screen.findByRole("region", { name: "GitHub checks" }),
+    );
+    const checkButtons = section.getAllByRole("button", {
       name: /^(test|lint|build)/i,
     });
     expect(checkButtons.map((button) => button.textContent)).toEqual([
@@ -122,7 +139,7 @@ describe("CiStatusIndicator", () => {
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     expect(screen.queryByText("Success")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^test/i }));
+    await user.click(section.getByRole("button", { name: /^test/i }));
     expect(openUrl).toHaveBeenCalledWith("https://x/test");
   });
 });
