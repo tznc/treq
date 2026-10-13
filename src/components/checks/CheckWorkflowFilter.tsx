@@ -1,29 +1,27 @@
 import type { WorkflowInfo } from "../../lib/api-types";
+import { MultiSelectFilter } from "../MultiSelectFilter";
 
-/** Picks which workflow's check logs to show. An empty value means all. */
+/** Picks which workflows' check logs to show. Nothing ticked means all. */
 export function CheckWorkflowFilter({
   workflows,
   value,
   onChange,
 }: {
   workflows: WorkflowInfo[];
-  value: string;
-  onChange: (filename: string) => void;
+  /** Selected workflow filenames. */
+  value: string[];
+  onChange: (filenames: string[]) => void;
 }) {
   return (
-    <select
-      aria-label="Filter by check"
-      data-testid="check-workflow-filter"
-      className="h-8 rounded-md border bg-background px-2 text-sm min-w-[130px]"
+    <MultiSelectFilter
+      options={workflows.map((wf) => ({ value: wf.filename, label: wf.name }))}
       value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">All checks</option>
-      {workflows.map((wf) => (
-        <option key={wf.filename} value={wf.filename}>
-          {wf.name}
-        </option>
-      ))}
-    </select>
+      onChange={onChange}
+      allLabel="All checks"
+      pluralNoun="checks"
+      ariaLabel="Filter by check"
+      testId="check-workflow-filter"
+      contentClassName="w-48"
+    />
   );
 }

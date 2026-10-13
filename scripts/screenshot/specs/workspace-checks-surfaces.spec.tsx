@@ -80,12 +80,25 @@ jobs:
         run: "echo building docs; echo docs-built"
 `;
 
+const AUDIT_WORKFLOW = `
+name: Security audit
+on:
+  workflow_dispatch: {}
+jobs:
+  audit:
+    name: Audit
+    steps:
+      - name: Audit deps
+        run: "echo auditing deps; echo audit-clean"
+`;
+
 const BRANCH = "feat/checks-demo";
 
 async function openWorkspaceWithChecks() {
   const { repoPath } = createTestRepo(false);
   await writeRepoFile(repoPath, ".treq/workflows/ci.yaml", WORKFLOW);
   await writeRepoFile(repoPath, ".treq/workflows/ci2.yaml", DOCS_WORKFLOW);
+  await writeRepoFile(repoPath, ".treq/workflows/ci3.yaml", AUDIT_WORKFLOW);
   openRepo(repoPath);
   await createWorkspace(repoPath, BRANCH);
 
@@ -121,7 +134,7 @@ it("captures checks in the header popover, Logs tab and command palette", async 
   await captureDocument(document, {
     name: "workspace-checks-02-popover-untrusted",
     expectations: [
-      'An open popover below the Checks button has a "Treq checks" section listing "Lint and Test" and "Docs", each reading "not run".',
+      'An open popover below the Checks button has a "Treq checks" section listing "Lint and Test", "Docs" and "Security audit", each reading "not run".',
       'An amber "Trust Repository" button sits next to a disabled "Run all" button.',
       'A "View logs" link sits at the right of the "Treq checks" title.',
     ],
@@ -144,8 +157,8 @@ it("captures checks in the header popover, Logs tab and command palette", async 
   await captureDocument(document, {
     name: "workspace-checks-03-popover-passed",
     expectations: [
-      'Both popover rows show a green check icon and read "run #N passed", each with a re-run icon button.',
-      'The header button reads "Checks 2/2" with a green check icon.',
+      'All three popover rows show a green check icon and read "run #N passed", each with a re-run icon button.',
+      'The header button reads "Checks 3/3" with a green check icon.',
       'The "Trust Repository" button is gone and "Run all" is enabled.',
     ],
   });
@@ -153,27 +166,58 @@ it("captures checks in the header popover, Logs tab and command palette", async 
   await user.click(within(popover).getByRole("button", { name: "View logs" }));
   await screen.findByText("all passed", {}, { timeout: 20_000 });
   await screen.findByText("docs-built", {}, { timeout: 20_000 });
+  await screen.findByText("audit-clean", {}, { timeout: 20_000 });
 
   await captureDocument(document, {
     name: "workspace-checks-04-logs-all-checks",
     expectations: [
-      'The Logs filter bar has the level filter, a check dropdown reading "All checks" and a search box, with no run, trust or setup buttons.',
-      'The log feed shows lines from both workflows: "all passed" (jobs lint/test) and "docs-built" (job build-docs).',
+      'The Logs filter bar has the level filter, a check filter button reading "All checks" with a chevron, and a search box, with no run, trust or setup buttons.',
+      'The log feed shows lines from all three workflows: "all passed" (lint/test), "docs-built" (build-docs) and "audit-clean" (audit).',
       "The Checks popover is closed.",
     ],
   });
 
-  await user.selectOptions(
-    screen.getByRole("combobox", { name: "Filter by check" }),
-    "ci2.yaml",
+  const filter = screen.getByRole("button", { name: "Filter by check" });
+  await user.click(filter);
+  await user.click(
+    await screen.findByRole("menuitemcheckbox", { name: "Docs" }),
   );
   await waitFor(() => expect(screen.queryByText("all passed")).toBeNull());
 
   await captureDocument(document, {
-    name: "workspace-checks-05-logs-one-check",
+    name: "workspace-checks-05-logs-check-menu",
     expectations: [
-      'The check dropdown reads "Docs" with no run button beside it.',
-      'The log feed only shows lines from job build-docs, such as "docs-built"; no lint or test output.',
+      'A menu below the check filter lists "Lint and Test", "Docs" and "Security audit", with only "Docs" ticked.',
+      'The check filter button reads "Docs".',
+    ],
+  });
+
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(screen.queryByRole("menuitemcheckbox")).toBeNull(),
+  );
+
+  await captureDocument(document, {
+    name: "workspace-checks-06-logs-one-check",
+    expectations: [
+      'The check filter button reads "Docs" and the menu is closed.',
+      'The log feed only shows lines from job build-docs, such as "docs-built"; no lint, test or audit output.',
+    ],
+  });
+
+  await user.click(filter);
+  await user.click(
+    await screen.findByRole("menuitemcheckbox", { name: "Security audit" }),
+  );
+  await user.keyboard("{Escape}");
+  await screen.findByText("audit-clean", {}, { timeout: 20_000 });
+  expect(screen.queryByText("all passed")).toBeNull();
+
+  await captureDocument(document, {
+    name: "workspace-checks-07-logs-two-checks",
+    expectations: [
+      'The check filter button reads "2 checks".',
+      'The log feed shows "docs-built" (build-docs) and "audit-clean" (audit) lines, and no lint or test output such as "all passed".',
     ],
   });
 
@@ -183,7 +227,7 @@ it("captures checks in the header popover, Logs tab and command palette", async 
   await screen.findByText("Run check: Lint and Test");
 
   await captureDocument(document, {
-    name: "workspace-checks-06-command-palette",
+    name: "workspace-checks-08-command-palette",
     // The checks commands sit below the fold of the palette list.
     scrollIntoView: "text=Run check: Lint and Test",
     expectations: [
@@ -215,10 +259,10 @@ it("captures Treq and GitHub checks together in the header popover", async () =>
   await within(popover).findByRole("region", { name: "GitHub checks" });
 
   await captureDocument(document, {
-    name: "workspace-checks-07-popover-with-github",
+    name: "workspace-checks-09-popover-with-github",
     expectations: [
       'The header button reads "Checks not run" followed by red "GH 2/3", with a red X-circle icon.',
-      'The popover shows a "Treq checks" section (two workflows, Trust Repository, Run all) above a "GitHub checks · 2/3" section.',
+      'The popover shows a "Treq checks" section (three workflows, Trust Repository, Run all) above a "GitHub checks · 2/3" section.',
       'The GitHub section lists "e2e" first with a red icon and 5m 56s, then "build" and "lint" with green icons.',
     ],
   });
@@ -286,7 +330,7 @@ it("captures the Treq checks section in the GitHub PR detail panel", async () =>
   );
 
   await captureDocument(document, {
-    name: "workspace-checks-08-pr-detail",
+    name: "workspace-checks-10-pr-detail",
     scrollIntoView: '[data-testid="pr-treq-checks"]',
     expectations: [
       'The PR detail panel has a "Treq checks" section listing the "Lint and Test" workflow with a passed status and a Re-run button.',

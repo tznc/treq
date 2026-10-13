@@ -14,7 +14,7 @@ The **Log source** menu at the top of the tab picks what to show.
 
 | Source | What it shows |
 | --- | --- |
-| Checks | Output from workflow checks run in any workspace of the repository, with run number and job. A **Filter by check** dropdown picks one workflow or **All checks**. To run checks, use the **Checks** button in the workspace header. See [Workspace Checks](/docs/concepts/checks). |
+| Checks | Output from workflow checks run in any workspace of the repository, with run number and job. A **Filter by check** menu picks one or more workflows. With none ticked it reads **All checks**. To run checks, use the **Checks** button in the workspace header. See [Workspace Checks](/docs/concepts/checks). |
 | Agent | The recorded conversation of one agent terminal. Pick the terminal from the **Agent terminal** menu. Shell terminals are not recorded. |
 | App setup | Output from the app setup script set in Application settings, with run number. |
 
@@ -22,7 +22,7 @@ The **Log source** menu at the top of the tab picks what to show.
 
 Each source shows a log feed. Every line has a timestamp, the source's own columns (run, job, or role), a level, and the message. Errors show in red and warnings in amber.
 
-For checks and app setup logs, **Filter by level** limits the feed to the levels you choose, and the search box matches text across all runs. For checks, **Filter by check** keeps only lines from runs of the chosen workflow, in any workspace. It defaults to **All checks**. The agent source searches only the selected conversation.
+For checks and app setup logs, **Filter by level** limits the feed to the levels you choose, and the search box matches text across all runs. For checks, **Filter by check** keeps only lines from runs of the workflows you tick, in any workspace. Tick several to see them together. With none ticked it reads **All checks** and shows every workflow. The agent source searches only the selected conversation.
 
 Check logs also show a stacked bar chart above the feed. It counts info, warn, and error lines per second, using the same filters as the feed.
 

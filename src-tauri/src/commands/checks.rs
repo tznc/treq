@@ -88,7 +88,7 @@ pub async fn get_run_logs(
       levels,
       search,
       step_index,
-      workflow: None,
+      workflows: None,
       limit,
       offset,
     };
@@ -103,7 +103,7 @@ pub async fn get_repo_logs(
   repo_path: String,
   levels: Option<Vec<String>>,
   search: Option<String>,
-  workflow: Option<String>,
+  workflows: Option<Vec<String>>,
   limit: Option<i64>,
   offset: Option<i64>,
 ) -> Result<Vec<LogRecordView>, String> {
@@ -112,7 +112,7 @@ pub async fn get_repo_logs(
       levels,
       search,
       step_index: None,
-      workflow,
+      workflows,
       limit,
       offset,
     };
@@ -127,7 +127,7 @@ pub async fn get_log_timeseries(
   repo_path: String,
   levels: Option<Vec<String>>,
   search: Option<String>,
-  workflow: Option<String>,
+  workflows: Option<Vec<String>>,
   bucket_seconds: Option<i64>,
 ) -> Result<Vec<LogBucket>, String> {
   tauri::async_runtime::spawn_blocking(move || {
@@ -135,7 +135,7 @@ pub async fn get_log_timeseries(
       levels,
       search,
       step_index: None,
-      workflow,
+      workflows,
       limit: None,
       offset: None,
     };

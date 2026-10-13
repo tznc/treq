@@ -113,10 +113,10 @@ describe("Workspace checks", () => {
     await trustAndRunAll(repoPath);
 
     await user.click(await screen.findByRole("tab", { name: /^Logs/ }));
-    const filter = (await screen.findByRole("combobox", {
+    const filter = await screen.findByRole("button", {
       name: "Filter by check",
-    })) as HTMLSelectElement;
-    expect(filter.value).toBe("");
+    });
+    expect(filter.textContent).toContain("All checks");
     expect(
       within(screen.getByTestId("logs-tab")).queryByRole("button", {
         name: /Run all/,
@@ -126,13 +126,31 @@ describe("Workspace checks", () => {
     await screen.findByText("hello-from-checks", {}, { timeout: 20_000 });
     await screen.findByText("hello-from-docs", {}, { timeout: 20_000 });
 
-    await user.selectOptions(filter, "docs.yaml");
+    await user.click(filter);
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Docs" }),
+    );
+    expect(filter.textContent).toContain("Docs");
     await waitFor(() =>
       expect(screen.queryByText("hello-from-checks")).toBeNull(),
     );
     expect(screen.getByText("hello-from-docs")).toBeTruthy();
 
-    await user.selectOptions(filter, "");
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Logging CI" }),
+    );
+    expect(filter.textContent).toContain("2 checks");
+    await screen.findByText("hello-from-checks", {}, { timeout: 20_000 });
+    expect(screen.getByText("hello-from-docs")).toBeTruthy();
+
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Docs" }),
+    );
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Logging CI" }),
+    );
+    expect(filter.textContent).toContain("All checks");
     await screen.findByText("hello-from-checks");
+    await screen.findByText("hello-from-docs");
   }, 40_000);
 });

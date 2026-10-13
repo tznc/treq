@@ -96,7 +96,7 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
   );
 }
 
-/** Repo-wide check logs, filterable by workflow. */
+/** Repo-wide check logs, filterable by one or more workflows. */
 function ChecksLogs({
   repoPath,
   onSendToAgent,
@@ -104,23 +104,22 @@ function ChecksLogs({
   repoPath: string;
   onSendToAgent?: (prompt: string) => void;
 }) {
-  const [workflow, setWorkflow] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
   // Same key as useWorkspaceChecks, so the list is shared when both fetch.
   const { data: workflows = [] } = useSWR(["workflows", repoPath], () =>
     listWorkflows(repoPath),
   );
-  const filter = workflow || undefined;
 
   return (
     <FilteredLogs
-      swrKey={["repo-logs", repoPath, workflow]}
+      swrKey={["repo-logs", repoPath, selected.join("\n")]}
       fetchLogs={(filters) =>
-        getRepoLogs(repoPath, { ...filters, workflow: filter })
+        getRepoLogs(repoPath, { ...filters, workflows: selected })
       }
       fetchBuckets={(filters) =>
         getLogTimeseries(repoPath, {
           ...filters,
-          workflow: filter,
+          workflows: selected,
           bucketSeconds: 1,
         })
       }
@@ -128,8 +127,8 @@ function ChecksLogs({
         workflows.length > 0 && (
           <CheckWorkflowFilter
             workflows={workflows}
-            value={workflow}
-            onChange={setWorkflow}
+            value={selected}
+            onChange={setSelected}
           />
         )
       }
@@ -137,8 +136,8 @@ function ChecksLogs({
       testId="repo-logs-output"
       lineTestId="repo-log-line"
       emptyMessage={
-        workflow
-          ? "No logs recorded for this check yet."
+        selected.length > 0
+          ? "No logs recorded for the selected checks yet."
           : "No check logs recorded yet. Run checks from the Checks button in a workspace header to populate this table."
       }
       promptLabel="my check logs"

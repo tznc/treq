@@ -57,11 +57,15 @@ describe("Home repo Logs tab", () => {
 
     await openLogsTab();
 
-    const filter = (await screen.findByRole("combobox", {
+    const filter = await screen.findByRole("button", {
       name: "Filter by check",
-    })) as HTMLSelectElement;
-    expect(filter.value).toBe("");
-    expect(within(filter).getByRole("option", { name: "Lint" })).toBeTruthy();
+    });
+    expect(filter.textContent).toContain("All checks");
+    await user.click(filter);
+    expect(
+      await screen.findByRole("menuitemcheckbox", { name: "Lint" }),
+    ).toBeTruthy();
+    await user.keyboard("{Escape}");
     expect(screen.queryByTestId("logs-checks-actions")).toBeNull();
   });
 

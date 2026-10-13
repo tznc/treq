@@ -107,8 +107,8 @@ export const getRepoLogs = async (
   options?: {
     levels?: string[];
     search?: string;
-    /** Workflow filename; keeps only logs from that workflow's runs. */
-    workflow?: string;
+    /** Workflow filenames; keeps logs from the runs of any of them. Empty means all. */
+    workflows?: string[];
     limit?: number;
     offset?: number;
   },
@@ -118,7 +118,7 @@ export const getRepoLogs = async (
     repoPath,
     levels: options?.levels ?? null,
     search: options?.search ?? null,
-    workflow: options?.workflow ?? null,
+    workflows: options?.workflows ?? null,
     limit: options?.limit ?? null,
     offset: options?.offset ?? null,
   });
@@ -139,7 +139,7 @@ export const getLogTimeseries = async (
   options?: {
     levels?: string[];
     search?: string;
-    workflow?: string;
+    workflows?: string[];
     bucketSeconds?: number;
   },
 ): Promise<LogBucket[]> => {
@@ -148,7 +148,7 @@ export const getLogTimeseries = async (
     repoPath,
     levels: options?.levels ?? null,
     search: options?.search ?? null,
-    workflow: options?.workflow ?? null,
+    workflows: options?.workflows ?? null,
     bucketSeconds: options?.bucketSeconds ?? null,
   });
 };

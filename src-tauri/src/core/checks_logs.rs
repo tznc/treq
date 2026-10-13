@@ -216,8 +216,9 @@ pub struct LogQuery {
   pub levels: Option<Vec<String>>,
   pub search: Option<String>,
   pub step_index: Option<i64>,
-  /// Workflow filename; keeps only records from that workflow's runs.
-  pub workflow: Option<String>,
+  /// Workflow filenames; keeps only records from the runs of any of them.
+  /// An empty or absent list means "no workflow filter".
+  pub workflows: Option<Vec<String>>,
   pub limit: Option<i64>,
   pub offset: Option<i64>,
 }
@@ -630,16 +631,26 @@ fn build_where_clause(query: &LogQuery, extra: &[String]) -> String {
   }
 }
 
-/// Condition limiting records to the runs of `query.workflow`, if set.
+/// Condition limiting records to the runs of any workflow in
+/// `query.workflows`, if the list is non-empty.
 ///
-/// Log records carry only the run id, so the workflow is resolved to its run
+/// Log records carry only the run id, so each workflow is resolved to its run
 /// ids through the local db. This keeps logs written before the filter
 /// existed filterable too.
 fn workflow_conditions(repo_path: &str, query: &LogQuery) -> Result<Vec<String>, String> {
-  let Some(filename) = query.workflow.as_ref().filter(|w| !w.is_empty()) else {
+  let filenames: Vec<&String> = query
+    .workflows
+    .iter()
+    .flatten()
+    .filter(|w| !w.is_empty())
+    .collect();
+  if filenames.is_empty() {
     return Ok(vec![]);
-  };
-  let ids = crate::local_db::list_workflow_run_ids(repo_path, filename)?;
+  }
+  let mut ids = Vec::new();
+  for filename in filenames {
+    ids.extend(crate::local_db::list_workflow_run_ids(repo_path, filename)?);
+  }
   if ids.is_empty() {
     return Ok(vec!["0".to_string()]);
   }
@@ -1270,7 +1281,7 @@ mod tests {
     write_workflow_run_line(&repo, "docs.yaml", "from docs");
 
     let query = LogQuery {
-      workflow: Some("docs.yaml".to_string()),
+      workflows: Some(vec!["docs.yaml".to_string()]),
       ..Default::default()
     };
     let result = query_repo_logs(&repo, &query).unwrap();
@@ -1282,13 +1293,49 @@ mod tests {
   }
 
   #[test]
+  fn test_query_repo_logs_unions_selected_workflows() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    write_workflow_run_line(&repo, "ci.yaml", "from ci");
+    write_workflow_run_line(&repo, "docs.yaml", "from docs");
+    write_workflow_run_line(&repo, "lint.yaml", "from lint");
+
+    let query = LogQuery {
+      workflows: Some(vec!["ci.yaml".to_string(), "lint.yaml".to_string()]),
+      ..Default::default()
+    };
+    let mut bodies: Vec<String> = query_repo_logs(&repo, &query)
+      .unwrap()
+      .into_iter()
+      .map(|r| r.body)
+      .collect();
+    bodies.sort();
+    assert_eq!(bodies, vec!["from ci", "from lint"]);
+  }
+
+  #[test]
+  fn test_query_repo_logs_empty_workflow_list_keeps_all() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    write_workflow_run_line(&repo, "ci.yaml", "from ci");
+    write_workflow_run_line(&repo, "docs.yaml", "from docs");
+    write_workflow_run_line(&repo, "lint.yaml", "from lint");
+
+    let query = LogQuery {
+      workflows: Some(vec![]),
+      ..Default::default()
+    };
+    assert_eq!(query_repo_logs(&repo, &query).unwrap().len(), 3);
+  }
+
+  #[test]
   fn test_query_repo_logs_empty_for_workflow_without_runs() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_string_lossy().to_string();
     write_workflow_run_line(&repo, "ci.yaml", "from ci");
 
     let query = LogQuery {
-      workflow: Some("never.yaml".to_string()),
+      workflows: Some(vec!["never.yaml".to_string()]),
       ..Default::default()
     };
     assert!(query_repo_logs(&repo, &query).unwrap().is_empty());
@@ -1302,7 +1349,7 @@ mod tests {
     write_workflow_run_line(&repo, "docs.yaml", "from docs");
 
     let query = LogQuery {
-      workflow: Some("ci.yaml".to_string()),
+      workflows: Some(vec!["ci.yaml".to_string()]),
       ..Default::default()
     };
     let total: i64 = query_log_timeseries(&repo, &query, 1)

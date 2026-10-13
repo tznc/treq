@@ -37,7 +37,7 @@ A file that is not valid YAML in this shape is skipped. `working-directory` must
 Checks run against one workspace. You can start them from four places:
 
 - **Workspace header.** The **Checks** button shows a summary of the latest runs, such as `Checks 2/3`, `Checks running`, or `Checks not run`. When the branch has a pull request with GitHub checks, the button also shows their count, such as `GH 4/5`. Click it to open a popover. The **Treq checks** section lists each workflow with its latest run, such as `run #3 passed`, and a button that runs or re-runs that workflow. **Run all** runs every workflow, **Setup** re-runs the setup script when one is configured, and **View logs** opens the **Logs** tab with **All checks** selected. The **GitHub checks** section lists the pull request's checks, failed first, and each one opens its run on GitHub. The button is hidden when there are no workflows and no pull request checks.
-- **Logs tab.** With **Checks** as the log source, the **Filter by check** dropdown shows the output of one workflow or **All checks**. The Logs tab does not run checks.
+- **Logs tab.** With **Checks** as the log source, the **Filter by check** menu shows the output of the workflows you tick. With none ticked it shows **All checks**. The Logs tab does not run checks.
 - **GitHub panel.** Open a pull request whose head branch has a Treq workspace. The **Treq checks** section lists each workflow and job with its latest status and run buttons. The button next to a job runs that job alone. **Open in Logs** switches to that workspace's Logs tab with **All checks** selected.
 - **Command palette.** **Run checks…** runs every workflow in the current workspace. **Run check:** followed by a workflow name runs one workflow. Treq shows a notification when the run finishes.
 
@@ -63,7 +63,7 @@ When a run passes and the workspace has uncommitted changes, Treq commits them w
 
 ## Logs
 
-Check output is stored per run. The **Logs** tab reads it when the **Logs** preview is on. Choose **Checks** as the log source to browse and filter it, or open **Logs Explorer** to query it with SQL. **Filter by check** limits the feed and the chart to the runs of one workflow.
+Check output is stored per run. The **Logs** tab reads it when the **Logs** preview is on. Choose **Checks** as the log source to browse and filter it, or open **Logs Explorer** to query it with SQL. **Filter by check** limits the feed and the chart to the runs of the ticked workflows.
 
 ## Scope
 
