@@ -1,7 +1,7 @@
 /**
  * Verifies every place Workspace Checks can be run from now that there is no
- * standalone Checks tab: the workspace header, the Logs tab, the command
- * palette, and the GitHub PR detail panel.
+ * standalone Checks tab: the workspace header, the Logs tab (check filter and
+ * run button), the command palette, and the GitHub PR detail panel.
  */
 
 import userEvent from "@testing-library/user-event";
@@ -65,11 +65,24 @@ jobs:
         run: "echo running 12 tests; echo all passed"
 `;
 
+const DOCS_WORKFLOW = `
+name: Docs
+on:
+  workflow_dispatch: {}
+jobs:
+  build-docs:
+    name: Build docs
+    steps:
+      - name: Build site
+        run: "echo building docs; echo docs-built"
+`;
+
 const BRANCH = "feat/checks-demo";
 
 it("captures checks in the workspace header, Logs tab and command palette", async () => {
   const { repoPath } = createTestRepo(false);
   await writeRepoFile(repoPath, ".treq/workflows/ci.yaml", WORKFLOW);
+  await writeRepoFile(repoPath, ".treq/workflows/ci2.yaml", DOCS_WORKFLOW);
   openRepo(repoPath);
   await createWorkspace(repoPath, BRANCH);
 
@@ -94,41 +107,54 @@ it("captures checks in the workspace header, Logs tab and command palette", asyn
   });
 
   await user.click(within(indicator).getByRole("button", { name: /Checks/ }));
-  const checks = await screen.findByTestId("workspace-checks");
-  await within(checks).findByRole("button", { name: "Trust Repository" });
+  const actions = await screen.findByTestId("logs-checks-actions");
+  await within(actions).findByRole("button", { name: "Trust Repository" });
 
   await captureDocument(document, {
     name: "workspace-checks-02-logs-untrusted",
     expectations: [
-      "The Logs tab is selected and a checks panel sits above the log browser.",
-      'The panel asks to trust the repository with a "Trust Repository" button before checks can run.',
+      'The Logs tab filter bar has a check dropdown reading "All checks" next to the level filter, and no card list of workflows.',
+      'A "Trust Repository" button sits next to a disabled "Run all" button.',
     ],
   });
 
   await user.click(
-    within(checks).getByRole("button", { name: "Trust Repository" }),
+    within(actions).getByRole("button", { name: "Trust Repository" }),
   );
-  const run = await within(checks).findByRole("button", {
-    name: "Run Lint and Test",
+  const runAll = within(actions).getByRole("button", {
+    name: "Run all checks",
   });
-  await waitFor(() => expect((run as HTMLButtonElement).disabled).toBe(false));
-  await user.click(run);
-  await within(checks).findByRole(
-    "button",
-    { name: "Re-run Lint and Test" },
-    { timeout: 30_000 },
+  await waitFor(() =>
+    expect((runAll as HTMLButtonElement).disabled).toBe(false),
   );
+  await user.click(runAll);
   await waitFor(() => expect(indicator.dataset.state).toBe("passed"), {
-    timeout: 20_000,
+    timeout: 30_000,
   });
   await screen.findByText("all passed", {}, { timeout: 20_000 });
+  await screen.findByText("docs-built", {}, { timeout: 20_000 });
 
   await captureDocument(document, {
-    name: "workspace-checks-03-logs-passed",
+    name: "workspace-checks-03-logs-all-checks",
     expectations: [
-      'The checks panel lists the "Lint and Test" workflow with a passed status and a Re-run button, plus its Lint and Test jobs.',
-      'The log browser below shows output from the run, including "all passed".',
-      'The header summary now reads "Checks 1/1" with a passed icon.',
+      'The check dropdown reads "All checks" with a passed icon and a "Run all" button beside it.',
+      'The log feed shows lines from both workflows: "all passed" (jobs lint/test) and "docs-built" (job build-docs).',
+      'The header summary reads "Checks 2/2" with a passed icon.',
+    ],
+  });
+
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Filter by check" }),
+    "ci2.yaml",
+  );
+  await waitFor(() => expect(screen.queryByText("all passed")).toBeNull());
+  await within(actions).findByRole("button", { name: "Re-run Docs" });
+
+  await captureDocument(document, {
+    name: "workspace-checks-04-logs-one-check",
+    expectations: [
+      'The check dropdown reads "Docs" and the button beside it reads "Re-run".',
+      'The log feed only shows lines from job build-docs, such as "docs-built"; no lint or test output.',
     ],
   });
 
@@ -138,7 +164,7 @@ it("captures checks in the workspace header, Logs tab and command palette", asyn
   await screen.findByText("Run check: Lint and Test");
 
   await captureDocument(document, {
-    name: "workspace-checks-04-command-palette",
+    name: "workspace-checks-05-command-palette",
     // The checks commands sit below the fold of the palette list.
     scrollIntoView: "text=Run check: Lint and Test",
     expectations: [
@@ -209,7 +235,7 @@ it("captures the Treq checks section in the GitHub PR detail panel", async () =>
   );
 
   await captureDocument(document, {
-    name: "workspace-checks-05-pr-detail",
+    name: "workspace-checks-06-pr-detail",
     scrollIntoView: '[data-testid="pr-treq-checks"]',
     expectations: [
       'The PR detail panel has a "Treq checks" section listing the "Lint and Test" workflow with a passed status and a Re-run button.',

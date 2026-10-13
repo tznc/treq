@@ -23,11 +23,26 @@ jobs:
         run: "echo hello-from-checks"
 `;
 
+const DOCS_WORKFLOW = `
+name: Docs
+on:
+  workflow_dispatch: {}
+jobs:
+  docs:
+    name: Docs Job
+    steps:
+      - name: Emit output
+        run: "echo hello-from-docs"
+`;
+
 let user: ReturnType<typeof userEvent.setup>;
 
-async function openWorkspace(branch: string) {
+async function openWorkspace(branch: string, extraWorkflows = false) {
   const { repoPath } = createTestRepo(false);
   await writeRepoFile(repoPath, ".treq/workflows/ci.yaml", WORKFLOW);
+  if (extraWorkflows) {
+    await writeRepoFile(repoPath, ".treq/workflows/docs.yaml", DOCS_WORKFLOW);
+  }
   openRepo(repoPath);
   await createWorkspace(repoPath, branch);
   render(<Dashboard />);
@@ -44,17 +59,21 @@ describe("Workspace checks", () => {
     const repoPath = await openWorkspace("feat/checks-logs");
     await user.click(await screen.findByRole("tab", { name: /^Logs/ }));
 
-    const checks = await screen.findByTestId(
-      "workspace-checks",
+    const actions = await screen.findByTestId(
+      "logs-checks-actions",
       {},
       { timeout: 20_000 },
     );
     await user.click(
-      await within(checks).findByRole("button", { name: "Trust Repository" }),
+      await within(actions).findByRole("button", { name: "Trust Repository" }),
     );
     await waitFor(async () => expect(await isRepoTrusted(repoPath)).toBe(true));
 
-    const run = await within(checks).findByRole("button", {
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter by check" }),
+      "ci.yaml",
+    );
+    const run = await within(actions).findByRole("button", {
       name: "Run Logging CI",
     });
     await waitFor(() =>
@@ -62,15 +81,55 @@ describe("Workspace checks", () => {
     );
     await user.click(run);
 
-    await within(checks).findByRole(
+    await within(actions).findByRole(
       "button",
       { name: "Re-run Logging CI" },
       { timeout: 20_000 },
     );
     expect(
-      within(checks).getAllByTestId("run-status-passed").length,
-    ).toBeGreaterThanOrEqual(2);
+      within(screen.getByTestId("selected-check-status")).getByTestId(
+        "run-status-passed",
+      ),
+    ).toBeTruthy();
     await screen.findByText("hello-from-checks", {}, { timeout: 20_000 });
+  });
+
+  it("filters check logs by workflow, defaulting to all checks", async () => {
+    const repoPath = await openWorkspace("feat/checks-filter", true);
+    await user.click(await screen.findByRole("tab", { name: /^Logs/ }));
+    const actions = await screen.findByTestId(
+      "logs-checks-actions",
+      {},
+      { timeout: 20_000 },
+    );
+    await user.click(
+      await within(actions).findByRole("button", { name: "Trust Repository" }),
+    );
+    await waitFor(async () => expect(await isRepoTrusted(repoPath)).toBe(true));
+
+    const filter = screen.getByRole("combobox", {
+      name: "Filter by check",
+    }) as HTMLSelectElement;
+    expect(filter.value).toBe("");
+    const runAll = within(actions).getByRole("button", {
+      name: "Run all checks",
+    });
+    await waitFor(() =>
+      expect((runAll as HTMLButtonElement).disabled).toBe(false),
+    );
+    await user.click(runAll);
+
+    await screen.findByText("hello-from-checks", {}, { timeout: 20_000 });
+    await screen.findByText("hello-from-docs", {}, { timeout: 20_000 });
+
+    await user.selectOptions(filter, "docs.yaml");
+    await waitFor(() =>
+      expect(screen.queryByText("hello-from-checks")).toBeNull(),
+    );
+    expect(screen.getByText("hello-from-docs")).toBeTruthy();
+
+    await user.selectOptions(filter, "");
+    await screen.findByText("hello-from-checks");
   });
 
   it("shows a header summary and runs all checks from it", async () => {
@@ -88,9 +147,17 @@ describe("Workspace checks", () => {
     expect((runAll as HTMLButtonElement).disabled).toBe(true);
 
     await user.click(within(indicator).getByRole("button", { name: /Checks/ }));
-    const checks = await screen.findByTestId("workspace-checks");
+    await screen.findByRole("tab", { name: /^Logs/, selected: true });
+    expect(
+      (
+        (await screen.findByRole("combobox", {
+          name: "Filter by check",
+        })) as HTMLSelectElement
+      ).value,
+    ).toBe("");
+    const actions = await screen.findByTestId("logs-checks-actions");
     await user.click(
-      await within(checks).findByRole("button", { name: "Trust Repository" }),
+      await within(actions).findByRole("button", { name: "Trust Repository" }),
     );
 
     await waitFor(() =>

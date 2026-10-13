@@ -216,6 +216,8 @@ pub struct LogQuery {
   pub levels: Option<Vec<String>>,
   pub search: Option<String>,
   pub step_index: Option<i64>,
+  /// Workflow filename; keeps only records from that workflow's runs.
+  pub workflow: Option<String>,
   pub limit: Option<i64>,
   pub offset: Option<i64>,
 }
@@ -628,6 +630,27 @@ fn build_where_clause(query: &LogQuery, extra: &[String]) -> String {
   }
 }
 
+/// Condition limiting records to the runs of `query.workflow`, if set.
+///
+/// Log records carry only the run id, so the workflow is resolved to its run
+/// ids through the local db. This keeps logs written before the filter
+/// existed filterable too.
+fn workflow_conditions(repo_path: &str, query: &LogQuery) -> Result<Vec<String>, String> {
+  let Some(filename) = query.workflow.as_ref().filter(|w| !w.is_empty()) else {
+    return Ok(vec![]);
+  };
+  let ids = crate::local_db::list_workflow_run_ids(repo_path, filename)?;
+  if ids.is_empty() {
+    return Ok(vec!["0".to_string()]);
+  }
+  let list = ids
+    .iter()
+    .map(|id| id.to_string())
+    .collect::<Vec<_>>()
+    .join(", ");
+  Ok(vec![format!("run_id IN ({})", list)])
+}
+
 /// Projection feeding the UI's flat row struct, read straight off `logs_raw`.
 const UI_PROJECTION: &str = "SELECT
       timestamp,
@@ -715,7 +738,7 @@ pub fn query_repo_logs(repo_path: &str, query: &LogQuery) -> Result<Vec<LogRecor
     "SELECT * FROM ({} FROM logs_raw {}) AS records
          ORDER BY run_id DESC, timestamp, step_index LIMIT {} OFFSET {}",
     UI_PROJECTION,
-    build_where_clause(query, &[]),
+    build_where_clause(query, &workflow_conditions(repo_path, query)?),
     limit,
     offset
   );
@@ -768,7 +791,7 @@ pub fn query_log_timeseries(
          FROM logs_raw {}
          GROUP BY bucket, severity_text
          ORDER BY bucket, severity_text",
-    build_where_clause(query, &[]),
+    build_where_clause(query, &workflow_conditions(repo_path, query)?),
     w = width
   );
 
@@ -1217,6 +1240,77 @@ mod tests {
     // Newest run first.
     assert_eq!(result[0].run_id, 2);
     assert_eq!(result[0].job_id, "build");
+  }
+
+  /// Write one info line for a run created in the local db under `filename`.
+  fn write_workflow_run_line(repo: &str, filename: &str, message: &str) -> i64 {
+    let run_id = crate::local_db::create_workflow_run(repo, 1, filename).unwrap();
+    let writer = LogWriter::create(repo, run_id, "build").unwrap();
+    writer
+      .write_line(&make_log_line(
+        format_timestamp(BASE_NANOS),
+        run_id,
+        "build",
+        0,
+        "step 0",
+        "stdout",
+        "info",
+        message,
+      ))
+      .unwrap();
+    writer.flush().unwrap();
+    run_id
+  }
+
+  #[test]
+  fn test_query_repo_logs_filters_by_workflow() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    write_workflow_run_line(&repo, "ci.yaml", "from ci");
+    write_workflow_run_line(&repo, "docs.yaml", "from docs");
+
+    let query = LogQuery {
+      workflow: Some("docs.yaml".to_string()),
+      ..Default::default()
+    };
+    let result = query_repo_logs(&repo, &query).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].body, "from docs");
+
+    let all = query_repo_logs(&repo, &LogQuery::default()).unwrap();
+    assert_eq!(all.len(), 2);
+  }
+
+  #[test]
+  fn test_query_repo_logs_empty_for_workflow_without_runs() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    write_workflow_run_line(&repo, "ci.yaml", "from ci");
+
+    let query = LogQuery {
+      workflow: Some("never.yaml".to_string()),
+      ..Default::default()
+    };
+    assert!(query_repo_logs(&repo, &query).unwrap().is_empty());
+  }
+
+  #[test]
+  fn test_query_log_timeseries_filters_by_workflow() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    write_workflow_run_line(&repo, "ci.yaml", "from ci");
+    write_workflow_run_line(&repo, "docs.yaml", "from docs");
+
+    let query = LogQuery {
+      workflow: Some("ci.yaml".to_string()),
+      ..Default::default()
+    };
+    let total: i64 = query_log_timeseries(&repo, &query, 1)
+      .unwrap()
+      .iter()
+      .map(|b| b.count)
+      .sum();
+    assert_eq!(total, 1);
   }
 
   #[test]

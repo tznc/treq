@@ -42,7 +42,7 @@ export function PrWorkspaceChecks({
         )}
       </div>
       <div className="border border-border rounded-md overflow-hidden">
-        <WorkspaceChecksPanel target={target} checks={checks} compact />
+        <WorkspaceChecksPanel checks={checks} />
       </div>
     </div>
   );

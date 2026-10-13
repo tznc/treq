@@ -14,6 +14,7 @@ import {
   findSidebarBranchElement,
   openRepo,
   seedSetupScriptLogs,
+  writeRepoFile,
 } from "../../utils";
 
 const SETUP_SCRIPT = "echo hello-from-logs; echo 'error: broke' 1>&2";
@@ -43,6 +44,25 @@ describe("Home repo Logs tab", () => {
     await openLogsTab();
 
     await screen.findByText(/No check logs recorded yet/i);
+  });
+
+  it("offers the check filter without a workspace selected", async () => {
+    const { repoPath } = createTestRepo(false);
+    await writeRepoFile(
+      repoPath,
+      ".treq/workflows/ci.yaml",
+      "name: Lint\non:\n  workflow_dispatch: {}\njobs:\n  lint:\n    name: Lint\n    steps:\n      - name: Lint\n        run: echo ok\n",
+    );
+    openRepo(repoPath);
+
+    await openLogsTab();
+
+    const filter = (await screen.findByRole("combobox", {
+      name: "Filter by check",
+    })) as HTMLSelectElement;
+    expect(filter.value).toBe("");
+    expect(within(filter).getByRole("option", { name: "Lint" })).toBeTruthy();
+    expect(screen.queryByTestId("logs-checks-actions")).toBeNull();
   });
 
   it("is offered inside a workspace too", async () => {

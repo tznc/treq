@@ -66,7 +66,7 @@ function Harness({ indicator }: { indicator?: () => void }) {
   return (
     <>
       <WorkspaceChecksIndicator checks={checks} onOpenDetails={indicator} />
-      <WorkspaceChecksPanel target={TARGET} checks={checks} />
+      <WorkspaceChecksPanel checks={checks} />
     </>
   );
 }
@@ -101,7 +101,6 @@ describe("WorkspaceChecksPanel", () => {
     await user.click(await screen.findByRole("button", { name: "Re-run CI" }));
     expect(api.runWorkflow).toHaveBeenCalledWith("/repo", "ci.yaml", 3, "/ws");
     expect(screen.getByRole("button", { name: "Run Lint" })).toBeTruthy();
-    expect(screen.getByTestId("step-result-fail")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Re-run job Test" }));
     expect(api.runWorkflowJob).toHaveBeenCalledWith(
@@ -111,7 +110,6 @@ describe("WorkspaceChecksPanel", () => {
       3,
       "/ws",
     );
-    expect(await screen.findByText("Run history (1)")).toBeTruthy();
   });
 
   it("asks to trust the repo before runs are allowed", async () => {

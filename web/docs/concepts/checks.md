@@ -36,9 +36,9 @@ A file that is not valid YAML in this shape is skipped. `working-directory` must
 
 Checks run against one workspace. You can start them from four places:
 
-- **Workspace header.** When the repository has workflows, the header shows a checks summary, such as `Checks 2/3`, next to the merge controls. The play button runs every workflow. Clicking the summary opens the **Logs** tab when the Logs preview is on.
-- **Logs tab.** With **Checks** as the log source, the top of the tab lists each workflow with its jobs, steps, latest status, and run history. **Run** or **Re-run** next to a workflow runs all its jobs. The same button next to a job runs that job alone. The check log browser sits below the list.
-- **GitHub panel.** Open a pull request whose head branch has a Treq workspace. The **Treq checks** section lists each workflow and job with its latest status and run buttons. **Open in Logs** switches to that workspace's Logs tab.
+- **Workspace header.** When the repository has workflows, the header shows a checks summary, such as `Checks 2/3`, next to the merge controls. The play button runs every workflow. Clicking the summary opens the **Logs** tab with **All checks** selected when the Logs preview is on.
+- **Logs tab.** With **Checks** as the log source, the filter bar has a **Filter by check** dropdown. It starts at **All checks**, and then **Run all** runs every workflow. Pick a workflow and the button becomes **Run** or **Re-run** for that workflow alone, with an icon for its latest status. A **Setup** button re-runs the setup script when one is configured.
+- **GitHub panel.** Open a pull request whose head branch has a Treq workspace. The **Treq checks** section lists each workflow and job with its latest status and run buttons. The button next to a job runs that job alone. **Open in Logs** switches to that workspace's Logs tab with **All checks** selected.
 - **Command palette.** **Run checks…** runs every workflow in the current workspace. **Run check:** followed by a workflow name runs one workflow. Treq shows a notification when the run finishes.
 
 | Behavior | Detail |
@@ -51,11 +51,11 @@ Checks run against one workspace. You can start them from four places:
 
 ## Trusting a Repository
 
-Workflows run arbitrary shell commands from files in the repository. Treq does not run them until you select **Trust Repository** in the checks list, or **Trust repository to run checks** in the command palette. The trust decision is stored per repository on your machine.
+Workflows run arbitrary shell commands from files in the repository. Treq does not run them until you select **Trust Repository** in the Logs tab or the GitHub panel, or **Trust repository to run checks** in the command palette. The trust decision is stored per repository on your machine.
 
 ## Setup Script
 
-If `.treq/config.yaml` sets a `setup_script`, Treq runs it when it creates a workspace. Checks wait until that script has finished. If the script fails, checks can still run. **Re-run setup script** in the checks list or the command palette runs it again.
+If `.treq/config.yaml` sets a `setup_script`, Treq runs it when it creates a workspace. Checks wait until that script has finished. If the script fails, checks can still run. **Setup** in the Logs tab, **Re-run setup script** in the GitHub panel, or the command palette runs it again.
 
 ## Autosave on Pass
 
@@ -63,7 +63,7 @@ When a run passes and the workspace has uncommitted changes, Treq commits them w
 
 ## Logs
 
-Check output is stored per run. The **Logs** tab reads it when the **Logs** preview is on. Choose **Checks** as the log source to browse and filter it, or open **Logs Explorer** to query it with SQL.
+Check output is stored per run. The **Logs** tab reads it when the **Logs** preview is on. Choose **Checks** as the log source to browse and filter it, or open **Logs Explorer** to query it with SQL. **Filter by check** limits the feed and the chart to the runs of one workflow.
 
 ## Scope
 

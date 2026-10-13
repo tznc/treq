@@ -306,12 +306,21 @@ export const ShowWorkspace = ({
     setChangedFiles(new Map());
   }, [workspace?.id]);
 
+  // Bumped by "open in Logs" links so the Logs tab remounts on its default
+  // view: check logs for all checks.
+  const [logsKey, setLogsKey] = useState(0);
+  const openCheckLogs = () => {
+    setLogsKey((key) => key + 1);
+    setActiveTab("logs");
+  };
+
   // Runs after the reset above, so a Logs request for this workspace wins.
   const openLogsFor = useOpenLogsRequest((state) => state.workspaceId);
   useEffect(() => {
     if (openLogsFor === null || openLogsFor !== workspace?.id) return;
     clearOpenWorkspaceLogsRequest();
-    if (logsEnabled) setActiveTab("logs");
+    if (logsEnabled) openCheckLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openLogsFor, workspace?.id, logsEnabled]);
 
   // After a child refresh (e.g. post-commit), re-check if workspace now has commits
@@ -1416,6 +1425,7 @@ export const ShowWorkspace = ({
           />
         ) : activeTab === "logs" ? (
           <LogsTab
+            key={logsKey}
             repoPath={effectiveRepoPath ?? ""}
             checksTarget={checksTarget}
             onSendToAgent={handleSendLogsToAgent}
@@ -1737,9 +1747,7 @@ export const ShowWorkspace = ({
               {checksTarget && (
                 <WorkspaceChecksButton
                   target={checksTarget}
-                  onOpenLogs={
-                    logsEnabled ? () => setActiveTab("logs") : undefined
-                  }
+                  onOpenLogs={logsEnabled ? openCheckLogs : undefined}
                 />
               )}
               {/* Merge queue button (build flag + repo opt-in) */}

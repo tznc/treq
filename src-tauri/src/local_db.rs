@@ -4057,6 +4057,20 @@ pub fn list_workflow_runs(
     .map_err(|e| format!("Failed to read workflow_runs: {}", e))
 }
 
+/// Ids of every run of a workflow file, across all workspaces.
+pub fn list_workflow_run_ids(repo_path: &str, filename: &str) -> Result<Vec<i64>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare("SELECT id FROM workflow_runs WHERE filename = ?1")
+    .map_err(|e| format!("Failed to prepare workflow run ids query: {}", e))?;
+  let rows = stmt
+    .query_map(params![filename], |row| row.get(0))
+    .map_err(|e| format!("Failed to query workflow run ids: {}", e))?;
+  rows
+    .collect::<rusqlite::Result<Vec<i64>>>()
+    .map_err(|e| format!("Failed to read workflow run ids: {}", e))
+}
+
 pub fn list_workflow_job_results(
   repo_path: &str,
   run_id: i64,

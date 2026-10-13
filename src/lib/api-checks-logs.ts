@@ -107,6 +107,8 @@ export const getRepoLogs = async (
   options?: {
     levels?: string[];
     search?: string;
+    /** Workflow filename; keeps only logs from that workflow's runs. */
+    workflow?: string;
     limit?: number;
     offset?: number;
   },
@@ -116,6 +118,7 @@ export const getRepoLogs = async (
     repoPath,
     levels: options?.levels ?? null,
     search: options?.search ?? null,
+    workflow: options?.workflow ?? null,
     limit: options?.limit ?? null,
     offset: options?.offset ?? null,
   });
@@ -133,13 +136,19 @@ export const getAppSetupLogs = (options?: {
 
 export const getLogTimeseries = async (
   repoPath: string,
-  options?: { levels?: string[]; search?: string; bucketSeconds?: number },
+  options?: {
+    levels?: string[];
+    search?: string;
+    workflow?: string;
+    bucketSeconds?: number;
+  },
 ): Promise<LogBucket[]> => {
   assertLocalOperation(repoPath, CHECKS_AND_LOGS);
   return invoke("get_log_timeseries", {
     repoPath,
     levels: options?.levels ?? null,
     search: options?.search ?? null,
+    workflow: options?.workflow ?? null,
     bucketSeconds: options?.bucketSeconds ?? null,
   });
 };
