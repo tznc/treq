@@ -153,7 +153,7 @@ jobs:
   # Unsigned debug builds of the GPUI mobile app (mobile-gpui/), rendered
   # through tauri-plugin-gpui. They only run nightly (not on every PR) since
   # the Android/iOS toolchains are slow. mobile-gpui.yml builds and
-  # smoke-tests the same app per push; signed webview builds live in mobile.yml.
+  # smoke-tests the same app per push.
   #
   # Nightlies track tauri-gpui main: each job bumps the locked plugin commit
   # to main's head before building, without committing the lockfile.
