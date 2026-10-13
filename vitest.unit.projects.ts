@@ -30,7 +30,6 @@ export const domTestFiles = [
   "src/lib/agentDeepLink.test.ts",
   "src/lib/change-file-drag.test.ts",
   "src/lib/focus-refresh.test.ts",
-  "src/lib/mobile-session.test.ts",
   "src/lib/repo-url.test.ts",
   "src/lib/utils.copyText.test.ts",
   "src/stores/authStore.freshness.test.ts",

@@ -155,7 +155,7 @@ const READINESS_POLL_INTERVAL_MS = 2_000;
 const READINESS_POLL_TIMEOUT_MS = 10 * 60_000;
 
 /** Polls structured lifecycle/readiness state until the instance is connectable (`ready`), or fails fast on a terminal failure state or timeout. */
-export async function waitForInstanceReady(
+async function waitForInstanceReady(
   deps: ManagedConnectionDeps,
   options: { intervalMs?: number; timeoutMs?: number } = {},
 ): Promise<InstanceStatusResponse> {
