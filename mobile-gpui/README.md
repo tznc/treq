@@ -2,7 +2,7 @@
 
 The Treq mobile app rebuilt with a native [GPUI](https://www.gpui.rs) interface instead of the React shell. It renders through [tauri-plugin-gpui](https://github.com/ziinc/tauri-gpui) inside an ordinary Tauri Android app. Components come from [gpui-kit](https://crates.io/crates/gpui-kit).
 
-It is a separate app (`dev.treq.gpui`, shown as "Treq"), so it installs next to the regular Treq mobile build. Repository work uses treq's own Rust code: `treq_lib` is linked directly (with its `embed` feature). Screens call the SSH transport, the remote command protocol and the settings database without going through IPC. The Supabase sign-in and the managed-instance control plane, which exist only in TypeScript in the React app, are ported to Rust in `src/auth.rs`, `src/control_plane.rs` and `src/managed.rs`.
+It is the Treq mobile app (`com.treq`, the same identifier as the desktop app). Repository work uses treq's own Rust code: `treq_lib` is linked directly (with its `embed` feature). Screens call the SSH transport, the remote command protocol and the settings database without going through IPC. The Supabase sign-in and the managed-instance control plane, which exist only in TypeScript in the React app, are ported to Rust in `src/auth.rs`, `src/control_plane.rs` and `src/managed.rs`.
 
 [`SPEC.md`](SPEC.md) describes the React mobile shell this app replaces.
 
