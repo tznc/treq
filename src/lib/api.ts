@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { InstalledSkill, RepoYamlConfig } from "./api-extra";
 import type {
   BranchStatus,
-  DeviceKeyInfo,
   EditorAppsResponse,
   GitRemoteInfo,
   HomeRebaseDryRunResult,
@@ -783,15 +782,6 @@ export const listLocalSshIdentities = (): Promise<LocalSshIdentity[]> =>
  */
 export const readLocalSshPublicKey = (reference: string): Promise<string> =>
   invoke("read_local_ssh_public_key", { reference });
-
-/**
- * Generates (on first call) or loads this device's ed25519 keypair for
- * control-plane registration and certificate-based SSH auth. Mobile-only in
- * practice - desktop uses the user's existing `~/.ssh` identities via
- * `listLocalSshIdentities` instead.
- */
-export const ensureMobileDeviceKey = (): Promise<DeviceKeyInfo> =>
-  invoke("ensure_mobile_device_key");
 
 export const listInstalledSkills = (
   repoPath?: string | null,

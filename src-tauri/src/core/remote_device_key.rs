@@ -30,8 +30,7 @@ pub struct DeviceKeyInfo {
 
 /// Machine-checkable prefix on the `Err(String)` this module returns when
 /// secure storage isn't usable on this device (no biometrics enrolled, or
-/// the OS keystore itself is unavailable). Callers - `ensure_mobile_device_key`
-/// and `RemoteConnectPanel` on the JS side - check for this prefix to show a
+/// the OS keystore itself is unavailable). Callers check for this prefix to show a
 /// dedicated "set up biometrics" state instead of a generic connection
 /// error. Kept as a string prefix (not a typed Tauri command error) because
 /// `ensure_device_key`'s `Result<_, String>` signature is shared with other

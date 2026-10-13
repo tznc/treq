@@ -23,16 +23,6 @@ export interface ResolvedSshAlias {
   identity_file: string | null;
 }
 
-/**
- * A device-generated ed25519 keypair used to register this mobile device
- * with the control plane (see `core::remote_device_key`). Only public
- * material ever crosses the Tauri IPC boundary.
- */
-export interface DeviceKeyInfo {
-  public_key: string;
-  fingerprint_sha256: string;
-}
-
 export interface RemoteRepoProbe {
   host: string;
   path: string;
@@ -148,18 +138,9 @@ export interface TrustedHostKey {
 }
 
 /**
- * Reserved `key_reference` for the mobile device key kept in the OS keystore
- * (mirrors `DEVICE_KEYSTORE_KEY_REFERENCE` in
- * `src-tauri/src/core/remote_ssh_transport.rs`). Only the mobile app can
- * resolve it; desktop rejects it with a clear error.
- */
-export const DEVICE_KEYSTORE_KEY_REFERENCE = "keystore:device";
-
-/**
  * `key_reference` always names key material on this device: a local key
- * path on desktop (the `.pub` path from `listLocalSshIdentities` works), or
- * `DEVICE_KEYSTORE_KEY_REFERENCE` on mobile. It is never a control-plane key
- * id. `certificate` carries the issued OpenSSH certificate text inline; the
+ * path (the `.pub` path from `listLocalSshIdentities` works). It is never a
+ * control-plane key id. `certificate` carries the issued OpenSSH certificate text inline; the
  * transport falls back to `<key>-cert.pub` on disk only when it is absent.
  */
 export type SshAuthentication =

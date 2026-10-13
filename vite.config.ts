@@ -6,9 +6,6 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   root: "src",
-  // `TAURI_ENV_PLATFORM` tells the bundle whether it is a mobile build (see
-  // `src/lib/mobile-platform.ts`).
-  envPrefix: ["VITE_", "TAURI_ENV_"],
   plugins: [
     react({
       babel: {

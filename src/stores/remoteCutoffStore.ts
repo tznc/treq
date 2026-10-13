@@ -6,7 +6,7 @@
 // refused or a certificate lapses unrenewed) and tracks which endpoints are
 // currently blocked behind a reauthentication prompt.
 //
-// The desktop Dashboard and the mobile `RemoteConnectPanel` both read
+// The desktop Dashboard and the mobile app both read
 // `useRemoteCutoffStore((s) => s.cutoffs[endpointId])` to decide whether to
 // show a blocking reauth prompt for that endpoint.
 
