@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -16,11 +17,7 @@ import {
   flattenWorkspaceTree,
 } from "../../../src/lib/workspace-tree";
 import { render, screen, waitFor } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 
 function sidebarOrder(workspaces: Awaited<ReturnType<typeof getWorkspaces>>) {
   const statuses: WorkspaceSidebarStatus[] = workspaces.map((current) => ({
@@ -152,7 +149,7 @@ describe("workspace sidebar stack reorder", () => {
 
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/parent"));
+    await clickGpuiRow("feat/parent");
 
     const targetBtn = await screen.findByRole("button", {
       name: "Workspace target",

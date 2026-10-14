@@ -1,7 +1,6 @@
 // @include-parallel
 import * as React from "react";
 import { invoke } from "@tauri-apps/api/core";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import {
@@ -10,25 +9,31 @@ import {
   getWorkspaces,
 } from "../../src/lib/api";
 import { invalidateQueries } from "../../src/lib/swr-cache";
-import { fireEvent, render, screen, waitFor } from "../test-utils";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { render, screen, waitFor } from "../test-utils";
+import { createTestRepo, openRepo } from "../utils";
+import {
+  clickGpuiRow,
+  findGpuiRow,
+  gpuiSnapshot,
+  pickGpuiRowMenuItem,
+  sendGpuiAction,
+  waitForNoGpuiRow,
+} from "../gpui-sidebar";
 
 describe("leaving a workspace when workspaces are removed", () => {
   let repoPath: string;
   let alphaId: number;
   let betaId: number;
-  let user: ReturnType<typeof userEvent.setup>;
 
   beforeEach(async () => {
     ({ repoPath } = createTestRepo(false));
     openRepo(repoPath);
     alphaId = await createWorkspace(repoPath, "feat/alpha");
     betaId = await createWorkspace(repoPath, "feat/beta");
-    user = userEvent.setup();
   });
 
   async function openWorkspace(branch: string) {
-    await user.click(await findSidebarBranchElement(branch));
+    await clickGpuiRow(branch);
     await waitFor(() =>
       expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
         branch,
@@ -40,14 +45,9 @@ describe("leaving a workspace when workspaces are removed", () => {
     render(<Dashboard />);
     await openWorkspace("feat/beta");
 
-    fireEvent.contextMenu(await findSidebarBranchElement("feat/alpha"));
-    await user.click(await screen.findByText("Archive Workspace"));
+    await pickGpuiRowMenuItem("feat/alpha", "Archive Workspace");
 
-    await waitFor(() =>
-      expect(
-        screen.queryByTestId("workspace-sidebar-item-feat/alpha"),
-      ).toBeNull(),
-    );
+    await waitForNoGpuiRow("feat/alpha");
     expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
       "feat/beta",
     );
@@ -58,11 +58,7 @@ describe("leaving a workspace when workspaces are removed", () => {
     render(<Dashboard />);
     await openWorkspace("feat/child");
 
-    await user.pointer({
-      keys: "[MouseRight]",
-      target: await findSidebarBranchElement("feat/child"),
-    });
-    await user.click(await screen.findByText("Archive Workspace"));
+    await pickGpuiRowMenuItem("feat/child", "Archive Workspace");
 
     await waitFor(() =>
       expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
@@ -99,27 +95,15 @@ describe("leaving a workspace when workspaces are removed", () => {
 
     try {
       render(<Dashboard />);
-      const alpha = await screen.findByTestId(
-        "workspace-sidebar-item-feat/alpha",
-      );
-      const beta = await screen.findByTestId(
-        "workspace-sidebar-item-feat/beta",
-      );
-      await user.keyboard("{Meta>}");
-      await user.click(alpha);
-      await user.click(beta);
-      await user.keyboard("{/Meta}");
-      await user.click(await screen.findByText(/archive 2 workspaces/i));
+      await findGpuiRow("feat/alpha");
+      await clickGpuiRow("feat/alpha", { toggle: true });
+      await clickGpuiRow("feat/beta", { toggle: true });
+      await waitFor(() => expect(gpuiSnapshot()?.bulkArchive).toBe(2));
+      sendGpuiAction({ kind: "bulkArchive" });
 
       expect(await screen.findByText(/archive refused/)).toBeInTheDocument();
-      await waitFor(() =>
-        expect(
-          screen.queryByTestId("workspace-sidebar-item-feat/alpha"),
-        ).toBeNull(),
-      );
-      expect(
-        screen.getByTestId("workspace-sidebar-item-feat/beta"),
-      ).toBeInTheDocument();
+      await waitForNoGpuiRow("feat/alpha");
+      expect(await findGpuiRow("feat/beta")).toBeTruthy();
       expect((await getWorkspaces(repoPath)).map((w) => w.id)).toEqual([
         betaId,
       ]);

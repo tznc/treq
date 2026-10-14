@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
@@ -17,7 +18,6 @@ import { render, screen, within } from "../../test-utils";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   setOriginUrl,
 } from "../../utils";
@@ -80,7 +80,7 @@ describe("ShowWorkspace - View PR", () => {
   }
 
   async function openWorkspace(branchName: string) {
-    await user.click(await findSidebarBranchElement(branchName));
+    await clickGpuiRow(branchName);
     return screen.findByTestId("show-workspace-header");
   }
 

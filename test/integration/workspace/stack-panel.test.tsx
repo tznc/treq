@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
@@ -9,12 +10,7 @@ import {
 } from "../../../src/lib/api";
 import { getFullWorkspacePath } from "../../../src/lib/utils";
 import { render, screen, waitFor, within } from "../../test-utils";
-import {
-  commitWorkspaceFile,
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { commitWorkspaceFile, createTestRepo, openRepo } from "../../utils";
 
 describe("ShowWorkspace - stack panel", () => {
   let repoPath: string;
@@ -51,7 +47,7 @@ describe("ShowWorkspace - stack panel", () => {
       screen.queryByTestId("workspace-stack-panel"),
     ).not.toBeInTheDocument();
 
-    await user.click(await findSidebarBranchElement("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
     await screen.findByText("Go to file");
     await waitFor(() => {
       expect(
@@ -64,7 +60,7 @@ describe("ShowWorkspace - stack panel", () => {
     await stackBetaOntoAlpha();
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/beta"));
+    await clickGpuiRow("feat/beta");
 
     const panel = await screen.findByTestId("workspace-stack-panel");
     expect(within(panel).getByText("1 of 2")).toBeTruthy();
@@ -104,7 +100,7 @@ describe("ShowWorkspace - stack panel", () => {
     );
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/beta"));
+    await clickGpuiRow("feat/beta");
 
     const panel = await screen.findByTestId("workspace-stack-panel");
     expect(within(panel).getByText("feat/alpha")).toBeTruthy();
@@ -116,7 +112,7 @@ describe("ShowWorkspace - stack panel", () => {
     await stackBetaOntoAlpha();
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
 
     const panel = await screen.findByTestId("workspace-stack-panel");
     expect(within(panel).getByText("2 of 2")).toBeTruthy();
@@ -139,7 +135,7 @@ describe("ShowWorkspace - stack panel", () => {
     );
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/beta"));
+    await clickGpuiRow("feat/beta");
 
     const panel = await screen.findByTestId("workspace-stack-panel");
     const betaItem = within(panel)

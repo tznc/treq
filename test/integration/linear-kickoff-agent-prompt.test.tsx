@@ -5,7 +5,8 @@ import { Dashboard } from "../../src/components/Dashboard";
 import type { LinearIssue } from "../../src/lib/api-linear";
 import { render, screen, within } from "../test-utils";
 import { createWorkspace } from "../../src/lib/api";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { createTestRepo, openRepo } from "../utils";
+import { findGpuiRow, sendGpuiAction } from "../gpui-sidebar";
 
 const linearApi = vi.hoisted(() => ({
   linearListIssues: vi.fn(),
@@ -51,7 +52,7 @@ describe("Linear issue kickoff", () => {
   it("opens the agent prompt dialog with the Linear issue attached", async () => {
     render(<Dashboard />);
 
-    await user.click(await screen.findByTestId("linear-sidebar-item"));
+    sendGpuiAction({ kind: "openLinear" });
     await user.click(await screen.findByRole("tab", { name: "Kanban" }));
     await user.click(await screen.findByRole("button", { name: "Kick off" }));
 
@@ -76,7 +77,7 @@ describe("Linear issue kickoff", () => {
     );
     render(<Dashboard />);
 
-    await user.click(await screen.findByTestId("linear-sidebar-item"));
+    sendGpuiAction({ kind: "openLinear" });
     await user.click(await screen.findByRole("tab", { name: "Kanban" }));
     await user.click(await screen.findByRole("button", { name: "Kick off" }));
     const dialog = (
@@ -92,6 +93,6 @@ describe("Linear issue kickoff", () => {
       repoPath,
       issue.id,
     );
-    expect(await findSidebarBranchElement(issue.branch_name)).toBeTruthy();
+    await findGpuiRow(issue.branch_name);
   }, 60000);
 });

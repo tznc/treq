@@ -1,12 +1,20 @@
 // @include-parallel
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { createTestRepo, openRepo } from "../utils";
 import { render, screen } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 import { createWorkspace } from "../../src/lib/api";
 import { previewSettingKey } from "../../src/lib/features";
+
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { clickGpuiRow, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
 
 describe("feature preview settings", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -20,7 +28,7 @@ describe("feature preview settings", () => {
 
   async function openFeaturePreview() {
     render(<Dashboard />);
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(
       await screen.findByRole("tab", { name: /feature preview/i }),
     );
@@ -51,7 +59,7 @@ describe("feature preview settings", () => {
     expect(screen.queryByRole("tab", { name: /^Logs/ })).toBeNull();
     expect(screen.queryByRole("tab", { name: /^Checks/ })).toBeNull();
 
-    await user.click(await findSidebarBranchElement("feat/hidden-previews"));
+    await clickGpuiRow("feat/hidden-previews");
     await user.click(await screen.findByRole("tab", { name: "Changes" }));
     expect(
       screen.queryByRole("button", { name: "Switch review view" }),

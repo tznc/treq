@@ -10,7 +10,8 @@ import {
   getWorkspaces,
 } from "../../src/lib/api";
 import { render, screen, waitFor } from "../test-utils";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { createTestRepo, openRepo } from "../utils";
+import { clickGpuiRow, findGpuiRow } from "../gpui-sidebar";
 
 describe("home-view task input", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -39,9 +40,7 @@ describe("home-view task input", () => {
 
     await submitTask("Fix the login redirect");
 
-    expect(
-      await findSidebarBranchElement("fix-the-login-redirect"),
-    ).toBeTruthy();
+    await findGpuiRow("fix-the-login-redirect");
     await waitFor(async () => {
       const workspace = (await getWorkspaces(repoPath)).find(
         (ws) => ws.branch_name === "fix-the-login-redirect",
@@ -80,7 +79,7 @@ describe("home-view task input", () => {
     render(<Dashboard />);
     await findToggle();
 
-    await user.click(await findSidebarBranchElement("feat/existing"));
+    await clickGpuiRow("feat/existing");
 
     await screen.findByPlaceholderText("Describe a task...");
     await waitFor(() =>

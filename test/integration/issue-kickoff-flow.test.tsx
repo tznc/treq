@@ -7,10 +7,10 @@ import type { LinearIssue } from "../../src/lib/api-linear";
 import { render, screen, waitFor, within } from "../test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   setOriginUrl,
 } from "../utils";
+import { findGpuiRow, sendGpuiAction } from "../gpui-sidebar";
 
 const external = vi.hoisted(() => ({
   ghListIssues: vi.fn(),
@@ -88,7 +88,7 @@ const CASES: Case[] = [
       external.ghViewIssue.mockResolvedValue(GITHUB_ISSUE);
     },
     open: async (user) => {
-      await user.click(await screen.findByTestId("github-sidebar-item"));
+      sendGpuiAction({ kind: "openGithub" });
       await user.click(await screen.findByText(GITHUB_ISSUE.title));
       await user.click(await screen.findByRole("button", { name: /^agent/i }));
     },
@@ -111,7 +111,7 @@ const CASES: Case[] = [
       );
     },
     open: async (user) => {
-      await user.click(await screen.findByTestId("linear-sidebar-item"));
+      sendGpuiAction({ kind: "openLinear" });
       await user.click(await screen.findByRole("button", { name: "Kick off" }));
     },
   },
@@ -151,7 +151,7 @@ describe.each(CASES)("$source issue kickoff", (c) => {
     );
     await user.click(within(dialog).getByRole("button", { name: /^edit$/i }));
 
-    expect(await findSidebarBranchElement(c.branch)).toBeTruthy();
+    await findGpuiRow(c.branch);
     await waitFor(async () => {
       const workspace = (await getWorkspaces(repoPath)).find(
         (ws) => ws.branch_name === c.branch,

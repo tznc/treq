@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -9,11 +10,7 @@ import {
   updateWorkspace,
 } from "../../../src/lib/api";
 import { render, screen, within } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 
 describe("ShowWorkspace - description", () => {
   let repoPath: string;
@@ -29,7 +26,7 @@ describe("ShowWorkspace - description", () => {
     const id = await createWorkspace(repoPath, "feat/desc");
     await updateWorkspace(repoPath, id, undefined, "Desc title", description);
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/desc"));
+    await clickGpuiRow("feat/desc");
     return screen.findByTestId("workspace-description");
   };
 

@@ -1,4 +1,3 @@
-// @include-serial
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestRepo, openRepo } from "../utils";
@@ -6,6 +5,14 @@ import { getSetting, saveAppSetupScript, setSetting } from "../../src/lib/api";
 import { render, screen, waitFor, within } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
+
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
 
 describe("application setup script", { timeout: 20_000 }, () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -21,7 +28,7 @@ describe("application setup script", { timeout: 20_000 }, () => {
 
   async function openApplicationSettings() {
     render(<Dashboard />);
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /application/i }));
     const script = await screen.findByLabelText("Application Setup Script");
     await waitFor(() => expect(script).toBeEnabled());

@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
@@ -11,7 +12,6 @@ import {
 import { render, screen, waitFor, within } from "../../test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   seedSetupScriptLogs,
   writeRepoFile,
@@ -75,7 +75,7 @@ describe("Home repo Logs tab", () => {
     await createWorkspace(repoPath, "logs-scope");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("logs-scope"));
+    await clickGpuiRow("logs-scope");
 
     expect(await screen.findByRole("tab", { name: /^Logs/ })).toBeTruthy();
   });

@@ -11,6 +11,14 @@ import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 import { getWorkspaces, uninstallSkill } from "../../src/lib/api";
 
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
+
 function skillChecksum(files: { path: string; content: Buffer }[]): string {
   const hash = crypto.createHash("sha256");
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
@@ -73,7 +81,7 @@ describe("skill library", () => {
 
   async function openSkillsTab() {
     render(<Dashboard />);
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /skills/i }));
     expect(await screen.findByTestId("skill-library-settings")).toBeTruthy();
   }

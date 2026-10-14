@@ -3,7 +3,6 @@ import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   newCommitWithParents,
   openRepo,
   resolveChangeId,
@@ -22,6 +21,7 @@ import { render, screen, waitFor, within, act } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 import * as api from "../../../src/lib/api";
+import { clickGpuiRow, findGpuiRow } from "../../gpui-sidebar";
 
 type ReviewFixture = {
   repoPath: string;
@@ -35,7 +35,7 @@ async function navigateToReviewTab(
   user: ReturnType<typeof userEvent.setup>,
   branchName: string,
 ) {
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await screen.findByRole("tab", { name: /^Changes/, selected: true });
@@ -235,14 +235,9 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     });
 
     render(<Dashboard />);
-    const branchNode = await findSidebarBranchElement(fixture.branchName);
-    await user.hover(branchNode);
+    const row = await findGpuiRow(fixture.branchName);
+    expect(row.conflicted).toBe(false);
     expect(screen.queryByText("Conflicts detected")).not.toBeInTheDocument();
-    expect(
-      document.querySelector(
-        `[data-testid="workspace-conflict-indicator-${fixture.workspaceId}"]`,
-      ),
-    ).toBeNull();
   });
 
   it("resolving markers in the working copy clears Conflicts UI before commit", async () => {
@@ -263,8 +258,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     }) as typeof listen);
 
     render(<Dashboard />);
-    await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await navigateToReviewTab(user, fixture.branchName);
     await screen.findByRole("button", { name: "Conflicts" });
@@ -326,16 +321,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     );
 
     render(<Dashboard />);
-    const conflictIndicator = await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
-    );
-    const conflictIndicatorClass =
-      conflictIndicator.getAttribute("class") ?? "";
-    expect(conflictIndicatorClass).toContain("absolute");
-    expect(conflictIndicatorClass).toContain("right-");
-    expect(conflictIndicatorClass).toMatch(/group-hover\/workspace:hidden/);
-    expect(conflictIndicatorClass).toMatch(
-      /group-focus-within\/workspace:hidden/,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await assertStatus(fixture.repoPath, fixture.workspaceId, {
       hasConflicts: true,
@@ -362,8 +349,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     });
 
     render(<Dashboard />);
-    await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await assertStatus(fixture.repoPath, fixture.workspaceId, {
       hasConflicts: true,
@@ -382,8 +369,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     const fixture = await setupRebaseConflictState("feat/conflict-card");
 
     render(<Dashboard />);
-    await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await navigateToReviewTab(user, fixture.branchName);
     await clickFileInSection(user, "Conflicts", "README.md");
@@ -412,8 +399,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     const fixture = await setupUnresolvedConflictState("feat/comment-controls");
 
     render(<Dashboard />);
-    await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await assertStatus(fixture.repoPath, fixture.workspaceId, {
       hasConflicts: true,
@@ -437,8 +424,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     );
 
     render(<Dashboard />);
-    await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await assertStatus(fixture.repoPath, fixture.workspaceId, {
       hasConflicts: true,
@@ -471,8 +458,8 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     });
 
     render(<Dashboard />);
-    await screen.findByTestId(
-      `workspace-conflict-indicator-${fixture.workspaceId}`,
+    await waitFor(async () =>
+      expect((await findGpuiRow(fixture.branchName)).conflicted).toBe(true),
     );
     await assertStatus(fixture.repoPath, fixture.workspaceId, {
       hasConflicts: true,
@@ -522,7 +509,11 @@ describe("Review - conflict rendering contract", { timeout: 20_000 }, () => {
     await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
     render(<Dashboard />);
-    await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+    await waitFor(async () =>
+      expect(
+        (await findGpuiRow("feat/delete-modify-conflict")).conflicted,
+      ).toBe(true),
+    );
     await assertStatus(repoPath, workspaceId, {
       hasConflicts: true,
       conflictedFiles: ["README.md"],

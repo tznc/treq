@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiHome, findGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +13,6 @@ import { render, screen, waitFor, within } from "../../test-utils";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveRevsetCommitIds,
 } from "../../utils";
@@ -40,7 +40,7 @@ describe("create dialog branch check", () => {
     await archiveWorkspace(repoPath, featA);
 
     render(<Dashboard />);
-    await user.click(await screen.findByTestId("home-repo-row"));
+    await clickGpuiHome();
     await screen.findByTestId("show-workspace-header");
     await user.click(await screen.findByRole("button", { name: "Stack" }));
     const dialog = await screen.findByTestId("modal");
@@ -57,7 +57,7 @@ describe("create dialog branch check", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
     );
-    await findSidebarBranchElement("feat-b");
+    await findGpuiRow("feat-b");
     await waitFor(() =>
       expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
         "feat-b",

@@ -13,12 +13,12 @@ import {
 import { Dashboard } from "../../../src/components/Dashboard";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
 } from "../../utils";
 import { dispatchRefreshWorkspaceChanges } from "../../../src/lib/change-file-drag";
+import { clickGpuiRow } from "../../gpui-sidebar";
 
 async function setupWorkspace(
   branchName: string,
@@ -56,7 +56,7 @@ async function openWorkspaceCodeBrowser(
   fileName: string,
 ) {
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   await user.click(await screen.findByRole("button", { name: fileName }));
   const fileBrowser = await screen.findByTestId("file-browser");
   const scoped = within(fileBrowser);

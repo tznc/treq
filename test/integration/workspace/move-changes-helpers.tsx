@@ -1,11 +1,11 @@
 import * as React from "react";
 import type userEvent from "@testing-library/user-event";
+import { clickGpuiRow } from "../../gpui-sidebar";
 import { expect } from "vitest";
 import * as api from "../../../src/lib/api";
 import { Dashboard } from "../../../src/components/Dashboard";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -37,7 +37,7 @@ export async function openReviewForBranch(
   branchName: string,
 ) {
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await screen.findByRole("tab", { name: /^Changes/, selected: true });

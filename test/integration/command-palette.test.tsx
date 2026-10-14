@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   writeRepoFile,
 } from "../utils";
 import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace, trustRepo } from "../../src/lib/api";
+import { clickGpuiRow } from "../gpui-sidebar";
 
 describe("CommandPalette integration", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -75,7 +75,7 @@ describe("CommandPalette integration", () => {
   it("opens the same stacked workspace dialog as the Stack button", async () => {
     await createWorkspace(repoPath, "feat/parent");
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/parent"));
+    await clickGpuiRow("feat/parent");
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByText("Create Workspace"));
@@ -102,7 +102,7 @@ describe("CommandPalette integration", () => {
     await trustRepo(repoPath);
     await createWorkspace(repoPath, "feat/palette-checks");
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/palette-checks"));
+    await clickGpuiRow("feat/palette-checks");
 
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByText("Run check: CI")).toBeTruthy();

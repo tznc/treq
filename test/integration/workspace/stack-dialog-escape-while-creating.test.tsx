@@ -1,14 +1,11 @@
 // @include-parallel
+import { findGpuiRow, stackGpui } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import * as api from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 
 let gate: Promise<void> | null = null;
 vi.mock("../../../src/lib/api", async (importOriginal) => {
@@ -40,13 +37,7 @@ it("ignores Escape while a stacked workspace is being created", async () => {
 
   render(<Dashboard />);
 
-  const row = (await findSidebarBranchElement("esc/base")).closest(
-    "div",
-  ) as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui("esc/base");
   const dialog = await screen.findByTestId("modal");
   await user.type(
     await within(dialog).findByLabelText("Branch Name"),
@@ -69,5 +60,5 @@ it("ignores Escape while a stacked workspace is being created", async () => {
   await waitFor(() =>
     expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
   );
-  await findSidebarBranchElement("esc/child");
+  await findGpuiRow("esc/child");
 }, 30000);

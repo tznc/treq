@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterAll, expect } from "vitest";
-import { act, waitFor, within } from "./test-utils";
+import { act, waitFor } from "./test-utils";
 import { waitForPendingInvokes } from "./setup.integration";
 
 export function openRepo(repoPath: string) {
@@ -300,38 +300,6 @@ export async function commitWorkspaceFile(
   const workspacePath = resolveWorkspacePath(repoPath, workspace.path);
   writeWorkspaceFile(workspacePath, relativePath, `${content}\n`, true);
   await createCommit(repoPath, workspace.id, message);
-}
-
-// Helper: wait for sidebar to show branch name, then return the first matching element
-export async function findSidebarBranchElement(
-  branchName: string,
-): Promise<HTMLElement> {
-  const sidebarRoot = await waitFor(() => {
-    const el = document.querySelector(
-      "[data-testid='workspace-sidebar']",
-    ) as HTMLElement | null;
-    if (!el) {
-      throw new Error("workspace sidebar not mounted");
-    }
-    return el;
-  });
-  await waitFor(() => {
-    expect(within(sidebarRoot).getAllByText(branchName).length).toBeGreaterThan(
-      0,
-    );
-  });
-  return within(sidebarRoot).getAllByText(branchName)[0];
-}
-
-/**
- * A workspace's sidebar row. Its hover actions include "Start agent" and
- * "Open shell", which open terminals in that workspace.
- */
-export async function findSidebarWorkspaceRow(
-  branchName: string,
-): Promise<HTMLElement> {
-  const label = await findSidebarBranchElement(branchName);
-  return label.closest("div") as HTMLElement;
 }
 
 /**

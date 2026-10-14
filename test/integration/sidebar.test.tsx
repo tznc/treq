@@ -2,11 +2,9 @@
 import * as React from "react";
 import { execSync } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "../test-utils";
-import userEvent from "@testing-library/user-event";
+import { act, render, screen } from "../test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   setWorkspaceTargetBranchRaw,
 } from "../utils";
@@ -18,18 +16,38 @@ import {
 } from "../../src/lib/api";
 import type { PrInfo } from "../../src/lib/api-types";
 import { Dashboard } from "../../src/components/Dashboard";
-import { waitFor, within } from "@testing-library/react";
+import type { NativeMenuEntry } from "../../src/lib/native-context-menu";
+import { waitFor } from "@testing-library/react";
+import {
+  clickGpuiHome,
+  clickGpuiRow,
+  findGpuiRow,
+  gpuiRepo,
+  gpuiSnapshot,
+  gpuiTitles,
+  openGpuiMenu,
+  sendGpuiAction,
+  stackGpui,
+} from "../gpui-sidebar";
 
 const findWorkspaceByBranchName = (
   workspaces: Awaited<ReturnType<typeof getWorkspaces>>,
   branchName: string,
 ) => workspaces.find((workspace) => workspace.branch_name === branchName);
 
+function selectMenuItem(entries: NativeMenuEntry[], label: string) {
+  const flat = entries.flatMap((e) => (e.kind === "submenu" ? e.items : [e]));
+  const entry = flat.find((e) => e.kind === "item" && e.text === label);
+  if (entry?.kind !== "item") throw new Error(`no "${label}" item`);
+  act(() => entry.onSelect());
+}
+
 describe("Dashboard - workspace list", () => {
   let repoPath: string;
+  let defaultBranch: string;
 
   beforeEach(async () => {
-    ({ repoPath } = createTestRepo(false));
+    ({ repoPath, defaultBranch } = createTestRepo(false));
 
     openRepo(repoPath);
 
@@ -39,23 +57,22 @@ describe("Dashboard - workspace list", () => {
 
   it("renders workspace sidebar elements correctly branch names in the sidebar", async () => {
     render(<Dashboard />);
-    await screen.findByText("main");
-    await screen.findByText("feat/alpha");
-    await screen.findByText("feat/beta");
-    expect(screen.queryByText("unknown")).toBeFalsy();
+    await findGpuiRow("feat/alpha");
+    await findGpuiRow("feat/beta");
+    await waitFor(() => expect(gpuiRepo()?.homeRef).toBe(defaultBranch));
+    expect(gpuiRepo()?.homeRef).not.toBe("unknown");
   });
 
-  it("renders the workspace list inside a shadcn sidebar", async () => {
+  it("draws the workspace list in the GPUI sidebar", async () => {
     render(<Dashboard />);
-    await screen.findByText("feat/alpha");
+    await findGpuiRow("feat/alpha");
 
-    const sidebar = document.querySelector(
-      '[data-sidebar="sidebar"]',
-    ) as HTMLElement;
-    expect(sidebar).toBeTruthy();
-    expect(sidebar.querySelector('[data-sidebar="header"]')).toBeTruthy();
-    expect(sidebar.querySelector('[data-sidebar="content"]')).toBeTruthy();
-    expect(within(sidebar).getByText("Workspaces")).toBeTruthy();
+    const snapshot = gpuiSnapshot()!;
+    expect(snapshot.repoName).toBe(repoPath.split("/").pop());
+    expect(snapshot.repos).toHaveLength(1);
+    expect(gpuiTitles()).toEqual(
+      expect.arrayContaining(["feat/alpha", "feat/beta"]),
+    );
   });
 
   it("shows detached HEAD short hash in home repo row instead of unknown", async () => {
@@ -70,17 +87,10 @@ describe("Dashboard - workspace list", () => {
 
     render(<Dashboard />);
 
-    const sidebarRoot = document.querySelector(
-      `.${CSS.escape("group/sidebar")}`,
-    ) as HTMLElement;
-    const homeRepoElement = sidebarRoot.querySelector(
-      '[data-testid="home-repo-row"]',
-    ) as HTMLElement;
-    expect(homeRepoElement).toBeTruthy();
     await waitFor(() => {
-      const homeText = homeRepoElement.textContent || "";
-      expect(homeText).toMatch(/\b[0-9a-f]{12}\b/i);
-      expect(homeText.toLowerCase()).not.toContain("unknown");
+      const homeRef = gpuiRepo()?.homeRef ?? "";
+      expect(homeRef).toMatch(/\b[0-9a-f]{12}\b/i);
+      expect(homeRef.toLowerCase()).not.toContain("unknown");
     });
   });
 
@@ -93,65 +103,41 @@ describe("Dashboard - workspace list", () => {
 
     render(<Dashboard />);
 
-    await screen.findByText("main");
-    await screen.findByText("feat/alpha");
-    await screen.findByText("feat/beta");
+    await waitFor(() => expect(gpuiRepo()?.homeRef).toBe(defaultBranch));
+    await findGpuiRow("feat/alpha");
+    await findGpuiRow("feat/beta");
   });
 
-  describe("context menu and tooltip", () => {
-    let user: ReturnType<typeof userEvent.setup>;
-
+  describe("context menu", () => {
     beforeEach(() => {
-      user = userEvent.setup();
       vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
     });
 
     it("should copy home repo relative and full paths from context menu", async () => {
       render(<Dashboard />);
+      await findGpuiRow("feat/alpha");
+      await waitFor(() => expect(gpuiRepo()?.homeRef).toBeTruthy());
 
-      const matches = await screen.findAllByText("feat/alpha");
-      expect(matches.length).toBeGreaterThan(0);
+      const menu = () => openGpuiMenu({ kind: "homeMenu", repoPath });
 
-      const sidebarRoot = document.querySelector(
-        `.${CSS.escape("group/sidebar")}`,
-      );
-      const homeRepoElement = sidebarRoot?.querySelector(
-        '[data-testid="home-repo-row"]',
-      ) as HTMLElement;
-      expect(homeRepoElement).toBeTruthy();
-
-      fireEvent.contextMenu(homeRepoElement);
-      await screen.findByText("Copy relative path");
-      await user.click(screen.getByText("Copy relative path"));
+      selectMenuItem(await menu(), "Copy relative path");
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(".");
 
-      fireEvent.contextMenu(homeRepoElement);
-      await screen.findByText("Copy full path");
-      await user.click(screen.getByText("Copy full path"));
+      selectMenuItem(await menu(), "Copy full path");
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(repoPath);
     });
 
     it("should open home repo in Finder when selecting Open in Finder", async () => {
       render(<Dashboard />);
+      await findGpuiRow("feat/alpha");
 
-      const matches = await screen.findAllByText("feat/alpha");
-      expect(matches.length).toBeGreaterThan(0);
-
-      const homeRepoElement = document.querySelector(
-        '[data-testid="home-repo-row"]',
-      ) as HTMLElement;
-      expect(homeRepoElement).toBeTruthy();
-
-      fireEvent.contextMenu(homeRepoElement!);
-
-      await screen.findByText("Open in...");
-
-      await user.hover(screen.getByText("Open in..."));
-
-      await screen.findByText("Open in Finder");
-
+      const entries = await openGpuiMenu({ kind: "homeMenu", repoPath });
+      expect(entries).toContainEqual(
+        expect.objectContaining({ kind: "submenu", text: "Open in..." }),
+      );
       const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
-      fireEvent.click(screen.getByText("Open in Finder"));
+      vi.mocked(revealItemInDir).mockResolvedValue(undefined);
+      selectMenuItem(entries, "Open in Finder");
 
       expect(revealItemInDir).toHaveBeenLastCalledWith(repoPath);
     });
@@ -166,18 +152,15 @@ describe("Dashboard - workspace list", () => {
 
       render(<Dashboard />);
 
-      const alphaElement = await findSidebarBranchElement("feat/alpha");
+      const alpha = await findGpuiRow("feat/alpha");
+      const menu = () => openGpuiMenu({ kind: "workspaceMenu", id: alpha.id });
 
-      fireEvent.contextMenu(alphaElement);
-      await screen.findByText("Copy relative path");
-      await user.click(screen.getByText("Copy relative path"));
+      selectMenuItem(await menu(), "Copy relative path");
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
         `.treq/workspaces/${alphaWorkspace.workspace_path}`,
       );
 
-      fireEvent.contextMenu(alphaElement);
-      await screen.findByText("Copy full path");
-      await user.click(screen.getByText("Copy full path"));
+      selectMenuItem(await menu(), "Copy full path");
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
         `${repoPath}/.treq/workspaces/${alphaWorkspace.workspace_path}`,
       );
@@ -201,11 +184,19 @@ describe("Dashboard - workspace list", () => {
 
       render(<Dashboard />);
 
-      const alphaElement = await findSidebarBranchElement("feat/alpha");
+      const alpha = await findGpuiRow("feat/alpha");
+      const menuLabels = async () =>
+        (await openGpuiMenu({ kind: "workspaceMenu", id: alpha.id })).flatMap(
+          (e) => (e.kind === "separator" ? [] : [e.text]),
+        );
+      await waitFor(async () =>
+        expect(await menuLabels()).toContain("Copy link to GitHub PR"),
+      );
 
-      fireEvent.contextMenu(alphaElement);
-      await screen.findByText("Copy link to GitHub PR");
-      await user.click(screen.getByText("Copy link to GitHub PR"));
+      selectMenuItem(
+        await openGpuiMenu({ kind: "workspaceMenu", id: alpha.id }),
+        "Copy link to GitHub PR",
+      );
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
         openPr.url,
       );
@@ -222,11 +213,18 @@ describe("Dashboard - workspace list", () => {
 
       render(<Dashboard />);
 
-      const alphaElement = await findSidebarBranchElement("feat/alpha");
+      const alpha = await findGpuiRow("feat/alpha");
+      expect(alpha.pr).toBeNull();
 
-      fireEvent.contextMenu(alphaElement);
-      await screen.findByText("Copy branch name");
-      expect(screen.queryByText("Copy link to GitHub PR")).toBeFalsy();
+      const entries = await openGpuiMenu({
+        kind: "workspaceMenu",
+        id: alpha.id,
+      });
+      const labels = entries.flatMap((e) =>
+        e.kind === "separator" ? [] : [e.text],
+      );
+      expect(labels).toContain("Copy branch name");
+      expect(labels).not.toContain("Copy link to GitHub PR");
 
       spy.mockRestore();
     });
@@ -241,18 +239,17 @@ describe("Dashboard - workspace list", () => {
 
       render(<Dashboard />);
 
-      const alphaElement = await findSidebarBranchElement("feat/alpha");
-
-      fireEvent.contextMenu(alphaElement);
-
-      await screen.findByText("Open in...");
-
-      await user.hover(screen.getByText("Open in..."));
-
-      await screen.findByText("Open in Finder");
-
+      const alpha = await findGpuiRow("feat/alpha");
+      const entries = await openGpuiMenu({
+        kind: "workspaceMenu",
+        id: alpha.id,
+      });
+      expect(entries).toContainEqual(
+        expect.objectContaining({ kind: "submenu", text: "Open in..." }),
+      );
       const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
-      fireEvent.click(screen.getByText("Open in Finder"));
+      vi.mocked(revealItemInDir).mockResolvedValue(undefined);
+      selectMenuItem(entries, "Open in Finder");
 
       expect(revealItemInDir).toHaveBeenLastCalledWith(
         `${repoPath}/.treq/workspaces/${alphaWorkspace.workspace_path}`,
@@ -261,61 +258,24 @@ describe("Dashboard - workspace list", () => {
   });
 
   describe("multi-select workspaces", () => {
-    let user: ReturnType<typeof userEvent.setup>;
-
-    beforeEach(() => {
-      user = userEvent.setup();
-    });
-
     it("should support multi-select interactions while keeping the main repository unselectable", async () => {
-      const getSidebarElements = async () => {
-        const alpha = await findSidebarBranchElement("feat/alpha");
-        const beta = await findSidebarBranchElement("feat/beta");
-        const sidebarRoot = document.querySelector(
-          `.${CSS.escape("group/sidebar")}`,
-        );
-        const mainRepoRow = sidebarRoot!.querySelector(
-          '[data-testid="home-repo-row"]',
-        );
+      render(<Dashboard />);
+      await findGpuiRow("feat/alpha");
+      await findGpuiRow("feat/beta");
 
-        return {
-          workspace1: alpha.closest("div") as HTMLElement,
-          workspace2: beta.closest("div") as HTMLElement,
-          mainRepoRow: mainRepoRow as HTMLElement,
-        };
-      };
+      await clickGpuiRow("feat/alpha", { toggle: true });
+      await clickGpuiRow("feat/beta", { toggle: true });
+      await waitFor(() => expect(gpuiSnapshot()?.bulkArchive).toBe(2));
 
-      const cmdClick = async (element: HTMLElement) => {
-        await user.keyboard("{Meta>}");
-        await user.click(element);
-        await user.keyboard("{/Meta}");
-      };
+      await clickGpuiRow("feat/alpha", { toggle: true });
+      await clickGpuiRow("feat/beta", { shift: true });
+      await waitFor(async () => {
+        expect((await findGpuiRow("feat/alpha")).selected).toBe(true);
+        expect((await findGpuiRow("feat/beta")).selected).toBe(true);
+      });
 
-      const { rerender } = render(<Dashboard />);
-      const { workspace1: cmdWorkspace1, workspace2: cmdWorkspace2 } =
-        await getSidebarElements();
-
-      await cmdClick(cmdWorkspace1);
-      await cmdClick(cmdWorkspace2);
-
-      rerender(<Dashboard />);
-      const { workspace1: shiftWorkspace1, workspace2: shiftWorkspace2 } =
-        await getSidebarElements();
-
-      await cmdClick(shiftWorkspace1);
-      await user.keyboard("{Shift>}");
-      await user.click(shiftWorkspace2);
-      await user.keyboard("{/Shift}");
-
-      expect(shiftWorkspace1).toHaveClass("bg-primary/20");
-      expect(shiftWorkspace2).toHaveClass("bg-primary/20");
-
-      rerender(<Dashboard />);
-
-      const { mainRepoRow } = await getSidebarElements();
-
-      await cmdClick(mainRepoRow);
-
+      await clickGpuiHome();
+      await waitFor(() => expect(gpuiSnapshot()?.bulkArchive).toBeNull());
       expect(
         screen.queryByText(/delete.*workspaces?/i),
       ).not.toBeInTheDocument();
@@ -324,48 +284,19 @@ describe("Dashboard - workspace list", () => {
     it("should show delete button when workspaces are selected", async () => {
       render(<Dashboard />);
 
-      const alpha = await findSidebarBranchElement("feat/alpha");
-      const beta = await findSidebarBranchElement("feat/beta");
+      await clickGpuiRow("feat/alpha", { toggle: true });
+      await clickGpuiRow("feat/beta", { toggle: true });
 
-      await user.keyboard("{Meta>}");
-      await user.click(alpha);
-      await user.click(beta);
-      await user.keyboard("{/Meta}");
-
-      await screen.findByText(/archive 2 workspaces/i);
+      await waitFor(() => expect(gpuiSnapshot()?.bulkArchive).toBe(2));
     });
 
     it("shows GitHub as a sidebar item below the home repo row", async () => {
       render(<Dashboard />);
 
-      const sidebarRoot = document.querySelector(
-        `.${CSS.escape("group/sidebar")}`,
-      ) as HTMLElement;
-      expect(sidebarRoot).toBeTruthy();
+      await waitFor(() => expect(gpuiRepo()?.homeRef).toBeTruthy());
+      expect(gpuiSnapshot()?.github).toBe(false);
 
-      const homeRepoRow = await waitFor(() => {
-        const row = sidebarRoot.querySelector(
-          '[data-testid="home-repo-row"]',
-        ) as HTMLElement;
-        expect(row).toBeTruthy();
-        return row;
-      });
-
-      const githubItem = within(sidebarRoot).getByRole("button", {
-        name: /github/i,
-      });
-      expect(githubItem).toBeTruthy();
-      expect(githubItem.textContent).toMatch(/github/i);
-
-      const homeIndex = Array.from(sidebarRoot.querySelectorAll("*")).indexOf(
-        homeRepoRow,
-      );
-      const githubIndex = Array.from(sidebarRoot.querySelectorAll("*")).indexOf(
-        githubItem,
-      );
-      expect(githubIndex).toBeGreaterThan(homeIndex);
-
-      await user.click(githubItem);
+      sendGpuiAction({ kind: "openGithub" });
       expect(
         await screen.findByRole("heading", { name: /github/i }),
       ).toBeTruthy();
@@ -374,31 +305,16 @@ describe("Dashboard - workspace list", () => {
     it("highlights only the GitHub sidebar item when GitHub is open", async () => {
       render(<Dashboard />);
 
-      const sidebarRoot = document.querySelector(
-        `.${CSS.escape("group/sidebar")}`,
-      ) as HTMLElement;
-      expect(sidebarRoot).toBeTruthy();
+      await waitFor(() => expect(gpuiRepo()?.homeSelected).toBe(true));
+      expect(gpuiSnapshot()?.github).toBe(false);
 
-      const homeRepoRow = await waitFor(() => {
-        const row = sidebarRoot.querySelector(
-          '[data-testid="home-repo-row"]',
-        ) as HTMLElement;
-        expect(row).toBeTruthy();
-        return row;
-      });
-
-      await waitFor(() => {
-        expect(homeRepoRow).toHaveClass("bg-primary/20");
-      });
-
-      const githubItem = within(sidebarRoot).getByTestId("github-sidebar-item");
-      await user.click(githubItem);
+      sendGpuiAction({ kind: "openGithub" });
 
       await screen.findByRole("heading", { name: /github/i });
 
       await waitFor(() => {
-        expect(githubItem).toHaveClass("bg-primary/20");
-        expect(homeRepoRow).not.toHaveClass("bg-primary/20");
+        expect(gpuiSnapshot()?.github).toBe(true);
+        expect(gpuiRepo()?.homeSelected).toBe(false);
       });
     });
 
@@ -443,10 +359,6 @@ describe("Dashboard - workspace list", () => {
 
       render(<Dashboard />);
 
-      const sidebarRoot = document.querySelector(
-        `.${CSS.escape("group/sidebar")}`,
-      ) as HTMLElement;
-
       const expectedBranches = [
         "dduck-joke-readme",
         "rubber-test-123",
@@ -458,114 +370,64 @@ describe("Dashboard - workspace list", () => {
 
       await waitFor(() => {
         for (const branchName of expectedBranches) {
-          expect(
-            sidebarRoot.querySelector(
-              `[data-testid="workspace-sidebar-item-${branchName}"]`,
-            ),
-          ).toBeTruthy();
+          expect(gpuiTitles()).toContain(branchName);
         }
       });
 
-      const getWorkspaceRow = (branchName: string) =>
-        sidebarRoot.querySelector(
-          `[data-testid="workspace-sidebar-item-${branchName}"]`,
-        ) as HTMLElement;
-
-      const visibleOrder = Array.from(
-        sidebarRoot.querySelectorAll<HTMLElement>(
-          "[data-testid^='workspace-sidebar-item-']",
-        ),
-      )
-        .map(
-          (el) =>
-            el.dataset.testid?.replace("workspace-sidebar-item-", "") ?? "",
-        )
-        .filter((name) => expectedBranches.includes(name));
-
+      const visibleOrder = gpuiTitles().filter((name) =>
+        expectedBranches.includes(name),
+      );
       expect(visibleOrder).toHaveLength(expectedBranches.length);
 
       const anchorBranch = "dduck-joke-readme";
       const targetBranch = "gumbo-notes";
-      const anchorRow = getWorkspaceRow(anchorBranch);
-      const targetRow = getWorkspaceRow(targetBranch);
-      const rangeCount =
-        Math.abs(
-          Number(anchorRow.dataset.sidebarIndex) -
-            Number(targetRow.dataset.sidebarIndex),
-        ) + 1;
+      const start = gpuiTitles().indexOf(anchorBranch);
+      const end = gpuiTitles().indexOf(targetBranch);
+      const rangeCount = Math.abs(start - end) + 1;
       expect(rangeCount).toBeGreaterThan(1);
 
-      fireEvent.pointerDown(anchorRow, { button: 0, metaKey: true });
-      fireEvent.click(anchorRow, { metaKey: true });
-      fireEvent.pointerDown(targetRow, { button: 0, shiftKey: true });
-      fireEvent.click(targetRow, { shiftKey: true });
+      await clickGpuiRow(anchorBranch, { toggle: true });
+      await clickGpuiRow(targetBranch, { shift: true });
 
       await waitFor(() => {
-        const start = Math.min(
-          Number(anchorRow.dataset.sidebarIndex),
-          Number(targetRow.dataset.sidebarIndex),
+        const titles = gpuiTitles();
+        const lo = Math.min(
+          titles.indexOf(anchorBranch),
+          titles.indexOf(targetBranch),
         );
-        const end = Math.max(
-          Number(anchorRow.dataset.sidebarIndex),
-          Number(targetRow.dataset.sidebarIndex),
+        const hi = Math.max(
+          titles.indexOf(anchorBranch),
+          titles.indexOf(targetBranch),
         );
-        for (const row of sidebarRoot.querySelectorAll<HTMLElement>(
-          "[data-testid^='workspace-sidebar-item-']",
-        )) {
-          const index = Number(row.dataset.sidebarIndex);
-          if (index >= start && index <= end) {
-            expect(row).toHaveClass("bg-primary/20");
-          }
-        }
+        gpuiRepo()!.workspaces.forEach((row, index) => {
+          if (index >= lo && index <= hi) expect(row.selected).toBe(true);
+        });
+        expect(gpuiSnapshot()?.bulkArchive).toBe(rangeCount);
       });
-
-      await screen.findByText(
-        new RegExp(`archive ${rangeCount} workspaces`, "i"),
-      );
     });
   });
 
   describe("home repo action buttons", () => {
-    let user: ReturnType<typeof userEvent.setup>;
-
-    beforeEach(() => {
-      user = userEvent.setup();
-    });
-
     it("keeps home action buttons visible when unselected", async () => {
       render(<Dashboard />);
 
-      const homeRepoElement = await screen.findByTestId("home-repo-row");
-      const alphaLabel = await findSidebarBranchElement("feat/alpha");
-      const alphaRow = alphaLabel.closest("div") as HTMLElement;
-      await user.click(alphaLabel);
+      await clickGpuiRow("feat/alpha");
 
-      expect(alphaRow).toHaveClass("bg-primary/20");
-      expect(homeRepoElement).not.toHaveClass("bg-primary/20");
-      expect(
-        within(homeRepoElement).getByRole("button", { name: "Start agent" }),
-      ).toBeTruthy();
-      expect(
-        within(homeRepoElement).getByRole("button", { name: "Open shell" }),
-      ).toBeTruthy();
-      expect(
-        within(homeRepoElement).getByRole("button", {
-          name: "Stack a workspace",
-        }),
-      ).toBeTruthy();
+      await waitFor(async () =>
+        expect((await findGpuiRow("feat/alpha")).selected).toBe(true),
+      );
+      expect(gpuiRepo()?.homeSelected).toBe(false);
+      expect(gpuiSnapshot()?.agentUnavailable).toBeNull();
+      expect(gpuiSnapshot()?.shellUnavailable).toBeNull();
     });
 
     it("opens the stack dialog for home when Stack is clicked", async () => {
       vi.spyOn(api, "jjGitFetchBackground").mockResolvedValue(undefined);
 
       render(<Dashboard />);
+      await findGpuiRow("feat/alpha");
 
-      const homeRepoElement = await screen.findByTestId("home-repo-row");
-      await user.click(
-        within(homeRepoElement).getByRole("button", {
-          name: "Stack a workspace",
-        }),
-      );
+      await stackGpui(null);
 
       expect(await screen.findByText("Stack a new Workspace")).toBeVisible();
       expect(

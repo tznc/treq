@@ -11,15 +11,14 @@ import {
 } from "../../src/lib/api";
 import { render, screen, waitFor, within } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
-
-const homeRow = (repoPath: string) =>
-  waitFor(() => {
-    const row = document.querySelector(
-      `[data-testid="home-repo-row"][data-repo-path="${CSS.escape(repoPath)}"]`,
-    ) as HTMLElement | null;
-    if (!row) throw new Error(`no home row for ${repoPath}`);
-    return row;
-  });
+import {
+  clickGpuiHome,
+  clickGpuiRow,
+  findGpuiRow,
+  gpuiRepo,
+  gpuiSnapshot,
+  sendGpuiAction,
+} from "../gpui-sidebar";
 
 describe("Supporting repositories", () => {
   let mainPath: string;
@@ -39,20 +38,20 @@ describe("Supporting repositories", () => {
     await createWorkspace(supportingPath, "feat/supporting-work");
     render(<Dashboard />);
 
-    await homeRow(mainPath);
-    await homeRow(supportingPath);
-    const sidebar = await screen.findByTestId("workspace-sidebar");
-    await within(sidebar).findByText("feat/main-work");
-    await within(sidebar).findByText("feat/supporting-work");
-    expect(
-      within(sidebar).getAllByTestId("repo-workspace-group-label"),
-    ).toHaveLength(2);
+    await findGpuiRow("feat/main-work", { repoPath: mainPath });
+    await findGpuiRow("feat/supporting-work", { repoPath: supportingPath });
+    await waitFor(() => {
+      const { repos } = gpuiSnapshot()!;
+      expect(repos.map((r) => r.path)).toEqual([mainPath, supportingPath]);
+      expect(repos[0].homeRef).toBeTruthy();
+      expect(repos.every((r) => r.label)).toBe(true);
+    });
   });
 
   it("stacks a workspace in the supporting repository when it is on screen", async () => {
     render(<Dashboard />);
 
-    await user.click(await homeRow(supportingPath));
+    await clickGpuiHome(supportingPath);
     await screen.findByTestId("show-workspace-header");
     await user.click(await screen.findByRole("button", { name: "Stack" }));
     const dialog = await screen.findByTestId("modal");
@@ -73,12 +72,11 @@ describe("Supporting repositories", () => {
   it("opens a supporting workspace and returns to the main home repository", async () => {
     await createWorkspace(supportingPath, "feat/supporting-open");
     render(<Dashboard />);
-    const sidebar = await screen.findByTestId("workspace-sidebar");
 
-    await user.click(await within(sidebar).findByText("feat/supporting-open"));
+    await clickGpuiRow("feat/supporting-open", { repoPath: supportingPath });
     const header = await screen.findByTestId("show-workspace-header");
     await within(header).findByText("feat/supporting-open");
-    await user.click(await homeRow(mainPath));
+    await clickGpuiHome(mainPath);
     await waitFor(() =>
       expect(
         within(screen.getByTestId("show-workspace-header")).queryByText(
@@ -91,15 +89,13 @@ describe("Supporting repositories", () => {
   it("collapses a repository group", async () => {
     await createWorkspace(supportingPath, "feat/hidden-by-collapse");
     render(<Dashboard />);
-    const sidebar = await screen.findByTestId("workspace-sidebar");
-    const workspaceRow = await within(sidebar).findByText(
-      "feat/hidden-by-collapse",
-    );
+    await findGpuiRow("feat/hidden-by-collapse", { repoPath: supportingPath });
+    expect(gpuiRepo(supportingPath)?.collapsed).toBe(false);
 
-    const labels = within(sidebar).getAllByTestId("repo-workspace-group-label");
-    await user.click(labels[1]);
+    sendGpuiAction({ kind: "toggleRepo", repoPath: supportingPath });
 
-    await waitFor(() => expect(workspaceRow).not.toBeVisible());
+    await waitFor(() => expect(gpuiRepo(supportingPath)?.collapsed).toBe(true));
+    expect(gpuiRepo(mainPath)?.collapsed).toBe(false);
   });
 
   it("rejects adding the main repository to itself", async () => {
