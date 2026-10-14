@@ -1668,6 +1668,18 @@ export const ShowWorkspace = ({
                   </TooltipProvider>
                 )}
 
+              {checksTarget && (
+                <WorkspaceChecksButton
+                  target={checksTarget}
+                  prBranch={
+                    workspace && workspace.branch_name !== defaultBranch
+                      ? workspace.branch_name
+                      : undefined
+                  }
+                  onOpenLogs={logsEnabled ? openCheckLogs : undefined}
+                />
+              )}
+
               {/* Create / View PR. When the branch has a GitHub remote but
 								    hasn't been pushed yet, CreatePrButtonGroup pushes it first so
 								    there's no separate "Push" click required. */}
@@ -1751,17 +1763,7 @@ export const ShowWorkspace = ({
                   </Tooltip>
                 </TooltipProvider>
               )}
-              {checksTarget && (
-                <WorkspaceChecksButton
-                  target={checksTarget}
-                  prBranch={
-                    workspace && workspace.branch_name !== defaultBranch
-                      ? workspace.branch_name
-                      : undefined
-                  }
-                  onOpenLogs={logsEnabled ? openCheckLogs : undefined}
-                />
-              )}
+
               {/* Merge queue button (build flag + repo opt-in) */}
               {workspace &&
                 workspace.branch_name !== defaultBranch &&
