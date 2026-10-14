@@ -46,3 +46,11 @@ pub fn list_local_ssh_identities() -> Result<Vec<LocalSshIdentity>, String> {
 pub fn read_local_ssh_public_key(reference: String) -> Result<String, String> {
   remote_local_keys::read_local_public_key(&reference)
 }
+
+/// Reads the host-key fingerprint a user-managed host presents, so the setup
+/// flow can ask the user to confirm it before pinning it. Never
+/// authenticates - see `core::remote_ssh_host_key_probe`.
+#[tauri::command]
+pub async fn probe_ssh_host_key(hostname: String, port: u16) -> Result<String, String> {
+  crate::core::remote_ssh_host_key_probe::probe_host_key_fingerprint(&hostname, port).await
+}

@@ -31,7 +31,7 @@ export const TaskInputMentionDropdown: React.FC<
         ref={mentionRef}
         className="mx-2 mb-1 rounded-lg border border-border bg-muted/50 overflow-hidden"
       >
-        <div className="px-3 py-1 text-[10px] text-muted-foreground font-medium uppercase tracking-wider border-b border-border">
+        <div className="px-3 py-1 text-xs text-muted-foreground font-medium uppercase tracking-wider border-b border-border">
           Files
         </div>
         {mentionResults.map((file, i) => (

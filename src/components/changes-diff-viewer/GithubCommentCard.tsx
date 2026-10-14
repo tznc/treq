@@ -121,7 +121,7 @@ export function GithubCommentCard({
           </>
         )}
         {thread.is_resolved && (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-medium flex-shrink-0">
+          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-xs font-medium flex-shrink-0">
             <CheckCircle2 className="w-3 h-3" />
             Resolved
           </span>

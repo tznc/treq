@@ -57,12 +57,13 @@ it("captures FileBrowser change highlighting on a very long modified line", asyn
   );
   expect(longRow).toBeTruthy();
   expect(longRow).toHaveClass("overflow-hidden");
+  expect((longRow as HTMLElement).style.minHeight).toBe("18px");
 
   await captureDocument(document, {
-    name: "filebrowser-long-line-changes-01-no-overlap",
+    name: "filebrowser-long-line-changes-01-wrapped",
     expectations: [
-      "FileBrowser is open on input.tsx showing the long Input.forwardRef line on a single row.",
-      "The long line does not wrap or overlay neighboring lines such as Input.displayName.",
+      "The long Input.forwardRef line wraps onto multiple visual lines with no horizontal scrollbar.",
+      "Input.displayName sits below the wrapped text and is not overlapped by it.",
       "Deleted and added text are not stacked on top of each other in the same row.",
     ],
   });

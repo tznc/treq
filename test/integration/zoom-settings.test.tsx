@@ -5,7 +5,7 @@ import { waitFor } from "@testing-library/react";
 import { Dashboard } from "../../src/components/Dashboard";
 import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
-import { setSetting } from "../../src/lib/api";
+import { getSetting, setSetting } from "../../src/lib/api";
 
 const setWebviewZoom = vi.fn().mockResolvedValue(undefined);
 
@@ -50,6 +50,19 @@ describe("UI zoom settings", () => {
     });
   });
 
+  it("applies slider changes immediately without saving", async () => {
+    render(<Dashboard />);
+
+    await user.click(await screen.findByLabelText("Settings"));
+    await user.click(await screen.findByRole("tab", { name: /application/i }));
+
+    const thumb = await screen.findByRole("slider");
+    thumb.focus();
+    await user.keyboard("{ArrowRight}");
+
+    await waitFor(() => expect(setWebviewZoom).toHaveBeenCalledWith(1.05));
+  });
+
   it("shows a zoom slider in application settings and saves the value", async () => {
     render(<Dashboard />);
 
@@ -67,5 +80,43 @@ describe("UI zoom settings", () => {
     await screen.findByText("Settings Saved");
 
     expect(setWebviewZoom).toHaveBeenCalledWith(1.1);
+  });
+});
+
+describe("font size presets", () => {
+  let user: ReturnType<typeof userEvent.setup>;
+
+  beforeEach(async () => {
+    const { repoPath } = createTestRepo(false);
+    openRepo(repoPath);
+    await setSetting("terminal_font_size", "14");
+    user = userEvent.setup();
+  });
+
+  it("offers named sizes and saves the chosen one", async () => {
+    render(<Dashboard />);
+
+    await user.click(await screen.findByLabelText("Settings"));
+    await user.click(await screen.findByRole("tab", { name: /application/i }));
+
+    const select = await screen.findByLabelText("Font Size");
+    expect(select).toHaveValue("14");
+    expect(
+      Array.from((select as HTMLSelectElement).options).map((o) => o.text),
+    ).toEqual([
+      "Extra Small",
+      "Small",
+      "Medium (default)",
+      "Large",
+      "Extra Large",
+    ]);
+
+    await user.selectOptions(select, "Large");
+    await user.click(screen.getByRole("button", { name: /save settings/i }));
+    await screen.findByText("Settings Saved");
+
+    await waitFor(async () =>
+      expect(await getSetting("terminal_font_size")).toBe("16"),
+    );
   });
 });

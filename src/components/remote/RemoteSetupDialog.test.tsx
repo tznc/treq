@@ -3,6 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "../../../test/test-utils";
 import { RemoteSetupDialog } from "./RemoteSetupDialog";
 
+const probeSshHostKey = vi.fn();
+vi.mock("../../lib/api-remote-ssh", () => ({
+  probeSshHostKey: (...args: unknown[]) => probeSshHostKey(...args),
+  resolveSshConfigAlias: vi.fn(),
+}));
+vi.mock("../../lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/api")>()),
+  listLocalSshIdentities: vi.fn().mockResolvedValue([
+    {
+      reference: "/home/me/.ssh/id_ed25519.pub",
+      label: "id_ed25519",
+      fingerprint_sha256: "SHA256:client",
+      algorithm: "ssh-ed25519",
+    },
+  ]),
+}));
+
 function baseProps() {
   return {
     open: true,
@@ -116,32 +133,33 @@ describe("RemoteSetupDialog", () => {
     );
   });
 
-  it("requires host-trust confirmation before registering a user-managed endpoint", async () => {
+  it("asks the user to confirm the host key the server presents", async () => {
     const user = userEvent.setup();
     const props = baseProps();
+    probeSshHostKey.mockResolvedValue("SHA256:deadbeef");
     render(<RemoteSetupDialog {...props} />);
 
     await user.click(
       await screen.findByRole("button", { name: /Your own VM/ }),
     );
 
-    await user.type(await screen.findByLabelText("Display name"), "My box");
+    expect(screen.queryByLabelText(/fingerprint/i)).not.toBeInTheDocument();
+    const continueButton = screen.getByRole("button", { name: "Continue" });
+    expect(continueButton).toBeDisabled();
+
     await user.type(
       screen.getByLabelText("Hostname or IP address"),
       "203.0.113.4",
     );
     await user.type(screen.getByLabelText("Username"), "dev");
-    await user.type(
-      screen.getByLabelText("Expected host-key fingerprint"),
-      "SHA256:deadbeef",
+    expect(await screen.findByLabelText("SSH key")).toHaveValue(
+      "/home/me/.ssh/id_ed25519.pub",
     );
-    await user.type(
-      screen.getByLabelText("Auth identity reference"),
-      "/home/me/.ssh/id_ed25519",
-    );
+    expect(continueButton).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(continueButton);
 
+    expect(probeSshHostKey).toHaveBeenCalledWith("203.0.113.4", 22);
     expect(props.onRegisterUserManaged).not.toHaveBeenCalled();
     const confirmation = await screen.findByTestId("host-trust-confirmation");
     expect(confirmation).toHaveTextContent("203.0.113.4");
@@ -150,11 +168,38 @@ describe("RemoteSetupDialog", () => {
     await user.click(screen.getByRole("button", { name: "Trust and connect" }));
     expect(props.onRegisterUserManaged).toHaveBeenCalledWith(
       expect.objectContaining({
-        display_name: "My box",
+        display_name: "203.0.113.4",
         hostname: "203.0.113.4",
         host_key_fingerprint: "SHA256:deadbeef",
+        auth_identity_reference: "/home/me/.ssh/id_ed25519.pub",
         alias: null,
       }),
     );
+  });
+
+  it("shows why the host key could not be read", async () => {
+    const user = userEvent.setup();
+    probeSshHostKey.mockRejectedValue(
+      new Error("could not reach 203.0.113.4:22"),
+    );
+    render(<RemoteSetupDialog {...baseProps()} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Your own VM/ }),
+    );
+    await user.type(
+      screen.getByLabelText("Hostname or IP address"),
+      "203.0.113.4",
+    );
+    await user.type(screen.getByLabelText("Username"), "dev");
+    await screen.findByDisplayValue(/id_ed25519/);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "could not reach 203.0.113.4:22",
+    );
+    expect(
+      screen.queryByTestId("host-trust-confirmation"),
+    ).not.toBeInTheDocument();
   });
 });

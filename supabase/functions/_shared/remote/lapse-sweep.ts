@@ -1,5 +1,5 @@
 // Stops and later deletes the cloud workspace of an owner whose Pro ended
-// (prds/billing-and-teams.md, "Enforcement" and open decision B02: "30 days,
+// (prds/billing-and-teams.md, "Enforcement" and open decision B02: "7 days,
 // stopped, then deleted"). Run by remote-admin's `sweep_lapsed_instances`
 // action from a scheduler.
 //
@@ -8,10 +8,10 @@
 //
 // * Pro is back: the lapse is cleared.
 // * The lapse is new: lapsed_at is recorded and the instance is stopped.
-// * 30 days have passed: the instance is deleted.
+// * 7 days have passed: the instance is deleted.
 //
 // The database decides every write against its own clock and the owner's
-// entitlement at that moment (027_billing_enforcement.sql), so this clock
+// entitlement at that moment (031_retention_windows.sql), so this clock
 // only chooses which instances to ask about. A clock running ahead cannot
 // delete early, and an owner who subscribes again after the listing keeps
 // their instance.
@@ -20,7 +20,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { recordAuditEvent, type RemoteAuditEventType } from "./audit.ts";
 import type { ManagedComputeProvider } from "./sprites-adapter.ts";
 
-export const LAPSE_GRACE_DAYS = 30;
+export const LAPSE_GRACE_DAYS = 7;
 const DAY_MS = 86_400_000;
 
 // States in which the machine may be running. Other states (failed,

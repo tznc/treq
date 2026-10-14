@@ -237,11 +237,11 @@ const CodeLine = ({
     <div
       data-testid="code-line"
       className={cn(
-        "flex items-center group relative overflow-hidden hover:bg-muted/30 transition-colors text-sm font-mono leading-normal",
+        "flex items-start group relative overflow-hidden hover:bg-muted/30 transition-colors text-sm font-mono leading-normal",
         diffStatus === "add" && "bg-emerald-500/10",
         isLineSelected && "!bg-blue-500/20",
       )}
-      style={{ height: LINE_HEIGHT }}
+      style={{ minHeight: LINE_HEIGHT }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onMouseDown={(e) => onLineMouseDown(e, lineNum, htmlContent)}
@@ -304,7 +304,7 @@ const CodeLine = ({
       {/* Code content */}
       <span
         data-testid="code-line-content"
-        className="whitespace-pre font-mono min-w-0 flex-1 overflow-x-auto"
+        className="whitespace-pre-wrap break-words font-mono min-w-0 flex-1"
         dangerouslySetInnerHTML={{ __html: htmlContent }}
       />
     </div>
@@ -1090,7 +1090,7 @@ const TreeNode = ({
         </span>
         {reviewCommentCount > 0 && (
           <span
-            className="flex items-center gap-0.5 text-[10px] text-primary flex-shrink-0 ml-auto"
+            className="flex items-center gap-0.5 text-xs text-primary flex-shrink-0 ml-auto"
             title={`${reviewCommentCount} pending review comment${reviewCommentCount !== 1 ? "s" : ""}`}
           >
             <MessageSquare className="w-3 h-3" />

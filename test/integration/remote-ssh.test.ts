@@ -18,7 +18,11 @@ import {
   listSavedRepositoriesForEndpoint,
   upsertSavedRemoteRepository,
 } from "../../src/lib/remote-repository";
-import { LOOPBACK_SSH_HOSTNAME } from "../loopback-ssh";
+import {
+  LOOPBACK_SSH_HOST_KEY_FINGERPRINT,
+  LOOPBACK_SSH_HOSTNAME,
+  TEST_SSH_PUBLIC_KEY,
+} from "../loopback-ssh";
 import { render, screen } from "../test-utils";
 import { createTestRepo } from "../utils";
 
@@ -164,6 +168,10 @@ describe("remote SSH integration", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "treq-alias-home-"));
     fs.mkdirSync(path.join(home, ".ssh"));
     fs.writeFileSync(path.join(home, ".ssh", "config"), contents);
+    fs.writeFileSync(
+      path.join(home, ".ssh", "id_ed25519.pub"),
+      `${TEST_SSH_PUBLIC_KEY}\n`,
+    );
     const previousHome = process.env.HOME;
     process.env.HOME = home;
     onTestFinished(() => {
@@ -181,13 +189,8 @@ describe("remote SSH integration", () => {
     );
     await user.type(await screen.findByLabelText("Display name"), "QA box");
     await user.type(screen.getByLabelText("Username"), "treq");
-    await user.type(
-      screen.getByLabelText("Expected host-key fingerprint"),
-      "SHA256:loopback",
-    );
-    await user.type(
-      screen.getByLabelText("Auth identity reference"),
-      "id_ed25519",
+    expect(await screen.findByLabelText("SSH key")).toHaveDisplayValue(
+      /id_ed25519/,
     );
     await user.click(screen.getByLabelText(/Use an explicit SSH alias/));
     await user.type(screen.getByLabelText(/^Alias/), "qa-alias");
@@ -217,7 +220,8 @@ describe("remote SSH integration", () => {
       alias: "qa-alias",
       hostname: LOOPBACK_SSH_HOSTNAME,
       port: 2222,
-      auth_identity_reference: "id_ed25519",
+      host_key_fingerprint: LOOPBACK_SSH_HOST_KEY_FINGERPRINT,
+      auth_identity_reference: expect.stringContaining("id_ed25519.pub"),
     });
     await user.clear(pathInput);
     await user.type(pathInput, repoPath);

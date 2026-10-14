@@ -10,7 +10,11 @@ import {
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { useThemeStore } from "../stores/themeStore";
-import { useTerminalSettingsStore } from "../stores/terminalSettingsStore";
+import {
+  FONT_SIZE_PRESETS,
+  nearestFontSizePreset,
+  useTerminalSettingsStore,
+} from "../stores/terminalSettingsStore";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -33,7 +37,6 @@ import {
   type RepositorySettingsContentHandle,
 } from "./RepositorySettingsContent";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Slider } from "./ui/slider";
 import { Switch } from "./ui/switch";
@@ -120,7 +123,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const conflictMarkerStyle = conflictDraft ?? savedConflict ?? "git";
   const localFontSize = fontDraft ?? fontSize;
   const localZoom = zoomDraft ?? zoom;
-  const originalFontSize = fontSize;
   const setDefaultModel = setModelDraft;
   const setDefaultAgent = setAgentDraft;
   const setConflictMarkerStyle = setConflictDraft;
@@ -262,6 +264,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                         onValueChange={(value) =>
                           setLocalZoom(Array.isArray(value) ? value[0] : value)
                         }
+                        onValueCommitted={(value) => {
+                          // Apply on release, not per drag tick: resizing the
+                          // page mid-drag moves the track under the pointer.
+                          const next = Array.isArray(value) ? value[0] : value;
+                          setLocalZoom(null);
+                          void setZoom(next);
+                        }}
                         className="mt-3"
                       />
                       <p className="text-sm text-muted-foreground mt-2">
@@ -272,48 +281,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
                     <div>
                       <Label htmlFor="font-size">Font Size</Label>
-                      <Input
+                      <select
                         id="font-size"
-                        type="number"
-                        min={8}
-                        max={32}
-                        value={localFontSize}
-                        onChange={(e) => {
-                          const value = parseInt(e.target.value, 10);
-                          if (!isNaN(value) && value >= 8 && value <= 32) {
-                            setLocalFontSize(value);
-                          }
-                        }}
-                        placeholder="14"
-                        className="mt-2"
-                      />
-                      {originalFontSize !== null &&
-                        localFontSize !== originalFontSize && (
-                          <div className="mt-3 p-3 border rounded-md bg-muted/30">
-                            <div className="text-sm text-muted-foreground mb-2">
-                              Preview:
-                            </div>
-                            <div className="space-y-2">
-                              <div
-                                style={{ fontSize: `${originalFontSize}px` }}
-                                className="font-mono text-muted-foreground"
-                              >
-                                Original ({originalFontSize}px): The quick brown
-                                fox jumps over the lazy dog
-                              </div>
-                              <div
-                                style={{ fontSize: `${localFontSize}px` }}
-                                className="font-mono"
-                              >
-                                New ({localFontSize}px): The quick brown fox
-                                jumps over the lazy dog
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                        value={nearestFontSizePreset(localFontSize)}
+                        onChange={(e) =>
+                          setLocalFontSize(parseInt(e.target.value, 10))
+                        }
+                        className="mt-2 w-full px-3 py-2 border rounded-md bg-background text-foreground"
+                      >
+                        {FONT_SIZE_PRESETS.map((preset) => (
+                          <option key={preset.size} value={preset.size}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </select>
                       <p className="text-sm text-muted-foreground mt-2">
                         Font size for terminal, code diff display, and overview
-                        files (8-32)
+                        files
                       </p>
                     </div>
 

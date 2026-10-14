@@ -376,7 +376,7 @@ pub struct SshTransportMetricsSnapshot {
 /// Computes the SHA256 fingerprint string (`SHA256:<base64>`) for a server
 /// host key or certificate, in the same shape as [`TrustedHostKey`]'s
 /// `fingerprint_sha256`.
-fn fingerprint_of(key: &russh::keys::PublicKeyOrCertificate) -> Option<String> {
+pub(crate) fn fingerprint_of(key: &russh::keys::PublicKeyOrCertificate) -> Option<String> {
   match key {
     russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => {
       Some(key.fingerprint(russh::keys::HashAlg::Sha256).to_string())
