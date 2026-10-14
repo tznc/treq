@@ -448,6 +448,9 @@ fn modal_backdrop_covers_the_sidebar_and_dismisses(cx: &mut TestAppContext) {
   let backdrop = h.bounds("modal-backdrop").expect("backdrop drawn");
   let row = h.bounds("workspace-7").unwrap();
   assert!(backdrop.contains(&row.center()));
+  // It reaches the sidebar's right edge, border included.
+  let sidebar = h.bounds("sidebar").expect("sidebar drawn");
+  assert_eq!(backdrop.right(), sidebar.right());
   // A click over a row reaches the backdrop, not the row.
   h.click("workspace-7");
   assert_eq!(h.sent(), vec![SidebarAction::DismissModal]);

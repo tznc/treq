@@ -465,6 +465,7 @@ impl Render for Sidebar {
 
     let mut sidebar = div()
       .id("sidebar")
+      .debug_selector(|| "sidebar".into())
       .relative()
       .flex()
       .flex_col()
@@ -559,6 +560,9 @@ fn modal_backdrop(opacity: f32) -> gpui::Stateful<gpui::Div> {
     .debug_selector(|| "modal-backdrop".into())
     .absolute()
     .inset_0()
+    // `inset_0` stops inside the sidebar's right border; cover it too, or it
+    // shows as a light line between the two backdrops.
+    .right(px(-1.))
     .bg(gpui::black().opacity(opacity.clamp(0., 1.)))
     .occlude()
 }
