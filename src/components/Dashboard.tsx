@@ -2786,16 +2786,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
     cacheKey: queryRepoKey,
     terminalSessions: terminalSessionSummaries,
     selectedWorkspaceId: selectedWorkspace?.id ?? null,
+    selectedWorkspaceIds,
+    archivingWorkspaceIds,
+    exitingWorkspaceIds,
     currentPage,
-    homeBranch: homeRepoDisplayRef,
+    homeRef: homeRepoDisplayRef,
     linearEnabled: linearIntegrationEnabled,
     dark,
     width: sidebarWidth,
+    capabilities: remoteCaps,
     onSelectWorkspace: handleSelectWorkspace,
+    onSelectRepoHome: handleSelectRepoHome,
     onOpenSettings: () => openSettings("application"),
     onOpenCommandPalette: () => setShowCommandPalette(true),
     onOpenGithub: openGitHub,
     onOpenLinear: openLinear,
+    onStartAgent: (id) => void handleCreateSessionFromSidebar(id),
+    onOpenShell: (workspace) =>
+      workspace
+        ? handleStartShellFromSidebar(workspace)
+        : handleStartHomeShellFromSidebar(),
+    onStack: (workspace) =>
+      workspace ? handleAddAfter(workspace) : handleStackHomeFromSidebar(),
+    onBulkArchive: () => void handleBulkArchive(),
   });
   const showSidebar = !gpuiSidebarActive;
   const sidebarWidthStyle = {

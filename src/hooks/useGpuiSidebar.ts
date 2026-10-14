@@ -8,6 +8,7 @@ import {
   updateGpuiSidebar,
 } from "../lib/gpui-shell";
 import type { Workspace } from "../lib/api";
+import type { RemoteCapabilities } from "../lib/remote-capabilities";
 import type { TerminalSessionSummary } from "../components/terminal/types";
 import { useWorkspaceSidebarRows } from "./useWorkspaceSidebarRows";
 
@@ -18,16 +19,26 @@ interface UseGpuiSidebarParams {
   cacheKey: string | undefined;
   terminalSessions: TerminalSessionSummary[];
   selectedWorkspaceId: number | null;
+  selectedWorkspaceIds: ReadonlySet<number>;
+  archivingWorkspaceIds: ReadonlySet<number>;
+  exitingWorkspaceIds: ReadonlySet<number>;
   currentPage: string | undefined;
-  homeBranch: string | null;
+  homeRef: string | null;
   linearEnabled: boolean;
   dark: boolean;
   width: number;
+  capabilities: RemoteCapabilities;
   onSelectWorkspace: (workspace: Workspace | null) => void;
+  onSelectRepoHome: (repoPath: string) => void;
   onOpenSettings: () => void;
   onOpenCommandPalette: () => void;
   onOpenGithub: () => void;
   onOpenLinear: () => void;
+  /** null starts an agent at the repository home. */
+  onStartAgent: (workspaceId: number | null) => void;
+  onOpenShell: (workspace: Workspace | null) => void;
+  onStack: (workspace: Workspace | null) => void;
+  onBulkArchive: () => void;
 }
 
 /**
@@ -42,23 +53,36 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
     terminalSessions: params.terminalSessions,
   });
 
-  const snapshot: GpuiSidebarSnapshot | null = active
-    ? buildGpuiSidebarSnapshot({
-        repoPath: params.repoPath,
-        nodes: rows.flattenedNodes,
-        streamingByBranchWithAgentSession:
-          rows.streamingByBranchWithAgentSession,
-        prStatusesByBranch: rows.prStatusesByBranch,
-        hasRemote: !!rows.remoteInfo,
-        selectedWorkspaceId: params.selectedWorkspaceId,
-        currentPage: params.currentPage,
-        homeBranch: params.homeBranch,
-        linearEnabled: params.linearEnabled,
-        dark: params.dark,
-        width: params.width,
-        loading: rows.workspacesPending && rows.flattenedNodes.length === 0,
-      })
-    : null;
+  const snapshot: GpuiSidebarSnapshot | null =
+    active && params.repoPath
+      ? buildGpuiSidebarSnapshot({
+          repoPath: params.repoPath,
+          repos: [
+            {
+              path: params.repoPath,
+              homeRef: params.homeRef,
+              active: true,
+              loading:
+                rows.workspacesPending && rows.flattenedNodes.length === 0,
+              nodes: rows.flattenedNodes,
+              streamingByBranchWithAgentSession:
+                rows.streamingByBranchWithAgentSession,
+              prStatusesByBranch: rows.prStatusesByBranch,
+              hasRemote: !!rows.remoteInfo,
+              queueStatusesByBranch: rows.branchQueueStatuses,
+            },
+          ],
+          selectedWorkspaceId: params.selectedWorkspaceId,
+          selectedWorkspaceIds: params.selectedWorkspaceIds,
+          archivingWorkspaceIds: params.archivingWorkspaceIds,
+          exitingWorkspaceIds: params.exitingWorkspaceIds,
+          currentPage: params.currentPage,
+          linearEnabled: params.linearEnabled,
+          dark: params.dark,
+          width: params.width,
+          capabilities: params.capabilities,
+        })
+      : null;
 
   const lastSent = useRef<string | null>(null);
   const snapshotJson = JSON.stringify(snapshot);
@@ -84,12 +108,15 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
     if (!active) return;
     const handle = (action: GpuiSidebarAction) => {
       const { params: p, workspaces } = latest.current;
+      const find = (id: number | null) =>
+        id === null ? null : (workspaces.find((w) => w.id === id) ?? null);
       switch (action.kind) {
         case "selectHome":
-          p.onSelectWorkspace(null);
+          if (action.repoPath === p.repoPath) p.onSelectWorkspace(null);
+          else p.onSelectRepoHome(action.repoPath);
           break;
         case "selectWorkspace": {
-          const workspace = workspaces.find((w) => w.id === action.id);
+          const workspace = find(action.id);
           if (workspace) p.onSelectWorkspace(workspace);
           break;
         }
@@ -104,6 +131,22 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
           break;
         case "openLinear":
           p.onOpenLinear();
+          break;
+        case "startAgent":
+          if (action.id === null || find(action.id)) p.onStartAgent(action.id);
+          break;
+        case "openShell": {
+          const workspace = find(action.id);
+          if (action.id === null || workspace) p.onOpenShell(workspace);
+          break;
+        }
+        case "stack": {
+          const workspace = find(action.id);
+          if (action.id === null || workspace) p.onStack(workspace);
+          break;
+        }
+        case "bulkArchive":
+          p.onBulkArchive();
           break;
         default:
           break;

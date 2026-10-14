@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import useSWR from "swr";
 import { getWorkspaces, listWorkspaceStatuses } from "../lib/api";
-import type { PrInfo } from "../lib/api-types";
+import type { PrInfo, QueueEntryStatus } from "../lib/api-types";
+import { FEATURES } from "../lib/features";
+import { supabase } from "../lib/supabase";
 import { pollMs } from "../lib/swr-cache";
 import {
   buildWorkspaceTree,
@@ -9,7 +11,11 @@ import {
   type WorkspaceSidebarStatusWithAgentDetail,
 } from "../lib/workspace-tree";
 import type { TerminalSessionSummary } from "../components/terminal/types";
-import { useGitRemoteInfo, usePrStatusPolling } from "./useMergeQueueStatus";
+import {
+  useGitRemoteInfo,
+  useMergeQueueEnabled,
+  usePrStatusPolling,
+} from "./useMergeQueueStatus";
 import { useWorkspaceGitDetail } from "./useWorkspaceGitDetail";
 
 /**
@@ -71,6 +77,28 @@ export function useWorkspaceSidebarRows({
   // `gh pr view` polling from the WebView.
   const { data: prStatusesByBranch = {} } = usePrStatusPolling(repoPath);
 
+  const { data: queueEnabled } = useMergeQueueEnabled(repoPath);
+  const repoFullName = remoteInfo?.full_name;
+  const { data: branchQueueStatuses } = useSWR(
+    FEATURES.mergeQueue && queueEnabled === true && repoFullName
+      ? ["repo-branch-queue-statuses", repoFullName]
+      : null,
+    async () => {
+      const { data } = await supabase.rpc("get_repo_branch_queue_statuses", {
+        p_repo_full_name: repoFullName!,
+      });
+      const map = new Map<string, QueueEntryStatus>();
+      for (const row of (data ?? []) as {
+        branch_name: string;
+        status: string;
+      }[]) {
+        map.set(row.branch_name, row.status as QueueEntryStatus);
+      }
+      return map;
+    },
+    { refreshInterval: pollMs(30_000) },
+  );
+
   const statuses: WorkspaceSidebarStatusWithAgentDetail[] = (() => {
     const statusById = new Map(
       (workspaceStatuses ?? []).map((status) => [status.current.id, status]),
@@ -101,5 +129,6 @@ export function useWorkspaceSidebarRows({
     remoteInfo,
     prStatusesByBranch: prStatusesByBranch as Record<string, PrInfo | null>,
     streamingByBranchWithAgentSession,
+    branchQueueStatuses,
   };
 }

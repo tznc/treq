@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMockWorkspace } from "../../test/factories/workspace.factory";
-import type { PrInfo } from "./api-types";
+import type { PrInfo, QueueEntryStatus } from "./api-types";
+import { capabilitiesFor } from "./remote-capabilities";
 import { buildGpuiSidebarSnapshot } from "./gpui-shell";
 import {
   buildWorkspaceTree,
@@ -39,25 +40,42 @@ function pr(state: string, isDraft?: boolean): PrInfo {
   };
 }
 
+type BuildParams = Parameters<typeof buildGpuiSidebarSnapshot>[0];
+type RepoInput = BuildParams["repos"][number];
+
 function build(
   statuses: WorkspaceSidebarStatusWithAgentDetail[],
-  overrides: Partial<Parameters<typeof buildGpuiSidebarSnapshot>[0]> = {},
+  overrides: Partial<BuildParams> = {},
+  repo: Partial<RepoInput> = {},
 ) {
-  return buildGpuiSidebarSnapshot({
+  const snapshot = buildGpuiSidebarSnapshot({
     repoPath: "/home/me/code/treq",
-    nodes: flattenWorkspaceTree(buildWorkspaceTree(statuses)),
-    streamingByBranchWithAgentSession: new Map(),
-    prStatusesByBranch: {},
-    hasRemote: true,
+    repos: [
+      {
+        path: "/home/me/code/treq",
+        homeRef: "main",
+        active: true,
+        loading: false,
+        nodes: flattenWorkspaceTree(buildWorkspaceTree(statuses)),
+        streamingByBranchWithAgentSession: new Map(),
+        prStatusesByBranch: {},
+        hasRemote: true,
+        ...repo,
+      },
+    ],
     selectedWorkspaceId: null,
     currentPage: "session",
-    homeBranch: "main",
     linearEnabled: false,
     dark: true,
     width: 280,
-    loading: false,
     ...overrides,
   });
+  const [section] = snapshot.repos;
+  return {
+    ...snapshot,
+    homeSelected: section.homeSelected,
+    workspaces: section.workspaces,
+  };
 }
 
 describe("buildGpuiSidebarSnapshot", () => {
@@ -74,9 +92,13 @@ describe("buildGpuiSidebarSnapshot", () => {
     ]);
     expect(snapshot).toMatchObject({
       repoName: "treq",
-      homeBranch: "main",
       dark: true,
       width: 280,
+    });
+    expect(snapshot.repos[0]).toMatchObject({
+      path: "/home/me/code/treq",
+      homeRef: "main",
+      active: true,
       loading: false,
     });
   });
@@ -117,20 +139,19 @@ describe("buildGpuiSidebarSnapshot", () => {
     ).toBe(true);
   });
 
-  it.each([
-    "settings",
-    "github",
-    "linear",
-  ])("drops home and workspace highlight on the %s page", (currentPage) => {
-    const a = status("a", {}, null);
-    const snapshot = build([a], {
-      currentPage,
-      selectedWorkspaceId: a.current.id,
-    });
-    expect(snapshot.homeSelected).toBe(false);
-    expect(snapshot.workspaces[0].selected).toBe(false);
-    expect(snapshot.settingsOpen).toBe(currentPage === "settings");
-  });
+  it.each(["settings", "github", "linear"])(
+    "drops home and workspace highlight on the %s page",
+    (currentPage) => {
+      const a = status("a", {}, null);
+      const snapshot = build([a], {
+        currentPage,
+        selectedWorkspaceId: a.current.id,
+      });
+      expect(snapshot.homeSelected).toBe(false);
+      expect(snapshot.workspaces[0].selected).toBe(false);
+      expect(snapshot.settingsOpen).toBe(currentPage === "settings");
+    },
+  );
 
   it("maps conflicts, changes and clean workspaces to status dots", () => {
     const snapshot = build([
@@ -154,6 +175,7 @@ describe("buildGpuiSidebarSnapshot", () => {
         status("clean-streaming", {}, null),
         status("no-session", {}, null),
       ],
+      {},
       {
         streamingByBranchWithAgentSession: new Map([
           ["streaming", true],
@@ -184,6 +206,7 @@ describe("buildGpuiSidebarSnapshot", () => {
         status("none", {}, null),
         status("draft-merged", {}, null),
       ],
+      {},
       {
         prStatusesByBranch: {
           draft: pr("OPEN", true),
@@ -208,14 +231,78 @@ describe("buildGpuiSidebarSnapshot", () => {
   });
 
   it("omits PR state without a GitHub remote", () => {
-    const snapshot = build([status("open", {}, null)], {
-      hasRemote: false,
-      prStatusesByBranch: { open: pr("OPEN") },
-    });
+    const snapshot = build(
+      [status("open", {}, null)],
+      {},
+      { hasRemote: false, prStatusesByBranch: { open: pr("OPEN") } },
+    );
     expect(snapshot.workspaces[0].pr).toBeNull();
   });
 
   it("falls back to a generic repository name", () => {
     expect(build([], { repoPath: undefined }).repoName).toBe("Repository");
+  });
+
+  it("carries merge queue status, conflicts and archive states", () => {
+    const queued = status("queued", { has_conflicts: true }, null);
+    const archiving = status("archiving", {}, null);
+    const exiting = status("exiting", {}, null);
+    const snapshot = build(
+      [queued, archiving, exiting],
+      {
+        archivingWorkspaceIds: new Set([archiving.current.id]),
+        exitingWorkspaceIds: new Set([exiting.current.id]),
+      },
+      {
+        queueStatusesByBranch: new Map<string, QueueEntryStatus>([
+          ["queued", "testing"],
+        ]),
+      },
+    );
+    const byTitle = Object.fromEntries(
+      snapshot.workspaces.map((w) => [w.title, w]),
+    );
+    expect(byTitle.queued).toMatchObject({
+      queue: "testing",
+      conflicted: true,
+    });
+    expect(byTitle.archiving).toMatchObject({ archiving: true, queue: null });
+    expect(byTitle.exiting).toMatchObject({ exiting: true, conflicted: false });
+  });
+
+  it("shows bulk archive for a multi-selection unless an archive is running", () => {
+    const a = status("a", {}, null);
+    const b = status("b", {}, null);
+    const selection = new Set([a.current.id, b.current.id]);
+    const snapshot = build([a, b], { selectedWorkspaceIds: selection });
+    expect(snapshot.bulkArchive).toBe(2);
+    expect(snapshot.workspaces.every((w) => w.selected)).toBe(true);
+    expect(
+      build([a, b], {
+        selectedWorkspaceIds: selection,
+        archivingWorkspaceIds: new Set([a.current.id]),
+      }).bulkArchive,
+    ).toBeNull();
+    expect(build([a, b]).bulkArchive).toBeNull();
+  });
+
+  it("explains unavailable agent and shell actions", () => {
+    expect(build([], { capabilities: capabilitiesFor(false) })).toMatchObject({
+      agentUnavailable: null,
+      shellUnavailable: null,
+    });
+    const remote = build([], { capabilities: capabilitiesFor(true) });
+    const caps = capabilitiesFor(true);
+    expect(remote.agentUnavailable).toBe(
+      caps.agentPty.supported ? null : (caps.agentPty.reason ?? "Unavailable"),
+    );
+    expect(remote.shellUnavailable).toBe(
+      caps.shell.supported ? null : (caps.shell.reason ?? "Unavailable"),
+    );
+  });
+
+  it("highlights only the active repository's home", () => {
+    const snapshot = build([], {}, { active: false });
+    expect(snapshot.homeSelected).toBe(false);
   });
 });

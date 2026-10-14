@@ -28,6 +28,7 @@ mod sidebar;
 mod theme;
 
 pub use sidebar::SidebarSnapshot;
+use sidebar::{Sidebar, SidebarAction};
 
 use crate::core::feature_preview::{self, PreviewFeature};
 use crate::db::Database;
@@ -81,18 +82,22 @@ struct Shell {
   app: AppHandle,
   label: SharedString,
   webview: Option<Webview<Wry>>,
-  sidebar: Option<SidebarSnapshot>,
+  sidebar: Option<gpui::Entity<Sidebar>>,
 }
 
 impl Render for Shell {
-  fn render(&mut self, window: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+  fn render(
+    &mut self,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<Self>,
+  ) -> impl IntoElement {
     // Until React sends its theme, follow the OS.
     let dark = self.sidebar.as_ref().map_or(
       matches!(
         window.appearance(),
         gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
       ),
-      |snapshot| snapshot.dark,
+      |sidebar| sidebar.read(cx).snapshot().dark,
     );
     gpui::div()
       .size_full()
@@ -101,9 +106,7 @@ impl Render for Shell {
       // Shown only until the webview's first frame, so opening a window
       // does not flash.
       .bg(theme::palette(dark).background)
-      .when_some(self.sidebar.as_ref(), |this, snapshot| {
-        this.child(sidebar::render(snapshot, &self.label, &self.app))
-      })
+      .when_some(self.sidebar.clone(), |this, sidebar| this.child(sidebar))
       .child(
         gpui::div()
           .flex_1()
@@ -160,7 +163,7 @@ pub fn open_window(
   // `webview_frame` shows it from its first frame.
   webview.hide()?;
 
-  update_shell(label, move |shell| shell.webview = Some(webview))?;
+  update_shell(label, move |shell, _| shell.webview = Some(webview))?;
   Ok(())
 }
 
@@ -168,7 +171,7 @@ pub fn open_window(
 /// Must run on the main thread, outside a GPUI update.
 fn update_shell(
   label: &str,
-  f: impl FnOnce(&mut Shell) + 'static,
+  f: impl FnOnce(&mut Shell, &mut gpui::Context<Shell>) + 'static,
 ) -> Result<(), tauri_plugin_gpui::GpuiError> {
   let label = label.to_string();
   tauri_plugin_gpui::with_app(move |cx| {
@@ -180,22 +183,48 @@ fn update_shell(
       return;
     };
     shell.update(cx, |shell, cx| {
-      f(shell);
+      f(shell, cx);
       cx.notify();
     });
   })
 }
 
-/// Shows `snapshot` in the GPUI sidebar of window `label`, or hides the
-/// sidebar for `None` (React then draws its own).
+/// Shows `snapshot` in the GPUI sidebar of window `label`, or removes the
+/// sidebar for `None`.
 pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnapshot>) {
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
-    let result = update_shell(&label, move |shell| shell.sidebar = snapshot);
+    let result = update_shell(&label, move |shell, cx| {
+      let Some(snapshot) = snapshot else {
+        shell.sidebar = None;
+        return;
+      };
+      match &shell.sidebar {
+        Some(sidebar) => sidebar.update(cx, |sidebar, cx| sidebar.set_snapshot(snapshot, cx)),
+        None => {
+          let sink = action_sink(shell.app.clone(), shell.label.to_string());
+          shell.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink)));
+        }
+      }
+    });
     if let Err(err) = result {
       log::warn!("failed to update the GPUI sidebar: {err}");
     }
   });
+}
+
+/// Sends sidebar actions to the webview of window `label`. Tauri calls must
+/// not run inside a GPUI update, so each send runs in a task.
+fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
+  std::rc::Rc::new(move |action: SidebarAction, _| {
+    let (app, label) = (app.clone(), label.clone());
+    tauri::async_runtime::spawn(async move {
+      let target = tauri::EventTarget::webview_window(&label);
+      if let Err(err) = tauri::Emitter::emit_to(&app, target, sidebar::ACTION_EVENT, action) {
+        log::warn!("failed to send GPUI sidebar action: {err}");
+      }
+    });
+  })
 }
 
 /// Forgets a destroyed window's shell.

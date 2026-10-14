@@ -5,45 +5,32 @@ use std::borrow::Cow;
 
 use tauri_plugin_gpui::gpui::{self, hsla, rgb, App, AssetSource, Hsla, SharedString};
 
-pub const ICON_BRANCH: &str = "icons/git-branch.svg";
-pub const ICON_GITHUB: &str = "icons/github.svg";
-pub const ICON_LINEAR: &str = "icons/list-todo.svg";
-pub const ICON_HOUSE: &str = "icons/house.svg";
-pub const ICON_SEARCH: &str = "icons/search.svg";
-pub const ICON_SETTINGS: &str = "icons/settings.svg";
-pub const ICON_SPINNER: &str = "icons/loader-circle.svg";
+/// Lucide icons (ISC license), the same set the React app draws with, as
+/// `icons/<name>.svg` asset paths and their bundled bytes.
+macro_rules! icons {
+  ($($konst:ident => $name:literal),* $(,)?) => {
+    $(pub const $konst: &str = concat!("icons/", $name, ".svg");)*
+    const ICONS: &[(&str, &[u8])] = &[
+      $(($konst, include_bytes!(concat!("../../assets/gpui-icons/", $name, ".svg"))),)*
+    ];
+  };
+}
 
-/// Lucide icons (ISC license), the same set the React app draws with.
-const ICONS: &[(&str, &[u8])] = &[
-  (
-    ICON_BRANCH,
-    include_bytes!("../../assets/gpui-icons/git-branch.svg"),
-  ),
-  (
-    ICON_GITHUB,
-    include_bytes!("../../assets/gpui-icons/github.svg"),
-  ),
-  (
-    ICON_LINEAR,
-    include_bytes!("../../assets/gpui-icons/list-todo.svg"),
-  ),
-  (
-    ICON_HOUSE,
-    include_bytes!("../../assets/gpui-icons/house.svg"),
-  ),
-  (
-    ICON_SEARCH,
-    include_bytes!("../../assets/gpui-icons/search.svg"),
-  ),
-  (
-    ICON_SETTINGS,
-    include_bytes!("../../assets/gpui-icons/settings.svg"),
-  ),
-  (
-    ICON_SPINNER,
-    include_bytes!("../../assets/gpui-icons/loader-circle.svg"),
-  ),
-];
+icons! {
+  ICON_ARCHIVE => "archive",
+  ICON_BOT => "bot",
+  ICON_BRANCH => "git-branch",
+  ICON_CHEVRON_DOWN => "chevron-down",
+  ICON_CHEVRON_RIGHT => "chevron-right",
+  ICON_GITHUB => "github",
+  ICON_HOUSE => "house",
+  ICON_LAYERS => "layers-2",
+  ICON_LINEAR => "list-todo",
+  ICON_SEARCH => "search",
+  ICON_SETTINGS => "settings",
+  ICON_SPINNER => "loader-circle",
+  ICON_TERMINAL => "terminal",
+}
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
 const INTER_REGULAR: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Regular.ttf");

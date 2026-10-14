@@ -116,6 +116,11 @@ getrandom = "0.4"
 rand_core = "0.10"
 wiremock = "0.6"
 
+# Headless GPUI tests for the GPUI shell. The same gpui-pre that
+# tauri-plugin-gpui renders with, plus its test platform.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
+
 [[bench]]
 name = "commit_workspace"
 harness = false

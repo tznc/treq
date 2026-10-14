@@ -1,16 +1,10 @@
 import { DragDropContext, Droppable, type DropResult } from "@hello-pangea/dnd";
 import { Archive, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import useSWR from "swr";
-import { useMergeQueueEnabled } from "../hooks/useMergeQueueStatus";
 import { useWorkspaceSidebarRows } from "../hooks/useWorkspaceSidebarRows";
 import { useWorkspaceSidebarMultiSelect } from "../hooks/useWorkspaceSidebarMultiSelect";
 import type { Workspace } from "../lib/api";
-import type { QueueEntryStatus } from "../lib/api-types";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
-import { FEATURES } from "../lib/features";
-import { supabase } from "../lib/supabase";
-import { pollMs } from "../lib/swr-cache";
 import { getDescendants, getEntireStack } from "../lib/workspace-tree";
 import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
 import type { TerminalSessionSummary } from "./terminal/types";
@@ -90,29 +84,8 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
     remoteInfo,
     prStatusesByBranch,
     streamingByBranchWithAgentSession,
+    branchQueueStatuses,
   } = useWorkspaceSidebarRows({ repoPath, cacheKey, terminalSessions });
-
-  const { data: queueEnabled } = useMergeQueueEnabled(repoPath);
-  const repoFullName = remoteInfo?.full_name;
-  const { data: branchQueueStatuses } = useSWR(
-    FEATURES.mergeQueue && queueEnabled === true && repoFullName
-      ? ["repo-branch-queue-statuses", repoFullName]
-      : null,
-    async () => {
-      const { data } = await supabase.rpc("get_repo_branch_queue_statuses", {
-        p_repo_full_name: repoFullName!,
-      });
-      const map = new Map<string, QueueEntryStatus>();
-      for (const row of (data ?? []) as {
-        branch_name: string;
-        status: string;
-      }[]) {
-        map.set(row.branch_name, row.status as QueueEntryStatus);
-      }
-      return map;
-    },
-    { refreshInterval: pollMs(30_000) },
-  );
 
   const workspacesForSelection = statuses.map((s) => s.current);
   const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
