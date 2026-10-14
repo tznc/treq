@@ -117,6 +117,26 @@ describe("Dashboard - GPUI sidebar selection", () => {
     await waitFor(() => expect(lastSnapshot()?.bulkArchive).toBeNull());
   });
 
+  it("clears the selection from a home click before navigating", async () => {
+    await renderRows();
+    click("feat/alpha", {});
+    click("feat/beta", { toggle: true });
+    await waitFor(() => expect(lastSnapshot()?.bulkArchive).toBe(1));
+
+    const home = {
+      kind: "selectHome",
+      repoPath: lastSnapshot()!.repos[0].path,
+    };
+    send(home as GpuiSidebarAction);
+    await waitFor(() => expect(lastSnapshot()?.bulkArchive).toBeNull());
+    expect(lastSnapshot()?.repos[0].homeSelected).toBe(false);
+
+    send(home as GpuiSidebarAction);
+    await waitFor(() =>
+      expect(lastSnapshot()?.repos[0].homeSelected).toBe(true),
+    );
+  });
+
   it("ignores a stack for a workspace it does not know", async () => {
     await renderRows();
     send({ kind: "selectStack", id: 999_999, descendants: false });
