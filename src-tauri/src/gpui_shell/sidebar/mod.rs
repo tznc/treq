@@ -616,6 +616,7 @@ impl Render for Sidebar {
 
     let mut sidebar = div()
       .id("sidebar")
+      .debug_selector(|| "sidebar".into())
       .relative()
       .flex()
       .flex_col()
@@ -674,7 +675,7 @@ impl Render for Sidebar {
         .id(("repo-section", index))
         .flex()
         .flex_col()
-        .gap(px(2.));
+        .gap(px(4.));
       if let Some(name) = &repo.label {
         section = section.child(self.group_label(repo, name, &palette));
       }
@@ -709,9 +710,10 @@ impl Render for Sidebar {
           .px_4()
           .pt_3()
           .pb_1()
-          .text_size(px(11.))
-          .text_color(palette.muted_foreground)
-          .child("Workspaces"),
+          .text_size(px(12.))
+          .font_weight(gpui::FontWeight::MEDIUM)
+          .text_color(palette.sidebar_foreground.opacity(0.7))
+          .child("WORKSPACES"),
       )
       .child(list)
       .child(self.resize_handle(&palette, cx))
@@ -748,6 +750,9 @@ fn modal_backdrop(opacity: f32) -> gpui::Stateful<gpui::Div> {
     .debug_selector(|| "modal-backdrop".into())
     .absolute()
     .inset_0()
+    // `inset_0` stops inside the sidebar's right border; cover it too, or it
+    // shows as a light line between the two backdrops.
+    .right(px(-1.))
     .bg(gpui::black().opacity(opacity.clamp(0., 1.)))
     .occlude()
 }
@@ -842,7 +847,7 @@ impl Sidebar {
         this.hover(|style| style.bg(palette.accent))
       })
       .when(disabled, |this| this.opacity(0.4))
-      .child(icon(icon_path, 12., palette.muted_foreground))
+      .child(icon(icon_path, 16., palette.foreground))
       .on_hover(
         cx.listener(move |this, hovered: &bool, _, cx| {
           this.hover_tooltip(key.clone(), *hovered, cx)
@@ -992,7 +997,7 @@ impl Sidebar {
         this.hover(|style| style.bg(palette.accent))
       })
       .when(repo.missing, |this| this.opacity(0.5))
-      .child(icon(theme::ICON_HOUSE, 12., palette.sidebar_foreground))
+      .child(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
       .child(title)
       .when(repo.missing, |this| {
         this.child(
@@ -1049,7 +1054,7 @@ impl Sidebar {
       .rounded_md()
       .when(active, |this| this.bg(palette.primary.opacity(0.2)))
       .when(!active, |this| this.hover(|style| style.bg(palette.accent)))
-      .child(icon(icon_path, 12., palette.sidebar_foreground))
+      .child(icon(icon_path, 16., palette.sidebar_foreground))
       .child(div().flex_1().min_w_0().truncate().child(text))
       .on_click(self.on_action(action))
   }
@@ -1102,7 +1107,7 @@ impl Sidebar {
       .text_size(px(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .hover(|style| style.bg(palette.accent))
-      .child(icon(chevron, 12., palette.sidebar_foreground.opacity(0.7)))
+      .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
       .child(div().min_w_0().truncate().child(name.to_uppercase()))
       .on_click(self.on_action(SidebarAction::ToggleRepo {
         repo_path: repo.path.clone(),
