@@ -626,9 +626,8 @@ impl Render for Sidebar {
       .bg(palette.sidebar)
       .text_color(palette.sidebar_foreground)
       .text_size(px(13.))
-      // Room for the right edge line, drawn as a child below so the modal
-      // backdrop covers it (GPUI paints a border above the children).
-      .pr(px(1.))
+      .border_r_1()
+      .border_color(palette.border)
       .child(header);
 
     for repo in &snapshot.repos {
@@ -676,7 +675,7 @@ impl Render for Sidebar {
         .id(("repo-section", index))
         .flex()
         .flex_col()
-        .gap(px(2.));
+        .gap(px(4.));
       if let Some(name) = &repo.label {
         section = section.child(self.group_label(repo, name, &palette));
       }
@@ -711,20 +710,12 @@ impl Render for Sidebar {
           .px_4()
           .pt_3()
           .pb_1()
-          .text_size(px(11.))
-          .text_color(palette.muted_foreground)
-          .child("Workspaces"),
+          .text_size(px(12.))
+          .font_weight(gpui::FontWeight::MEDIUM)
+          .text_color(palette.sidebar_foreground.opacity(0.7))
+          .child("WORKSPACES"),
       )
       .child(list)
-      .child(
-        div()
-          .absolute()
-          .top_0()
-          .bottom_0()
-          .right_0()
-          .w(px(1.))
-          .bg(palette.border),
-      )
       .child(self.resize_handle(&palette, cx))
       .on_drag_move(
         cx.listener(|this, event: &gpui::DragMoveEvent<ResizeDrag>, _, cx| {
@@ -759,6 +750,9 @@ fn modal_backdrop(opacity: f32) -> gpui::Stateful<gpui::Div> {
     .debug_selector(|| "modal-backdrop".into())
     .absolute()
     .inset_0()
+    // `inset_0` stops inside the sidebar's right border; cover it too, or it
+    // shows as a light line between the two backdrops.
+    .right(px(-1.))
     .bg(gpui::black().opacity(opacity.clamp(0., 1.)))
     .occlude()
 }
