@@ -40,14 +40,13 @@ describe("Settings integration", () => {
     expect(screen.getByRole("tab", { name: /skills/i })).toBeVisible();
     await user.click(applicationTab);
     await screen.findByLabelText(/theme/i);
-    const fontSizeInput = await screen.findByLabelText(/font size/i);
+    const fontSizeSelect = await screen.findByLabelText(/font size/i);
 
     expect(
       screen.queryByLabelText(/branch name pattern/i),
     ).not.toBeInTheDocument();
 
-    await user.clear(fontSizeInput);
-    await user.type(fontSizeInput, "17");
+    await user.selectOptions(fontSizeSelect, "Large");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
     await screen.findByText("Settings Saved");
     await screen.findByText(/application settings updated successfully/i);
