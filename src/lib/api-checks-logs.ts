@@ -134,6 +134,20 @@ export const getAppSetupLogs = (options?: {
     search: options?.search ?? null,
   });
 
+/** The app's own log files (Help > View Logs), newest records last. */
+export const getSystemLogs = (options?: {
+  levels?: string[];
+  search?: string;
+}): Promise<LogRecordView[]> =>
+  invoke("get_system_logs", {
+    levels: options?.levels ?? null,
+    search: options?.search ?? null,
+  });
+
+/** Reveals the folder holding the app's log files in the OS file manager. */
+export const openSystemLogDir = (): Promise<void> =>
+  invoke("open_system_log_dir");
+
 export const getLogTimeseries = async (
   repoPath: string,
   options?: {

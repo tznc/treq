@@ -41,8 +41,7 @@ pub fn init_test_state() -> Result<AppState, String> {
   }
   binary_paths::init_binary_paths_cache(detected);
 
-  let log_dir = std::env::temp_dir().join(format!("treq-tauri-test-logs-{}", std::process::id()));
-  let telemetry = crate::telemetry::init(&log_dir).map_err(|e| e.to_string())?;
+  let telemetry = crate::telemetry::init(&test_log_dir()).map_err(|e| e.to_string())?;
 
   Ok(AppState::new(
     db,
@@ -53,6 +52,41 @@ pub fn init_test_state() -> Result<AppState, String> {
     String::new(),
     telemetry,
   ))
+}
+
+fn test_log_dir() -> std::path::PathBuf {
+  std::env::temp_dir().join(format!("treq-tauri-test-logs-{}", std::process::id()))
+}
+
+/// Appends one record to the app log, in the shape `telemetry::JsonLogLayer`
+/// writes, synchronously so the Logs tab's "System" source reads it at once.
+/// The file sorts after any real dated log file, so it holds the newest lines.
+#[napi]
+pub fn append_system_log_line(level: String, target: String, message: String) -> napi::Result<()> {
+  use std::io::Write;
+  let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_nanos().to_string())
+    .unwrap_or_default();
+  let line = serde_json::json!({
+    "timeUnixNano": nanos,
+    "severityText": level,
+    "target": target,
+    "message": message,
+    "fields": {},
+  });
+  let dir = test_log_dir();
+  std::fs::create_dir_all(&dir).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+  let path = dir.join(format!(
+    "{}.9999-12-31",
+    crate::core::system_logs::LOG_FILE_PREFIX
+  ));
+  let mut file = std::fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(path)
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+  writeln!(file, "{}", line).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi(object)]

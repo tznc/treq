@@ -8,8 +8,10 @@ import {
   recordAgentChatUserMessage,
   registerAgentChat,
 } from "../../../src/lib/api";
-import { render, screen, waitFor, within } from "../../test-utils";
+import { emitOnTestBus } from "../../test-event-bus";
+import { act, render, screen, waitFor, within } from "../../test-utils";
 import {
+  appendSystemLogLine,
   createTestRepo,
   findSidebarBranchElement,
   openRepo,
@@ -292,6 +294,53 @@ describe("Home repo Logs tab", () => {
       );
       await screen.findByText("Newest records across every run");
     });
+  });
+
+  it("shows the app's own log file under the System source", async () => {
+    const { repoPath } = createTestRepo(false);
+    openRepo(repoPath);
+    appendSystemLogLine("INFO", "treq_lib::sync", "system-log-info-line");
+    appendSystemLogLine("ERROR", "treq_lib::sync", "system-log-error-line");
+
+    await openLogsTab();
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: /Log source/i }),
+      "system",
+    );
+    await screen.findByText("system-log-error-line");
+    expect(screen.getByText("system-log-info-line")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Logs Explorer/ })).toBeNull();
+
+    await user.click(
+      screen.getByRole("textbox", { name: "Search system logs" }),
+    );
+    await user.paste("error-line");
+    await waitFor(() =>
+      expect(screen.queryByText("system-log-info-line")).toBeNull(),
+    );
+    const line = (await screen.findByText("system-log-error-line")).closest(
+      '[data-testid="system-log-line"]',
+    );
+    expect(line).toHaveTextContent("treq_lib::sync");
+  });
+
+  it("opens the System source from Help > View Logs", async () => {
+    const { repoPath } = createTestRepo(false);
+    openRepo(repoPath);
+    await createWorkspace(repoPath, "view-logs-menu");
+    appendSystemLogLine("WARN", "treq_lib::menu", "system-log-from-menu");
+
+    render(<Dashboard />);
+    await user.click(await findSidebarBranchElement("view-logs-menu"));
+    await screen.findByRole("tab", { name: /^Logs/, selected: false });
+
+    act(() => emitOnTestBus("menu-view-logs"));
+
+    await screen.findByRole("tab", { name: /^Logs/, selected: true });
+    expect(
+      await screen.findByRole("combobox", { name: /Log source/i }),
+    ).toHaveValue("system");
+    await screen.findByText("system-log-from-menu");
   });
 
   it("lists agent chats as a log source group and hides shell terminals", async () => {
