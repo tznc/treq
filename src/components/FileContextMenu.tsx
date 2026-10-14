@@ -1,4 +1,5 @@
-import { Copy, FolderOpen } from "lucide-react";
+import { ArrowRightLeft, Copy, FolderOpen } from "lucide-react";
+import type { ChangeFilesMoveTarget } from "./ChangeFilesMoveContext";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,12 +18,17 @@ interface FileContextMenuProps {
   filePath: string;
   workspacePath: string;
   children: React.ReactNode;
+  /** Workspaces the file can move to; leaving it out hides "Move to workspace". */
+  moveTargets?: ChangeFilesMoveTarget[];
+  onMoveTo?: (target: ChangeFilesMoveTarget) => void;
 }
 
 export const FileContextMenu = ({
   filePath,
   workspacePath,
   children,
+  moveTargets,
+  onMoveTo,
 }: FileContextMenuProps) => {
   const { addToast } = useToast();
   const editorApps = useEditorAppsStore();
@@ -178,6 +184,27 @@ export const FileContextMenu = ({
             )}
           </ContextMenuSubContent>
         </ContextMenuSub>
+        {onMoveTo && moveTargets && moveTargets.length > 0 && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger data-testid="move-to-workspace">
+                <ArrowRightLeft className="w-4 h-4 mr-2" />
+                Move to workspace...
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {moveTargets.map((target) => (
+                  <ContextMenuItem
+                    key={target.branch}
+                    onClick={() => onMoveTo(target)}
+                  >
+                    {target.label}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
