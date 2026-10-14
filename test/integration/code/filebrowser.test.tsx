@@ -321,7 +321,6 @@ describe("Dashboard - FileBrowser integration", { timeout: 15_000 }, () => {
     );
     expect(content).toHaveClass("whitespace-pre-wrap");
     expect(content).not.toHaveClass("overflow-x-auto");
-    // Row must grow with wrapped content, not clip/overlap at a fixed height
     expect((longRow as HTMLElement).style.height).toBe("");
     expect((longRow as HTMLElement).style.minHeight).toBe("18px");
 
