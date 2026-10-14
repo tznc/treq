@@ -5,6 +5,13 @@
  */
 export const LOOPBACK_SSH_HOSTNAME = "treq-test-loopback.invalid";
 
+/** The host-key fingerprint the loopback endpoint "presents" to a probe. */
+export const LOOPBACK_SSH_HOST_KEY_FINGERPRINT = "SHA256:loopback";
+
+/** A syntactically valid OpenSSH public key for `~/.ssh` fixtures. */
+export const TEST_SSH_PUBLIC_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOKAQEWDZ1EUztxmGvIoaFl5xy1HcBCOXuH5gXT6XI4O qa@treq";
+
 type Invoke = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
 
 function isLoopback(args: Record<string, unknown>): boolean {
@@ -18,6 +25,11 @@ export function routeLoopbackSsh(
   cmd: string,
   args: Record<string, unknown>,
 ): Promise<unknown> | null {
+  if (cmd === "probe_ssh_host_key") {
+    return args.hostname === LOOPBACK_SSH_HOSTNAME
+      ? Promise.resolve(LOOPBACK_SSH_HOST_KEY_FINGERPRINT)
+      : null;
+  }
   if (!isLoopback(args)) return null;
   const local = () =>
     invoke("remote_dispatch_local", { request: args.request });

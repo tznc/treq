@@ -989,6 +989,7 @@ pub fn run() {
       commands::list_local_ssh_identities,
       commands::read_local_ssh_public_key,
       commands::resolve_ssh_config_alias,
+      commands::probe_ssh_host_key,
       commands::remote_dispatch_local,
       commands::remote_dispatch_over_ssh,
       commands::remote_dispatch_mutation_over_ssh,

@@ -109,6 +109,12 @@ jobs:
           npm install --no-audit --no-fund
           npm run tauri -- android init --ci
           scripts/apply-icons.sh
+          # `android init` regenerates gen/android without the plugin entries;
+          # only this app's build script adds them back (tauri-plugin-gpui's
+          # GpuiView), and a warm Rust cache skips it. Force it to rerun.
+          for target in aarch64-linux-android x86_64-linux-android; do
+            cargo clean -p treq-gpui --target "$target"
+          done
           npm run tauri -- android build --debug --apk --target aarch64 --target x86_64 --ci
           apk=$(find gen/android/app/build/outputs/apk -name '*universal-debug.apk' | head -1)
           ls -la "$apk"
