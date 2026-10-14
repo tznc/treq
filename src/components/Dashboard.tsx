@@ -2789,11 +2789,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             ? "session"
             : undefined;
   // With the GPUI shell, the native sidebar replaces <WorkspaceSidebar> for a
-  // single local repository; other windows keep the React sidebar.
+  // single repository, local or remote; multi-repo windows keep the React
+  // sidebar.
   const gpuiSidebarActive = useGpuiSidebar({
     supported:
-      Boolean(dataRepoPath) && !isRemoteActive && supportingRepos.length === 0,
-    repoPath: mainRepoPath,
+      Boolean(dataRepoPath) && (isRemoteActive || supportingRepos.length === 0),
+    repoPath: isRemoteActive ? dataRepoPath : mainRepoPath,
     cacheKey: queryRepoKey,
     terminalSessions: terminalSessionSummaries,
     selectedWorkspaceId: selectedWorkspace?.id ?? null,
@@ -2833,9 +2834,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       workspace ? handleAddAfter(workspace) : handleStackHomeFromSidebar(),
     onBulkArchive: () => void handleBulkArchive(),
     onOpenBranchSwitcher: () => setShowBranchSwitcher(true),
-    onAddRepository: mainRepoPath
-      ? () => void handleAddSupportingRepo()
-      : undefined,
+    onAddRepository:
+      mainRepoPath && !isRemoteActive
+        ? () => void handleAddSupportingRepo()
+        : undefined,
     onRenameWorkspace: setRenameTarget,
     onArchiveWorkspace: handleArchive,
   });
