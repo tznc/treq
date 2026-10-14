@@ -2,11 +2,7 @@
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
-import {
-  createTestRepo,
-  openRepo,
-  writeRepoFile,
-} from "../utils";
+import { createTestRepo, openRepo, writeRepoFile } from "../utils";
 import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace, trustRepo } from "../../src/lib/api";

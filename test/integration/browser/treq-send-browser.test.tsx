@@ -5,17 +5,13 @@ import * as api from "../../../src/lib/api";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
-import {
-  createTestRepo,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 import { TREQ_SEND_EVENT } from "../../../src/lib/treqSend";
 import { useFeaturePreviewStore } from "../../../src/stores/featurePreviewStore";
 import { useTreqSendStore } from "../../../src/stores/treqSendStore";
 import { clickGpuiRow } from "../../gpui-sidebar";
 
 describe("treq send --browser integration", () => {
-
   beforeEach(() => {
     useFeaturePreviewStore.setState({
       flags: {

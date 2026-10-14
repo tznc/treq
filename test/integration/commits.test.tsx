@@ -13,7 +13,6 @@ import { Dashboard } from "../../src/components/Dashboard";
 import { clickGpuiRow } from "../gpui-sidebar";
 
 describe("LinearCommitHistory integration", () => {
-
   it("shows workspace commits in the Code tab sidebar skipping the working copy", async () => {
     const { repoPath } = createTestRepo(false);
     openRepo(repoPath);

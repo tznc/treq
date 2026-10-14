@@ -55,9 +55,7 @@ setTestEventSource(() => tauriTest.drainTestEvents());
 // it through test/gpui-sidebar.ts. Its context menus are native too, so they
 // are recorded here instead of opened.
 vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import("../src/lib/native-context-menu")
-  >()),
+  ...(await importOriginal<typeof import("../src/lib/native-context-menu")>()),
   popupNativeMenu: vi.fn(),
 }));
 beforeEach(() => {

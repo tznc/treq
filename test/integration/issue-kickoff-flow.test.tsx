@@ -5,11 +5,7 @@ import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace, getSessions, getWorkspaces } from "../../src/lib/api";
 import type { LinearIssue } from "../../src/lib/api-linear";
 import { render, screen, waitFor, within } from "../test-utils";
-import {
-  createTestRepo,
-  openRepo,
-  setOriginUrl,
-} from "../utils";
+import { createTestRepo, openRepo, setOriginUrl } from "../utils";
 import { findGpuiRow, sendGpuiAction } from "../gpui-sidebar";
 
 const external = vi.hoisted(() => ({

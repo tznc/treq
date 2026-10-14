@@ -3,11 +3,7 @@ import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import * as api from "../../src/lib/api";
-import {
-  commitWorkspaceFile,
-  createTestRepo,
-  openRepo,
-} from "../utils";
+import { commitWorkspaceFile, createTestRepo, openRepo } from "../utils";
 import { createWorkspace, getWorkspaces } from "../../src/lib/api";
 import { fireEvent, render, screen, waitFor, within } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";

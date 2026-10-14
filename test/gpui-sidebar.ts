@@ -99,7 +99,11 @@ export async function clickGpuiRow(
   const row = await findGpuiRow(title, options);
   const repo = gpuiRepo(options.repoPath);
   if (repo && !repo.active) {
-    sendGpuiAction({ kind: "openRepoWorkspace", repoPath: repo.path, id: row.id });
+    sendGpuiAction({
+      kind: "openRepoWorkspace",
+      repoPath: repo.path,
+      id: row.id,
+    });
   } else {
     sendGpuiAction({
       kind: "selectWorkspace",
