@@ -8,6 +8,13 @@ import {
   updateGpuiSidebar,
 } from "../lib/gpui-shell";
 import type { Workspace } from "../lib/api";
+import {
+  homeMenuEntries,
+  popupNativeMenu,
+  workspaceMenuEntries,
+} from "../lib/native-context-menu";
+import { getWorkspaceTitle } from "../lib/workspace-utils";
+import { useEditorAppsStore } from "../stores/editorAppsStore";
 import type { RemoteCapabilities } from "../lib/remote-capabilities";
 import type { TerminalSessionSummary } from "../components/terminal/types";
 import { useWorkspaceSidebarRows } from "./useWorkspaceSidebarRows";
@@ -39,6 +46,11 @@ interface UseGpuiSidebarParams {
   onOpenShell: (workspace: Workspace | null) => void;
   onStack: (workspace: Workspace | null) => void;
   onBulkArchive: () => void;
+  onOpenBranchSwitcher: () => void;
+  /** Adds a supporting repository; undefined drops the menu item. */
+  onAddRepository?: () => void;
+  onRenameWorkspace: (workspace: Workspace) => void;
+  onArchiveWorkspace: (workspace: Workspace) => void;
 }
 
 /**
@@ -102,12 +114,20 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
   }, [active]);
 
   // Handlers change every render; the listener reads the latest through a ref.
-  const latest = useRef({ params, workspaces: rows.workspaces });
-  latest.current = { params, workspaces: rows.workspaces };
+  const latest = useRef({
+    params,
+    workspaces: rows.workspaces,
+    prStatusesByBranch: rows.prStatusesByBranch,
+  });
+  latest.current = {
+    params,
+    workspaces: rows.workspaces,
+    prStatusesByBranch: rows.prStatusesByBranch,
+  };
   useEffect(() => {
     if (!active) return;
     const handle = (action: GpuiSidebarAction) => {
-      const { params: p, workspaces } = latest.current;
+      const { params: p, workspaces, prStatusesByBranch } = latest.current;
       const find = (id: number | null) =>
         id === null ? null : (workspaces.find((w) => w.id === id) ?? null);
       switch (action.kind) {
@@ -148,6 +168,32 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
         case "bulkArchive":
           p.onBulkArchive();
           break;
+        case "homeMenu":
+          void popupNativeMenu(
+            homeMenuEntries({
+              repoPath: action.repoPath,
+              editorApps: useEditorAppsStore.getState(),
+              onOpenBranchSwitcher: p.onOpenBranchSwitcher,
+              onAddRepository: p.onAddRepository,
+            }),
+          );
+          break;
+        case "workspaceMenu": {
+          const workspace = find(action.id);
+          if (!workspace) break;
+          void popupNativeMenu(
+            workspaceMenuEntries({
+              workspace,
+              title: getWorkspaceTitle(workspace),
+              repoPath: p.repoPath,
+              prUrl: prStatusesByBranch[workspace.branch_name]?.url ?? null,
+              editorApps: useEditorAppsStore.getState(),
+              onRename: () => p.onRenameWorkspace(workspace),
+              onArchive: () => p.onArchiveWorkspace(workspace),
+            }),
+          );
+          break;
+        }
         default:
           break;
       }

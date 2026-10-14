@@ -73,7 +73,9 @@ export type GpuiSidebarAction =
   | { kind: "startAgent"; id: number | null }
   | { kind: "openShell"; id: number | null }
   | { kind: "stack"; id: number | null }
-  | { kind: "bulkArchive" };
+  | { kind: "bulkArchive" }
+  | { kind: "homeMenu"; repoPath: string }
+  | { kind: "workspaceMenu"; id: number };
 
 const GPUI_SIDEBAR_ACTION_EVENT = "gpui-sidebar-action";
 

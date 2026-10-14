@@ -11,7 +11,7 @@ use std::{rc::Rc, time::Duration};
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, rgb, svg, Animation, AnimationExt as _, App, ClickEvent, Context,
-  Hsla, SharedString, Transformation, Window,
+  Hsla, MouseButton, MouseDownEvent, SharedString, Transformation, Window,
 };
 
 use super::theme::{self, Palette};
@@ -156,6 +156,15 @@ pub enum SidebarAction {
     id: Option<i64>,
   },
   BulkArchive,
+  /// Right-click on a repository's home row: React pops its native menu.
+  #[serde(rename_all = "camelCase")]
+  HomeMenu {
+    repo_path: String,
+  },
+  /// Right-click on a workspace row.
+  WorkspaceMenu {
+    id: i64,
+  },
 }
 
 /// Where the sidebar's actions go: the window's webview in the app, a list
@@ -203,6 +212,26 @@ impl Sidebar {
     let sink = self.sink.clone();
     move |_, _, cx| {
       cx.stop_propagation();
+      sink(action.clone(), cx);
+    }
+  }
+
+  /// A right-click handler that hides any tooltip, since the native menu
+  /// opens over it, and sends `action`.
+  fn on_menu(
+    &self,
+    action: SidebarAction,
+    cx: &mut Context<Self>,
+  ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+    let sidebar = cx.entity().downgrade();
+    let sink = self.sink.clone();
+    move |_, _, cx| {
+      cx.stop_propagation();
+      let _ = sidebar.update(cx, |this, cx| {
+        if this.tooltip.take().is_some() {
+          cx.notify();
+        }
+      });
       sink(action.clone(), cx);
     }
   }
@@ -727,6 +756,15 @@ impl Sidebar {
       .on_click(self.on_action(SidebarAction::SelectHome {
         repo_path: repo.path.clone(),
       }))
+      .on_mouse_down(
+        MouseButton::Right,
+        self.on_menu(
+          SidebarAction::HomeMenu {
+            repo_path: repo.path.clone(),
+          },
+          cx,
+        ),
+      )
   }
 
   /// A row above the workspace list: GitHub or Linear.
@@ -934,7 +972,11 @@ impl Sidebar {
       })
       .when(!row.archiving, |this| {
         this.on_click(self.on_action(SidebarAction::SelectWorkspace { id }))
-      });
+      })
+      .on_mouse_down(
+        MouseButton::Right,
+        self.on_menu(SidebarAction::WorkspaceMenu { id }, cx),
+      );
 
     if row.exiting {
       // Collapse out of the list, as the React sidebar does before the

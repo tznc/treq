@@ -173,6 +173,7 @@ import {
   usePreviewFeature,
 } from "../stores/featurePreviewStore";
 import { useGpuiSidebar } from "../hooks/useGpuiSidebar";
+import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
 import { useThemeStore } from "../stores/themeStore";
 import { useSidebarWidthStore } from "../stores/sidebarWidthStore";
 import { AgentPromptDialog } from "./AgentPromptDialog";
@@ -320,6 +321,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     issue?: IssueAttachment | null;
   } | null>(null);
   const [showBranchSwitcher, setShowBranchSwitcher] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
@@ -2809,6 +2811,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onStack: (workspace) =>
       workspace ? handleAddAfter(workspace) : handleStackHomeFromSidebar(),
     onBulkArchive: () => void handleBulkArchive(),
+    onOpenBranchSwitcher: () => setShowBranchSwitcher(true),
+    onAddRepository: mainRepoPath
+      ? () => void handleAddSupportingRepo()
+      : undefined,
+    onRenameWorkspace: setRenameTarget,
+    onArchiveWorkspace: handleArchive,
   });
   const showSidebar = !gpuiSidebarActive;
   const sidebarWidthStyle = {
@@ -2954,6 +2962,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
               data-testid="remote-cutoff-overlay"
               className="absolute inset-0 z-40 bg-background/40"
               aria-hidden
+            />
+          )}
+          {renameTarget && dataRepoPath && (
+            <RenameWorkspaceDialog
+              open
+              onOpenChange={(open) => {
+                if (!open) setRenameTarget(null);
+              }}
+              repoPath={dataRepoPath}
+              workspace={renameTarget}
+              onSuccess={() => setRenameTarget(null)}
             />
           )}
           {showSidebar && (

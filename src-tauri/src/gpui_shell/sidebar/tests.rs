@@ -165,6 +165,16 @@ fn serializes_actions_for_react() {
     json(SidebarAction::BulkArchive),
     serde_json::json!({"kind": "bulkArchive"})
   );
+  assert_eq!(
+    json(SidebarAction::HomeMenu {
+      repo_path: "/r".into()
+    }),
+    serde_json::json!({"kind": "homeMenu", "repoPath": "/r"})
+  );
+  assert_eq!(
+    json(SidebarAction::WorkspaceMenu { id: 4 }),
+    serde_json::json!({"kind": "workspaceMenu", "id": 4})
+  );
 }
 
 #[test]
@@ -375,4 +385,52 @@ fn row_button_tooltip_wins_over_its_row(cx: &mut TestAppContext) {
   h.sidebar.read_with(&h.cx, |s, _| {
     assert!(s.tooltip_shown("home:/src/treq"));
   });
+}
+
+fn right_click(h: &mut Harness, selector: &'static str) {
+  let bounds = h
+    .bounds(selector)
+    .unwrap_or_else(|| panic!("{selector} is not drawn"));
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: bounds.center(),
+    button: gpui::MouseButton::Right,
+    modifiers: Modifiers::none(),
+    click_count: 1,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: bounds.center(),
+    button: gpui::MouseButton::Right,
+    modifiers: Modifiers::none(),
+    click_count: 1,
+  });
+}
+
+#[gpui::test]
+fn right_click_opens_row_menus_without_selecting(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  right_click(&mut h, "home");
+  right_click(&mut h, "workspace-7");
+  assert_eq!(
+    h.sent(),
+    vec![
+      SidebarAction::HomeMenu {
+        repo_path: "/src/treq".into()
+      },
+      SidebarAction::WorkspaceMenu { id: 7 },
+    ]
+  );
+}
+
+#[gpui::test]
+fn right_click_hides_the_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(s.tooltip_shown("workspace:7")));
+  right_click(&mut h, "workspace-7");
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("workspace:7")));
 }
