@@ -168,6 +168,9 @@ pub struct Sidebar {
   sink: ActionSink,
   /// The element the pointer rests on, and whether its tooltip shows yet.
   tooltip: Option<(SharedString, bool)>,
+  /// The row under the pointer. A button inside it takes the tooltip, and
+  /// the row's own tooltip comes back when the pointer leaves the button.
+  hovered_row: Option<SharedString>,
 }
 
 impl Sidebar {
@@ -176,6 +179,7 @@ impl Sidebar {
       snapshot,
       sink,
       tooltip: None,
+      hovered_row: None,
     }
   }
 
@@ -209,9 +213,29 @@ impl Sidebar {
       if self.tooltip.as_ref().is_some_and(|(k, _)| *k == key) {
         self.tooltip = None;
         cx.notify();
+        if let Some(row) = self.hovered_row.clone().filter(|row| *row != key) {
+          self.start_tooltip(row, cx);
+        }
       }
       return;
     }
+    self.start_tooltip(key, cx);
+  }
+
+  /// Hovering a row; a button inside it keeps the tooltip if it has it.
+  fn hover_row_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
+    if hovered {
+      self.hovered_row = Some(key.clone());
+      if self.tooltip.is_some() {
+        return;
+      }
+    } else if self.hovered_row.as_ref() == Some(&key) {
+      self.hovered_row = None;
+    }
+    self.hover_tooltip(key, hovered, cx);
+  }
+
+  fn start_tooltip(&mut self, key: SharedString, cx: &mut Context<Self>) {
     self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
@@ -300,11 +324,31 @@ fn tooltip_bubble(
   max_width: f32,
   content: gpui::AnyElement,
 ) -> impl IntoElement {
+  bubble(palette, max_width, content, false)
+}
+
+/// A one-line tooltip under a small button, right-aligned to it so it stays
+/// clear of the sidebar's right edge.
+fn button_tooltip_bubble(
+  palette: &Palette,
+  max_width: f32,
+  content: gpui::AnyElement,
+) -> impl IntoElement {
+  bubble(palette, max_width, content, true)
+}
+
+fn bubble(
+  palette: &Palette,
+  max_width: f32,
+  content: gpui::AnyElement,
+  button: bool,
+) -> impl IntoElement {
   gpui::deferred(
     div()
       .absolute()
       .top_full()
-      .left_0()
+      .when(button, |this| this.right_0().whitespace_nowrap())
+      .when(!button, |this| this.left_0())
       .mt_1()
       .max_w(px(max_width))
       .px_2()
@@ -515,7 +559,7 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(id), |this| {
-        this.child(tooltip_bubble(
+        this.child(button_tooltip_bubble(
           palette,
           tooltip_width,
           tip.into_any_element(),
@@ -562,7 +606,7 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(&id), |this| {
-        this.child(tooltip_bubble(
+        this.child(button_tooltip_bubble(
           palette,
           tooltip_width,
           tip.into_any_element(),
@@ -675,7 +719,7 @@ impl Sidebar {
       })
       .on_hover(cx.listener({
         let key = key.clone();
-        move |this, hovered: &bool, _, cx| this.hover_tooltip(key.clone(), *hovered, cx)
+        move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
       }))
       .when(shown, |this| {
         this.child(tooltip_bubble(palette, tooltip_width, tip))
@@ -883,7 +927,7 @@ impl Sidebar {
       )
       .on_hover(cx.listener({
         let key = key.clone();
-        move |this, hovered: &bool, _, cx| this.hover_tooltip(key.clone(), *hovered, cx)
+        move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
       }))
       .when(self.tooltip_shown(&key), |this| {
         this.child(tooltip_bubble(palette, tooltip_width, tip))

@@ -352,3 +352,27 @@ fn tooltip_shows_after_a_short_rest(cx: &mut TestAppContext) {
   h.sidebar
     .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("settings")));
 }
+
+#[gpui::test]
+fn row_button_tooltip_wins_over_its_row(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("home-stack");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  h.sidebar.read_with(&h.cx, |s, _| {
+    assert!(s.tooltip_shown("home-stack"));
+    assert!(!s.tooltip_shown("home:/src/treq"));
+  });
+  // Back on the row itself, the row's tooltip returns.
+  let home = h.bounds("home").unwrap();
+  h.cx.simulate_mouse_move(
+    home.origin + gpui::point(gpui::px(40.), gpui::px(8.)),
+    None,
+    Modifiers::none(),
+  );
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  h.sidebar.read_with(&h.cx, |s, _| {
+    assert!(s.tooltip_shown("home:/src/treq"));
+  });
+}
