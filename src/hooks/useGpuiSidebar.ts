@@ -169,8 +169,19 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
         id === null ? null : (workspaces.find((w) => w.id === id) ?? null);
       switch (action.kind) {
         case "selectHome":
-          if (action.repoPath === p.repoPath) p.onSelectWorkspace(null);
-          else p.onSelectRepoHome(action.repoPath);
+          if (action.repoPath !== p.repoPath) {
+            p.onSelectRepoHome(action.repoPath);
+          } else if (p.selectedWorkspaceIds.size > 0) {
+            // As in the React sidebar, a click on home first drops the selection.
+            lastSelectedIndexRef.current = null;
+            p.onWorkspaceMultiSelect(null, {
+              shiftKey: false,
+              metaKey: false,
+              ctrlKey: false,
+            });
+          } else {
+            p.onSelectWorkspace(null);
+          }
           break;
         case "selectWorkspace": {
           const workspace = find(action.id);
