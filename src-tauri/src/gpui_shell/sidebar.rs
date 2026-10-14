@@ -7,7 +7,7 @@
 //! handles with the same code as clicks in its own sidebar.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, EventTarget};
+use tauri::{AppHandle, Emitter, EventTarget, Manager};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, svg, Animation, AnimationExt as _, Hsla, SharedString, Transformation,
 };
@@ -88,14 +88,24 @@ pub enum SidebarAction {
   OpenLinear,
 }
 
-/// Sends `action` to the webview of window `label`. Tauri calls must not
-/// run inside a GPUI update, so this runs in a task.
+/// Sends `action` to the webview of window `label` and gives that webview
+/// keyboard focus. Tauri calls must not run inside a GPUI update, so this
+/// runs in a task.
 fn send(app: &AppHandle, label: &SharedString, action: SidebarAction) {
   let app = app.clone();
   let label = label.to_string();
   tauri::async_runtime::spawn(async move {
     if let Err(err) = app.emit_to(EventTarget::webview_window(&label), ACTION_EVENT, action) {
       log::warn!("failed to send GPUI sidebar action: {err}");
+    }
+    // Keys go where a click on the page would send them, so a palette the
+    // action opens can be typed into straight away.
+    if let Some(webview) = app.get_webview(&label) {
+      let _ = app.run_on_main_thread(move || {
+        if let Err(err) = tauri_plugin_gpui::focus_webview(&webview) {
+          log::warn!("failed to focus the webview: {err}");
+        }
+      });
     }
   });
 }
