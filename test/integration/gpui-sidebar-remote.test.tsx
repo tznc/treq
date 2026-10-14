@@ -22,12 +22,12 @@ function lastSnapshot(): GpuiSidebarSnapshot | null | undefined {
 
 describe("Dashboard - GPUI sidebar for a remote repository", () => {
   beforeEach(async () => {
+    window.__TREQ_GPUI_SHELL__ = true;
     window.history.replaceState({}, "", "/");
     await clearLastOpenedRemoteRepository();
     const { repoPath } = createTestRepo(false);
     await createWorkspace(repoPath, "feat/remote-ui");
     await openSavedRemoteRepo(repoPath);
-    window.__TREQ_GPUI_SHELL__ = true;
   });
 
   afterEach(() => {
