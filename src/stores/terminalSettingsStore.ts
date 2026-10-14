@@ -5,6 +5,21 @@ const DEFAULT_TERMINAL_FONT_SIZE = 14;
 export const MIN_TERMINAL_FONT_SIZE = 8;
 export const MAX_TERMINAL_FONT_SIZE = 32;
 
+export const FONT_SIZE_PRESETS = [
+  { label: "Extra Small", size: 10 },
+  { label: "Small", size: 12 },
+  { label: "Medium (default)", size: DEFAULT_TERMINAL_FONT_SIZE },
+  { label: "Large", size: 16 },
+  { label: "Extra Large", size: 18 },
+] as const;
+
+/** Snaps a stored pixel size (older builds allowed any 8-32) to a preset. */
+export function nearestFontSizePreset(size: number): number {
+  return FONT_SIZE_PRESETS.reduce((best, p) =>
+    Math.abs(p.size - size) < Math.abs(best.size - size) ? p : best,
+  ).size;
+}
+
 export interface TerminalSettingsState {
   fontSize: number;
   setFontSize: (size: number) => Promise<void>;
