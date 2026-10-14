@@ -172,6 +172,8 @@ import {
   useFeaturePreviewStore,
   usePreviewFeature,
 } from "../stores/featurePreviewStore";
+import { useGpuiSidebar } from "../hooks/useGpuiSidebar";
+import { useThemeStore } from "../stores/themeStore";
 import { useSidebarWidthStore } from "../stores/sidebarWidthStore";
 import { AgentPromptDialog } from "./AgentPromptDialog";
 import { CommandPalette } from "./CommandPalette";
@@ -2763,8 +2765,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const isSessionView = viewMode === "session" || viewMode === "show-workspace";
-  const showSidebar = true;
   const sidebarWidth = useSidebarWidthStore((s) => s.width);
+  const dark = useThemeStore((s) => s.actualTheme()) === "dark";
+  const currentPage =
+    viewMode === "settings"
+      ? "settings"
+      : viewMode === "github"
+        ? "github"
+        : viewMode === "linear"
+          ? viewMode
+          : viewMode === "session" || viewMode === "show-workspace"
+            ? "session"
+            : undefined;
+  // With the GPUI shell, the native sidebar replaces <WorkspaceSidebar> for a
+  // single local repository; other windows keep the React sidebar.
+  const gpuiSidebarActive = useGpuiSidebar({
+    supported:
+      Boolean(dataRepoPath) && !isRemoteActive && supportingRepos.length === 0,
+    repoPath: mainRepoPath,
+    cacheKey: queryRepoKey,
+    terminalSessions: terminalSessionSummaries,
+    selectedWorkspaceId: selectedWorkspace?.id ?? null,
+    currentPage,
+    homeBranch: homeRepoDisplayRef,
+    linearEnabled: linearIntegrationEnabled,
+    dark,
+    width: sidebarWidth,
+    onSelectWorkspace: handleSelectWorkspace,
+    onOpenSettings: () => openSettings("application"),
+    onOpenCommandPalette: () => setShowCommandPalette(true),
+    onOpenGithub: openGitHub,
+    onOpenLinear: openLinear,
+  });
+  const showSidebar = !gpuiSidebarActive;
   const sidebarWidthStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
   } as CSSProperties;
@@ -2910,63 +2943,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
               aria-hidden
             />
           )}
-          <WorkspaceSidebar
-            repoPath={dataRepoPath}
-            mainRepoPath={isRemoteActive ? undefined : mainRepoPath}
-            supportingRepos={isRemoteActive ? [] : supportingRepos}
-            onSelectRepoHome={handleSelectRepoHome}
-            onAddRepository={
-              mainRepoPath && !isRemoteActive
-                ? () => void handleAddSupportingRepo()
-                : undefined
-            }
-            onRemoveSupportingRepo={(path) =>
-              void handleRemoveSupportingRepo(path)
-            }
-            onLocateSupportingRepo={(path) =>
-              void handleLocateSupportingRepo(path)
-            }
-            onOpenRepoSettings={handleOpenRepoSettings}
-            homeRepoDisplayRef={homeRepoDisplayRef}
-            selectedWorkspaceId={selectedWorkspace?.id ?? null}
-            selectedWorkspaceIds={selectedWorkspaceIds}
-            archivingWorkspaceIds={archivingWorkspaceIds}
-            exitingWorkspaceIds={exitingWorkspaceIds}
-            onWorkspaceClick={(workspace) => handleSelectWorkspace(workspace)}
-            onWorkspaceMultiSelect={handleWorkspaceMultiSelect}
-            onBulkArchive={handleBulkArchive}
-            onArchiveWorkspace={handleArchive}
-            openSettings={openSettings}
-            navigateToDashboard={handleReturnToDashboard}
-            onOpenCommandPalette={() => setShowCommandPalette(true)}
-            onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
-            onAddBefore={handleAddBefore}
-            onAddAfter={handleAddAfter}
-            onMoveWorkspace={handleMoveWorkspace}
-            onSelectStack={handleSelectStack}
-            onStartAgent={(workspace) =>
-              handleCreateSessionFromSidebar(workspace.id)
-            }
-            onStartShell={handleStartShellFromSidebar}
-            onStartHomeAgent={() => handleCreateSessionFromSidebar(null)}
-            onStartHomeShell={handleStartHomeShellFromSidebar}
-            onStackHome={handleStackHomeFromSidebar}
-            terminalSessions={terminalSessionSummaries}
-            onDropChangeFiles={handleDropChangeFiles}
-            onOpenGitHub={openGitHub}
-            onOpenLinear={linearIntegrationEnabled ? openLinear : undefined}
-            currentPage={
-              viewMode === "settings"
-                ? "settings"
-                : viewMode === "github"
-                  ? "github"
-                  : viewMode === "linear"
-                    ? viewMode
-                    : viewMode === "session" || viewMode === "show-workspace"
-                      ? "session"
-                      : undefined
-            }
-          />
+          {showSidebar && (
+            <WorkspaceSidebar
+              repoPath={dataRepoPath}
+              mainRepoPath={isRemoteActive ? undefined : mainRepoPath}
+              supportingRepos={isRemoteActive ? [] : supportingRepos}
+              onSelectRepoHome={handleSelectRepoHome}
+              onAddRepository={
+                mainRepoPath && !isRemoteActive
+                  ? () => void handleAddSupportingRepo()
+                  : undefined
+              }
+              onRemoveSupportingRepo={(path) =>
+                void handleRemoveSupportingRepo(path)
+              }
+              onLocateSupportingRepo={(path) =>
+                void handleLocateSupportingRepo(path)
+              }
+              onOpenRepoSettings={handleOpenRepoSettings}
+              homeRepoDisplayRef={homeRepoDisplayRef}
+              selectedWorkspaceId={selectedWorkspace?.id ?? null}
+              selectedWorkspaceIds={selectedWorkspaceIds}
+              archivingWorkspaceIds={archivingWorkspaceIds}
+              exitingWorkspaceIds={exitingWorkspaceIds}
+              onWorkspaceClick={(workspace) => handleSelectWorkspace(workspace)}
+              onWorkspaceMultiSelect={handleWorkspaceMultiSelect}
+              onBulkArchive={handleBulkArchive}
+              onArchiveWorkspace={handleArchive}
+              openSettings={openSettings}
+              navigateToDashboard={handleReturnToDashboard}
+              onOpenCommandPalette={() => setShowCommandPalette(true)}
+              onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
+              onAddBefore={handleAddBefore}
+              onAddAfter={handleAddAfter}
+              onMoveWorkspace={handleMoveWorkspace}
+              onSelectStack={handleSelectStack}
+              onStartAgent={(workspace) =>
+                handleCreateSessionFromSidebar(workspace.id)
+              }
+              onStartShell={handleStartShellFromSidebar}
+              onStartHomeAgent={() => handleCreateSessionFromSidebar(null)}
+              onStartHomeShell={handleStartHomeShellFromSidebar}
+              onStackHome={handleStackHomeFromSidebar}
+              terminalSessions={terminalSessionSummaries}
+              onDropChangeFiles={handleDropChangeFiles}
+              onOpenGitHub={openGitHub}
+              onOpenLinear={linearIntegrationEnabled ? openLinear : undefined}
+              currentPage={currentPage}
+            />
+          )}
 
           <SidebarInset
             className="flex-1 relative min-w-0"

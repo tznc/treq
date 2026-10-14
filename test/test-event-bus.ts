@@ -83,3 +83,10 @@ export async function closeTestPtys(
   // Drop output a closed PTY emitted after its listener went away.
   source?.();
 }
+
+/** Deliver an event to the listeners registered on the bus, as the backend would. */
+export function emitOnTestBus(event: string, payload: unknown) {
+  for (const handler of listeners.get(event) ?? []) {
+    handler({ event, id: nextId++, payload });
+  }
+}

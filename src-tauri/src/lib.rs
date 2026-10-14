@@ -889,6 +889,7 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
+      commands::gpui_sidebar_update,
       commands::acknowledge_agent_dispatch,
       commands::detect_editor_apps,
       commands::get_treq_bin_dir,

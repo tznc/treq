@@ -86,6 +86,15 @@ export const initRepo = async (repoPath: string): Promise<boolean> => {
   return invoke("init_repo", { repoPath });
 };
 
+/** Push the GPUI sidebar snapshot to the native shell; null hides it. */
+export const gpuiSidebarUpdate = (
+  snapshot: import("./gpui-shell").GpuiSidebarSnapshot | null,
+): Promise<void> =>
+  invoke("gpui_sidebar_update", {
+    windowLabel: currentWindowLabel(),
+    snapshot,
+  });
+
 // Database API
 export const getWorkspaces = (repoPath: string): Promise<Workspace[]> =>
   transportGetWorkspaces(repoPath, () =>
