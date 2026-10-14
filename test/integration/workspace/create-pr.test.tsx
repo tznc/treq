@@ -341,6 +341,36 @@ describe("ShowWorkspace - Create PR", () => {
     );
   });
 
+  it("creates a PR using the title saved through the Code tab editor", async () => {
+    const { description } = await setupPushedWorkspaceWithGitHub();
+    render(<Dashboard />);
+
+    const header = await openWorkspace("feat/create-pr");
+    const panel = await screen.findByTestId("workspace-title");
+    await user.click(
+      within(panel).getByRole("button", { name: "Edit workspace title" }),
+    );
+    const input = within(panel).getByRole("textbox", {
+      name: "Workspace title",
+    });
+    await user.clear(input);
+    await user.type(input, "Updated PR title");
+    await user.click(within(panel).getByRole("button", { name: "Save" }));
+    await within(panel).findByRole("heading", { name: "Updated PR title" });
+    await user.click(await findEnabledCreatePr(header));
+
+    await waitFor(() => {
+      expect(ghCreatePr).toHaveBeenCalledWith(
+        "acme/treq",
+        "feat: Updated PR title",
+        description,
+        expect.any(String),
+        "feat/create-pr",
+        false,
+      );
+    });
+  });
+
   it("uses a description an agent updated after the workspace view loaded", async () => {
     const { workspace } = await setupPushedWorkspaceWithGitHub();
     render(<Dashboard />);
