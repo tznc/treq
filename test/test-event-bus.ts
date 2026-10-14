@@ -59,6 +59,13 @@ export function listenOnTestBus(
   });
 }
 
+/** Delivers an event straight to its listeners, as a native menu click would. */
+export function emitOnTestBus(event: string, payload: unknown = null) {
+  for (const handler of listeners.get(event) ?? []) {
+    handler({ event, id: nextId++, payload });
+  }
+}
+
 // PTYs spawned during a test (only when TREQ_TEST_PTY=1) are closed after it,
 // so a fake agent never outlives the test that started it.
 const openPtySessions = new Set<string>();

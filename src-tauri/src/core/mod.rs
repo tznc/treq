@@ -34,6 +34,7 @@ pub mod skills;
 pub mod stash;
 pub mod submodules;
 pub mod supporting_repos;
+pub mod system_logs;
 pub mod workspaces;
 use crate::lock_ext::LockExt;
 pub use agent_chat::*;
