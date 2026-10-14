@@ -290,7 +290,7 @@ describe("Dashboard - FileBrowser integration", { timeout: 15_000 }, () => {
     await screen.findByText("Open in...");
   });
 
-  it("keeps a long changed line on a single row instead of wrapping over neighbors", async () => {
+  it("wraps a long line within its own row without overlapping neighbors", async () => {
     const longLine =
       "export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(({className, ...props}, ref) => <input ref={ref} className={cn('flex h-9 w-full rounded-md border border-zinc-200 bg-white px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-zinc-300', className)} {...props} />);";
     await setupWorkspace("feat/filebrowser-long-line-wrap-test", {
@@ -319,9 +319,11 @@ describe("Dashboard - FileBrowser integration", { timeout: 15_000 }, () => {
     const content = within(longRow as HTMLElement).getByTestId(
       "code-line-content",
     );
-    expect(content).toHaveClass("whitespace-pre");
-    expect(content).not.toHaveClass("break-words");
-    expect(content).not.toHaveClass("whitespace-pre-wrap");
+    expect(content).toHaveClass("whitespace-pre-wrap");
+    expect(content).not.toHaveClass("overflow-x-auto");
+    // Row must grow with wrapped content, not clip/overlap at a fixed height
+    expect((longRow as HTMLElement).style.height).toBe("");
+    expect((longRow as HTMLElement).style.minHeight).toBe("18px");
 
     const neighbor = lines.find((line) =>
       (line.textContent ?? "").includes("displayName"),
