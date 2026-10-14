@@ -174,7 +174,7 @@ export function LogFeed({
           </>
         )}
       </div>
-      <div className="flex w-full gap-3 px-3 py-1 border-b bg-muted/20 font-mono text-[10px] uppercase tracking-wide text-muted-foreground select-none">
+      <div className="flex w-full gap-3 px-3 py-1 border-b bg-muted/20 font-mono text-xs uppercase tracking-wide text-muted-foreground select-none">
         <span className={TIMESTAMP_COL_CLASS}>Timestamp</span>
         {prefixColumns.map((col) => (
           <span key={col.header} className={cn(col.className, "truncate")}>

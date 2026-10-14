@@ -9,6 +9,16 @@ export default {
     extend: {
       // Font stacks come from CSS tokens in src/index.css, which mirror the
       // docs site tokens in web/src/css/custom.css.
+      // Dense IDE type scale: 13px body, 11px meta. `sm` and `base` are both
+      // body text so components that picked either render the same size.
+      fontSize: {
+        xs: ["11px", { lineHeight: "16px" }],
+        sm: ["13px", { lineHeight: "20px" }],
+        base: ["13px", { lineHeight: "20px" }],
+        lg: ["15px", { lineHeight: "22px" }],
+        xl: ["17px", { lineHeight: "24px" }],
+        "2xl": ["20px", { lineHeight: "28px" }],
+      },
       fontFamily: {
         sans: ['var(--font-sans)'],
         display: ['var(--font-display)'],

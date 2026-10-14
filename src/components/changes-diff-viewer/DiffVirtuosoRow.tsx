@@ -311,7 +311,7 @@ export function DiffVirtuosoRow({ item }: { item: DiffVirtuosoItem }) {
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-700 dark:text-amber-300 text-[10px] font-medium">
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-700 dark:text-amber-300 text-xs font-medium">
                     Outdated
                   </span>
                   <span className="text-xs text-muted-foreground">

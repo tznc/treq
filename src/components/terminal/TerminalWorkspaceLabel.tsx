@@ -22,7 +22,7 @@ export function TerminalWorkspaceLabel({
         onNavigate();
       }}
       className={cn(
-        "truncate max-w-[200px] rounded-sm bg-muted/60 px-1 py-0.5 text-[11px] font-mono font-medium leading-none text-muted-foreground",
+        "truncate max-w-[200px] rounded-sm bg-muted/60 px-1 py-0.5 text-xs font-mono font-medium leading-none text-muted-foreground",
         onNavigate && "cursor-pointer hover:bg-muted",
         className,
       )}

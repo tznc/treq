@@ -415,7 +415,7 @@ export const StashModal: React.FC<StashModalProps> = ({
                               ) : (
                                 <Command.Group
                                   heading="Apply to"
-                                  className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+                                  className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
                                 >
                                   {filteredApplyTargets.map((target) => (
                                     <Command.Item

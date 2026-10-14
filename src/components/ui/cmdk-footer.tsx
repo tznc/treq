@@ -19,7 +19,7 @@ export const CmdkFooter: React.FC<CmdkFooterProps> = ({ actions }) => {
       <div className="flex items-center gap-3">
         {displayActions.map((action, index) => (
           <span key={index}>
-            <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">
+            <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">
               {action.key}
             </kbd>{" "}
             {action.label}
