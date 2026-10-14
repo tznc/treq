@@ -2,10 +2,15 @@
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import {
+  createTestRepo,
+  findSidebarBranchElement,
+  openRepo,
+  writeRepoFile,
+} from "../utils";
 import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
-import { createWorkspace } from "../../src/lib/api";
+import { createWorkspace, trustRepo } from "../../src/lib/api";
 
 describe("CommandPalette integration", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -86,5 +91,25 @@ describe("CommandPalette integration", () => {
         screen.queryByPlaceholderText("Type a command or search..."),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("runs the workspace's checks from Run checks…", async () => {
+    await writeRepoFile(
+      repoPath,
+      ".treq/workflows/ci.yaml",
+      "name: CI\njobs:\n  test:\n    steps:\n      - name: Echo\n        run: echo ok\n",
+    );
+    await trustRepo(repoPath);
+    await createWorkspace(repoPath, "feat/palette-checks");
+    render(<Dashboard />);
+    await user.click(await findSidebarBranchElement("feat/palette-checks"));
+
+    await user.keyboard("{Control>}k{/Control}");
+    expect(await screen.findByText("Run check: CI")).toBeTruthy();
+    await user.click(await screen.findByText("Run checks…"));
+
+    expect(
+      await screen.findByText("Checks passed", {}, { timeout: 20_000 }),
+    ).toBeTruthy();
   });
 });

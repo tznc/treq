@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import useSWR from "swr";
 import { Database, Loader2, Table2 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -8,6 +8,7 @@ import {
   getLogTimeseries,
   getRepoLogs,
   listAgentChats,
+  listWorkflows,
 } from "../lib/api";
 import type { LogBucket, LogRecordView } from "../lib/api-types";
 import { LogLevelFilter } from "./LogLevelFilter";
@@ -16,6 +17,7 @@ import { LogFeed, type PrefixColumn } from "./LogFeed";
 import { LogsTimeseriesChart } from "./LogsTimeseriesChart";
 import { buildLogLinesPrompt } from "../lib/logs-prompt";
 import { agentChatToLogRecords } from "../lib/agentChatLogs";
+import { CheckWorkflowFilter } from "./checks/CheckWorkflowFilter";
 
 interface Props {
   repoPath: string;
@@ -86,31 +88,69 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
           prefixColumns={[RUN_COLUMN]}
         />
       ) : browsing ? (
-        <FilteredLogs
-          swrKey={["repo-logs", repoPath]}
-          fetchLogs={(filters) => getRepoLogs(repoPath, filters)}
-          fetchBuckets={(filters) =>
-            getLogTimeseries(repoPath, { ...filters, bucketSeconds: 1 })
-          }
-          searchLabel="Search logs"
-          testId="repo-logs-output"
-          lineTestId="repo-log-line"
-          emptyMessage="No check logs recorded yet. Run a workflow check from the Checks tab of any workspace to populate this table."
-          promptLabel="my check logs"
-          onSendToAgent={onSendToAgent}
-          prefixColumns={[
-            RUN_COLUMN,
-            {
-              header: "Job",
-              className: "w-[10ch] text-blue-600 dark:text-blue-400",
-              render: (record) => record.job_id,
-            },
-          ]}
-        />
+        <ChecksLogs repoPath={repoPath} onSendToAgent={onSendToAgent} />
       ) : (
         <LogsSqlExplorer repoPath={repoPath} onSendToAgent={onSendToAgent} />
       )}
     </div>
+  );
+}
+
+/** Repo-wide check logs, filterable by one or more workflows. */
+function ChecksLogs({
+  repoPath,
+  onSendToAgent,
+}: {
+  repoPath: string;
+  onSendToAgent?: (prompt: string) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  // Same key as useWorkspaceChecks, so the list is shared when both fetch.
+  const { data: workflows = [] } = useSWR(["workflows", repoPath], () =>
+    listWorkflows(repoPath),
+  );
+
+  return (
+    <FilteredLogs
+      swrKey={["repo-logs", repoPath, selected.join("\n")]}
+      fetchLogs={(filters) =>
+        getRepoLogs(repoPath, { ...filters, workflows: selected })
+      }
+      fetchBuckets={(filters) =>
+        getLogTimeseries(repoPath, {
+          ...filters,
+          workflows: selected,
+          bucketSeconds: 1,
+        })
+      }
+      filterControls={
+        workflows.length > 0 && (
+          <CheckWorkflowFilter
+            workflows={workflows}
+            value={selected}
+            onChange={setSelected}
+          />
+        )
+      }
+      searchLabel="Search logs"
+      testId="repo-logs-output"
+      lineTestId="repo-log-line"
+      emptyMessage={
+        selected.length > 0
+          ? "No logs recorded for the selected checks yet."
+          : "No check logs recorded yet. Run checks from the Checks button in a workspace header to populate this table."
+      }
+      promptLabel="my check logs"
+      onSendToAgent={onSendToAgent}
+      prefixColumns={[
+        RUN_COLUMN,
+        {
+          header: "Job",
+          className: "w-[10ch] text-blue-600 dark:text-blue-400",
+          render: (record) => record.job_id,
+        },
+      ]}
+    />
   );
 }
 
@@ -225,6 +265,7 @@ function FilteredLogs({
   emptyMessage,
   promptLabel,
   prefixColumns,
+  filterControls,
   onSendToAgent,
 }: {
   swrKey: unknown[];
@@ -236,6 +277,8 @@ function FilteredLogs({
   emptyMessage: string;
   promptLabel: string;
   prefixColumns: PrefixColumn[];
+  /** Extra controls placed after the level filter. */
+  filterControls?: ReactNode;
   onSendToAgent?: (prompt: string) => void;
 }) {
   const [levels, setLevels] = useState<string[]>([]);
@@ -258,6 +301,7 @@ function FilteredLogs({
     <>
       <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-muted/30">
         <LogLevelFilter value={levels} onChange={setLevels} />
+        {filterControls}
         <input
           aria-label={searchLabel}
           placeholder="Search all runs…"

@@ -86,7 +86,6 @@ import { BrowserPanel } from "./browser-panel/BrowserPanel";
 import { useReviewSubView } from "./browser-panel/useReviewSubView";
 import { LocDiffMarker } from "./LocDiffMarker";
 import { LogsTab } from "./LogsTab";
-import { CiStatusIndicator } from "./CiStatusIndicator";
 import { CommitDiffViewer } from "./CommitDiffViewer";
 import { CreatePrButtonGroup } from "./CreatePrButtonGroup";
 import { FileBrowser } from "./FileBrowser";
@@ -118,6 +117,12 @@ import {
 import { ViewPrButton } from "./ViewPrButton";
 import { WorkspaceStackPanel } from "./WorkspaceStackPanel";
 import { MergeQueueButton } from "./workspace-header/MergeQueueButton";
+import { WorkspaceChecksButton } from "./workspace-header/WorkspaceChecksButton";
+import { checksTargetOf } from "../hooks/useWorkspaceChecks";
+import {
+  clearOpenWorkspaceLogsRequest,
+  useOpenLogsRequest,
+} from "../lib/open-logs-request";
 import {
   type WorkspaceTrackerMetadata,
   WorkspaceTrackerBadges,
@@ -227,6 +232,7 @@ export const ShowWorkspace = ({
 
   const { addToast } = useToast();
   const logsEnabled = usePreviewFeature("logs");
+  const checksTarget = checksTargetOf(workspace);
   const { fontSize } = useTerminalSettingsStore();
 
   const { data: remoteInfo } = useGitRemoteInfo(effectiveRepoPath || undefined);
@@ -298,6 +304,23 @@ export const ShowWorkspace = ({
     setActiveTab("overview");
     setChangedFiles(new Map());
   }, [workspace?.id]);
+
+  // Bumped by "open in Logs" links so the Logs tab remounts on its default
+  // view: check logs for all checks.
+  const [logsKey, setLogsKey] = useState(0);
+  const openCheckLogs = () => {
+    setLogsKey((key) => key + 1);
+    setActiveTab("logs");
+  };
+
+  // Runs after the reset above, so a Logs request for this workspace wins.
+  const openLogsFor = useOpenLogsRequest((state) => state.workspaceId);
+  useEffect(() => {
+    if (openLogsFor === null || openLogsFor !== workspace?.id) return;
+    clearOpenWorkspaceLogsRequest();
+    if (logsEnabled) openCheckLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openLogsFor, workspace?.id, logsEnabled]);
 
   // After a child refresh (e.g. post-commit), re-check if workspace now has commits
   const handleRefreshingChange = (r: boolean) => {
@@ -1401,6 +1424,7 @@ export const ShowWorkspace = ({
           />
         ) : activeTab === "logs" ? (
           <LogsTab
+            key={logsKey}
             repoPath={effectiveRepoPath ?? ""}
             onSendToAgent={handleSendLogsToAgent}
           />
@@ -1638,10 +1662,6 @@ export const ShowWorkspace = ({
                 workspace.branch_name !== defaultBranch &&
                 effectiveRepoPath && (
                   <>
-                    <CiStatusIndicator
-                      repoPath={effectiveRepoPath}
-                      branchName={workspace.branch_name}
-                    />
                     <ViewPrButton
                       repoPath={effectiveRepoPath}
                       branchName={workspace.branch_name}
@@ -1717,6 +1737,17 @@ export const ShowWorkspace = ({
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
+              )}
+              {checksTarget && (
+                <WorkspaceChecksButton
+                  target={checksTarget}
+                  prBranch={
+                    workspace && workspace.branch_name !== defaultBranch
+                      ? workspace.branch_name
+                      : undefined
+                  }
+                  onOpenLogs={logsEnabled ? openCheckLogs : undefined}
+                />
               )}
               {/* Merge queue button (build flag + repo opt-in) */}
               {workspace &&

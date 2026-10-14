@@ -1,5 +1,49 @@
 import type { AgentKind } from "./agents";
 
+export interface WorkflowStepInfo {
+  name: string;
+}
+export interface WorkflowJobInfo {
+  id: string;
+  name: string;
+  steps: WorkflowStepInfo[];
+}
+export interface WorkflowInfo {
+  filename: string;
+  name: string;
+  jobs: WorkflowJobInfo[];
+}
+export interface StepResult {
+  name: string;
+  success: boolean;
+}
+export interface JobResult {
+  job_id: string;
+  steps: StepResult[];
+  success: boolean;
+}
+
+export interface RunJobSummary {
+  job_id: string;
+  status: string;
+  steps: StepResult[];
+  has_logs: boolean;
+}
+export interface RunSummary {
+  id: number;
+  filename: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  jobs: RunJobSummary[];
+}
+export interface SetupScriptStatus {
+  configured: boolean;
+  /** "not_configured" | "pending" | "running" | "passed" | "failed" */
+  status: string;
+  run_id: number | null;
+}
+
 export interface LogRecordView {
   timestamp: string;
   severity_number: number;

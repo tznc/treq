@@ -60,6 +60,7 @@ const sidebars: SidebarsConfig = {
         'concepts/commit-management',
         'concepts/github-integration',
         'concepts/logs',
+        'concepts/checks',
       ],
     },
     {

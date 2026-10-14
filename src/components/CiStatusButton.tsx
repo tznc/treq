@@ -1,4 +1,3 @@
-import { usePrCiStatus } from "../hooks/useMergeQueueStatus";
 import type { PrCiStatus } from "../lib/api-types";
 import {
   ciStateForBucket,
@@ -16,11 +15,22 @@ import {
   TooltipTrigger,
 } from "./ui/tooltip";
 
+/** A PR's GitHub checks, failed first, each linking to its run. */
+export function CiChecksList({ ciStatus }: { ciStatus: PrCiStatus }) {
+  const checks = [...ciStatus.checks].sort(compareCiChecksBySeverity);
+  return (
+    <div className="max-h-80 overflow-y-auto">
+      {checks.map((check, index) => (
+        <CheckEntryRow key={`${check.name}-${index}`} check={check} />
+      ))}
+    </div>
+  );
+}
+
 /**
- * Compact "passed/total" pill for a PR's rolled-up CI status. Pure/presentational
- * so it can be reused anywhere a `PrCiStatus` is already in hand -- the
- * workspace header (via `CiStatusIndicator` below, which fetches by branch)
- * and the GitHub panel's PR detail view (which fetches by PR number).
+ * Compact "passed/total" pill for a PR's rolled-up CI status, for the GitHub
+ * panel's PR detail view. The workspace header shows the same list inside
+ * its combined Checks popover.
  */
 export function CiStatusButton({ ciStatus }: { ciStatus: PrCiStatus }) {
   const style = ciStatusStyle(ciStatus.state);
@@ -28,8 +38,6 @@ export function CiStatusButton({ ciStatus }: { ciStatus: PrCiStatus }) {
   const failingChecks = ciStatus.checks.filter(
     (check) => ciStateForBucket(check.bucket) === "failure",
   );
-  const checks = [...ciStatus.checks].sort(compareCiChecksBySeverity);
-
   return (
     <Popover>
       <TooltipProvider delay={200}>
@@ -68,30 +76,8 @@ export function CiStatusButton({ ciStatus }: { ciStatus: PrCiStatus }) {
         <div className="px-2 pb-1 text-xs font-medium text-muted-foreground">
           Checks
         </div>
-        <div className="max-h-80 overflow-y-auto">
-          {checks.map((check, index) => (
-            <CheckEntryRow key={`${check.name}-${index}`} check={check} />
-          ))}
-        </div>
+        <CiChecksList ciStatus={ciStatus} />
       </PopoverContent>
     </Popover>
   );
-}
-
-interface CiStatusIndicatorProps {
-  repoPath: string;
-  branchName: string;
-}
-
-export function CiStatusIndicator({
-  repoPath,
-  branchName,
-}: CiStatusIndicatorProps) {
-  const { data: ciStatus } = usePrCiStatus(repoPath, branchName);
-
-  if (!ciStatus || ciStatus.total === 0) {
-    return null;
-  }
-
-  return <CiStatusButton ciStatus={ciStatus} />;
 }
