@@ -35,11 +35,6 @@ export function FeaturePreviewSettings() {
                 >
                   {feature.title}
                 </button>
-                {feature.restartRequired && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Takes effect after restarting Treq
-                  </p>
-                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <Label htmlFor={`preview-${feature.id}`} className="sr-only">

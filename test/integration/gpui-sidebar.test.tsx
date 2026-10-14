@@ -25,11 +25,10 @@ describe("Dashboard - GPUI sidebar host", () => {
     await createWorkspace(repoPath, "feat/alpha");
   });
 
-  it("replaces the React sidebar and selects a workspace from a GPUI click", async () => {
+  it("selects a workspace from a GPUI click", async () => {
     render(<Dashboard />);
 
     await waitFor(() => expect(gpuiTitles()).toEqual(["feat/alpha"]));
-    expect(screen.queryByTestId("workspace-sidebar")).toBeNull();
     expect(gpuiRepo()?.homeSelected).toBe(true);
 
     await clickGpuiRow("feat/alpha");
@@ -94,13 +93,14 @@ describe("Dashboard - GPUI sidebar actions", () => {
 });
 
 describe("Dashboard - without the GPUI shell", () => {
-  it("renders the React sidebar and never pushes a snapshot", async () => {
+  it("pushes no snapshot and renders no sidebar", async () => {
     delete window.__TREQ_GPUI_SHELL__;
     const { repoPath } = createTestRepo(false);
     openRepo(repoPath);
     vi.mocked(invoke).mockClear();
     render(<Dashboard />);
-    expect(await screen.findByTestId("workspace-sidebar")).toBeTruthy();
+    expect(await screen.findByTestId("show-workspace-header")).toBeTruthy();
+    expect(screen.queryByTestId("workspace-sidebar")).toBeNull();
     expect(
       vi
         .mocked(invoke)

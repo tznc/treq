@@ -7,8 +7,7 @@ import { getWorkspaceTitle } from "./workspace-utils";
 import type { FlattenedWorkspaceNode } from "./workspace-tree";
 
 /**
- * With the `gpuiSidebar` preview on, the window is drawn by GPUI and this app
- * runs in a child webview. The Rust side marks that webview with this global.
+ * On desktop the window is drawn by GPUI and this app runs in a child webview. The Rust side marks that webview with this global.
  */
 declare global {
   interface Window {
@@ -130,7 +129,7 @@ export function buildGpuiSidebarSnapshot(params: {
   selectedWorkspaceIds?: ReadonlySet<number>;
   archivingWorkspaceIds?: ReadonlySet<number>;
   exitingWorkspaceIds?: ReadonlySet<number>;
-  /** Same values Dashboard passes to WorkspaceSidebar's `currentPage`. */
+  /** Same values Dashboard passes as `currentPage`. */
   currentPage: string | undefined;
   linearEnabled: boolean;
   dark: boolean;

@@ -1,28 +1,10 @@
-export type WorkspaceStatusColor = "red" | "yellow" | "neutral";
+type WorkspaceStatusColor = "red" | "yellow" | "neutral";
 
 export interface WorkspaceStatusIndicator {
   color: WorkspaceStatusColor;
   spin: boolean;
   label: string;
 }
-
-export const WORKSPACE_STATUS_DOT_TEXT_CLASS: Record<
-  WorkspaceStatusColor,
-  string
-> = {
-  red: "text-destructive",
-  yellow: "text-yellow-500",
-  neutral: "text-muted-foreground",
-};
-
-export const WORKSPACE_STATUS_DOT_BG_CLASS: Record<
-  WorkspaceStatusColor,
-  string
-> = {
-  red: "bg-destructive",
-  yellow: "bg-yellow-500",
-  neutral: "bg-muted-foreground",
-};
 
 /**
  * Sidebar row indicator: a color-coded dot -- red for conflicts, yellow for

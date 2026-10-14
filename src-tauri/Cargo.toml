@@ -31,7 +31,7 @@ gui = [
   "dep:tauri-plugin-cli",
   "dep:tauri-plugin-single-instance",
 ]
-# Lets repo windows open in a GPUI shell (the `gpuiSidebar` feature preview).
+# Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
 # Left out of the NAPI test addon, which has no windows.
 gpui-shell = ["gui", "dep:tauri-plugin-gpui"]
 tauri-test = ["gui", "dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]

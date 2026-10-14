@@ -9,7 +9,6 @@ export const PREVIEW_FEATURE_IDS = [
   "logs",
   "browser",
   "devcontainers",
-  "gpuiSidebar",
 ] as const;
 
 export type PreviewFeatureId = (typeof PREVIEW_FEATURE_IDS)[number];
@@ -18,8 +17,6 @@ export type PreviewFeature = {
   id: PreviewFeatureId;
   title: string;
   docsPath: string;
-  /** Changes how the window is built, so a switch only applies after a restart. */
-  restartRequired?: boolean;
 };
 
 export const PREVIEW_FEATURES: readonly PreviewFeature[] = [
@@ -54,23 +51,14 @@ export const PREVIEW_FEATURES: readonly PreviewFeature[] = [
     title: "Devcontainer environments",
     docsPath: "/docs/how-to/devcontainer-environments",
   },
-  {
-    id: "gpuiSidebar",
-    title: "GPUI sidebar",
-    docsPath: "/docs/concepts/gpui-sidebar",
-    restartRequired: true,
-  },
 ];
 
 export function previewSettingKey(id: PreviewFeatureId): string {
   return `feature_preview.${id}`;
 }
 
-/** Startup default: Vite dev (and Vitest) turn every preview flag on, except `gpuiSidebar`. */
+/** Startup default: Vite dev (and Vitest) turn every preview flag on. */
 export function previewFeatureDefault(id: PreviewFeatureId): boolean {
-  // The Rust side builds the window differently when this is on, so dev and
-  // test builds do not turn it on by default.
-  if (id === "gpuiSidebar") return FEATURES.gpuiSidebar === true;
   if (import.meta.env.DEV || import.meta.env.MODE === "test") {
     return true;
   }

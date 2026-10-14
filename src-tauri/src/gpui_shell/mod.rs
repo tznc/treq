@@ -1,6 +1,6 @@
-//! Experimental GPUI window shell (the `gpuiSidebar` feature preview).
+//! GPUI window shell for desktop repo windows.
 //!
-//! With the preview on, a repo window is a plain Tauri window with GPUI
+//! A repo window is a plain Tauri window with GPUI
 //! attached as its renderer, and the React app runs in a child webview that
 //! GPUI places with `webview_frame`. This is the first step of moving the
 //! desktop UI to GPUI one piece at a time: GPUI owns the window, and every
@@ -30,30 +30,19 @@ mod theme;
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
 
-use crate::core::feature_preview::{self, PreviewFeature};
-use crate::db::Database;
-
 /// Set on `window` in the webview so the React app knows GPUI hosts it.
 const HOSTED_FLAG_SCRIPT: &str = "window.__TREQ_GPUI_SHELL__ = true;";
 
-/// Whether this platform can host a webview inside a GPUI window.
-///
 /// tauri-plugin-gpui stacks the webview above GPUI with an X11 child window
-/// on Linux, so a Wayland session (unless GTK is forced onto XWayland) falls
-/// back to the plain webview window.
-fn platform_supported() -> bool {
-  if cfg!(target_os = "linux") {
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    let forced_x11 = std::env::var("GDK_BACKEND").is_ok_and(|backend| backend == "x11");
-    return !wayland || forced_x11;
+/// on Linux, so a Wayland session runs GTK through XWayland. Call before GTK
+/// starts, while the process is still single-threaded.
+pub fn force_x11_on_wayland() {
+  if cfg!(target_os = "linux")
+    && std::env::var_os("WAYLAND_DISPLAY").is_some()
+    && std::env::var_os("GDK_BACKEND").is_none()
+  {
+    std::env::set_var("GDK_BACKEND", "x11");
   }
-  true
-}
-
-/// Whether repo windows open in the GPUI shell for this run of the app.
-/// Read once at startup: switching the preview takes effect on restart.
-pub fn should_enable(db: &Database) -> bool {
-  feature_preview::is_enabled(db, PreviewFeature::GpuiSidebar) && platform_supported()
 }
 
 /// Starts GPUI. Call once from `setup`, before the first shell window.

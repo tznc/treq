@@ -2,7 +2,7 @@ import type { Workspace, WorkspaceSidebarStatus } from "./api";
 
 /**
  * WorkspaceSidebarStatus plus git detail only populated for workspaces with
- * an active agent session (see WorkspaceSidebar's agent-session spinner).
+ * an active agent session (see the sidebar agent-session spinner).
  */
 export type WorkspaceSidebarStatusWithAgentDetail = WorkspaceSidebarStatus & {
   has_changes?: boolean;

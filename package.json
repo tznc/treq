@@ -14,8 +14,7 @@
     "devcontainers": false,
     "linearIntegration": false,
     "logs": true,
-    "browser": false,
-    "gpuiSidebar": false
+    "browser": false
   },
   "env": {
     "dev": {
@@ -72,7 +71,6 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "@hello-pangea/dnd": "^18.0.1",
     "@monaco-editor/react": "^4.6.0",
     "@supabase/supabase-js": "^2.95.3",
     "@tauri-apps/api": "^2.12.3",
