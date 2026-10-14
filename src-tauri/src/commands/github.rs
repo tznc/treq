@@ -350,6 +350,44 @@ pub async fn gh_set_pr_draft(
   .await
 }
 
+#[tauri::command]
+pub async fn gh_pr_diff(repo_full_name: String, pr_number: u64) -> Result<String, String> {
+  run_gh_blocking("gh_pr_diff", move |gh, path| {
+    crate::github::gh_pr_diff_impl(gh, &repo_full_name, pr_number, path)
+  })
+  .await
+}
+
+#[tauri::command]
+pub async fn gh_reply_pr_review_thread(thread_id: String, body: String) -> Result<(), String> {
+  run_gh_blocking("gh_reply_pr_review_thread", move |gh, path| {
+    crate::github::gh_reply_pr_review_thread_impl(gh, &thread_id, &body, path)
+  })
+  .await
+}
+
+#[tauri::command]
+pub async fn gh_submit_pr_review(
+  repo_full_name: String,
+  pr_number: u64,
+  event: String,
+  body: String,
+  comments: Vec<crate::github::GhDraftReviewComment>,
+) -> Result<(), String> {
+  run_gh_blocking("gh_submit_pr_review", move |gh, path| {
+    crate::github::gh_submit_pr_review_impl(
+      gh,
+      &repo_full_name,
+      pr_number,
+      &event,
+      &body,
+      &comments,
+      path,
+    )
+  })
+  .await
+}
+
 /// List every review-comment thread on a PR, including resolved/outdated
 /// state. Read-only: no replies, resolves, or other mutations are issued.
 /// Runs off the UI/command thread via `spawn_blocking`.

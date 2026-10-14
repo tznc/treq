@@ -13,6 +13,7 @@ export interface ConflictCommentRecord {
 type AgentReviewTargetType = string;
 
 export const AGENT_REVIEW_TARGET_WORKSPACE_DIFF = "workspace_diff";
+export const AGENT_REVIEW_TARGET_GITHUB_PR = "github_pr";
 export const AGENT_REVIEW_TARGET_LINEAR_ISSUE = "linear_issue";
 export const AGENT_REVIEW_TARGET_LINEAR_PROJECT = "linear_project";
 export const AGENT_REVIEW_TARGET_LINEAR_DOCUMENT = "linear_document";

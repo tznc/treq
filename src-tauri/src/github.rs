@@ -703,6 +703,113 @@ pub fn gh_create_pr_comment_impl(
   check_gh_output(out).map(|_| ())
 }
 
+/// Unified diff of a PR (`gh pr diff`), base...head as GitHub shows it.
+pub fn gh_pr_diff_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  extended_path: &str,
+) -> Result<String, String> {
+  let num = pr_number.to_string();
+  let out = run_gh(
+    gh_path,
+    &["pr", "diff", &num, "--repo", repo_full_name],
+    extended_path,
+  )?;
+  let bytes = check_gh_output(out)?;
+  Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
+
+/// `gh api` exits 0 on GraphQL-level errors, so check the `errors` field.
+fn check_graphql_errors(bytes: &[u8]) -> Result<(), String> {
+  let value: serde_json::Value = serde_json::from_slice(bytes).unwrap_or_default();
+  match value.get("errors").and_then(|e| e.as_array()) {
+    Some(errors) if !errors.is_empty() => Err(
+      errors
+        .iter()
+        .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
+        .collect::<Vec<_>>()
+        .join("; "),
+    ),
+    _ => Ok(()),
+  }
+}
+
+/// Reply to a PR review thread (GraphQL node id from the review-threads query).
+pub fn gh_reply_pr_review_thread_impl(
+  gh_path: &str,
+  thread_id: &str,
+  body: &str,
+  extended_path: &str,
+) -> Result<(), String> {
+  let input = serde_json::json!({
+    "query": REPLY_THREAD_MUTATION,
+    "variables": { "threadId": thread_id, "body": body },
+  });
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", "graphql", "--input", "-"],
+    &input.to_string(),
+    extended_path,
+  )?;
+  check_graphql_errors(&check_gh_output(out)?)
+}
+
+/// One inline comment of a submitted review. `side` is `LEFT` or `RIGHT`;
+/// `start_line` makes it a multi-line comment on the same side.
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct GhDraftReviewComment {
+  pub path: String,
+  pub line: u64,
+  pub side: String,
+  pub start_line: Option<u64>,
+  pub body: String,
+}
+
+/// Submit a PR review (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`) with its
+/// inline comments in one REST call.
+#[allow(clippy::too_many_arguments)]
+pub fn gh_submit_pr_review_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  event: &str,
+  body: &str,
+  comments: &[GhDraftReviewComment],
+  extended_path: &str,
+) -> Result<(), String> {
+  if !matches!(event, "APPROVE" | "REQUEST_CHANGES" | "COMMENT") {
+    return Err(format!("Invalid review event: {event}"));
+  }
+  let comments: Vec<serde_json::Value> = comments
+    .iter()
+    .map(|c| {
+      let mut v = serde_json::json!({
+        "path": c.path,
+        "line": c.line,
+        "side": c.side,
+        "body": c.body,
+      });
+      if let Some(start) = c.start_line.filter(|s| *s < c.line) {
+        v["start_line"] = start.into();
+        v["start_side"] = c.side.clone().into();
+      }
+      v
+    })
+    .collect();
+  let input = serde_json::json!({ "event": event, "body": body, "comments": comments });
+  let endpoint = format!("repos/{repo_full_name}/pulls/{pr_number}/reviews");
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", &endpoint, "--method", "POST", "--input", "-"],
+    &input.to_string(),
+    extended_path,
+  )?;
+  check_gh_output(out).map(|_| ())
+}
+
 pub fn gh_close_pr_impl(
   gh_path: &str,
   repo_full_name: &str,
@@ -2562,5 +2669,126 @@ esac
     let result = gh_list_pr_review_threads_impl(&gh_path, "owner", "repo", 1, "/usr/bin:/bin");
 
     assert!(result.is_err());
+  }
+
+  // ── PR review (diff, thread reply, submit) ───────────────────────────────
+
+  /// Fake gh that records argv to `args` and stdin to `stdin` in `dir`, then
+  /// prints `stdout`.
+  #[cfg(unix)]
+  fn write_stdin_recording_gh(bin_dir: &TempDir, stdout: &str) -> String {
+    let dir = bin_dir.path().display();
+    write_fake_gh(
+      bin_dir,
+      &format!(
+        "printf '%s\\n' \"$@\" > {dir}/args\ncat > {dir}/stdin\ncat <<'TREQ_EOF'\n{stdout}\nTREQ_EOF\n"
+      ),
+    )
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_pr_diff_returns_unified_diff() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, "diff --git a/x b/x\n+hi");
+
+    let diff = gh_pr_diff_impl(&gh_path, "o/r", 7, "/usr/bin:/bin").unwrap();
+
+    assert!(diff.starts_with("diff --git a/x b/x\n+hi"));
+    let args = fs::read_to_string(bin_dir.path().join("args")).unwrap();
+    assert_eq!(args, "pr\ndiff\n7\n--repo\no/r\n");
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_pr_diff_propagates_error() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(&bin_dir, "echo nope >&2\nexit 1");
+    assert!(gh_pr_diff_impl(&gh_path, "o/r", 7, "/usr/bin:/bin").is_err());
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_reply_pr_review_thread_sends_graphql_mutation_on_stdin() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"data":{}}"#);
+
+    gh_reply_pr_review_thread_impl(&gh_path, "PRRT_1", "thanks -- fixed", "/usr/bin:/bin").unwrap();
+
+    let args = fs::read_to_string(bin_dir.path().join("args")).unwrap();
+    assert_eq!(args, "api\ngraphql\n--input\n-\n");
+    let stdin: serde_json::Value =
+      serde_json::from_str(&fs::read_to_string(bin_dir.path().join("stdin")).unwrap()).unwrap();
+    assert!(stdin["query"]
+      .as_str()
+      .unwrap()
+      .contains("addPullRequestReviewThreadReply"));
+    assert_eq!(stdin["variables"]["threadId"], "PRRT_1");
+    assert_eq!(stdin["variables"]["body"], "thanks -- fixed");
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_reply_pr_review_thread_surfaces_graphql_errors() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"errors":[{"message":"denied"}]}"#);
+    let err = gh_reply_pr_review_thread_impl(&gh_path, "T", "b", "/usr/bin:/bin").unwrap_err();
+    assert!(err.contains("denied"));
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_submit_pr_review_posts_event_body_and_comments() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"id":1}"#);
+
+    gh_submit_pr_review_impl(
+      &gh_path,
+      "o/r",
+      7,
+      "APPROVE",
+      "LGTM",
+      &[
+        GhDraftReviewComment {
+          path: "src/a.ts".into(),
+          line: 3,
+          side: "RIGHT".into(),
+          start_line: Some(1),
+          body: "nit".into(),
+        },
+        GhDraftReviewComment {
+          path: "src/b.ts".into(),
+          line: 9,
+          side: "LEFT".into(),
+          start_line: None,
+          body: "why?".into(),
+        },
+      ],
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+
+    let args = fs::read_to_string(bin_dir.path().join("args")).unwrap();
+    assert_eq!(
+      args,
+      "api\nrepos/o/r/pulls/7/reviews\n--method\nPOST\n--input\n-\n"
+    );
+    let stdin: serde_json::Value =
+      serde_json::from_str(&fs::read_to_string(bin_dir.path().join("stdin")).unwrap()).unwrap();
+    assert_eq!(stdin["event"], "APPROVE");
+    assert_eq!(stdin["body"], "LGTM");
+    assert_eq!(stdin["comments"][0]["path"], "src/a.ts");
+    assert_eq!(stdin["comments"][0]["line"], 3);
+    assert_eq!(stdin["comments"][0]["side"], "RIGHT");
+    assert_eq!(stdin["comments"][0]["start_line"], 1);
+    assert_eq!(stdin["comments"][0]["start_side"], "RIGHT");
+    assert!(stdin["comments"][1].get("start_line").is_none());
+  }
+
+  #[test]
+  fn test_gh_submit_pr_review_rejects_unknown_event() {
+    let err =
+      gh_submit_pr_review_impl("gh", "o/r", 7, "MERGE", "", &[], "/usr/bin:/bin").unwrap_err();
+    assert!(err.contains("Invalid review event"));
   }
 }

@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Bot, Check, Terminal, Trash2, Wand2 } from "lucide-react";
+import {
+  Bot,
+  Check,
+  MessageSquarePlus,
+  Terminal,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import type { AgentReviewComment } from "../../lib/api-types-review";
@@ -17,6 +24,11 @@ interface AgentReviewCommentCardProps {
   onDelete: (commentId: string) => Promise<void>;
   onApplySuggestion: (commentId: string) => Promise<void>;
   onSendToAgent?: (comment: AgentReviewComment) => Promise<void>;
+  /**
+   * Turns the comment into a draft review comment (PR review screen). When
+   * set, it replaces Apply: there are no local files to apply a suggestion to.
+   */
+  onAddToReview?: (comment: AgentReviewComment) => Promise<void>;
   onError: (message: string) => void;
   /** Replaces the `file:line` label, e.g. for content that is not a file. */
   locationLabel?: string;
@@ -36,6 +48,7 @@ export function AgentReviewCommentCard({
   onDelete,
   onApplySuggestion,
   onSendToAgent,
+  onAddToReview,
   onError,
   locationLabel,
   applyLabel = "Apply",
@@ -140,7 +153,19 @@ export function AgentReviewCommentCard({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {comment.suggested_replacement != null && (
+        {onAddToReview && (
+          <Button
+            size="sm"
+            variant="default"
+            className="gap-1.5"
+            disabled={pending}
+            onClick={() => run(() => onAddToReview(comment))}
+          >
+            <MessageSquarePlus className="w-3 h-3" />
+            Add to review
+          </Button>
+        )}
+        {!onAddToReview && comment.suggested_replacement != null && (
           <Button
             size="sm"
             variant="default"
