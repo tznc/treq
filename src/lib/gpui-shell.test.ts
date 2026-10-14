@@ -139,19 +139,20 @@ describe("buildGpuiSidebarSnapshot", () => {
     ).toBe(true);
   });
 
-  it.each(["settings", "github", "linear"])(
-    "drops home and workspace highlight on the %s page",
-    (currentPage) => {
-      const a = status("a", {}, null);
-      const snapshot = build([a], {
-        currentPage,
-        selectedWorkspaceId: a.current.id,
-      });
-      expect(snapshot.homeSelected).toBe(false);
-      expect(snapshot.workspaces[0].selected).toBe(false);
-      expect(snapshot.settingsOpen).toBe(currentPage === "settings");
-    },
-  );
+  it.each([
+    "settings",
+    "github",
+    "linear",
+  ])("drops home and workspace highlight on the %s page", (currentPage) => {
+    const a = status("a", {}, null);
+    const snapshot = build([a], {
+      currentPage,
+      selectedWorkspaceId: a.current.id,
+    });
+    expect(snapshot.homeSelected).toBe(false);
+    expect(snapshot.workspaces[0].selected).toBe(false);
+    expect(snapshot.settingsOpen).toBe(currentPage === "settings");
+  });
 
   it("maps conflicts, changes and clean workspaces to status dots", () => {
     const snapshot = build([
