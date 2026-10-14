@@ -120,7 +120,8 @@ export function LogsTab({
           prefixColumns={[
             {
               header: "Source",
-              className: "w-[24ch] text-muted-foreground",
+              width: "w-[calc(24ch+1.5rem)]",
+              className: "text-muted-foreground",
               render: (record) => record.job_id,
             },
           ]}
@@ -184,7 +185,8 @@ function ChecksLogs({
         RUN_COLUMN,
         {
           header: "Job",
-          className: "w-[10ch] text-blue-600 dark:text-blue-400",
+          width: "w-[calc(10ch+1.5rem)]",
+          className: "text-blue-600 dark:text-blue-400",
           render: (record) => record.job_id,
         },
       ]}
@@ -271,7 +273,8 @@ function AgentChatsSource({
           prefixColumns={[
             {
               header: "Role",
-              className: "w-[6ch] text-blue-600 dark:text-blue-400",
+              width: "w-[calc(6ch+1.5rem)]",
+              className: "text-blue-600 dark:text-blue-400",
               render: (record) => record.job_id,
             },
           ]}
@@ -283,7 +286,8 @@ function AgentChatsSource({
 
 const RUN_COLUMN: PrefixColumn = {
   header: "Run",
-  className: "w-[5ch] text-muted-foreground",
+  width: "w-[calc(6ch+1.5rem)]",
+  className: "text-muted-foreground",
   render: (record) => `#${record.run_id}`,
 };
 

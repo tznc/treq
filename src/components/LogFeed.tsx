@@ -16,11 +16,16 @@ function formatTimestamp(timestamp: string): string {
   if (Number.isNaN(parsed.getTime())) return timestamp;
   return parsed.toISOString().slice(11, 23);
 }
-const TIMESTAMP_COL_CLASS = "w-[12ch] shrink-0 whitespace-nowrap";
-const LEVEL_COL_CLASS = "w-[6ch] shrink-0 whitespace-nowrap";
+const TIMESTAMP_COL_CLASS = "w-[calc(12ch+1.5rem)]";
+const LEVEL_COL_CLASS = "w-[calc(6ch+1.5rem)]";
+const CELL_CLASS = "px-3 py-0.5 truncate whitespace-nowrap text-left";
+const HEADER_CELL_CLASS = cn(CELL_CLASS, "py-1 font-normal");
 export interface PrefixColumn {
   header: string;
-  className: string;
+  /** Column width class including the cells' 1.5rem padding, e.g. `w-[calc(10ch+1.5rem)]`. */
+  width: string;
+  /** Extra classes for the column's cells. */
+  className?: string;
   render: (record: LogRecordView) => React.ReactNode;
 }
 interface Props {
@@ -174,16 +179,6 @@ export function LogFeed({
           </>
         )}
       </div>
-      <div className="flex w-full gap-3 px-3 py-1 border-b bg-muted/20 font-mono text-xs uppercase tracking-wide text-muted-foreground select-none">
-        <span className={TIMESTAMP_COL_CLASS}>Timestamp</span>
-        {prefixColumns.map((col) => (
-          <span key={col.header} className={cn(col.className, "truncate")}>
-            {col.header}
-          </span>
-        ))}
-        <span className={LEVEL_COL_CLASS}>Level</span>
-        <span className="flex-1 min-w-0">Message</span>
-      </div>
       <div className="relative flex-1 min-h-0">
         <SearchOverlay
           isVisible={findVisible}
@@ -202,60 +197,82 @@ export function LogFeed({
         <div
           ref={feedRef}
           data-testid={testId}
-          className="h-full overflow-auto font-mono text-xs leading-relaxed p-3 select-text"
+          className="h-full overflow-auto font-mono text-xs leading-relaxed select-text"
         >
-          {records.map((record, index) => (
-            <div
-              role="button"
-              tabIndex={0}
-              key={`${record.run_id}-${record.job_id}-${record.timestamp}-${index}`}
-              data-testid={lineTestId}
-              data-level={record.severity_text}
-              data-selected={selected.has(index) ? "true" : undefined}
-              aria-pressed={selected.has(index)}
-              onMouseDown={() => onLineMouseDown(index)}
-              onMouseEnter={() => onLineMouseEnter(index)}
-              className={cn(
-                "flex w-full gap-3 text-left whitespace-nowrap overflow-hidden",
-                selected.has(index) ? "bg-primary/20" : "hover:bg-muted/50",
-              )}
-            >
-              <span
-                className={cn(
-                  TIMESTAMP_COL_CLASS,
-                  "select-none text-muted-foreground tabular-nums",
-                )}
-              >
-                {formatTimestamp(record.timestamp)}
-              </span>
+          <table className="w-full table-fixed border-collapse">
+            <colgroup>
+              <col className={TIMESTAMP_COL_CLASS} />
               {prefixColumns.map((col) => (
-                <span
-                  key={col.header}
-                  className={cn(col.className, "shrink-0 select-none truncate")}
-                >
-                  {col.render(record)}
-                </span>
+                <col key={col.header} className={col.width} />
               ))}
-              <span
-                className={cn(
-                  LEVEL_COL_CLASS,
-                  "select-none",
-                  severityClass(record.severity_text),
-                )}
-              >
-                {record.severity_text}
-              </span>
-              <span
-                data-find-match={matches.includes(index) ? "true" : undefined}
-                className={cn(
-                  "flex-1 min-w-0 truncate",
-                  severityClass(record.severity_text),
-                )}
-              >
-                {highlightedBody(record.body)}
-              </span>
-            </div>
-          ))}
+              <col className={LEVEL_COL_CLASS} />
+              <col />
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-muted text-muted-foreground uppercase tracking-wide select-none">
+              <tr className="border-b">
+                <th className={HEADER_CELL_CLASS}>Timestamp</th>
+                {prefixColumns.map((col) => (
+                  <th key={col.header} className={HEADER_CELL_CLASS}>
+                    {col.header}
+                  </th>
+                ))}
+                <th className={HEADER_CELL_CLASS}>Level</th>
+                <th className={HEADER_CELL_CLASS}>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((record, index) => (
+                <tr
+                  tabIndex={0}
+                  key={`${record.run_id}-${record.job_id}-${record.timestamp}-${index}`}
+                  data-testid={lineTestId}
+                  data-level={record.severity_text}
+                  data-selected={selected.has(index) ? "true" : undefined}
+                  aria-selected={selected.has(index)}
+                  onMouseDown={() => onLineMouseDown(index)}
+                  onMouseEnter={() => onLineMouseEnter(index)}
+                  className={cn(
+                    "cursor-pointer",
+                    selected.has(index) ? "bg-primary/20" : "hover:bg-muted/50",
+                  )}
+                >
+                  <td
+                    className={cn(
+                      CELL_CLASS,
+                      "select-none text-muted-foreground tabular-nums",
+                    )}
+                  >
+                    {formatTimestamp(record.timestamp)}
+                  </td>
+                  {prefixColumns.map((col) => (
+                    <td
+                      key={col.header}
+                      className={cn(CELL_CLASS, "select-none", col.className)}
+                    >
+                      {col.render(record)}
+                    </td>
+                  ))}
+                  <td
+                    className={cn(
+                      CELL_CLASS,
+                      "select-none",
+                      severityClass(record.severity_text),
+                    )}
+                  >
+                    {record.severity_text}
+                  </td>
+                  <td
+                    data-find-match={
+                      matches.includes(index) ? "true" : undefined
+                    }
+                    className={CELL_CLASS}
+                  >
+                    {highlightedBody(record.body)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
       {inspected && (

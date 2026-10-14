@@ -38,9 +38,9 @@ it("captures Help > View Logs opening the System log source", async () => {
   await captureDocument(document, {
     name: "logs-tab-system-02-system-source",
     expectations: [
-      'The Logs tab is active and the "Log source" select reads "System".',
-      "Log lines show time, level, a Source column (treq_lib::sync, webview, treq_lib::pty) and the message; the WARN line is amber and the ERROR line red.",
-      'An "Open log folder" button sits next to the level filter.',
+      'The Logs tab is active, "Log source" reads "System" and "Open log folder" sits by the level filter.',
+      "Log lines render as a table whose Timestamp, Source, Level and Message headers line up with their values.",
+      "Only the level cell is coloured (WARN amber, ERROR red); message text stays the default colour.",
     ],
   });
 
