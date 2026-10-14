@@ -166,7 +166,7 @@ export function TerminalSendPreviews({
                     ) : (
                       <>
                         <FileText />
-                        <span className="w-full truncate text-center text-[10px] leading-tight">
+                        <span className="w-full truncate text-center text-xs leading-tight">
                           {asset.title}
                         </span>
                       </>

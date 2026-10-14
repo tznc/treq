@@ -434,7 +434,7 @@ function CommitItem({
         )}
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           {commit.is_immutable && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-medium">
+            <span className="text-xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-medium">
               Immutable
             </span>
           )}

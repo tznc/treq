@@ -1090,7 +1090,7 @@ const TreeNode = ({
         </span>
         {reviewCommentCount > 0 && (
           <span
-            className="flex items-center gap-0.5 text-[10px] text-primary flex-shrink-0 ml-auto"
+            className="flex items-center gap-0.5 text-xs text-primary flex-shrink-0 ml-auto"
             title={`${reviewCommentCount} pending review comment${reviewCommentCount !== 1 ? "s" : ""}`}
           >
             <MessageSquare className="w-3 h-3" />

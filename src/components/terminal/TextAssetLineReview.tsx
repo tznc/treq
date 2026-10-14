@@ -193,7 +193,7 @@ export function TextAssetLineReview({
                   data-testid={`treq-send-line-comment-${comment.id}`}
                   className="border-t border-white/10 bg-zinc-900/80 px-4 py-2 text-sm text-zinc-100"
                 >
-                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+                  <p className="text-xs uppercase tracking-wide text-zinc-500">
                     Lines {comment.startLine}
                     {comment.endLine !== comment.startLine
                       ? `–${comment.endLine}`

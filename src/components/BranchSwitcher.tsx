@@ -199,21 +199,15 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({
         <div className="border-t border-border px-3 py-2 flex items-center justify-between text-sm text-muted-foreground">
           <div className="flex items-center gap-3">
             <span>
-              <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">
-                ↑↓
-              </kbd>{" "}
+              <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">↑↓</kbd>{" "}
               Navigate
             </span>
             <span>
-              <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">
-                ↵
-              </kbd>{" "}
+              <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">↵</kbd>{" "}
               Switch
             </span>
             <span>
-              <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px]">
-                Esc
-              </kbd>{" "}
+              <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">Esc</kbd>{" "}
               Close
             </span>
           </div>

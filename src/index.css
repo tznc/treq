@@ -214,6 +214,8 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 20px;
   }
   h1,
   h2,
@@ -265,7 +267,7 @@
 [cmdk-group-heading] {
   padding: 0.5rem 0.75rem;
   margin-top: 0.5rem;
-  font-size: 0.75rem;
+  font-size: 11px;
   font-weight: 600;
   color: hsl(var(--muted-foreground));
   text-transform: uppercase;

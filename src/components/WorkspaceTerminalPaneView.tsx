@@ -151,7 +151,7 @@ export const WorkspaceTerminalPaneView: React.FC<
           {!collapsed && environment && (
             <EnvironmentSelector
               env={environment}
-              className="h-5 px-1.5 text-[11px] [&_svg]:h-3 [&_svg]:w-3"
+              className="h-5 px-1.5 text-xs [&_svg]:h-3 [&_svg]:w-3"
             />
           )}
           {!collapsed && maximized && (
