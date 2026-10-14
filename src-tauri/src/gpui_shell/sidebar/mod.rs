@@ -76,6 +76,15 @@ pub struct RepoSection {
   /// The workspace list has not loaded yet.
   pub loading: bool,
   pub workspaces: Vec<SidebarRow>,
+  /// The repository's name in a window with several; `None` with one.
+  #[serde(default)]
+  pub label: Option<String>,
+  /// A supporting repository whose folder is gone.
+  #[serde(default)]
+  pub missing: bool,
+  /// Its workspace group is folded away.
+  #[serde(default)]
+  pub collapsed: bool,
 }
 
 /// One workspace row, in stack order.
@@ -199,6 +208,23 @@ pub enum SidebarAction {
   },
   /// A double click on the resize handle.
   ResetSidebarWidth,
+  /// A click on a workspace row of a repository that is not on screen.
+  #[serde(rename_all = "camelCase")]
+  OpenRepoWorkspace {
+    repo_path: String,
+    id: i64,
+  },
+  /// A right-click on a workspace row of a repository that is not on screen.
+  #[serde(rename_all = "camelCase")]
+  RepoWorkspaceMenu {
+    repo_path: String,
+    id: i64,
+  },
+  /// A click on a repository's workspace group label.
+  #[serde(rename_all = "camelCase")]
+  ToggleRepo {
+    repo_path: String,
+  },
 }
 
 /// A workspace row being dragged.
@@ -640,27 +666,42 @@ impl Render for Sidebar {
       .on_click(self.on_action(SidebarAction::ClearSelection))
       .on_drop(self.on_workspace_drop(None));
     let mut any_rows = false;
-    for repo in &snapshot.repos {
-      if repo.loading && repo.workspaces.is_empty() {
-        list = list.children((0..6).map(|i| skeleton_row(i, &palette)));
+    let grouped = snapshot.repos.iter().any(|repo| repo.label.is_some());
+    for (index, repo) in snapshot.repos.iter().enumerate() {
+      // Each repository's rows sit in their own element, so workspace ids,
+      // which are per repository, do not collide.
+      let mut section = div()
+        .id(("repo-section", index))
+        .flex()
+        .flex_col()
+        .gap(px(2.));
+      if let Some(name) = &repo.label {
+        section = section.child(self.group_label(repo, name, &palette));
       }
-      for row in &repo.workspaces {
-        any_rows = true;
-        list = list.child(self.workspace_row(row, repo.active, &palette, tooltip_width, cx));
-      }
-      if repo.active {
-        if let Some(count) = snapshot.bulk_archive {
-          list = list.child(
-            bulk_archive_button(count, &palette)
-              .on_click(self.on_action(SidebarAction::BulkArchive)),
-          );
+      if !repo.collapsed {
+        if repo.loading && repo.workspaces.is_empty() {
+          section = section.children((0..6).map(|i| skeleton_row(i, &palette)));
+        }
+        for row in &repo.workspaces {
+          any_rows = true;
+          section =
+            section.child(self.workspace_row(row, repo, index, &palette, tooltip_width, cx));
+        }
+        if repo.active {
+          if let Some(count) = snapshot.bulk_archive {
+            section = section.child(
+              bulk_archive_button(count, &palette)
+                .on_click(self.on_action(SidebarAction::BulkArchive)),
+            );
+          }
         }
       }
+      list = list.child(section);
     }
 
     sidebar
       .when(
-        any_rows || snapshot.repos.iter().any(|r| r.loading),
+        grouped || any_rows || snapshot.repos.iter().any(|r| r.loading),
         |this| this.child(div().mx_2().mt_2().h_px().bg(palette.border)),
       )
       .child(
@@ -881,6 +922,43 @@ impl Sidebar {
   ) -> impl IntoElement {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
     let key = SharedString::from(format!("home:{}", repo.path));
+    let title: gpui::AnyElement = match &repo.label {
+      // Several repositories: the name, then the checked-out branch.
+      Some(name) => div()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .items_baseline()
+        .gap(px(6.))
+        .child(
+          div()
+            .flex_none()
+            .truncate()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(name.clone()),
+        )
+        .when_some(
+          repo.home_ref.clone().filter(|_| !repo.missing),
+          |this, home_ref| {
+            this.child(
+              div()
+                .min_w_0()
+                .truncate()
+                .font_family(theme::MONO_FONT)
+                .text_color(palette.muted_foreground)
+                .child(home_ref),
+            )
+          },
+        )
+        .into_any_element(),
+      None => div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .font_family(theme::MONO_FONT)
+        .child(label.clone())
+        .into_any_element(),
+    };
     let shown = self.tooltip_shown(&key);
     let tip = div()
       .flex()
@@ -892,7 +970,13 @@ impl Sidebar {
       .into_any_element();
     div()
       .id(key.clone())
-      .debug_selector(|| "home".into())
+      .debug_selector({
+        let selector = match &repo.label {
+          Some(name) if !repo.active => format!("home-{name}"),
+          _ => "home".to_string(),
+        };
+        move || selector.clone()
+      })
       .relative()
       .flex()
       .items_center()
@@ -907,15 +991,18 @@ impl Sidebar {
       .when(!repo.home_selected, |this| {
         this.hover(|style| style.bg(palette.accent))
       })
+      .when(repo.missing, |this| this.opacity(0.5))
       .child(icon(theme::ICON_HOUSE, 12., palette.sidebar_foreground))
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .truncate()
-          .font_family(theme::MONO_FONT)
-          .child(label),
-      )
+      .child(title)
+      .when(repo.missing, |this| {
+        this.child(
+          div()
+            .flex_none()
+            .text_size(px(12.))
+            .text_color(palette.muted_foreground)
+            .child("missing"),
+        )
+      })
       .when(repo.active, |this| {
         this.child(self.row_actions("home", None, palette, tooltip_width, cx))
       })
@@ -994,17 +1081,54 @@ impl Sidebar {
       })
   }
 
+  /// A repository's workspace group label in a window with several; a
+  /// click folds the group.
+  fn group_label(&self, repo: &RepoSection, name: &str, palette: &Palette) -> impl IntoElement {
+    let chevron = if repo.collapsed {
+      theme::ICON_CHEVRON_RIGHT
+    } else {
+      theme::ICON_CHEVRON_DOWN
+    };
+    let selector = format!("group-{name}");
+    div()
+      .id("group-label")
+      .debug_selector(move || selector.clone())
+      .flex()
+      .items_center()
+      .gap_1()
+      .px_2()
+      .h(px(32.))
+      .rounded_md()
+      .text_size(px(12.))
+      .text_color(palette.sidebar_foreground.opacity(0.7))
+      .hover(|style| style.bg(palette.accent))
+      .child(icon(chevron, 12., palette.sidebar_foreground.opacity(0.7)))
+      .child(div().min_w_0().truncate().child(name.to_uppercase()))
+      .on_click(self.on_action(SidebarAction::ToggleRepo {
+        repo_path: repo.path.clone(),
+      }))
+  }
+
   fn workspace_row(
     &self,
     row: &SidebarRow,
-    repo_active: bool,
+    repo: &RepoSection,
+    repo_index: usize,
     palette: &Palette,
     tooltip_width: f32,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let id = row.id;
-    let group = SharedString::from(format!("workspace-row-{id}"));
-    let key = SharedString::from(format!("workspace:{id}"));
+    let repo_active = repo.active;
+    // Ids are per repository; rows of other repositories get their own keys.
+    let prefix = if repo_active {
+      String::new()
+    } else {
+      format!("repo{repo_index}-")
+    };
+    let group = SharedString::from(format!("{prefix}workspace-row-{id}"));
+    let key = SharedString::from(format!("{prefix}workspace:{id}"));
+    let selector = format!("{prefix}workspace-{id}");
     let branch_color = match row.pr {
       Some(pr) => pr_color(pr, palette),
       None if row.selected => palette.primary,
@@ -1099,7 +1223,7 @@ impl Sidebar {
     let interactive = repo_active && !row.archiving;
     let row_el = div()
       .id(("workspace", id as u64))
-      .debug_selector(move || format!("workspace-{id}"))
+      .debug_selector(move || selector.clone())
       .group(group.clone())
       .relative()
       .flex()
@@ -1170,7 +1294,15 @@ impl Sidebar {
       .when(self.tooltip_shown(&key), |this| {
         this.child(tooltip_bubble(palette, tooltip_width, tip))
       })
-      .when(!row.archiving, |this| this.on_click(self.on_row_click(id)))
+      .when(!row.archiving && repo_active, |this| {
+        this.on_click(self.on_row_click(id))
+      })
+      .when(!repo_active, |this| {
+        this.on_click(self.on_action(SidebarAction::OpenRepoWorkspace {
+          repo_path: repo.path.clone(),
+          id,
+        }))
+      })
       .when(interactive, |this| {
         let primary = palette.primary;
         this
@@ -1197,7 +1329,17 @@ impl Sidebar {
       })
       .on_mouse_down(
         MouseButton::Right,
-        self.on_menu(SidebarAction::WorkspaceMenu { id }, cx),
+        self.on_menu(
+          if repo_active {
+            SidebarAction::WorkspaceMenu { id }
+          } else {
+            SidebarAction::RepoWorkspaceMenu {
+              repo_path: repo.path.clone(),
+              id,
+            }
+          },
+          cx,
+        ),
       );
 
     if row.exiting {

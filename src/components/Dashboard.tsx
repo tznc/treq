@@ -330,7 +330,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     issue?: IssueAttachment | null;
   } | null>(null);
   const [showBranchSwitcher, setShowBranchSwitcher] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    workspace: Workspace;
+    repoPath: string;
+  } | null>(null);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
@@ -2788,59 +2791,63 @@ export const Dashboard: React.FC<DashboardProps> = ({
           : viewMode === "session" || viewMode === "show-workspace"
             ? "session"
             : undefined;
-  // With the GPUI shell, the native sidebar replaces <WorkspaceSidebar> for a
-  // single repository, local or remote; multi-repo windows keep the React
-  // sidebar.
-  const gpuiSidebarActive = useGpuiSidebar({
-    supported:
-      Boolean(dataRepoPath) && (isRemoteActive || supportingRepos.length === 0),
-    repoPath: isRemoteActive ? dataRepoPath : mainRepoPath,
-    cacheKey: queryRepoKey,
-    terminalSessions: terminalSessionSummaries,
-    selectedWorkspaceId: selectedWorkspace?.id ?? null,
-    selectedWorkspaceIds,
-    archivingWorkspaceIds,
-    exitingWorkspaceIds,
-    currentPage,
-    homeRef: homeRepoDisplayRef,
-    linearEnabled: linearIntegrationEnabled,
-    dark,
-    width: sidebarWidth,
-    capabilities: remoteCaps,
-    onSelectWorkspace: handleSelectWorkspace,
-    onWorkspaceMultiSelect: handleWorkspaceMultiSelect,
-    onSelectStack: handleSelectStack,
-    onMoveWorkspace: (workspace, targetBranch) =>
-      void handleMoveWorkspace(workspace, targetBranch),
-    onResizeSidebar: (width) => {
-      useSidebarWidthStore.getState().setWidth(width);
-      void useSidebarWidthStore.getState().persistWidth();
-    },
-    onResetSidebarWidth: () => {
-      useSidebarWidthStore.getState().setWidth(DEFAULT_SIDEBAR_WIDTH);
-      void useSidebarWidthStore.getState().persistWidth();
-    },
-    onSelectRepoHome: handleSelectRepoHome,
-    onOpenSettings: () => openSettings("application"),
-    onOpenCommandPalette: () => setShowCommandPalette(true),
-    onOpenGithub: openGitHub,
-    onOpenLinear: openLinear,
-    onStartAgent: (id) => void handleCreateSessionFromSidebar(id),
-    onOpenShell: (workspace) =>
-      workspace
-        ? handleStartShellFromSidebar(workspace)
-        : handleStartHomeShellFromSidebar(),
-    onStack: (workspace) =>
-      workspace ? handleAddAfter(workspace) : handleStackHomeFromSidebar(),
-    onBulkArchive: () => void handleBulkArchive(),
-    onOpenBranchSwitcher: () => setShowBranchSwitcher(true),
-    onAddRepository:
-      mainRepoPath && !isRemoteActive
-        ? () => void handleAddSupportingRepo()
-        : undefined,
-    onRenameWorkspace: setRenameTarget,
-    onArchiveWorkspace: handleArchive,
-  });
+  // With the GPUI shell, the native sidebar replaces <WorkspaceSidebar>.
+  const { active: gpuiSidebarActive, sources: gpuiSidebarSources } =
+    useGpuiSidebar({
+      supported: Boolean(dataRepoPath),
+      repoPath: isRemoteActive ? dataRepoPath : repoPath,
+      mainRepoPath: isRemoteActive ? undefined : mainRepoPath,
+      supportingRepos: isRemoteActive ? [] : supportingRepos,
+      cacheKey: queryRepoKey,
+      terminalSessions: terminalSessionSummaries,
+      selectedWorkspaceId: selectedWorkspace?.id ?? null,
+      selectedWorkspaceIds,
+      archivingWorkspaceIds,
+      exitingWorkspaceIds,
+      currentPage,
+      homeRef: homeRepoDisplayRef,
+      linearEnabled: linearIntegrationEnabled,
+      dark,
+      width: sidebarWidth,
+      capabilities: remoteCaps,
+      onSelectWorkspace: handleSelectWorkspace,
+      onWorkspaceMultiSelect: handleWorkspaceMultiSelect,
+      onSelectStack: handleSelectStack,
+      onMoveWorkspace: (workspace, targetBranch) =>
+        void handleMoveWorkspace(workspace, targetBranch),
+      onResizeSidebar: (width) => {
+        useSidebarWidthStore.getState().setWidth(width);
+        void useSidebarWidthStore.getState().persistWidth();
+      },
+      onResetSidebarWidth: () => {
+        useSidebarWidthStore.getState().setWidth(DEFAULT_SIDEBAR_WIDTH);
+        void useSidebarWidthStore.getState().persistWidth();
+      },
+      onSelectRepoHome: handleSelectRepoHome,
+      onOpenSettings: () => openSettings("application"),
+      onOpenCommandPalette: () => setShowCommandPalette(true),
+      onOpenGithub: openGitHub,
+      onOpenLinear: openLinear,
+      onStartAgent: (id) => void handleCreateSessionFromSidebar(id),
+      onOpenShell: (workspace) =>
+        workspace
+          ? handleStartShellFromSidebar(workspace)
+          : handleStartHomeShellFromSidebar(),
+      onStack: (workspace) =>
+        workspace ? handleAddAfter(workspace) : handleStackHomeFromSidebar(),
+      onBulkArchive: () => void handleBulkArchive(),
+      onOpenBranchSwitcher: () => setShowBranchSwitcher(true),
+      onAddRepository:
+        mainRepoPath && !isRemoteActive
+          ? () => void handleAddSupportingRepo()
+          : undefined,
+      onRenameWorkspace: (workspace, path) =>
+        setRenameTarget({ workspace, repoPath: path }),
+      onArchiveWorkspace: handleArchive,
+      onOpenRepoSettings: handleOpenRepoSettings,
+      onLocateRepo: (path) => void handleLocateSupportingRepo(path),
+      onRemoveRepo: (path) => void handleRemoveSupportingRepo(path),
+    });
   const showSidebar = !gpuiSidebarActive;
   const sidebarWidthStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
@@ -3002,14 +3009,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 aria-hidden
               />
             )}
-            {renameTarget && dataRepoPath && (
+            {gpuiSidebarSources}
+            {renameTarget && (
               <RenameWorkspaceDialog
                 open
                 onOpenChange={(open) => {
                   if (!open) setRenameTarget(null);
                 }}
-                repoPath={dataRepoPath}
-                workspace={renameTarget}
+                repoPath={renameTarget.repoPath}
+                workspace={renameTarget.workspace}
                 onSuccess={() => setRenameTarget(null)}
               />
             )}

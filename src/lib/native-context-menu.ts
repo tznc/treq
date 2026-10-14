@@ -143,7 +143,8 @@ export function workspaceMenuEntries(params: {
   prUrl: string | null;
   editorApps: EditorApps;
   onRename: () => void;
-  onArchive: () => void;
+  /** Undefined for a repository that is not on screen. */
+  onArchive?: () => void;
 }): NativeMenuEntry[] {
   const { workspace, title, prUrl } = params;
   return [
@@ -156,8 +157,9 @@ export function workspaceMenuEntries(params: {
       fullPath: getFullWorkspacePath(workspace),
       editorApps: params.editorApps,
     }),
-    separator,
-    item("Archive Workspace", params.onArchive),
+    ...(params.onArchive
+      ? [separator, item("Archive Workspace", params.onArchive)]
+      : []),
   ];
 }
 

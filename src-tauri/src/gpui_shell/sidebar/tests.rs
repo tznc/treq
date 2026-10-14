@@ -37,9 +37,31 @@ fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
       active: true,
       loading: false,
       workspaces,
+      label: None,
+      missing: false,
+      collapsed: false,
     }],
     modal: None,
   }
+}
+
+/// The main repository "treq" on screen, and a supporting "lib" whose
+/// workspace shares an id with treq's.
+fn two_repos() -> SidebarSnapshot {
+  let mut s = snapshot(vec![row(7, "feat-a", 0)]);
+  s.repos[0].label = Some("treq".into());
+  s.repos.push(RepoSection {
+    path: "/src/lib".into(),
+    home_ref: None,
+    home_selected: false,
+    active: false,
+    loading: false,
+    workspaces: vec![row(7, "lib-feat", 0)],
+    label: Some("lib".into()),
+    missing: false,
+    collapsed: false,
+  });
+  s
 }
 
 /// A sidebar in a test window, and the actions it sent.
@@ -655,4 +677,94 @@ fn double_clicking_the_edge_resets_the_width(cx: &mut TestAppContext) {
   h.press(handle, MouseButton::Left, Modifiers::none(), 1);
   h.press(handle, MouseButton::Left, Modifiers::none(), 2);
   assert_eq!(h.sent(), vec![SidebarAction::ResetSidebarWidth]);
+}
+
+#[test]
+fn serializes_repo_actions_for_react() {
+  let json = |action| serde_json::to_value(action).expect("json");
+  assert_eq!(
+    json(SidebarAction::OpenRepoWorkspace {
+      repo_path: "/r".into(),
+      id: 3
+    }),
+    serde_json::json!({"kind": "openRepoWorkspace", "repoPath": "/r", "id": 3})
+  );
+  assert_eq!(
+    json(SidebarAction::RepoWorkspaceMenu {
+      repo_path: "/r".into(),
+      id: 3
+    }),
+    serde_json::json!({"kind": "repoWorkspaceMenu", "repoPath": "/r", "id": 3})
+  );
+  assert_eq!(
+    json(SidebarAction::ToggleRepo {
+      repo_path: "/r".into()
+    }),
+    serde_json::json!({"kind": "toggleRepo", "repoPath": "/r"})
+  );
+}
+
+#[gpui::test]
+fn rows_of_another_repository_open_it(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  h.click("repo1-workspace-7");
+  h.click("workspace-7");
+  assert_eq!(
+    h.sent(),
+    vec![
+      SidebarAction::OpenRepoWorkspace {
+        repo_path: "/src/lib".into(),
+        id: 7
+      },
+      select(7, false, false),
+    ]
+  );
+}
+
+#[gpui::test]
+fn rows_of_another_repository_have_their_own_menu(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  right_click(&mut h, "repo1-workspace-7");
+  assert_eq!(
+    h.sent(),
+    vec![SidebarAction::RepoWorkspaceMenu {
+      repo_path: "/src/lib".into(),
+      id: 7
+    }]
+  );
+}
+
+#[gpui::test]
+fn rows_of_another_repository_have_no_actions(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  h.hover("repo1-workspace-7");
+  assert!(h.bounds("workspace-7-start-agent").is_none());
+}
+
+#[gpui::test]
+fn group_labels_fold_their_repository(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  assert!(h.bounds("group-lib").is_some());
+  assert!(h.bounds("home-lib").is_some());
+  h.click("group-lib");
+  assert_eq!(
+    h.sent(),
+    vec![SidebarAction::ToggleRepo {
+      repo_path: "/src/lib".into()
+    }]
+  );
+
+  h.update(|s| s.repos[1].collapsed = true);
+  assert!(h.bounds("repo1-workspace-7").is_none());
+  assert!(h.bounds("workspace-7").is_some());
+}
+
+#[test]
+fn parses_repo_labels_with_defaults() {
+  let json = r#"{"path": "/r", "homeRef": null, "homeSelected": false,
+    "active": false, "loading": false, "workspaces": [],
+    "label": "lib", "missing": true}"#;
+  let repo: RepoSection = serde_json::from_str(json).expect("parse");
+  assert_eq!(repo.label.as_deref(), Some("lib"));
+  assert!(repo.missing && !repo.collapsed);
 }

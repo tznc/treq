@@ -34,7 +34,7 @@ interface GpuiSidebarRow {
   exiting: boolean;
 }
 
-interface GpuiSidebarRepo {
+export interface GpuiSidebarRepo {
   path: string;
   /** Checked-out branch or detached short hash; null until it loads. */
   homeRef: string | null;
@@ -43,6 +43,12 @@ interface GpuiSidebarRepo {
   active: boolean;
   loading: boolean;
   workspaces: GpuiSidebarRow[];
+  /** The repository's name in a window with several; null with one. */
+  label: string | null;
+  /** A supporting repository whose folder is gone. */
+  missing: boolean;
+  /** Its workspace group is folded away. */
+  collapsed: boolean;
 }
 
 export interface GpuiSidebarSnapshot {
@@ -83,7 +89,10 @@ export type GpuiSidebarAction =
   | { kind: "dismissModal" }
   | { kind: "moveWorkspace"; id: number; onto: number | null }
   | { kind: "resizeSidebar"; width: number }
-  | { kind: "resetSidebarWidth" };
+  | { kind: "resetSidebarWidth" }
+  | { kind: "openRepoWorkspace"; repoPath: string; id: number }
+  | { kind: "repoWorkspaceMenu"; repoPath: string; id: number }
+  | { kind: "toggleRepo"; repoPath: string };
 
 const GPUI_SIDEBAR_ACTION_EVENT = "gpui-sidebar-action";
 
@@ -107,6 +116,9 @@ export interface GpuiSidebarRepoInput {
   prStatusesByBranch: Record<string, PrInfo | null>;
   hasRemote: boolean;
   queueStatusesByBranch?: ReadonlyMap<string, QueueEntryStatus>;
+  label?: string | null;
+  missing?: boolean;
+  collapsed?: boolean;
 }
 
 export function buildGpuiSidebarSnapshot(params: {
@@ -165,46 +177,91 @@ export function buildGpuiSidebarSnapshot(params: {
     bulkArchive:
       selectedWorkspaceIds.size > 0 && !busy ? selectedWorkspaceIds.size : null,
     modal,
-    repos: repos.map((repo) => ({
-      path: repo.path,
-      homeRef: repo.homeRef,
-      homeSelected:
-        workspaceSelectionActive && repo.active && selectedWorkspaceId === null,
-      active: repo.active,
-      loading: repo.loading,
-      workspaces: repo.nodes.map((node) => {
-        const workspace = node.status.current;
-        const branch = workspace.branch_name;
-        const hasAgentSession =
-          repo.streamingByBranchWithAgentSession.has(branch);
-        const indicator = getWorkspaceStatusIndicator({
-          isConflicted: node.status.has_conflicts,
-          hasChanges: node.status.has_changes ?? false,
-          isAgentSessionStreaming:
-            hasAgentSession &&
-            (repo.streamingByBranchWithAgentSession.get(branch) ?? false),
-        });
-        const prInfo = repo.prStatusesByBranch[branch] ?? null;
-        const selected =
-          repo.active &&
-          (selectedWorkspaceIds.has(workspace.id) ||
-            (workspaceSelectionActive && selectedWorkspaceId === workspace.id));
-        return {
-          id: workspace.id,
-          title: getWorkspaceTitle(workspace),
-          depth: node.depth,
-          selected,
-          conflicted: node.status.has_conflicts,
-          status: indicator
-            ? { color: indicator.color, spin: indicator.spin }
-            : null,
-          pr: repo.hasRemote && prInfo ? prState(prInfo) : null,
-          queue: repo.queueStatusesByBranch?.get(branch) ?? null,
-          archiving: archivingWorkspaceIds.has(workspace.id),
-          exiting: exitingWorkspaceIds.has(workspace.id),
-        };
+    repos: repos.map((repo) =>
+      buildGpuiRepoSection(repo, {
+        selectedWorkspaceId,
+        selectedWorkspaceIds,
+        archivingWorkspaceIds,
+        exitingWorkspaceIds,
+        workspaceSelectionActive,
       }),
-    })),
+    ),
+  };
+}
+
+/** Selection state that only the repository on screen shows. */
+interface GpuiSelection {
+  selectedWorkspaceId: number | null;
+  selectedWorkspaceIds: ReadonlySet<number>;
+  archivingWorkspaceIds: ReadonlySet<number>;
+  exitingWorkspaceIds: ReadonlySet<number>;
+  /** False while GitHub, Linear or Settings is open. */
+  workspaceSelectionActive: boolean;
+}
+
+/** No selection, for a repository that is not on screen. */
+export const NO_GPUI_SELECTION: GpuiSelection = {
+  selectedWorkspaceId: null,
+  selectedWorkspaceIds: new Set(),
+  archivingWorkspaceIds: new Set(),
+  exitingWorkspaceIds: new Set(),
+  workspaceSelectionActive: false,
+};
+
+/** One repository's home row and workspace rows. */
+export function buildGpuiRepoSection(
+  repo: GpuiSidebarRepoInput,
+  selection: GpuiSelection,
+): GpuiSidebarRepo {
+  const {
+    selectedWorkspaceId,
+    selectedWorkspaceIds,
+    archivingWorkspaceIds,
+    exitingWorkspaceIds,
+    workspaceSelectionActive,
+  } = selection;
+  return {
+    path: repo.path,
+    homeRef: repo.homeRef,
+    homeSelected:
+      workspaceSelectionActive && repo.active && selectedWorkspaceId === null,
+    active: repo.active,
+    loading: repo.loading,
+    label: repo.label ?? null,
+    missing: repo.missing ?? false,
+    collapsed: repo.collapsed ?? false,
+    workspaces: repo.nodes.map((node) => {
+      const workspace = node.status.current;
+      const branch = workspace.branch_name;
+      const hasAgentSession =
+        repo.streamingByBranchWithAgentSession.has(branch);
+      const indicator = getWorkspaceStatusIndicator({
+        isConflicted: node.status.has_conflicts,
+        hasChanges: node.status.has_changes ?? false,
+        isAgentSessionStreaming:
+          hasAgentSession &&
+          (repo.streamingByBranchWithAgentSession.get(branch) ?? false),
+      });
+      const prInfo = repo.prStatusesByBranch[branch] ?? null;
+      const selected =
+        repo.active &&
+        (selectedWorkspaceIds.has(workspace.id) ||
+          (workspaceSelectionActive && selectedWorkspaceId === workspace.id));
+      return {
+        id: workspace.id,
+        title: getWorkspaceTitle(workspace),
+        depth: node.depth,
+        selected,
+        conflicted: node.status.has_conflicts,
+        status: indicator
+          ? { color: indicator.color, spin: indicator.spin }
+          : null,
+        pr: repo.hasRemote && prInfo ? prState(prInfo) : null,
+        queue: repo.queueStatusesByBranch?.get(branch) ?? null,
+        archiving: repo.active && archivingWorkspaceIds.has(workspace.id),
+        exiting: repo.active && exitingWorkspaceIds.has(workspace.id),
+      };
+    }),
   };
 }
 

@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import * as React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildGpuiSidebarSnapshot,
   type GpuiSidebarAction,
+  type GpuiSidebarRepo,
   type GpuiSidebarSnapshot,
   isGpuiShellHost,
   listenGpuiSidebarActions,
@@ -25,11 +27,25 @@ import {
 import type { RemoteCapabilities } from "../lib/remote-capabilities";
 import type { TerminalSessionSummary } from "../components/terminal/types";
 import { useWorkspaceSidebarRows } from "./useWorkspaceSidebarRows";
+import {
+  GpuiRepoRowsSource,
+  type GpuiRepoLookup,
+} from "../components/GpuiRepoRowsSource";
+import {
+  readCollapsedRepos,
+  writeCollapsedRepos,
+} from "../lib/collapsed-repos";
+import { repoDisplayLabels } from "../lib/repo-labels";
 
 interface UseGpuiSidebarParams {
-  /** Single local repository open: no SSH, no supporting repos, past onboarding. */
+  /** A repository is open in this window. */
   supported: boolean;
+  /** The repository on screen. */
   repoPath: string | undefined;
+  /** The window's main repository; undefined for a remote one. */
+  mainRepoPath: string | undefined;
+  /** Repositories linked to the main one; empty for a single repository. */
+  supportingRepos: { path: string; exists: boolean }[];
   cacheKey: string | undefined;
   terminalSessions: TerminalSessionSummary[];
   selectedWorkspaceId: number | null;
@@ -62,7 +78,10 @@ interface UseGpuiSidebarParams {
   onOpenBranchSwitcher: () => void;
   /** Adds a supporting repository; undefined drops the menu item. */
   onAddRepository?: () => void;
-  onRenameWorkspace: (workspace: Workspace) => void;
+  onRenameWorkspace: (workspace: Workspace, repoPath: string) => void;
+  onOpenRepoSettings: (repoPath: string) => void;
+  onLocateRepo: (repoPath: string) => void;
+  onRemoveRepo: (repoPath: string) => void;
   onArchiveWorkspace: (workspace: Workspace) => void;
   /** Stacks `workspace` on `targetBranch`, or on the home branch for null. */
   onMoveWorkspace: (workspace: Workspace, targetBranch: string | null) => void;
@@ -73,21 +92,91 @@ interface UseGpuiSidebarParams {
 
 /**
  * Mirrors the workspace sidebar into the GPUI shell and routes its clicks
- * back. Returns whether GPUI draws the sidebar, so the caller can skip its own.
+ * back. Returns whether GPUI draws the sidebar, so the caller can skip its
+ * own, and `sources`, which the caller renders to load the rows of
+ * repositories that are not on screen.
  */
-export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
+export function useGpuiSidebar(params: UseGpuiSidebarParams): {
+  active: boolean;
+  sources: React.ReactNode;
+} {
   const active = isGpuiShellHost() && params.supported;
+  const { mainRepoPath, supportingRepos, terminalSessions } = params;
+  const multi = Boolean(mainRepoPath) && supportingRepos.length > 0;
+  const order = multi
+    ? [mainRepoPath ?? "", ...supportingRepos.map((repo) => repo.path)]
+    : [params.repoPath ?? ""];
+  const labels = multi ? repoDisplayLabels(order) : null;
+  const missingRepos = new Set(
+    supportingRepos.filter((repo) => !repo.exists).map((repo) => repo.path),
+  );
+  // Agents carry their repository; shells belong to the one on screen.
+  const sessionsFor = (path: string) =>
+    multi
+      ? terminalSessions.filter((session) =>
+          session.repoPath
+            ? session.repoPath === path
+            : path === params.repoPath,
+        )
+      : terminalSessions;
+
   const rows = useWorkspaceSidebarRows({
     repoPath: active ? params.repoPath : undefined,
     cacheKey: active ? params.cacheKey : undefined,
-    terminalSessions: params.terminalSessions,
+    terminalSessions: sessionsFor(params.repoPath ?? ""),
   });
 
+  // Folded groups, stored per main repository as the React sidebar does.
+  const [collapsedState, setCollapsedState] = useState(() => ({
+    mainRepoPath,
+    repos: readCollapsedRepos(mainRepoPath),
+  }));
+  const collapsedRepos =
+    collapsedState.mainRepoPath === mainRepoPath
+      ? collapsedState.repos
+      : readCollapsedRepos(mainRepoPath);
+
+  // Repositories off screen report their sections and rows from `sources`.
+  const [sections, setSections] = useState<Record<string, string>>({});
+  const onSection = useCallback((path: string, section: string | null) => {
+    setSections((prev) => {
+      if (section === null) {
+        if (!(path in prev)) return prev;
+        const rest = { ...prev };
+        delete rest[path];
+        return rest;
+      }
+      return prev[path] === section ? prev : { ...prev, [path]: section };
+    });
+  }, []);
+  const lookupsRef = useRef(new Map<string, GpuiRepoLookup>());
+  const onLookup = useCallback(
+    (path: string, lookup: GpuiRepoLookup | null) => {
+      if (lookup) lookupsRef.current.set(path, lookup);
+      else lookupsRef.current.delete(path);
+    },
+    [],
+  );
+  const offScreen = active
+    ? order.filter(
+        (path) => path !== params.repoPath && !missingRepos.has(path),
+      )
+    : [];
+  const sources = offScreen.map((path) => (
+    <GpuiRepoRowsSource
+      key={path}
+      path={path}
+      terminalSessions={sessionsFor(path)}
+      onSection={onSection}
+      onLookup={onLookup}
+    />
+  ));
+
   const modal = useWindowModalBackdrop(active);
-  const snapshot: GpuiSidebarSnapshot | null =
+  const built: GpuiSidebarSnapshot | null =
     active && params.repoPath
       ? buildGpuiSidebarSnapshot({
-          repoPath: params.repoPath,
+          repoPath: mainRepoPath || params.repoPath,
           repos: [
             {
               path: params.repoPath,
@@ -115,6 +204,37 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
           modal,
         })
       : null;
+  const snapshot: GpuiSidebarSnapshot | null = built && {
+    ...built,
+    repos: order.map((path): GpuiSidebarRepo => {
+      const missing = missingRepos.has(path);
+      const reported = sections[path];
+      const section: GpuiSidebarRepo =
+        path === params.repoPath
+          ? built.repos[0]
+          : reported
+            ? (JSON.parse(reported) as GpuiSidebarRepo)
+            : {
+                path,
+                homeRef: null,
+                homeSelected: false,
+                active: false,
+                loading: !missing,
+                workspaces: [],
+                label: null,
+                missing: false,
+                collapsed: false,
+              };
+      return {
+        ...section,
+        label: labels?.get(path) ?? null,
+        missing,
+        collapsed: multi && !missing && collapsedRepos.has(path),
+        workspaces: missing ? [] : section.workspaces,
+        loading: missing ? false : section.loading,
+      };
+    }),
+  };
 
   const lastSent = useRef<string | null>(null);
   const snapshotJson = JSON.stringify(snapshot);
@@ -142,17 +262,28 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
   }, [active]);
 
   // Handlers change every render; the listener reads the latest through a ref.
+  const toggleRepo = (path: string) => {
+    const next = new Set(collapsedRepos);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    writeCollapsedRepos(mainRepoPath, next);
+    setCollapsedState({ mainRepoPath, repos: next });
+  };
   const latest = useRef({
     params,
     workspaces: rows.workspaces,
     nodes: rows.flattenedNodes,
     prStatusesByBranch: rows.prStatusesByBranch,
+    missingRepos,
+    toggleRepo,
   });
   latest.current = {
     params,
     workspaces: rows.workspaces,
     nodes: rows.flattenedNodes,
     prStatusesByBranch: rows.prStatusesByBranch,
+    missingRepos,
+    toggleRepo,
   };
   // The last plain or toggled row, where a Shift range starts.
   const lastSelectedIndexRef = useRef<number | null>(null);
@@ -164,13 +295,20 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
         workspaces,
         nodes,
         prStatusesByBranch,
+        missingRepos: missing,
+        toggleRepo: toggle,
       } = latest.current;
+      const findIn = (path: string, id: number) =>
+        lookupsRef.current.get(path)?.workspaces.find((w) => w.id === id) ??
+        null;
       const find = (id: number | null) =>
         id === null ? null : (workspaces.find((w) => w.id === id) ?? null);
       switch (action.kind) {
         case "selectHome":
           if (action.repoPath !== p.repoPath) {
-            p.onSelectRepoHome(action.repoPath);
+            if (!missing.has(action.repoPath)) {
+              p.onSelectRepoHome(action.repoPath);
+            }
           } else if (p.selectedWorkspaceIds.size > 0) {
             // As in the React sidebar, a click on home first drops the selection.
             lastSelectedIndexRef.current = null;
@@ -267,15 +405,55 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
         case "dismissModal":
           dismissTopWindowModal();
           break;
-        case "homeMenu":
+        case "homeMenu": {
+          const path = action.repoPath;
+          const supporting = p.supportingRepos.some((r) => r.path === path);
+          const isMissing = missing.has(path);
           void popupNativeMenu(
             homeMenuEntries({
-              repoPath: action.repoPath,
+              repoPath: path,
+              missing: isMissing,
               editorApps: useEditorAppsStore.getState(),
-              onOpenBranchSwitcher: p.onOpenBranchSwitcher,
-              onAddRepository: p.onAddRepository,
+              onOpenBranchSwitcher:
+                path === p.repoPath ? p.onOpenBranchSwitcher : undefined,
+              onAddRepository: supporting ? undefined : p.onAddRepository,
+              onOpenRepoSettings:
+                supporting && !isMissing
+                  ? () => p.onOpenRepoSettings(path)
+                  : undefined,
+              onLocateRepo:
+                supporting && isMissing
+                  ? () => p.onLocateRepo(path)
+                  : undefined,
+              onRemoveRepo: supporting ? () => p.onRemoveRepo(path) : undefined,
             }),
           );
+          break;
+        }
+        case "openRepoWorkspace": {
+          const workspace = findIn(action.repoPath, action.id);
+          if (workspace) p.onSelectWorkspace(workspace);
+          break;
+        }
+        case "repoWorkspaceMenu": {
+          const path = action.repoPath;
+          const workspace = findIn(path, action.id);
+          if (!workspace) break;
+          const prs = lookupsRef.current.get(path)?.prStatusesByBranch ?? {};
+          void popupNativeMenu(
+            workspaceMenuEntries({
+              workspace,
+              title: getWorkspaceTitle(workspace),
+              repoPath: path,
+              prUrl: prs[workspace.branch_name]?.url ?? null,
+              editorApps: useEditorAppsStore.getState(),
+              onRename: () => p.onRenameWorkspace(workspace, path),
+            }),
+          );
+          break;
+        }
+        case "toggleRepo":
+          toggle(action.repoPath);
           break;
         case "workspaceMenu": {
           const workspace = find(action.id);
@@ -287,7 +465,7 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
               repoPath: p.repoPath,
               prUrl: prStatusesByBranch[workspace.branch_name]?.url ?? null,
               editorApps: useEditorAppsStore.getState(),
-              onRename: () => p.onRenameWorkspace(workspace),
+              onRename: () => p.onRenameWorkspace(workspace, p.repoPath ?? ""),
               onArchive: () => p.onArchiveWorkspace(workspace),
             }),
           );
@@ -303,5 +481,5 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
     };
   }, [active]);
 
-  return active;
+  return { active, sources };
 }
