@@ -12406,6 +12406,7 @@ dependencies = [
  "tauri-plugin-cli",
  "tauri-plugin-deep-link",
  "tauri-plugin-dialog",
+ "tauri-plugin-gpui",
  "tauri-plugin-keystore",
  "tauri-plugin-log",
  "tauri-plugin-notification",

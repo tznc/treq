@@ -258,8 +258,8 @@ jobs:
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: webkit-4.1-1
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
+          version: webkit-4.1-gpui-1
           execute_install_scripts: true
 
       - name: Build real-sshd integration tests
