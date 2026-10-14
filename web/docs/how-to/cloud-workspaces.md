@@ -58,9 +58,9 @@ The trash icon (**Delete cloud workspace**) removes the machine. The confirmatio
 
 ## If your subscription lapses
 
-Creating, waking, and repairing a cloud workspace need an active Pro or Team subscription, and so does connecting to it. When the subscription ends, the machine stops. Treq keeps the disk for 30 days and then deletes it.
+Creating, waking, and repairing a cloud workspace need an active Pro or Team subscription, and so does connecting to it. When the subscription ends, the machine stops. Treq keeps the disk for 7 days and then deletes it.
 
-Resubscribe within those 30 days to wake the workspace with your files. After that the data is gone, and you create a new cloud workspace. Checking status and deleting the workspace still work without a subscription.
+Resubscribe within those 7 days to wake the workspace with your files. After that the data is gone, and you create a new cloud workspace. Checking status and deleting the workspace still work without a subscription.
 
 ## Next Steps
 
