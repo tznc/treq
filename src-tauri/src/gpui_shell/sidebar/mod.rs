@@ -142,9 +142,21 @@ pub enum SidebarAction {
   SelectHome {
     repo_path: String,
   },
+  /// A single click on a workspace row. `shift` extends a range from the
+  /// last clicked row; `toggle` (Cmd or Ctrl) adds or removes the row.
   SelectWorkspace {
     id: i64,
+    shift: bool,
+    toggle: bool,
   },
+  /// A double click on a workspace row: select its whole stack, or with
+  /// Shift only the row and its descendants.
+  SelectStack {
+    id: i64,
+    descendants: bool,
+  },
+  /// A click on the empty list background.
+  ClearSelection,
   OpenSettings,
   OpenCommandPalette,
   OpenGithub,
@@ -222,6 +234,29 @@ impl Sidebar {
     move |_, _, cx| {
       cx.stop_propagation();
       sink(action.clone(), cx);
+    }
+  }
+
+  /// A workspace row's click handler, which reads the modifiers and click
+  /// count into the action.
+  fn on_row_click(&self, id: i64) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let sink = self.sink.clone();
+    move |event, _, cx| {
+      cx.stop_propagation();
+      let modifiers = event.modifiers();
+      let action = if event.click_count() >= 2 {
+        SidebarAction::SelectStack {
+          id,
+          descendants: modifiers.shift,
+        }
+      } else {
+        SidebarAction::SelectWorkspace {
+          id,
+          shift: modifiers.shift,
+          toggle: modifiers.control || modifiers.platform,
+        }
+      };
+      sink(action, cx);
     }
   }
 
@@ -503,6 +538,7 @@ impl Render for Sidebar {
 
     let mut list = div()
       .id("workspaces")
+      .debug_selector(|| "workspaces".into())
       .flex()
       .flex_col()
       .flex_1()
@@ -510,7 +546,8 @@ impl Render for Sidebar {
       .overflow_y_scroll()
       .px_2()
       .pb_2()
-      .gap(px(2.));
+      .gap(px(2.))
+      .on_click(self.on_action(SidebarAction::ClearSelection));
     let mut any_rows = false;
     for repo in &snapshot.repos {
       if repo.loading && repo.workspaces.is_empty() {
@@ -995,8 +1032,10 @@ impl Sidebar {
       .when(self.tooltip_shown(&key), |this| {
         this.child(tooltip_bubble(palette, tooltip_width, tip))
       })
-      .when(!row.archiving, |this| {
-        this.on_click(self.on_action(SidebarAction::SelectWorkspace { id }))
+      .when(!row.archiving, |this| this.on_click(self.on_row_click(id)))
+      // An archiving row swallows the click, so it does not clear the selection.
+      .when(row.archiving, |this| {
+        this.on_click(|_, _, cx| cx.stop_propagation())
       })
       .on_mouse_down(
         MouseButton::Right,

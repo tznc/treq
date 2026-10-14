@@ -14,6 +14,8 @@ import {
   workspaceMenuEntries,
 } from "../lib/native-context-menu";
 import { getWorkspaceTitle } from "../lib/workspace-utils";
+import { getDescendants, getEntireStack } from "../lib/workspace-tree";
+import { idsInVisibleRange } from "./useWorkspaceSidebarMultiSelect";
 import { useEditorAppsStore } from "../stores/editorAppsStore";
 import {
   dismissTopWindowModal,
@@ -41,6 +43,12 @@ interface UseGpuiSidebarParams {
   width: number;
   capabilities: RemoteCapabilities;
   onSelectWorkspace: (workspace: Workspace | null) => void;
+  /** A workspace click with its modifiers; null clears the selection. */
+  onWorkspaceMultiSelect: (
+    workspace: Workspace | null,
+    modifiers: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
+  ) => void;
+  onSelectStack: (workspaceIds: Set<number>) => void;
   onSelectRepoHome: (repoPath: string) => void;
   onOpenSettings: () => void;
   onOpenCommandPalette: () => void;
@@ -132,17 +140,26 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
   const latest = useRef({
     params,
     workspaces: rows.workspaces,
+    nodes: rows.flattenedNodes,
     prStatusesByBranch: rows.prStatusesByBranch,
   });
   latest.current = {
     params,
     workspaces: rows.workspaces,
+    nodes: rows.flattenedNodes,
     prStatusesByBranch: rows.prStatusesByBranch,
   };
+  // The last plain or toggled row, where a Shift range starts.
+  const lastSelectedIndexRef = useRef<number | null>(null);
   useEffect(() => {
     if (!active) return;
     const handle = (action: GpuiSidebarAction) => {
-      const { params: p, workspaces, prStatusesByBranch } = latest.current;
+      const {
+        params: p,
+        workspaces,
+        nodes,
+        prStatusesByBranch,
+      } = latest.current;
       const find = (id: number | null) =>
         id === null ? null : (workspaces.find((w) => w.id === id) ?? null);
       switch (action.kind) {
@@ -152,9 +169,44 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
           break;
         case "selectWorkspace": {
           const workspace = find(action.id);
-          if (workspace) p.onSelectWorkspace(workspace);
+          const index = nodes.findIndex(
+            (n) => n.status.current.id === action.id,
+          );
+          if (!workspace || index === -1) break;
+          if (action.shift && lastSelectedIndexRef.current !== null) {
+            p.onSelectStack(
+              idsInVisibleRange(nodes, lastSelectedIndexRef.current, index),
+            );
+            break;
+          }
+          lastSelectedIndexRef.current = index;
+          p.onWorkspaceMultiSelect(workspace, {
+            shiftKey: action.shift,
+            metaKey: action.toggle,
+            ctrlKey: false,
+          });
           break;
         }
+        case "selectStack": {
+          const workspace = find(action.id);
+          if (!workspace) break;
+          const all = nodes.map((n) => n.status.current);
+          const stack = action.descendants
+            ? [workspace, ...getDescendants(all, workspace.branch_name)]
+            : getEntireStack(all, workspace.branch_name);
+          p.onSelectStack(new Set(stack.map((w) => w.id)));
+          break;
+        }
+        case "clearSelection":
+          if (p.selectedWorkspaceIds.size > 0) {
+            lastSelectedIndexRef.current = null;
+            p.onWorkspaceMultiSelect(null, {
+              shiftKey: false,
+              metaKey: false,
+              ctrlKey: false,
+            });
+          }
+          break;
         case "openSettings":
           p.onOpenSettings();
           break;

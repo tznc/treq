@@ -2625,7 +2625,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleWorkspaceMultiSelect = (
     workspace: Workspace | null,
-    event: React.MouseEvent,
+    event: Pick<React.MouseEvent, "metaKey" | "ctrlKey" | "shiftKey">,
   ) => {
     // Handle clicking away to clear selection
     if (workspace === null) {
@@ -2804,6 +2804,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     width: sidebarWidth,
     capabilities: remoteCaps,
     onSelectWorkspace: handleSelectWorkspace,
+    onWorkspaceMultiSelect: handleWorkspaceMultiSelect,
+    onSelectStack: handleSelectStack,
     onSelectRepoHome: handleSelectRepoHome,
     onOpenSettings: () => openSettings("application"),
     onOpenCommandPalette: () => setShowCommandPalette(true),

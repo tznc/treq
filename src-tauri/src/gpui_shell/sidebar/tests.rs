@@ -82,6 +82,29 @@ impl Harness {
       .simulate_mouse_move(bounds.center(), None, Modifiers::none());
   }
 
+  /// A mouse down and up at `position`, the `click_count`th in a row.
+  fn press(
+    &mut self,
+    position: gpui::Point<gpui::Pixels>,
+    button: MouseButton,
+    modifiers: Modifiers,
+    click_count: usize,
+  ) {
+    self.cx.simulate_event(gpui::MouseDownEvent {
+      position,
+      button,
+      modifiers,
+      click_count,
+      first_mouse: false,
+    });
+    self.cx.simulate_event(gpui::MouseUpEvent {
+      position,
+      button,
+      modifiers,
+      click_count,
+    });
+  }
+
   fn sent(&self) -> Vec<SidebarAction> {
     self.sent.borrow().clone()
   }
@@ -149,8 +172,23 @@ fn parses_snapshot_from_react() {
 fn serializes_actions_for_react() {
   let json = |action| serde_json::to_value(action).expect("json");
   assert_eq!(
-    json(SidebarAction::SelectWorkspace { id: 3 }),
-    serde_json::json!({"kind": "selectWorkspace", "id": 3})
+    json(SidebarAction::SelectWorkspace {
+      id: 3,
+      shift: true,
+      toggle: false
+    }),
+    serde_json::json!({"kind": "selectWorkspace", "id": 3, "shift": true, "toggle": false})
+  );
+  assert_eq!(
+    json(SidebarAction::SelectStack {
+      id: 3,
+      descendants: true
+    }),
+    serde_json::json!({"kind": "selectStack", "id": 3, "descendants": true})
+  );
+  assert_eq!(
+    json(SidebarAction::ClearSelection),
+    serde_json::json!({"kind": "clearSelection"})
   );
   assert_eq!(
     json(SidebarAction::SelectHome {
@@ -266,7 +304,60 @@ fn home_actions_show_without_hover_and_do_not_select_home(cx: &mut TestAppContex
 fn clicking_a_workspace_selects_it(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
   h.click("workspace-7");
-  assert_eq!(h.sent(), vec![SidebarAction::SelectWorkspace { id: 7 }]);
+  assert_eq!(h.sent(), vec![select(7, false, false)]);
+}
+
+fn select(id: i64, shift: bool, toggle: bool) -> SidebarAction {
+  SidebarAction::SelectWorkspace { id, shift, toggle }
+}
+
+#[gpui::test]
+fn modified_clicks_carry_shift_and_toggle(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  let at = h.bounds("workspace-7").expect("drawn").center();
+  h.press(at, MouseButton::Left, Modifiers::shift(), 1);
+  h.press(at, MouseButton::Left, Modifiers::control(), 1);
+  h.press(at, MouseButton::Left, Modifiers::command(), 1);
+  assert_eq!(
+    h.sent(),
+    vec![
+      select(7, true, false),
+      select(7, false, true),
+      select(7, false, true)
+    ]
+  );
+}
+
+#[gpui::test]
+fn double_click_selects_the_stack(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  let at = h.bounds("workspace-7").expect("drawn").center();
+  h.press(at, MouseButton::Left, Modifiers::none(), 1);
+  h.press(at, MouseButton::Left, Modifiers::none(), 2);
+  h.press(at, MouseButton::Left, Modifiers::shift(), 2);
+  assert_eq!(
+    h.sent(),
+    vec![
+      select(7, false, false),
+      SidebarAction::SelectStack {
+        id: 7,
+        descendants: false
+      },
+      SidebarAction::SelectStack {
+        id: 7,
+        descendants: true
+      },
+    ]
+  );
+}
+
+#[gpui::test]
+fn clicking_the_list_background_clears_the_selection(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  let list = h.bounds("workspaces").expect("drawn");
+  let below_rows = gpui::point(list.center().x, list.bottom() - px(4.));
+  h.press(below_rows, MouseButton::Left, Modifiers::none(), 1);
+  assert_eq!(h.sent(), vec![SidebarAction::ClearSelection]);
 }
 
 #[gpui::test]
@@ -396,19 +487,7 @@ fn right_click(h: &mut Harness, selector: &'static str) {
   let bounds = h
     .bounds(selector)
     .unwrap_or_else(|| panic!("{selector} is not drawn"));
-  h.cx.simulate_event(gpui::MouseDownEvent {
-    position: bounds.center(),
-    button: gpui::MouseButton::Right,
-    modifiers: Modifiers::none(),
-    click_count: 1,
-    first_mouse: false,
-  });
-  h.cx.simulate_event(gpui::MouseUpEvent {
-    position: bounds.center(),
-    button: gpui::MouseButton::Right,
-    modifiers: Modifiers::none(),
-    click_count: 1,
-  });
+  h.press(bounds.center(), MouseButton::Right, Modifiers::none(), 1);
 }
 
 #[gpui::test]

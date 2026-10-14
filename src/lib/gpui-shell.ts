@@ -67,7 +67,9 @@ export interface GpuiSidebarSnapshot {
 
 export type GpuiSidebarAction =
   | { kind: "selectHome"; repoPath: string }
-  | { kind: "selectWorkspace"; id: number }
+  | { kind: "selectWorkspace"; id: number; shift: boolean; toggle: boolean }
+  | { kind: "selectStack"; id: number; descendants: boolean }
+  | { kind: "clearSelection" }
   | { kind: "openSettings" }
   | { kind: "openCommandPalette" }
   | { kind: "openGithub" }
