@@ -52,6 +52,10 @@ pub struct SidebarSnapshot {
   pub bulk_archive: Option<u32>,
   /// The window's repositories: the main one first.
   pub repos: Vec<RepoSection>,
+  /// The opacity of an open webview modal's backdrop, continued over the
+  /// sidebar; `None` with no modal open.
+  #[serde(default)]
+  pub modal: Option<f32>,
 }
 
 /// One repository: its home row and its workspaces.
@@ -165,6 +169,8 @@ pub enum SidebarAction {
   WorkspaceMenu {
     id: i64,
   },
+  /// A click on the modal backdrop drawn over the sidebar.
+  DismissModal,
 }
 
 /// Where the sidebar's actions go: the window's webview in the app, a list
@@ -198,6 +204,9 @@ impl Sidebar {
 
   pub fn set_snapshot(&mut self, snapshot: SidebarSnapshot, cx: &mut Context<Self>) {
     if self.snapshot != snapshot {
+      if snapshot.modal.is_some() {
+        self.tooltip = None;
+      }
       self.snapshot = snapshot;
       cx.notify();
     }
@@ -456,6 +465,7 @@ impl Render for Sidebar {
 
     let mut sidebar = div()
       .id("sidebar")
+      .relative()
       .flex()
       .flex_col()
       .flex_none()
@@ -535,7 +545,22 @@ impl Render for Sidebar {
           .child("Workspaces"),
       )
       .child(list)
+      .when_some(snapshot.modal, |this, opacity| {
+        this.child(modal_backdrop(opacity).on_click(self.on_action(SidebarAction::DismissModal)))
+      })
   }
+}
+
+/// The webview modal's backdrop, continued over the sidebar in the same
+/// translucent black. It takes every click and hover.
+fn modal_backdrop(opacity: f32) -> gpui::Stateful<gpui::Div> {
+  div()
+    .id("modal-backdrop")
+    .debug_selector(|| "modal-backdrop".into())
+    .absolute()
+    .inset_0()
+    .bg(gpui::black().opacity(opacity.clamp(0., 1.)))
+    .occlude()
 }
 
 impl Sidebar {

@@ -15,6 +15,11 @@ import {
 } from "../lib/native-context-menu";
 import { getWorkspaceTitle } from "../lib/workspace-utils";
 import { useEditorAppsStore } from "../stores/editorAppsStore";
+import {
+  dismissTopWindowModal,
+  setWindowOffsetLeft,
+  useWindowModalBackdrop,
+} from "../lib/window-modals";
 import type { RemoteCapabilities } from "../lib/remote-capabilities";
 import type { TerminalSessionSummary } from "../components/terminal/types";
 import { useWorkspaceSidebarRows } from "./useWorkspaceSidebarRows";
@@ -65,6 +70,7 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
     terminalSessions: params.terminalSessions,
   });
 
+  const modal = useWindowModalBackdrop(active);
   const snapshot: GpuiSidebarSnapshot | null =
     active && params.repoPath
       ? buildGpuiSidebarSnapshot({
@@ -93,6 +99,7 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
           dark: params.dark,
           width: params.width,
           capabilities: params.capabilities,
+          modal,
         })
       : null;
 
@@ -103,6 +110,14 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
     lastSent.current = snapshotJson;
     void updateGpuiSidebar(JSON.parse(snapshotJson));
   }, [active, snapshotJson]);
+
+  // Modals centre in the window, whose sidebar lies left of this webview.
+  const { width } = params;
+  useEffect(() => {
+    if (!active) return;
+    setWindowOffsetLeft(width);
+    return () => setWindowOffsetLeft(null);
+  }, [active, width]);
 
   // Hide the GPUI sidebar when the window goes away or the case stops being supported.
   useEffect(() => {
@@ -167,6 +182,9 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
         }
         case "bulkArchive":
           p.onBulkArchive();
+          break;
+        case "dismissModal":
+          dismissTopWindowModal();
           break;
         case "homeMenu":
           void popupNativeMenu(

@@ -15,9 +15,15 @@ const Dialog: React.FC<DialogProps> = ({ open, onOpenChange, children }) => {
 
   return (
     <DialogTitleIdContext.Provider value={titleId}>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        data-window-modal
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ left: "calc(-1 * var(--window-offset-left, 0px))" }}
+      >
         <div
+          data-window-modal-backdrop
           className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
+          style={{ left: "calc(-1 * var(--window-offset-left, 0px))" }}
           onClick={() => onOpenChange?.(false)}
         />
         <div className="relative z-50">{children}</div>

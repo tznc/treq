@@ -38,6 +38,7 @@ fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
       loading: false,
       workspaces,
     }],
+    modal: None,
   }
 }
 
@@ -170,6 +171,10 @@ fn serializes_actions_for_react() {
       repo_path: "/r".into()
     }),
     serde_json::json!({"kind": "homeMenu", "repoPath": "/r"})
+  );
+  assert_eq!(
+    json(SidebarAction::DismissModal),
+    serde_json::json!({"kind": "dismissModal"})
   );
   assert_eq!(
     json(SidebarAction::WorkspaceMenu { id: 4 }),
@@ -433,4 +438,30 @@ fn right_click_hides_the_tooltip(cx: &mut TestAppContext) {
   right_click(&mut h, "workspace-7");
   h.sidebar
     .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("workspace:7")));
+}
+
+#[gpui::test]
+fn modal_backdrop_covers_the_sidebar_and_dismisses(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  assert!(h.bounds("modal-backdrop").is_none());
+  h.update(|s| s.modal = Some(0.4));
+  let backdrop = h.bounds("modal-backdrop").expect("backdrop drawn");
+  let row = h.bounds("workspace-7").unwrap();
+  assert!(backdrop.contains(&row.center()));
+  // A click over a row reaches the backdrop, not the row.
+  h.click("workspace-7");
+  assert_eq!(h.sent(), vec![SidebarAction::DismissModal]);
+}
+
+#[gpui::test]
+fn opening_a_modal_hides_the_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("settings");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(s.tooltip_shown("settings")));
+  h.update(|s| s.modal = Some(0.4));
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("settings")));
 }

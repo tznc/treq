@@ -61,6 +61,8 @@ export interface GpuiSidebarSnapshot {
   /** The "Archive N workspaces" button's count, or null to hide it. */
   bulkArchive: number | null;
   repos: GpuiSidebarRepo[];
+  /** An open modal's backdrop opacity, which GPUI draws over the sidebar; null with none. */
+  modal: number | null;
 }
 
 export type GpuiSidebarAction =
@@ -75,7 +77,8 @@ export type GpuiSidebarAction =
   | { kind: "stack"; id: number | null }
   | { kind: "bulkArchive" }
   | { kind: "homeMenu"; repoPath: string }
-  | { kind: "workspaceMenu"; id: number };
+  | { kind: "workspaceMenu"; id: number }
+  | { kind: "dismissModal" };
 
 const GPUI_SIDEBAR_ACTION_EVENT = "gpui-sidebar-action";
 
@@ -116,6 +119,7 @@ export function buildGpuiSidebarSnapshot(params: {
   dark: boolean;
   width: number;
   capabilities?: RemoteCapabilities;
+  modal?: number | null;
 }): GpuiSidebarSnapshot {
   const {
     repoPath,
@@ -129,6 +133,7 @@ export function buildGpuiSidebarSnapshot(params: {
     dark,
     width,
     capabilities,
+    modal = null,
   } = params;
   const workspaceSelectionActive =
     currentPage !== "github" &&
@@ -154,6 +159,7 @@ export function buildGpuiSidebarSnapshot(params: {
         : null,
     bulkArchive:
       selectedWorkspaceIds.size > 0 && !busy ? selectedWorkspaceIds.size : null,
+    modal,
     repos: repos.map((repo) => ({
       path: repo.path,
       homeRef: repo.homeRef,
