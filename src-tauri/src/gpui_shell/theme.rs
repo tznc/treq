@@ -36,15 +36,12 @@ icons! {
 const INTER_REGULAR: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Regular.ttf");
 const INTER_MEDIUM: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Medium.ttf");
 
-/// The React app's mono stack starts with JetBrains Mono, which ships only as
-/// a web font; use each platform's own mono face instead.
-pub const MONO_FONT: &str = if cfg!(target_os = "macos") {
-  "Menlo"
-} else if cfg!(target_os = "windows") {
-  "Consolas"
-} else {
-  "DejaVu Sans Mono"
-};
+/// The React app's mono face, converted from its web font
+/// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
+const JETBRAINS_MONO_REGULAR: &[u8] =
+  include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+
+pub const MONO_FONT: &str = "JetBrains Mono";
 
 /// Serves the bundled icons to GPUI's `svg()` element.
 pub struct Assets;
@@ -72,9 +69,13 @@ impl AssetSource for Assets {
 
 /// App-level GPUI setup: fonts and the default text style.
 pub fn init(cx: &mut App) {
-  let fonts = vec![Cow::Borrowed(INTER_REGULAR), Cow::Borrowed(INTER_MEDIUM)];
+  let fonts = vec![
+    Cow::Borrowed(INTER_REGULAR),
+    Cow::Borrowed(INTER_MEDIUM),
+    Cow::Borrowed(JETBRAINS_MONO_REGULAR),
+  ];
   if let Err(err) = cx.text_system().add_fonts(fonts) {
-    log::error!("failed to load bundled Inter fonts: {err:#}");
+    log::error!("failed to load bundled fonts: {err:#}");
   }
 }
 
@@ -162,5 +163,18 @@ mod tests {
       assert!(bytes.is_some(), "{path} is not registered in ICONS");
     }
     assert!(Assets.load("icons/missing.svg").expect("load").is_none());
+  }
+
+  #[test]
+  fn bundles_the_mono_face_by_its_family_name() {
+    // TrueType, with MONO_FONT in its (UTF-16BE) name table.
+    assert_eq!(&JETBRAINS_MONO_REGULAR[..4], &[0, 1, 0, 0]);
+    let family: Vec<u8> = MONO_FONT
+      .encode_utf16()
+      .flat_map(u16::to_be_bytes)
+      .collect();
+    assert!(JETBRAINS_MONO_REGULAR
+      .windows(family.len())
+      .any(|w| w == family.as_slice()));
   }
 }

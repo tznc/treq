@@ -846,7 +846,7 @@ impl Sidebar {
         this.hover(|style| style.bg(palette.accent))
       })
       .when(disabled, |this| this.opacity(0.4))
-      .child(icon(icon_path, 12., palette.muted_foreground))
+      .child(icon(icon_path, 16., palette.foreground))
       .on_hover(
         cx.listener(move |this, hovered: &bool, _, cx| {
           this.hover_tooltip(key.clone(), *hovered, cx)
@@ -996,7 +996,7 @@ impl Sidebar {
         this.hover(|style| style.bg(palette.accent))
       })
       .when(repo.missing, |this| this.opacity(0.5))
-      .child(icon(theme::ICON_HOUSE, 12., palette.sidebar_foreground))
+      .child(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
       .child(title)
       .when(repo.missing, |this| {
         this.child(
@@ -1053,7 +1053,7 @@ impl Sidebar {
       .rounded_md()
       .when(active, |this| this.bg(palette.primary.opacity(0.2)))
       .when(!active, |this| this.hover(|style| style.bg(palette.accent)))
-      .child(icon(icon_path, 12., palette.sidebar_foreground))
+      .child(icon(icon_path, 16., palette.sidebar_foreground))
       .child(div().flex_1().min_w_0().truncate().child(text))
       .on_click(self.on_action(action))
   }
@@ -1106,7 +1106,7 @@ impl Sidebar {
       .text_size(px(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .hover(|style| style.bg(palette.accent))
-      .child(icon(chevron, 12., palette.sidebar_foreground.opacity(0.7)))
+      .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
       .child(div().min_w_0().truncate().child(name.to_uppercase()))
       .on_click(self.on_action(SidebarAction::ToggleRepo {
         repo_path: repo.path.clone(),
