@@ -6,6 +6,7 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { saveAppSetupScript } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 const SCRIPT = [
   "echo installing tools",
@@ -21,7 +22,7 @@ it("captures the application setup script settings", async () => {
 
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(await screen.findByRole("tab", { name: /application/i }));
   const textarea = await screen.findByLabelText("Application Setup Script");
   await screen.findByText("Never run");

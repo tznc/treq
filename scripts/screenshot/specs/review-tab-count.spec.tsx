@@ -21,6 +21,7 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/review-badge-count";
 
@@ -53,7 +54,7 @@ it("captures Review badge showing total WC + committed count before and after se
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByText(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 
 	await waitFor(() => {
@@ -85,7 +86,7 @@ it("captures Review badge showing total WC + committed count before and after se
 		],
 	});
 
-	await user.click(await screen.findByText("feat/clean-badge"));
+	await clickGpuiRow("feat/clean-badge");
 	await waitFor(() => {
 		expect(getReviewBadgeCount()).toBeNull();
 	});

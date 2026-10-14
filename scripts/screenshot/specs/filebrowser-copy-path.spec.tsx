@@ -8,7 +8,6 @@ import { expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -17,6 +16,7 @@ import { render, screen, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/filebrowser-copy-path";
 
@@ -42,7 +42,7 @@ it("captures FileBrowser filename copy icon feedback", async () => {
 
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await user.click(await screen.findByRole("button", { name: "copy-me.ts" }));
 	const fileBrowser = within(await screen.findByTestId("file-browser"));
 	const copyButton = await fileBrowser.findByRole("button", {

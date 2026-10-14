@@ -19,6 +19,7 @@ import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/file-comment";
 
@@ -42,7 +43,7 @@ it("captures the file-level comment button and thread in the Changes tab", async
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByText(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 	await user.click(await screen.findByRole("tab", { name: /^Changes/i }));
 	await screen.findAllByText("example.ts");

@@ -11,6 +11,7 @@ import type { TreqCommandRequest } from "../../../src/lib/remote-dispatch";
 import { render, screen, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 // Cloud workspace lifecycle lives behind the `remote-instance` Supabase Edge
 // Function, which the desktop harness cannot reach, usage is read from the
@@ -209,7 +210,7 @@ it("captures creating and managing a cloud workspace from account settings", asy
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(await screen.findByRole("tab", { name: /account/i }));
   await screen.findByRole("button", { name: "Create cloud workspace" });
   expect(screen.queryByText(/Sprite/)).toBeNull();

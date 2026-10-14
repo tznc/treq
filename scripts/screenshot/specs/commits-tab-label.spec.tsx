@@ -4,10 +4,8 @@
 
 import * as React from "react";
 import { expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -22,6 +20,8 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 function commitsCountPill(): HTMLElement {
 	const tab = screen.getByRole("tab", { name: /^Commits/ });
@@ -48,9 +48,8 @@ it("captures grey Commits count pill on a workspace", async () => {
 	writeWorkspaceFile(workspacePath, "a.txt", "one\n");
 	await createCommit(repoPath, workspaceId, "first workspace commit");
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
-	await user.click(await findSidebarBranchElement("feat/commits-pill"));
+	await clickGpuiRow("feat/commits-pill");
 	await screen.findByTestId("show-workspace-header");
 
 	await waitFor(() => {
@@ -90,10 +89,9 @@ it("captures red Commits count pill when the workspace has conflicts", async () 
 	await checkAndRebaseWorkspaces(repoPath, workspaceId, defaultBranch, true);
 	await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
-	await user.click(await findSidebarBranchElement("feat/commits-red"));
-	await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+	await clickGpuiRow("feat/commits-red");
+	await waitForGpuiConflict(workspaceId);
 
 	await waitFor(() => {
 		const pill = commitsCountPill();
@@ -114,7 +112,6 @@ it("captures home Commits tab without a count pill", async () => {
 	const { repoPath } = createTestRepo(false);
 	openRepo(repoPath);
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
 	await screen.findByTestId("show-workspace-header");
 

@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
@@ -12,13 +11,14 @@ import { getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
 
 import { appendFileSync } from "node:fs";
+import { clickGpuiHome, clickGpuiRow, stackGpui } from "../../../test/gpui-sidebar";
 const chaosLog = (...a: unknown[]) =>
   appendFileSync("/tmp/claude-0/chaos.log", `${a.join(" ")}\n`);
 
 type User = ReturnType<typeof userEvent.setup>;
 
 async function stackFromHome(user: User, branchName: string) {
-  await user.click(await screen.findByTestId("home-repo-row"));
+  await clickGpuiHome();
   await screen.findByTestId("show-workspace-header");
   await user.click(await screen.findByRole("button", { name: "Stack" }));
   const dialog = await screen.findByTestId("modal");
@@ -31,13 +31,8 @@ async function stackFromHome(user: User, branchName: string) {
   );
 }
 
-async function openStackDialogOn(user: User, parentBranch: string) {
-  const label = await findSidebarBranchElement(parentBranch);
-  const row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+async function openStackDialogOn(parentBranch: string) {
+  await stackGpui(parentBranch);
   return screen.findByTestId("modal");
 }
 
@@ -47,7 +42,7 @@ async function stackOn(
   branchName: string,
   position: "after" | "before" = "after",
 ) {
-  const dialog = await openStackDialogOn(user, parentBranch);
+  const dialog = await openStackDialogOn(parentBranch);
   if (position === "before") {
     await user.click(within(dialog).getByRole("button", { name: /^before$/i }));
   }
@@ -92,7 +87,7 @@ it("stack chaos: before-insert keeps the chain linear", async () => {
   );
   expect(described).toEqual([]);
 
-  await user.click(await findSidebarBranchElement("chaos/b"));
+  await clickGpuiRow("chaos/b");
   await screen.findByTestId("workspace-stack-panel");
   await new Promise((r) => setTimeout(r, 500));
   await captureDocument(document, {
@@ -115,7 +110,7 @@ it("stack chaos: invalid and duplicate branch names", async () => {
   await stackFromHome(user, "chaos/parent");
 
   // 1. Stack onto chaos/parent using chaos/parent's own name.
-  const dialog = await openStackDialogOn(user, "chaos/parent");
+  const dialog = await openStackDialogOn("chaos/parent");
   const input = within(dialog).getByLabelText("Branch Name");
   const submit = within(dialog).getByRole("button", {
     name: "Create Workspace",

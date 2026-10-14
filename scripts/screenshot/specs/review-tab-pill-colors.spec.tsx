@@ -9,7 +9,6 @@ import userEvent from "@testing-library/user-event";
 import {
 	commitWorkspaceFile,
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -24,6 +23,8 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 function reviewPill(): HTMLElement {
 	const tab = screen.getByRole("tab", { name: /^Changes/ });
@@ -52,7 +53,7 @@ it("captures yellow Review pill for uncommitted changes", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement("feat/pill-yellow"));
+	await clickGpuiRow("feat/pill-yellow");
 	await screen.findByTestId("show-workspace-header");
 	await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
 	await screen.findAllByText("dirty.txt");
@@ -91,10 +92,9 @@ it("captures grey Review pill for committed changes only", async () => {
 		"add committed file",
 	);
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement("feat/pill-grey"));
+	await clickGpuiRow("feat/pill-grey");
 	await screen.findByTestId("show-workspace-header");
 
 	await waitFor(() => {
@@ -138,11 +138,10 @@ it("captures red Review pill for conflicts", async () => {
 	await checkAndRebaseWorkspaces(repoPath, workspaceId, defaultBranch, true);
 	await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
-	await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+	await waitForGpuiConflict(workspaceId);
 
-	await user.click(await findSidebarBranchElement("feat/pill-red"));
+	await clickGpuiRow("feat/pill-red");
 	await screen.findByTestId("show-workspace-header");
 
 	await waitFor(() => {

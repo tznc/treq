@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   gitCommitRepoFile,
   openRepo,
 } from "../../../test/utils";
@@ -11,6 +10,7 @@ import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/file-picker";
 
@@ -41,7 +41,7 @@ it("captures Cmd+P file search from a workspace without a prior file-browser ind
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(BRANCH_NAME));
+  await clickGpuiRow(BRANCH_NAME);
   await screen.findByTestId("show-workspace-header");
 
   await user.keyboard("{Control>}p{/Control}");

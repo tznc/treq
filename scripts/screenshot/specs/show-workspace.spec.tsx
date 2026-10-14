@@ -4,13 +4,13 @@ import userEvent from "@testing-library/user-event";
 import {
 	commitRepoFile,
 	createTestRepo,
-	findSidebarWorkspaceRow,
 	openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, findGpuiRow, stackGpui } from "../../../test/gpui-sidebar";
 
 // Same setup as test/integration/workspace/*.test.tsx: a real jj repo via
 // NAPI, a real Dashboard render, real Rust dispatch under the hood. The only
@@ -32,7 +32,7 @@ it("captures the ShowWorkspace component", async () => {
 	render(<Dashboard />);
 
 	await screen.findByTestId("show-workspace-header");
-	await screen.findByText("feat/screenshot-demo");
+	await findGpuiRow("feat/screenshot-demo");
 	await screen.findByRole("heading", { name: "Test Repository" });
 	// Let async queries triggered by the initial render (branch list, file
 	// tree, README preview, etc.) settle before snapshotting the DOM.
@@ -51,7 +51,7 @@ it("captures the ShowWorkspace component", async () => {
 	// Switch to the workspace itself, which renders the interactive
 	// TargetBranchSelector branch-target visualization (not shown on the
 	// home-repo header captured above).
-	await user.click(await screen.findByText("feat/screenshot-demo"));
+	await clickGpuiRow("feat/screenshot-demo");
 	await screen.findByRole("button", { name: "Workspace target" });
 
 	const workspacePngPath = await captureDocument(document, {
@@ -68,12 +68,7 @@ it("captures the ShowWorkspace component", async () => {
 	// buttons.
 	const longBranchName =
 		"feat/a-very-long-branch-name-that-should-truncate-instead-of-overflowing-the-header-row";
-	await user.click(
-		within(await findSidebarWorkspaceRow("feat/screenshot-demo")).getByRole(
-			"button",
-			{ name: "Stack a workspace" },
-		),
-	);
+	await stackGpui("feat/screenshot-demo");
 	const dialog = await screen.findByTestId("modal");
 	const branchNameInput = within(dialog).getByLabelText("Branch Name");
 	await user.type(branchNameInput, longBranchName);

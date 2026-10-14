@@ -2,10 +2,11 @@ import * as React from "react";
 import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { createTestRepo, openRepo } from "../../../test/utils";
-import { render, screen } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { useZoomSettingsStore } from "../../../src/stores/zoomSettingsStore";
 import { captureDocument } from "../capture";
+import { gpuiSnapshot, sendGpuiAction } from "../../../test/gpui-sidebar";
 
 it("captures UI zoom settings slider and keyboard zoom", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -15,16 +16,15 @@ it("captures UI zoom settings slider and keyboard zoom", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await screen.findByLabelText("Settings");
+	await waitFor(() => expect(gpuiSnapshot()).toBeTruthy());
 	await captureDocument(document, {
 		name: "zoom-settings-01-default",
 		expectations: [
 			"The dashboard renders at normal scale before any zoom change.",
-			"The Settings gear control is visible in the sidebar.",
 		],
 	});
 
-	await user.click(await screen.findByLabelText("Settings"));
+	sendGpuiAction({ kind: "openSettings" });
 	await user.click(await screen.findByRole("tab", { name: /application/i }));
 	const slider = await screen.findByRole("slider");
 	expect(slider).toHaveAttribute("aria-valuenow", "100");

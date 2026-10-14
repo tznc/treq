@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { listen } from "@tauri-apps/api/event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	newCommitWithParents,
 	openRepo,
 	resolveChangeId,
@@ -21,6 +20,8 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 const BRANCH_NAME = "feat/wc-resolve-clears-conflicts";
 
@@ -60,8 +61,8 @@ it("clears Conflicts UI when markers are resolved in the working copy", async ()
 
 	const user = userEvent.setup();
 	render(<Dashboard />);
-	await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
-	await user.click(await findSidebarBranchElement(BRANCH_NAME));
+	await waitForGpuiConflict(workspaceId);
+	await clickGpuiRow(BRANCH_NAME);
 	await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
 	await screen.findByRole("tab", { name: /^Changes/, selected: true });
 	await screen.findByRole("button", { name: "Conflicts" });

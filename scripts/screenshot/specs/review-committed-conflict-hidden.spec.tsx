@@ -3,7 +3,6 @@ import { it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -18,6 +17,8 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 // Rebase conflicts land in committed hunks. Hiding the Committed section must
 // still leave the Conflicts list and inline conflict card visible.
@@ -50,11 +51,9 @@ it("captures committed-tip conflict after hiding Committed changes", async () =>
 	await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
 	render(<Dashboard />);
-	await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+	await waitForGpuiConflict(workspaceId);
 
-	await user.click(
-		await findSidebarBranchElement("feat/committed-conflict-hidden"),
-	);
+	await clickGpuiRow("feat/committed-conflict-hidden");
 	const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
 	await user.click(reviewTab);
 	await screen.findByRole("tab", { name: /^Changes/, selected: true });

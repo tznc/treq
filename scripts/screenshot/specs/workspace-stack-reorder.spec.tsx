@@ -12,10 +12,10 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import {
 	commitWorkspaceFile,
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiHome, clickGpuiRow, findGpuiRow } from "../../../test/gpui-sidebar";
 
 const PARENT = "feat/reorder-parent";
 const CHILD = "feat/reorder-child";
@@ -70,25 +70,20 @@ it("captures sidebar stack before and after parent/child reorder", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await screen.findByText(PARENT);
-	await screen.findByText(CHILD);
+	await findGpuiRow(PARENT);
+	await findGpuiRow(CHILD);
 
 	// View the child so the stack panel mounts (it ignores the default-branch
 	// workspace as an ancestor) and remount after commits like the stacked
 	// panel screenshot spec does.
-	await user.click(await findSidebarBranchElement(CHILD));
-	await user.click(await screen.findByTestId("home-repo-row"));
-	await user.click(await findSidebarBranchElement(CHILD));
+	await clickGpuiRow(CHILD);
+	await clickGpuiHome();
+	await clickGpuiRow(CHILD);
 
 	const panel = await screen.findByTestId("workspace-stack-panel");
 	await within(panel).findByText(PARENT);
 	await within(panel).findByText(CHILD);
 	await screen.findByText("Child commit");
-
-	const sidebar = document.querySelector(
-		`.${CSS.escape("group/sidebar")}`,
-	) as HTMLElement;
-	expect(sidebar).toBeTruthy();
 
 	await captureDocument(document, {
 		name: "workspace-stack-reorder-01-before",
@@ -99,7 +94,7 @@ it("captures sidebar stack before and after parent/child reorder", async () => {
 		],
 	});
 
-	await user.click(await findSidebarBranchElement(PARENT));
+	await clickGpuiRow(PARENT);
 	await screen.findByText("Parent commit");
 
 	const targetBtn = await screen.findByRole("button", {
@@ -122,8 +117,8 @@ it("captures sidebar stack before and after parent/child reorder", async () => {
 	});
 
 	await screen.findByText(/Rebased successfully/i);
-	await within(sidebar).findByText(CHILD);
-	await within(sidebar).findByText(PARENT);
+	await findGpuiRow(CHILD);
+	await findGpuiRow(PARENT);
 
 	await captureDocument(document, {
 		name: "workspace-stack-reorder-02-after",

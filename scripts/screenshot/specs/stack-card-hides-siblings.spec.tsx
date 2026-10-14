@@ -1,4 +1,3 @@
-import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
@@ -11,10 +10,10 @@ import { getFullWorkspacePath } from "../../../src/lib/utils";
 import { render, screen, within } from "../../../test/test-utils";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const PARENT = "feat/stack-parent";
 const CURRENT = "feat/stack-current";
@@ -66,9 +65,8 @@ it("captures the stack card without current-level sibling workspaces", async () 
 		CURRENT,
 	);
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
-	await user.click(await findSidebarBranchElement(CURRENT));
+	await clickGpuiRow(CURRENT);
 
 	const panel = await screen.findByTestId("workspace-stack-panel");
 	expect(within(panel).getByText(PARENT)).toBeTruthy();

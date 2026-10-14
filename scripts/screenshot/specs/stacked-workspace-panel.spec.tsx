@@ -7,12 +7,12 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import {
 	commitWorkspaceFile,
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiHome, clickGpuiRow, stackGpui } from "../../../test/gpui-sidebar";
 
 const PARENT_BRANCH = "feat/stack-parent";
 const CHILD_BRANCH = "feat/stack-child";
@@ -48,13 +48,7 @@ it("captures the stack panel and navigation to a sibling workspace", async () =>
 
 	// Stack a child workspace on top of the parent from its sidebar row's
 	// hover action (workspace headers have no "Stack" button).
-	const parentRow = (await findSidebarBranchElement(PARENT_BRANCH)).closest(
-		"div",
-	) as HTMLElement;
-	await user.hover(parentRow);
-	await user.click(
-		await within(parentRow).findByRole("button", { name: "Stack a workspace" }),
-	);
+	await stackGpui(PARENT_BRANCH);
 
 	dialog = await screen.findByTestId("modal");
 	await user.type(within(dialog).getByLabelText("Branch Name"), CHILD_BRANCH);
@@ -119,8 +113,8 @@ it("captures the stack panel and navigation to a sibling workspace", async () =>
 	// commit made above. Wait out SWR's 2s dedupe window first, or the
 	// remount reuses the cached empty result instead of refetching.
 	await new Promise((resolve) => setTimeout(resolve, 2100));
-	await user.click(await screen.findByTestId("home-repo-row"));
-	await user.click(await screen.findByText(CHILD_BRANCH));
+	await clickGpuiHome();
+	await clickGpuiRow(CHILD_BRANCH);
 
 	const panel = await screen.findByTestId("workspace-stack-panel");
 	await within(panel).findByText(PARENT_BRANCH);

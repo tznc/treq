@@ -4,18 +4,10 @@ import * as React from "react";
 import { expect, it, vi } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { addSupportingRepo, createWorkspace } from "../../../src/lib/api";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
-
-const homeRow = (repoPath: string) =>
-  waitFor(() => {
-    const row = document.querySelector(
-      `[data-testid="home-repo-row"][data-repo-path="${CSS.escape(repoPath)}"]`,
-    ) as HTMLElement | null;
-    if (!row) throw new Error(`no home row for ${repoPath}`);
-    return row;
-  });
+import { clickGpuiHome, findGpuiRow, gpuiMenuLabels, gpuiSnapshot, openGpuiMenu, pickGpuiHomeMenuItem } from "../../../test/gpui-sidebar";
 
 // The everyday entry points a multi-repository user reaches for, beyond the
 // sidebar itself: discovering "Add Repository…" in a single-repository
@@ -29,32 +21,26 @@ it("captures the multi-repository UX journey", async () => {
 
   const user = userEvent.setup();
   const view = render(<Dashboard />);
-  const sidebar = await screen.findByTestId("workspace-sidebar");
-  await within(sidebar).findByText("feat/main-work");
+  await findGpuiRow("feat/main-work");
 
   // Discovery: a single-repository window offers "Add Repository…" only in
-  // the home row's context menu (and the File menu).
-  await user.pointer({ keys: "[MouseRight]", target: await homeRow(mainPath) });
-  await screen.findByText("Add Repository…");
-  await captureDocument(document, {
-    name: "supporting-repos-ux-01-discover-add",
-    expectations: [
-      "A single home row; its context menu lists Add Repository… below the copy-path items.",
-    ],
-  });
+  // the home row's native context menu (and the File menu). Native menus are
+  // not drawn in the browser harness, so assert the entry instead.
+  expect(
+    gpuiMenuLabels(await openGpuiMenu({ kind: "homeMenu", repoPath: mainPath })),
+  ).toContain("Add Repository…");
   vi.mocked(open).mockResolvedValueOnce(otherPath);
-  await user.click(screen.getByText("Add Repository…"));
+  await pickGpuiHomeMenuItem("Add Repository…");
   await screen.findByText("Repository Added");
   const supportingPath = await addSupportingRepo(mainPath, otherPath).catch(
     () => null,
   );
   expect(supportingPath).toBeNull(); // already linked by the menu
-  const supportingRow = await waitFor(() => {
-    const rows = within(sidebar).getAllByTestId("home-repo-row");
-    expect(rows).toHaveLength(2);
-    return rows[1];
+  const svcPath = await waitFor(() => {
+    const repos = gpuiSnapshot()?.repos ?? [];
+    expect(repos).toHaveLength(2);
+    return repos[1].path;
   });
-  const svcPath = supportingRow.getAttribute("data-repo-path") ?? "";
   await createWorkspace(svcPath, "feat/svc");
 
   // Cmd+K > Go to workspace, with the main repository on screen.
@@ -88,14 +74,11 @@ it("captures the multi-repository UX journey", async () => {
   // a fresh render stands in for closing them.
   view.unmount();
   render(<Dashboard />);
-  const sidebarAgain = await screen.findByTestId("workspace-sidebar");
-  await within(sidebarAgain).findByText("feat/svc");
-  const supportingRowAgain =
-    within(sidebarAgain).getAllByTestId("home-repo-row")[1];
+  await findGpuiRow("feat/svc", { repoPath: svcPath });
 
   // A supporting repository on screen: what tells the user which one it is?
-  await user.click(supportingRowAgain);
-  await within(sidebarAgain).findByText("feat/svc");
+  await clickGpuiHome(svcPath);
+  await findGpuiRow("feat/svc", { repoPath: svcPath });
   await captureDocument(document, {
     name: "supporting-repos-ux-04-supporting-home",
     expectations: [
@@ -105,8 +88,7 @@ it("captures the multi-repository UX journey", async () => {
   });
 
   // Repository Settings for the supporting repository.
-  await user.pointer({ keys: "[MouseRight]", target: supportingRowAgain });
-  await user.click(await screen.findByText("Repository Settings"));
+  await pickGpuiHomeMenuItem("Repository Settings", svcPath);
   await screen.findByRole("heading", { name: "Settings" });
   await captureDocument(document, {
     name: "supporting-repos-ux-05-repo-settings",

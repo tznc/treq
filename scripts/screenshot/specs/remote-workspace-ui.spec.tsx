@@ -8,6 +8,7 @@ import { render, screen } from "../../../test/test-utils";
 import { openSavedRemoteRepo } from "../../../test/remote-repo";
 import { createTestRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { findGpuiRow } from "../../../test/gpui-sidebar";
 
 it("captures the remote workspace tree and state banners", async () => {
   const { repoPath } = createTestRepo(false);
@@ -18,7 +19,7 @@ it("captures the remote workspace tree and state banners", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
   await screen.findByTestId("show-workspace-header");
-  await screen.findByText("feat/remote-qa");
+  await findGpuiRow("feat/remote-qa");
   await user.click(await screen.findByRole("button", { name: "Refresh" }));
 
   await captureDocument(document, {

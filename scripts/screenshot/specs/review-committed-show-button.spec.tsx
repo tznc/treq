@@ -3,7 +3,6 @@ import { it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -16,6 +15,7 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 it("captures Committed section Show button on the Changes tab", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -38,7 +38,7 @@ it("captures Committed section Show button on the Changes tab", async () => {
 	writeWorkspaceFile(workspacePath, "working.txt", "working\n");
 
 	render(<Dashboard />);
-	await user.click(await findSidebarBranchElement("feat/committed-show"));
+	await clickGpuiRow("feat/committed-show");
 
 	const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
 	await user.click(reviewTab);
