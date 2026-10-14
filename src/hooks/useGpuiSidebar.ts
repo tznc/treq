@@ -64,6 +64,11 @@ interface UseGpuiSidebarParams {
   onAddRepository?: () => void;
   onRenameWorkspace: (workspace: Workspace) => void;
   onArchiveWorkspace: (workspace: Workspace) => void;
+  /** Stacks `workspace` on `targetBranch`, or on the home branch for null. */
+  onMoveWorkspace: (workspace: Workspace, targetBranch: string | null) => void;
+  /** The resize handle was let go at `width`. */
+  onResizeSidebar: (width: number) => void;
+  onResetSidebarWidth: () => void;
 }
 
 /**
@@ -234,6 +239,19 @@ export function useGpuiSidebar(params: UseGpuiSidebarParams): boolean {
         }
         case "bulkArchive":
           p.onBulkArchive();
+          break;
+        case "moveWorkspace": {
+          const workspace = find(action.id);
+          const onto = find(action.onto);
+          if (!workspace || (action.onto !== null && !onto)) break;
+          p.onMoveWorkspace(workspace, onto?.branch_name ?? null);
+          break;
+        }
+        case "resizeSidebar":
+          p.onResizeSidebar(action.width);
+          break;
+        case "resetSidebarWidth":
+          p.onResetSidebarWidth();
           break;
         case "dismissModal":
           dismissTopWindowModal();

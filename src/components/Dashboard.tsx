@@ -181,7 +181,10 @@ import {
   ChangeFilesMoveProvider,
 } from "./ChangeFilesMoveContext";
 import { useThemeStore } from "../stores/themeStore";
-import { useSidebarWidthStore } from "../stores/sidebarWidthStore";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  useSidebarWidthStore,
+} from "../stores/sidebarWidthStore";
 import { AgentPromptDialog } from "./AgentPromptDialog";
 import { CommandPalette } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -2806,6 +2809,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onSelectWorkspace: handleSelectWorkspace,
     onWorkspaceMultiSelect: handleWorkspaceMultiSelect,
     onSelectStack: handleSelectStack,
+    onMoveWorkspace: (workspace, targetBranch) =>
+      void handleMoveWorkspace(workspace, targetBranch),
+    onResizeSidebar: (width) => {
+      useSidebarWidthStore.getState().setWidth(width);
+      void useSidebarWidthStore.getState().persistWidth();
+    },
+    onResetSidebarWidth: () => {
+      useSidebarWidthStore.getState().setWidth(DEFAULT_SIDEBAR_WIDTH);
+      void useSidebarWidthStore.getState().persistWidth();
+    },
     onSelectRepoHome: handleSelectRepoHome,
     onOpenSettings: () => openSettings("application"),
     onOpenCommandPalette: () => setShowCommandPalette(true),

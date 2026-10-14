@@ -26,6 +26,10 @@ pub const ACTION_EVENT: &str = "gpui-sidebar-action";
 /// the React app's `TooltipProvider`.
 const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
 
+/// The sidebar's width range, as React clamps it (`sidebarWidthStore`).
+const MIN_WIDTH: f32 = 200.;
+const MAX_WIDTH: f32 = 480.;
+
 /// What the sidebar shows, flattened for drawing.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,6 +187,53 @@ pub enum SidebarAction {
   },
   /// A click on the modal backdrop drawn over the sidebar.
   DismissModal,
+  /// A workspace row dropped onto another row, to stack it there, or onto
+  /// the list (`onto: None`), to move it to the home branch.
+  MoveWorkspace {
+    id: i64,
+    onto: Option<i64>,
+  },
+  /// The resize handle was let go at `width`.
+  ResizeSidebar {
+    width: f32,
+  },
+  /// A double click on the resize handle.
+  ResetSidebarWidth,
+}
+
+/// A workspace row being dragged.
+#[derive(Clone)]
+struct DraggedWorkspace {
+  id: i64,
+  title: SharedString,
+  palette: Palette,
+}
+
+impl Render for DraggedWorkspace {
+  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .px_2()
+      .py_1()
+      .rounded_md()
+      .border_1()
+      .border_color(self.palette.border)
+      .bg(self.palette.sidebar)
+      .text_size(px(13.))
+      .text_color(self.palette.sidebar_foreground)
+      .font_family(theme::MONO_FONT)
+      .shadow_md()
+      .child(self.title.clone())
+  }
+}
+
+/// The resize handle being dragged.
+#[derive(Clone, Copy)]
+struct ResizeDrag;
+
+impl Render for ResizeDrag {
+  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    gpui::Empty
+  }
 }
 
 /// Where the sidebar's actions go: the window's webview in the app, a list
@@ -198,6 +249,8 @@ pub struct Sidebar {
   /// The row under the pointer. A button inside it takes the tooltip, and
   /// the row's own tooltip comes back when the pointer leaves the button.
   hovered_row: Option<SharedString>,
+  /// The width while the resize handle is dragged, ahead of React.
+  drag_width: Option<f32>,
 }
 
 impl Sidebar {
@@ -207,7 +260,24 @@ impl Sidebar {
       sink,
       tooltip: None,
       hovered_row: None,
+      drag_width: None,
     }
+  }
+
+  /// The width drawn: the dragged width while resizing, else React's.
+  pub fn width(&self) -> f32 {
+    self.drag_width.unwrap_or(self.snapshot.width)
+  }
+
+  /// Ends a resize: keeps the new width until React sends it back, and
+  /// tells React.
+  fn finish_resize(&mut self, cx: &mut Context<Self>) {
+    let Some(width) = self.drag_width.take() else {
+      return;
+    };
+    self.snapshot.width = width;
+    (self.sink)(SidebarAction::ResizeSidebar { width }, cx);
+    cx.notify();
   }
 
   pub fn snapshot(&self) -> &SidebarSnapshot {
@@ -257,6 +327,25 @@ impl Sidebar {
         }
       };
       sink(action, cx);
+    }
+  }
+
+  /// A drop handler that moves the dragged workspace onto `onto`.
+  fn on_workspace_drop(
+    &self,
+    onto: Option<i64>,
+  ) -> impl Fn(&DraggedWorkspace, &mut Window, &mut App) + 'static {
+    let sink = self.sink.clone();
+    move |dragged, _, cx| {
+      if onto != Some(dragged.id) {
+        sink(
+          SidebarAction::MoveWorkspace {
+            id: dragged.id,
+            onto,
+          },
+          cx,
+        );
+      }
     }
   }
 
@@ -442,7 +531,8 @@ impl Render for Sidebar {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let snapshot = &self.snapshot;
     let palette = theme::palette(snapshot.dark);
-    let tooltip_width = (snapshot.width - 24.).max(80.);
+    let width = self.width();
+    let tooltip_width = (width - 24.).max(80.);
 
     let header = div()
       .flex()
@@ -504,7 +594,7 @@ impl Render for Sidebar {
       .flex()
       .flex_col()
       .flex_none()
-      .w(px(snapshot.width))
+      .w(px(width))
       .h_full()
       .bg(palette.sidebar)
       .text_color(palette.sidebar_foreground)
@@ -547,7 +637,8 @@ impl Render for Sidebar {
       .px_2()
       .pb_2()
       .gap(px(2.))
-      .on_click(self.on_action(SidebarAction::ClearSelection));
+      .on_click(self.on_action(SidebarAction::ClearSelection))
+      .on_drop(self.on_workspace_drop(None));
     let mut any_rows = false;
     for repo in &snapshot.repos {
       if repo.loading && repo.workspaces.is_empty() {
@@ -582,6 +673,26 @@ impl Render for Sidebar {
           .child("Workspaces"),
       )
       .child(list)
+      .child(self.resize_handle(&palette, cx))
+      .on_drag_move(
+        cx.listener(|this, event: &gpui::DragMoveEvent<ResizeDrag>, _, cx| {
+          let width = f32::from(event.event.position.x)
+            .round()
+            .clamp(MIN_WIDTH, MAX_WIDTH);
+          if this.drag_width != Some(width) {
+            this.drag_width = Some(width);
+            cx.notify();
+          }
+        }),
+      )
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|this, _, _, cx| this.finish_resize(cx)),
+      )
+      .on_mouse_up_out(
+        MouseButton::Left,
+        cx.listener(|this, _, _, cx| this.finish_resize(cx)),
+      )
       .when_some(snapshot.modal, |this, opacity| {
         this.child(modal_backdrop(opacity).on_click(self.on_action(SidebarAction::DismissModal)))
       })
@@ -856,6 +967,33 @@ impl Sidebar {
       .on_click(self.on_action(action))
   }
 
+  /// The strip on the sidebar's right edge that drags its width, or resets
+  /// it on double click.
+  fn resize_handle(&self, palette: &Palette, _cx: &mut Context<Self>) -> impl IntoElement {
+    let dragging = self.drag_width.is_some();
+    let primary = palette.primary;
+    let sink = self.sink.clone();
+    div()
+      .id("resize-handle")
+      .debug_selector(|| "resize-handle".into())
+      .absolute()
+      .top_0()
+      .bottom_0()
+      // Inside the sidebar: the webview takes every click right of it.
+      .right_0()
+      .w(px(4.))
+      .cursor_ew_resize()
+      .when(dragging, |this| this.bg(primary))
+      .hover(move |style| style.bg(primary.opacity(0.5)))
+      .on_drag(ResizeDrag, |drag, _, _, cx| cx.new(|_| *drag))
+      .on_click(move |event: &ClickEvent, _, cx| {
+        cx.stop_propagation();
+        if event.click_count() >= 2 {
+          sink(SidebarAction::ResetSidebarWidth, cx);
+        }
+      })
+  }
+
   fn workspace_row(
     &self,
     row: &SidebarRow,
@@ -1033,6 +1171,26 @@ impl Sidebar {
         this.child(tooltip_bubble(palette, tooltip_width, tip))
       })
       .when(!row.archiving, |this| this.on_click(self.on_row_click(id)))
+      .when(interactive, |this| {
+        let primary = palette.primary;
+        this
+          .on_drag(
+            DraggedWorkspace {
+              id,
+              title: row.title.clone().into(),
+              palette: *palette,
+            },
+            |dragged, _, _, cx| cx.new(|_| dragged.clone()),
+          )
+          .drag_over::<DraggedWorkspace>(move |style, dragged, _, _| {
+            if dragged.id == id {
+              style
+            } else {
+              style.bg(primary.opacity(0.2))
+            }
+          })
+          .on_drop(self.on_workspace_drop(Some(id)))
+      })
       // An archiving row swallows the click, so it does not clear the selection.
       .when(row.archiving, |this| {
         this.on_click(|_, _, cx| cx.stop_propagation())

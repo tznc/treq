@@ -82,6 +82,7 @@ pub fn init(cx: &mut App) {
 pub const SANS_FONT: &str = "Inter";
 
 /// Theme tokens from `src/index.css`, light or dark.
+#[derive(Clone, Copy)]
 pub struct Palette {
   pub background: Hsla,
   pub foreground: Hsla,

@@ -544,3 +544,115 @@ fn opening_a_modal_hides_the_tooltip(cx: &mut TestAppContext) {
   h.sidebar
     .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("settings")));
 }
+
+impl Harness {
+  /// Presses at `from`, moves to `to` in steps, and lets go there.
+  fn drag(&mut self, from: gpui::Point<gpui::Pixels>, to: gpui::Point<gpui::Pixels>) {
+    self.cx.simulate_event(gpui::MouseDownEvent {
+      position: from,
+      button: MouseButton::Left,
+      modifiers: Modifiers::none(),
+      click_count: 1,
+      first_mouse: false,
+    });
+    for step in 1..=4 {
+      let t = step as f32 / 4.;
+      let position = from + (to - from) * t;
+      self
+        .cx
+        .simulate_mouse_move(position, Some(MouseButton::Left), Modifiers::none());
+    }
+    self.cx.simulate_event(gpui::MouseUpEvent {
+      position: to,
+      button: MouseButton::Left,
+      modifiers: Modifiers::none(),
+      click_count: 1,
+    });
+    self.cx.run_until_parked();
+  }
+
+  fn center(&mut self, selector: &'static str) -> gpui::Point<gpui::Pixels> {
+    self
+      .bounds(selector)
+      .unwrap_or_else(|| panic!("{selector} is not drawn"))
+      .center()
+  }
+}
+
+#[test]
+fn serializes_drag_actions_for_react() {
+  let json = |action| serde_json::to_value(action).expect("json");
+  assert_eq!(
+    json(SidebarAction::MoveWorkspace { id: 3, onto: None }),
+    serde_json::json!({"kind": "moveWorkspace", "id": 3, "onto": null})
+  );
+  assert_eq!(
+    json(SidebarAction::ResizeSidebar { width: 320. }),
+    serde_json::json!({"kind": "resizeSidebar", "width": 320.0})
+  );
+  assert_eq!(
+    json(SidebarAction::ResetSidebarWidth),
+    serde_json::json!({"kind": "resetSidebarWidth"})
+  );
+}
+
+#[gpui::test]
+fn dropping_a_workspace_on_another_stacks_it_there(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), row(8, "feat-b", 0)]));
+  let (from, to) = (h.center("workspace-8"), h.center("workspace-7"));
+  h.drag(from, to);
+  assert_eq!(
+    h.sent(),
+    vec![SidebarAction::MoveWorkspace {
+      id: 8,
+      onto: Some(7)
+    }]
+  );
+}
+
+#[gpui::test]
+fn dropping_a_workspace_on_the_list_moves_it_home(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), row(8, "feat-b", 1)]));
+  let list = h.bounds("workspaces").expect("drawn");
+  let below_rows = gpui::point(list.center().x, list.bottom() - px(4.));
+  let from = h.center("workspace-8");
+  h.drag(from, below_rows);
+  assert_eq!(
+    h.sent(),
+    vec![SidebarAction::MoveWorkspace { id: 8, onto: None }]
+  );
+}
+
+#[gpui::test]
+fn dropping_a_workspace_on_itself_does_nothing(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  let at = h.center("workspace-7");
+  h.drag(at, at + gpui::point(px(30.), px(2.)));
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn dragging_the_edge_resizes_within_bounds(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  let handle = h.center("resize-handle");
+  h.drag(handle, gpui::point(px(350.), handle.y));
+  assert_eq!(h.sent(), vec![SidebarAction::ResizeSidebar { width: 350. }]);
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert_eq!(s.width(), 350.));
+
+  let handle = h.center("resize-handle");
+  h.drag(handle, gpui::point(px(900.), handle.y));
+  assert_eq!(
+    h.sent().last(),
+    Some(&SidebarAction::ResizeSidebar { width: 480. })
+  );
+}
+
+#[gpui::test]
+fn double_clicking_the_edge_resets_the_width(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  let handle = h.center("resize-handle");
+  h.press(handle, MouseButton::Left, Modifiers::none(), 1);
+  h.press(handle, MouseButton::Left, Modifiers::none(), 2);
+  assert_eq!(h.sent(), vec![SidebarAction::ResetSidebarWidth]);
+}

@@ -80,7 +80,10 @@ export type GpuiSidebarAction =
   | { kind: "bulkArchive" }
   | { kind: "homeMenu"; repoPath: string }
   | { kind: "workspaceMenu"; id: number }
-  | { kind: "dismissModal" };
+  | { kind: "dismissModal" }
+  | { kind: "moveWorkspace"; id: number; onto: number | null }
+  | { kind: "resizeSidebar"; width: number }
+  | { kind: "resetSidebarWidth" };
 
 const GPUI_SIDEBAR_ACTION_EVENT = "gpui-sidebar-action";
 
