@@ -29,7 +29,7 @@ export type NativeMenuEntry =
     };
 
 /** The lucide icon beside an item, as the React context menus drew them. */
-export type MenuIcon =
+type MenuIcon =
   | "archive"
   | "copy"
   | "folder-open"
