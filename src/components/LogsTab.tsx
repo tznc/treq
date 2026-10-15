@@ -1,12 +1,14 @@
 import { type ReactNode, useEffect, useState } from "react";
 import useSWR from "swr";
-import { Database, Loader2, Table2 } from "lucide-react";
+import { Database, FolderOpen, Loader2, Table2 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   getAgentChat,
   getAppSetupLogs,
   getLogTimeseries,
   getRepoLogs,
+  getSystemLogs,
+  openSystemLogDir,
   listAgentChats,
   listWorkflows,
 } from "../lib/api";
@@ -21,15 +23,21 @@ import { CheckWorkflowFilter } from "./checks/CheckWorkflowFilter";
 
 interface Props {
   repoPath: string;
+  /** Source shown on mount; defaults to check logs. */
+  initialSource?: LogSource;
   onSendToAgent?: (prompt: string) => void;
 }
 
 type View = "browse" | "explorer";
-type SourceGroup = "checks" | "agent-chats" | "app-setup";
+export type LogSource = "checks" | "agent-chats" | "app-setup" | "system";
 
-/** Repo-level check and agent logs, plus app-level setup script logs. */
-export function LogsTab({ repoPath, onSendToAgent }: Props) {
-  const [source, setSource] = useState<SourceGroup>("checks");
+/** Repo-level check and agent logs, plus app-level setup script and system logs. */
+export function LogsTab({
+  repoPath,
+  initialSource = "checks",
+  onSendToAgent,
+}: Props) {
+  const [source, setSource] = useState<LogSource>(initialSource);
   const [view, setView] = useState<View>("browse");
   const browsing = source === "checks" && view === "browse";
 
@@ -43,13 +51,14 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
           className="h-8 rounded-md border bg-background px-2 text-sm"
           value={source}
           onChange={(event) => {
-            setSource(event.target.value as SourceGroup);
+            setSource(event.target.value as LogSource);
             setView("browse");
           }}
         >
           <option value="checks">Checks</option>
           <option value="agent-chats">Agent</option>
           <option value="app-setup">App setup</option>
+          <option value="system">System</option>
         </select>
         {checksSelected && (
           <div className="flex items-center gap-1">
@@ -86,6 +95,36 @@ export function LogsTab({ repoPath, onSendToAgent }: Props) {
           promptLabel="my app setup script logs"
           onSendToAgent={onSendToAgent}
           prefixColumns={[RUN_COLUMN]}
+        />
+      ) : source === "system" ? (
+        <FilteredLogs
+          swrKey={["system-logs"]}
+          fetchLogs={getSystemLogs}
+          searchLabel="Search system logs"
+          searchPlaceholder="Search system logs…"
+          testId="system-logs-output"
+          lineTestId="system-log-line"
+          emptyMessage="No system logs recorded yet."
+          promptLabel="the Treq app's system logs"
+          onSendToAgent={onSendToAgent}
+          filterControls={
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void openSystemLogDir()}
+            >
+              <FolderOpen className="h-3 w-3 mr-1" />
+              Open log folder
+            </Button>
+          }
+          prefixColumns={[
+            {
+              header: "Source",
+              width: "w-[calc(24ch+1.5rem)]",
+              className: "text-muted-foreground",
+              render: (record) => record.job_id,
+            },
+          ]}
         />
       ) : browsing ? (
         <ChecksLogs repoPath={repoPath} onSendToAgent={onSendToAgent} />
@@ -146,7 +185,8 @@ function ChecksLogs({
         RUN_COLUMN,
         {
           header: "Job",
-          className: "w-[10ch] text-blue-600 dark:text-blue-400",
+          width: "w-[calc(10ch+1.5rem)]",
+          className: "text-blue-600 dark:text-blue-400",
           render: (record) => record.job_id,
         },
       ]}
@@ -233,7 +273,8 @@ function AgentChatsSource({
           prefixColumns={[
             {
               header: "Role",
-              className: "w-[6ch] text-blue-600 dark:text-blue-400",
+              width: "w-[calc(6ch+1.5rem)]",
+              className: "text-blue-600 dark:text-blue-400",
               render: (record) => record.job_id,
             },
           ]}
@@ -245,7 +286,8 @@ function AgentChatsSource({
 
 const RUN_COLUMN: PrefixColumn = {
   header: "Run",
-  className: "w-[5ch] text-muted-foreground",
+  width: "w-[calc(6ch+1.5rem)]",
+  className: "text-muted-foreground",
   render: (record) => `#${record.run_id}`,
 };
 
@@ -260,6 +302,7 @@ function FilteredLogs({
   fetchLogs,
   fetchBuckets,
   searchLabel,
+  searchPlaceholder = "Search all runs…",
   testId,
   lineTestId,
   emptyMessage,
@@ -272,6 +315,7 @@ function FilteredLogs({
   fetchLogs: (filters: LogFilters) => Promise<LogRecordView[]>;
   fetchBuckets?: (filters: LogFilters) => Promise<LogBucket[]>;
   searchLabel: string;
+  searchPlaceholder?: string;
   testId: string;
   lineTestId: string;
   emptyMessage: string;
@@ -304,7 +348,7 @@ function FilteredLogs({
         {filterControls}
         <input
           aria-label={searchLabel}
-          placeholder="Search all runs…"
+          placeholder={searchPlaceholder}
           className="ml-auto h-8 w-full max-w-sm min-w-[160px] rounded-md border bg-background px-2 text-sm"
           value={search}
           onChange={(e) => setSearch(e.target.value)}

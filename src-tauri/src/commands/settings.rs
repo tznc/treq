@@ -129,3 +129,33 @@ pub async fn get_app_setup_logs(
   .await
   .map_err(|e| e.to_string())?
 }
+
+/// Reveals the app's log folder in the OS file manager.
+#[tauri::command]
+pub fn open_system_log_dir(app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
+  use tauri_plugin_opener::OpenerExt;
+  app
+    .opener()
+    .open_path(state.telemetry.log_dir.to_string_lossy(), None::<&str>)
+    .map_err(|e| e.to_string())
+}
+
+/// The app's own log files, newest records last.
+#[tauri::command]
+pub async fn get_system_logs(
+  state: State<'_, AppState>,
+  levels: Option<Vec<String>>,
+  search: Option<String>,
+) -> Result<Vec<core::checks_logs::LogRecordView>, String> {
+  let log_dir = state.telemetry.log_dir.clone();
+  tauri::async_runtime::spawn_blocking(move || {
+    let query = core::checks_logs::LogQuery {
+      levels,
+      search,
+      ..Default::default()
+    };
+    core::system_logs::query_system_logs(&log_dir, &query)
+  })
+  .await
+  .map_err(|e| e.to_string())?
+}

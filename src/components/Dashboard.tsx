@@ -55,8 +55,10 @@ import {
   addSupportingRepo,
   removeSupportingRepo,
   updateSessionAccess,
+  openSystemLogDir,
   type Workspace,
 } from "../lib/api";
+import { requestOpenSystemLogs } from "../lib/open-logs-request";
 import type { RemoteRepository } from "../lib/api-types";
 import type {
   InstanceStatusResponse,
@@ -309,6 +311,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [location, navigate] = useLocation();
   const remoteSshEnabled = usePreviewFeature("remoteSsh");
   const linearIntegrationEnabled = usePreviewFeature("linearIntegration");
+  const logsEnabled = usePreviewFeature("logs");
   const previousViewModeRef = useRef<ViewMode>(
     initialViewMode === "settings" ? "show-workspace" : initialViewMode,
   );
@@ -1851,6 +1854,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
         void handleOpenRemoteSetup();
       }),
       // Menu factory reset
+      // Help > View Logs: the System source of the Logs tab. With no repo
+      // open there is no Logs tab, so reveal the log folder instead.
+      listen("menu-view-logs", () => {
+        if (!dataRepoPath || !logsEnabled) {
+          void openSystemLogDir();
+          return;
+        }
+        requestOpenSystemLogs();
+        setViewMode("show-workspace");
+      }),
       listen("menu-factory-reset", async () => {
         const confirmed = await ask(
           "Clear the saved repository path and return to the start screen?",
@@ -1931,6 +1944,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [
     repoPath,
+    dataRepoPath,
+    logsEnabled,
     mainRepoPath,
     selectedWorkspace,
     effectiveDefaultBranch,

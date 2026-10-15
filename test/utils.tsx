@@ -21,6 +21,7 @@ type NapiTestBindings = {
     defaultBranch: string;
   };
   cleanupTestRepo: (tempDirPath: string) => void;
+  appendSystemLogLine: (level: string, target: string, message: string) => void;
   gitCommitAll: (repoPath: string, message: string) => void;
   writeWorkspaceFile: (
     workspacePath: string,
@@ -252,6 +253,15 @@ export function newCommitWithParents(
   parentRevisions: string[],
 ): string {
   return getNapiBindings().newCommitWithParents(workspacePath, parentRevisions);
+}
+
+/** Appends a line to the app's own log, read by the Logs tab "System" source. */
+export function appendSystemLogLine(
+  level: "INFO" | "WARN" | "ERROR",
+  target: string,
+  message: string,
+) {
+  getNapiBindings().appendSystemLogLine(level, target, message);
 }
 
 export async function writeRepoFile(
