@@ -16,8 +16,6 @@ export interface AgentReviewContextValue {
    */
   sendAgentCommentToAgent?: (comment: AgentReviewComment) => Promise<void>;
   onAgentCommentError: (message: string) => void;
-  /** PR review screen: promote the comment to a draft GitHub review comment. */
-  addAgentCommentToReview?: (comment: AgentReviewComment) => Promise<void>;
 }
 
 /**
@@ -98,7 +96,6 @@ export function AgentReviewInlineList({
           onDelete={agentReview.deleteAgentComment}
           onApplySuggestion={agentReview.applyAgentSuggestion}
           onSendToAgent={agentReview.sendAgentCommentToAgent}
-          onAddToReview={agentReview.addAgentCommentToReview}
           onError={agentReview.onAgentCommentError}
         />
       ))}

@@ -703,6 +703,13 @@ pub fn gh_create_pr_comment_impl(
   check_gh_output(out).map(|_| ())
 }
 
+/// Login of the user `gh` is authenticated as.
+pub fn gh_current_user_impl(gh_path: &str, extended_path: &str) -> Result<String, String> {
+  let out = run_gh(gh_path, &["api", "user", "--jq", ".login"], extended_path)?;
+  let bytes = check_gh_output(out)?;
+  Ok(String::from_utf8_lossy(&bytes).trim().to_string())
+}
+
 /// Unified diff of a PR (`gh pr diff`), base...head as GitHub shows it.
 pub fn gh_pr_diff_impl(
   gh_path: &str,
@@ -2783,6 +2790,19 @@ esac
     assert_eq!(stdin["comments"][0]["start_line"], 1);
     assert_eq!(stdin["comments"][0]["start_side"], "RIGHT");
     assert!(stdin["comments"][1].get("start_line").is_none());
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_current_user_returns_trimmed_login() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, "alice");
+
+    let login = gh_current_user_impl(&gh_path, "/usr/bin:/bin").unwrap();
+
+    assert_eq!(login, "alice");
+    let args = fs::read_to_string(bin_dir.path().join("args")).unwrap();
+    assert_eq!(args, "api\nuser\n--jq\n.login\n");
   }
 
   #[test]

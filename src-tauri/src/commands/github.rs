@@ -351,6 +351,11 @@ pub async fn gh_set_pr_draft(
 }
 
 #[tauri::command]
+pub async fn gh_current_user() -> Result<String, String> {
+  run_gh_blocking("gh_current_user", crate::github::gh_current_user_impl).await
+}
+
+#[tauri::command]
 pub async fn gh_pr_diff(repo_full_name: String, pr_number: u64) -> Result<String, String> {
   run_gh_blocking("gh_pr_diff", move |gh, path| {
     crate::github::gh_pr_diff_impl(gh, &repo_full_name, pr_number, path)

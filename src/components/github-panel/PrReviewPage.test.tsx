@@ -1,6 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { invalidateQueries } from "../../lib/swr-cache";
 import { PrReviewScreen } from "./PrReviewPage";
 
 const api = vi.hoisted(() => ({
@@ -12,6 +13,8 @@ const api = vi.hoisted(() => ({
   ghSubmitPrReview: vi.fn(),
   listAgentReviewComments: vi.fn(),
   resolveAgentReviewComment: vi.fn(),
+  deleteAgentReviewComment: vi.fn(),
+  ghCurrentUser: vi.fn(),
 }));
 
 vi.mock("../../lib/api", async (importOriginal) => ({
@@ -114,6 +117,8 @@ describe("PR review screen", () => {
     api.ghSubmitPrReview.mockResolvedValue(undefined);
     api.listAgentReviewComments.mockResolvedValue([AGENT_COMMENT]);
     api.resolveAgentReviewComment.mockResolvedValue(undefined);
+    api.deleteAgentReviewComment.mockResolvedValue(undefined);
+    api.ghCurrentUser.mockResolvedValue("bob");
   });
 
   it("shows the PR diff with its GitHub threads", async () => {
@@ -153,15 +158,11 @@ describe("PR review screen", () => {
     expect(prompt).toContain("gh pr diff 42 --repo acme/treq");
   });
 
-  it("approves with an agent comment promoted into the review", async () => {
+  it("inserts the agent's comments as drafts and approves with them", async () => {
     renderScreen();
-    await user.click(
-      await screen.findByRole("button", { name: /Add to review/ }),
-    );
-    expect(api.resolveAgentReviewComment).toHaveBeenCalledWith(
-      "/repo",
-      "agent-1",
-    );
+    const draft = await screen.findByTestId("inline-comment-card");
+    expect(draft.textContent).toContain("Returns the untrimmed query.");
+    expect(screen.queryByTestId("agent-review-comment-card")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Finish review/ }));
     const popover = await screen.findByText("Finish your review");
@@ -190,5 +191,68 @@ describe("PR review screen", () => {
         ],
       ),
     );
+    // Submitted drafts are done with; the agent comment is resolved.
+    await waitFor(() =>
+      expect(api.resolveAgentReviewComment).toHaveBeenCalledWith(
+        "/repo",
+        "agent-1",
+      ),
+    );
+  });
+
+  it("adds a comment the agent writes while the screen is open", async () => {
+    api.listAgentReviewComments.mockResolvedValue([]);
+    renderScreen();
+    await waitFor(() => expect(diffLineTexts().length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("inline-comment-card")).toBeNull();
+
+    // The agent records a comment; the next poll picks it up.
+    api.listAgentReviewComments.mockResolvedValue([AGENT_COMMENT]);
+    await invalidateQueries([
+      "agent-review-comments",
+      "/repo",
+      "github_pr",
+      "42",
+    ]);
+
+    expect(
+      (await screen.findByTestId("inline-comment-card")).textContent,
+    ).toContain("Returns the untrimmed query.");
+  });
+
+  it("deleting an agent draft deletes the agent comment", async () => {
+    renderScreen();
+    const draft = await screen.findByTestId("inline-comment-card");
+    await user.click(within(draft).getByRole("button"));
+    expect(api.deleteAgentReviewComment).toHaveBeenCalledWith(
+      "/repo",
+      "agent-1",
+    );
+    expect(screen.queryByTestId("inline-comment-card")).toBeNull();
+  });
+
+  it("disables Approve and Request changes on your own PR", async () => {
+    api.ghCurrentUser.mockResolvedValue("alice");
+    renderScreen();
+    await user.click(
+      await screen.findByRole("button", { name: /Finish review/ }),
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("radio", { name: "Approve" }) as HTMLInputElement)
+          .disabled,
+      ).toBe(true),
+    );
+    expect(
+      (
+        screen.getByRole("radio", {
+          name: "Request changes",
+        }) as HTMLInputElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("radio", { name: "Comment" }) as HTMLInputElement)
+        .disabled,
+    ).toBe(false);
   });
 });

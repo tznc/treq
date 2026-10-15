@@ -1,5 +1,5 @@
 /* eslint-disable max-lines */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import {
   ArrowLeft,
@@ -11,16 +11,14 @@ import {
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  ghCurrentUser,
   ghPrDiff,
   ghReplyPrReviewThread,
   ghSubmitPrReview,
   ghViewPr,
   type GhReviewEvent,
 } from "../../lib/api";
-import {
-  AGENT_REVIEW_TARGET_GITHUB_PR,
-  type AgentReviewComment,
-} from "../../lib/api-types-review";
+import { AGENT_REVIEW_TARGET_GITHUB_PR } from "../../lib/api-types-review";
 import { prepareGithubPrReview } from "../../lib/agent-review-launch";
 import {
   agentCommentToLineComment,
@@ -34,7 +32,6 @@ import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Textarea } from "../ui/textarea";
 import { useToast } from "../ui/toast";
-import { AgentReviewContext } from "../changes-diff-viewer/AgentReviewContext";
 import { ContextMenu } from "../changes-diff-viewer/ContextMenu";
 import { DiffContentArea } from "../changes-diff-viewer/DiffContentArea";
 import { GithubThreadReplyContext } from "../changes-diff-viewer/GithubCommentCard";
@@ -189,19 +186,39 @@ function PrReviewPage({
     pr: { owner, repo, number: prNumber },
   });
 
+  // The AI review writes comments to the local DB while this screen is open;
+  // a short poll turns each new one into a draft as soon as it lands. They
+  // stay open (so drafts survive leaving the screen) until submitted.
   const agentReview = useAgentReviewComments({
     repoPath,
     targetType: AGENT_REVIEW_TARGET_GITHUB_PR,
     targetId: String(prNumber),
+    refreshMs: 3_000,
   });
-
-  const addAgentCommentToReview = async (comment: AgentReviewComment) => {
+  const agentDraftIds = useRef<Set<string>>(new Set());
+  const { openAgentReviewComments } = agentReview;
+  useEffect(() => {
+    if (rawDiff === undefined) return;
+    const fresh = openAgentReviewComments.filter(
+      (c) => !agentDraftIds.current.has(c.id),
+    );
+    if (fresh.length === 0) return;
+    for (const c of fresh) agentDraftIds.current.add(c.id);
     setComments((prev) => [
       ...prev,
-      agentCommentToLineComment(comment, allFileHunks),
+      ...fresh.map((c) => agentCommentToLineComment(c, allFileHunks)),
     ]);
-    await agentReview.resolveAgentComment(comment.id);
+  }, [openAgentReviewComments, rawDiff, allFileHunks, setComments]);
+
+  const deleteComment = (commentId: string) => {
+    commentState.deleteComment(commentId);
+    if (agentDraftIds.current.has(commentId)) {
+      void agentReview.deleteAgentComment(commentId);
+    }
   };
+
+  const { data: viewer } = useSWR("gh-current-user", ghCurrentUser);
+  const isOwnPr = Boolean(viewer && pr && viewer === pr.author.login);
 
   const replyToThread = async (threadId: string, body: string) => {
     await ghReplyPrReviewThread(threadId, body);
@@ -243,6 +260,11 @@ function PrReviewPage({
     setSubmitting(true);
     try {
       await ghSubmitPrReview(repoFullName, prNumber, event, body, inline);
+      await Promise.all(
+        comments
+          .filter((c) => agentDraftIds.current.has(c.id))
+          .map((c) => agentReview.resolveAgentComment(c.id)),
+      );
       setComments([]);
       setSummary("");
       setEvent("COMMENT");
@@ -268,251 +290,235 @@ function PrReviewPage({
     event !== "REQUEST_CHANGES" || summary.trim() || comments.length > 0;
 
   return (
-    <AgentReviewContext.Provider
-      value={{
-        getAgentCommentsForLine: agentReview.getAgentCommentsForLine,
-        resolveAgentComment: agentReview.resolveAgentComment,
-        deleteAgentComment: agentReview.deleteAgentComment,
-        applyAgentSuggestion: async () => {},
-        addAgentCommentToReview,
-        onAgentCommentError: (message) =>
-          addToast({
-            title: "Review comment action failed",
-            description: message,
-            type: "error",
-          }),
-      }}
-    >
-      <GithubThreadReplyContext.Provider value={replyToThread}>
-        <div
-          className="flex flex-col h-full min-h-0 bg-background"
-          data-testid="pr-review-page"
-        >
-          <header className="flex items-center gap-3 px-4 py-2 border-b border-border">
+    <GithubThreadReplyContext.Provider value={replyToThread}>
+      <div
+        className="flex flex-col h-full min-h-0 bg-background"
+        data-testid="pr-review-page"
+      >
+        <header className="flex items-center gap-3 px-4 py-2 border-b border-border">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            aria-label="Back"
+            onClick={onClose}
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <GitPullRequest className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium truncate">
+              {pr?.title ?? `Pull request #${prNumber}`}{" "}
+              <span className="text-muted-foreground">#{prNumber}</span>
+            </div>
+            {pr && (
+              <div className="text-xs text-muted-foreground truncate">
+                {pr.author.login} wants to merge <code>{pr.head_ref_name}</code>{" "}
+                into <code>{pr.base_ref_name}</code> · {files.length} file
+                {files.length === 1 ? "" : "s"}
+              </div>
+            )}
+          </div>
+          {pr && (
             <Button
               size="icon"
               variant="ghost"
               className="h-8 w-8"
-              aria-label="Back"
-              onClick={onClose}
+              aria-label="Open on GitHub"
+              onClick={() => void openUrl(pr.url)}
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ExternalLink className="w-4 h-4" />
             </Button>
-            <GitPullRequest className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium truncate">
-                {pr?.title ?? `Pull request #${prNumber}`}{" "}
-                <span className="text-muted-foreground">#{prNumber}</span>
-              </div>
-              {pr && (
-                <div className="text-xs text-muted-foreground truncate">
-                  {pr.author.login} wants to merge{" "}
-                  <code>{pr.head_ref_name}</code> into{" "}
-                  <code>{pr.base_ref_name}</code> · {files.length} file
-                  {files.length === 1 ? "" : "s"}
-                </div>
-              )}
-            </div>
-            {pr && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8"
-                aria-label="Open on GitHub"
-                onClick={() => void openUrl(pr.url)}
-              >
-                <ExternalLink className="w-4 h-4" />
-              </Button>
-            )}
-            {onStartAgentReview && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2"
-                disabled={startingAgent || files.length === 0}
-                onClick={() => void handleStartAgentReview()}
-              >
-                <Bot className="w-3 h-3" />
-                AI review
-                {agentReview.openAgentReviewComments.length > 0 &&
-                  ` (${agentReview.openAgentReviewComments.length})`}
-              </Button>
-            )}
-            <Popover open={reviewOpen} onOpenChange={setReviewOpen}>
-              <PopoverTrigger asChild>
-                <Button size="sm" className="gap-2">
-                  <Send className="w-3 h-3" />
-                  Finish review
-                  {comments.length > 0 && ` (${comments.length})`}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" side="bottom" className="w-96">
-                <div className="space-y-3">
-                  <div>
-                    <h4 className="font-medium text-sm mb-1">
-                      Finish your review
-                    </h4>
-                    <p className="text-sm text-muted-foreground">
-                      {comments.length} pending comment
-                      {comments.length === 1 ? "" : "s"} will be posted to
-                      GitHub.
-                    </p>
-                  </div>
-                  <Textarea
-                    value={summary}
-                    onChange={(e) => setSummary(e.target.value)}
-                    placeholder="Leave a comment"
-                    className="min-h-[80px] text-sm"
-                  />
-                  <div role="radiogroup" className="space-y-2">
-                    {REVIEW_EVENTS.map((option) => (
-                      <label
-                        key={option.value}
-                        aria-label={option.label}
-                        className="flex items-start gap-2 text-sm cursor-pointer"
-                      >
-                        <input
-                          type="radio"
-                          name="pr-review-event"
-                          className="mt-1"
-                          checked={event === option.value}
-                          onChange={() => setEvent(option.value)}
-                        />
-                        <span>
-                          <span className="font-medium">{option.label}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {option.hint}
-                          </span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      disabled={submitting || !canSubmit}
-                      onClick={() => void handleSubmitReview()}
-                    >
-                      Submit review
-                    </Button>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </header>
-
-          <div
-            className="flex flex-1 min-h-0 overflow-hidden"
-            onClick={selection.handleBackgroundClick}
-          >
-            <nav
-              aria-label="Changed files"
-              className="w-64 flex-shrink-0 border-r border-border overflow-y-auto py-2"
+          )}
+          {onStartAgentReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              disabled={startingAgent || files.length === 0}
+              onClick={() => void handleStartAgentReview()}
             >
-              {files.map((file) => (
-                <button
-                  key={file.path}
-                  title={file.path}
-                  onClick={() => {
-                    setActiveFile(file.path);
-                    diffScrollApiRef.current?.scrollToFile(file.path);
-                  }}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 py-1 text-left text-xs hover:bg-accent",
-                    activeFile === file.path && "bg-accent",
-                  )}
-                >
-                  <FileText className="w-3 h-3 flex-shrink-0 text-muted-foreground" />
-                  <span className="truncate flex-1">
-                    {getFileName(file.path)}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {file.workspaceStatus}
-                  </span>
-                </button>
-              ))}
-            </nav>
-            <div className="flex-1 flex flex-col min-w-0">
-              {diffError ? (
-                <div className="p-6 text-sm text-destructive">
-                  Failed to load the PR diff: {String(diffError)}
+              <Bot className="w-3 h-3" />
+              AI review
+            </Button>
+          )}
+          <Popover open={reviewOpen} onOpenChange={setReviewOpen}>
+            <PopoverTrigger asChild>
+              <Button size="sm" className="gap-2">
+                <Send className="w-3 h-3" />
+                Finish review
+                {comments.length > 0 && ` (${comments.length})`}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" side="bottom" className="w-96">
+              <div className="space-y-3">
+                <div>
+                  <h4 className="font-medium text-sm mb-1">
+                    Finish your review
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {comments.length} pending comment
+                    {comments.length === 1 ? "" : "s"} will be posted to GitHub.
+                  </p>
                 </div>
-              ) : (
-                <DiffContentArea
-                  {...search}
-                  initialLoading={diffLoading}
-                  loadingAllHunks={false}
-                  files={files}
-                  allFileHunks={allFileHunks}
-                  committedFiles={[]}
-                  committedFileHunks={EMPTY_HUNKS}
-                  showCommittedChanges={false}
-                  largeChangesetExpanded={largeChangesetExpanded}
-                  setLargeChangesetExpanded={setLargeChangesetExpanded}
-                  actualConflictedFiles={NO_STRINGS}
-                  conflictLineLookups={new Map()}
-                  firstConflictRegionIdByFile={new Map()}
-                  expandedContext={new Map()}
-                  {...commentState}
-                  conflictFileRefs={conflictFileRefs}
-                  diffFontSize={diffFontSize}
-                  handleExpandContext={noop}
-                  diffLineSelection={selection.diffLineSelection}
-                  handleLineMouseDown={selection.handleLineMouseDown}
-                  handleLineMouseEnter={selection.handleLineMouseEnter}
-                  handleLineMouseUp={selection.handleLineMouseUp}
-                  isLineSelected={selection.isLineSelected}
-                  getThreadsForLine={threads.getThreadsForLine}
-                  getUnplacedThreadsForFile={threads.getUnplacedThreadsForFile}
-                  collapsedThreadIds={threads.collapsedThreadIds}
-                  toggleThreadCollapse={threads.toggleThreadCollapse}
-                  collapsedFiles={collapsedFiles}
-                  viewedFiles={viewedFiles}
-                  expandedLargeDiffs={expandedLargeDiffs}
-                  readOnly
-                  fileActionTarget={null}
-                  selectedUnstagedFiles={new Set()}
-                  workspacePath={repoPath}
-                  toggleFileCollapse={toggleIn(setCollapsedFiles)}
-                  toggleLargeDiff={toggleIn(setExpandedLargeDiffs)}
-                  handleMarkFileViewed={(path) => {
-                    setViewedFiles((prev) =>
-                      new Map(prev).set(path, {
-                        viewedAt: new Date().toISOString(),
-                        contentHash: "",
-                      }),
-                    );
-                    setCollapsedFiles((prev) => new Set(prev).add(path));
-                  }}
-                  handleUnmarkFileViewed={(path) =>
-                    setViewedFiles((prev) => {
-                      const next = new Map(prev);
-                      next.delete(path);
-                      return next;
-                    })
-                  }
-                  handleDiscardFiles={noop}
-                  handleContextMenu={selection.handleContextMenu}
-                  addToast={addToast}
-                  diffContainerRef={diffContainerRef}
-                  diffScrollApiRef={diffScrollApiRef}
+                <Textarea
+                  value={summary}
+                  onChange={(e) => setSummary(e.target.value)}
+                  placeholder="Leave a comment"
+                  className="min-h-[80px] text-sm"
                 />
-              )}
-            </div>
-          </div>
+                <div role="radiogroup" className="space-y-2">
+                  {REVIEW_EVENTS.map((option) => (
+                    <label
+                      key={option.value}
+                      aria-label={option.label}
+                      className="flex items-start gap-2 text-sm cursor-pointer"
+                    >
+                      <input
+                        type="radio"
+                        name="pr-review-event"
+                        className="mt-1"
+                        checked={event === option.value}
+                        disabled={isOwnPr && option.value !== "COMMENT"}
+                        onChange={() => setEvent(option.value)}
+                      />
+                      <span>
+                        <span className="font-medium">{option.label}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {isOwnPr && option.value !== "COMMENT"
+                            ? "Pull request authors can't approve or request changes on their own pull request."
+                            : option.hint}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    disabled={submitting || !canSubmit}
+                    onClick={() => void handleSubmitReview()}
+                  >
+                    Submit review
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </header>
 
-          {selection.contextMenuPosition &&
-            selection.diffLineSelection &&
-            selection.diffLineSelection.lines.length > 0 && (
-              <ContextMenu
-                position={selection.contextMenuPosition}
-                onAddComment={commentState.handleAddCommentFromSelection}
-                onCopyLocation={noop}
-                onCopyLines={noop}
+        <div
+          className="flex flex-1 min-h-0 overflow-hidden"
+          onClick={selection.handleBackgroundClick}
+        >
+          <nav
+            aria-label="Changed files"
+            className="w-64 flex-shrink-0 border-r border-border overflow-y-auto py-2"
+          >
+            {files.map((file) => (
+              <button
+                key={file.path}
+                title={file.path}
+                onClick={() => {
+                  setActiveFile(file.path);
+                  diffScrollApiRef.current?.scrollToFile(file.path);
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-1 text-left text-xs hover:bg-accent",
+                  activeFile === file.path && "bg-accent",
+                )}
+              >
+                <FileText className="w-3 h-3 flex-shrink-0 text-muted-foreground" />
+                <span className="truncate flex-1">
+                  {getFileName(file.path)}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {file.workspaceStatus}
+                </span>
+              </button>
+            ))}
+          </nav>
+          <div className="flex-1 flex flex-col min-w-0">
+            {diffError ? (
+              <div className="p-6 text-sm text-destructive">
+                Failed to load the PR diff: {String(diffError)}
+              </div>
+            ) : (
+              <DiffContentArea
+                {...search}
+                initialLoading={diffLoading}
+                loadingAllHunks={false}
+                files={files}
+                allFileHunks={allFileHunks}
+                committedFiles={[]}
+                committedFileHunks={EMPTY_HUNKS}
+                showCommittedChanges={false}
+                largeChangesetExpanded={largeChangesetExpanded}
+                setLargeChangesetExpanded={setLargeChangesetExpanded}
+                actualConflictedFiles={NO_STRINGS}
+                conflictLineLookups={new Map()}
+                firstConflictRegionIdByFile={new Map()}
+                expandedContext={new Map()}
+                {...commentState}
+                deleteComment={deleteComment}
+                conflictFileRefs={conflictFileRefs}
+                diffFontSize={diffFontSize}
+                handleExpandContext={noop}
+                diffLineSelection={selection.diffLineSelection}
+                handleLineMouseDown={selection.handleLineMouseDown}
+                handleLineMouseEnter={selection.handleLineMouseEnter}
+                handleLineMouseUp={selection.handleLineMouseUp}
+                isLineSelected={selection.isLineSelected}
+                getThreadsForLine={threads.getThreadsForLine}
+                getUnplacedThreadsForFile={threads.getUnplacedThreadsForFile}
+                collapsedThreadIds={threads.collapsedThreadIds}
+                toggleThreadCollapse={threads.toggleThreadCollapse}
+                collapsedFiles={collapsedFiles}
+                viewedFiles={viewedFiles}
+                expandedLargeDiffs={expandedLargeDiffs}
+                readOnly
+                fileActionTarget={null}
+                selectedUnstagedFiles={new Set()}
+                workspacePath={repoPath}
+                toggleFileCollapse={toggleIn(setCollapsedFiles)}
+                toggleLargeDiff={toggleIn(setExpandedLargeDiffs)}
+                handleMarkFileViewed={(path) => {
+                  setViewedFiles((prev) =>
+                    new Map(prev).set(path, {
+                      viewedAt: new Date().toISOString(),
+                      contentHash: "",
+                    }),
+                  );
+                  setCollapsedFiles((prev) => new Set(prev).add(path));
+                }}
+                handleUnmarkFileViewed={(path) =>
+                  setViewedFiles((prev) => {
+                    const next = new Map(prev);
+                    next.delete(path);
+                    return next;
+                  })
+                }
+                handleDiscardFiles={noop}
+                handleContextMenu={selection.handleContextMenu}
+                addToast={addToast}
+                diffContainerRef={diffContainerRef}
+                diffScrollApiRef={diffScrollApiRef}
               />
             )}
+          </div>
         </div>
-      </GithubThreadReplyContext.Provider>
-    </AgentReviewContext.Provider>
+
+        {selection.contextMenuPosition &&
+          selection.diffLineSelection &&
+          selection.diffLineSelection.lines.length > 0 && (
+            <ContextMenu
+              position={selection.contextMenuPosition}
+              onAddComment={commentState.handleAddCommentFromSelection}
+              onCopyLocation={noop}
+              onCopyLines={noop}
+            />
+          )}
+      </div>
+    </GithubThreadReplyContext.Provider>
   );
 }

@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { render, screen, waitFor } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
+import { invalidateQueries } from "../../../src/lib/swr-cache";
 import { captureDocument } from "../capture";
 
 // The PR lives on GitHub, so the `gh`-backed calls are stubbed at the
@@ -19,6 +20,8 @@ const gh = vi.hoisted(() => ({
   ghSubmitPrReview: vi.fn(),
   listAgentReviewComments: vi.fn(),
   resolveAgentReviewComment: vi.fn(),
+  deleteAgentReviewComment: vi.fn(),
+  ghCurrentUser: vi.fn(),
   getPrChecksForPr: vi.fn(),
 }));
 
@@ -107,27 +110,33 @@ it("reviews a GitHub PR from its own screen", async () => {
     },
   ]);
   let agentStatus = "open";
-  gh.listAgentReviewComments.mockImplementation(async () => [
-    {
-      id: "agent-1",
-      repo_path: "",
-      target_type: "github_pr",
-      target_id: "42",
-      file_path: "src/search.ts",
-      hunk_id: null,
-      start_line: 6,
-      end_line: 6,
-      side: "new",
-      comment_text:
-        "The filter still matches on `q`, so the trimmed `query` is never used.",
-      suggested_replacement:
-        "  return index.filter((item) => item.name.toLowerCase().includes(query));",
-      status: agentStatus,
-      source: "local-agent",
-      created_at: "",
-      resolved_at: null,
-    },
-  ]);
+  let agentHasWritten = false;
+  gh.listAgentReviewComments.mockImplementation(async () =>
+    !agentHasWritten
+      ? []
+      : [
+          {
+            id: "agent-1",
+            repo_path: "",
+            target_type: "github_pr",
+            target_id: "42",
+            file_path: "src/search.ts",
+            hunk_id: null,
+            start_line: 6,
+            end_line: 6,
+            side: "new",
+            comment_text:
+              "The filter still matches on `q`, so the trimmed `query` is never used.",
+            suggested_replacement:
+              "  return index.filter((item) => item.name.toLowerCase().includes(query));",
+            status: agentStatus,
+            source: "local-agent",
+            created_at: "",
+            resolved_at: null,
+          },
+        ],
+  );
+  gh.ghCurrentUser.mockResolvedValue("bob");
   gh.resolveAgentReviewComment.mockImplementation(async () => {
     agentStatus = "resolved";
   });
@@ -148,13 +157,31 @@ it("reviews a GitHub PR from its own screen", async () => {
   );
   await screen.findByTestId("pr-review-page");
   await screen.findByText("Should empty queries return everything instead?");
-  await screen.findByText(/trimmed `query` is never used/);
   await captureDocument(document, {
     name: "github-pr-review-01-screen",
     expectations: [
       "A full-screen PR review shows the PR title, a changed-files list on the left, and the PR diff with + / - lines.",
-      "octocat's GitHub thread is shown inline under its diff line with a Reply link, and a violet Local agent comment shows an Add to review button.",
-      'The header has "AI review" and "Finish review" buttons.',
+      "octocat's GitHub thread is shown inline under its diff line with a Reply link.",
+      'The header has "AI review" and "Finish review" buttons, and there are no draft comments yet.',
+    ],
+  });
+
+  // The AI review agent records a comment; the screen's poll picks it up.
+  agentHasWritten = true;
+  await invalidateQueries([
+    "agent-review-comments",
+    repoPath,
+    "github_pr",
+    "42",
+  ]);
+  await screen.findByTestId("inline-comment-card");
+  await screen.findByRole("button", { name: /Finish review \(1\)/ });
+  await captureDocument(document, {
+    name: "github-pr-review-02-agent-draft",
+    expectations: [
+      "Without any navigation, the agent's comment appears as a draft comment card under line 6, including its ```suggestion block.",
+      "The draft comment card text is in the sans-serif UI font, not the monospace diff font.",
+      'The header button reads "Finish review (1)".',
     ],
   });
 
@@ -164,7 +191,7 @@ it("reviews a GitHub PR from its own screen", async () => {
     "Empty should return nothing; the search box hides results anyway.",
   );
   await captureDocument(document, {
-    name: "github-pr-review-02-reply",
+    name: "github-pr-review-03-reply",
     expectations: [
       "A reply box under octocat's thread holds the typed reply, with Cancel and Send reply buttons.",
     ],
@@ -177,7 +204,6 @@ it("reviews a GitHub PR from its own screen", async () => {
     ),
   );
 
-  await user.click(screen.getByRole("button", { name: /Add to review/ }));
   await user.click(
     await screen.findByRole("button", { name: /Finish review \(1\)/ }),
   );
@@ -187,11 +213,11 @@ it("reviews a GitHub PR from its own screen", async () => {
   );
   await user.click(screen.getByRole("radio", { name: "Request changes" }));
   await captureDocument(document, {
-    name: "github-pr-review-03-finish-popover",
+    name: "github-pr-review-04-finish-popover",
     expectations: [
       'A "Finish your review" popover says 1 pending comment will be posted and shows the typed summary.',
       'Comment / Approve / Request changes radio options are listed, with "Request changes" selected, plus a Submit review button.',
-      "The promoted agent comment shows as a draft comment (with its suggestion block) in the diff, and the violet Local card is gone.",
+      "The agent's draft comment is still shown in the diff.",
     ],
   });
 
@@ -202,7 +228,55 @@ it("reviews a GitHub PR from its own screen", async () => {
       42,
       "REQUEST_CHANGES",
       "Nice cleanup, one fix needed.",
-      [expect.objectContaining({ path: "src/search.ts", line: 6, side: "RIGHT" })],
+      [
+        expect.objectContaining({
+          path: "src/search.ts",
+          line: 6,
+          side: "RIGHT",
+        }),
+      ],
     ),
   );
+}, 90000);
+
+it("limits your own PR's review to Comment", async () => {
+  gh.getGitRemoteUrl.mockResolvedValue({
+    owner: "acme",
+    repo: "search",
+    full_name: "acme/search",
+  });
+  gh.ghListPrs.mockResolvedValue({ items: [PR], hasMore: false });
+  gh.ghListIssues.mockResolvedValue({ items: [], hasMore: false });
+  gh.ghViewPr.mockResolvedValue(PR);
+  gh.ghPrDiff.mockResolvedValue(DIFF);
+  gh.getPrChecksForPr.mockResolvedValue(null);
+  gh.ghListPrReviewThreads.mockResolvedValue([]);
+  gh.listAgentReviewComments.mockResolvedValue([]);
+  gh.ghCurrentUser.mockResolvedValue(PR.author.login);
+
+  const { repoPath } = createTestRepo(false);
+  openRepo(repoPath);
+  const user = userEvent.setup();
+  render(<Dashboard />);
+
+  await user.click(await screen.findByTestId("github-sidebar-item"));
+  await user.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+  await user.click(await screen.findByText(PR.title));
+  await user.click(
+    await screen.findByRole("button", { name: /Review changes/ }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: /Finish review/ }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("radio", { name: "Approve" })).toBeDisabled(),
+  );
+  expect(screen.getByRole("radio", { name: "Request changes" })).toBeDisabled();
+  await captureDocument(document, {
+    name: "github-pr-review-05-own-pr",
+    expectations: [
+      'In the "Finish your review" popover, "Approve" and "Request changes" radios are disabled (greyed out) and explain that PR authors cannot approve or request changes on their own PR.',
+      '"Comment" stays selectable and selected.',
+    ],
+  });
 }, 90000);

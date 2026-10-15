@@ -15,6 +15,8 @@ interface UseAgentReviewCommentsParams {
   targetType: string;
   /** Identifier within the target type; the hook idles while this is unset. */
   targetId: string | undefined;
+  /** Poll interval; how soon a comment the agent just wrote shows up. */
+  refreshMs?: number;
 }
 
 /**
@@ -26,13 +28,14 @@ export function useAgentReviewComments({
   repoPath,
   targetType,
   targetId,
+  refreshMs = 10_000,
 }: UseAgentReviewCommentsParams) {
   const { data, mutate } = useSWR<AgentReviewComment[]>(
     repoPath && targetId
       ? ["agent-review-comments", repoPath, targetType, targetId]
       : null,
     () => listAgentReviewComments(repoPath ?? "", targetType, targetId ?? ""),
-    { refreshInterval: pollMs(10_000) },
+    { refreshInterval: pollMs(refreshMs) },
   );
 
   // The command can be stubbed out in tests and on transports that do not

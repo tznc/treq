@@ -179,3 +179,6 @@ export const ghSubmitPrReview = (
     body,
     comments,
   });
+
+/** Login of the user `gh` is authenticated as. */
+export const ghCurrentUser = (): Promise<string> => invoke("gh_current_user");

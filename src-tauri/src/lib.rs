@@ -1030,6 +1030,7 @@ pub fn run() {
       commands::gh_close_pr,
       commands::gh_reopen_pr,
       commands::gh_set_pr_draft,
+      commands::gh_current_user,
       commands::gh_pr_diff,
       commands::gh_reply_pr_review_thread,
       commands::gh_submit_pr_review,
