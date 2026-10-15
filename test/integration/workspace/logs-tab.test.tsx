@@ -331,7 +331,7 @@ describe("Home repo Logs tab", () => {
     appendSystemLogLine("WARN", "treq_lib::menu", "system-log-from-menu");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("view-logs-menu"));
+    await clickGpuiRow("view-logs-menu");
     await screen.findByRole("tab", { name: /^Logs/, selected: false });
 
     act(() => emitOnTestBus("menu-view-logs"));
