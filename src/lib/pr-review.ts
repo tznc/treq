@@ -96,48 +96,78 @@ export function commentsToGhReview(comments: LineComment[]): {
   return { comments: inline, fileComments: fileLevel.join("\n\n") };
 }
 
-/**
- * Agent review comment → draft review comment, anchored to the hunk holding
- * its last line. A suggestion becomes a GitHub ```suggestion block.
- */
-export function agentCommentToLineComment(
-  comment: AgentReviewComment,
+/** djb2 hash of diff lines (with their +/-/space prefix), as hex. */
+export function hashDiffLines(lines: string[]): string {
+  const text = lines.join("\n");
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 33 + text.charCodeAt(i)) % 4_294_967_296;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/** Never a real hunk id: the diff viewer lists such a comment as outdated. */
+const OUTDATED_HUNK_ID = "__outdated__";
+
+/** The hunk and diff lines `start..end` on `side` cover, if all are present. */
+function findCommentedLines(
   hunks: Map<string, FileHunksData>,
-): LineComment {
-  const side = comment.side ?? "new";
-  let hunkId = "";
-  let lineContent: string[] = [];
-  for (const hunk of hunks.get(comment.file_path)?.hunks ?? []) {
+  draft: AgentReviewComment,
+): { hunkId: string; lines: string[] } | null {
+  const side = draft.side ?? "new";
+  const lineSide = (n: { old?: number; new?: number }) =>
+    n.old !== undefined && n.new === undefined ? "old" : "new";
+  for (const hunk of hunks.get(draft.file_path)?.hunks ?? []) {
     const numbers = computeHunkLineNumbers(hunk);
-    const lineSide = (n: { old?: number; new?: number }) =>
-      n.old !== undefined && n.new === undefined ? "old" : "new";
-    const inRange = (n: { old?: number; new?: number }) => {
+    const lines = hunk.lines.filter((_, i) => {
+      const n = numbers[i];
       const num = side === "old" ? n.old : n.new;
       return (
         lineSide(n) === side &&
         num !== undefined &&
-        num >= comment.start_line &&
-        num <= comment.end_line
+        num >= draft.start_line &&
+        num <= draft.end_line
       );
-    };
-    if (!numbers.some(inRange)) continue;
-    hunkId = hunk.id;
-    lineContent = hunk.lines.filter((_, i) => inRange(numbers[i]));
-    break;
+    });
+    if (lines.length === draft.end_line - draft.start_line + 1) {
+      return { hunkId: hunk.id, lines };
+    }
   }
+  return null;
+}
+
+/**
+ * A stored PR review draft → the diff viewer's comment. It is outdated when
+ * its lines left the diff or no longer match the hash taken when it was
+ * written. `lineHash` is the current hash, for drafts stored without one.
+ */
+export function draftToLineComment(
+  draft: AgentReviewComment,
+  hunks: Map<string, FileHunksData>,
+): { comment: LineComment; lineHash: string | null; outdated: boolean } {
+  const found = findCommentedLines(hunks, draft);
+  const lineHash = found ? hashDiffLines(found.lines) : null;
+  const outdated =
+    !found || (draft.line_hash != null && draft.line_hash !== lineHash);
   const text =
-    comment.suggested_replacement != null
-      ? `${comment.comment_text}\n\n\`\`\`suggestion\n${comment.suggested_replacement}\n\`\`\``
-      : comment.comment_text;
+    draft.suggested_replacement != null &&
+    !draft.comment_text.includes("```suggestion")
+      ? `${draft.comment_text}\n\n\`\`\`suggestion\n${draft.suggested_replacement}\n\`\`\``
+      : draft.comment_text;
   return {
-    id: comment.id,
-    filePath: comment.file_path,
-    hunkId,
-    startLine: comment.start_line,
-    endLine: comment.end_line,
-    lineContent,
-    text,
-    createdAt: new Date().toISOString(),
-    lineSide: side,
+    comment: {
+      id: draft.id,
+      filePath: draft.file_path,
+      hunkId: outdated ? OUTDATED_HUNK_ID : (found?.hunkId ?? ""),
+      startLine: draft.start_line,
+      endLine: draft.end_line,
+      // An outdated draft must not show the lines that replaced its own.
+      lineContent: outdated ? [] : (found?.lines ?? []),
+      text,
+      createdAt: draft.created_at,
+      lineSide: draft.side ?? "new",
+    },
+    lineHash,
+    outdated,
   };
 }

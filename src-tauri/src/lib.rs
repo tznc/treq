@@ -975,6 +975,8 @@ pub fn run() {
       commands::save_pending_review,
       commands::clear_pending_review,
       commands::list_agent_review_comments,
+      commands::create_review_draft,
+      commands::update_agent_review_comment,
       commands::resolve_agent_review_comment,
       commands::delete_agent_review_comment,
       commands::apply_agent_review_suggestion,

@@ -334,7 +334,7 @@ export function DiffVirtuosoRow({ item }: { item: DiffVirtuosoItem }) {
                   {comment.lineContent.join("\n")}
                 </pre>
               )}
-              <p className="font-sans">{comment.text}</p>
+              <p className="font-sans whitespace-pre-wrap">{comment.text}</p>
             </div>
           ))}
         </div>,

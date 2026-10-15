@@ -118,7 +118,8 @@ pub struct AgentReviewComment {
   pub suggested_replacement: Option<String>,
   /// `"open"` or `"resolved"`.
   pub status: String,
-  /// Where the comment came from; always `"local-agent"` today.
+  /// Where the comment came from: `"local-agent"`, or `"local-human"` for a
+  /// PR review draft the user wrote.
   pub source: String,
   pub created_at: String,
   pub resolved_at: Option<String>,
@@ -126,6 +127,10 @@ pub struct AgentReviewComment {
   /// Set for Linear targets, whose suggestions are applied by text match.
   #[serde(default)]
   pub quoted_text: Option<String>,
+  /// Hash of the commented diff lines when the comment was anchored; a PR
+  /// draft whose lines no longer hash the same is outdated.
+  #[serde(default)]
+  pub line_hash: Option<String>,
 }
 
 /// Pending review session for the FileBrowser, kept separate from `PendingReview`
@@ -571,6 +576,20 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
           e
         )
       })?;
+  }
+
+  let has_agent_review_line_hash_column: Result<i64, _> = conn.query_row(
+    "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'line_hash'",
+    [],
+    |row| row.get(0),
+  );
+  if matches!(has_agent_review_line_hash_column, Ok(0)) {
+    conn
+      .execute(
+        "ALTER TABLE agent_review_comments ADD COLUMN line_hash TEXT",
+        [],
+      )
+      .map_err(|e| format!("Failed to add agent_review_comments line_hash column: {e}"))?;
   }
 
   conn.execute(
@@ -1902,7 +1921,8 @@ pub fn clear_pending_review(repo_path: &str, workspace_id: i64) -> Result<(), St
 
 const AGENT_REVIEW_COMMENT_SELECT: &str =
   "SELECT id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side,
-            comment_text, suggested_replacement, status, source, created_at, resolved_at, quoted_text
+            comment_text, suggested_replacement, status, source, created_at, resolved_at, quoted_text,
+            line_hash
      FROM agent_review_comments";
 
 fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewComment> {
@@ -1923,6 +1943,7 @@ fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewC
     created_at: row.get(13)?,
     resolved_at: row.get(14)?,
     quoted_text: row.get(15)?,
+    line_hash: row.get(16)?,
   })
 }
 
@@ -1960,6 +1981,7 @@ pub fn create_agent_review_comment(
     created_at: Utc::now().to_rfc3339(),
     resolved_at: None,
     quoted_text: quoted_text.map(|s| s.to_string()),
+    line_hash: None,
   };
 
   conn.execute(
@@ -2043,6 +2065,25 @@ pub fn resolve_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Str
       params![id, now],
     )
     .map_err(|e| format!("Failed to resolve agent review comment: {}", e))?;
+  Ok(())
+}
+
+/// Edit a comment's text and/or record its line hash; `None` keeps the value.
+pub fn update_agent_review_comment(
+  repo_path: &str,
+  id: &str,
+  comment_text: Option<&str>,
+  line_hash: Option<&str>,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "UPDATE agent_review_comments
+         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash)
+       WHERE id = ?1",
+      params![id, comment_text, line_hash],
+    )
+    .map_err(|e| format!("Failed to update agent review comment: {e}"))?;
   Ok(())
 }
 
@@ -2347,6 +2388,43 @@ mod tests {
       cached_at: "2026-08-26T00:00:00Z".to_string(),
       mtime: None,
     }
+  }
+
+  #[test]
+  fn updates_review_comment_text_and_line_hash() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let comment = create_agent_review_comment(
+      repo,
+      "github_pr",
+      "7",
+      "a.rs",
+      None,
+      2,
+      3,
+      Some("new"),
+      "first",
+      None,
+      "local-human",
+      None,
+    )
+    .unwrap();
+    assert_eq!(comment.line_hash, None);
+
+    update_agent_review_comment(repo, &comment.id, None, Some("h1")).unwrap();
+    let stored = get_agent_review_comment(repo, &comment.id)
+      .unwrap()
+      .unwrap();
+    assert_eq!(stored.comment_text, "first");
+    assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+
+    update_agent_review_comment(repo, &comment.id, Some("second"), None).unwrap();
+    let stored = get_agent_review_comment(repo, &comment.id)
+      .unwrap()
+      .unwrap();
+    assert_eq!(stored.comment_text, "second");
+    assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.source, "local-human");
   }
 
   #[test]

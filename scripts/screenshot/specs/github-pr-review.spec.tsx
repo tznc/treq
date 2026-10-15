@@ -22,6 +22,8 @@ const gh = vi.hoisted(() => ({
   resolveAgentReviewComment: vi.fn(),
   deleteAgentReviewComment: vi.fn(),
   ghCurrentUser: vi.fn(),
+  createReviewDraft: vi.fn(),
+  updateAgentReviewComment: vi.fn(),
   getPrChecksForPr: vi.fn(),
 }));
 
@@ -109,37 +111,55 @@ it("reviews a GitHub PR from its own screen", async () => {
       ],
     },
   ]);
-  let agentStatus = "open";
-  let agentHasWritten = false;
-  gh.listAgentReviewComments.mockImplementation(async () =>
-    !agentHasWritten
-      ? []
-      : [
-          {
-            id: "agent-1",
-            repo_path: "",
-            target_type: "github_pr",
-            target_id: "42",
-            file_path: "src/search.ts",
-            hunk_id: null,
-            start_line: 6,
-            end_line: 6,
-            side: "new",
-            comment_text:
-              "The filter still matches on `q`, so the trimmed `query` is never used.",
-            suggested_replacement:
-              "  return index.filter((item) => item.name.toLowerCase().includes(query));",
-            status: agentStatus,
-            source: "local-agent",
-            created_at: "",
-            resolved_at: null,
-          },
-        ],
-  );
-  gh.ghCurrentUser.mockResolvedValue("bob");
-  gh.resolveAgentReviewComment.mockImplementation(async () => {
-    agentStatus = "resolved";
+  // Stands in for the local DB the drafts persist in.
+  type Draft = Record<string, unknown> & { id: string };
+  let drafts: Draft[] = [];
+  const row = (over: Partial<Draft> & { id: string }): Draft => ({
+    repo_path: "",
+    target_type: "github_pr",
+    target_id: "42",
+    hunk_id: null,
+    suggested_replacement: null,
+    status: "open",
+    created_at: "",
+    resolved_at: null,
+    line_hash: null,
+    ...over,
   });
+  gh.listAgentReviewComments.mockImplementation(async () =>
+    drafts.map((d) => ({ ...d })),
+  );
+  gh.createReviewDraft.mockImplementation(async (_repo, input) => {
+    const draft = row({
+      id: `human-${drafts.length}`,
+      file_path: input.filePath,
+      start_line: input.startLine,
+      end_line: input.endLine,
+      side: input.side,
+      comment_text: input.commentText,
+      line_hash: input.lineHash,
+      source: "local-human",
+    });
+    drafts.push(draft);
+    return draft;
+  });
+  gh.updateAgentReviewComment.mockImplementation(async (_repo, id, update) => {
+    drafts = drafts.map((d) =>
+      d.id !== id
+        ? d
+        : {
+            ...d,
+            comment_text: update.commentText ?? d.comment_text,
+            line_hash: update.lineHash ?? d.line_hash,
+          },
+    );
+  });
+  gh.resolveAgentReviewComment.mockImplementation(async (_repo, id) => {
+    drafts = drafts.map((d) =>
+      d.id === id ? { ...d, status: "resolved" } : d,
+    );
+  });
+  gh.ghCurrentUser.mockResolvedValue("bob");
   gh.ghReplyPrReviewThread.mockResolvedValue(undefined);
   gh.ghSubmitPrReview.mockResolvedValue(undefined);
 
@@ -167,7 +187,20 @@ it("reviews a GitHub PR from its own screen", async () => {
   });
 
   // The AI review agent records a comment; the screen's poll picks it up.
-  agentHasWritten = true;
+  drafts.push(
+    row({
+      id: "agent-1",
+      file_path: "src/search.ts",
+      start_line: 6,
+      end_line: 6,
+      side: "new",
+      comment_text:
+        "The filter still matches on `q`, so the trimmed `query` is never used.",
+      suggested_replacement:
+        "  return index.filter((item) => item.name.toLowerCase().includes(query));",
+      source: "local-agent",
+    }),
+  );
   await invalidateQueries([
     "agent-review-comments",
     repoPath,
@@ -185,13 +218,65 @@ it("reviews a GitHub PR from its own screen", async () => {
     ],
   });
 
+  // The agent's draft got the hash of the line it covers.
+  await waitFor(() => expect(drafts[0].line_hash).toBeTruthy());
+
+  // The user drafts their own comment on line 4.
+  const line4 = Array.from(document.querySelectorAll("[data-diff-line]")).find(
+    (el) => el.textContent?.includes("toLowerCase();"),
+  ) as HTMLElement;
+  await user.click(
+    line4.querySelector("[data-testid='line-gutter']") as HTMLElement,
+  );
+  await user.click(line4.querySelector("[data-comment-button]") as HTMLElement);
+  await user.type(
+    await screen.findByPlaceholderText(/add a comment/i),
+    "Lower-casing here changes matching for mixed-case names.",
+  );
+  await user.keyboard("{Meta>}{Enter}{/Meta}");
+  await screen.findByRole("button", { name: /Finish review \(2\)/ });
+
+  // Leave the screen and come back: both drafts are still there.
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.click(
+    await screen.findByRole("button", { name: /Review changes/ }),
+  );
+  await screen.findByRole("button", { name: /Finish review \(2\)/ });
+  expect(await screen.findAllByTestId("inline-comment-card")).toHaveLength(2);
+  await captureDocument(document, {
+    name: "github-pr-review-03-drafts-after-navigation",
+    expectations: [
+      "After leaving the PR review screen and reopening it, two draft comment cards are shown: the user's under line 4 and the agent's under line 6.",
+      'The header button reads "Finish review (2)".',
+    ],
+  });
+
+  // The author pushes a change to line 6; the agent's draft is now outdated.
+  gh.ghPrDiff.mockResolvedValue(
+    DIFF.replace(
+      "+  return index.filter((item) => item.name.includes(q));",
+      "+  return index.filter((item) => item.name.startsWith(query));",
+    ),
+  );
+  await invalidateQueries(["gh-pr-diff", "acme/search", 42]);
+  await screen.findByText("Outdated");
+  await screen.findByRole("button", { name: /Finish review \(1\)/ });
+  await captureDocument(document, {
+    name: "github-pr-review-04-outdated-after-update",
+    expectations: [
+      "Line 6 now reads `startsWith(query)`, and the agent's draft moved to an amber Outdated box above the file's diff.",
+      "The user's draft under line 4 (an unchanged line) is still shown inline.",
+      'The header button reads "Finish review (1)".',
+    ],
+  });
+
   await user.click(screen.getByRole("button", { name: "Reply" }));
   await user.type(
     screen.getByPlaceholderText("Reply on GitHub…"),
     "Empty should return nothing; the search box hides results anyway.",
   );
   await captureDocument(document, {
-    name: "github-pr-review-03-reply",
+    name: "github-pr-review-05-reply",
     expectations: [
       "A reply box under octocat's thread holds the typed reply, with Cancel and Send reply buttons.",
     ],
@@ -213,11 +298,11 @@ it("reviews a GitHub PR from its own screen", async () => {
   );
   await user.click(screen.getByRole("radio", { name: "Request changes" }));
   await captureDocument(document, {
-    name: "github-pr-review-04-finish-popover",
+    name: "github-pr-review-06-finish-popover",
     expectations: [
-      'A "Finish your review" popover says 1 pending comment will be posted and shows the typed summary.',
+      'A "Finish your review" popover says 1 pending comment will be posted and 1 outdated draft stays as a draft, and shows the typed summary.',
       'Comment / Approve / Request changes radio options are listed, with "Request changes" selected, plus a Submit review button.',
-      "The agent's draft comment is still shown in the diff.",
+      "The user's draft comment is still shown in the diff.",
     ],
   });
 
@@ -231,7 +316,7 @@ it("reviews a GitHub PR from its own screen", async () => {
       [
         expect.objectContaining({
           path: "src/search.ts",
-          line: 6,
+          line: 4,
           side: "RIGHT",
         }),
       ],
@@ -273,7 +358,7 @@ it("limits your own PR's review to Comment", async () => {
   );
   expect(screen.getByRole("radio", { name: "Request changes" })).toBeDisabled();
   await captureDocument(document, {
-    name: "github-pr-review-05-own-pr",
+    name: "github-pr-review-07-own-pr",
     expectations: [
       'In the "Finish your review" popover, "Approve" and "Request changes" radios are disabled (greyed out) and explain that PR authors cannot approve or request changes on their own PR.',
       '"Comment" stays selectable and selected.',

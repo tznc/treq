@@ -55,4 +55,6 @@ export interface AgentReviewComment {
   resolved_at: string | null;
   /** Exact reviewed text of the line range; set for Linear targets. */
   quoted_text?: string | null;
+  /** Hash of the commented diff lines when anchored (PR review drafts). */
+  line_hash?: string | null;
 }

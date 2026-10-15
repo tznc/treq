@@ -11,21 +11,24 @@ import {
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  createReviewDraft,
   ghCurrentUser,
   ghPrDiff,
   ghReplyPrReviewThread,
   ghSubmitPrReview,
   ghViewPr,
   type GhReviewEvent,
+  updateAgentReviewComment,
 } from "../../lib/api";
 import { AGENT_REVIEW_TARGET_GITHUB_PR } from "../../lib/api-types-review";
 import { prepareGithubPrReview } from "../../lib/agent-review-launch";
 import {
-  agentCommentToLineComment,
   commentsToGhReview,
+  draftToLineComment,
   parseUnifiedDiff,
 } from "../../lib/pr-review";
 import { cn, getFileName } from "../../lib/utils";
+import { pollMs } from "../../lib/swr-cache";
 import { useDiffSettingsStore } from "../../stores/diffSettingsStore";
 import { useGitRemoteInfo } from "../../hooks/useMergeQueueStatus";
 import { Button } from "../ui/button";
@@ -114,8 +117,11 @@ function PrReviewPage({
     data: rawDiff,
     error: diffError,
     isLoading: diffLoading,
-  } = useSWR(["gh-pr-diff", repoFullName, prNumber], () =>
-    ghPrDiff(repoFullName, prNumber),
+  } = useSWR(
+    ["gh-pr-diff", repoFullName, prNumber],
+    () => ghPrDiff(repoFullName, prNumber),
+    // Pick up new pushes so drafts on changed lines turn outdated.
+    { refreshInterval: pollMs(60_000) },
   );
   const { files, hunks: allFileHunks } = useMemo(
     () => parseUnifiedDiff(rawDiff ?? ""),
@@ -177,7 +183,7 @@ function PrReviewPage({
     setContextMenuPosition: selection.setContextMenuPosition,
     addToast,
   });
-  const { comments, setComments } = commentState;
+  const { setComments } = commentState;
 
   const threads = useGithubReviewThreads({
     repoPath,
@@ -186,36 +192,116 @@ function PrReviewPage({
     pr: { owner, repo, number: prNumber },
   });
 
-  // The AI review writes comments to the local DB while this screen is open;
-  // a short poll turns each new one into a draft as soon as it lands. They
-  // stay open (so drafts survive leaving the screen) until submitted.
+  // Drafts live in the local DB (target `github_pr`): the user's own
+  // (`local-human`) and the AI review's (`local-agent`), which it writes while
+  // this screen is open, so poll often. Each draft stores a hash of the lines
+  // it covers; when a PR update changes those lines it is shown as outdated.
   const agentReview = useAgentReviewComments({
     repoPath,
     targetType: AGENT_REVIEW_TARGET_GITHUB_PR,
     targetId: String(prNumber),
     refreshMs: 3_000,
   });
-  const agentDraftIds = useRef<Set<string>>(new Set());
-  const { openAgentReviewComments } = agentReview;
+  const {
+    agentReviewComments: storedDrafts,
+    refreshAgentReviewComments: refreshDrafts,
+  } = agentReview;
+  const drafts = useMemo(
+    () =>
+      rawDiff === undefined
+        ? []
+        : storedDrafts
+            .filter((row) => row.status !== "resolved")
+            .map((row) => ({ row, ...draftToLineComment(row, allFileHunks) })),
+    [storedDrafts, rawDiff, allFileHunks],
+  );
   useEffect(() => {
-    if (rawDiff === undefined) return;
-    const fresh = openAgentReviewComments.filter(
-      (c) => !agentDraftIds.current.has(c.id),
-    );
-    if (fresh.length === 0) return;
-    for (const c of fresh) agentDraftIds.current.add(c.id);
-    setComments((prev) => [
-      ...prev,
-      ...fresh.map((c) => agentCommentToLineComment(c, allFileHunks)),
-    ]);
-  }, [openAgentReviewComments, rawDiff, allFileHunks, setComments]);
+    setComments(drafts.map((d) => d.comment));
+  }, [drafts, setComments]);
 
-  const deleteComment = (commentId: string) => {
-    commentState.deleteComment(commentId);
-    if (agentDraftIds.current.has(commentId)) {
-      void agentReview.deleteAgentComment(commentId);
+  // The agent's CLI cannot see the diff, so hash its drafts on first sight.
+  const hashedIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const unhashed = drafts.filter(
+      (d) => !d.row.line_hash && d.lineHash && !hashedIds.current.has(d.row.id),
+    );
+    if (unhashed.length === 0) return;
+    for (const d of unhashed) hashedIds.current.add(d.row.id);
+    void Promise.all(
+      unhashed.map((d) =>
+        updateAgentReviewComment(repoPath, d.row.id, {
+          lineHash: d.lineHash ?? undefined,
+        }),
+      ),
+    ).then(() => refreshDrafts());
+  }, [drafts, repoPath, refreshDrafts]);
+
+  const reportDraftError = (error: unknown) =>
+    addToast({
+      title: "Failed to save draft comment",
+      description: error instanceof Error ? error.message : String(error),
+      type: "error",
+    });
+
+  const addComment = async (text: string) => {
+    const pending = commentState.pendingComment;
+    if (!text.trim() || !pending) return;
+    const { lineHash } = draftToLineComment(
+      {
+        id: "",
+        repo_path: repoPath,
+        target_type: AGENT_REVIEW_TARGET_GITHUB_PR,
+        target_id: String(prNumber),
+        file_path: pending.filePath,
+        hunk_id: null,
+        start_line: pending.startLine,
+        end_line: pending.endLine,
+        side: pending.lineSide,
+        comment_text: "",
+        suggested_replacement: null,
+        status: "open",
+        source: "local-human",
+        created_at: "",
+        resolved_at: null,
+      },
+      allFileHunks,
+    );
+    try {
+      await createReviewDraft(repoPath, {
+        targetType: AGENT_REVIEW_TARGET_GITHUB_PR,
+        targetId: String(prNumber),
+        filePath: pending.filePath,
+        startLine: pending.startLine,
+        endLine: pending.endLine,
+        side: pending.lineSide,
+        commentText: text.trim(),
+        lineHash,
+      });
+      commentState.cancelComment();
+      await refreshDrafts();
+    } catch (error) {
+      reportDraftError(error);
     }
   };
+
+  const saveEditComment = async (commentId: string, text: string) => {
+    try {
+      await updateAgentReviewComment(repoPath, commentId, {
+        commentText: text.trim(),
+      });
+      commentState.cancelEditComment();
+      await refreshDrafts();
+    } catch (error) {
+      reportDraftError(error);
+    }
+  };
+
+  const deleteComment = (commentId: string) => {
+    agentReview.deleteAgentComment(commentId).catch(reportDraftError);
+  };
+
+  const postable = drafts.filter((d) => !d.outdated).map((d) => d.comment);
+  const outdatedCount = drafts.length - postable.length;
 
   const { data: viewer } = useSWR("gh-current-user", ghCurrentUser);
   const isOwnPr = Boolean(viewer && pr && viewer === pr.author.login);
@@ -255,17 +341,15 @@ function PrReviewPage({
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmitReview = async () => {
-    const { comments: inline, fileComments } = commentsToGhReview(comments);
+    const { comments: inline, fileComments } = commentsToGhReview(postable);
     const body = [summary.trim(), fileComments].filter(Boolean).join("\n\n");
     setSubmitting(true);
     try {
       await ghSubmitPrReview(repoFullName, prNumber, event, body, inline);
+      // Posted drafts are done; outdated ones stay for the user to handle.
       await Promise.all(
-        comments
-          .filter((c) => agentDraftIds.current.has(c.id))
-          .map((c) => agentReview.resolveAgentComment(c.id)),
+        postable.map((c) => agentReview.resolveAgentComment(c.id)),
       );
-      setComments([]);
       setSummary("");
       setEvent("COMMENT");
       setReviewOpen(false);
@@ -287,7 +371,7 @@ function PrReviewPage({
   };
 
   const canSubmit =
-    event !== "REQUEST_CHANGES" || summary.trim() || comments.length > 0;
+    event !== "REQUEST_CHANGES" || summary.trim() || postable.length > 0;
 
   return (
     <GithubThreadReplyContext.Provider value={replyToThread}>
@@ -347,7 +431,7 @@ function PrReviewPage({
               <Button size="sm" className="gap-2">
                 <Send className="w-3 h-3" />
                 Finish review
-                {comments.length > 0 && ` (${comments.length})`}
+                {postable.length > 0 && ` (${postable.length})`}
               </Button>
             </PopoverTrigger>
             <PopoverContent align="end" side="bottom" className="w-96">
@@ -357,8 +441,10 @@ function PrReviewPage({
                     Finish your review
                   </h4>
                   <p className="text-sm text-muted-foreground">
-                    {comments.length} pending comment
-                    {comments.length === 1 ? "" : "s"} will be posted to GitHub.
+                    {postable.length} pending comment
+                    {postable.length === 1 ? "" : "s"} will be posted to GitHub.
+                    {outdatedCount > 0 &&
+                      ` ${outdatedCount} outdated draft${outdatedCount === 1 ? " stays as a draft" : "s stay as drafts"}.`}
                   </p>
                 </div>
                 <Textarea
@@ -460,6 +546,8 @@ function PrReviewPage({
                 firstConflictRegionIdByFile={new Map()}
                 expandedContext={new Map()}
                 {...commentState}
+                addComment={(text) => void addComment(text)}
+                saveEditComment={(id, text) => void saveEditComment(id, text)}
                 deleteComment={deleteComment}
                 conflictFileRefs={conflictFileRefs}
                 diffFontSize={diffFontSize}

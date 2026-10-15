@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { AgentReviewComment } from "./api-types-review";
 import {
-  agentCommentToLineComment,
   commentsToGhReview,
+  draftToLineComment,
+  hashDiffLines,
   parseUnifiedDiff,
 } from "./pr-review";
 import type { LineComment } from "./review";
@@ -112,30 +114,36 @@ describe("commentsToGhReview", () => {
   });
 });
 
-describe("agentCommentToLineComment", () => {
-  it("anchors the comment to the hunk holding its last line and keeps the suggestion", () => {
-    const { hunks } = parseUnifiedDiff(DIFF);
-    const line = agentCommentToLineComment(
-      {
-        id: "a1",
-        repo_path: "/r",
-        target_type: "github_pr",
-        target_id: "7",
-        file_path: "src/a.ts",
-        hunk_id: null,
-        start_line: 11,
-        end_line: 11,
-        side: "new",
-        comment_text: "Rename.",
-        suggested_replacement: "newer",
-        status: "open",
-        source: "local-agent",
-        created_at: "",
-        resolved_at: null,
-      },
-      hunks,
-    );
-    expect(line).toMatchObject({
+const row = (over: Partial<AgentReviewComment> = {}): AgentReviewComment => ({
+  id: "a1",
+  repo_path: "/r",
+  target_type: "github_pr",
+  target_id: "7",
+  file_path: "src/a.ts",
+  hunk_id: null,
+  start_line: 11,
+  end_line: 11,
+  side: "new",
+  comment_text: "Rename.",
+  suggested_replacement: "newer",
+  status: "open",
+  source: "local-agent",
+  created_at: "",
+  resolved_at: null,
+  line_hash: null,
+  ...over,
+});
+
+describe("draftToLineComment", () => {
+  const { hunks } = parseUnifiedDiff(DIFF);
+  const currentHash = hashDiffLines(["+new"]);
+
+  it("anchors a draft to its hunk and keeps the suggestion", () => {
+    const { comment, lineHash, outdated } = draftToLineComment(row(), hunks);
+    expect(outdated).toBe(false);
+    expect(lineHash).toBe(currentHash);
+    expect(comment).toMatchObject({
+      id: "a1",
       filePath: "src/a.ts",
       hunkId: "src/a.ts#1",
       startLine: 11,
@@ -144,5 +152,39 @@ describe("agentCommentToLineComment", () => {
       lineContent: ["+new"],
       text: "Rename.\n\n```suggestion\nnewer\n```",
     });
+  });
+
+  it("does not repeat a suggestion already written into the text", () => {
+    const text = "Edited.\n\n```suggestion\nnewer\n```";
+    expect(
+      draftToLineComment(row({ comment_text: text }), hunks).comment.text,
+    ).toBe(text);
+  });
+
+  it("is outdated when the commented lines changed since it was written", () => {
+    const stale = draftToLineComment(row({ line_hash: "deadbeef" }), hunks);
+    expect(stale.outdated).toBe(true);
+    expect(stale.comment.hunkId).not.toBe("src/a.ts#1");
+    expect(stale.comment.lineContent).toEqual([]);
+    expect(
+      draftToLineComment(row({ line_hash: currentHash }), hunks).outdated,
+    ).toBe(false);
+  });
+
+  it("is outdated when its lines are no longer in the diff", () => {
+    const gone = draftToLineComment(
+      row({ start_line: 90, end_line: 90 }),
+      hunks,
+    );
+    expect(gone.outdated).toBe(true);
+    expect(gone.lineHash).toBeNull();
+  });
+});
+
+describe("hashDiffLines", () => {
+  it("is stable and content-sensitive", () => {
+    expect(hashDiffLines(["+a", " b"])).toBe(hashDiffLines(["+a", " b"]));
+    expect(hashDiffLines(["+a", " b"])).not.toBe(hashDiffLines(["+a", " c"]));
+    expect(hashDiffLines(["+ab"])).not.toBe(hashDiffLines(["+a", "b"]));
   });
 });

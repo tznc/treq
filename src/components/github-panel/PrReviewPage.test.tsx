@@ -2,6 +2,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { invalidateQueries } from "../../lib/swr-cache";
+import { hashDiffLines } from "../../lib/pr-review";
 import { PrReviewScreen } from "./PrReviewPage";
 
 const api = vi.hoisted(() => ({
@@ -15,6 +16,8 @@ const api = vi.hoisted(() => ({
   resolveAgentReviewComment: vi.fn(),
   deleteAgentReviewComment: vi.fn(),
   ghCurrentUser: vi.fn(),
+  createReviewDraft: vi.fn(),
+  updateAgentReviewComment: vi.fn(),
 }));
 
 vi.mock("../../lib/api", async (importOriginal) => ({
@@ -119,6 +122,8 @@ describe("PR review screen", () => {
     api.resolveAgentReviewComment.mockResolvedValue(undefined);
     api.deleteAgentReviewComment.mockResolvedValue(undefined);
     api.ghCurrentUser.mockResolvedValue("bob");
+    api.createReviewDraft.mockResolvedValue({});
+    api.updateAgentReviewComment.mockResolvedValue(undefined);
   });
 
   it("shows the PR diff with its GitHub threads", async () => {
@@ -221,6 +226,9 @@ describe("PR review screen", () => {
   });
 
   it("deleting an agent draft deletes the agent comment", async () => {
+    api.deleteAgentReviewComment.mockImplementation(async () => {
+      api.listAgentReviewComments.mockResolvedValue([]);
+    });
     renderScreen();
     const draft = await screen.findByTestId("inline-comment-card");
     await user.click(within(draft).getByRole("button"));
@@ -228,7 +236,9 @@ describe("PR review screen", () => {
       "/repo",
       "agent-1",
     );
-    expect(screen.queryByTestId("inline-comment-card")).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByTestId("inline-comment-card")).toBeNull(),
+    );
   });
 
   it("disables Approve and Request changes on your own PR", async () => {
@@ -254,5 +264,74 @@ describe("PR review screen", () => {
       (screen.getByRole("radio", { name: "Comment" }) as HTMLInputElement)
         .disabled,
     ).toBe(false);
+  });
+
+  it("stores a comment the user writes, with the hash of its line", async () => {
+    api.listAgentReviewComments.mockResolvedValue([]);
+    renderScreen();
+    await waitFor(() => expect(diffLineTexts().length).toBeGreaterThan(0));
+    const line = Array.from(document.querySelectorAll("[data-diff-line]")).find(
+      (el) => el.textContent?.includes("const query"),
+    ) as HTMLElement;
+    await user.click(
+      line.querySelector("[data-testid='line-gutter']") as HTMLElement,
+    );
+    await user.click(
+      line.querySelector("[data-comment-button]") as HTMLElement,
+    );
+    await user.type(
+      await screen.findByPlaceholderText(/add a comment/i),
+      "Name this trimmed.",
+    );
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() =>
+      expect(api.createReviewDraft).toHaveBeenCalledWith("/repo", {
+        targetType: "github_pr",
+        targetId: "42",
+        filePath: "src/search.ts",
+        startLine: 2,
+        endLine: 2,
+        side: "new",
+        commentText: "Name this trimmed.",
+        lineHash: hashDiffLines(["+  const query = q.trim();"]),
+      }),
+    );
+  });
+
+  it("records the line hash of an agent draft stored without one", async () => {
+    renderScreen();
+    await screen.findByTestId("inline-comment-card");
+    await waitFor(() =>
+      expect(api.updateAgentReviewComment).toHaveBeenCalledWith(
+        "/repo",
+        "agent-1",
+        { lineHash: hashDiffLines(["   return q;"]) },
+      ),
+    );
+  });
+
+  it("shows a draft whose lines changed as outdated and keeps it out of the review", async () => {
+    api.listAgentReviewComments.mockResolvedValue([
+      { ...AGENT_COMMENT, line_hash: "stale000" },
+    ]);
+    renderScreen();
+    expect(await screen.findByText("Outdated")).toBeTruthy();
+    expect(screen.queryByTestId("inline-comment-card")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Finish review/ }));
+    expect(
+      await screen.findByText(/1 outdated draft stays as a draft/),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Submit review" }));
+    await waitFor(() =>
+      expect(api.ghSubmitPrReview).toHaveBeenCalledWith(
+        "acme/treq",
+        42,
+        "COMMENT",
+        "",
+        [],
+      ),
+    );
+    expect(api.resolveAgentReviewComment).not.toHaveBeenCalled();
   });
 });
