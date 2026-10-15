@@ -1,5 +1,5 @@
 use serde_json::{json, Map, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -9,12 +9,18 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{EnvFilter, Layer, Registry};
 
+/// jj-lib logs every file lock it takes at INFO, which would bury everything
+/// else in the Logs tab's System source.
+const DEFAULT_LOG_FILTER: &str = "info,jj_lib::lock=warn";
+
 pub const MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 pub struct TelemetryGuards {
   // Held only for its Drop impl, which flushes the non-blocking writer.
   #[allow(dead_code)]
   file_guard: WorkerGuard,
+  /// Where the log files are written; the Logs tab's "System" source reads them.
+  pub log_dir: PathBuf,
 }
 
 /// Installs a panic hook that forwards panic messages into the `tracing` pipeline
@@ -43,16 +49,20 @@ pub fn init(log_dir: &Path) -> Result<TelemetryGuards, Box<dyn std::error::Error
   std::fs::create_dir_all(log_dir)?;
   cleanup_old_logs(log_dir, MAX_AGE);
 
-  let appender = rolling::daily(log_dir, "treq");
+  let appender = rolling::daily(log_dir, crate::core::system_logs::LOG_FILE_PREFIX);
   let (writer, file_guard) = tracing_appender::non_blocking(appender);
 
   let json_layer = JsonLogLayer::new(writer);
 
-  let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+  let filter =
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER));
   let subscriber = Registry::default().with(filter).with(json_layer);
   tracing::subscriber::set_global_default(subscriber)?;
 
-  Ok(TelemetryGuards { file_guard })
+  Ok(TelemetryGuards {
+    file_guard,
+    log_dir: log_dir.to_path_buf(),
+  })
 }
 
 /// Forward a `log` record into tracing so records from `tauri-plugin-log`
