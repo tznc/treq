@@ -10,11 +10,9 @@
 
 import * as React from "react";
 import { expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -29,6 +27,8 @@ import {
   getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 it("captures conflict/committed/working-copy status pips in the Code tab file list", async () => {
   const branchName = "feat/file-status-pips";
@@ -68,11 +68,10 @@ it("captures conflict/committed/working-copy status pips in the Code tab file li
 
   await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
-  const user = userEvent.setup();
   render(<Dashboard />);
 
-  await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
-  await user.click(await findSidebarBranchElement(branchName));
+  await waitForGpuiConflict(workspaceId);
+  await clickGpuiRow(branchName);
   await screen.findByTestId("show-workspace-header");
 
   await screen.findByRole("button", { name: /committed\.txt/ });

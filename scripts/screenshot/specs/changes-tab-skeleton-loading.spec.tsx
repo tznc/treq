@@ -18,6 +18,7 @@ import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/skeleton-loading";
 const FILES = ["a-first.ts", "b-second.ts", "c-third.ts", "d-fourth.ts"];
@@ -42,7 +43,7 @@ it("shows a skeleton while the Changes tab loads, then renders files progressive
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByText(BRANCH_NAME));
+  await clickGpuiRow(BRANCH_NAME);
   await screen.findByTestId("show-workspace-header");
   await user.click(await screen.findByRole("tab", { name: /^Changes/i }));
 

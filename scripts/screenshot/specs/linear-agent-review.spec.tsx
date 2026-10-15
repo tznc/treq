@@ -27,6 +27,7 @@ import {
 	seedAgentReviewComment,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 const fixtures = vi.hoisted(() => {
 	const issue: LinearIssue = {
@@ -166,7 +167,7 @@ it("reviews Linear issues, comments, projects and documents with the agent", asy
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByTestId("linear-sidebar-item"));
+	sendGpuiAction({ kind: "openLinear" });
 	await user.click(await screen.findByText(fixtures.issue.title));
 	const expanded = await screen.findByTestId("linear-issue-expanded");
 	await within(expanded).findByText(/50ms is not measurable/);

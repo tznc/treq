@@ -43,7 +43,6 @@ describe("Dashboard - GPUI sidebar for a remote repository", () => {
         ).toEqual(["feat/remote-ui"]),
       { timeout: 10_000 },
     );
-    expect(screen.queryByTestId("workspace-sidebar")).toBeNull();
 
     const [{ id }] = lastSnapshot()!.repos[0].workspaces;
     act(() => {

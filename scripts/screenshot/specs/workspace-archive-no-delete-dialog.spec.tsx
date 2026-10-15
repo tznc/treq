@@ -5,17 +5,16 @@
 
 import * as React from "react";
 import { expect, it, vi } from "vitest";
-import userEvent from "@testing-library/user-event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
-import { render, screen, waitFor } from "../../../test/test-utils";
+import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { findGpuiRow, pickGpuiRowMenuItem, waitForNoGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/archive-no-delete-dialog";
 
@@ -29,10 +28,9 @@ it("archives a workspace from the sidebar without the delete dialog", async () =
   if (!workspace) throw new Error(`workspace ${BRANCH_NAME} not found`);
 
   const askSpy = vi.mocked(ask);
-  const user = userEvent.setup();
   render(<Dashboard />);
 
-  const row = await findSidebarBranchElement(BRANCH_NAME);
+  await findGpuiRow(BRANCH_NAME);
   await captureDocument(document, {
     name: "workspace-archive-no-delete-dialog-01-before",
     expectations: [
@@ -41,12 +39,8 @@ it("archives a workspace from the sidebar without the delete dialog", async () =
     ],
   });
 
-  await user.pointer({ keys: "[MouseRight]", target: row });
-  await user.click(await screen.findByText("Archive Workspace"));
-
-  await waitFor(() => {
-    expect(screen.queryByText(BRANCH_NAME)).not.toBeInTheDocument();
-  });
+  await pickGpuiRowMenuItem(BRANCH_NAME, "Archive Workspace");
+  await waitForNoGpuiRow(BRANCH_NAME);
 
   expect(askSpy).not.toHaveBeenCalled();
   expect(screen.queryByText("Delete Workspace")).not.toBeInTheDocument();

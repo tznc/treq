@@ -8,14 +8,13 @@ import { expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
-  findSidebarWorkspaceRow,
 	openRepo,
 } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, openGpuiShell, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/terminal-dblclick-scroll";
 
@@ -31,19 +30,13 @@ it("double-clicking a halfway-scrolled terminal scrolls it fully into view", asy
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(workspace.branch_name));
+	await clickGpuiRow(workspace.branch_name);
 	await screen.findByTestId("workspace-terminal-pane");
 
 	// Three terminals at 40% min-width each forces horizontal overflow.
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", { name: "Start agent" }),
-	);
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", { name: "Open shell" }),
-	);
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", { name: "Open shell" }),
-	);
+	await startGpuiAgent(BRANCH_NAME);
+	await openGpuiShell(BRANCH_NAME);
+	await openGpuiShell(BRANCH_NAME);
 
 	const shellPanels = await waitFor(() => {
 		const els = document.querySelectorAll('[data-terminal-id^="shell-"]');

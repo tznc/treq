@@ -1,11 +1,11 @@
 // @include-serial
+import { clickGpuiRow } from "../../gpui-sidebar";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor } from "../../test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -39,7 +39,7 @@ async function openWorkspaceCommitsTab(
   branchName: string,
 ) {
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
 }
 

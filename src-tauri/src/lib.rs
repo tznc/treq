@@ -415,6 +415,9 @@ pub fn run() {
   if is_cli_process(std::env::args_os()) {
     std::process::exit(cli::args::run(std::env::args_os()));
   }
+  #[cfg(feature = "gpui-shell")]
+  #[cfg(desktop)]
+  gpui_shell::force_x11_on_wayland();
   let builder = tauri::Builder::default();
   // Must be the first plugin. On Windows and Linux a `treq://` link starts a
   // second process; this plugin makes it exit and hands its arguments to the
@@ -502,10 +505,8 @@ pub fn run() {
 
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
-      if gpui_shell::should_enable(&db) {
-        if let Err(err) = gpui_shell::init(app) {
-          log::error!("GPUI shell unavailable, using the webview window: {err}");
-        }
+      if let Err(err) = gpui_shell::init(app) {
+        log::error!("GPUI shell unavailable, using the webview window: {err}");
       }
       open_repo_window(app.handle(), "main", window_url, "Treq - Stacking ADE")?;
 

@@ -16,7 +16,6 @@ describe("preview features", () => {
       "logs",
       "browser",
       "devcontainers",
-      "gpuiSidebar",
     ]);
     for (const feature of PREVIEW_FEATURES) {
       expect(feature.docsPath.startsWith("/docs/")).toBe(true);
@@ -38,15 +37,6 @@ describe("preview features", () => {
     expect(previewFeatureDefault("linearIntegration")).toBe(true);
     expect(previewFeatureDefault("logs")).toBe(true);
     expect(previewFeatureDefault("browser")).toBe(true);
-  });
-
-  it("keeps the GPUI sidebar off in test and dev", () => {
-    expect(FEATURES.gpuiSidebar).toBe(false);
-    expect(previewFeatureDefault("gpuiSidebar")).toBe(false);
-    expect(
-      PREVIEW_FEATURES.find((feature) => feature.id === "gpuiSidebar")
-        ?.restartRequired,
-    ).toBe(true);
   });
 
   it("honors stored true/false over the startup default", () => {

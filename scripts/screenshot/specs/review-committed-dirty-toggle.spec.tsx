@@ -3,7 +3,6 @@ import { it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -16,6 +15,7 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 it("keeps dirty committed files visible after hiding Committed Show", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -45,9 +45,7 @@ it("keeps dirty committed files visible after hiding Committed Show", async () =
 	writeWorkspaceFile(workspacePath, "uncommitted-only.txt", "working only\n");
 
 	render(<Dashboard />);
-	await user.click(
-		await findSidebarBranchElement("feat/committed-dirty-show"),
-	);
+	await clickGpuiRow("feat/committed-dirty-show");
 
 	const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
 	await user.click(reviewTab);

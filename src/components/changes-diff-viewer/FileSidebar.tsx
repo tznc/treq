@@ -4,7 +4,6 @@ import type { JjFileChange } from "../../lib/api";
 import type { ParsedFileChange } from "../../lib/git-utils";
 import { isRemoteRepository } from "../../lib/active-repository";
 import { useActiveRepository } from "../../lib/active-repository-context";
-import { setChangeFilesDragData } from "../../lib/change-file-drag";
 import {
   type ChangeFilesMoveTarget,
   useChangeFilesMove,
@@ -128,18 +127,11 @@ export function FileSidebar({
 
   const move = useChangeFilesMove();
 
-  // A selected file carries the whole selection with it, as a drag does.
+  // A selected file carries the whole selection with it.
   const filesFor = (path: string) =>
     selectedUnstagedFiles.has(path) && selectedUnstagedFiles.size > 0
       ? Array.from(selectedUnstagedFiles)
       : [path];
-
-  const handleFileDragStart = (path: string, event: React.DragEvent) => {
-    setChangeFilesDragData(event.dataTransfer, {
-      files: filesFor(path),
-      sourceBranch,
-    });
-  };
 
   const moveTargets = move?.targets.filter((t) => t.branch !== sourceBranch);
   const handleMoveFile = (path: string, target: ChangeFilesMoveTarget) => {
@@ -244,7 +236,6 @@ export function FileSidebar({
                   onStage={handleStageFile}
                   onStageAll={handleStageAllFiles}
                   workspacePath={workspacePath}
-                  onFileDragStart={handleFileDragStart}
                   moveTargets={moveTargets}
                   onMoveFile={move ? handleMoveFile : undefined}
                 />

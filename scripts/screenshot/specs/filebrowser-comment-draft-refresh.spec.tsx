@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { fireEvent } from "@testing-library/react";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -13,6 +12,7 @@ import { render, screen, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 // Per-line "Add comment" uses hoveredLine state; see filebrowser-review.spec.tsx.
 it("captures a FileBrowser comment draft surviving a same-file reload", async () => {
@@ -35,7 +35,7 @@ it("captures a FileBrowser comment draft surviving a same-file reload", async ()
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   await user.click(await screen.findByRole("button", { name: "notes.ts" }));
   const fileBrowser = within(await screen.findByTestId("file-browser"));
   await fileBrowser.findByText("greeting");

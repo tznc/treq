@@ -14,11 +14,11 @@ import type { GhPullRequest, PrCiStatus } from "../../../src/lib/api-types";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   writeRepoFile,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const {
   mockGetGitRemoteUrl,
@@ -104,7 +104,7 @@ async function openWorkspaceWithChecks() {
 
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(BRANCH));
+  await clickGpuiRow(BRANCH);
   await screen.findByTestId("show-workspace-header");
   const trigger = await screen.findByTestId(
     "workspace-checks-button",

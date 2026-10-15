@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
@@ -13,13 +12,14 @@ import { getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
 
 import { appendFileSync } from "node:fs";
+import { clickGpuiHome, clickGpuiRow, pickGpuiRowMenuItem, stackGpui, waitForNoGpuiRow } from "../../../test/gpui-sidebar";
 const chaosLog = (...a: unknown[]) =>
   appendFileSync("/tmp/claude-0/chaos.log", `${a.join(" ")}\n`);
 
 type User = ReturnType<typeof userEvent.setup>;
 
 async function stackFromHome(user: User, branchName: string) {
-  await user.click(await screen.findByTestId("home-repo-row"));
+  await clickGpuiHome();
   await screen.findByTestId("show-workspace-header");
   await user.click(await screen.findByRole("button", { name: "Stack" }));
   const dialog = await screen.findByTestId("modal");
@@ -38,12 +38,7 @@ async function stackOn(
   branchName: string,
   position: "after" | "before" = "after",
 ) {
-  const label = await findSidebarBranchElement(parentBranch);
-  const row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui(parentBranch);
   const dialog = await screen.findByTestId("modal");
   if (position === "before") {
     await user.click(within(dialog).getByRole("button", { name: /^before$/i }));
@@ -93,19 +88,14 @@ it("stack chaos: archiving the middle of a stack", async () => {
   await stackOn(user, "mid/b", "mid/c");
   await commitOn(repoPath, "mid/c", "C commit");
 
-  const b = await findSidebarBranchElement("mid/b");
-  await user.pointer({ keys: "[MouseRight]", target: b });
-  await user.click(await screen.findByText("Archive Workspace"));
-  const sidebar = await screen.findByTestId("workspace-sidebar");
-  await waitFor(() =>
-    expect(within(sidebar).queryByText("mid/b")).not.toBeInTheDocument(),
-  );
+  await pickGpuiRowMenuItem("mid/b", "Archive Workspace");
+  await waitForNoGpuiRow("mid/b");
   const t = await targets(repoPath);
   chaosLog("[chaos] targets after archiving middle", JSON.stringify(t));
   // mid/c is spliced onto mid/b's parent, not dropped onto the default branch.
   expect(t["mid/c"]).toBe("mid/a");
 
-  await user.click(await findSidebarBranchElement("mid/c"));
+  await clickGpuiRow("mid/c");
   await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
   await screen.findByText("C commit");
   await settle();
@@ -138,7 +128,7 @@ it("stack chaos: before on the root and a grandchild reorder", async () => {
   expect(t["ro/a"]).toBe("ro/root");
   expect(t["ro/b"]).toBe("ro/a");
 
-  await user.click(await findSidebarBranchElement("ro/c"));
+  await clickGpuiRow("ro/c");
   await screen.findByTestId("workspace-stack-panel");
   await settle();
   await captureDocument(document, {
@@ -150,7 +140,7 @@ it("stack chaos: before on the root and a grandchild reorder", async () => {
   });
 
   // Reorder: move ro/a onto its grandchild ro/c.
-  await user.click(await findSidebarBranchElement("ro/a"));
+  await clickGpuiRow("ro/a");
   const targetBtn = await screen.findByRole("button", {
     name: "Workspace target",
   });

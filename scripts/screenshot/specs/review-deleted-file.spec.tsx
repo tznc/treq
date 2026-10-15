@@ -5,7 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	newCommitWithParents,
 	openRepo,
 	resolveChangeId,
@@ -21,6 +20,8 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 it("captures deleted file placeholder in the Changes tab", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -46,7 +47,7 @@ it("captures deleted file placeholder in the Changes tab", async () => {
 
 	const user = userEvent.setup();
 	render(<Dashboard />);
-	await user.click(await findSidebarBranchElement("feat/deleted-file-qa"));
+	await clickGpuiRow("feat/deleted-file-qa");
 	await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
 	await screen.findByRole("tab", { name: /^Changes/, selected: true });
 
@@ -97,9 +98,9 @@ it("captures delete/modify conflict deleted-side card in the Changes tab", async
 	await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
 	render(<Dashboard />);
-	await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+	await waitForGpuiConflict(workspaceId);
 
-	await user.click(await findSidebarBranchElement("feat/delete-modify-qa"));
+	await clickGpuiRow("feat/delete-modify-qa");
 	const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
 	await user.click(reviewTab);
 	await screen.findByRole("tab", { name: /^Changes/, selected: true });

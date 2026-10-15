@@ -1,11 +1,17 @@
 // @include-parallel
 import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "../test-utils";
+import { render, screen } from "../test-utils";
 import { waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { createTestRepo, openRepo } from "../utils";
 import { createWorkspace } from "../../src/lib/api";
 import { Dashboard } from "../../src/components/Dashboard";
+import {
+  clickGpuiRow,
+  findGpuiRow,
+  gpuiRepo,
+  pickGpuiHomeMenuItem,
+} from "../gpui-sidebar";
 
 describe("home row context menu does not lock sidebar clicks after branch switch", () => {
   let repoPath: string;
@@ -22,33 +28,25 @@ describe("home row context menu does not lock sidebar clicks after branch switch
   it("switches the home branch via Switch Branch... and still allows clicking a workspace row afterward", async () => {
     render(<Dashboard />);
 
-    const homeRepoElement = await screen.findByTestId("home-repo-row");
-    await waitFor(() => {
-      expect(homeRepoElement.textContent).not.toMatch(/…/);
-    });
-    expect(within(homeRepoElement).queryByText("feat/beta")).toBeFalsy();
+    await findGpuiRow("feat/alpha");
+    await waitFor(() => expect(gpuiRepo()?.homeRef).toBeTruthy());
+    expect(gpuiRepo()?.homeRef).not.toBe("feat/beta");
 
-    fireEvent.contextMenu(homeRepoElement);
-    const switchBranchItem = await screen.findByText("Switch Branch...");
-    await user.click(switchBranchItem);
+    await pickGpuiHomeMenuItem("Switch Branch...");
 
     const modal = await screen.findByTestId("modal");
     const targetBranchOption = await within(modal).findByText("feat/beta");
     await user.click(targetBranchOption);
 
-    await waitFor(() => {
-      expect(within(homeRepoElement).getByText("feat/beta")).toBeTruthy();
-    });
+    await waitFor(() => expect(gpuiRepo()?.homeRef).toBe("feat/beta"));
     expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 
     expect(document.body.style.pointerEvents).not.toBe("none");
 
-    const alphaLabel = await findSidebarBranchElement("feat/alpha");
-    await user.click(alphaLabel);
+    await clickGpuiRow("feat/alpha");
 
-    const alphaRow = alphaLabel.closest("div") as HTMLElement;
-    await waitFor(() => {
-      expect(alphaRow).toHaveClass("bg-primary/20");
-    });
+    await waitFor(async () =>
+      expect((await findGpuiRow("feat/alpha")).selected).toBe(true),
+    );
   });
 });

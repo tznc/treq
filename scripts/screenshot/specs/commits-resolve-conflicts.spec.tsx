@@ -3,12 +3,11 @@ import { it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
 } from "../../../test/utils";
-import { render, screen, within } from "../../../test/test-utils";
+import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import {
 	checkAndRebaseWorkspaces,
@@ -18,6 +17,8 @@ import {
 	getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 it("captures Resolve conflicts banner on the Commits tab", async () => {
 	const { repoPath, defaultBranch } = createTestRepo(false);
@@ -47,8 +48,8 @@ it("captures Resolve conflicts banner on the Commits tab", async () => {
 	await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
 	render(<Dashboard />);
-	await user.click(await findSidebarBranchElement("feat/commits-resolve"));
-	await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+	await clickGpuiRow("feat/commits-resolve");
+	await waitForGpuiConflict(workspaceId);
 
 	const commitsTab = await screen.findByRole("tab", { name: /commits/i });
 	await user.click(commitsTab);

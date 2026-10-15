@@ -7,13 +7,14 @@ import { Dashboard } from "../../src/components/Dashboard";
 import { getWorkspaces } from "../../src/lib/api";
 import { render, screen, waitFor, within } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
+import { clickGpuiHome, findGpuiRow } from "../gpui-sidebar";
 
 async function stackFromHome(
   user: ReturnType<typeof userEvent.setup>,
   branchName: string,
   onDialogOpen?: () => void,
 ) {
-  await user.click(await screen.findByTestId("home-repo-row"));
+  await clickGpuiHome();
   await screen.findByTestId("show-workspace-header");
   await user.click(await screen.findByRole("button", { name: "Stack" }));
   const dialog = await screen.findByTestId("modal");
@@ -28,6 +29,9 @@ async function stackFromHome(
   await waitFor(
     () => expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
     { timeout: 10_000 },
+  );
+  await waitFor(async () =>
+    expect((await findGpuiRow(branchName)).selected).toBe(true),
   );
 }
 

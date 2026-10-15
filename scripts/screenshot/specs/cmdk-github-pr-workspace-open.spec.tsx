@@ -6,6 +6,7 @@ import { createWorkspace } from "../../../src/lib/api";
 import { render, screen } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/pr-cmdk-demo";
 
@@ -40,7 +41,7 @@ async function setupSelectedWorkspace() {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByText(BRANCH_NAME));
+  await clickGpuiRow(BRANCH_NAME);
   await screen.findByTestId("show-workspace-header");
   return user;
 }

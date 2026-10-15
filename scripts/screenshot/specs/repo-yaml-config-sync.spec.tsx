@@ -5,6 +5,7 @@ import { createTestRepo, openRepo, writeRepoFile } from "../../../test/utils";
 import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 it("captures the repository tab with no config, synced with fields disabled, and after a reload", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -13,7 +14,7 @@ it("captures the repository tab with no config, synced with fields disabled, and
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByLabelText("Settings"));
+	sendGpuiAction({ kind: "openSettings" });
 	await screen.findByRole("tab", { name: /repository/i, selected: true });
 
 	const branchPatternInput = await screen.findByLabelText(/branch name pattern/i);
@@ -38,7 +39,7 @@ it("captures the repository tab with no config, synced with fields disabled, and
 		["default_model: opus", "default_agent: claude"].join("\n"),
 	);
 
-	await user.click(await screen.findByLabelText("Settings"));
+	sendGpuiAction({ kind: "openSettings" });
 	await screen.findByRole("tab", { name: /repository/i, selected: true });
 
 	await screen.findByText(/synced from \.treq\/config\.yaml/i);

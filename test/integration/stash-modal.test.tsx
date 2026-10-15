@@ -3,7 +3,6 @@ import { describe, expect, it, beforeEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -16,6 +15,7 @@ import {
 } from "../../src/lib/api";
 import { render, screen, waitFor, within } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
+import { clickGpuiRow } from "../gpui-sidebar";
 
 describe("stash dual-pane modal", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -46,7 +46,7 @@ describe("stash dual-pane modal", () => {
 
   it("opens from the command palette and shows list + isolated diff", async () => {
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(branchName));
+    await clickGpuiRow(branchName);
     await screen.findByTestId("show-workspace-header");
 
     await user.keyboard("{Meta>}k{/Meta}");

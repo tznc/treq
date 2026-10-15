@@ -6,7 +6,6 @@ import path from "node:path";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -23,6 +22,7 @@ import type { LineComment } from "../../../src/lib/api-types";
 import { render, screen, waitFor } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { findReviewCopyButton, setupReviewMode } from "./comments-helpers";
+import { clickGpuiRow } from "../../gpui-sidebar";
 
 const REVIEW_FILE = "commit-reload.txt";
 
@@ -100,7 +100,7 @@ async function openReviewTab(
 ) {
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
 
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
@@ -157,7 +157,7 @@ describe("Review - deleted file collapsible", () => {
     fs.unlinkSync(path.join(workspacePath, "doomed.txt"));
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/deleted-file"));
+    await clickGpuiRow("feat/deleted-file");
     await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
     await screen.findByRole("tab", { name: /^Changes/, selected: true });
 

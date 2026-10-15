@@ -3,15 +3,11 @@ import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import * as api from "../../src/lib/api";
-import {
-  commitWorkspaceFile,
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../utils";
+import { commitWorkspaceFile, createTestRepo, openRepo } from "../utils";
 import { createWorkspace, getWorkspaces } from "../../src/lib/api";
 import { fireEvent, render, screen, waitFor, within } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
+import { clickGpuiRow } from "../gpui-sidebar";
 
 vi.mock("../../src/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/lib/api")>();
@@ -58,7 +54,7 @@ describe("MergePreviewPage integration", () => {
 
   async function openMergePreview(branchName: string) {
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(branchName));
+    await clickGpuiRow(branchName);
     let mergeButton: HTMLButtonElement;
     await waitFor(() => {
       const header = screen.getByTestId("show-workspace-header");

@@ -8,11 +8,12 @@
 import * as React from "react";
 import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../../../test/utils";
+import { createTestRepo, openRepo } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/ctrl-w-close";
 
@@ -28,7 +29,7 @@ it("Cmd+W closes the selected terminal and shows the hotkey in the Close tooltip
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(workspace.branch_name));
+	await clickGpuiRow(workspace.branch_name);
 	await screen.findByTestId("workspace-terminal-pane");
 
 	// Create a shell terminal (Cmd+\) so there's a selected/active terminal to close.

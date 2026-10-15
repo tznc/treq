@@ -5,7 +5,10 @@
  * Order:
  * 1. Copy every PNG from an optional source tree (CI artifact).
  * 2. If the hero is still missing, copy assets/screenshots/code.png.
- * 3. If a landing crop is still missing, copy the hero so /img/landing/*.png
+ * 3. Copy committed crops from assets/screenshots/landing/ that are still
+ *    missing. These are native captures of the GPUI sidebar, which browser
+ *    capture cannot draw.
+ * 4. If a landing crop is still missing, copy the hero so /img/landing/*.png
  *    never 404s when capture did not run.
  */
 import fs from "node:fs";
@@ -19,6 +22,7 @@ const destImg = path.join(webRoot, "static", "img");
 const destLanding = path.join(destImg, "landing");
 const destHero = path.join(destImg, "code.png");
 const committedHero = path.join(repoRoot, "assets", "screenshots", "code.png");
+const committedLanding = path.join(repoRoot, "assets", "screenshots", "landing");
 const listPath = path.join(webRoot, "src", "data", "landing-screenshots.json");
 const names = JSON.parse(fs.readFileSync(listPath, "utf8"));
 const srcRoot = process.argv[2];
@@ -67,6 +71,14 @@ if (!fs.existsSync(destHero)) {
   }
   copyFile(committedHero, destHero);
   console.log(`Staged hero from ${committedHero}`);
+}
+
+for (const name of names) {
+  const dest = path.join(destLanding, name);
+  const committed = path.join(committedLanding, name);
+  if (fs.existsSync(dest) || !fs.existsSync(committed)) continue;
+  copyFile(committed, dest);
+  console.log(`Staged ${name} from ${committedLanding}`);
 }
 
 let filled = 0;

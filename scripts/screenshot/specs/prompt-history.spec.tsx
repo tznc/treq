@@ -3,7 +3,6 @@ import { expect, it, onTestFinished } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
@@ -11,6 +10,7 @@ import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { installFakeAgents } from "../../../test/fake-agent";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_A = "feat/prompt-history-demo";
 const BRANCH_B = "feat/prompt-history-demo-2";
@@ -23,16 +23,6 @@ async function submitPrompt(user: ReturnType<typeof userEvent.setup>, text: stri
 	await user.click(await screen.findByRole("button", { name: /^edit$/i }));
 	// Wait for the prompt to actually persist.
 	await new Promise((resolve) => setTimeout(resolve, 500));
-}
-
-// Once a workspace's terminal has been visited, its branch name shows up
-// both in the sidebar row and in the terminal tab bar -- scope clicks to the
-// workspace sidebar so the branch name stays unambiguous.
-async function clickSidebarWorkspace(
-	user: ReturnType<typeof userEvent.setup>,
-	branchName: string,
-) {
-	await user.click(await findSidebarBranchElement(branchName));
 }
 
 it("captures the workspace details starting prompt and the dual-pane prompt history modal", async () => {
@@ -50,18 +40,18 @@ it("captures the workspace details starting prompt and the dual-pane prompt hist
 	// -- this lets us prove "View full prompt" jumps straight to A even
 	// though B (submitted after) is more recent and would otherwise be the
 	// modal's default selection.
-	await clickSidebarWorkspace(user, BRANCH_A);
+	await clickGpuiRow(BRANCH_A);
 	await screen.findByTestId("show-workspace-header");
 	await submitPrompt(user, PROMPT_A);
 
-	await clickSidebarWorkspace(user, BRANCH_B);
+	await clickGpuiRow(BRANCH_B);
 	await screen.findByTestId("show-workspace-header");
 	await submitPrompt(user, PROMPT_B);
 
 	// Back to workspace A: open Details and confirm its own starting prompt
 	// (not B's, which was submitted later) shows up, with the max-height,
 	// scrollable prompt box and the new "View full prompt" link.
-	await clickSidebarWorkspace(user, BRANCH_A);
+	await clickGpuiRow(BRANCH_A);
 	await screen.findByTestId("show-workspace-header");
 	const detailsButton = await screen.findByTestId("workspace-details-button");
 	await user.click(detailsButton);

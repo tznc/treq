@@ -11,6 +11,7 @@ import { installFakeAgents } from "../../../test/fake-agent";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const agentColumns = () =>
   Array.from(
@@ -75,7 +76,7 @@ it("captures the highlight after switching workspace", async () => {
   await screen.findByTestId("show-workspace-header");
 
   for (const branch of ["feat/alpha", "feat/beta"]) {
-    await user.click((await screen.findAllByText(branch))[0]);
+    await clickGpuiRow(branch);
     await waitFor(() =>
       expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
         branch,
@@ -93,7 +94,7 @@ it("captures the highlight after switching workspace", async () => {
       { timeout: 15000 },
     );
   }
-  await user.click(screen.getAllByText("feat/alpha")[0]);
+  await clickGpuiRow("feat/alpha");
   await waitFor(() =>
     expect(agentColumns()[0]).toHaveAttribute("data-active", "true"),
   );

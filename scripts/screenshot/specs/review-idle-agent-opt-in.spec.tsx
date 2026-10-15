@@ -11,16 +11,16 @@ import { expect, it, onTestFinished } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarWorkspaceRow,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
 } from "../../../test/utils";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { installFakeAgents } from "../../../test/fake-agent";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/review-idle-agent";
 
@@ -47,14 +47,10 @@ async function setupWithIdleAgent() {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByText(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
-			name: "Start agent",
-		}),
-	);
+	await startGpuiAgent(BRANCH_NAME);
 	await waitFor(() => expect(agentTerminalCount()).toBe(1));
 
 	await user.click(await screen.findByRole("tab", { name: /^Changes/i }));

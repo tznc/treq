@@ -7,6 +7,13 @@ import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 import { getSetting, setSetting } from "../../src/lib/api";
 
+import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitFor(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
+
 const setWebviewZoom = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@tauri-apps/api/webview", () => ({
@@ -37,7 +44,7 @@ describe("UI zoom settings", () => {
 
   it("zooms in with Ctrl+= and out with Ctrl+-", async () => {
     render(<Dashboard />);
-    await screen.findByLabelText("Settings");
+    await waitFor(() => expect(gpuiSnapshot()).toBeTruthy());
 
     await user.keyboard("{Control>}{=}{/Control}");
     await waitFor(() => {
@@ -53,7 +60,7 @@ describe("UI zoom settings", () => {
   it("applies slider changes immediately without saving", async () => {
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /application/i }));
 
     const thumb = await screen.findByRole("slider");
@@ -66,7 +73,7 @@ describe("UI zoom settings", () => {
   it("shows a zoom slider in application settings and saves the value", async () => {
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /application/i }));
 
     const thumb = await screen.findByRole("slider");
@@ -96,7 +103,7 @@ describe("font size presets", () => {
   it("offers named sizes and saves the chosen one", async () => {
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /application/i }));
 
     const select = await screen.findByLabelText("Font Size");

@@ -8,6 +8,7 @@ import {
 import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 it("captures the Feature Preview settings tab and gated UI", async () => {
   const { repoPath } = createTestRepo(false);
@@ -15,7 +16,7 @@ it("captures the Feature Preview settings tab and gated UI", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(
     await screen.findByRole("tab", { name: /feature preview/i }),
   );

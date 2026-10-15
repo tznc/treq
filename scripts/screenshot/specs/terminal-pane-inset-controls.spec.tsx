@@ -5,17 +5,15 @@
 
 import * as React from "react";
 import { expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
-  findSidebarWorkspaceRow,
   openRepo,
 } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/terminal-inset-controls";
 
@@ -28,10 +26,9 @@ it("pane expand/control buttons sit in an inset top-right pull", async () => {
   const workspace = workspaces.find((w) => w.branch_name === BRANCH_NAME);
   if (!workspace) throw new Error(`workspace ${BRANCH_NAME} not found`);
 
-  const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(workspace.branch_name));
+  await clickGpuiRow(workspace.branch_name);
   await screen.findByTestId("workspace-terminal-pane");
   expect(screen.queryByText("Terminals")).not.toBeInTheDocument();
   expect(screen.getByLabelText(/Expand terminal/i)).toBeInTheDocument();
@@ -44,11 +41,7 @@ it("pane expand/control buttons sit in an inset top-right pull", async () => {
     ],
   });
 
-  await user.click(
-    within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
-      name: "Start agent",
-    }),
-  );
+  await startGpuiAgent(BRANCH_NAME);
   await waitFor(() => {
     expect(
       document.querySelector('[data-terminal-id^="agent-"]'),

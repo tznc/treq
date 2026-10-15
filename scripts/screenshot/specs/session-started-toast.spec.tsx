@@ -12,6 +12,7 @@ import { installFakeAgents } from "../../../test/fake-agent";
 import { render, screen, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 const linearApi = vi.hoisted(() => ({
   linearListIssues: vi.fn(),
@@ -55,7 +56,7 @@ it("captures the session-started toast and its Open action", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByTestId("linear-sidebar-item"));
+  sendGpuiAction({ kind: "openLinear" });
   await user.click(await screen.findByRole("button", { name: "Kick off" }));
   const dialog = (
     await screen.findByRole("heading", { name: "Start a new agent session" })

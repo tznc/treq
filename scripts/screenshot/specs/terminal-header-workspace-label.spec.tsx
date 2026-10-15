@@ -5,17 +5,15 @@
 
 import * as React from "react";
 import { expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
-  findSidebarWorkspaceRow,
   openRepo,
 } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, openGpuiShell, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/terminal-header-label";
 
@@ -28,28 +26,19 @@ it("shows workspace name as a label on each terminal header", async () => {
   const workspace = workspaces.find((w) => w.branch_name === BRANCH_NAME);
   if (!workspace) throw new Error(`workspace ${BRANCH_NAME} not found`);
 
-  const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(workspace.branch_name));
+  await clickGpuiRow(workspace.branch_name);
   await screen.findByTestId("workspace-terminal-pane");
 
-  await user.click(
-    within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
-      name: "Start agent",
-    }),
-  );
+  await startGpuiAgent(BRANCH_NAME);
   const agentPanel = await waitFor(() => {
     const el = document.querySelector('[data-terminal-id^="agent-"]');
     expect(el).not.toBeNull();
     return el as HTMLElement;
   });
 
-  await user.click(
-    within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
-      name: "Open shell",
-    }),
-  );
+  await openGpuiShell(BRANCH_NAME);
   const shellPanel = await waitFor(() => {
     const el = document.querySelector('[data-terminal-id^="shell-"]');
     expect(el).not.toBeNull();

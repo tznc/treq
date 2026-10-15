@@ -6,6 +6,7 @@ import { createWorkspace } from "../../src/lib/api";
 import { installFakeAgents } from "../fake-agent";
 import { render, screen, waitFor, within } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
+import { clickGpuiRow } from "../gpui-sidebar";
 
 const agentColumns = () =>
   Array.from(
@@ -48,9 +49,7 @@ describe("terminal pane sessions", () => {
   }
 
   async function openWorkspace(branch: string) {
-    await user.click(
-      await within(screen.getByTestId("workspace-sidebar")).findByText(branch),
-    );
+    await clickGpuiRow(branch);
     await waitFor(() =>
       expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
         branch,

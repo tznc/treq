@@ -6,10 +6,10 @@ import { createWorkspace, updateWorkspace } from "../../../src/lib/api";
 import { render, screen, within } from "../../../test/test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 // Scenario: the user opens a workspace whose description an agent wrote,
 // edits it in place from the card's pencil button, and saves.
@@ -27,7 +27,7 @@ it("captures editing the workspace description in the Code tab", async () => {
 
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement("feat/login-limits"));
+  await clickGpuiRow("feat/login-limits");
   const panel = await screen.findByTestId("workspace-description");
   await within(panel).findByRole("heading", { name: "Summary" });
   await captureDocument(document, {

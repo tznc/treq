@@ -7,8 +7,6 @@ import crypto from "crypto";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
-  findSidebarWorkspaceRow,
   openRepo,
   resolveWorkspacePath,
 } from "../../../test/utils";
@@ -16,6 +14,7 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
 import { getWorkspaces, readFile, uninstallSkill } from "../../../src/lib/api";
+import { findGpuiRow, sendGpuiAction, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/with-demo-skill";
 const SKILL_BODY = "---\nname: demo\ndescription: demo skill\n---\n# Demo\n";
@@ -77,7 +76,7 @@ it("materializes installed library skills into a new workspace", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(await screen.findByRole("tab", { name: /skills/i }));
   await user.click(await screen.findByRole("button", { name: /^install/i }));
   await user.click(
@@ -102,7 +101,7 @@ it("materializes installed library skills into a new workspace", async () => {
 
   const header = await screen.findByTestId("show-workspace-header");
   await within(header).findByText(BRANCH_NAME);
-  await findSidebarBranchElement(BRANCH_NAME);
+  await findGpuiRow(BRANCH_NAME);
 
   const workspace = (await getWorkspaces(repoPath)).find(
     (candidate) => candidate.branch_name === BRANCH_NAME,
@@ -136,9 +135,7 @@ it("materializes installed library skills into a new workspace", async () => {
     ],
   });
 
-  await user.click(
-    within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", { name: "Start agent" }),
-  );
+  await startGpuiAgent(BRANCH_NAME);
   await waitFor(() => {
     expect(
       document.querySelector('[data-terminal-id^="agent-"]'),

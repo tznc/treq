@@ -6,10 +6,10 @@ import { installFakeAgents } from "../../../test/fake-agent";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { findGpuiRow } from "../../../test/gpui-sidebar";
 
 const PROMPT = "Add input validation to the signup form";
 const BRANCH = "add-input-validation-to-the-signup-form";
@@ -40,7 +40,7 @@ it("captures a home-view task starting in its own workspace", async () => {
     });
 
     await user.click(screen.getByRole("button", { name: /^edit$/i }));
-    await findSidebarBranchElement(BRANCH);
+    await findGpuiRow(BRANCH);
     const pane = await screen.findByTestId("workspace-terminal-pane");
     await within(pane).findByText(`prompt: ${PROMPT}`, {}, { timeout: 15000 });
 

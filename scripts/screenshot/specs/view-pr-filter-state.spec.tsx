@@ -16,6 +16,7 @@ import {
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { render, screen, within } from "../../../test/test-utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 // gh CLI calls can't run against a real GitHub remote inside the harness, so
 // mock the gh-network boundary the same way test/integration/workspace/create-pr.test.tsx
@@ -98,7 +99,7 @@ it("captures View PR landing on the filter tab matching a CLOSED PR's state", as
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByText("feat/closed-pr"));
+	await clickGpuiRow("feat/closed-pr");
 	const header = await screen.findByTestId("show-workspace-header");
 	const viewPr = await within(header).findByRole("button", {
 		name: /view pr.*closed/i,

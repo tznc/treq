@@ -10,7 +10,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -20,6 +19,7 @@ import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { dispatchRefreshWorkspaceChanges } from "../../../src/lib/change-file-drag";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/scoped-fs-refresh";
 
@@ -48,7 +48,7 @@ it("refreshes only the visible FileBrowser and Changes views", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 
 	// Overview without FileBrowser: scoped refresh should not spin "Refreshing..."

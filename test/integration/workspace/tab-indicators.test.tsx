@@ -1,10 +1,10 @@
 // @include-serial
+import { clickGpuiRow, clickGpuiHome } from "../../gpui-sidebar";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -106,12 +106,6 @@ async function setupWorkspaceWithChange(branchName: string): Promise<{
 }
 
 describe("ShowWorkspace tab-row LOC marker", () => {
-  let user: ReturnType<typeof userEvent.setup>;
-
-  beforeEach(() => {
-    user = userEvent.setup();
-  });
-
   it("shows committed + working-copy LOC pulled right of the tab buttons", async () => {
     const { repoPath } = createTestRepo(false);
     openRepo(repoPath);
@@ -144,7 +138,7 @@ describe("ShowWorkspace tab-row LOC marker", () => {
     expect(expected.insertions).toBeGreaterThan(0);
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(branchName));
+    await clickGpuiRow(branchName);
     await screen.findByTestId("show-workspace-header");
 
     const marker = await screen.findByTestId("loc-diff-marker");
@@ -167,7 +161,7 @@ describe("ShowWorkspace tab-row LOC marker", () => {
     await createWorkspace(repoPath, branchName);
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(branchName));
+    await clickGpuiRow(branchName);
     await screen.findByTestId("show-workspace-header");
     await screen.findByRole("tab", { name: /^Code/ });
 
@@ -189,7 +183,7 @@ describe("Review tab change count", () => {
       await setupWorkspaceWithCommittedAndUncommitted("feat/review-count");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(fixture.branchName));
+    await clickGpuiRow(fixture.branchName);
     await screen.findByTestId("show-workspace-header");
 
     await waitFor(() => {
@@ -214,13 +208,13 @@ describe("Review tab change count", () => {
     await createWorkspace(fixture.repoPath, "feat/clean");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(fixture.branchName));
+    await clickGpuiRow(fixture.branchName);
     await screen.findByTestId("show-workspace-header");
     await waitFor(() => {
       expect(getReviewBadgeCount()).toBe(2);
     });
 
-    await user.click(await findSidebarBranchElement("feat/clean"));
+    await clickGpuiRow("feat/clean");
     const header = await screen.findByTestId("show-workspace-header");
     await waitFor(() => {
       expect(header).toHaveTextContent("feat/clean");
@@ -235,13 +229,13 @@ describe("Review tab change count", () => {
       await setupWorkspaceWithCommittedAndUncommitted("feat/review-count");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(fixture.branchName));
+    await clickGpuiRow(fixture.branchName);
     await screen.findByTestId("show-workspace-header");
     await waitFor(() => {
       expect(getReviewBadgeCount()).toBe(2);
     });
 
-    await user.click(await screen.findByTestId("home-repo-row"));
+    await clickGpuiHome();
     await waitFor(() => {
       expect(getReviewBadgeCount()).not.toBe(2);
     });
@@ -263,7 +257,7 @@ describe("ShowWorkspace - committed diff dedupe integration", () => {
     const fixture = await setupOverlappingWorkspace("feat/committed-dedupe");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(fixture.branchName));
+    await clickGpuiRow(fixture.branchName);
 
     const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
     await user.click(reviewTab);

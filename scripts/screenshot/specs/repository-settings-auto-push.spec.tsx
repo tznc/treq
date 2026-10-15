@@ -5,6 +5,7 @@ import { createTestRepo, openRepo } from "../../../test/utils";
 import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 it("captures the auto-push toggle defaulting off and persisting once enabled", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -13,7 +14,7 @@ it("captures the auto-push toggle defaulting off and persisting once enabled", a
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByLabelText("Settings"));
+	sendGpuiAction({ kind: "openSettings" });
 	await screen.findByRole("tab", { name: /repository/i, selected: true });
 
 	const autoPushSwitch = await screen.findByRole("switch", {
@@ -45,7 +46,7 @@ it("captures the auto-push toggle defaulting off and persisting once enabled", a
 	});
 
 	await user.click(screen.getByRole("button", { name: /^close$/i }));
-	await user.click(await screen.findByLabelText("Settings"));
+	sendGpuiAction({ kind: "openSettings" });
 	await screen.findByRole("tab", { name: /repository/i, selected: true });
 
 	const reloadedSwitch = await screen.findByRole("switch", {

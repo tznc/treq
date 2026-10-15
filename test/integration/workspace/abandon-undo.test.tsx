@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -6,7 +7,6 @@ import { render, screen, waitFor } from "../../test-utils";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
 } from "../../utils";
@@ -50,7 +50,7 @@ describe("Commits tab - abandon undo", () => {
     );
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/abandon-undo"));
+    await clickGpuiRow("feat/abandon-undo");
     await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
 
     const commitButton = await screen.findByRole("button", {

@@ -10,6 +10,14 @@ import { Dashboard } from "../../src/components/Dashboard";
 import { render, screen, within } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
+
 const FAKE_TOOL = path.resolve(__dirname, "../fake-agent/fake-agent.sh");
 
 describe("onboarding setup checklist", () => {
@@ -96,7 +104,7 @@ describe("onboarding setup checklist", () => {
     openRepo(repoPath);
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /application/i }));
 
     expect(

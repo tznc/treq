@@ -88,7 +88,6 @@ describe("Dashboard - GPUI sidebar with supporting repositories", () => {
 
   it("draws a labelled section for each repository", async () => {
     await renderSections();
-    expect(screen.queryByTestId("workspace-sidebar")).toBeNull();
     const { repos } = lastSnapshot()!;
     expect(repos.map((r) => r.path)).toEqual([mainPath, supportingPath]);
     expect(repos.map((r) => r.active)).toEqual([true, false]);

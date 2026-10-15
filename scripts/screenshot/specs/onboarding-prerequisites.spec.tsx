@@ -8,6 +8,7 @@ import { Dashboard } from "../../../src/components/Dashboard";
 import { render, screen, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 const FAKE_TOOL = path.resolve(
   __dirname,
@@ -67,7 +68,7 @@ it("captures the tool checklist on the Application settings tab", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(await screen.findByRole("tab", { name: /application/i }));
   const checklist = await findChecklist();
   await within(

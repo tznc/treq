@@ -9,8 +9,8 @@
 import * as React from "react";
 import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { createTestRepo, findSidebarWorkspaceRow, openRepo, resolveWorkspacePath, writeWorkspaceFile } from "../../../test/utils";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { createTestRepo, openRepo, resolveWorkspacePath, writeWorkspaceFile } from "../../../test/utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import {
 	createWorkspace,
@@ -18,6 +18,7 @@ import {
 	setRepoSetting,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/codex-review-agent";
 
@@ -47,16 +48,12 @@ it("send review to terminal opens a codex terminal when repo default_agent=codex
 	render(<Dashboard />);
 
 	// Navigate to the workspace by clicking its name in the sidebar.
-	await user.click(await screen.findByText(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 
 	// Open an agent terminal before starting the review. Edit must not reuse
 	// it: reviews open a new terminal unless the user opts into the idle agent.
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
-			name: "Start agent",
-		}),
-	);
+	await startGpuiAgent(BRANCH_NAME);
 	await waitFor(() => {
 		expect(document.querySelector('[data-terminal-id^="agent-"]')).not.toBeNull();
 	});

@@ -4,17 +4,13 @@ import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
-import { fireEvent, render, screen, waitFor, within } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { render, screen, waitFor, within } from "../../test-utils";
+import { pickGpuiRowMenuItem } from "../../gpui-sidebar";
+import { createTestRepo, openRepo } from "../../utils";
 
 async function openRenameDialog(user: ReturnType<typeof userEvent.setup>) {
   render(<Dashboard />);
-  fireEvent.contextMenu(await findSidebarBranchElement("feat/alpha"));
-  await user.click(await screen.findByText("Rename Workspace"));
+  await pickGpuiRowMenuItem("feat/alpha", "Rename Workspace");
   const dialog = await screen.findByRole("dialog");
   const input = within(dialog).getByLabelText("Branch Name");
   await user.clear(input);
