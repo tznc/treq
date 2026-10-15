@@ -368,16 +368,13 @@ describe("Dashboard - workspace list", () => {
         "gumbo-notes",
       ];
 
+      // Stacked children move under their parent once the stack loads, so
+      // wait for the final order before measuring the range.
       await waitFor(() => {
-        for (const branchName of expectedBranches) {
-          expect(gpuiTitles()).toContain(branchName);
-        }
+        expect(
+          gpuiTitles().filter((name) => expectedBranches.includes(name)),
+        ).toEqual(expectedBranches);
       });
-
-      const visibleOrder = gpuiTitles().filter((name) =>
-        expectedBranches.includes(name),
-      );
-      expect(visibleOrder).toHaveLength(expectedBranches.length);
 
       const anchorBranch = "dduck-joke-readme";
       const targetBranch = "gumbo-notes";
