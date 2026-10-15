@@ -13,6 +13,7 @@ pub enum PreviewFeature {
   Logs,
   Browser,
   Devcontainers,
+  GpuiSidebar,
 }
 
 impl PreviewFeature {
@@ -24,6 +25,7 @@ impl PreviewFeature {
       Self::Logs => "logs",
       Self::Browser => "browser",
       Self::Devcontainers => "devcontainers",
+      Self::GpuiSidebar => "gpuiSidebar",
     }
   }
 
@@ -48,7 +50,9 @@ fn package_flag(id: &str) -> bool {
 }
 
 pub fn compile_default(feature: PreviewFeature) -> bool {
-  if cfg!(debug_assertions) {
+  // Dev builds turn previews on, except ones that change how the window is
+  // built: the GPUI shell is untested on macOS and Windows.
+  if cfg!(debug_assertions) && feature != PreviewFeature::GpuiSidebar {
     true
   } else {
     package_flag(feature.as_str())
@@ -119,6 +123,19 @@ mod tests {
     assert!(!package_json_default(PreviewFeature::RemoteSsh));
     assert!(!package_json_default(PreviewFeature::LinearIntegration));
     assert!(!package_json_default(PreviewFeature::Browser));
+  }
+
+  #[test]
+  fn gpui_sidebar_defaults_off_in_every_build() {
+    assert!(!compile_default(PreviewFeature::GpuiSidebar));
+  }
+
+  #[test]
+  fn stored_true_enables_gpui_sidebar() {
+    let (_dir, db) = temp_db();
+    db.set_setting(&PreviewFeature::GpuiSidebar.setting_key(), "true")
+      .expect("set");
+    assert!(is_enabled(&db, PreviewFeature::GpuiSidebar));
   }
 
   #[test]

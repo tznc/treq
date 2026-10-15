@@ -14,7 +14,8 @@
     "devcontainers": false,
     "linearIntegration": false,
     "logs": true,
-    "browser": false
+    "browser": false,
+    "gpuiSidebar": false
   },
   "env": {
     "dev": {
@@ -42,7 +43,7 @@
     "clean": "cd src-tauri && cargo clean",
     "test:run": "npm run test:unit && npm run test:integration",
     "test:ui": "vitest --ui",
-    "build:napi": "cargo build --manifest-path src-tauri/Cargo.toml --lib --features tauri-test",
+    "build:napi": "cargo build --manifest-path src-tauri/Cargo.toml --lib --no-default-features --features tauri-test",
     "test:unit": "vitest run --config vitest.unit.config.ts --silent=passed-only",
     "test:integration:run": "DEBUG_PRINT_LIMIT=10 vitest run --config vitest.integration.config.ts --silent=passed-only",
     "test:integration": "npm run build:napi --silent && npm run test:integration:run",

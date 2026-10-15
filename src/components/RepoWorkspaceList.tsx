@@ -1,31 +1,11 @@
 import { DragDropContext, Droppable, type DropResult } from "@hello-pangea/dnd";
 import { Archive, ChevronDown, ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
-import useSWR from "swr";
-import {
-  useGitRemoteInfo,
-  useMergeQueueEnabled,
-  usePrStatusPolling,
-} from "../hooks/useMergeQueueStatus";
+import { useState } from "react";
+import { useWorkspaceSidebarRows } from "../hooks/useWorkspaceSidebarRows";
 import { useWorkspaceSidebarMultiSelect } from "../hooks/useWorkspaceSidebarMultiSelect";
-import { useWorkspaceGitDetail } from "../hooks/useWorkspaceGitDetail";
-import {
-  getWorkspaces,
-  listWorkspaceStatuses,
-  type Workspace,
-} from "../lib/api";
-import type { PrInfo, QueueEntryStatus } from "../lib/api-types";
+import type { Workspace } from "../lib/api";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
-import { FEATURES } from "../lib/features";
-import { supabase } from "../lib/supabase";
-import { pollMs } from "../lib/swr-cache";
-import {
-  buildWorkspaceTree,
-  flattenWorkspaceTree,
-  getDescendants,
-  getEntireStack,
-  type WorkspaceSidebarStatusWithAgentDetail,
-} from "../lib/workspace-tree";
+import { getDescendants, getEntireStack } from "../lib/workspace-tree";
 import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
 import type { TerminalSessionSummary } from "./terminal/types";
 import {
@@ -96,94 +76,19 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
   terminalSessions,
   onDropChangeFiles,
 }) => {
-  const { data: workspaces = [], isLoading: workspacesPending } = useSWR(
-    cacheKey ? ["workspaces", cacheKey] : null,
-    () => getWorkspaces(repoPath || ""),
-    // Agents create workspaces in supporting repositories with `treq add -r`
-    // while another repository is on screen; nothing else refreshes them.
-    { keepPreviousData: true, refreshInterval: pollMs(10000) },
-  );
-  const workspacesLoaded = workspacesPending === false && Boolean(repoPath);
+  const {
+    workspaces,
+    workspacesPending,
+    statuses,
+    flattenedNodes,
+    remoteInfo,
+    prStatusesByBranch,
+    streamingByBranchWithAgentSession,
+    branchQueueStatuses,
+  } = useWorkspaceSidebarRows({ repoPath, cacheKey, terminalSessions });
 
-  // Branches with an open agent terminal, and whether any of those sessions
-  // is actively streaming -- drives the sidebar spinner's spin vs. idle pip.
-  const streamingByBranchWithAgentSession = useMemo(() => {
-    const branches = new Map<string, boolean>();
-    for (const session of terminalSessions ?? []) {
-      if (session.kind !== "agent" || !session.branchName) continue;
-      branches.set(
-        session.branchName,
-        (branches.get(session.branchName) ?? false) || session.isStreaming,
-      );
-    }
-    return branches;
-  }, [terminalSessions]);
-
-  // Shares its key with Dashboard.tsx's own plain `listWorkspaceStatuses`
-  // poll, so this fetcher must stay a plain pass-through of that call --
-  // see useWorkspaceGitDetail for the extra per-workspace detail this
-  // sidebar needs on top of it.
-  const { data: workspaceStatuses = [] } = useSWR(
-    cacheKey && workspacesLoaded ? ["workspace-statuses", cacheKey] : null,
-    () => listWorkspaceStatuses(repoPath || ""),
-    { keepPreviousData: true },
-  );
-  const gitDetailById = useWorkspaceGitDetail({
-    repoPath,
-    cacheKey,
-    enabled: workspacesLoaded,
-    statuses: workspaceStatuses,
-  });
-
-  const { data: remoteInfo } = useGitRemoteInfo(repoPath);
-  const { data: queueEnabled } = useMergeQueueEnabled(repoPath);
-  const repoFullName = remoteInfo?.full_name;
-  // Single Rust-backed cache for all workspace PR statuses — no per-row
-  // `gh pr view` polling from the WebView.
-  const { data: prStatusesByBranch = {} } = usePrStatusPolling(repoPath);
-  const { data: branchQueueStatuses } = useSWR(
-    FEATURES.mergeQueue && queueEnabled === true && repoFullName
-      ? ["repo-branch-queue-statuses", repoFullName]
-      : null,
-    async () => {
-      const { data } = await supabase.rpc("get_repo_branch_queue_statuses", {
-        p_repo_full_name: repoFullName!,
-      });
-      const map = new Map<string, QueueEntryStatus>();
-      for (const row of (data ?? []) as {
-        branch_name: string;
-        status: string;
-      }[]) {
-        map.set(row.branch_name, row.status as QueueEntryStatus);
-      }
-      return map;
-    },
-    { refreshInterval: pollMs(30_000) },
-  );
-
-  const statuses: WorkspaceSidebarStatusWithAgentDetail[] = (() => {
-    const statusById = new Map(
-      (workspaceStatuses ?? []).map((status) => [status.current.id, status]),
-    );
-    return (workspaces ?? []).map((workspace) => {
-      const status = statusById.get(workspace.id);
-      const detail = gitDetailById?.get(workspace.id);
-      return {
-        ...(status ?? { current: workspace, has_conflicts: false }),
-        ...detail,
-      };
-    });
-  })();
   const workspacesForSelection = statuses.map((s) => s.current);
   const [renameTarget, setRenameTarget] = useState<Workspace | null>(null);
-
-  const flattenedNodes = (() => {
-    const isMergedBranch = (branchName: string) =>
-      (prStatusesByBranch as Record<string, PrInfo | null>)[branchName]
-        ?.state === "MERGED";
-    const tree = buildWorkspaceTree(statuses, isMergedBranch);
-    return flattenWorkspaceTree(tree);
-  })();
 
   const { handleItemSelect } = useWorkspaceSidebarMultiSelect({
     flattenedNodes,
@@ -306,9 +211,8 @@ export const RepoWorkspaceList: React.FC<RepoWorkspaceListProps> = ({
                         node.status.current.branch_name,
                       )}
                       prInfo={
-                        (prStatusesByBranch as Record<string, PrInfo | null>)[
-                          node.status.current.branch_name
-                        ] ?? null
+                        prStatusesByBranch[node.status.current.branch_name] ??
+                        null
                       }
                       hasRemote={!!remoteInfo}
                       onDropChangeFiles={onDropChangeFiles}

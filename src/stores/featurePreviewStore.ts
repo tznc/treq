@@ -9,6 +9,7 @@ import {
 } from "../lib/features";
 
 function previewFeatureDefault(id: PreviewFeatureId): boolean {
+  if (id === "gpuiSidebar") return FEATURES.gpuiSidebar === true;
   if (import.meta.env.DEV || import.meta.env.MODE === "test") {
     return true;
   }
@@ -25,6 +26,7 @@ function defaultFlags(): PreviewFlags {
     logs: previewFeatureDefault("logs"),
     browser: previewFeatureDefault("browser"),
     devcontainers: previewFeatureDefault("devcontainers"),
+    gpuiSidebar: previewFeatureDefault("gpuiSidebar"),
   };
 }
 

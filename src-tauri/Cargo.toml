@@ -15,7 +15,7 @@ name = "treq_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["gui"]
+default = ["gui", "gpui-shell"]
 # The desktop app. Without it the crate builds only the `treq` CLI, with no
 # Tauri, GTK or WebKit, for Linux hosts and containers without a display.
 gui = [
@@ -31,6 +31,9 @@ gui = [
   "dep:tauri-plugin-cli",
   "dep:tauri-plugin-single-instance",
 ]
+# Lets repo windows open in a GPUI shell (the `gpuiSidebar` feature preview).
+# Left out of the NAPI test addon, which has no windows.
+gpui-shell = ["gui", "dep:tauri-plugin-gpui"]
 tauri-test = ["gui", "dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
@@ -51,6 +54,9 @@ tauri-plugin-cli = { version = "2.4.1", optional = true }
 # Parses CLI args before Tauri starts (see `cli::args`); same version the plugin uses.
 clap = { version = "4", features = ["string"] }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
+# GPUI renderer for Tauri windows. Same source as mobile-gpui's, so both
+# resolve to one copy of GPUI when mobile-gpui links this crate.
+tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "main", optional = true }
 
 [dependencies]
 tauri = { version = "2.12", features = ["protocol-asset", "unstable"], optional = true }
@@ -109,6 +115,11 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 getrandom = "0.4"
 rand_core = "0.10"
 wiremock = "0.6"
+
+# Headless GPUI tests for the GPUI shell. The same gpui-pre that
+# tauri-plugin-gpui renders with, plus its test platform.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
 
 [[bench]]
 name = "commit_workspace"

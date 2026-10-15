@@ -4,6 +4,10 @@ import type { SupportingRepo, Workspace } from "../lib/api";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
 import { useRepositoryCacheKey } from "../lib/active-repository-context";
 import { repoDisplayLabels } from "../lib/repo-labels";
+import {
+  readCollapsedRepos,
+  writeCollapsedRepos,
+} from "../lib/collapsed-repos";
 import { usePreviewFeature } from "../stores/featurePreviewStore";
 import { HomeRepoSidebarRow } from "./HomeRepoSidebarRow";
 import { RepoWorkspaceList } from "./RepoWorkspaceList";
@@ -23,32 +27,6 @@ import { TooltipProvider } from "./ui/tooltip";
 import { WorkspaceSidebarHeaderActions } from "./WorkspaceSidebarHeaderActions";
 import { WorkspaceSidebarPanelButton } from "./WorkspaceSidebarPanelButton";
 import { WorkspaceSidebarResizeHandle } from "./WorkspaceSidebarResizeHandle";
-
-const collapsedReposKey = (mainRepoPath?: string) =>
-  `treq.sidebar.collapsedRepos:${mainRepoPath ?? ""}`;
-
-const readCollapsedRepos = (mainRepoPath?: string): Set<string> => {
-  try {
-    const raw = localStorage.getItem(collapsedReposKey(mainRepoPath));
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-};
-
-const writeCollapsedRepos = (
-  mainRepoPath: string | undefined,
-  paths: Set<string>,
-) => {
-  try {
-    localStorage.setItem(
-      collapsedReposKey(mainRepoPath),
-      JSON.stringify([...paths]),
-    );
-  } catch {
-    // Collapsed state is a convenience; ignore storage failures.
-  }
-};
 
 interface WorkspaceSidebarProps {
   /** Repository on screen: the main repository or a supporting one. */

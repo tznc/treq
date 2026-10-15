@@ -18,6 +18,9 @@ pub mod core;
 pub mod db;
 pub mod file_indexer;
 pub mod github;
+#[cfg(feature = "gpui-shell")]
+#[cfg(desktop)]
+mod gpui_shell;
 pub mod jj;
 #[cfg(feature = "gui")]
 pub mod linear;
@@ -343,17 +346,37 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
         let label = open_new_window::new_repo_window_label();
         let url = open_new_window::new_repo_window_url(&path);
         let title = open_new_window::new_repo_window_title(&path);
-        let _ = tauri::WebviewWindowBuilder::new(
-          &app_for_init,
-          &label,
-          tauri::WebviewUrl::App(url.into()),
-        )
-        .title(&title)
-        .inner_size(1400.0, 900.0)
-        .build();
+        let app_for_window = app_for_init.clone();
+        // The GPUI shell builds windows on the main thread.
+        let _ = app_for_init.run_on_main_thread(move || {
+          if let Err(err) = open_repo_window(&app_for_window, &label, url, &title) {
+            log::error!("failed to open repo window: {err}");
+          }
+        });
         open_new_window::OPEN_NEW_WINDOW_GATE.end();
       });
     });
+}
+
+/// Opens a window showing the React app at `url`: inside the GPUI shell
+/// when it is on (see `gpui_shell`), else as a plain webview window.
+#[cfg(feature = "gui")]
+fn open_repo_window(
+  app: &AppHandle,
+  label: &str,
+  url: String,
+  title: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+  #[cfg(feature = "gpui-shell")]
+  #[cfg(desktop)]
+  if gpui_shell::is_enabled(app) {
+    return gpui_shell::open_window(app, label, url, title);
+  }
+  tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(url.into()))
+    .title(title)
+    .inner_size(1400.0, 900.0)
+    .build()?;
+  Ok(())
 }
 
 /// Web page a menu item opens in the browser, on every desktop platform.
@@ -440,6 +463,9 @@ pub fn run() {
       // OS window-close button) tore it down.
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
+        #[cfg(feature = "gpui-shell")]
+        #[cfg(desktop)]
+        gpui_shell::forget_window(&label);
         let app_handle = window.app_handle().clone();
         if let Some(state) = app_handle.try_state::<AppState>() {
           state.pty_manager.close_all_for_window(&label);
@@ -474,11 +500,14 @@ pub fn run() {
         "index.html".to_string()
       };
 
-      let _window =
-        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(window_url.into()))
-          .title("Treq - Stacking ADE")
-          .inner_size(1400.0, 900.0)
-          .build()?;
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if gpui_shell::should_enable(&db) {
+        if let Err(err) = gpui_shell::init(app) {
+          log::error!("GPUI shell unavailable, using the webview window: {err}");
+        }
+      }
+      open_repo_window(app.handle(), "main", window_url, "Treq - Stacking ADE")?;
 
       // Load cached binary paths and initialize in-memory cache
       let binary_paths = commands::load_cached_binary_paths(&db);
@@ -855,6 +884,7 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
+      commands::gpui_sidebar_update,
       commands::acknowledge_agent_dispatch,
       commands::detect_editor_apps,
       commands::get_treq_bin_dir,

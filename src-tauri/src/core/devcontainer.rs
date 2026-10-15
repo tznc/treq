@@ -92,14 +92,16 @@ pub const CLAUDE_CONFIG_DIR: &str = "/treq/claude-config";
 /// plus Node (which the Claude Code feature needs) unless the config has it.
 /// Features the config already names are left to the config.
 pub fn additional_features(config_json: &str) -> Option<String> {
-  let mut features = serde_json::Map::new();
+  // Sorted, so the argument is the same whether or not another crate turns
+  // on serde_json's `preserve_order` (GPUI does).
+  let mut features = std::collections::BTreeMap::<String, serde_json::Value>::new();
   if !config_json.contains("anthropics/devcontainer-features/claude-code") {
     if !config_json.contains("devcontainers/features/node") {
       features.insert(NODE_FEATURE.into(), serde_json::json!({}));
     }
     features.insert(CLAUDE_CODE_FEATURE.into(), serde_json::json!({}));
   }
-  (!features.is_empty()).then(|| serde_json::Value::Object(features).to_string())
+  (!features.is_empty()).then(|| serde_json::json!(features).to_string())
 }
 
 /// Arguments for `devcontainer up` that start (or reuse) Treq's container.
