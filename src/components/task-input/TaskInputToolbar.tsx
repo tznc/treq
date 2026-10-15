@@ -64,24 +64,29 @@ export const TaskInputToolbar: React.FC<TaskInputToolbarProps> = ({
   return (
     <div className="px-2 pb-2 pt-1 flex min-w-0 flex-wrap items-center justify-between gap-1">
       <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs px-2 gap-1"
-          onClick={onOpenFilePicker}
-        >
-          <Plus className="w-4 h-4" />
-          File
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs px-2 gap-1"
-          onClick={onAttachFromFinder}
-        >
-          <Paperclip className="w-4 h-4" />
-          Attach
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs px-2 gap-1"
+            >
+              <Plus className="w-4 h-4" />
+              Add
+              <ChevronDown className="w-3.5 h-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={4}>
+            <DropdownMenuItem onClick={onOpenFilePicker}>
+              <Plus className="w-4 h-4" />
+              File
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onAttachFromFinder}>
+              <Paperclip className="w-4 h-4" />
+              Attach
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {newWorkspace && (
           <div className="ml-1 flex items-center gap-1.5">
             <Switch
