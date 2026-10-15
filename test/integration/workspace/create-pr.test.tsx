@@ -14,7 +14,12 @@ import {
   pushWorkspaceToRemote,
   updateWorkspace,
 } from "../../../src/lib/api";
-import { render, screen, waitFor, within } from "../../test-utils";
+import {
+  clickGpuiToastAction,
+  findGpuiToast,
+  gpuiToasts,
+} from "../../gpui-sidebar";
+import { render, waitFor, within } from "../../test-utils";
 import {
   commitWorkspaceFile,
   createTestRepo,
@@ -192,7 +197,7 @@ describe("ShowWorkspace - Create PR", () => {
         false,
       );
     });
-    expect(await screen.findByText("Pull request created")).toBeVisible();
+    await findGpuiToast("Pull request created");
   });
 
   it("pushes committed changes before creating a PR when the branch is ahead of remote", async () => {
@@ -223,7 +228,7 @@ describe("ShowWorkspace - Create PR", () => {
     expect(
       vi.mocked(pushWorkspaceToRemote).mock.invocationCallOrder[0],
     ).toBeLessThan(vi.mocked(ghCreatePr).mock.invocationCallOrder[0]);
-    expect(await screen.findByText("Pull request created")).toBeVisible();
+    await findGpuiToast("Pull request created");
   });
 
   it("keeps Create PR disabled until the new PR's status has loaded", async () => {
@@ -244,10 +249,12 @@ describe("ShowWorkspace - Create PR", () => {
       name: /creating/i,
     });
     expect(pending).toBeDisabled();
-    expect(screen.queryByText("Pull request created")).toBeNull();
+    expect(gpuiToasts().map((t) => t.title)).not.toContain(
+      "Pull request created",
+    );
 
     resolvePrInfo();
-    expect(await screen.findByText("Pull request created")).toBeVisible();
+    await findGpuiToast("Pull request created");
   }, 30_000);
 
   it.each([
@@ -276,7 +283,7 @@ describe("ShowWorkspace - Create PR", () => {
       }),
     ).toBeVisible();
     await user.click(await findEnabledCreatePr(header));
-    expect(await screen.findByText("Pull request created")).toBeVisible();
+    await findGpuiToast("Pull request created");
   }, 30_000);
 
   it("pushes a rewritten (diverged) branch before creating a PR", async () => {
@@ -295,7 +302,7 @@ describe("ShowWorkspace - Create PR", () => {
     const header = await openWorkspace("feat/create-pr");
     await user.click(await findEnabledCreatePr(header));
 
-    expect(await screen.findByText("Pull request created")).toBeVisible();
+    await findGpuiToast("Pull request created");
     expect(pushWorkspaceToRemote).toHaveBeenCalledWith(repoPath, workspace.id);
   }, 30_000);
 
@@ -333,9 +340,7 @@ describe("ShowWorkspace - Create PR", () => {
       );
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: /open in web/i }),
-    );
+    await clickGpuiToastAction(/open in web/i);
     expect(openUrl).toHaveBeenCalledWith(
       "https://github.com/acme/treq/pull/42",
     );

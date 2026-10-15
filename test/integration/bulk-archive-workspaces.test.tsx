@@ -1,13 +1,14 @@
 // @include-parallel
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { render, screen, waitFor } from "../test-utils";
+import { render, waitFor } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 import { createWorkspace } from "../../src/lib/api";
 import { Dashboard } from "../../src/components/Dashboard";
 import {
   clickGpuiRow,
   findGpuiRow,
+  findGpuiToast,
   gpuiSnapshot,
   sendGpuiAction,
   waitForNoGpuiRow,
@@ -57,7 +58,7 @@ describe("bulk archive workspaces", () => {
 
       releaseArchives!();
 
-      await screen.findByText(/2 workspaces archived/i);
+      await findGpuiToast(/2 workspaces archived/i);
       await waitForNoGpuiRow("feat/alpha");
       await waitForNoGpuiRow("feat/beta");
     } finally {

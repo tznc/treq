@@ -1,4 +1,5 @@
 // @include-parallel
+import { findGpuiToast, gpuiToasts } from "../../gpui-sidebar";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
@@ -179,13 +180,13 @@ describe("ShowWorkspace - Commit and create PR", () => {
     await waitFor(() => expect(commitAndCreatePr).toBeEnabled());
     await user.click(commitAndCreatePr);
 
-    expect(
-      await screen.findByText("Committed, but failed to push", undefined, {
-        timeout: 15_000,
-      }),
-    ).toBeVisible();
-    expect(screen.getByText("remote rejected")).toBeVisible();
-    expect(screen.queryByText("Failed to create PR")).toBeNull();
+    const toast = await findGpuiToast("Committed, but failed to push", {
+      timeout: 15_000,
+    });
+    expect(toast.description).toBe("remote rejected");
+    expect(gpuiToasts().map((t) => t.title)).not.toContain(
+      "Failed to create PR",
+    );
     expect(ghCreatePr).not.toHaveBeenCalled();
   }, 30_000);
 

@@ -7,7 +7,7 @@ import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 import { getSetting, setSetting } from "../../src/lib/api";
 
-import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+import { findGpuiToast, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
 
 async function openGpuiSettings() {
   await waitFor(() => expect(gpuiSnapshot()).toBeTruthy());
@@ -84,7 +84,7 @@ describe("UI zoom settings", () => {
     expect(thumb).toHaveAttribute("aria-valuenow", "110");
 
     await user.click(screen.getByRole("button", { name: /save settings/i }));
-    await screen.findByText("Settings Saved");
+    await findGpuiToast("Settings Saved");
 
     expect(setWebviewZoom).toHaveBeenCalledWith(1.1);
   });
@@ -120,7 +120,7 @@ describe("font size presets", () => {
 
     await user.selectOptions(select, "Large");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
-    await screen.findByText("Settings Saved");
+    await findGpuiToast("Settings Saved");
 
     await waitFor(async () =>
       expect(await getSetting("terminal_font_size")).toBe("16"),

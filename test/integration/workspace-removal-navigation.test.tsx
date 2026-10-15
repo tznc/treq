@@ -14,6 +14,7 @@ import { createTestRepo, openRepo } from "../utils";
 import {
   clickGpuiRow,
   findGpuiRow,
+  findGpuiToast,
   gpuiSnapshot,
   pickGpuiRowMenuItem,
   sendGpuiAction,
@@ -101,7 +102,7 @@ describe("leaving a workspace when workspaces are removed", () => {
       await waitFor(() => expect(gpuiSnapshot()?.bulkArchive).toBe(2));
       sendGpuiAction({ kind: "bulkArchive" });
 
-      expect(await screen.findByText(/archive refused/)).toBeInTheDocument();
+      await findGpuiToast(/archive refused/);
       await waitForNoGpuiRow("feat/alpha");
       expect(await findGpuiRow("feat/beta")).toBeTruthy();
       expect((await getWorkspaces(repoPath)).map((w) => w.id)).toEqual([

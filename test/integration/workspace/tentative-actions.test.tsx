@@ -1,5 +1,9 @@
 // @include-serial
-import { clickGpuiRow } from "../../gpui-sidebar";
+import {
+  clickGpuiRow,
+  clickGpuiToastAction,
+  findGpuiToast,
+} from "../../gpui-sidebar";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
@@ -116,8 +120,8 @@ describe("ShowWorkspace - tentative working copy actions", () => {
       ).toHaveLength(0);
     });
 
-    await user.click(await screen.findByRole("button", { name: "Undo" }));
-    await screen.findByText("Working copy changes were restored");
+    await clickGpuiToastAction("Undo");
+    await findGpuiToast("Working copy changes were restored");
     expect(
       fs.existsSync(path.join(workspacePath, "tentative-actions.txt")),
     ).toBe(true);

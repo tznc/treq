@@ -7,7 +7,7 @@ import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 
 import { waitFor as waitForSnapshot } from "@testing-library/react";
-import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+import { findGpuiToast, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
 
 async function openGpuiSettings() {
   await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
@@ -55,8 +55,8 @@ describe("Settings integration", () => {
 
     await user.selectOptions(fontSizeSelect, "Large");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
-    await screen.findByText("Settings Saved");
-    await screen.findByText(/application settings updated successfully/i);
+    await findGpuiToast("Settings Saved");
+    await findGpuiToast(/application settings updated successfully/i);
 
     await user.click(repositoryTab);
     await screen.findByLabelText(/branch name pattern/i);

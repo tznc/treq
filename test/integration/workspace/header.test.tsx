@@ -1,5 +1,5 @@
 // @include-parallel
-import { clickGpuiRow } from "../../gpui-sidebar";
+import { clickGpuiRow, findGpuiToast } from "../../gpui-sidebar";
 import { execFileSync } from "node:child_process";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
@@ -215,7 +215,7 @@ describe("ShowWorkspace - header", () => {
     });
     fireEvent.click(betaElement);
 
-    await screen.findByText("Rebased successfully");
+    await findGpuiToast("Rebased successfully");
     await within(header).findByText("feat/beta", { selector: "button *" });
 
     const betaWorkspacePath = resolveWorkspacePath(
@@ -259,7 +259,7 @@ describe("ShowWorkspace - header sync indicator", () => {
     await user.click(
       await within(header).findByRole("button", { name: /^push$/i }),
     );
-    await screen.findByText("Pushed to remote");
+    await findGpuiToast("Pushed to remote");
     await waitFor(() => {
       expect(
         screen.queryByRole("button", { name: /^push$/i }),
@@ -281,7 +281,7 @@ describe("ShowWorkspace - header sync indicator", () => {
     );
     await user.click(screen.getByRole("button", { name: "Commit" }));
 
-    await screen.findByText("Commit created");
+    await findGpuiToast("Commit created");
 
     await within(header).findByText("↑1");
   });

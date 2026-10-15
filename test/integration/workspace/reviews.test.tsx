@@ -1,5 +1,5 @@
 // @include-serial
-import { clickGpuiRow } from "../../gpui-sidebar";
+import { clickGpuiRow, clickGpuiToastAction } from "../../gpui-sidebar";
 import * as React from "react";
 import fs from "node:fs";
 import path from "node:path";
@@ -348,7 +348,7 @@ describe("Review tab - discard changes", () => {
     });
     expect(fs.existsSync(path.join(workspacePath, fileName))).toBe(false);
 
-    await user.click(await screen.findByRole("button", { name: "Undo" }));
+    await clickGpuiToastAction("Undo");
 
     await waitFor(() => {
       expect(screen.getByTestId(`file-row-${fileName}`)).toBeTruthy();
