@@ -103,6 +103,12 @@ export const gpuiMenuShow = (
 
 export const gpuiMenuHide = (): Promise<void> => invoke("gpui_menu_hide");
 
+/** Shows this window's toasts in GPUI, above the webview. */
+export const gpuiToastsUpdate = (
+  toasts: import("../stores/toastStore").GpuiToast[],
+): Promise<void> =>
+  invoke("gpui_toasts_update", { windowLabel: currentWindowLabel(), toasts });
+
 // Database API
 export const getWorkspaces = (repoPath: string): Promise<Workspace[]> =>
   transportGetWorkspaces(repoPath, () =>

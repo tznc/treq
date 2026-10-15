@@ -1,9 +1,11 @@
-//! Tooltips and menus that pop out of the GPUI sidebar, drawn like the React
-//! app's `TooltipContent` and `ContextMenuContent`.
+//! Tooltips and menus that pop out of the GPUI sidebar, and the app's
+//! toasts, drawn like the React app's `TooltipContent`, `ContextMenuContent`
+//! and `ToastItem`.
 //!
 //! GPUI cannot paint over the webview (a native child window), so each popup
 //! is a small borderless, unfocusable Tauri window with GPUI attached. One
-//! window per [`Slot`] is built on first use, then moved and resized.
+//! window per [`Slot`] (per shell window, for toasts) is built on first use,
+//! then moved and resized.
 
 use std::{
   cell::{Cell, RefCell},
@@ -51,6 +53,17 @@ const MENU_PADDING: f32 = 4.;
 const MENU_MIN_WIDTH: f32 = 128.;
 /// Sent to the menu's webview when an item is picked.
 pub const MENU_SELECT_EVENT: &str = "gpui-menu-select";
+/// Sent to a toast's webview when its action or close button is clicked.
+pub const TOAST_EVENT: &str = "gpui-toast";
+/// The toast stack's corner: `fixed bottom-4 left-4`, and its `gap-2`.
+const TOAST_INSET: f32 = 16.;
+const TOAST_GAP: f32 = 8.;
+/// A toast's width: `min-w-[320px] max-w-sm`.
+const TOAST_MIN_WIDTH: f32 = 320.;
+const TOAST_MAX_WIDTH: f32 = 384.;
+/// Everything in a toast's row but its text: `p-4` and a border, the
+/// `h-4 w-4` icon and the `p-1` close button with `gap-3` between them.
+const TOAST_CHROME: f32 = 2. + 32. + 16. + 12. + 12. + 24.;
 
 /// What a tooltip shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +114,7 @@ pub enum MenuIcon {
   Link,
   Pencil,
   Settings,
+  #[serde(rename = "trash-2")]
   Trash2,
 }
 
@@ -143,19 +157,47 @@ pub enum MenuEntry {
   },
 }
 
+/// A toast's kind, which picks its icon.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToastKind {
+  Success,
+  Error,
+  Info,
+  Warning,
+}
+
+/// One toast, as React's toast store holds it.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Toast {
+  pub id: String,
+  pub title: String,
+  #[serde(default)]
+  pub description: Option<String>,
+  #[serde(rename = "type")]
+  pub kind: ToastKind,
+  /// The action button's label.
+  #[serde(default)]
+  pub action: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Slot {
   Tooltip,
   Menu,
   Submenu,
+  /// A shell window's toasts; each shell window has its own.
+  Toasts,
 }
 
 impl Slot {
-  fn label(self) -> &'static str {
+  fn label(self, owner: &str) -> String {
     match self {
-      Slot::Tooltip => "gpui-popup-tooltip",
-      Slot::Menu => "gpui-popup-menu",
-      Slot::Submenu => "gpui-popup-submenu",
+      Slot::Tooltip => "gpui-popup-tooltip".into(),
+      Slot::Menu => "gpui-popup-menu".into(),
+      Slot::Submenu => "gpui-popup-submenu".into(),
+      Slot::Toasts => format!("gpui-popup-toasts-{owner}"),
     }
   }
 }
@@ -169,6 +211,7 @@ enum Content {
     /// The submenu trigger whose submenu is open.
     open_submenu: Option<usize>,
   },
+  Toasts(Vec<Toast>),
 }
 
 /// The root view of a popup window.
@@ -266,6 +309,99 @@ fn menu_size(cx: &App, entries: &[MenuEntry]) -> (f32, f32) {
 /// The top of entry `index` inside the menu box.
 fn entry_top(entries: &[MenuEntry], index: usize) -> f32 {
   1. + MENU_PADDING + entries[..index].iter().map(entry_height).sum::<f32>()
+}
+
+/// The number of lines `text` takes in Inter at `text-sm` within `width`.
+fn wrapped_lines(cx: &App, text: &str, width: f32) -> usize {
+  let mut wrapper = cx
+    .text_system()
+    .line_wrapper(gpui::font(theme::SANS_FONT), px(TEXT_SIZE));
+  text
+    .split('\n')
+    .map(|line| {
+      let fragments = [gpui::LineFragment::text(line)];
+      1 + wrapper
+        .wrap_line(&fragments, px(width), gpui::IndentAdjustment::NoIndent)
+        .count()
+    })
+    .sum()
+}
+
+/// The width of `text` in Inter at `text-sm` and `weight`.
+fn weighted_text_width(cx: &App, text: &str, weight: gpui::FontWeight) -> f32 {
+  let system = cx.text_system();
+  let font = system.resolve_font(&gpui::Font {
+    weight,
+    ..gpui::font(theme::SANS_FONT)
+  });
+  text
+    .chars()
+    .map(|ch| {
+      system
+        .advance(font, px(TEXT_SIZE), ch)
+        .map(|advance| f32::from(advance.width))
+        .unwrap_or(0.)
+    })
+    .sum()
+}
+
+/// A toast's box width: its text on one line, between `min-w-[320px]` and
+/// `max-w-sm`. The stack is as wide as its widest toast, and every toast
+/// fills it (`w-full`).
+fn toast_width(cx: &App, toast: &Toast) -> f32 {
+  let mut text = weighted_text_width(cx, &toast.title, gpui::FontWeight::SEMIBOLD);
+  if let Some(description) = &toast.description {
+    let widest = description
+      .split('\n')
+      .map(|line| text_width(cx, line, theme::SANS_FONT))
+      .fold(0., f32::max);
+    text = text.max(widest);
+  }
+  if let Some(action) = &toast.action {
+    text = text.max(weighted_text_width(cx, action, gpui::FontWeight::MEDIUM));
+  }
+  (text + TOAST_CHROME)
+    .clamp(TOAST_MIN_WIDTH, TOAST_MAX_WIDTH)
+    .ceil()
+}
+
+/// A toast's box height at `width`: its text column (a `leading-none`
+/// title, the description and action below it with `space-y-1`), or the
+/// close button where taller, in `p-4` and a border.
+fn toast_height(cx: &App, toast: &Toast, width: f32) -> f32 {
+  let mut text = TEXT_SIZE;
+  if let Some(description) = &toast.description {
+    let lines = wrapped_lines(cx, description, width - TOAST_CHROME);
+    text += 4. + LINE_HEIGHT * lines as f32;
+  }
+  if toast.action.is_some() {
+    // `mt-1` on the button.
+    text += 4. + 4. + LINE_HEIGHT;
+  }
+  text.max(24.) + 32. + 2.
+}
+
+/// The toast stack's size: toasts one above another with `gap-2`.
+fn toasts_size(cx: &App, toasts: &[Toast]) -> (f32, f32) {
+  let width = toasts
+    .iter()
+    .map(|toast| toast_width(cx, toast))
+    .fold(0., f32::max);
+  let height = toasts
+    .iter()
+    .map(|toast| toast_height(cx, toast, width))
+    .sum::<f32>()
+    + TOAST_GAP * toasts.len().saturating_sub(1) as f32;
+  (width, height)
+}
+
+/// The toast stack's corner, `bottom-4 left-4` in `client` (the shell
+/// window's client area on screen).
+fn place_toasts(size: (f32, f32), client: Bounds<Pixels>) -> Point<Pixels> {
+  gpui::point(
+    client.left() + px(TOAST_INSET),
+    client.bottom() - px(TOAST_INSET + size.1),
+  )
 }
 
 /// A tooltip's box beside `anchor` (screen coordinates), shifted to stay
@@ -508,6 +644,125 @@ struct MenuSelect {
   id: u32,
 }
 
+/// A click on a toast's action (`action: true`) or close button.
+#[derive(Clone, Serialize)]
+struct ToastClick {
+  id: String,
+  action: bool,
+}
+
+impl PopupView {
+  /// The toast stack: `ToastItem`s in `flex flex-col gap-2`.
+  fn render_toasts(&self, toasts: &[Toast], cx: &mut Context<Self>) -> gpui::AnyElement {
+    let palette = self.palette;
+    let composited = composited();
+    let mut stack = div().flex().flex_col().gap(px(TOAST_GAP));
+    for toast in toasts {
+      let (icon, icon_color) = match toast.kind {
+        ToastKind::Error => (theme::ICON_CIRCLE_ALERT, palette.destructive),
+        ToastKind::Info => (theme::ICON_INFO, palette.primary),
+        ToastKind::Success => (theme::ICON_CIRCLE_CHECK, palette.toast_success),
+        ToastKind::Warning => (theme::ICON_TRIANGLE_ALERT, palette.toast_warning),
+      };
+      let id = toast.id.clone();
+      let close_id = toast.id.clone();
+      // `flex items-start gap-3 rounded-lg border bg-popover p-4 shadow-lg`
+      let item = div()
+        .id(SharedString::from(format!("toast-{}", toast.id)))
+        .flex()
+        .items_start()
+        .gap_3()
+        .p_4()
+        .when(composited, |this| this.rounded_lg().shadow_lg())
+        .border_1()
+        .border_color(palette.border)
+        .bg(palette.popover)
+        .text_color(palette.popover_foreground)
+        .child(
+          svg()
+            .path(icon)
+            .size(px(16.))
+            .mt(px(2.))
+            .flex_none()
+            .text_color(icon_color),
+        )
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+              div()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .line_height(px(TEXT_SIZE))
+                .child(SharedString::from(toast.title.clone())),
+            )
+            .when_some(toast.description.clone(), |this, description| {
+              this.child(
+                div()
+                  .text_color(palette.muted_foreground)
+                  .child(SharedString::from(description)),
+              )
+            })
+            .when_some(toast.action.clone(), |this, action| {
+              // `mt-1 font-medium text-primary underline`
+              this.child(
+                div()
+                  .id("action")
+                  .mt_1()
+                  .font_weight(gpui::FontWeight::MEDIUM)
+                  .text_color(palette.primary)
+                  .underline()
+                  .hover(|style| style.text_decoration_none())
+                  .cursor_pointer()
+                  .child(SharedString::from(action))
+                  .on_click(cx.listener(move |this, _, _, _| this.click_toast(&id, true))),
+              )
+            }),
+        )
+        .child(
+          // `rounded-md p-1 text-muted-foreground/70 hover:bg-accent
+          // hover:text-foreground`
+          div()
+            .id("close")
+            .group("close")
+            .flex_none()
+            .p_1()
+            .rounded_md()
+            .hover(|style| style.bg(palette.menu_accent))
+            .cursor_pointer()
+            .child(
+              svg()
+                .path(theme::ICON_X)
+                .size(px(16.))
+                .text_color(palette.muted_foreground.opacity(0.7))
+                .group_hover("close", |style| style.text_color(palette.foreground)),
+            )
+            .on_click(cx.listener(move |this, _, _, _| this.click_toast(&close_id, false))),
+        );
+      stack = stack.child(item);
+    }
+    stack.into_any_element()
+  }
+
+  /// Sends a toast click to the toast's webview.
+  fn click_toast(&self, id: &str, action: bool) {
+    let owner = self.owner.clone();
+    let click = ToastClick {
+      id: id.to_string(),
+      action,
+    };
+    defer_main(&self.app, move |app| {
+      let target = tauri::EventTarget::webview_window(&owner);
+      if let Err(err) = app.emit_to(target, TOAST_EVENT, click) {
+        log::warn!("failed to send a GPUI toast click: {err}");
+      }
+    });
+  }
+}
+
 /// A menu row: `rounded-sm px-2 py-1.5 text-sm`, `bg-accent` on hover.
 fn menu_row(
   id: impl Into<gpui::ElementId>,
@@ -551,6 +806,15 @@ impl Render for PopupView {
     let palette = self.palette;
     let body = match self.content.clone() {
       Content::Empty => None,
+      Content::Toasts(toasts) => {
+        return div()
+          .size_full()
+          .p(px(shadow_margin()))
+          .font_family(theme::SANS_FONT)
+          .text_size(px(TEXT_SIZE))
+          .line_height(px(LINE_HEIGHT))
+          .child(self.render_toasts(&toasts, cx));
+      }
       // `px-3 py-1.5 shadow-md`
       Content::Tooltip(content) => Some(
         div()
@@ -630,36 +894,51 @@ struct PopupWindow {
 }
 
 thread_local! {
-  /// Popup windows by slot. Only touched on the main thread.
-  static WINDOWS: RefCell<HashMap<Slot, PopupWindow>> = RefCell::default();
+  /// Popup windows by label. Only touched on the main thread.
+  static WINDOWS: RefCell<HashMap<String, PopupWindow>> = RefCell::default();
   /// A menu is open, so tooltips stay hidden, as under a React context menu.
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
 }
 
-/// The popup window for `slot`, built on first use. Main thread only.
+/// The popup window for `slot` of window `owner`, built on first use. Main
+/// thread only.
 fn popup_window(
   app: &AppHandle,
   slot: Slot,
+  owner: &str,
 ) -> Option<(tauri::Window<Wry>, WeakEntity<PopupView>)> {
+  let label = slot.label(owner);
   if let Some(found) = WINDOWS.with(|windows| {
     windows
       .borrow()
-      .get(&slot)
+      .get(&label)
       .map(|popup| (popup.window.clone(), popup.view.clone()))
   }) {
     return Some(found);
   }
-  let window = tauri::WindowBuilder::new(app, slot.label())
+  let builder = tauri::WindowBuilder::new(app, &label)
     .decorations(false)
     .transparent(true)
     .shadow(false)
     .resizable(false)
-    .always_on_top(true)
     .skip_taskbar(true)
     .focused(false)
     .focusable(false)
     .visible(false)
-    .inner_size(1., 1.)
+    .inner_size(1., 1.);
+  // Toasts stay up while their window is in the background, so they ride
+  // above it rather than above every app. Tooltips and menus close when it
+  // loses focus.
+  let builder = if slot == Slot::Toasts {
+    let parent = tauri::Manager::get_window(app, owner)?;
+    builder
+      .parent(&parent)
+      .map_err(|err| log::warn!("failed to parent the toast window: {err}"))
+      .ok()?
+  } else {
+    builder.always_on_top(true)
+  };
+  let window = builder
     .build()
     .map_err(|err| log::warn!("failed to build a GPUI popup window: {err}"))
     .ok()?;
@@ -673,6 +952,7 @@ fn popup_window(
     gtk_window.set_type_hint(match slot {
       Slot::Tooltip => gtk::gdk::WindowTypeHint::Tooltip,
       Slot::Menu | Slot::Submenu => gtk::gdk::WindowTypeHint::PopupMenu,
+      Slot::Toasts => gtk::gdk::WindowTypeHint::Notification,
     });
   }
   let view: Rc<RefCell<Option<WeakEntity<PopupView>>>> = Rc::default();
@@ -701,7 +981,7 @@ fn popup_window(
   let view = view.borrow_mut().take()?;
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
-      slot,
+      label,
       PopupWindow {
         window: window.clone(),
         view: view.clone(),
@@ -722,7 +1002,7 @@ fn show(
   measure: impl FnOnce(&App, &Content) -> (f32, f32) + 'static,
   place: impl FnOnce((f32, f32)) -> Option<Point<Pixels>> + 'static,
 ) {
-  let Some((window, view)) = popup_window(app, slot) else {
+  let Some((window, view)) = popup_window(app, slot, owner) else {
     return;
   };
   let frame: Rc<RefCell<Option<Bounds<Pixels>>>> = Rc::default();
@@ -767,18 +1047,22 @@ fn show(
   let _ = window.show();
 }
 
-/// Hides the popup for `slot`. Main thread only.
+/// Hides the popup for `slot` (a tooltip or menu). Main thread only.
 fn hide(slot: Slot) {
   if slot == Slot::Menu {
     MENU_OPEN.with(|open| open.set(false));
   }
-  let window = WINDOWS.with(|windows| windows.borrow().get(&slot).map(|p| p.window.clone()));
+  hide_label(&slot.label(""));
+}
+
+fn hide_label(label: &str) {
+  let window = WINDOWS.with(|windows| windows.borrow().get(label).map(|p| p.window.clone()));
   if let Some(window) = window {
     let _ = window.hide();
   }
 }
 
-/// Hides every popup. Main thread only.
+/// Hides every tooltip and menu. Main thread only.
 pub fn hide_all() {
   hide(Slot::Tooltip);
   hide(Slot::Submenu);
@@ -922,6 +1206,75 @@ pub fn show_menu(
   );
 }
 
+/// Shows window `owner`'s `toasts` in its bottom-left corner, or hides them
+/// when there are none. Main thread only.
+pub fn show_toasts(app: &AppHandle, owner: &str, toasts: Vec<Toast>, dark: bool) {
+  if toasts.is_empty() {
+    hide_label(&Slot::Toasts.label(owner));
+    return;
+  }
+  let Some(client) = tauri::Manager::get_window(app, owner)
+    .as_ref()
+    .and_then(client_bounds)
+  else {
+    return;
+  };
+  show(
+    app,
+    Slot::Toasts,
+    owner,
+    theme::palette(dark),
+    Content::Toasts(toasts),
+    |cx, content| match content {
+      Content::Toasts(toasts) => toasts_size(cx, toasts),
+      _ => (0., 0.),
+    },
+    move |size| Some(place_toasts(size, client)),
+  );
+}
+
+/// Moves window `owner`'s toasts back to its corner after it moved or
+/// resized. Main thread only.
+pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
+  let label = Slot::Toasts.label(owner);
+  let Some((window, view)) = WINDOWS.with(|windows| {
+    windows
+      .borrow()
+      .get(&label)
+      .map(|popup| (popup.window.clone(), popup.view.clone()))
+  }) else {
+    return;
+  };
+  if !window.is_visible().unwrap_or(false) {
+    return;
+  }
+  let Some(client) = tauri::Manager::get_window(app, owner)
+    .as_ref()
+    .and_then(client_bounds)
+  else {
+    return;
+  };
+  let frame = tauri_plugin_gpui::with_app(move |cx| view.read_with(cx, |view, _| view.frame).ok());
+  if let Ok(Some(frame)) = frame {
+    let size = (f32::from(frame.size.width), f32::from(frame.size.height));
+    let origin = place_toasts(size, client);
+    let margin = px(shadow_margin());
+    let _ = window.set_position(LogicalPosition::new(
+      f32::from(origin.x - margin),
+      f32::from(origin.y - margin),
+    ));
+  }
+}
+
+/// Destroys window `owner`'s toast window once the window is gone. Main
+/// thread only.
+pub fn forget_owner(owner: &str) {
+  let label = Slot::Toasts.label(owner);
+  if let Some(popup) = WINDOWS.with(|windows| windows.borrow_mut().remove(&label)) {
+    let _ = popup.window.destroy();
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -989,6 +1342,73 @@ mod tests {
       place_submenu(trigger, (150., 100.), screen),
       gpui::point(px(300.), px(100.))
     );
+  }
+
+  #[test]
+  fn places_toasts_in_the_bottom_left_corner() {
+    let client = bounds(100., 50., 1200., 800.);
+    assert_eq!(
+      place_toasts((320., 90.), client),
+      gpui::point(px(116.), px(744.))
+    );
+  }
+
+  #[test]
+  fn reads_toasts_from_react() {
+    let toasts: Vec<Toast> = serde_json::from_str(
+      r#"[{"id":"a","title":"Saved","type":"success"},
+          {"id":"b","title":"Push failed","description":"Rejected","type":"error","action":"Retry"}]"#,
+    )
+    .unwrap();
+    assert_eq!(toasts[0].kind, ToastKind::Success);
+    assert_eq!(toasts[0].description, None);
+    assert_eq!(toasts[1].action.as_deref(), Some("Retry"));
+  }
+
+  #[gpui::test]
+  fn sizes_toasts_like_the_react_toast(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      theme::init(cx);
+      let short = Toast {
+        id: "a".into(),
+        title: "Saved".into(),
+        description: None,
+        kind: ToastKind::Success,
+        action: None,
+      };
+      // `min-w-[320px]`, and the close button's height in `p-4`.
+      assert_eq!(toasts_size(cx, std::slice::from_ref(&short)), (320., 58.));
+      let long = Toast {
+        description: Some("word ".repeat(40)),
+        action: Some("Retry".into()),
+        ..short.clone()
+      };
+      let (width, height) = toasts_size(cx, &[short, long]);
+      // `max-w-sm`; the description wraps onto several lines.
+      assert_eq!(width, 384.);
+      assert!(height > 58. + 8. + 34. + 14. + 4. + 2. * LINE_HEIGHT);
+    });
+  }
+
+  #[test]
+  fn reads_every_menu_icon_react_sends() {
+    // `MenuIcon` in src/lib/native-context-menu.ts.
+    let names = [
+      "archive",
+      "copy",
+      "folder-open",
+      "folder-plus",
+      "folder-search",
+      "git-branch",
+      "link",
+      "pencil",
+      "settings",
+      "trash-2",
+    ];
+    for name in names {
+      let parsed: Result<MenuIcon, _> = serde_json::from_value(serde_json::json!(name));
+      assert!(parsed.is_ok(), "{name} does not parse");
+    }
   }
 
   #[test]

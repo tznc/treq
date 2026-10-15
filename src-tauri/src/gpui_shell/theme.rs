@@ -20,6 +20,8 @@ icons! {
   ICON_ARCHIVE => "archive",
   ICON_BOT => "bot",
   ICON_BRANCH => "git-branch",
+  ICON_CIRCLE_ALERT => "circle-alert",
+  ICON_CIRCLE_CHECK => "circle-check",
   ICON_CHEVRON_DOWN => "chevron-down",
   ICON_CHEVRON_RIGHT => "chevron-right",
   ICON_COPY => "copy",
@@ -28,6 +30,7 @@ icons! {
   ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
   ICON_HOUSE => "house",
+  ICON_INFO => "info",
   ICON_LAYERS => "layers-2",
   ICON_LINEAR => "list-todo",
   ICON_LINK => "link",
@@ -37,11 +40,15 @@ icons! {
   ICON_SPINNER => "loader-circle",
   ICON_TERMINAL => "terminal",
   ICON_TRASH => "trash-2",
+  ICON_TRIANGLE_ALERT => "triangle-alert",
+  ICON_X => "x",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
 const INTER_REGULAR: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Regular.ttf");
 const INTER_MEDIUM: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Medium.ttf");
+const INTER_SEMIBOLD: &[u8] =
+  include_bytes!("../../../mobile-gpui/assets/fonts/Inter-SemiBold.ttf");
 
 /// The React app's mono face, converted from its web font
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
@@ -79,6 +86,7 @@ pub fn init(cx: &mut App) {
   let fonts = vec![
     Cow::Borrowed(INTER_REGULAR),
     Cow::Borrowed(INTER_MEDIUM),
+    Cow::Borrowed(INTER_SEMIBOLD),
     Cow::Borrowed(JETBRAINS_MONO_REGULAR),
   ];
   if let Err(err) = cx.text_system().add_fonts(fonts) {
@@ -114,6 +122,9 @@ pub struct Palette {
   pub pr_closed: Hsla,
   /// The line linking stacked workspaces.
   pub stack_guide: Hsla,
+  /// Toast icons: `text-green-500`, and `text-yellow-600 dark:text-yellow-400`.
+  pub toast_success: Hsla,
+  pub toast_warning: Hsla,
 }
 
 /// A CSS `hsl(h s% l%)` token.
@@ -142,6 +153,8 @@ pub fn palette(dark: bool) -> Palette {
       pr_merged: rgb(0xc084fc).into(),
       pr_closed: rgb(0xf87171).into(),
       stack_guide: rgb(0x93c5fd).into(),
+      toast_success: rgb(0x22c55e).into(),
+      toast_warning: rgb(0xfacc15).into(),
     }
   } else {
     Palette {
@@ -163,6 +176,8 @@ pub fn palette(dark: bool) -> Palette {
       pr_merged: rgb(0x9333ea).into(),
       pr_closed: rgb(0xdc2626).into(),
       stack_guide: rgb(0x1e3a8a).into(),
+      toast_success: rgb(0x22c55e).into(),
+      toast_warning: rgb(0xca8a04).into(),
     }
   }
 }

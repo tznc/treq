@@ -54,3 +54,21 @@ pub fn gpui_menu_hide(app: AppHandle) {
   #[cfg(not(all(desktop, feature = "gpui-shell")))]
   let _ = app;
 }
+
+/// Shows window `window_label`'s toasts (React's toast store) in GPUI, over
+/// the webview. Clicks come back as `gpui-toast` events.
+#[tauri::command]
+pub fn gpui_toasts_update(app: AppHandle, window_label: String, toasts: serde_json::Value) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    if !crate::gpui_shell::is_enabled(&app) {
+      return;
+    }
+    match serde_json::from_value(toasts) {
+      Ok(toasts) => crate::gpui_shell::update_toasts(&app, &window_label, toasts),
+      Err(err) => log::warn!("invalid GPUI toasts: {err}"),
+    }
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = (app, window_label, toasts);
+}

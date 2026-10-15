@@ -13,6 +13,22 @@ export interface Toast {
   };
 }
 
+/** A toast as the GPUI shell draws it: its action reduced to a label. */
+export interface GpuiToast {
+  id: string;
+  title: string;
+  description?: string;
+  type: ToastType;
+  action?: string;
+}
+
+export function toGpuiToasts(toasts: Toast[]): GpuiToast[] {
+  return toasts.map(({ action, ...toast }) => ({
+    ...toast,
+    ...(action ? { action: action.label } : {}),
+  }));
+}
+
 const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export interface ToastState {

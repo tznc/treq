@@ -7,15 +7,18 @@
 //! screen that is still web UI lives in the webview.
 //!
 //! The workspace sidebar is the first screen drawn by GPUI (see `sidebar`).
-//! Its tooltips and menus open in popup windows of their own (see `popup`),
-//! since GPUI cannot paint over the webview.
+//! Its tooltips and menus, and the app's toasts, open in popup windows of
+//! their own (see `popup`), since GPUI cannot paint over the webview.
 //!
 //! The child webview has the same label as its window. Tauri treats a window
 //! whose only webview shares its label as a webview window, so
 //! `get_webview_window`, `emit_to` and the `WebviewWindow` command extractor
 //! keep working as they do for a window built with `WebviewWindowBuilder`.
 
-use std::collections::HashMap;
+use std::{
+  collections::{HashMap, VecDeque},
+  sync::Mutex,
+};
 
 use tauri::{
   AppHandle, LogicalPosition, LogicalSize, Manager, Runtime, Webview, WebviewBuilder, WebviewUrl,
@@ -30,7 +33,7 @@ mod popup;
 mod sidebar;
 mod theme;
 
-pub use popup::MenuEntry;
+pub use popup::{MenuEntry, Toast};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
 
@@ -51,11 +54,21 @@ pub fn force_x11_on_wayland() {
 
 /// Starts GPUI. Call once from `setup`, before the first shell window.
 pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiError> {
+  let handle = app.handle().clone();
   tauri_plugin_gpui::init_with(
     app,
     GpuiConfig::new()
       .assets(theme::Assets)
-      .on_launch(theme::init),
+      .on_launch(move |cx| {
+        theme::init(cx);
+        // Escape in a shell window closes an open menu, as in a native one.
+        cx.observe_keystrokes(move |event, _, _| {
+          if event.keystroke.key == "escape" {
+            defer_main(&handle, |_| popup::hide_menus());
+          }
+        })
+        .detach();
+      }),
   )?;
   app.manage(ShellEnabled);
   Ok(())
@@ -235,13 +248,26 @@ fn popup_sink(app: AppHandle, label: String) -> popup::PopupSink {
   })
 }
 
+type Deferred = Box<dyn FnOnce(&AppHandle) + Send>;
+
+/// Calls waiting for the main thread, in the order they were deferred.
+static DEFERRED: Mutex<VecDeque<Deferred>> = Mutex::new(VecDeque::new());
+
 /// Runs `f` on the main thread once the current GPUI update and Tauri call
-/// have returned.
+/// have returned, after every call deferred before it (so a click's "close
+/// the menu" never lands after the menu it opens).
 fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
+  if let Ok(mut deferred) = DEFERRED.lock() {
+    deferred.push_back(Box::new(f));
+  }
   let app = app.clone();
   tauri::async_runtime::spawn(async move {
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || f(&handle));
+    let _ = app.run_on_main_thread(move || {
+      while let Some(next) = DEFERRED.lock().ok().and_then(|mut d| d.pop_front()) {
+        next(&handle);
+      }
+    });
   });
 }
 
@@ -278,8 +304,35 @@ pub fn hide_popups(app: &AppHandle) {
   defer_main(app, |_| popup::hide_all());
 }
 
+/// Shows window `label`'s toasts, in its sidebar's theme.
+pub fn update_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
+  let label = label.to_string();
+  defer_main(app, move |app| {
+    let dark = tauri_plugin_gpui::with_app({
+      let label = label.clone();
+      move |cx| {
+        let sidebar = cx
+          .try_global::<Shells>()
+          .and_then(|shells| shells.0.get(&label))
+          .and_then(WeakEntity::upgrade)
+          .and_then(|shell| shell.read(cx).sidebar.clone())?;
+        Some(sidebar.read(cx).snapshot().dark)
+      }
+    });
+    let dark = dark.ok().flatten().unwrap_or(false);
+    popup::show_toasts(app, &label, toasts, dark);
+  });
+}
+
+/// Keeps window `label`'s toasts in its corner as it moves or resizes.
+pub fn place_toasts(app: &AppHandle, label: &str) {
+  let label = label.to_string();
+  defer_main(app, move |app| popup::place_owner_toasts(app, &label));
+}
+
 /// Forgets a destroyed window's shell.
 pub fn forget_window(label: &str) {
+  popup::forget_owner(label);
   let label = label.to_string();
   let _ = tauri_plugin_gpui::with_app(move |cx| {
     if let Some(shells) = cx.try_global::<Shells>() {
