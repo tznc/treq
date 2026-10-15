@@ -368,8 +368,6 @@ describe("Dashboard - workspace list", () => {
         "gumbo-notes",
       ];
 
-      // Stacked children move under their parent once the stack loads, so
-      // wait for the final order before measuring the range.
       await waitFor(() => {
         expect(
           gpuiTitles().filter((name) => expectedBranches.includes(name)),
