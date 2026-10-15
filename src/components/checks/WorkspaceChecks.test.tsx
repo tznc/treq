@@ -97,7 +97,9 @@ describe("WorkspaceChecksPanel", () => {
     ] as Awaited<ReturnType<typeof api.getRunLogs>>);
     render(<Harness />);
 
-    await user.click(await screen.findByRole("button", { name: "Run history" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Run history" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Run #9" }));
     expect(await screen.findByText("[stderr] 1 test failed")).toBeTruthy();
     expect(api.getRunLogs).toHaveBeenCalledWith("/repo", 9, "test");
