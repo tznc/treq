@@ -7,6 +7,8 @@
 //! screen that is still web UI lives in the webview.
 //!
 //! The workspace sidebar is the first screen drawn by GPUI (see `sidebar`).
+//! Its tooltips and menus open in popup windows of their own (see `popup`),
+//! since GPUI cannot paint over the webview.
 //!
 //! The child webview has the same label as its window. Tauri treats a window
 //! whose only webview shares its label as a webview window, so
@@ -24,9 +26,11 @@ use tauri_plugin_gpui::{
   webview_frame, GpuiConfig, GpuiWindowExt,
 };
 
+mod popup;
 mod sidebar;
 mod theme;
 
+pub use popup::MenuEntry;
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
 
@@ -88,10 +92,14 @@ impl Render for Shell {
       ),
       |sidebar| sidebar.read(cx).snapshot().dark,
     );
+    let app = self.app.clone();
     gpui::div()
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
+      // A click anywhere in the window closes an open menu, as one outside
+      // a native menu does.
+      .capture_any_mouse_down(move |_, _, _| defer_main(&app, |_| popup::hide_menus()))
       // Shown only until the webview's first frame, so opening a window
       // does not flash.
       .bg(theme::palette(dark).background)
@@ -186,13 +194,16 @@ pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnap
     let result = update_shell(&label, move |shell, cx| {
       let Some(snapshot) = snapshot else {
         shell.sidebar = None;
+        defer_main(&shell.app, |_| popup::hide_all());
         return;
       };
       match &shell.sidebar {
         Some(sidebar) => sidebar.update(cx, |sidebar, cx| sidebar.set_snapshot(snapshot, cx)),
         None => {
-          let sink = action_sink(shell.app.clone(), shell.label.to_string());
-          shell.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink)));
+          let label = shell.label.to_string();
+          let sink = action_sink(shell.app.clone(), label.clone());
+          let popups = popup_sink(shell.app.clone(), label);
+          shell.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink, popups)));
         }
       }
     });
@@ -214,6 +225,57 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
       }
     });
   })
+}
+
+/// Opens the sidebar's tooltip popups for window `label`.
+fn popup_sink(app: AppHandle, label: String) -> popup::PopupSink {
+  std::rc::Rc::new(move |request, _| {
+    let label = label.clone();
+    defer_main(&app, move |app| popup::handle(app, &label, request));
+  })
+}
+
+/// Runs `f` on the main thread once the current GPUI update and Tauri call
+/// have returned.
+fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
+  let app = app.clone();
+  tauri::async_runtime::spawn(async move {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || f(&handle));
+  });
+}
+
+/// Opens a menu of `entries` at the last right-click in window `label`'s
+/// sidebar.
+pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
+  let label = label.to_string();
+  defer_main(app, move |app| {
+    let anchor = tauri_plugin_gpui::with_app({
+      let label = label.clone();
+      move |cx| {
+        let sidebar = cx
+          .try_global::<Shells>()
+          .and_then(|shells| shells.0.get(&label))
+          .and_then(WeakEntity::upgrade)
+          .and_then(|shell| shell.read(cx).sidebar.clone())?;
+        let sidebar = sidebar.read(cx);
+        Some((sidebar.menu_anchor(), sidebar.snapshot().dark))
+      }
+    });
+    if let Ok(Some((at, dark))) = anchor {
+      popup::show_menu(app, &label, entries, at, dark);
+    }
+  });
+}
+
+/// Closes an open menu.
+pub fn hide_menus(app: &AppHandle) {
+  defer_main(app, |_| popup::hide_menus());
+}
+
+/// Closes every popup, as when a shell window loses focus.
+pub fn hide_popups(app: &AppHandle) {
+  defer_main(app, |_| popup::hide_all());
 }
 
 /// Forgets a destroyed window's shell.

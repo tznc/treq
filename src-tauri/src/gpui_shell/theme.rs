@@ -22,14 +22,21 @@ icons! {
   ICON_BRANCH => "git-branch",
   ICON_CHEVRON_DOWN => "chevron-down",
   ICON_CHEVRON_RIGHT => "chevron-right",
+  ICON_COPY => "copy",
+  ICON_FOLDER_OPEN => "folder-open",
+  ICON_FOLDER_PLUS => "folder-plus",
+  ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
   ICON_HOUSE => "house",
   ICON_LAYERS => "layers-2",
   ICON_LINEAR => "list-todo",
+  ICON_LINK => "link",
+  ICON_PENCIL => "pencil",
   ICON_SEARCH => "search",
   ICON_SETTINGS => "settings",
   ICON_SPINNER => "loader-circle",
   ICON_TERMINAL => "terminal",
+  ICON_TRASH => "trash-2",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
@@ -93,6 +100,11 @@ pub struct Palette {
   pub muted: Hsla,
   pub muted_foreground: Hsla,
   pub border: Hsla,
+  /// Tooltips and menus.
+  pub popover: Hsla,
+  pub popover_foreground: Hsla,
+  /// `--accent`, a menu row's hover; `accent` above is `--sidebar-accent`.
+  pub menu_accent: Hsla,
   pub primary: Hsla,
   pub destructive: Hsla,
   /// Tailwind yellow-500, the uncommitted-changes dot.
@@ -120,6 +132,9 @@ pub fn palette(dark: bool) -> Palette {
       muted: token(0., 0., 25.),
       muted_foreground: token(0., 0., 60.),
       border: token(0., 0., 28.),
+      popover: token(0., 0., 22.),
+      popover_foreground: token(0., 0., 95.),
+      menu_accent: token(0., 0., 25.),
       primary: token(211., 100., 55.),
       destructive: token(0., 85., 58.),
       warning: rgb(0xeab308).into(),
@@ -138,6 +153,9 @@ pub fn palette(dark: bool) -> Palette {
       muted: token(220., 13., 95.),
       muted_foreground: token(0., 0., 45.),
       border: token(220., 13., 88.),
+      popover: token(0., 0., 100.),
+      popover_foreground: token(0., 0., 13.),
+      menu_accent: token(220., 13., 95.),
       primary: token(211., 100., 50.),
       destructive: token(0., 85., 60.),
       warning: rgb(0xeab308).into(),

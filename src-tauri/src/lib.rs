@@ -464,6 +464,16 @@ pub fn run() {
       // terminals without touching another window's, regardless of
       // which UI path (dashboard unmount, native "Close Window", the
       // OS window-close button) tore it down.
+      // A shell window losing focus closes its tooltips and menus, as
+      // native ones would.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if let tauri::WindowEvent::Focused(false) = event {
+        if !window.label().starts_with("gpui-popup-") && gpui_shell::is_enabled(window.app_handle())
+        {
+          gpui_shell::hide_popups(window.app_handle());
+        }
+      }
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
         #[cfg(feature = "gpui-shell")]
@@ -891,6 +901,8 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       commands::gpui_sidebar_update,
+      commands::gpui_menu_show,
+      commands::gpui_menu_hide,
       commands::acknowledge_agent_dispatch,
       commands::detect_editor_apps,
       commands::get_treq_bin_dir,

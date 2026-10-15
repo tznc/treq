@@ -46,6 +46,10 @@ napi-build = "2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Asks GDK whether a compositor draws transparent GPUI popups (gpui_shell::popup).
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 # Desktop-only crates. `tauri-plugin-cli` has no Android/iOS support, and the
 # `treq` command-line entry point it backs only exists on desktop, so mobile
 # builds leave it out entirely (see `#[cfg(desktop)]` on `mod cli` in lib.rs).

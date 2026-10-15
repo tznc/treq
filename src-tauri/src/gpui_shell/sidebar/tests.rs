@@ -69,6 +69,7 @@ struct Harness {
   cx: VisualTestContext,
   sidebar: Entity<Sidebar>,
   sent: Rc<RefCell<Vec<SidebarAction>>>,
+  popups: Rc<RefCell<Vec<PopupRequest>>>,
 }
 
 impl Harness {
@@ -78,9 +79,19 @@ impl Harness {
       let sent = sent.clone();
       Rc::new(move |action, _| sent.borrow_mut().push(action))
     };
-    let (sidebar, cx) = cx.add_window_view(|_, _| Sidebar::new(snapshot, sink));
+    let popups = Rc::new(RefCell::new(Vec::new()));
+    let popup_sink: PopupSink = {
+      let popups = popups.clone();
+      Rc::new(move |request, _| popups.borrow_mut().push(request))
+    };
+    let (sidebar, cx) = cx.add_window_view(|_, _| Sidebar::new(snapshot, sink, popup_sink));
     let cx = cx.clone();
-    Self { cx, sidebar, sent }
+    Self {
+      cx,
+      sidebar,
+      sent,
+      popups,
+    }
   }
 
   fn bounds(&mut self, selector: &'static str) -> Option<gpui::Bounds<gpui::Pixels>> {
@@ -503,6 +514,45 @@ fn row_button_tooltip_wins_over_its_row(cx: &mut TestAppContext) {
   h.sidebar.read_with(&h.cx, |s, _| {
     assert!(s.tooltip_shown("home:/src/treq"));
   });
+}
+
+#[gpui::test]
+fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0)]));
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  let row = h.bounds("workspace-7").unwrap();
+  assert_eq!(
+    h.popups.borrow().as_slice(),
+    &[PopupRequest::ShowTooltip {
+      anchor: row,
+      side: Side::Right,
+      content: TooltipContent::Branch {
+        title: "feat-a".into(),
+        conflicted: false,
+        pr: None,
+      },
+      dark: false,
+    }]
+  );
+}
+
+#[gpui::test]
+fn button_tooltip_opens_below_and_closes_on_leave(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("settings");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  let settings = h.bounds("settings").unwrap();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip { anchor, side: Side::Bottom, content: TooltipContent::Text(_), .. }]
+      if *anchor == settings
+  ));
+  h.hover("command-palette");
+  h.cx.run_until_parked();
+  assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
 }
 
 fn right_click(h: &mut Harness, selector: &'static str) {
