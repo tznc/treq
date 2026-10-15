@@ -118,7 +118,7 @@ pub(crate) struct AppState {
   dispatch_started_at: u64,
   dispatch_endpoint: String,
   // Held for its Drop guards (file writer + provider shutdown).
-  _telemetry: telemetry::TelemetryGuards,
+  telemetry: telemetry::TelemetryGuards,
 }
 
 #[cfg(feature = "gui")]
@@ -142,7 +142,7 @@ impl AppState {
       dispatch_instance_id,
       dispatch_started_at,
       dispatch_endpoint,
-      _telemetry: telemetry,
+      telemetry,
     }
   }
 }
@@ -885,12 +885,7 @@ pub fn run() {
           }
           "force_rebase_workspace" => emit_to_focused(app, "menu-force-rebase-workspace", ()),
           "factory_reset" => emit_to_focused(app, "menu-factory-reset", ()),
-          "view_logs" => {
-            use tauri_plugin_opener::OpenerExt;
-            if let Ok(dir) = app.path().app_log_dir() {
-              let _ = app.opener().open_path(dir.to_string_lossy(), None::<&str>);
-            }
-          }
+          "view_logs" => emit_to_focused(app, "menu-view-logs", ()),
           id => {
             if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
@@ -938,6 +933,8 @@ pub fn run() {
       commands::save_app_setup_script,
       commands::run_app_setup_script,
       commands::get_app_setup_logs,
+      commands::get_system_logs,
+      commands::open_system_log_dir,
       commands::get_repo_setting,
       commands::set_repo_setting,
       commands::list_skill_catalog,

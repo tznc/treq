@@ -85,7 +85,7 @@ import { ChangesDiffViewer } from "./changes-diff-viewer/ChangesDiffViewerMain";
 import { BrowserPanel } from "./browser-panel/BrowserPanel";
 import { useReviewSubView } from "./browser-panel/useReviewSubView";
 import { LocDiffMarker } from "./LocDiffMarker";
-import { LogsTab } from "./LogsTab";
+import { type LogSource, LogsTab } from "./LogsTab";
 import { CommitDiffViewer } from "./CommitDiffViewer";
 import { CreatePrButtonGroup } from "./CreatePrButtonGroup";
 import { FileBrowser } from "./FileBrowser";
@@ -120,6 +120,7 @@ import { MergeQueueButton } from "./workspace-header/MergeQueueButton";
 import { WorkspaceChecksButton } from "./workspace-header/WorkspaceChecksButton";
 import { checksTargetOf } from "../hooks/useWorkspaceChecks";
 import {
+  clearOpenSystemLogsRequest,
   clearOpenWorkspaceLogsRequest,
   useOpenLogsRequest,
 } from "../lib/open-logs-request";
@@ -305,13 +306,16 @@ export const ShowWorkspace = ({
     setChangedFiles(new Map());
   }, [workspace?.id]);
 
-  // Bumped by "open in Logs" links so the Logs tab remounts on its default
-  // view: check logs for all checks.
+  // Bumped by "open in Logs" links so the Logs tab remounts on the requested
+  // source: check logs for all checks, or the app's system logs.
   const [logsKey, setLogsKey] = useState(0);
-  const openCheckLogs = () => {
+  const [logsSource, setLogsSource] = useState<LogSource>("checks");
+  const openLogs = (source: LogSource) => {
+    setLogsSource(source);
     setLogsKey((key) => key + 1);
     setActiveTab("logs");
   };
+  const openCheckLogs = () => openLogs("checks");
 
   // Runs after the reset above, so a Logs request for this workspace wins.
   const openLogsFor = useOpenLogsRequest((state) => state.workspaceId);
@@ -321,6 +325,14 @@ export const ShowWorkspace = ({
     if (logsEnabled) openCheckLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openLogsFor, workspace?.id, logsEnabled]);
+
+  const openSystemLogs = useOpenLogsRequest((state) => state.system);
+  useEffect(() => {
+    if (!openSystemLogs) return;
+    clearOpenSystemLogsRequest();
+    if (logsEnabled) openLogs("system");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSystemLogs, logsEnabled]);
 
   // After a child refresh (e.g. post-commit), re-check if workspace now has commits
   const handleRefreshingChange = (r: boolean) => {
@@ -1425,6 +1437,7 @@ export const ShowWorkspace = ({
         ) : activeTab === "logs" ? (
           <LogsTab
             key={logsKey}
+            initialSource={logsSource}
             repoPath={effectiveRepoPath ?? ""}
             onSendToAgent={handleSendLogsToAgent}
           />
