@@ -23,6 +23,7 @@ import {
   clickGpuiRow,
   findGpuiRow,
   gpuiRepo,
+  gpuiRows,
   gpuiSnapshot,
   gpuiTitles,
   openGpuiMenu,
@@ -359,45 +360,25 @@ describe("Dashboard - workspace list", () => {
 
       render(<Dashboard />);
 
-      const expectedBranches = [
-        "dduck-joke-readme",
-        "rubber-test-123",
-        "zebra-notes",
-        "feat/alpha",
-        "feat/beta",
-        "gumbo-notes",
-      ];
-
-      await waitFor(() => {
-        expect(
-          gpuiTitles().filter((name) => expectedBranches.includes(name)),
-        ).toEqual(expectedBranches);
-      });
-
-      const anchorBranch = "dduck-joke-readme";
-      const targetBranch = "gumbo-notes";
-      const start = gpuiTitles().indexOf(anchorBranch);
-      const end = gpuiTitles().indexOf(targetBranch);
-      const rangeCount = Math.abs(start - end) + 1;
-      expect(rangeCount).toBeGreaterThan(1);
-
-      await clickGpuiRow(anchorBranch, { toggle: true });
-      await clickGpuiRow(targetBranch, { shift: true });
+      const stack = ["dduck-joke-readme", "rubber-test-123", "zebra-notes"];
 
       await waitFor(() => {
         const titles = gpuiTitles();
-        const lo = Math.min(
-          titles.indexOf(anchorBranch),
-          titles.indexOf(targetBranch),
-        );
-        const hi = Math.max(
-          titles.indexOf(anchorBranch),
-          titles.indexOf(targetBranch),
-        );
-        gpuiRepo()!.workspaces.forEach((row, index) => {
-          if (index >= lo && index <= hi) expect(row.selected).toBe(true);
-        });
-        expect(gpuiSnapshot()?.bulkArchive).toBe(rangeCount);
+        const first = titles.indexOf(stack[0]);
+        expect(first).toBeGreaterThanOrEqual(0);
+        expect(titles.slice(first, first + stack.length)).toEqual(stack);
+      });
+
+      await clickGpuiRow(stack[0], { toggle: true });
+      await clickGpuiRow(stack[2], { shift: true });
+
+      await waitFor(() => {
+        expect(
+          gpuiRows()
+            .filter((row) => row.selected)
+            .map((row) => row.title),
+        ).toEqual(stack);
+        expect(gpuiSnapshot()?.bulkArchive).toBe(stack.length);
       });
     });
   });
