@@ -98,7 +98,7 @@ export function WorkspaceDescription({
                 void save();
               }
             }}
-            className="text-sm font-mono"
+            className="text-sm font-sans"
           />
           <div className="flex justify-end gap-2">
             <Button
