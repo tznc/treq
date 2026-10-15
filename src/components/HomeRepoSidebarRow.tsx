@@ -87,7 +87,7 @@ export function HomeRepoSidebarRow({
                 asChild
                 isActive={isHomeSelected}
                 className={cn(
-                  "h-auto py-1",
+                  "h-auto cursor-pointer py-1",
                   isHomeSelected && "bg-primary/20",
                   missing && "opacity-50",
                 )}
