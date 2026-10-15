@@ -81,10 +81,10 @@ jobs:
       JS: ${{ needs.detect-changes.outputs.js_changed }}
       RUST: ${{ needs.detect-changes.outputs.rust_changed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -151,13 +151,13 @@ jobs:
       # Matrix entries flagged rust: true also run on Rust-only changes.
       RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: env.RUN_TASK == 'true'
 
       - name: Setup Node.js
         if: env.RUN_TASK == 'true'
         id: setup-node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           # Pin major so NAPI cache keys stay stable across LTS patch bumps.
           node-version: "24"
@@ -171,7 +171,7 @@ jobs:
         # WebKit/GTK is needed to *dlopen* libtreq_lib.so in integration tests
         # even on a NAPI cache hit.
         if: env.RUN_TASK == 'true' && (matrix.platform == 'ubuntu-22.04' && matrix.task == 'test:integration')
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: webkit-4.1-1
@@ -194,7 +194,7 @@ jobs:
       - name: Restore jj CLI cache
         id: jj-cache
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -244,7 +244,7 @@ jobs:
       - name: Save jj CLI cache
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration' && steps.jj-cache.outputs.cache-hit != 'true')
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
@@ -280,7 +280,7 @@ jobs:
       # older commit is safe to reuse; the key only picks the newest one.
       - name: Vitest module cache
         if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: node_modules/.experimental-vitest-cache
           key: vitest-fsmc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
@@ -312,7 +312,7 @@ jobs:
     name: test-rust / clippy + test / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
@@ -327,7 +327,7 @@ jobs:
 
       # mold links the large test binaries several times faster than ld.
       - name: Use mold linker
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
@@ -335,7 +335,7 @@ jobs:
       - name: install dependencies (ubuntu only)
         # WebKit/GTK is needed to *link* treq/tauri and to *dlopen*
         # libtreq_lib.so in tests.
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: webkit-4.1-1
@@ -356,7 +356,7 @@ jobs:
 
       - name: Restore jj CLI cache
         id: jj-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -406,7 +406,7 @@ jobs:
       - name: Save jj CLI cache
         if: steps.jj-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
