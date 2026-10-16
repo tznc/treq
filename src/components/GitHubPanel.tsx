@@ -21,6 +21,7 @@ import {
   type GitHubStateFilter,
   type GitHubTab,
   githubDetailPath,
+  githubPrReviewPath,
   githubListPath,
   githubNewItemPath,
   githubTabPath,
@@ -525,6 +526,9 @@ export const GitHubPanel: React.FC<GitHubPanelProps> = ({
               prNumber={selectedPr}
               onClose={handleCloseDetail}
               onOpenWorkspace={onOpenWorkspace}
+              onReviewChanges={() =>
+                navigate(githubPrReviewPath(selectedPr, currentFilter))
+              }
             />
           )}
         </div>

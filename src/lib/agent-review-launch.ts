@@ -6,7 +6,10 @@ import {
   buildReviewPrompt,
   workspaceDiffSummary,
 } from "./agent-review-prompt";
-import type { LinearReviewTargetType } from "./api-types-review";
+import {
+  AGENT_REVIEW_TARGET_GITHUB_PR,
+  type LinearReviewTargetType,
+} from "./api-types-review";
 
 /**
  * Payload of the backend's `auto-review-triggered` event. The backend only
@@ -125,6 +128,53 @@ export async function prepareLinearReview({
     targetId,
     snapshotDir,
     diffSummary: `the Linear ${LINEAR_KIND_LABEL[targetType]} "${snapshot.title}" and its ${comments} comment${comments === 1 ? "" : "s"}`,
+  });
+  return { prompt, agent: reviewAgent || undefined };
+}
+
+/**
+ * What-is-under-review line for a GitHub PR. The PR is usually not checked
+ * out, so it tells the agent where to read the diff and the files.
+ */
+export function githubPrReviewSummary({
+  repoFullName,
+  prNumber,
+  title,
+  fileCount,
+}: Omit<GithubPrReviewRequest, "repoPath">): string {
+  const files = `${fileCount} changed file${fileCount === 1 ? "" : "s"}`;
+  return `GitHub pull request #${prNumber} "${title}" (${files}). The PR is not checked out locally: read its diff with \`gh pr diff ${prNumber} --repo ${repoFullName}\` and, for full file contents, \`gh api repos/${repoFullName}/contents/<path>?ref=<head sha>\`. Use paths and new-side line numbers from that diff in --file and --start-line/--end-line (--side old for removed lines)`;
+}
+
+export interface GithubPrReviewRequest {
+  repoPath: string;
+  repoFullName: string;
+  prNumber: number;
+  title: string;
+  fileCount: number;
+}
+
+/** Review prompt for a GitHub PR; comments target `github_pr` / PR number. */
+export async function prepareGithubPrReview({
+  repoPath,
+  repoFullName,
+  prNumber,
+  title,
+  fileCount,
+}: GithubPrReviewRequest): Promise<ReviewLaunch> {
+  const [customPrompt, reviewAgent] = await Promise.all([
+    getRepoSetting(repoPath, "review_prompt").catch(() => null),
+    getRepoSetting(repoPath, "review_agent").catch(() => null),
+  ]);
+  const prompt = buildReviewPrompt(customPrompt, {
+    targetType: AGENT_REVIEW_TARGET_GITHUB_PR,
+    targetId: String(prNumber),
+    diffSummary: githubPrReviewSummary({
+      repoFullName,
+      prNumber,
+      title,
+      fileCount,
+    }),
   });
   return { prompt, agent: reviewAgent || undefined };
 }

@@ -65,7 +65,8 @@ pub fn normalize_agent_comments(comments: Vec<AgentReviewComment>) -> Vec<Normal
   comments
     .into_iter()
     .map(|comment| NormalizedReviewComment {
-      source: SOURCE_LOCAL_AGENT.to_string(),
+      // PR review drafts the user wrote are stored here as `local-human`.
+      source: comment.source,
       id: comment.id,
       file_path: comment.file_path,
       start_line: comment.start_line,
@@ -236,7 +237,16 @@ mod tests {
       created_at: "2024-01-01T00:00:00Z".to_string(),
       resolved_at: None,
       quoted_text: None,
+      line_hash: None,
     }
+  }
+
+  #[test]
+  fn keeps_the_source_of_a_stored_human_draft() {
+    let mut draft = agent_comment("h", "open");
+    draft.source = SOURCE_LOCAL_HUMAN.to_string();
+    let normalized = normalize_agent_comments(vec![draft]);
+    assert_eq!(normalized[0].source, SOURCE_LOCAL_HUMAN);
   }
 
   #[test]

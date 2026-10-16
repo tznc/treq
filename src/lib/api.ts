@@ -216,6 +216,40 @@ export const resolveAgentReviewComment = (
     commentId,
   });
 
+export interface ReviewDraftInput {
+  targetType: string;
+  targetId: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  side: "old" | "new";
+  commentText: string;
+  lineHash: string | null;
+}
+
+/** Store a draft comment the user wrote (a PR review draft). */
+export const createReviewDraft = (
+  repoPath: string,
+  draft: ReviewDraftInput,
+): Promise<import("./api-types-review").AgentReviewComment> =>
+  invoke("create_review_draft", {
+    repoPath: repoStateScope(repoPath),
+    ...draft,
+  });
+
+/** Edit a stored comment's text and/or record its line hash. */
+export const updateAgentReviewComment = (
+  repoPath: string,
+  commentId: string,
+  update: { commentText?: string; lineHash?: string },
+): Promise<void> =>
+  invoke("update_agent_review_comment", {
+    repoPath: repoStateScope(repoPath),
+    commentId,
+    commentText: update.commentText ?? null,
+    lineHash: update.lineHash ?? null,
+  });
+
 export const deleteAgentReviewComment = (
   repoPath: string,
   commentId: string,

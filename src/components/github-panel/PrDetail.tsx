@@ -4,6 +4,7 @@ import { useMutation } from "../../hooks/useMutation";
 import { useRepositoryCacheKey } from "../../lib/active-repository-context";
 import { invalidateQueries } from "../../lib/swr-cache";
 import {
+  FileDiff,
   GitBranch,
   ListChecks,
   Loader2,
@@ -65,12 +66,15 @@ export function PrDetailPanel({
   prNumber,
   onClose,
   onOpenWorkspace,
+  onReviewChanges,
 }: {
   repoPath: string;
   repoFullName: string;
   prNumber: number;
   onClose: () => void;
   onOpenWorkspace?: (workspaceId: number) => void;
+  /** Opens the full-screen review of this PR's diff. */
+  onReviewChanges?: () => void;
 }) {
   const { addToast } = useToast();
   const ghErrorToast = useGhErrorToast();
@@ -215,9 +219,21 @@ export function PrDetailPanel({
                 {pr.title}
               </h2>
               <div className="flex items-center gap-2 shrink-0">
+                {onReviewChanges && (
+                  <Button
+                    size="sm"
+                    className="text-base gap-1.5"
+                    onClick={onReviewChanges}
+                  >
+                    <FileDiff className="w-4 h-4" />
+                    Review changes
+                  </Button>
+                )}
                 <Button
                   size="sm"
-                  variant={existingWorkspace ? "outline" : "default"}
+                  variant={
+                    existingWorkspace || onReviewChanges ? "outline" : "default"
+                  }
                   className="text-base gap-1.5"
                   disabled={openOrCreateWorkspace.isPending}
                   onClick={() => openOrCreateWorkspace.mutate()}

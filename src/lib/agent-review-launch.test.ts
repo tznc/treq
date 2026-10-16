@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { autoReviewSummary } from "./agent-review-launch";
+import {
+  autoReviewSummary,
+  githubPrReviewSummary,
+} from "./agent-review-launch";
 import { buildLinearReviewPrompt } from "./agent-review-prompt";
 
 describe("autoReviewSummary", () => {
@@ -44,5 +47,19 @@ describe("buildLinearReviewPrompt", () => {
     expect(prompt).not.toMatch(
       /\{(target_type|target_id|snapshot_dir|diff_summary)\}/,
     );
+  });
+});
+
+describe("githubPrReviewSummary", () => {
+  it("names the PR and tells the agent how to read its diff", () => {
+    const summary = githubPrReviewSummary({
+      repoFullName: "o/r",
+      prNumber: 7,
+      title: "Add search",
+      fileCount: 3,
+    });
+    expect(summary).toContain('pull request #7 "Add search" (3 changed files)');
+    expect(summary).toContain("gh pr diff 7 --repo o/r");
+    expect(summary).toContain("not checked out");
   });
 });
