@@ -156,6 +156,7 @@ export function useWorkspaceChecks(target: ChecksTarget | null) {
   };
 
   return {
+    target,
     workflows,
     isLoading: trustLoading || workflowsLoading,
     trusted: !!trusted,
