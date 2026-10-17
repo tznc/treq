@@ -143,3 +143,42 @@ export const ghCreatePr = (
     headBranch,
     draft,
   });
+
+/** Unified diff of a PR as GitHub shows it (base...head). */
+export const ghPrDiff = (
+  repoFullName: string,
+  prNumber: number,
+): Promise<string> => invoke("gh_pr_diff", { repoFullName, prNumber });
+
+export const ghReplyPrReviewThread = (
+  threadId: string,
+  body: string,
+): Promise<void> => invoke("gh_reply_pr_review_thread", { threadId, body });
+
+export type GhReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+
+export interface GhDraftReviewComment {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  start_line?: number | null;
+  body: string;
+}
+
+export const ghSubmitPrReview = (
+  repoFullName: string,
+  prNumber: number,
+  event: GhReviewEvent,
+  body: string,
+  comments: GhDraftReviewComment[],
+): Promise<void> =>
+  invoke("gh_submit_pr_review", {
+    repoFullName,
+    prNumber,
+    event,
+    body,
+    comments,
+  });
+
+/** Login of the user `gh` is authenticated as. */
+export const ghCurrentUser = (): Promise<string> => invoke("gh_current_user");

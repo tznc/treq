@@ -54,3 +54,22 @@ export function stateFilterForPrState(
       return "all";
   }
 }
+
+/** Full-screen review of a PR's diff. */
+export function githubPrReviewPath(
+  number: number,
+  filter: GitHubStateFilter = "open",
+): string {
+  return `${githubDetailPath("prs", number, filter)}/review`;
+}
+
+export function parsePrReviewPath(
+  path: string,
+): { number: number; filter: GitHubStateFilter } | null {
+  const match = path.match(/^\/github\/prs\/([^/]+)\/(\d+)\/review$/);
+  if (!match) return null;
+  const filter = ["draft", "open", "closed", "all"].includes(match[1])
+    ? (match[1] as GitHubStateFilter)
+    : "open";
+  return { number: Number(match[2]), filter };
+}
