@@ -1163,6 +1163,7 @@ fn test_create_workspace_materializes_installed_library_skills() {
     license: None,
     proprietary: false,
     url: None,
+    route: None,
     checksum: Some(checksum),
     files: vec![],
   };

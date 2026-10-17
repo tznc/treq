@@ -1,3 +1,5 @@
+import { APP_DEEP_LINK } from '../../lib/constants';
+
 // Extensions confirmed present in prism-react-renderer's default language
 // bundle. Anything else falls back to plain, unhighlighted text rather than
 // risking a runtime error from an unregistered Prism grammar.
@@ -46,4 +48,9 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Parsed by `parseSkillInstallDeepLink` in the app (src/lib/skillDeepLink.ts).
+export function skillInstallDeepLink(skillId: string): string {
+  return `${APP_DEEP_LINK}skill/install?id=${encodeURIComponent(skillId)}`;
 }

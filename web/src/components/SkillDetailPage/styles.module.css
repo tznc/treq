@@ -96,6 +96,24 @@
   border-color: var(--ifm-color-primary);
 }
 
+.headerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.openInTreqButton {
+  composes: githubButton;
+  border-color: var(--ifm-color-primary);
+  background: var(--ifm-color-primary);
+  color: var(--ifm-color-white, #fff) !important;
+}
+
+.openInTreqButton:hover {
+  background: var(--ifm-color-primary-dark);
+}
+
 .callout {
   border: 1px solid var(--ifm-color-warning-dark);
   background: color-mix(in srgb, var(--ifm-color-warning) 12%, transparent);

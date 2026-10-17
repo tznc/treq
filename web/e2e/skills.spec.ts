@@ -129,6 +129,12 @@ test.describe("Skill detail page", () => {
     );
   });
 
+  test("offers an Open in Treq deep link for the skill", async ({ page }) => {
+    await expect(
+      page.getByRole("link", { name: "Open in Treq" }),
+    ).toHaveAttribute("href", "treq://skill/install?id=anthropic%2Fmcp-builder");
+  });
+
   test("file tree lists the skill files", async ({ page }) => {
     await expect(page.getByRole("button", { name: "SKILL.md" })).toBeVisible();
     await expect(
@@ -234,6 +240,9 @@ test.describe("Proprietary skill detail page", () => {
     ).toBeVisible();
     await expect(page.getByTestId("proprietary-callout")).toBeVisible();
     await expect(page.getByTestId("skill-file-browser")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Open in Treq" })).toHaveCount(
+      0,
+    );
     await expect(page.getByTestId("repo-github-link")).toHaveAttribute(
       "href",
       "https://github.com/anthropics/skills/tree/main/skills/pdf",
