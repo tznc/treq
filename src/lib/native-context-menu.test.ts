@@ -4,6 +4,7 @@ import {
   homeMenuEntries,
   type NativeMenuEntry,
   pathMenuEntries,
+  toGpuiMenu,
   workspaceMenuEntries,
   workspaceRelativePath,
 } from "./native-context-menu";
@@ -130,5 +131,51 @@ describe("workspaceMenuEntries", () => {
     expect(
       workspaceRelativePath({ ...workspace, workspace_path: "/x/a" }, "/r"),
     ).toBe("/x/a");
+  });
+});
+
+describe("toGpuiMenu", () => {
+  it("numbers items for GPUI and keeps their handlers", () => {
+    const onRename = vi.fn();
+    const onArchive = vi.fn();
+    const { entries, handlers } = toGpuiMenu([
+      { kind: "item", text: "Rename", onSelect: onRename, icon: "pencil" },
+      { kind: "separator" },
+      {
+        kind: "submenu",
+        text: "Open in...",
+        icon: "folder-open",
+        items: [
+          {
+            kind: "item",
+            text: "Archive",
+            onSelect: onArchive,
+            icon: "archive",
+            destructive: true,
+          },
+        ],
+      },
+    ]);
+    expect(entries).toEqual([
+      { kind: "item", id: 0, text: "Rename", icon: "pencil" },
+      { kind: "separator" },
+      {
+        kind: "submenu",
+        text: "Open in...",
+        icon: "folder-open",
+        items: [
+          {
+            kind: "item",
+            id: 1,
+            text: "Archive",
+            icon: "archive",
+            destructive: true,
+          },
+        ],
+      },
+    ]);
+    handlers.get(1)?.();
+    expect(onArchive).toHaveBeenCalledOnce();
+    expect(onRename).not.toHaveBeenCalled();
   });
 });

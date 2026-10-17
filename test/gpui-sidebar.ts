@@ -17,6 +17,7 @@ import {
   popupNativeMenu,
   type NativeMenuEntry,
 } from "../src/lib/native-context-menu";
+import type { GpuiToast } from "../src/stores/toastStore";
 import { emitOnTestBus } from "./test-event-bus";
 
 /** The snapshot the sidebar draws now; null once it is hidden. */
@@ -215,4 +216,56 @@ async function pickGpuiMenuItem(
     );
   }
   act(() => entry.onSelect());
+}
+
+/** The toasts the GPUI shell shows now, oldest first. */
+export function gpuiToasts(): GpuiToast[] {
+  const calls = vi
+    .mocked(invoke)
+    .mock.calls.filter(([cmd]) => cmd === "gpui_toasts_update");
+  return (
+    (calls.at(-1)?.[1] as { toasts: GpuiToast[] } | undefined)?.toasts ?? []
+  );
+}
+
+/** Waits for a toast whose title or description matches `text`. */
+export async function findGpuiToast(
+  text: string | RegExp,
+  options: { timeout?: number } = {},
+): Promise<GpuiToast> {
+  const matches = (value?: string) =>
+    value !== undefined &&
+    (typeof text === "string" ? value === text : text.test(value));
+  return waitFor(
+    () => {
+      const toast = gpuiToasts().find(
+        (t) => matches(t.title) || matches(t.description),
+      );
+      if (!toast) {
+        throw new Error(
+          `no "${text}" toast (toasts: ${JSON.stringify(gpuiToasts())})`,
+        );
+      }
+      return toast;
+    },
+    options.timeout === undefined ? undefined : { timeout: options.timeout },
+  );
+}
+
+/** Clicks the action link of the toast whose action reads `label`. */
+export async function clickGpuiToastAction(
+  label: string | RegExp,
+): Promise<void> {
+  const toast = await waitFor(() => {
+    const found = gpuiToasts().find(
+      (t) =>
+        t.action !== undefined &&
+        (typeof label === "string" ? t.action === label : label.test(t.action)),
+    );
+    if (!found) throw new Error(`no toast with a "${label}" action`);
+    return found;
+  });
+  act(() => {
+    emitOnTestBus("gpui-toast", { id: toast.id, action: true });
+  });
 }

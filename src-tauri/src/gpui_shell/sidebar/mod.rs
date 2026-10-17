@@ -6,15 +6,22 @@
 //! to the window's webview as a `gpui-sidebar-action` event, which React
 //! carries out with the app's own handlers.
 
-use std::{rc::Rc, time::Duration};
+use std::{
+  cell::{Cell, RefCell},
+  rc::Rc,
+  time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, rgb, svg, Animation, AnimationExt as _, App, ClickEvent, Context,
-  Hsla, MouseButton, MouseDownEvent, SharedString, Transformation, Window,
+  Hsla, MouseButton, MouseDownEvent, Pixels, Point, SharedString, Transformation, Window,
 };
 
-use super::theme::{self, Palette};
+use super::{
+  popup::{PopupRequest, PopupSink, Side, TooltipContent},
+  theme::{self, Palette},
+};
 
 #[cfg(test)]
 mod tests;
@@ -136,7 +143,7 @@ pub enum PrState {
 }
 
 impl PrState {
-  fn label(self) -> &'static str {
+  pub(super) fn label(self) -> &'static str {
     match self {
       PrState::Draft => "Draft PR",
       PrState::Open => "Open PR",
@@ -270,6 +277,11 @@ pub type ActionSink = Rc<dyn Fn(SidebarAction, &mut App)>;
 pub struct Sidebar {
   snapshot: SidebarSnapshot,
   sink: ActionSink,
+  popups: PopupSink,
+  /// The element whose tooltip popup is open.
+  tooltip_sent: Rc<RefCell<Option<SharedString>>>,
+  /// Where the last right-click was, for placing its menu.
+  menu_anchor: Rc<Cell<Point<Pixels>>>,
   /// The element the pointer rests on, and whether its tooltip shows yet.
   tooltip: Option<(SharedString, bool)>,
   /// The row under the pointer. A button inside it takes the tooltip, and
@@ -280,10 +292,13 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-  pub fn new(snapshot: SidebarSnapshot, sink: ActionSink) -> Self {
+  pub fn new(snapshot: SidebarSnapshot, sink: ActionSink, popups: PopupSink) -> Self {
     Self {
       snapshot,
       sink,
+      popups,
+      tooltip_sent: Rc::default(),
+      menu_anchor: Rc::default(),
       tooltip: None,
       hovered_row: None,
       drag_width: None,
@@ -308,6 +323,11 @@ impl Sidebar {
 
   pub fn snapshot(&self) -> &SidebarSnapshot {
     &self.snapshot
+  }
+
+  /// Where the last right-click was, in the window's coordinates.
+  pub fn menu_anchor(&self) -> Point<Pixels> {
+    self.menu_anchor.get()
   }
 
   pub fn set_snapshot(&mut self, snapshot: SidebarSnapshot, cx: &mut Context<Self>) {
@@ -375,8 +395,8 @@ impl Sidebar {
     }
   }
 
-  /// A right-click handler that hides any tooltip, since the native menu
-  /// opens over it, and sends `action`.
+  /// A right-click handler that hides any tooltip, since the menu opens
+  /// over it, notes where the menu goes, and sends `action`.
   fn on_menu(
     &self,
     action: SidebarAction,
@@ -384,8 +404,10 @@ impl Sidebar {
   ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
     let sidebar = cx.entity().downgrade();
     let sink = self.sink.clone();
-    move |_, _, cx| {
+    let anchor = self.menu_anchor.clone();
+    move |event, _, cx| {
       cx.stop_propagation();
+      anchor.set(event.position);
       let _ = sidebar.update(cx, |this, cx| {
         if this.tooltip.take().is_some() {
           cx.notify();
@@ -442,6 +464,52 @@ impl Sidebar {
   fn tooltip_shown(&self, key: &str) -> bool {
     matches!(&self.tooltip, Some((k, true)) if k.as_ref() == key)
   }
+
+  /// A layer over the element whose tooltip shows, which opens the tooltip
+  /// popup beside the element once its bounds are known.
+  /// Reports the bounds of its parent, `border` px wide borders included,
+  /// as the anchor of the tooltip `key`.
+  fn tooltip_anchor(
+    &self,
+    key: SharedString,
+    side: Side,
+    content: TooltipContent,
+    border: f32,
+  ) -> impl IntoElement {
+    let sent = self.tooltip_sent.clone();
+    let popups = self.popups.clone();
+    let dark = self.snapshot.dark;
+    gpui::canvas(
+      move |anchor, _, cx| {
+        if sent.borrow().as_ref() != Some(&key) {
+          *sent.borrow_mut() = Some(key);
+          popups(
+            PopupRequest::ShowTooltip {
+              anchor,
+              side,
+              content,
+              dark,
+            },
+            cx,
+          );
+        }
+      },
+      |_, _, _, _| {},
+    )
+    .absolute()
+    .top(px(-border))
+    .left(px(-border))
+    .right(px(-border))
+    .bottom(px(-border))
+  }
+
+  /// Closes the tooltip popup once no tooltip shows.
+  fn sync_tooltip_popup(&self, cx: &mut App) {
+    let shown = matches!(self.tooltip, Some((_, true)));
+    if !shown && self.tooltip_sent.borrow_mut().take().is_some() {
+      (self.popups)(PopupRequest::HideTooltip, cx);
+    }
+  }
 }
 
 /// Indentation of a row's content, matching the React sidebar's
@@ -463,7 +531,7 @@ fn status_color(color: StatusColor, palette: &Palette) -> Hsla {
   }
 }
 
-fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
+pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
   match pr {
     PrState::Draft => palette.muted_foreground,
     PrState::Open => palette.pr_open,
@@ -505,60 +573,12 @@ fn spinner(id: impl Into<gpui::ElementId>, size: f32, color: Hsla) -> impl IntoE
   )
 }
 
-/// A tooltip bubble below its element, kept inside the sidebar: the
-/// webview covers anything drawn past the sidebar's right edge.
-fn tooltip_bubble(
-  palette: &Palette,
-  max_width: f32,
-  content: gpui::AnyElement,
-) -> impl IntoElement {
-  bubble(palette, max_width, content, false)
-}
-
-/// A one-line tooltip under a small button, right-aligned to it so it stays
-/// clear of the sidebar's right edge.
-fn button_tooltip_bubble(
-  palette: &Palette,
-  max_width: f32,
-  content: gpui::AnyElement,
-) -> impl IntoElement {
-  bubble(palette, max_width, content, true)
-}
-
-fn bubble(
-  palette: &Palette,
-  max_width: f32,
-  content: gpui::AnyElement,
-  button: bool,
-) -> impl IntoElement {
-  gpui::deferred(
-    div()
-      .absolute()
-      .top_full()
-      .when(button, |this| this.right_0().whitespace_nowrap())
-      .when(!button, |this| this.left_0())
-      .mt_1()
-      .max_w(px(max_width))
-      .px_2()
-      .py_1()
-      .rounded_md()
-      .border_1()
-      .border_color(palette.border)
-      .bg(palette.background)
-      .text_color(palette.foreground)
-      .text_size(px(12.))
-      .shadow_md()
-      .child(content),
-  )
-  .with_priority(1)
-}
-
 impl Render for Sidebar {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.sync_tooltip_popup(cx);
     let snapshot = &self.snapshot;
     let palette = theme::palette(snapshot.dark);
     let width = self.width();
-    let tooltip_width = (width - 24.).max(80.);
 
     let header = div()
       .flex()
@@ -610,7 +630,6 @@ impl Render for Sidebar {
         snapshot.settings_open,
         SidebarAction::OpenSettings,
         &palette,
-        tooltip_width,
         cx,
       ));
 
@@ -632,7 +651,7 @@ impl Render for Sidebar {
       .child(header);
 
     for repo in &snapshot.repos {
-      sidebar = sidebar.child(self.home_row(repo, &palette, tooltip_width, cx));
+      sidebar = sidebar.child(self.home_row(repo, &palette, cx));
     }
     sidebar = sidebar
       .child(self.nav_row(
@@ -686,8 +705,7 @@ impl Render for Sidebar {
         }
         for row in &repo.workspaces {
           any_rows = true;
-          section =
-            section.child(self.workspace_row(row, repo, index, &palette, tooltip_width, cx));
+          section = section.child(self.workspace_row(row, repo, index, &palette, cx));
         }
         if repo.active {
           if let Some(count) = snapshot.bulk_archive {
@@ -776,7 +794,6 @@ impl Sidebar {
     active: bool,
     action: SidebarAction,
     palette: &Palette,
-    tooltip_width: f32,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let key = SharedString::from(id);
@@ -814,10 +831,11 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(id), |this| {
-        this.child(button_tooltip_bubble(
-          palette,
-          tooltip_width,
-          tip.into_any_element(),
+        this.child(self.tooltip_anchor(
+          id.into(),
+          Side::Bottom,
+          TooltipContent::Text(tip.into()),
+          1.,
         ))
       })
       .when(!disabled, |this| this.on_click(self.on_action(action)))
@@ -833,7 +851,6 @@ impl Sidebar {
     disabled_reason: Option<&str>,
     action: SidebarAction,
     palette: &Palette,
-    tooltip_width: f32,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let disabled = disabled_reason.is_some();
@@ -861,10 +878,11 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(&id), |this| {
-        this.child(button_tooltip_bubble(
-          palette,
-          tooltip_width,
-          tip.into_any_element(),
+        this.child(self.tooltip_anchor(
+          id.clone(),
+          Side::Bottom,
+          TooltipContent::Text(tip.into()),
+          0.,
         ))
       })
       // Swallow clicks on a disabled button too, so the row is not selected.
@@ -882,7 +900,6 @@ impl Sidebar {
     prefix: &str,
     id: Option<i64>,
     palette: &Palette,
-    tooltip_width: f32,
     cx: &mut Context<Self>,
   ) -> gpui::Div {
     let snapshot = &self.snapshot;
@@ -898,7 +915,6 @@ impl Sidebar {
         snapshot.agent_unavailable.as_deref(),
         SidebarAction::StartAgent { id },
         palette,
-        tooltip_width,
         cx,
       ))
       .child(self.row_button(
@@ -908,7 +924,6 @@ impl Sidebar {
         snapshot.shell_unavailable.as_deref(),
         SidebarAction::OpenShell { id },
         palette,
-        tooltip_width,
         cx,
       ))
       .child(self.row_button(
@@ -918,7 +933,6 @@ impl Sidebar {
         None,
         SidebarAction::Stack { id },
         palette,
-        tooltip_width,
         cx,
       ))
   }
@@ -929,7 +943,6 @@ impl Sidebar {
     &self,
     repo: &RepoSection,
     palette: &Palette,
-    tooltip_width: f32,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
@@ -972,14 +985,11 @@ impl Sidebar {
         .into_any_element(),
     };
     let shown = self.tooltip_shown(&key);
-    let tip = div()
-      .flex()
-      .items_center()
-      .gap_1()
-      .font_family(theme::MONO_FONT)
-      .child(icon(theme::ICON_BRANCH, 12., palette.foreground))
-      .child(label.clone())
-      .into_any_element();
+    let tip = TooltipContent::Branch {
+      title: label.clone().into(),
+      conflicted: false,
+      pr: None,
+    };
     div()
       .id(key.clone())
       .debug_selector({
@@ -1016,14 +1026,14 @@ impl Sidebar {
         )
       })
       .when(repo.active, |this| {
-        this.child(self.row_actions("home", None, palette, tooltip_width, cx))
+        this.child(self.row_actions("home", None, palette, cx))
       })
       .on_hover(cx.listener({
         let key = key.clone();
         move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
       }))
       .when(shown, |this| {
-        this.child(tooltip_bubble(palette, tooltip_width, tip))
+        this.child(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
       })
       .on_click(self.on_action(SidebarAction::SelectHome {
         repo_path: repo.path.clone(),
@@ -1127,7 +1137,6 @@ impl Sidebar {
     repo: &RepoSection,
     repo_index: usize,
     palette: &Palette,
-    tooltip_width: f32,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let id = row.id;
@@ -1154,30 +1163,11 @@ impl Sidebar {
       palette.muted_foreground
     };
 
-    let tip = div()
-      .flex()
-      .flex_col()
-      .gap_1()
-      .font_family(theme::MONO_FONT)
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .gap_1()
-          .child(icon(theme::ICON_BRANCH, 12., palette.foreground))
-          .child(row.title.clone()),
-      )
-      .when(row.conflicted, |this| {
-        this.child(
-          div()
-            .text_color(palette.destructive)
-            .child("Conflicts detected"),
-        )
-      })
-      .when_some(row.pr, |this, pr| {
-        this.child(div().text_color(pr_color(pr, palette)).child(pr.label()))
-      })
-      .into_any_element();
+    let tip = TooltipContent::Branch {
+      title: row.title.clone().into(),
+      conflicted: row.conflicted,
+      pr: row.pr,
+    };
 
     let leading: gpui::AnyElement = if row.archiving {
       spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
@@ -1285,13 +1275,7 @@ impl Sidebar {
           .when(interactive, |this| {
             this.child(
               self
-                .row_actions(
-                  &format!("workspace-{id}"),
-                  Some(id),
-                  palette,
-                  tooltip_width,
-                  cx,
-                )
+                .row_actions(&format!("workspace-{id}"), Some(id), palette, cx)
                 .absolute()
                 .right_0()
                 .invisible()
@@ -1304,7 +1288,7 @@ impl Sidebar {
         move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
       }))
       .when(self.tooltip_shown(&key), |this| {
-        this.child(tooltip_bubble(palette, tooltip_width, tip))
+        this.child(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
       })
       .when(!row.archiving && repo_active, |this| {
         this.on_click(self.on_row_click(id))

@@ -17,7 +17,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { waitFor as waitForSnapshot } from "@testing-library/react";
-import { clickGpuiRow, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+import {
+  clickGpuiRow,
+  findGpuiToast,
+  gpuiSnapshot,
+  sendGpuiAction,
+} from "../gpui-sidebar";
 
 async function openGpuiSettings() {
   await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
@@ -78,7 +83,7 @@ describe("default agent configuration", () => {
     await user.click(
       await screen.findByRole("button", { name: /save settings/i }),
     );
-    await screen.findByText("Settings Saved");
+    await findGpuiToast("Settings Saved");
 
     const saved = await getSetting("default_agent");
     expect(saved).toBe("codex");
@@ -105,7 +110,7 @@ describe("default agent configuration", () => {
     await user.click(
       await screen.findByRole("button", { name: /save settings/i }),
     );
-    await screen.findByText("Settings saved");
+    await findGpuiToast("Settings saved");
 
     const savedRepo = await getRepoSetting(repoPath, "default_agent");
     expect(savedRepo).toBe("claude");
@@ -137,7 +142,7 @@ describe("default agent configuration", () => {
     await user.click(
       await screen.findByRole("button", { name: /save settings/i }),
     );
-    await screen.findByText("Settings saved");
+    await findGpuiToast("Settings saved");
 
     const gitignore = fs.readFileSync(gitignorePath, "utf8");
     expect(gitignore).toContain(".jj*/");

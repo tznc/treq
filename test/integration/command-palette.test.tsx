@@ -6,7 +6,7 @@ import { createTestRepo, openRepo, writeRepoFile } from "../utils";
 import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace, trustRepo } from "../../src/lib/api";
-import { clickGpuiRow } from "../gpui-sidebar";
+import { clickGpuiRow, findGpuiToast } from "../gpui-sidebar";
 
 describe("CommandPalette integration", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -104,8 +104,6 @@ describe("CommandPalette integration", () => {
     expect(await screen.findByText("Run check: CI")).toBeTruthy();
     await user.click(await screen.findByText("Run checks…"));
 
-    expect(
-      await screen.findByText("Checks passed", {}, { timeout: 20_000 }),
-    ).toBeTruthy();
+    await findGpuiToast("Checks passed", { timeout: 20_000 });
   });
 });

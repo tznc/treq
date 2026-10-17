@@ -1,5 +1,9 @@
 // @include-parallel
-import { clickGpuiRow } from "../../gpui-sidebar";
+import {
+  clickGpuiRow,
+  clickGpuiToastAction,
+  findGpuiToast,
+} from "../../gpui-sidebar";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -61,14 +65,14 @@ describe("Commits tab - abandon undo", () => {
       await screen.findByRole("button", { name: /delete commit/i }),
     );
 
-    await screen.findByText("Commit deleted");
+    await findGpuiToast("Commit deleted");
     expect(fs.existsSync(path.join(workspacePath, "abandon-undo.txt"))).toBe(
       false,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Undo" }));
+    await clickGpuiToastAction("Undo");
 
-    await screen.findByText("Restored");
+    await findGpuiToast("Restored");
     await waitFor(() => {
       expect(
         screen.getAllByText(/Commit to abandon then undo/i).length,

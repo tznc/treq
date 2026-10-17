@@ -1,4 +1,5 @@
 // @include-parallel
+import { findGpuiToast } from "../gpui-sidebar";
 import * as React from "react";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,14 +34,10 @@ describe("opening a folder that is not a Git repository", () => {
       await screen.findByRole("button", { name: "Open Repository" }),
     );
 
-    expect(
-      await screen.findByText(
-        `${folder} is not a Git repository. Open a folder that contains a .git directory.`,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      await screen.findByText("Failed to open repository"),
-    ).toBeInTheDocument();
+    const toast = await findGpuiToast("Failed to open repository");
+    expect(toast.description).toBe(
+      `${folder} is not a Git repository. Open a folder that contains a .git directory.`,
+    );
     expect(
       await screen.findByRole("button", { name: "Open Repository" }),
     ).toBeInTheDocument();

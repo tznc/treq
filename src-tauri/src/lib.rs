@@ -457,6 +457,19 @@ pub fn run() {
   let builder = builder.plugin(tauri_plugin_cli::init());
   builder
     .on_window_event(|window, event| {
+      // A shell window losing focus closes its tooltips and menus, as
+      // native ones would; its toasts follow it as it moves or resizes.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if !window.label().starts_with("gpui-popup-") && gpui_shell::is_enabled(window.app_handle()) {
+        match event {
+          tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
+          tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+            gpui_shell::place_toasts(window.app_handle(), window.label())
+          }
+          _ => {}
+        }
+      }
       // Fires once, after the window is actually gone (not on a
       // cancellable close request), for every window this app opens —
       // "main" and any later "Open in New Window" targets alike — so
@@ -886,6 +899,9 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       commands::gpui_sidebar_update,
+      commands::gpui_menu_show,
+      commands::gpui_menu_hide,
+      commands::gpui_toasts_update,
       commands::acknowledge_agent_dispatch,
       commands::detect_editor_apps,
       commands::get_treq_bin_dir,

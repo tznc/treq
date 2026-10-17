@@ -8,7 +8,7 @@ import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 
 import { waitFor as waitForSnapshot } from "@testing-library/react";
-import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+import { findGpuiToast, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
 
 async function openGpuiSettings() {
   await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
@@ -43,7 +43,7 @@ describe("Notify when an agent finishes setting", () => {
     render(<Dashboard />);
     await user.click(await openApplicationSettings());
     await user.click(screen.getByRole("button", { name: /save settings/i }));
-    await screen.findByText("Settings Saved");
+    await findGpuiToast("Settings Saved");
 
     expect(await getSetting("notify_agent_finished")).toBe("false");
 
