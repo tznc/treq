@@ -106,6 +106,7 @@ import {
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { WorkspaceDescription } from "./WorkspaceDescription";
+import { WorkspaceTitle } from "./WorkspaceTitle";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import {
@@ -1256,6 +1257,14 @@ export const ShowWorkspace = ({
                     onSessionCreated={onSessionCreated}
                     offerNewWorkspace={!workspace}
                   />
+                  {workspace && workspaceTitle && (
+                    <WorkspaceTitle
+                      key={workspace.id}
+                      repoPath={effectiveRepoPath}
+                      workspaceId={workspace.id}
+                      title={workspaceTitle}
+                    />
+                  )}
                   {workspace && workspaceDescription && (
                     <WorkspaceDescription
                       repoPath={effectiveRepoPath}
@@ -1926,14 +1935,6 @@ export const ShowWorkspace = ({
               )}
             </div>
           </div>
-          {/* Row 2: Title (if workspace title exists) */}
-          {workspace && workspaceTitle && workspaceTitle !== branchTitle && (
-            <div className="flex items-center px-1 mt-2">
-              <h1 className="text-sm font-medium text-foreground">
-                {workspaceTitle}
-              </h1>
-            </div>
-          )}
         </div>
 
         <div className="flex-1 flex overflow-hidden min-h-0">
