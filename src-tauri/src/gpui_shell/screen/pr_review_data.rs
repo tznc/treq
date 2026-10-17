@@ -120,6 +120,7 @@ impl PrReviewHost for Backend {
       side: Some(side_name(draft.side).into()),
       comment_text: draft.text.clone(),
       line_hash: draft.line_hash.clone(),
+      quoted_text: None,
     };
     crate::core::review_drafts::create_review_draft(repo_path, &draft).map(|_| ())
   }
