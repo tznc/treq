@@ -90,7 +90,8 @@ describe("Workspace checks", () => {
       {},
       { timeout: 20_000 },
     );
-    expect(trigger.textContent).toContain("not run");
+    expect(trigger).toHaveTextContent(/^0\/2$/);
+    expect(trigger).toHaveAccessibleName("Checks: Treq not run");
     const popover = await trustAndRunAll(repoPath);
 
     await waitFor(() => expect(trigger.dataset.checksState).toBe("passed"), {
