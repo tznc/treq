@@ -29,6 +29,12 @@ export interface AuthState {
   subscription: Subscription | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Deletes the signed-in account on the server (delete-account Edge
+   * Function), then clears the local session. Throws with the server's
+   * reason when the account was not deleted.
+   */
+  deleteAccount: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
   exchangeToken: (token: string) => Promise<void>;
   restoreSession: () => Promise<void>;
@@ -89,6 +95,24 @@ export function startSubscriptionRefreshOnFocus(): () => void {
   return onWindowFocus(() => {
     void useAuthStore.getState().refreshSubscription();
   });
+}
+
+/** The `{ error }` message an Edge Function answered with, when it sent one. */
+async function functionErrorMessage(error: unknown): Promise<Error> {
+  const context =
+    typeof error === "object" && error !== null && "context" in error
+      ? (error as { context?: unknown }).context
+      : null;
+  if (context instanceof Response) {
+    const payload = (await context
+      .clone()
+      .json()
+      .catch(() => null)) as { error?: unknown } | null;
+    if (typeof payload?.error === "string") return new Error(payload.error);
+  }
+  return new Error(
+    error instanceof Error ? error.message : "Account deletion failed",
+  );
 }
 
 type SetAuth = (partial: Partial<AuthState>) => void;
@@ -152,6 +176,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // No native pool (e.g. a web preview); nothing to cut off.
     }
     await supabase.auth.signOut();
+    set({ user: null, session: null, subscription: null });
+    await persistSession(null);
+  },
+  deleteAccount: async () => {
+    const { error } = await supabase.functions.invoke("delete-account", {
+      body: {},
+    });
+    if (error) throw await functionErrorMessage(error);
+    try {
+      await remoteCutOffManaged();
+    } catch {
+      // No native pool (e.g. a web preview); nothing to cut off.
+    }
+    // The user no longer exists, so a global sign-out would fail. Drop the
+    // local session only.
+    await supabase.auth.signOut({ scope: "local" });
     set({ user: null, session: null, subscription: null });
     await persistSession(null);
   },

@@ -15,7 +15,11 @@ import {
   isSpritesStubEnabled,
   StubSpritesProvider,
 } from "../_shared/remote/stub-sprites-adapter.ts";
-import { deleteAccount, deleteAccountStoreFor, revokeLinearToken } from "./lib.ts";
+import {
+  deleteAccount,
+  deleteAccountStoreFor,
+  revokeLinearToken,
+} from "./lib.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -70,7 +74,10 @@ Deno.serve(async (req) => {
       err instanceof Error ? err.message : String(err),
     );
     return json(
-      { error: "Account deletion failed. Your account may not be deleted. Try again." },
+      {
+        error:
+          "Account deletion failed. Your account may not be deleted. Try again.",
+      },
       500,
     );
   }

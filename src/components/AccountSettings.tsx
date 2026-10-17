@@ -17,6 +17,7 @@ import {
   subscriptionStatusLabel,
 } from "../lib/subscription";
 import { useEffect, useState } from "react";
+import { DeleteAccountSection } from "./DeleteAccountSection";
 import {
   CloudWorkspaceCard,
   type CloudWorkspaceCardProps,
@@ -255,6 +256,8 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
         <LogOut className="w-4 h-4" />
         Sign Out
       </Button>
+
+      {email && <DeleteAccountSection email={email} />}
     </div>
   );
 };

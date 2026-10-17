@@ -207,7 +207,9 @@ describe("deleteAccount cleanup", () => {
       ],
     });
     const { provider, deleted } = fakeProvider();
-    const result = await deleteAccount(deps({ store, provider: () => provider }));
+    const result = await deleteAccount(
+      deps({ store, provider: () => provider }),
+    );
     expect(result.status).toBe(200);
     expect(deleted).toEqual(["dev-treq-1"]);
     expect(log).toEqual([
@@ -223,7 +225,9 @@ describe("deleteAccount cleanup", () => {
       instances: [{ id: "inst-1", provider_resource_id: "dev-treq-1" }],
     });
     const { provider } = fakeProvider(true);
-    const result = await deleteAccount(deps({ store, provider: () => provider }));
+    const result = await deleteAccount(
+      deps({ store, provider: () => provider }),
+    );
     expect(result.status).toBe(502);
     expect(log).toEqual([]);
   });
@@ -267,8 +271,9 @@ describe("deleteAccount cleanup", () => {
     const { store, log } = fakeStore({ subscriptions: ["sub_a"] });
     const subs = { sub_a: { status: "active" } };
     const failing = fakeStripe(subs, true);
-    expect((await deleteAccount(deps({ store, stripe: failing.stripe }))).status)
-      .toBe(502);
+    expect(
+      (await deleteAccount(deps({ store, stripe: failing.stripe }))).status,
+    ).toBe(502);
 
     const working = fakeStripe(subs);
     const retry = await deleteAccount(deps({ store, stripe: working.stripe }));
