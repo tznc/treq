@@ -137,8 +137,48 @@ function findCommentedLines(
 }
 
 /**
- * A stored PR review draft → the diff viewer's comment. It is outdated when
- * its lines left the diff or no longer match the hash taken when it was
+ * Where a draft's lines moved to: the run of diff lines on its side that
+ * hashes to `line_hash`, nearest its original start. Only lines in the diff
+ * can be found, so a range that moved outside every hunk stays lost.
+ */
+function findMovedLines(
+  hunks: Map<string, FileHunksData>,
+  draft: AgentReviewComment,
+  lineHash: string,
+): { hunkId: string; lines: string[]; startLine: number } | null {
+  const side = draft.side ?? "new";
+  const size = draft.end_line - draft.start_line + 1;
+  let best: { hunkId: string; lines: string[]; startLine: number } | null =
+    null;
+  for (const hunk of hunks.get(draft.file_path)?.hunks ?? []) {
+    const numbers = computeHunkLineNumbers(hunk);
+    // Consecutive lines on one side of a hunk have consecutive numbers.
+    const sideLines = hunk.lines
+      .map((text, i) => ({ text, n: numbers[i] }))
+      .filter(({ n }) =>
+        side === "old" ? n.new === undefined : n.new !== undefined,
+      );
+    for (let i = 0; i + size <= sideLines.length; i++) {
+      const window = sideLines.slice(i, i + size);
+      const lines = window.map((l) => l.text);
+      if (hashDiffLines(lines) !== lineHash) continue;
+      const startLine = (side === "old" ? window[0].n.old : window[0].n.new)!;
+      if (
+        !best ||
+        Math.abs(startLine - draft.start_line) <
+          Math.abs(best.startLine - draft.start_line)
+      ) {
+        best = { hunkId: hunk.id, lines, startLine };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * A stored PR review draft → the diff viewer's comment, following its lines
+ * if a PR update moved them unchanged. It is outdated when its lines left the
+ * diff or no longer match the hash taken when it was
  * written; it then shows the lines it was written on, kept in `quoted_text`.
  * `lineHash` and `quotedText` describe the current lines, for drafts stored
  * without them.
@@ -152,7 +192,20 @@ export function draftToLineComment(
   quotedText: string | null;
   outdated: boolean;
 } {
-  const found = findCommentedLines(hunks, draft);
+  let found = findCommentedLines(hunks, draft);
+  let startLine = draft.start_line;
+  // Lines that changed at their old position may have moved unchanged.
+  if (
+    draft.line_hash &&
+    (!found || hashDiffLines(found.lines) !== draft.line_hash)
+  ) {
+    const moved = findMovedLines(hunks, draft, draft.line_hash);
+    if (moved) {
+      found = moved;
+      ({ startLine } = moved);
+    }
+  }
+  const endLine = startLine + (draft.end_line - draft.start_line);
   const lineHash = found ? hashDiffLines(found.lines) : null;
   const outdated =
     !found || (draft.line_hash != null && draft.line_hash !== lineHash);
@@ -166,8 +219,8 @@ export function draftToLineComment(
       id: draft.id,
       filePath: draft.file_path,
       hunkId: outdated ? OUTDATED_HUNK_ID : (found?.hunkId ?? ""),
-      startLine: draft.start_line,
-      endLine: draft.end_line,
+      startLine,
+      endLine,
       // An outdated draft shows the lines it was written on, never the
       // lines that replaced them.
       lineContent: outdated

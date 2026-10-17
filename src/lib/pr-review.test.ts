@@ -198,6 +198,66 @@ describe("draftToLineComment", () => {
   });
 });
 
+describe("draftToLineComment on moved lines", () => {
+  const { hunks } = parseUnifiedDiff(DIFF);
+
+  it("follows lines that moved to a new position unchanged", () => {
+    const moved = draftToLineComment(
+      row({
+        start_line: 11,
+        end_line: 11,
+        line_hash: hashDiffLines(["+const z = 4;"]),
+        quoted_text: "+const z = 4;",
+      }),
+      hunks,
+    );
+    expect(moved.outdated).toBe(false);
+    expect(moved.comment).toMatchObject({
+      hunkId: "src/a.ts#0",
+      startLine: 3,
+      endLine: 3,
+      lineContent: ["+const z = 4;"],
+    });
+  });
+
+  it("follows a multi-line range", () => {
+    const moved = draftToLineComment(
+      row({
+        start_line: 20,
+        end_line: 21,
+        line_hash: hashDiffLines(["+const y = 3;", "+const z = 4;"]),
+      }),
+      hunks,
+    );
+    expect(moved.outdated).toBe(false);
+    expect(moved.comment).toMatchObject({ startLine: 2, endLine: 3 });
+  });
+
+  it("picks the copy nearest the original line when the lines repeat", () => {
+    const { hunks: repeated } = parseUnifiedDiff(
+      "diff --git a/r.ts b/r.ts\n--- a/r.ts\n+++ b/r.ts\n@@ -0,0 +1,9 @@\n+x\n+a\n+b\n+c\n+d\n+e\n+f\n+x\n+g\n",
+    );
+    const moved = draftToLineComment(
+      row({
+        file_path: "r.ts",
+        start_line: 7,
+        end_line: 7,
+        line_hash: hashDiffLines(["+x"]),
+      }),
+      repeated,
+    );
+    expect(moved.comment).toMatchObject({ startLine: 8, endLine: 8 });
+  });
+
+  it("does not move a draft whose lines are unchanged in place", () => {
+    const { comment } = draftToLineComment(
+      row({ line_hash: hashDiffLines(["+new"]) }),
+      hunks,
+    );
+    expect(comment).toMatchObject({ startLine: 11, hunkId: "src/a.ts#1" });
+  });
+});
+
 describe("hashDiffLines", () => {
   it("is stable and content-sensitive", () => {
     expect(hashDiffLines(["+a", " b"])).toBe(hashDiffLines(["+a", " b"]));

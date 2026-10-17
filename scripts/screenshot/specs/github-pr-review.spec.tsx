@@ -253,12 +253,18 @@ it("reviews a GitHub PR from its own screen", async () => {
     ],
   });
 
-  // The author pushes a change to line 6; the agent's draft is now outdated.
+  // The author pushes: a new line above line 4 moves the user's line down
+  // unchanged, and line 6 itself changes, so the agent's draft is outdated.
   gh.ghPrDiff.mockResolvedValue(
-    DIFF.replace(
-      "+  return index.filter((item) => item.name.includes(q));",
-      "+  return index.filter((item) => item.name.startsWith(query));",
-    ),
+    DIFF.replace("@@ -1,6 +1,8 @@", "@@ -1,6 +1,9 @@")
+      .replace(
+        "+  const query",
+        "+  // Normalise before matching.\n+  const query",
+      )
+      .replace(
+        "+  return index.filter((item) => item.name.includes(q));",
+        "+  return index.filter((item) => item.name.startsWith(query));",
+      ),
   );
   await invalidateQueries(["gh-pr-diff", "acme/search", 42]);
   await screen.findByText("Outdated");
@@ -266,9 +272,9 @@ it("reviews a GitHub PR from its own screen", async () => {
   await captureDocument(document, {
     name: "github-pr-review-04-outdated-after-update",
     expectations: [
-      "Line 6 in the diff now reads `startsWith(query)`; the agent's draft is in an amber Outdated box above the file's diff.",
+      "The diff has a new `// Normalise before matching.` line 4, and the agent's draft is in an amber Outdated box above the file's diff.",
       "The Outdated box shows the original line it was written on, `+ return index.filter((item) => item.name.includes(q));`, above the comment and its suggestion.",
-      'The user\'s draft under line 4 (an unchanged line) is still shown inline, and the header button reads "Finish review (1)".',
+      'The user\'s draft followed its line: it is shown inline under `const query = …` (now line 5), and the header button reads "Finish review (1)".',
     ],
   });
 
@@ -318,7 +324,7 @@ it("reviews a GitHub PR from its own screen", async () => {
       [
         expect.objectContaining({
           path: "src/search.ts",
-          line: 4,
+          line: 5,
           side: "RIGHT",
         }),
       ],
