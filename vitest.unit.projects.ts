@@ -76,6 +76,7 @@ export const unitProjects = [
         "test/merge-queue/**/*.test.ts",
         "test/linear-proxy/**/*.test.ts",
         "test/billing/**/*.test.ts",
+        "test/account/**/*.test.ts",
         "test/vitest-config.test.ts",
         "test/remote-ssh-traceability.test.ts",
       ],
