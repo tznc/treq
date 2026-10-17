@@ -38,10 +38,9 @@ describe("ShowWorkspace - title", () => {
     const panel = await openWorkspace(title, "Description underneath");
     expect(within(panel).getByRole("heading", { name: title })).toBeVisible();
     const description = await screen.findByTestId("workspace-description");
-    expect(
-      panel.compareDocumentPosition(description) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(panel.compareDocumentPosition(description)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(
       within(screen.getByTestId("show-workspace-header")).queryByText(title),
     ).not.toBeInTheDocument();
@@ -69,23 +68,24 @@ describe("ShowWorkspace - title", () => {
     ).toBe("Updated title");
   });
 
-  it("discards title edits on Cancel and Escape", async () => {
+  it.each([
+    "Cancel",
+    "Escape",
+  ])("discards title edits on %s", async (cancelMethod) => {
     const panel = await openWorkspace("Keep this title");
-    for (const cancelWithEscape of [false, true]) {
-      await user.click(
-        within(panel).getByRole("button", { name: "Edit workspace title" }),
-      );
-      await user.type(
-        within(panel).getByRole("textbox", { name: "Workspace title" }),
-        " changed",
-      );
-      if (cancelWithEscape) await user.keyboard("{Escape}");
-      else
-        await user.click(within(panel).getByRole("button", { name: "Cancel" }));
-      expect(
-        within(panel).getByRole("heading", { name: "Keep this title" }),
-      ).toBeVisible();
-    }
+    await user.click(
+      within(panel).getByRole("button", { name: "Edit workspace title" }),
+    );
+    await user.type(
+      within(panel).getByRole("textbox", { name: "Workspace title" }),
+      " changed",
+    );
+    if (cancelMethod === "Escape") await user.keyboard("{Escape}");
+    else
+      await user.click(within(panel).getByRole("button", { name: "Cancel" }));
+    expect(
+      within(panel).getByRole("heading", { name: "Keep this title" }),
+    ).toBeVisible();
     expect(
       (await getWorkspaces(repoPath)).find(
         (w) => w.branch_name === "feat/title",
