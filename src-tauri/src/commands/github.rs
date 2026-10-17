@@ -331,6 +331,99 @@ pub async fn gh_close_pr(repo_full_name: String, pr_number: u64) -> Result<(), S
 }
 
 #[tauri::command]
+pub async fn gh_repo_merge_settings(
+  repo_full_name: String,
+) -> Result<crate::github::GhRepoMergeSettings, String> {
+  run_gh_blocking("gh_repo_merge_settings", move |gh, path| {
+    crate::github::gh_repo_merge_settings_impl(gh, &repo_full_name, path)
+  })
+  .await
+}
+
+/// Merge a workspace's PR on GitHub, sync locally, move stacked child PRs
+/// onto the new base, and refresh the PR status of every branch involved.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn merge_workspace_on_github(
+  repo_path: String,
+  workspace_id: i64,
+  repo_full_name: String,
+  pr_number: u64,
+  method: crate::github::GhMergeMethod,
+  subject: Option<String>,
+  body: Option<String>,
+) -> Result<crate::core::MergeResult, String> {
+  run_gh_blocking("merge_workspace_on_github", move |gh, path| {
+    let plan = crate::core::merge_workspace_on_github(
+      &repo_path,
+      workspace_id,
+      gh,
+      path,
+      &repo_full_name,
+      pr_number,
+      method,
+      subject.as_deref(),
+      body.as_deref(),
+    )?;
+    Ok(finish_merge(&repo_path, plan, true))
+  })
+  .await
+}
+
+/// For a PR already merged on GitHub: sync the target and stack locally.
+#[tauri::command]
+pub async fn sync_workspace_after_remote_merge(
+  repo_path: String,
+  workspace_id: i64,
+) -> Result<crate::core::MergeResult, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let plan = crate::core::sync_after_remote_merge(&repo_path, workspace_id)?;
+    Ok(finish_merge(&repo_path, plan, true))
+  })
+  .await
+  .map_err(|e| format!("Failed to join sync_workspace_after_remote_merge task: {e}"))?
+}
+
+/// Shared tail of every merge path: optionally move open child PRs onto the
+/// new base (best-effort, needs `gh` and a GitHub remote), then queue a
+/// PR+CI refresh for every branch the merge landed or retargeted.
+pub fn finish_merge(
+  repo_path: &str,
+  plan: crate::core::MergeLandingPlan,
+  retarget_prs: bool,
+) -> crate::core::MergeResult {
+  let mut notes = Vec::new();
+  if retarget_prs && !plan.retargeted.is_empty() {
+    let remote = crate::github::get_git_remote_url_impl(repo_path)
+      .ok()
+      .flatten();
+    if let (Ok(gh), Some(remote)) = (gh_bin(), remote) {
+      let retargets: Vec<(String, String)> = plan
+        .retargeted
+        .iter()
+        .map(|r| (r.branch_name.clone(), r.to_branch.clone()))
+        .collect();
+      notes = crate::github::gh_retarget_open_prs_impl(
+        &gh,
+        repo_path,
+        &remote.full_name,
+        &retargets,
+        &get_extended_path(),
+      );
+    }
+  }
+  let pr_status = crate::pr_status::global();
+  for branch in plan
+    .landed_branches
+    .iter()
+    .chain(plan.retargeted.iter().map(|r| &r.branch_name))
+  {
+    pr_status.queue_branch_refresh(repo_path.to_string(), branch.clone());
+  }
+  crate::core::MergeResult { plan, notes }
+}
+
+#[tauri::command]
 pub async fn gh_reopen_pr(repo_full_name: String, pr_number: u64) -> Result<(), String> {
   run_gh_blocking("gh_reopen_pr", move |gh, path| {
     crate::github::gh_reopen_pr_impl(gh, &repo_full_name, pr_number, path)

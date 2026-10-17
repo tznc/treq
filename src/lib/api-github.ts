@@ -1,8 +1,11 @@
 import type {
   GhIssue,
   GhListPage,
+  GhMergeMethod,
   GhPullRequest,
+  GhRepoMergeSettings,
   GhReviewThread,
+  MergeResult,
 } from "./api-types";
 import { invoke } from "@tauri-apps/api/core";
 import { assertLocalOperation } from "./repository-adapter";
@@ -119,6 +122,29 @@ export const ghReopenPr = (
   repoFullName: string,
   prNumber: number,
 ): Promise<void> => invoke("gh_reopen_pr", { repoFullName, prNumber });
+
+export const ghRepoMergeSettings = (
+  repoFullName: string,
+): Promise<GhRepoMergeSettings> =>
+  invoke("gh_repo_merge_settings", { repoFullName });
+
+/** Merge the workspace's PR on GitHub, then sync the target and stack locally. */
+export const mergeWorkspaceOnGithub = (args: {
+  repoPath: string;
+  workspaceId: number;
+  repoFullName: string;
+  prNumber: number;
+  method: GhMergeMethod;
+  subject?: string;
+  body?: string;
+}): Promise<MergeResult> => {
+  assertLocalOperation(args.repoPath, "Merging a workspace on GitHub");
+  return invoke("merge_workspace_on_github", {
+    ...args,
+    subject: args.subject ?? null,
+    body: args.body ?? null,
+  });
+};
 
 export const ghSetPrDraft = (
   repoFullName: string,

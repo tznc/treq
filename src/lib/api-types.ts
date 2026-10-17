@@ -223,6 +223,40 @@ export interface JjCommitsAhead {
 
 export type MergeStrategy = "merge" | "squash" | "rebase";
 
+export interface WorkspaceRetarget {
+  workspace_id: number;
+  branch_name: string;
+  from_branch: string;
+  to_branch: string;
+}
+
+/** What a merge lands where; mirrors `core::MergeLandingPlan`. */
+export interface MergeLandingPlan {
+  target_branch: string;
+  /** Root-first; more than one entry only for a stack rollup. */
+  landed_branches: string[];
+  retargeted: WorkspaceRetarget[];
+  can_rollup: boolean;
+}
+
+/** A finished merge; `notes` are follow-ups such as stacked PRs moved onto a new base. */
+export interface MergeResult {
+  plan: MergeLandingPlan;
+  notes: string[];
+}
+
+export interface LocalMergeOptions {
+  rollup: boolean;
+  push: boolean;
+}
+
+export type GhMergeMethod = "merge" | "squash" | "rebase";
+
+export interface GhRepoMergeSettings {
+  default_method: GhMergeMethod;
+  allowed_methods: GhMergeMethod[];
+}
+
 export interface JjFileDiff {
   path: string;
   hunks: JjDiffHunk[];

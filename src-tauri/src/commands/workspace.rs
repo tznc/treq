@@ -248,8 +248,10 @@ pub async fn merge_workspace(
   workspace_id: i64,
   message: String,
   merge_strategy: String,
-) -> Result<(), String> {
-  use crate::core::MergeCommit;
+  rollup: Option<bool>,
+  push: Option<bool>,
+) -> Result<crate::core::MergeResult, String> {
+  use crate::core::{LocalMergeOptions, MergeCommit};
 
   // Convert string to enum
   let strategy = match merge_strategy.as_str() {
@@ -262,13 +264,25 @@ pub async fn merge_workspace(
   let started_at = Instant::now();
   let repo_path_for_task = repo_path.clone();
   let message_for_task = message.clone();
+  let push = push.unwrap_or(false);
+  let options = LocalMergeOptions {
+    rollup: rollup.unwrap_or(false),
+    push,
+  };
   let result = tauri::async_runtime::spawn_blocking(move || {
-    crate::core::merge_workspace(
+    let plan = crate::core::merge_workspace_with_options(
       &repo_path_for_task,
       workspace_id,
       &message_for_task,
       strategy,
-    )
+      options,
+    )?;
+    // Child PRs only follow the target once it is on the remote.
+    Ok(crate::commands::finish_merge(
+      &repo_path_for_task,
+      plan,
+      push,
+    ))
   })
   .await
   .map_err(|e| format!("Failed to join merge_workspace task: {}", e))?;
@@ -279,6 +293,34 @@ pub async fn merge_workspace(
     started_at.elapsed()
   );
   result
+}
+
+/// Diff for the merge preview; with `rollup`, everything the stack lands.
+#[tauri::command]
+pub async fn get_merge_preview_diff(
+  repo_path: String,
+  workspace_id: i64,
+  rollup: Option<bool>,
+) -> Result<crate::jj::JjRevisionDiff, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    crate::core::merge_preview_diff(&repo_path, workspace_id, rollup.unwrap_or(false))
+  })
+  .await
+  .map_err(|e| format!("Failed to join get_merge_preview_diff task: {}", e))?
+}
+
+/// What a merge would land where, for the merge preview.
+#[tauri::command]
+pub async fn get_merge_landing_plan(
+  repo_path: String,
+  workspace_id: i64,
+  rollup: Option<bool>,
+) -> Result<crate::core::MergeLandingPlan, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    crate::core::get_merge_landing_plan(&repo_path, workspace_id, rollup.unwrap_or(false))
+  })
+  .await
+  .map_err(|e| format!("Failed to join get_merge_landing_plan task: {}", e))?
 }
 
 #[tauri::command]

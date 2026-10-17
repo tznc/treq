@@ -17,6 +17,9 @@ import type {
   JjRebaseResult,
   JjRevisionDiff,
   LocalSshIdentity,
+  LocalMergeOptions,
+  MergeLandingPlan,
+  MergeResult,
   MergeStrategy,
   PrCiStatus,
   PrerequisiteStatus,
@@ -736,14 +739,48 @@ export const mergeWorkspace = async (
   workspaceId: number,
   message: string,
   mergeStrategy: MergeStrategy,
-): Promise<void> => {
+  options: LocalMergeOptions = { rollup: false, push: false },
+): Promise<MergeResult> => {
   assertLocalOperation(repoPath, "Merging a workspace");
   return invoke("merge_workspace", {
     repoPath,
     workspaceId,
     message,
     mergeStrategy,
+    rollup: options.rollup,
+    push: options.push,
   });
+};
+
+/** The preview diff; with `rollup`, everything the stack lands. */
+export const getMergePreviewDiff = (
+  repoPath: string,
+  workspaceId: number,
+  rollup: boolean,
+): Promise<JjRevisionDiff> => {
+  assertLocalOperation(repoPath, "Previewing a workspace merge");
+  return invoke("get_merge_preview_diff", { repoPath, workspaceId, rollup });
+};
+
+/** Sync the target and stack locally after the PR was merged on GitHub. */
+export const syncWorkspaceAfterRemoteMerge = (
+  repoPath: string,
+  workspaceId: number,
+): Promise<MergeResult> => {
+  assertLocalOperation(repoPath, "Syncing a merged workspace");
+  return invoke("sync_workspace_after_remote_merge", {
+    repoPath,
+    workspaceId,
+  });
+};
+
+export const getMergeLandingPlan = (
+  repoPath: string,
+  workspaceId: number,
+  rollup: boolean,
+): Promise<MergeLandingPlan> => {
+  assertLocalOperation(repoPath, "Planning a workspace merge");
+  return invoke("get_merge_landing_plan", { repoPath, workspaceId, rollup });
 };
 
 export const pushWorkspaceToRemote = (

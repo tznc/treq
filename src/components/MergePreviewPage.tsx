@@ -1,35 +1,40 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 import {
+  type GhMergeMethod,
+  type MergeResult,
   type MergeStrategy,
   type Workspace,
-  getWorkspaceDiff,
+  getMergeLandingPlan,
+  getMergePreviewDiff,
+  ghRepoMergeSettings,
   jjGetCommitsAhead,
   mergeWorkspace,
+  mergeWorkspaceOnGithub,
+  syncWorkspaceAfterRemoteMerge,
 } from "../lib/api";
+import {
+  invalidatePrStatuses,
+  useGitRemoteInfo,
+  usePrInfoViaGh,
+} from "../hooks/useMergeQueueStatus";
+import { MergeLandingPanel } from "./MergeLandingPanel";
+import {
+  type MergeLocation,
+  MergeLocationToggle,
+  MergeWarnings,
+  githubMergeWarnings,
+} from "./MergeGithubControls";
+import { MergePreviewChangedFiles } from "./MergePreviewChangedFiles";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { useToast } from "./ui/toast";
 import { Card } from "./ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  GitBranch,
-  GitCommitHorizontal,
-  GitMerge,
-  Loader2,
-} from "lucide-react";
+import { ArrowLeft, GitPullRequest, Loader2 } from "lucide-react";
+import { MergeActionButton } from "./MergeActionButton";
+import { MergeCommitsList } from "./MergeCommitsList";
 import { useGpuiScreen } from "../lib/gpui-screen";
-import { cn, getFullWorkspacePath } from "../lib/utils";
+import { getFullWorkspacePath } from "../lib/utils";
 
 export interface MergePreviewPageProps {
   workspace: Workspace;
@@ -65,11 +70,56 @@ export const MergePreviewPage = ({
   // State
   const [commitDraft, setCommitDraft] = useState<string | null>(null);
   const [merging, setMerging] = useState(false);
-  const [expandedFiles, setExpandedFiles] = useState<Set<string> | null>(null);
-  const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>("merge");
+  const [localStrategy, setLocalStrategy] = useState<MergeStrategy>("merge");
+  const [githubMethod, setGithubMethod] = useState<GhMergeMethod | null>(null);
+  const [location, setLocation] = useState<MergeLocation>("local");
+  const [rollupChecked, setRollupChecked] = useState(false);
+  const [pushChecked, setPushChecked] = useState(true);
 
-  const targetBranch = workspace.target_branch || "main";
   const fullPath = getFullWorkspacePath(workspace);
+
+  const { data: remoteInfo } = useGitRemoteInfo(workspace.repo_path);
+  const { data: prInfo } = usePrInfoViaGh(
+    workspace.repo_path,
+    workspace.branch_name,
+  );
+  const openPr =
+    remoteInfo && prInfo && prInfo.state === "OPEN" ? prInfo : null;
+  const mergedPr =
+    remoteInfo && prInfo && prInfo.state === "MERGED" ? prInfo : null;
+  const onGithub = location === "github" && openPr !== null;
+
+  const { data: mergeSettings } = useSWR(
+    openPr && remoteInfo ? ["gh-merge-settings", remoteInfo.full_name] : null,
+    () => ghRepoMergeSettings(remoteInfo!.full_name),
+  );
+
+  const { data: plans } = useSWR(
+    ["merge-landing-plan", workspace.repo_path, workspace.id],
+    async () => {
+      const [single, rolledUp] = await Promise.all([
+        getMergeLandingPlan(workspace.repo_path, workspace.id, false),
+        getMergeLandingPlan(workspace.repo_path, workspace.id, true),
+      ]);
+      return { single, rolledUp };
+    },
+  );
+  const rollup = !onGithub && rollupChecked && !!plans?.single.can_rollup;
+  const plan = plans ? (rollup ? plans.rolledUp : plans.single) : null;
+
+  const mergeStrategy: MergeStrategy = onGithub
+    ? (githubMethod ?? mergeSettings?.default_method ?? "merge")
+    : localStrategy;
+  const setMergeStrategy = (value: MergeStrategy) =>
+    onGithub ? setGithubMethod(value) : setLocalStrategy(value);
+  const availableMethods: MergeStrategy[] =
+    onGithub && mergeSettings
+      ? mergeSettings.allowed_methods
+      : ["merge", "squash", "rebase"];
+
+  const targetBranch = plan?.target_branch || workspace.target_branch || "main";
+  const canPush = !onGithub && !!remoteInfo;
+  const push = canPush && pushChecked;
 
   const {
     data: preview,
@@ -82,15 +132,17 @@ export const MergePreviewPage = ({
       workspace.repo_path,
       workspace.id,
       targetBranch,
+      rollup,
     ],
     async () => {
       const [commits, diffData] = await Promise.all([
         jjGetCommitsAhead(fullPath, targetBranch),
-        getWorkspaceDiff(workspace.repo_path, workspace.id),
+        getMergePreviewDiff(workspace.repo_path, workspace.id, rollup),
       ]);
       return { commits, diffData };
     },
     {
+      keepPreviousData: true,
       onError: (error) => {
         addToast({
           title: "Failed to load merge preview",
@@ -103,11 +155,6 @@ export const MergePreviewPage = ({
   void previewError;
   const commitsAhead = preview?.commits ?? null;
   const diff = preview?.diffData ?? null;
-
-  useEffect(() => {
-    if (!diff?.hunks_by_file) return;
-    setExpandedFiles(new Set(diff.hunks_by_file.map((file) => file.path)));
-  }, [diff]);
 
   const defaultCommitMessage = (() => {
     let description = "";
@@ -126,13 +173,49 @@ export const MergePreviewPage = ({
     }
     return `Merge ${workspace.branch_name} into ${targetBranch}`;
   })();
-  const commitMessage = commitDraft ?? defaultCommitMessage;
+  // An empty GitHub message keeps GitHub's own default.
+  const commitMessage = commitDraft ?? (onGithub ? "" : defaultCommitMessage);
   const setCommitMessage = setCommitDraft;
-  const expandedFileSet = expandedFiles ?? new Set<string>();
 
-  // Handle merge
+  const reportNotes = (result: MergeResult) => {
+    if (result.notes.length === 0) return;
+    addToast({
+      title: "Stacked pull requests updated",
+      description: result.notes.join("\n"),
+      type: result.notes.some((note) => note.startsWith("Could not"))
+        ? "warning"
+        : "success",
+    });
+  };
+
+  const handleSyncMerged = async () => {
+    setMerging(true);
+    try {
+      const result = await syncWorkspaceAfterRemoteMerge(
+        workspace.repo_path,
+        workspace.id,
+      );
+      void invalidatePrStatuses(workspace.repo_path);
+      await onMergeComplete();
+      addToast({
+        title: "Workspace synced",
+        description: `Synced ${result.plan.target_branch} after PR #${mergedPr!.number} merged on GitHub`,
+        type: "success",
+      });
+      reportNotes(result);
+    } catch (error) {
+      addToast({
+        title: "Sync failed",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    } finally {
+      setMerging(false);
+    }
+  };
+
   const handleMerge = async () => {
-    if (mergeStrategy !== "rebase" && !commitMessage.trim()) {
+    if (!onGithub && mergeStrategy !== "rebase" && !commitMessage.trim()) {
       addToast({
         title: "Commit message required",
         type: "error",
@@ -142,14 +225,29 @@ export const MergePreviewPage = ({
 
     setMerging(true);
     try {
-      // Use new high-level API with merge strategy
-      await mergeWorkspace(
-        workspace.repo_path,
-        workspace.id,
-        commitMessage,
-        mergeStrategy,
-      );
+      let result: MergeResult;
+      if (onGithub) {
+        const [subject, ...bodyLines] = commitMessage.trim().split("\n");
+        result = await mergeWorkspaceOnGithub({
+          repoPath: workspace.repo_path,
+          workspaceId: workspace.id,
+          repoFullName: remoteInfo!.full_name,
+          prNumber: openPr!.number,
+          method: mergeStrategy,
+          subject: subject || undefined,
+          body: bodyLines.join("\n").trim() || undefined,
+        });
+      } else {
+        result = await mergeWorkspace(
+          workspace.repo_path,
+          workspace.id,
+          commitMessage,
+          mergeStrategy,
+          { rollup, push },
+        );
+      }
 
+      void invalidatePrStatuses(workspace.repo_path);
       await onMergeComplete();
 
       const actionLabel =
@@ -166,9 +264,12 @@ export const MergePreviewPage = ({
             : mergeStrategy === "rebase"
               ? "Workspace rebased"
               : "Workspace merged",
-        description: `Successfully ${actionLabel} ${workspace.branch_name} into ${targetBranch}`,
+        description: onGithub
+          ? `Merged PR #${openPr!.number} on GitHub and synced ${targetBranch}`
+          : `Successfully ${actionLabel} ${workspace.branch_name} into ${targetBranch}${push ? " and pushed it" : ""}`,
         type: "success",
       });
+      reportNotes(result);
     } catch (error) {
       addToast({
         title: "Merge failed",
@@ -178,19 +279,6 @@ export const MergePreviewPage = ({
     } finally {
       setMerging(false);
     }
-  };
-
-  // Toggle file expansion
-  const toggleFile = (path: string) => {
-    setExpandedFiles((prev) => {
-      const next = new Set(prev ?? []);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
   };
 
   if (loading) {
@@ -205,10 +293,16 @@ export const MergePreviewPage = ({
     );
   }
 
-  const requiresMessage = mergeStrategy !== "rebase";
+  const requiresMessage = !onGithub && mergeStrategy !== "rebase";
+  const githubWarnings = onGithub
+    ? githubMergeWarnings(openPr, targetBranch)
+    : [];
+  const githubTargetMismatch =
+    onGithub && openPr.base_ref_name !== targetBranch;
   const canMerge =
     commitsAhead &&
     commitsAhead.total_count > 0 &&
+    !githubTargetMismatch &&
     (!requiresMessage || commitMessage.trim().length > 0);
 
   return (
@@ -237,16 +331,47 @@ export const MergePreviewPage = ({
         <div className="flex justify-center px-4">
           <Card className="w-full md:w-3/4 p-6">
             <div className="flex flex-col gap-4">
+              {openPr ? (
+                <MergeLocationToggle
+                  value={location}
+                  prNumber={openPr.number}
+                  onChange={setLocation}
+                />
+              ) : null}
+              {mergedPr ? (
+                <div className="flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm">
+                  <GitPullRequest className="h-4 w-4 shrink-0 text-purple-600" />
+                  <span className="flex-1 min-w-0">
+                    PR #{mergedPr.number} was already merged on GitHub. Sync to
+                    update {targetBranch} locally and clean up this workspace.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSyncMerged}
+                    disabled={merging}
+                  >
+                    Sync merged PR
+                  </Button>
+                </div>
+              ) : null}
+              <MergeWarnings warnings={githubWarnings} />
               <div>
                 <h2 className="text-sm font-semibold mb-3">
                   {mergeStrategy === "rebase"
                     ? "Commit Message (not used for rebase)"
-                    : "Merge Commit Message"}
+                    : onGithub
+                      ? "Merge Commit Message (optional)"
+                      : "Merge Commit Message"}
                 </h2>
                 <Textarea
                   value={commitMessage}
                   onChange={(e) => setCommitMessage(e.target.value)}
-                  placeholder="Enter merge commit message..."
+                  placeholder={
+                    onGithub
+                      ? "Leave empty to use GitHub's default message"
+                      : "Enter merge commit message..."
+                  }
                   rows={3}
                   maxLength={10000}
                   className="font-mono text-sm"
@@ -259,211 +384,59 @@ export const MergePreviewPage = ({
                 ) : null}
               </div>
 
-              {/* Button group - aligned to left */}
-              <div className="flex justify-start">
-                <div className="inline-flex items-center rounded-md overflow-hidden">
-                  <Button
-                    onClick={handleMerge}
-                    disabled={!canMerge || merging}
-                    className="gap-2 rounded-none"
-                    style={{
-                      backgroundColor: "hsl(142, 76%, 36%)",
-                    }}
-                  >
-                    {merging ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <GitMerge className="w-4 h-4" />
-                    )}
-                    {merging
-                      ? "Merging..."
-                      : mergeStrategy === "squash"
-                        ? "Squash and merge"
-                        : mergeStrategy === "rebase"
-                          ? "Rebase and merge"
-                          : "Confirm merge"}
-                  </Button>
-                  <div
-                    className="w-px opacity-30"
-                    style={{ backgroundColor: "currentColor" }}
+              {canPush ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    id="merge-push-target"
+                    type="checkbox"
+                    checked={pushChecked}
+                    onChange={(e) => setPushChecked(e.target.checked)}
                   />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        disabled={!canMerge || merging}
-                        className="rounded-none px-2"
-                        style={{
-                          backgroundColor: "hsl(142, 76%, 36%)",
-                        }}
-                      >
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-64">
-                      <DropdownMenuRadioGroup
-                        value={mergeStrategy}
-                        onValueChange={(value) =>
-                          setMergeStrategy(value as MergeStrategy)
-                        }
-                      >
-                        <DropdownMenuRadioItem
-                          value="merge"
-                          className="flex-col items-start py-3"
-                        >
-                          <div className="font-semibold flex items-center gap-2">
-                            <GitMerge className="h-4 w-4" />
-                            Create a merge commit
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1 pl-6">
-                            All commits from this branch will be added to the
-                            base branch via a merge commit
-                          </div>
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem
-                          value="squash"
-                          className="flex-col items-start py-3"
-                        >
-                          <div className="font-semibold flex items-center gap-2">
-                            <GitCommitHorizontal className="h-4 w-4" />
-                            Squash and merge
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1 pl-6">
-                            The {commitsAhead?.commits.length || "multiple"}{" "}
-                            commits from this branch will be combined into one
-                            commit
-                          </div>
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem
-                          value="rebase"
-                          className="flex-col items-start py-3"
-                        >
-                          <div className="font-semibold flex items-center gap-2">
-                            <GitBranch className="h-4 w-4" />
-                            Rebase and merge
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1 pl-6">
-                            Commits will be rebased onto {targetBranch} with a
-                            linear history
-                          </div>
-                        </DropdownMenuRadioItem>
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
+                  Push {targetBranch} to origin after merging
+                </label>
+              ) : null}
+              <MergeActionButton
+                strategy={mergeStrategy}
+                availableMethods={availableMethods}
+                onStrategyChange={setMergeStrategy}
+                onMerge={handleMerge}
+                disabled={!canMerge || merging}
+                merging={merging}
+                onGithub={onGithub}
+                commitCount={commitsAhead?.commits.length}
+                targetBranch={targetBranch}
+              />
             </div>
           </Card>
         </div>
 
-        {/* Commits to be merged */}
-        <section>
-          <h2 className="text-sm font-semibold mb-3">
-            Commits to be merged ({commitsAhead?.total_count || 0})
-          </h2>
-          {commitsAhead && commitsAhead.commits.length > 0 ? (
-            <div className="border rounded-lg divide-y">
-              {commitsAhead.commits.map((commit) => (
-                <div key={commit.short_id} className="p-3">
-                  <div className="flex items-start gap-3">
-                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                      {commit.short_id}
-                    </code>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {commit.description || "(no description)"}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="text-xs text-muted-foreground">
-                          {commit.author_name}
-                        </span>
-                        {commit.insertions > 0 || commit.deletions > 0 ? (
-                          <span className="text-xs text-muted-foreground">
-                            <span className="text-green-600">
-                              +{commit.insertions}
-                            </span>{" "}
-                            <span className="text-red-600">
-                              -{commit.deletions}
-                            </span>
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+        {plan ? (
+          <div className="flex justify-center px-4">
+            <div className="w-full md:w-3/4">
+              <MergeLandingPanel
+                plan={plan}
+                pr={onGithub ? openPr : null}
+                pushed={push}
+                rollup={
+                  !onGithub && plans?.single.can_rollup
+                    ? {
+                        checked: rollupChecked,
+                        rootBranch: plans.rolledUp.target_branch,
+                        onChange: setRollupChecked,
+                      }
+                    : null
+                }
+              />
             </div>
-          ) : (
-            <div className="border rounded-lg p-6 text-center text-muted-foreground">
-              No commits ahead of {targetBranch}
-            </div>
-          )}
-        </section>
+          </div>
+        ) : null}
 
-        {/* Combined diff */}
-        <section>
-          <h2 className="text-sm font-semibold mb-3">
-            Changed Files ({diff?.committed_files.length || 0})
-          </h2>
-          {diff && diff.committed_files.length > 0 ? (
-            <div className="border rounded-lg divide-y">
-              {diff.hunks_by_file.map((fileDiff) => {
-                const isExpanded = expandedFileSet.has(fileDiff.path);
-                return (
-                  <div key={fileDiff.path}>
-                    <button
-                      className="w-full p-3 flex items-center gap-2 text-left hover:bg-muted/50 transition-colors"
-                      onClick={() => toggleFile(fileDiff.path)}
-                      type="button"
-                    >
-                      {isExpanded ? (
-                        <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                      )}
-                      <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                      <span className="font-mono text-sm flex-1 truncate">
-                        {fileDiff.path}
-                      </span>
-                    </button>
-                    {isExpanded && fileDiff.hunks.length > 0 && (
-                      <div className="border-t bg-muted/30">
-                        {fileDiff.hunks.map((hunk, hunkIndex) => (
-                          <pre
-                            key={hunk.id || hunkIndex}
-                            className="p-2 text-xs font-mono overflow-x-auto"
-                          >
-                            <div className="text-muted-foreground mb-1">
-                              {hunk.header}
-                            </div>
-                            {hunk.lines.map((line, lineIndex) => (
-                              <div
-                                key={lineIndex}
-                                className={cn(
-                                  line.startsWith("+") &&
-                                    !line.startsWith("+++") &&
-                                    "bg-emerald-500/20",
-                                  line.startsWith("-") &&
-                                    !line.startsWith("---") &&
-                                    "bg-red-500/20",
-                                )}
-                              >
-                                {line}
-                              </div>
-                            ))}
-                          </pre>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="border rounded-lg p-6 text-center text-muted-foreground">
-              No file changes
-            </div>
-          )}
-        </section>
+        <MergeCommitsList
+          commitsAhead={commitsAhead}
+          targetBranch={targetBranch}
+        />
+
+        <MergePreviewChangedFiles diff={diff} />
       </div>
     </div>
   );
