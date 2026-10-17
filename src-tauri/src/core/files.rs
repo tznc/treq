@@ -19,6 +19,28 @@ pub fn search_workspace_files(
   )
 }
 
+/// Lists the top-level entries of a workspace (or the home repo when
+/// `workspace_id` is `None`), each annotated with its file status for the
+/// Code tab's file list. Costs three jj computations on top of a plain
+/// `ls_workspace`, so callers that don't need status use that instead.
+pub fn list_workspace_files(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+) -> Result<Vec<WorkspaceEntry>, String> {
+  let workspace_root = crate::core::workspaces::resolve_workspace_root(repo_path, workspace_id)?;
+  let mut entries = crate::core::ls_workspace(repo_path, workspace_id)?;
+
+  let target_branch = workspace_id.and_then(|id| {
+    local_db::get_workspace_by_id(repo_path, id)
+      .ok()
+      .flatten()
+      .and_then(|ws| ws.target_branch)
+  });
+  annotate_entry_statuses(&workspace_root, &mut entries, target_branch.as_deref());
+
+  Ok(entries)
+}
+
 /// Status of a file (or, for a directory, the most severe status among its
 /// descendants) relative to the working copy and target branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,6 +51,8 @@ pub enum FileStatus {
   WorkingCopy,
   /// Modified by an already-committed ancestor, relative to the target branch.
   Committed,
+  /// No change in the working copy or the workspace's commits.
+  Untouched,
 }
 
 impl FileStatus {
@@ -37,13 +61,13 @@ impl FileStatus {
       FileStatus::Conflicted => "conflict",
       FileStatus::WorkingCopy => "workingCopy",
       FileStatus::Committed => "committed",
+      FileStatus::Untouched => "untouched",
     }
   }
 }
 
 /// Populate `status` on each entry (file or directory) in place, based on
-/// each entry's path relative to `workspace_path`. Entries whose `path` isn't
-/// inside `workspace_path` are left untouched (no status).
+/// each entry's path relative to `workspace_path`.
 pub fn annotate_entry_statuses(
   workspace_path: &str,
   entries: &mut [WorkspaceEntry],
@@ -70,7 +94,7 @@ pub fn annotate_entry_statuses(
     } else {
       file_status(&rel_path, &conflicted, &working_copy, &committed)
     };
-    entry.status = status.map(|s| s.as_str().to_string());
+    entry.status = Some(status.unwrap_or(FileStatus::Untouched).as_str().to_string());
   }
 }
 

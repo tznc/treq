@@ -186,7 +186,7 @@ impl CodeHost for Backend {
       return Err(unsupported("Browsing the file tree"));
     }
     Ok(Overview {
-      entries: core::ls_workspace_with_status(repo_path, workspace_id)?,
+      entries: core::list_workspace_files(repo_path, workspace_id)?,
       readme: core::get_workspace_readme(repo_path, workspace_id)?,
       unavailable: false,
     })
