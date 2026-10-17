@@ -139,12 +139,19 @@ function findCommentedLines(
 /**
  * A stored PR review draft → the diff viewer's comment. It is outdated when
  * its lines left the diff or no longer match the hash taken when it was
- * written. `lineHash` is the current hash, for drafts stored without one.
+ * written; it then shows the lines it was written on, kept in `quoted_text`.
+ * `lineHash` and `quotedText` describe the current lines, for drafts stored
+ * without them.
  */
 export function draftToLineComment(
   draft: AgentReviewComment,
   hunks: Map<string, FileHunksData>,
-): { comment: LineComment; lineHash: string | null; outdated: boolean } {
+): {
+  comment: LineComment;
+  lineHash: string | null;
+  quotedText: string | null;
+  outdated: boolean;
+} {
   const found = findCommentedLines(hunks, draft);
   const lineHash = found ? hashDiffLines(found.lines) : null;
   const outdated =
@@ -161,13 +168,17 @@ export function draftToLineComment(
       hunkId: outdated ? OUTDATED_HUNK_ID : (found?.hunkId ?? ""),
       startLine: draft.start_line,
       endLine: draft.end_line,
-      // An outdated draft must not show the lines that replaced its own.
-      lineContent: outdated ? [] : (found?.lines ?? []),
+      // An outdated draft shows the lines it was written on, never the
+      // lines that replaced them.
+      lineContent: outdated
+        ? (draft.quoted_text?.split("\n") ?? [])
+        : (found?.lines ?? []),
       text,
       createdAt: draft.created_at,
       lineSide: draft.side ?? "new",
     },
     lineHash,
+    quotedText: found ? found.lines.join("\n") : null,
     outdated,
   };
 }

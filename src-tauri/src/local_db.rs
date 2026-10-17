@@ -2064,20 +2064,23 @@ pub fn resolve_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Str
   Ok(())
 }
 
-/// Edit a comment's text and/or record its line hash; `None` keeps the value.
+/// Edit a comment's text, or record the hash and text of the lines it
+/// covers (PR review drafts); `None` keeps the stored value.
 pub fn update_agent_review_comment(
   repo_path: &str,
   id: &str,
   comment_text: Option<&str>,
   line_hash: Option<&str>,
+  quoted_text: Option<&str>,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
   conn
     .execute(
       "UPDATE agent_review_comments
-         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash)
+         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash),
+             quoted_text = COALESCE(?4, quoted_text)
        WHERE id = ?1",
-      params![id, comment_text, line_hash],
+      params![id, comment_text, line_hash, quoted_text],
     )
     .map_err(|e| format!("Failed to update agent review comment: {e}"))?;
   Ok(())
@@ -2407,19 +2410,21 @@ mod tests {
     .unwrap();
     assert_eq!(comment.line_hash, None);
 
-    update_agent_review_comment(repo, &comment.id, None, Some("h1")).unwrap();
+    update_agent_review_comment(repo, &comment.id, None, Some("h1"), Some("+a\n+b")).unwrap();
     let stored = get_agent_review_comment(repo, &comment.id)
       .unwrap()
       .unwrap();
     assert_eq!(stored.comment_text, "first");
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
 
-    update_agent_review_comment(repo, &comment.id, Some("second"), None).unwrap();
+    update_agent_review_comment(repo, &comment.id, Some("second"), None, None).unwrap();
     let stored = get_agent_review_comment(repo, &comment.id)
       .unwrap()
       .unwrap();
     assert_eq!(stored.comment_text, "second");
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
     assert_eq!(stored.source, "local-human");
   }
 
@@ -2447,6 +2452,7 @@ mod tests {
       &draft.id,
       Some("Trim before matching."),
       Some("abc123"),
+      None,
     )
     .unwrap();
 

@@ -138,6 +138,7 @@ it("reviews a GitHub PR from its own screen", async () => {
       side: input.side,
       comment_text: input.commentText,
       line_hash: input.lineHash,
+      quoted_text: input.quotedText,
       source: "local-human",
     });
     drafts.push(draft);
@@ -151,6 +152,7 @@ it("reviews a GitHub PR from its own screen", async () => {
             ...d,
             comment_text: update.commentText ?? d.comment_text,
             line_hash: update.lineHash ?? d.line_hash,
+            quoted_text: update.quotedText ?? d.quoted_text,
           },
     );
   });
@@ -264,9 +266,9 @@ it("reviews a GitHub PR from its own screen", async () => {
   await captureDocument(document, {
     name: "github-pr-review-04-outdated-after-update",
     expectations: [
-      "Line 6 now reads `startsWith(query)`, and the agent's draft moved to an amber Outdated box above the file's diff.",
-      "The user's draft under line 4 (an unchanged line) is still shown inline.",
-      'The header button reads "Finish review (1)".',
+      "Line 6 in the diff now reads `startsWith(query)`; the agent's draft is in an amber Outdated box above the file's diff.",
+      "The Outdated box shows the original line it was written on, `+ return index.filter((item) => item.name.includes(q));`, above the comment and its suggestion.",
+      'The user\'s draft under line 4 (an unchanged line) is still shown inline, and the header button reads "Finish review (1)".',
     ],
   });
 

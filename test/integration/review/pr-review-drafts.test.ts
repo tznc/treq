@@ -21,6 +21,7 @@ describe("PR review drafts", () => {
       side: "new",
       commentText: "Trim first.",
       lineHash: "abc123",
+      quotedText: "+a\n+b",
     });
     expect(draft.source).toBe("local-human");
 
@@ -32,6 +33,7 @@ describe("PR review drafts", () => {
       id: draft.id,
       comment_text: "Trim before matching.",
       line_hash: "abc123",
+      quoted_text: "+a\n+b",
       start_line: 3,
       end_line: 4,
       side: "new",

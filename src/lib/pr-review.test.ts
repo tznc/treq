@@ -166,6 +166,23 @@ describe("draftToLineComment", () => {
     expect(stale.outdated).toBe(true);
     expect(stale.comment.hunkId).not.toBe("src/a.ts#1");
     expect(stale.comment.lineContent).toEqual([]);
+  });
+
+  it("shows an outdated draft's original lines, kept in quoted_text", () => {
+    const stale = draftToLineComment(
+      row({ line_hash: "deadbeef", quoted_text: "-older\n+old" }),
+      hunks,
+    );
+    expect(stale.outdated).toBe(true);
+    expect(stale.comment.lineContent).toEqual(["-older", "+old"]);
+  });
+
+  it("returns the current lines to store with a draft", () => {
+    expect(draftToLineComment(row(), hunks).quotedText).toBe("+new");
+    expect(
+      draftToLineComment(row({ start_line: 90, end_line: 90 }), hunks)
+        .quotedText,
+    ).toBeNull();
     expect(
       draftToLineComment(row({ line_hash: currentHash }), hunks).outdated,
     ).toBe(false);

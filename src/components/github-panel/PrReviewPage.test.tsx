@@ -294,6 +294,7 @@ describe("PR review screen", () => {
         side: "new",
         commentText: "Name this trimmed.",
         lineHash: hashDiffLines(["+  const query = q.trim();"]),
+        quotedText: "+  const query = q.trim();",
       }),
     );
   });
@@ -305,7 +306,10 @@ describe("PR review screen", () => {
       expect(api.updateAgentReviewComment).toHaveBeenCalledWith(
         "/repo",
         "agent-1",
-        { lineHash: hashDiffLines(["   return q;"]) },
+        {
+          lineHash: hashDiffLines(["   return q;"]),
+          quotedText: "   return q;",
+        },
       ),
     );
   });

@@ -249,7 +249,8 @@ function PrReviewPage({
     setComments(drafts.map((d) => d.comment));
   }, [drafts, setComments]);
 
-  // The agent's CLI cannot see the diff, so hash its drafts on first sight.
+  // The agent's CLI cannot see the diff, so record the hash and text of the
+  // lines its drafts cover on first sight.
   const hashedIds = useRef<Set<string>>(new Set());
   useEffect(() => {
     const unhashed = drafts.filter(
@@ -261,6 +262,7 @@ function PrReviewPage({
       unhashed.map((d) =>
         updateAgentReviewComment(repoPath, d.row.id, {
           lineHash: d.lineHash ?? undefined,
+          quotedText: d.quotedText ?? undefined,
         }),
       ),
     ).then(() => refreshDrafts());
@@ -276,7 +278,7 @@ function PrReviewPage({
   const addComment = async (text: string) => {
     const pending = commentState.pendingComment;
     if (!text.trim() || !pending) return;
-    const { lineHash } = draftToLineComment(
+    const { lineHash, quotedText } = draftToLineComment(
       {
         id: "",
         repo_path: repoPath,
@@ -306,6 +308,7 @@ function PrReviewPage({
         side: pending.lineSide,
         commentText: text.trim(),
         lineHash,
+        quotedText,
       });
       commentState.cancelComment();
       await refreshDrafts();

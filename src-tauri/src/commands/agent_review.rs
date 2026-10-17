@@ -27,6 +27,7 @@ pub fn create_review_draft(
   side: Option<String>,
   comment_text: String,
   line_hash: Option<String>,
+  quoted_text: Option<String>,
 ) -> Result<local_db::AgentReviewComment, String> {
   let draft = crate::core::review_drafts::NewReviewDraft {
     target_type,
@@ -37,6 +38,7 @@ pub fn create_review_draft(
     side,
     comment_text,
     line_hash,
+    quoted_text,
   };
   crate::core::review_drafts::create_review_draft(&repo_path, &draft)
 }
@@ -47,12 +49,14 @@ pub fn update_agent_review_comment(
   comment_id: String,
   comment_text: Option<String>,
   line_hash: Option<String>,
+  quoted_text: Option<String>,
 ) -> Result<(), String> {
   local_db::update_agent_review_comment(
     &repo_path,
     &comment_id,
     comment_text.as_deref(),
     line_hash.as_deref(),
+    quoted_text.as_deref(),
   )
 }
 

@@ -280,6 +280,8 @@ export interface ReviewDraftInput {
   side: "old" | "new";
   commentText: string;
   lineHash: string | null;
+  /** The commented diff lines, shown if the draft goes outdated. */
+  quotedText: string | null;
 }
 
 /** Store a draft comment the user wrote (a PR review draft). */
@@ -296,13 +298,14 @@ export const createReviewDraft = (
 export const updateAgentReviewComment = (
   repoPath: string,
   commentId: string,
-  update: { commentText?: string; lineHash?: string },
+  update: { commentText?: string; lineHash?: string; quotedText?: string },
 ): Promise<void> =>
   invoke("update_agent_review_comment", {
     repoPath: repoStateScope(repoPath),
     commentId,
     commentText: update.commentText ?? null,
     lineHash: update.lineHash ?? null,
+    quotedText: update.quotedText ?? null,
   });
 
 export const deleteAgentReviewComment = (
