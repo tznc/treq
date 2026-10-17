@@ -5,6 +5,12 @@
 // The account deleted is always the one the bearer token names. The body is
 // never read for a user id.
 //
+// A user who is the only owner of an organization that has other members
+// is refused (409 last_owner) before anything is released: every shared
+// organization keeps at least one owner. They promote another member or
+// delete the organization first. An organization the user is the only
+// member of does not block; it is deleted with them (step 5).
+//
 // Order matters. Everything that holds an external resource or a charge is
 // released first, and any failure there stops the request before the auth
 // user is deleted, so the user can retry:
@@ -19,8 +25,8 @@
 //   4. Delete personal GitHub App installation rows. Their foreign key is
 //      SET NULL, which would otherwise leave them ownerless.
 //   5. Delete the auth user. Foreign keys cascade the remaining user rows,
-//      and the organizations_on_account_delete trigger (029) hands
-//      organizations to a successor or deletes them.
+//      and the organizations_on_account_delete trigger (029) deletes the
+//      organizations left with no members.
 //
 // billing_customers and billing_subscriptions have no foreign key to the
 // user and are kept on purpose, for invoices, refunds and disputes.
@@ -34,7 +40,11 @@ import type { ManagedComputeProvider } from "../_shared/remote/sprites-adapter.t
 
 export type LiveInstance = { id: string; provider_resource_id: string | null };
 
+export type OrganizationRef = { id: string; name: string };
+
 export interface DeleteAccountStore {
+  /** Organizations with other members in which the user is the only owner. */
+  organizationsNeedingOwner(): Promise<OrganizationRef[]>;
   /** Stripe subscription ids that may still bill once the user is gone. */
   subscriptionsToCancel(): Promise<string[]>;
   /** The user's remote instances not yet marked deleted. */
@@ -91,6 +101,22 @@ export async function deleteAccount(
   if (!user) return { status: 401, body: { error: "Unauthorized" } };
 
   const store = deps.storeFor(user.id);
+
+  const needingOwner = await store.organizationsNeedingOwner();
+  if (needingOwner.length > 0) {
+    return {
+      status: 409,
+      body: {
+        error: `You are the only owner of ${needingOwner
+          .map((org) => org.name)
+          .join(
+            ", ",
+          )}. Make another member an owner, or delete the organization, before deleting your account.`,
+        code: "last_owner",
+        organizations: needingOwner,
+      },
+    };
+  }
 
   const subscriptions = await store.subscriptionsToCancel();
   if (subscriptions.length > 0) {
@@ -207,6 +233,48 @@ export function deleteAccountStoreFor(
   userId: string,
 ): DeleteAccountStore {
   return {
+    async organizationsNeedingOwner() {
+      const owned = check(
+        await client
+          .from("organization_members")
+          .select("org_id")
+          .eq("user_id", userId)
+          .eq("role", "owner"),
+        "owned organization lookup",
+      ) as { org_id: string }[];
+      if (owned.length === 0) return [];
+
+      const members = check(
+        await client
+          .from("organization_members")
+          .select("org_id, user_id, role")
+          .in(
+            "org_id",
+            owned.map((row) => row.org_id),
+          ),
+        "organization member lookup",
+      ) as { org_id: string; user_id: string; role: string }[];
+      const blocking = owned
+        .map((row) => row.org_id)
+        .filter((orgId) => {
+          const others = members.filter(
+            (m) => m.org_id === orgId && m.user_id !== userId,
+          );
+          return others.length > 0 && !others.some((m) => m.role === "owner");
+        });
+      if (blocking.length === 0) return [];
+
+      const orgs = check(
+        await client
+          .from("organizations")
+          .select("id, name")
+          .in("id", blocking)
+          .order("name"),
+        "organization lookup",
+      ) as OrganizationRef[];
+      return orgs;
+    },
+
     async subscriptionsToCancel() {
       const ids = new Set<string>();
 

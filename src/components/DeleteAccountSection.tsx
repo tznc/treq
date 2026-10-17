@@ -75,8 +75,9 @@ export function DeleteAccountSection({ email }: { email: string }) {
               without a refund for the remaining period. Your cloud workspace
               and everything on it is deleted. Treq disconnects Linear and
               forgets your GitHub App installations. Organizations you are the
-              only member of are deleted. Billing records are kept for tax and
-              accounting.
+              only member of are deleted. If you are the only owner of an
+              organization with other members, make one of them an owner first.
+              Billing records are kept for tax and accounting.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2 pt-2">

@@ -21,11 +21,15 @@ function fakeStore(
     subscriptions?: string[];
     instances?: Instance[];
     linearToken?: string | null;
+    lastOwnerOf?: { id: string; name: string }[];
   } = {},
 ) {
   const log: string[] = [];
   const instances = [...(seed.instances ?? [])];
   const store: DeleteAccountStore = {
+    async organizationsNeedingOwner() {
+      return seed.lastOwnerOf ?? [];
+    },
     async subscriptionsToCancel() {
       return seed.subscriptions ?? [];
     },
@@ -138,6 +142,49 @@ describe("deleteAccount authorization", () => {
     expect(result).toEqual({ status: 200, body: { deleted: true } });
     expect(storesFor).toEqual([ME]);
     expect(log).toContain("user-deleted");
+  });
+});
+
+describe("deleteAccount organization ownership", () => {
+  it("refuses while the user is the last owner of an organization with other members", async () => {
+    const { store, log } = fakeStore({
+      subscriptions: ["sub_a"],
+      instances: [{ id: "inst-1", provider_resource_id: "dev-treq-1" }],
+      linearToken: "lin_oauth_abc",
+      lastOwnerOf: [
+        { id: "org-1", name: "Acme" },
+        { id: "org-2", name: "Globex" },
+      ],
+    });
+    const { stripe, calls } = fakeStripe({ sub_a: { status: "active" } });
+    const { provider, deleted } = fakeProvider();
+    const revoked: string[] = [];
+    const result = await deleteAccount(
+      deps({
+        store,
+        stripe,
+        provider: () => provider,
+        revokeLinearToken: async (token) => {
+          revoked.push(token);
+        },
+      }),
+    );
+    expect(result).toEqual({
+      status: 409,
+      body: {
+        error:
+          "You are the only owner of Acme, Globex. Make another member an owner, or delete the organization, before deleting your account.",
+        code: "last_owner",
+        organizations: [
+          { id: "org-1", name: "Acme" },
+          { id: "org-2", name: "Globex" },
+        ],
+      },
+    });
+    expect(calls).toEqual([]);
+    expect(deleted).toEqual([]);
+    expect(revoked).toEqual([]);
+    expect(log).toEqual([]);
   });
 });
 

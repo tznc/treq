@@ -229,14 +229,52 @@ it("deletes only the caller and releases their billing, machines and integration
     const personal = await linkGithubRepo(admin, owner.user.id);
     const bystanderRepo = await linkGithubRepo(admin, bystander.user.id);
 
+    const ownerToken = `Bearer ${await accessToken(owner)}`;
+
+    // The owner is the only owner of an organization that has another
+    // member, so deletion is refused before anything is released.
+    const blockedStubs = newStubs();
+    const blocked = await callDeleteAccount(admin, ownerToken, blockedStubs);
+    expect(blocked).toEqual({
+      status: 409,
+      body: {
+        error:
+          "You are the only owner of Shared QA. Make another member an owner, or delete the organization, before deleting your account.",
+        code: "last_owner",
+        organizations: [{ id: sharedOrg, name: "Shared QA" }],
+      },
+    });
+    expect(blockedStubs).toEqual(newStubs());
+    expect(await userExists(admin, owner.user.id)).toBe(true);
+    expect(
+      await rowCount(admin, "remote_instances", "owner_user_id", owner.user.id),
+    ).toBe(1);
+    expect(await rowCount(admin, "organizations", "id", soloOrg)).toBe(1);
+
+    await recordOutcome("delete-account-02-last-owner-blocked", {
+      expectations: [
+        "While the user is the only owner of an organization with another member, delete-account answers 409 last_owner naming that organization.",
+        "The organization the user is the only member of does not block.",
+        "Nothing is released: no Stripe, provider or Linear call, and the user, instance and organizations remain.",
+      ],
+      details: { blocked, stubs: blockedStubs },
+    });
+
+    const promoted = await organizations(
+      admin,
+      owner,
+    )({
+      action: "promote_member",
+      organization_id: sharedOrg,
+      user_id: teammate.user.id,
+    });
+    expect(promoted.status).toBe(200);
+
     // The caller names another user in the body. It must be ignored.
     const stubs = newStubs();
-    const result = await callDeleteAccount(
-      admin,
-      `Bearer ${await accessToken(owner)}`,
-      stubs,
-      { body: { user_id: bystander.user.id } },
-    );
+    const result = await callDeleteAccount(admin, ownerToken, stubs, {
+      body: { user_id: bystander.user.id },
+    });
     expect(result).toEqual({ status: 200, body: { deleted: true } });
 
     expect(await userExists(admin, owner.user.id)).toBe(false);
@@ -254,7 +292,7 @@ it("deletes only the caller and releases their billing, machines and integration
       `DELETE /v1/subscriptions/${bystanderPro.subscriptionId}`,
     );
 
-    await recordOutcome("delete-account-02-caller-only", {
+    await recordOutcome("delete-account-03-caller-only", {
       expectations: [
         "With a body naming another user, delete-account answers 200 and deletes the token's user only.",
         "The other user, their profile, their GitHub installation and their subscription are untouched.",
@@ -280,7 +318,7 @@ it("deletes only the caller and releases their billing, machines and integration
     expect(stubs.machinesDeleted).toEqual([providerId]);
     expect(stubs.linearRevoked).toEqual([linearToken]);
 
-    await recordOutcome("delete-account-03-external-cleanup", {
+    await recordOutcome("delete-account-04-external-cleanup", {
       expectations: [
         "Stripe cancels the user's Pro and the Team subscription of the organization they were the only member of, and not the shared organization's Team.",
         "The user's cloud workspace machine is deleted at the provider.",
@@ -325,10 +363,10 @@ it("deletes only the caller and releases their billing, machines and integration
       ),
     ).toBe(1);
 
-    await recordOutcome("delete-account-04-rows", {
+    await recordOutcome("delete-account-05-rows", {
       expectations: [
         "The user's profile, remote instance, Linear token, memberships and personal GitHub installation (with its repositories) are gone.",
-        "The solo organization is deleted; the shared one survives with the teammate promoted to owner.",
+        "The solo organization is deleted; the shared one survives with the teammate (promoted before deletion) as its only owner.",
         "billing_subscriptions keeps the user's subscription row for accounting.",
       ],
       details: { sharedMembers, soloOrg, sharedOrg },
@@ -366,7 +404,7 @@ it("keeps the account when Stripe fails and finishes on retry", async () => {
     // The user can still sign in after the failed attempt.
     await signInWithEmailPassword(user.email, user.password);
 
-    await recordOutcome("delete-account-05-stripe-failure", {
+    await recordOutcome("delete-account-06-stripe-failure", {
       expectations: [
         "When Stripe fails to cancel the subscription, delete-account answers 502.",
         "The auth user and profile remain and the user can still sign in.",
@@ -393,7 +431,7 @@ it("keeps the account when Stripe fails and finishes on retry", async () => {
       });
     expect(signInError).not.toBeNull();
 
-    await recordOutcome("delete-account-06-retry", {
+    await recordOutcome("delete-account-07-retry", {
       expectations: [
         "Retrying with the same token cancels the subscription and deletes the user (200).",
         "Afterwards the old token answers 401 and password sign-in fails.",
