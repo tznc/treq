@@ -18,6 +18,41 @@ interface AppSetupScriptSettingsProps {
   onRun: () => Promise<void>;
 }
 
+/** What the Run row shows, for both the React and the GPUI settings. */
+export function setupScriptRunState({
+  script,
+  status,
+  starting,
+  loadError,
+}: {
+  script: string;
+  status: AppSetupScriptStatus | undefined;
+  starting: boolean;
+  loadError: string | undefined;
+}): { canRun: boolean; text: string; error: boolean } {
+  const unsaved = !!status && script !== status.script;
+  const canRun =
+    !!status &&
+    !status.running &&
+    !starting &&
+    !unsaved &&
+    status.script.trim() !== "";
+  if (loadError) {
+    return {
+      canRun,
+      text: `Could not load the setup script: ${loadError}`,
+      error: true,
+    };
+  }
+  return {
+    canRun,
+    text: unsaved
+      ? "Save settings to run the edited script."
+      : formatStatus(status),
+    error: false,
+  };
+}
+
 export function AppSetupScriptSettings({
   script,
   alwaysRun,

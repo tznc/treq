@@ -49,6 +49,7 @@ pub fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
 }
 
 /// The spinning `loader-circle` (`animate-spin`).
+#[allow(dead_code)] // The full set, as in React; screens still to port use the rest.
 pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoElement {
   spin(id, icon(theme::ICON_SPINNER, size, color))
 }
@@ -64,6 +65,7 @@ pub fn spin(id: impl Into<ElementId>, icon: gpui::Svg) -> impl IntoElement {
 
 /// `ui/button.tsx` variants.
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // The full set, as in React; screens still to port use the rest.
 pub enum Variant {
   Default,
   Destructive,
@@ -75,6 +77,7 @@ pub enum Variant {
 
 /// `ui/button.tsx` sizes.
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // The full set, as in React; screens still to port use the rest.
 pub enum Size {
   Default,
   Icon,

@@ -29,6 +29,7 @@ use tauri_plugin_gpui::{
   webview_frame, GpuiConfig, GpuiWindowExt,
 };
 
+mod form;
 mod popup;
 mod screen;
 mod sidebar;

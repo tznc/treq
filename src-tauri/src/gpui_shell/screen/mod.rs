@@ -13,12 +13,13 @@
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Window};
+use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
 
 use super::theme;
 
-mod checklist;
+pub(super) mod checklist;
 mod onboarding;
+mod settings;
 
 #[cfg(test)]
 mod tests;
@@ -45,6 +46,7 @@ pub struct ScreenSnapshot {
 pub enum View {
   /// No repository open: open one, or check the required tools.
   Onboarding(onboarding::Onboarding),
+  Settings(Box<settings::Settings>),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -54,7 +56,23 @@ pub enum ScreenAction {
   OpenRepo,
   OpenRemote,
   RecheckPrerequisites,
-  OpenUrl { url: String },
+  OpenUrl {
+    url: String,
+  },
+  /// A control's new value; `field` names it, as in `"app.theme"`.
+  Field {
+    field: String,
+    value: serde_json::Value,
+  },
+  /// A slider released at `value`.
+  Commit {
+    field: String,
+    value: serde_json::Value,
+  },
+  /// A button; `id` names it, as in `"settings.save"`.
+  Press {
+    id: String,
+  },
 }
 
 /// Where a screen sends its actions.
@@ -64,11 +82,18 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 pub struct Screen {
   snapshot: ScreenSnapshot,
   sink: ActionSink,
+  /// Screens with state of their own (text being edited, open dropdowns),
+  /// kept while React keeps sending them.
+  settings: Option<Entity<settings::SettingsView>>,
 }
 
 impl Screen {
   pub fn new(snapshot: ScreenSnapshot, sink: ActionSink) -> Self {
-    Self { snapshot, sink }
+    Self {
+      snapshot,
+      sink,
+      settings: None,
+    }
   }
 
   pub fn snapshot(&self) -> &ScreenSnapshot {
@@ -98,13 +123,32 @@ impl Ctx<'_> {
 }
 
 impl Render for Screen {
-  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let dark = self.snapshot.dark;
+    if !matches!(self.snapshot.view, View::Settings(_)) {
+      self.settings = None;
+    }
     let ctx = Ctx {
-      palette: theme::palette(self.snapshot.dark),
+      palette: theme::palette(dark),
       sink: &self.sink,
     };
     let body = match &self.snapshot.view {
       View::Onboarding(screen) => onboarding::render(screen, &ctx).into_any_element(),
+      View::Settings(screen) => {
+        let screen = (**screen).clone();
+        match &self.settings {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_snapshot(screen, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let sink = self.sink.clone();
+            let view = cx.new(|_| settings::SettingsView::new(screen, dark, sink));
+            self.settings = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
     };
     div()
       .size_full()

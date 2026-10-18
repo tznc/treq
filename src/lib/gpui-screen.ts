@@ -27,11 +27,100 @@ export interface GpuiChecklist {
   groups: { label: string; error: boolean; tools: GpuiChecklistTool[] }[];
 }
 
-export type GpuiScreenView = {
-  kind: "onboarding";
-  remoteLabel: string | null;
+/** One `<option>` of a `<select>`. */
+export interface GpuiSelectOption {
+  value: string;
+  label: string;
+}
+
+export type GpuiSettingsTab =
+  | "repository"
+  | "application"
+  | "account"
+  | "integrations"
+  | "skills"
+  | "preview";
+
+export interface GpuiApplicationSettings {
+  theme: string;
+  themeOptions: GpuiSelectOption[];
+  zoom: number;
+  zoomMin: number;
+  zoomMax: number;
+  zoomStep: number;
+  fontSize: string;
+  fontSizeOptions: GpuiSelectOption[];
+  defaultModel: string;
+  modelOptions: GpuiSelectOption[];
+  defaultAgent: string;
+  agentOptions: GpuiSelectOption[];
+  conflictMarkerStyle: string;
+  conflictOptions: GpuiSelectOption[];
+  notifyAgentFinished: boolean;
   checklist: GpuiChecklist;
-};
+  setupScript: {
+    script: string;
+    alwaysRun: boolean;
+    /** Status not loaded yet: the editor is disabled. */
+    loading: boolean;
+    canRun: boolean;
+    /** The line beside Run: the status, or why it cannot run. */
+    status: string;
+    /** `status` is a load error, drawn in the destructive color. */
+    statusError: boolean;
+  };
+}
+
+export interface GpuiRepositorySettings {
+  /** The `.treq/config.yaml` card, or null when it is not shown. */
+  yamlCard: { error: string | null; loading: boolean } | null;
+  currentBranch: string | null;
+  /** "Loading settings..." in place of the fields. */
+  loading: boolean;
+  fields: {
+    branchNamePattern: string;
+    includedFiles: string;
+    defaultModel: string;
+    defaultAgent: string;
+    autoPush: boolean;
+    ignoreGeneratedAgentFiles: boolean;
+    reviewPrompt: string;
+    reviewAgent: string;
+    autoReviewTrigger: string;
+  };
+  /** Fields `.treq/config.yaml` sets, drawn disabled. */
+  managed: string[];
+  modelOptions: GpuiSelectOption[];
+  agentOptions: GpuiSelectOption[];
+  reviewAgentOptions: GpuiSelectOption[];
+  triggerOptions: GpuiSelectOption[];
+  error: string | null;
+}
+
+export interface GpuiPreviewSettings {
+  features: { id: string; title: string; checked: boolean }[];
+}
+
+export interface GpuiSettingsScreen {
+  kind: "settings";
+  tab: GpuiSettingsTab;
+  /** Visible tabs, in order. */
+  tabs: GpuiSettingsTab[];
+  /** The header's save button, or null without one. */
+  save: { label: string; disabled: boolean } | null;
+  application: GpuiApplicationSettings | null;
+  /** null without a repository: "Set repository in Application tab". */
+  repository: GpuiRepositorySettings | null;
+  preview: GpuiPreviewSettings | null;
+}
+
+export type GpuiScreenView =
+  | {
+      kind: "onboarding";
+      remoteLabel: string | null;
+      checklist: GpuiChecklist;
+    }
+  | GpuiSettingsScreen;
 
 export type GpuiScreenSnapshot = GpuiScreenView & { dark: boolean };
 
@@ -39,7 +128,13 @@ export type GpuiScreenAction =
   | { kind: "openRepo" }
   | { kind: "openRemote" }
   | { kind: "recheckPrerequisites" }
-  | { kind: "openUrl"; url: string };
+  | { kind: "openUrl"; url: string }
+  /** A control's new value; `field` names it, e.g. "app.theme". */
+  | { kind: "field"; field: string; value: string | number | boolean }
+  /** A slider released at `value`. */
+  | { kind: "commit"; field: string; value: number }
+  /** A button; `id` names it, e.g. "settings.save". */
+  | { kind: "press"; id: string };
 
 const GPUI_SCREEN_ACTION_EVENT = "gpui-screen-action";
 

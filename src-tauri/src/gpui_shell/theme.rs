@@ -20,6 +20,7 @@ macro_rules! icons {
 
 icons! {
   ICON_ARCHIVE => "archive",
+  ICON_BOOK_OPEN => "book-open",
   ICON_BOT => "bot",
   ICON_BRANCH => "git-branch",
   ICON_CIRCLE_ALERT => "circle-alert",
@@ -30,6 +31,8 @@ icons! {
   ICON_CIRCLE_X => "circle-x",
   ICON_COPY => "copy",
   ICON_EXTERNAL_LINK => "external-link",
+  ICON_FLASK => "flask-conical",
+  ICON_FOLDER_GIT => "folder-git-2",
   ICON_FOLDER_OPEN => "folder-open",
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
@@ -40,6 +43,8 @@ icons! {
   ICON_LINEAR => "list-todo",
   ICON_LINK => "link",
   ICON_PENCIL => "pencil",
+  ICON_PLAY => "play",
+  ICON_PLUG => "plug",
   ICON_REFRESH => "refresh-cw",
   ICON_SEARCH => "search",
   ICON_SERVER => "server",
@@ -48,6 +53,7 @@ icons! {
   ICON_TERMINAL => "terminal",
   ICON_TRASH => "trash-2",
   ICON_TRIANGLE_ALERT => "triangle-alert",
+  ICON_USER => "user",
   ICON_X => "x",
 }
 
@@ -186,6 +192,8 @@ pub struct Palette {
   pub destructive_foreground: Hsla,
   /// `--input`, the border of outline buttons and text fields.
   pub input: Hsla,
+  /// `--ring`, the focus outline.
+  #[allow(dead_code)]
   pub ring: Hsla,
   /// Tailwind green-500, a passed check.
   pub success: Hsla,

@@ -48,6 +48,8 @@ function useGpuiOnboarding({
         case "openUrl":
           void openUrl(action.url);
           break;
+        default:
+          break;
       }
     },
   );
