@@ -52,15 +52,12 @@ pub fn resolve_remote_git() -> Result<String, String> {
   }).ok_or_else(|| "Push and sync require Git 2.41.0 or newer. Install or upgrade Git (on macOS: brew install git), then restart Treq.".to_string())
 }
 
-/// Get extended PATH that includes common binary locations
+/// Use the configured shell's PATH on Unix, plus the running executable directory.
 pub fn get_extended_path() -> String {
   let current_path = env::var("PATH").unwrap_or_default();
 
   if cfg!(windows) {
-    // The extra locations and `:` joiner below are Unix-specific (Homebrew,
-    // /usr/bin, etc.) and would clobber the inherited PATH — which includes
-    // System32 and PowerShell's own directory — with a broken value. Just
-    // append the running exe's directory, using the Windows `;` separator.
+    // Preserve the inherited Windows PATH and its native separator.
     let mut all_paths: Vec<String> = current_path
       .split(';')
       .filter(|p| !p.is_empty())
@@ -77,21 +74,24 @@ pub fn get_extended_path() -> String {
     return all_paths.join(";");
   }
 
-  let expanded_paths = unix_extra_bin_dirs(&env::var("HOME").unwrap_or_default());
+  #[cfg(unix)]
+  let current_path = {
+    static SHELL_PATH: OnceLock<Option<String>> = OnceLock::new();
+    SHELL_PATH
+      .get_or_init(|| {
+        let shell = env::var_os("SHELL").filter(|shell| !shell.is_empty())?;
+        let mut command = login_shell_command(&shell);
+        shell_path_from_command(&mut command, std::time::Duration::from_secs(5))
+      })
+      .clone()
+      .unwrap_or(current_path)
+  };
 
-  // Combine existing PATH with additional paths (deduplicating)
   let mut all_paths: Vec<String> = current_path
     .split(':')
     .filter(|p| !p.is_empty())
     .map(String::from)
     .collect();
-
-  // Add additional paths if not already present
-  for path in expanded_paths {
-    if !all_paths.contains(&path) {
-      all_paths.push(path);
-    }
-  }
 
   // Add the running treq binary directory so `treq` is available in PTY sessions.
   if let Ok(exe_path) = std::env::current_exe() {
@@ -106,20 +106,63 @@ pub fn get_extended_path() -> String {
   all_paths.join(":")
 }
 
-/// Install locations searched after PATH on Unix, with `~` expanded to
-/// `home`. An app opened from the macOS Finder gets a PATH that misses them.
-fn unix_extra_bin_dirs(home: &str) -> Vec<String> {
-  [
-    "/opt/homebrew/bin", // macOS ARM Homebrew
-    "/usr/local/bin",    // macOS Intel Homebrew, common
-    "~/.cargo/bin",      // Rust tools
-    "~/.local/bin",      // Claude Code and Cursor Agent installers
-    "/usr/bin",          // System binaries
-    "/bin",              // System binaries
-  ]
-  .iter()
-  .map(|p| p.replace('~', home))
-  .collect()
+#[cfg(unix)]
+fn login_shell_command(shell: &OsStr) -> Command {
+  let mut command = Command::new(shell);
+  // Interactive startup loads tools configured in .zshrc/.bashrc; login
+  // startup also loads profile files, matching a new terminal window.
+  command.args(["-ilc", "printf '\\000%s\\000' \"$PATH\""]);
+  command
+}
+
+/// Delimit PATH with NULs so startup messages cannot be mistaken for it.
+/// Bound both shell startup and stdout collection (including inherited pipes).
+#[cfg(unix)]
+fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) -> Option<String> {
+  use std::io::Read;
+  use std::process::Stdio;
+  use std::time::{Duration, Instant};
+
+  let mut child = command
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()
+    .ok()?;
+  let stdout = child.stdout.take()?;
+  let (sender, receiver) = std::sync::mpsc::channel();
+  std::thread::spawn(move || {
+    let mut bytes = Vec::new();
+    let result = stdout
+      .take(1024 * 1024)
+      .read_to_end(&mut bytes)
+      .map(|_| bytes);
+    let _ = sender.send(result);
+  });
+  let start = Instant::now();
+  loop {
+    match child.try_wait() {
+      Ok(Some(status)) => {
+        if !status.success() {
+          return None;
+        }
+        break;
+      }
+      Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
+      _ => {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+      }
+    }
+  }
+  let bytes = receiver
+    .recv_timeout(timeout.saturating_sub(start.elapsed()))
+    .ok()?
+    .ok()?;
+  let path = bytes.split(|byte| *byte == 0).nth(1)?;
+  let path = String::from_utf8(path.to_vec()).ok()?;
+  (!path.is_empty()).then_some(path)
 }
 
 /// Get the directory containing the running treq executable
@@ -137,9 +180,7 @@ pub fn get_exe_dir() -> Option<String> {
 /// Detect binary path using `which` (Unix) or `where` (Windows) with extended PATH
 pub fn detect_binary(name: &str) -> Option<String> {
   if cfg!(windows) {
-    // `which` isn't available by default on Windows, and `get_extended_path`
-    // joins entries with `:` (a Unix path separator), so neither applies here.
-    // `where` uses the process's own PATH and is present on all supported Windows versions.
+    // `where` is the Windows equivalent of `which` and uses the inherited PATH.
     return first_output_line(Command::new("where").arg(name));
   }
 
@@ -207,6 +248,85 @@ pub fn get_editor_apps_cache() -> Option<HashMap<String, bool>> {
 mod tests {
   use super::*;
 
+  #[cfg(target_os = "macos")]
+  #[test]
+  fn loads_login_and_interactive_shell_startup() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+      temp.path().join(".zprofile"),
+      "export PATH='/custom/login/bin:/usr/bin:/bin'\n",
+    )
+    .unwrap();
+    std::fs::write(
+      temp.path().join(".zshrc"),
+      "export PATH=\"/custom/interactive/bin:$PATH\"\nprintf 'startup message\\n'\n",
+    )
+    .unwrap();
+    let mut shell = login_shell_command(OsStr::new("/bin/zsh"));
+    shell.env("ZDOTDIR", temp.path());
+    let path = shell_path_from_command(&mut shell, std::time::Duration::from_secs(2)).unwrap();
+    assert_eq!(
+      path,
+      "/custom/interactive/bin:/custom/login/bin:/usr/bin:/bin"
+    );
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn discovers_and_executes_cli_from_shell_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let bin = temp.path().join("custom npm prefix/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let cli = bin.join("devcontainer");
+    std::fs::write(&cli, "#!/bin/sh\nprintf 'custom-cli'").unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let expected = format!("{}:/usr/bin:/bin", bin.display());
+    let mut shell = Command::new("/bin/sh");
+    shell.args([
+      "-c",
+      r#"printf 'startup noise\n\000%s\000' "$1"; printf 'trailing noise'"#,
+      "sh",
+      &expected,
+    ]);
+    let path = shell_path_from_command(&mut shell, std::time::Duration::from_secs(2)).unwrap();
+    assert_eq!(path, expected);
+    assert_eq!(
+      detect_binary_in("devcontainer", &path),
+      Some(cli.to_string_lossy().into_owned())
+    );
+    let output = Command::new("devcontainer")
+      .env("PATH", path)
+      .output()
+      .unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"custom-cli");
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn rejects_failed_shell_path_lookup() {
+    let mut shell = Command::new("/bin/sh");
+    shell.args(["-c", "exit 1"]);
+    assert_eq!(
+      shell_path_from_command(&mut shell, std::time::Duration::from_secs(2)),
+      None
+    );
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn bounds_shell_path_lookup_time() {
+    let mut shell = Command::new("/bin/sh");
+    shell.args(["-c", "exec /bin/sleep 10"]);
+    let start = std::time::Instant::now();
+    assert_eq!(
+      shell_path_from_command(&mut shell, std::time::Duration::from_millis(50)),
+      None
+    );
+    assert!(start.elapsed() < std::time::Duration::from_secs(2));
+  }
+
   #[test]
   fn selects_supported_git_after_old_cached_binary() {
     let paths = vec!["apple-git".to_string(), "brew-git".to_string()];
@@ -242,12 +362,5 @@ mod tests {
         Some("git".to_string())
       );
     }
-  }
-
-  #[test]
-  fn extra_bin_dirs_include_user_local_bin() {
-    let dirs = unix_extra_bin_dirs("/home/dev");
-
-    assert!(dirs.contains(&"/home/dev/.local/bin".to_string()));
   }
 }
