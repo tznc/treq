@@ -1953,7 +1953,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -4454,7 +4454,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -5511,7 +5511,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -8617,7 +8617,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9920,7 +9920,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.21.7",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
@@ -11175,7 +11175,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-gpui"
 version = "0.1.0"
-source = "git+https://github.com/ziinc/tauri-gpui?branch=main#f9cf76bbeb3265b831bb7f4e736b2be66f285030"
+source = "git+https://github.com/ziinc/tauri-gpui?branch=main#d7877f2ac0da8816257bb49d9e32e03a7fce6823"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
