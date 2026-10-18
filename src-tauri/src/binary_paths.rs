@@ -6,6 +6,52 @@ use std::sync::OnceLock;
 
 static BINARY_PATHS_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 
+fn select_supported_git(
+  paths: Vec<String>,
+  mut version: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
+  paths.into_iter().find(|path| {
+    let Some(output) = version(path) else {
+      return false;
+    };
+    let Some(number) = output
+      .strip_prefix("git version ")
+      .and_then(|s| s.split_whitespace().next())
+    else {
+      return false;
+    };
+    let mut parts = number.split('.');
+    let major = parts.next().and_then(|s| s.parse::<u32>().ok());
+    let minor = parts.next().and_then(|s| s.parse::<u32>().ok());
+    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (2, 41))
+  })
+}
+
+/// jj-lib fetch needs Git >= 2.41. GUI launches may find Apple's older Git
+/// before Homebrew, and the persisted binary cache may also point at that Git.
+pub fn resolve_remote_git() -> Result<String, String> {
+  let mut paths = get_binary_path("git").into_iter().collect::<Vec<_>>();
+  let finder = if cfg!(windows) { "where" } else { "which" };
+  let mut command = Command::new(finder);
+  if !cfg!(windows) {
+    command.arg("-a");
+  }
+  if let Ok(output) = command.arg("git").env("PATH", get_extended_path()).output() {
+    if output.status.success() {
+      for path in String::from_utf8_lossy(&output.stdout).lines() {
+        let path = path.trim().to_string();
+        if !path.is_empty() && !paths.contains(&path) {
+          paths.push(path);
+        }
+      }
+    }
+  }
+  select_supported_git(paths, |path| {
+    let output = Command::new(path).arg("--version").output().ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+  }).ok_or_else(|| "Push and sync require Git 2.41.0 or newer. Install or upgrade Git (on macOS: brew install git), then restart Treq.".to_string())
+}
+
 /// Get extended PATH that includes common binary locations
 pub fn get_extended_path() -> String {
   let current_path = env::var("PATH").unwrap_or_default();
@@ -160,6 +206,43 @@ pub fn get_editor_apps_cache() -> Option<HashMap<String, bool>> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn selects_supported_git_after_old_cached_binary() {
+    let paths = vec!["apple-git".to_string(), "brew-git".to_string()];
+    let selected = select_supported_git(paths, |path| {
+      Some(if path == "apple-git" {
+        "git version 2.39.5 (Apple Git-154)".to_string()
+      } else {
+        "git version 2.47.1".to_string()
+      })
+    });
+    assert_eq!(selected.as_deref(), Some("brew-git"));
+  }
+
+  #[test]
+  fn rejects_old_or_unreadable_git_versions() {
+    for version in ["git version 2.40.9", "", "not git"] {
+      assert_eq!(
+        select_supported_git(vec!["git".to_string()], |_| Some(version.to_string())),
+        None
+      );
+    }
+  }
+
+  #[test]
+  fn accepts_minimum_and_platform_git_versions() {
+    for version in [
+      "git version 2.41.0",
+      "git version 2.46.0.windows.1",
+      "git version 3.0.0",
+    ] {
+      assert_eq!(
+        select_supported_git(vec!["git".to_string()], |_| Some(version.to_string())),
+        Some("git".to_string())
+      );
+    }
+  }
 
   #[test]
   fn extra_bin_dirs_include_user_local_bin() {
