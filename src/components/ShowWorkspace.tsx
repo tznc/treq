@@ -1122,7 +1122,8 @@ export const ShowWorkspace = ({
     : `Rebase ${branchTitle} onto ${defaultBranch} (${homeRepoTargetAheadCount} new commit${
         homeRepoTargetAheadCount === 1 ? "" : "s"
       })`;
-  const onFeatureBranch = !!workspace && workspace.branch_name !== defaultBranch;
+  const onFeatureBranch =
+    !!workspace && workspace.branch_name !== defaultBranch;
   const mergeBlocked = rebasing || conflictCount > 0;
   const mergeBlockedTooltip = rebasing
     ? "Rebasing in progress..."
@@ -1192,7 +1193,8 @@ export const ShowWorkspace = ({
           }
         : null,
       details: !!workspace,
-      more: workspace && onDeleteWorkspace ? { disabled: !!actionPending } : null,
+      more:
+        workspace && onDeleteWorkspace ? { disabled: !!actionPending } : null,
       title:
         workspace && workspaceTitle && workspaceTitle !== branchTitle
           ? workspaceTitle
@@ -1256,7 +1258,8 @@ export const ShowWorkspace = ({
   });
   // GPUI draws the header and tab row; React keeps them mounted but hidden,
   // so the parts they publish stay current.
-  const gpuiTabRow = gpuiFramed && !(reviewSubView.switcher || reviewSubView.showBrowser);
+  const gpuiTabRow =
+    gpuiFramed && !(reviewSubView.switcher || reviewSubView.showBrowser);
 
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">

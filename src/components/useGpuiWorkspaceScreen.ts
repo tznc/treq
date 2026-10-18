@@ -32,10 +32,9 @@ interface Handlers {
 
 const TABS: GpuiWorkspaceTab[] = ["overview", "commits", "changes", "logs"];
 
-type PartData<K extends PartControl> = Exclude<
-  GpuiWorkspaceHeader[K],
-  null
-> & { open?: boolean };
+type PartData<K extends PartControl> = Exclude<GpuiWorkspaceHeader[K], null> & {
+  open?: boolean;
+};
 
 /**
  * Draws ShowWorkspace's header and tab row in GPUI while `active`, with the

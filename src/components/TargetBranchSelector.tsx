@@ -42,10 +42,7 @@ export const TargetBranchSelector: React.FC<TargetBranchSelectorProps> = ({
   );
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={changeOpen}
-    >
+    <Popover open={open} onOpenChange={changeOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
