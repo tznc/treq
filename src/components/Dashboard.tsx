@@ -92,6 +92,7 @@ import { getWorkspaceTitle } from "../lib/workspace-utils";
 import {
   GITHUB_BASE_PATH,
   githubDetailPath,
+  parsePrReviewPath,
   githubListPath,
   stateFilterForPrState,
 } from "../lib/githubRoutes";
@@ -194,6 +195,7 @@ import { GitHubPanel } from "./GitHubPanel";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 import { LinearPanel } from "./LinearPanel";
 import { MergePreviewPage } from "./MergePreviewPage";
+import { PrReviewScreen } from "./github-panel/PrReviewPage";
 import { Onboarding } from "./Onboarding";
 import { PromptHistoryModal } from "./PromptHistoryModal";
 import {
@@ -309,6 +311,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [changeMovePending, setChangeMovePending] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
   const [location, navigate] = useLocation();
+  const prReviewRoute = parsePrReviewPath(location);
   const remoteSshEnabled = usePreviewFeature("remoteSsh");
   const linearIntegrationEnabled = usePreviewFeature("linearIntegration");
   const logsEnabled = usePreviewFeature("logs");
@@ -3285,7 +3288,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
 
                   {/* GitHub Panel */}
-                  {viewMode === "github" && (
+                  {viewMode === "github" && prReviewRoute && (
+                    <PrReviewScreen
+                      repoPath={dataRepoPath}
+                      prNumber={prReviewRoute.number}
+                      onClose={() =>
+                        navigate(
+                          githubDetailPath(
+                            "prs",
+                            prReviewRoute.number,
+                            prReviewRoute.filter,
+                          ),
+                        )
+                      }
+                      // A PR is usually not checked out, so its review runs in
+                      // the home repository and reads the diff through gh.
+                      onStartAgentReview={async (prompt, agent) => {
+                        await launchAgentSession({
+                          workspace: null,
+                          homeRepoPath: dataRepoPath,
+                          prompt,
+                          mode: "acceptEdits",
+                          agent: toAgentKind(agent),
+                          sessionName: "AI Review",
+                        });
+                      }}
+                    />
+                  )}
+                  {viewMode === "github" && !prReviewRoute && (
                     <GitHubPanel
                       repoPath={dataRepoPath}
                       onOpenSettings={openSettings}

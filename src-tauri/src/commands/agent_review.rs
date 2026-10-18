@@ -14,6 +14,56 @@ pub fn resolve_agent_review_comment(repo_path: String, comment_id: String) -> Re
   local_db::resolve_agent_review_comment(&repo_path, &comment_id)
 }
 
+/// Save a draft comment the user wrote on a reviewed target (a PR review).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn create_review_draft(
+  repo_path: String,
+  target_type: String,
+  target_id: String,
+  file_path: String,
+  start_line: i64,
+  end_line: i64,
+  side: Option<String>,
+  comment_text: String,
+  line_hash: Option<String>,
+) -> Result<local_db::AgentReviewComment, String> {
+  let mut comment = local_db::create_agent_review_comment(
+    &repo_path,
+    &target_type,
+    &target_id,
+    &file_path,
+    None,
+    start_line,
+    end_line,
+    side.as_deref(),
+    &comment_text,
+    None,
+    crate::review_aggregate::SOURCE_LOCAL_HUMAN,
+    None,
+  )?;
+  if let Some(hash) = line_hash.as_deref() {
+    local_db::update_agent_review_comment(&repo_path, &comment.id, None, Some(hash))?;
+    comment.line_hash = line_hash;
+  }
+  Ok(comment)
+}
+
+#[tauri::command]
+pub fn update_agent_review_comment(
+  repo_path: String,
+  comment_id: String,
+  comment_text: Option<String>,
+  line_hash: Option<String>,
+) -> Result<(), String> {
+  local_db::update_agent_review_comment(
+    &repo_path,
+    &comment_id,
+    comment_text.as_deref(),
+    line_hash.as_deref(),
+  )
+}
+
 #[tauri::command]
 pub fn delete_agent_review_comment(repo_path: String, comment_id: String) -> Result<(), String> {
   local_db::delete_agent_review_comment(&repo_path, &comment_id)

@@ -16,6 +16,8 @@ interface UseGithubReviewThreadsParams {
   allFileHunks: Map<string, FileHunksData>;
   /** Committed PR/workspace hunks shown in the Changes tab. */
   committedFileHunks?: Map<string, FileHunksData>;
+  /** A known PR; skips the remote and branch lookups (PR review screen). */
+  pr?: { owner: string; repo: string; number: number };
 }
 
 /**
@@ -29,15 +31,19 @@ export function useGithubReviewThreads({
   branchName,
   allFileHunks,
   committedFileHunks,
+  pr,
 }: UseGithubReviewThreadsParams) {
-  const { data: remoteInfo } = useGitRemoteInfo(repoPath);
-  const { data: prInfo } = usePrInfoViaGh(repoPath, branchName);
-  const repoFullName = remoteInfo?.full_name;
-  const prNumber = prInfo?.number;
-  const remoteOwner = remoteInfo?.owner;
-  const remoteRepo = remoteInfo?.repo;
+  const { data: remoteInfo } = useGitRemoteInfo(pr ? undefined : repoPath);
+  const { data: prInfo } = usePrInfoViaGh(
+    pr ? undefined : repoPath,
+    pr ? undefined : branchName,
+  );
+  const remoteOwner = pr?.owner ?? remoteInfo?.owner;
+  const remoteRepo = pr?.repo ?? remoteInfo?.repo;
+  const repoFullName = pr ? `${pr.owner}/${pr.repo}` : remoteInfo?.full_name;
+  const prNumber = pr?.number ?? prInfo?.number;
 
-  const { data: threads = [] } = useSWR<GhReviewThread[]>(
+  const { data: threads = [], mutate } = useSWR<GhReviewThread[]>(
     repoFullName != null && prNumber != null && remoteOwner && remoteRepo
       ? ["gh-pr-review-threads", repoFullName, prNumber]
       : null,
@@ -104,6 +110,7 @@ export function useGithubReviewThreads({
 
   return {
     threads,
+    refreshThreads: mutate,
     getThreadsForLine,
     getUnplacedThreadsForFile,
     collapsedThreadIds,

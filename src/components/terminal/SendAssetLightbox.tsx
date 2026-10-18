@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import useSWR from "swr";
 import { Copy, FolderOpen, X, ZoomIn, ZoomOut } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -415,7 +416,8 @@ export function SendAssetLightbox({
     </div>
   );
 
-  return (
+  // Escape the terminal's stacking context so the preview covers the sidebar.
+  return createPortal(
     <div
       data-testid="treq-send-preview-lightbox"
       data-window-modal
@@ -505,6 +507,7 @@ export function SendAssetLightbox({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </div>,
+    document.body,
   );
 }

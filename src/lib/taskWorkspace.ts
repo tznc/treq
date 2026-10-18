@@ -1,4 +1,10 @@
-import { createWorkspace, getWorkspaces, listRepoBranches } from "./api";
+import {
+  createWorkspace,
+  getRepoSetting,
+  getWorkspaces,
+  listRepoBranches,
+} from "./api";
+import { applyBranchNamePattern } from "./utils";
 import { buildCreateMetadata } from "./workspaceMetadata";
 
 /** Repo setting for the home-view "Run in a new workspace" toggle. */
@@ -26,8 +32,12 @@ function taskBranchSlug(prompt: string): string {
 export function taskBranchName(
   prompt: string,
   taken: ReadonlySet<string>,
+  pattern: string = "{name}",
 ): string {
-  const base = taskBranchSlug(prompt) || "task";
+  const base = applyBranchNamePattern(
+    pattern,
+    taskBranchSlug(prompt) || "task",
+  );
   let name = base;
   for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
   return name;
@@ -42,9 +52,10 @@ export async function createTaskWorkspace(
   prompt: string,
   title: string,
 ): Promise<number> {
-  const [workspaces, branches] = await Promise.all([
+  const [workspaces, branches, pattern] = await Promise.all([
     getWorkspaces(repoPath),
     listRepoBranches(repoPath),
+    getRepoSetting(repoPath, "branch_name_pattern"),
   ]);
   const taken = new Set([
     ...workspaces.map((ws) => ws.branch_name),
@@ -52,7 +63,7 @@ export async function createTaskWorkspace(
   ]);
   return createWorkspace(
     repoPath,
-    taskBranchName(prompt, taken),
+    taskBranchName(prompt, taken, pattern || "treq/{name}"),
     undefined,
     buildCreateMetadata({ title, description: "", sparsePaths: "" }),
   );

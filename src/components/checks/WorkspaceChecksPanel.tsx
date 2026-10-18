@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import type { RunSummary, WorkflowInfo } from "../../lib/api-types";
 import type { WorkspaceChecks } from "../../hooks/useWorkspaceChecks";
 import { ChecksStatusIcon } from "./ChecksStatusIcon";
+import { RunHistory } from "./RunHistory";
 
 interface Props {
   checks: WorkspaceChecks;
@@ -210,6 +211,9 @@ function WorkflowCard({
           );
         })}
       </div>
+      {latestRun && checks.target && (
+        <RunHistory target={checks.target} filename={wf.filename} />
+      )}
     </div>
   );
 }

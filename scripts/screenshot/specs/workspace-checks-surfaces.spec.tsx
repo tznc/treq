@@ -337,4 +337,23 @@ it("captures the Treq checks section in the GitHub PR detail panel", async () =>
       'The section header has an "Open in Logs" button.',
     ],
   });
+
+  // Past runs expand to their recorded job logs.
+  const card = within(section).getAllByTestId("workflow-card")[0];
+  await user.click(within(card).getByRole("button", { name: "Run history" }));
+  await user.click(await within(card).findByRole("button", { name: /Run #/ }));
+  await within(card).findAllByTestId("run-job-logs");
+  await waitFor(() => {
+    if (within(card).queryAllByText("No logs recorded.").length +
+        card.querySelectorAll("pre").length === 0)
+      throw new Error("logs not loaded");
+  });
+  await captureDocument(document, {
+    name: "workspace-checks-11-pr-detail-run-history",
+    scrollIntoView: '[data-testid="pr-treq-checks"]',
+    expectations: [
+      'Under the "Lint and Test" workflow, an expanded "Run history" lists a run with a green passed icon, number and timestamp.',
+      "The expanded run lists each job with a status icon and a grey monospace log block showing its output.",
+    ],
+  });
 }, 120000);

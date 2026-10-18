@@ -200,11 +200,16 @@ pub(super) fn handle_agent_review_command(
   }
 }
 
+/// A GitHub pull request, by number. Its files live on GitHub, not on disk,
+/// so `add` only checks the id and that `--file` is a relative path.
+const GITHUB_PR_TARGET_TYPE: &str = "github_pr";
+
 /// Target types the app renders review comments for. The Linear ones are
 /// validated against their snapshot instead (`linear_review`).
 const KNOWN_TARGET_TYPES: &[&str] = &[
   DEFAULT_TARGET_TYPE,
   "file_browser_file",
+  GITHUB_PR_TARGET_TYPE,
   linear_review::TARGET_LINEAR_ISSUE,
   linear_review::TARGET_LINEAR_PROJECT,
   linear_review::TARGET_LINEAR_DOCUMENT,
@@ -233,6 +238,14 @@ fn validate_add_target(
       PathBuf::from(workspace_dir)
     }
     "file_browser_file" => PathBuf::from(repo_path),
+    GITHUB_PR_TARGET_TYPE => {
+      if !target_id.trim().parse::<u64>().is_ok_and(|n| n > 0) {
+        return Err(format!(
+          "invalid_arguments: --target-id must be a pull request number, got '{target_id}'"
+        ));
+      }
+      PathBuf::new()
+    }
     other => {
       return Err(format!(
         "invalid_arguments: unknown --target-type '{other}'. Expected one of: {}",
@@ -248,6 +261,9 @@ fn validate_add_target(
     return Err(format!(
       "invalid_arguments: --file must be a relative path inside the repository, got '{file}'"
     ));
+  }
+  if target_type == GITHUB_PR_TARGET_TYPE {
+    return Ok(());
   }
   // Canonicalize so a symlink cannot point the line check outside the root.
   let resolved = match (root.join(relative).canonicalize(), root.canonicalize()) {
@@ -387,6 +403,8 @@ mod tests {
     check(DEFAULT_TARGET_TYPE, &id, "a.rs", 3, None).unwrap();
     check(DEFAULT_TARGET_TYPE, &id, "a.rs", 99, Some("old")).unwrap();
     check("file_browser_file", b, "b.rs", 1, None).unwrap();
+    // A PR's files are not on disk; only the id and path shape are checked.
+    check("github_pr", "42", "src/not_local.ts", 500, None).unwrap();
     for (target_type, target_id, file, end) in [
       ("bogus", id.as_str(), "a.rs", 1),
       (DEFAULT_TARGET_TYPE, "999", "a.rs", 1),
@@ -401,6 +419,10 @@ mod tests {
       ("file_browser_file", b, "missing.rs", 1),
       (DEFAULT_TARGET_TYPE, id.as_str(), "link.rs", 1),
       (DEFAULT_TARGET_TYPE, id.as_str(), "dir/o.rs", 1),
+      ("github_pr", "feat", "a.rs", 1),
+      ("github_pr", "0", "a.rs", 1),
+      ("github_pr", "42", "../a.rs", 1),
+      ("github_pr", "42", "/etc/passwd", 1),
     ] {
       assert!(
         check(target_type, target_id, file, end, None).is_err(),

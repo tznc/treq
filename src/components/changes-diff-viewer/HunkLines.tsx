@@ -211,7 +211,7 @@ export const HunkDiffLine: React.FC<HunkLinesProps & { lineIndex: number }> = (
       </div>
 
       {lineComments.length > 0 && actualLineNum === lineComments[0].endLine && (
-        <div className="bg-muted/60 border-y border-border/40 px-[16px] py-[8px] space-y-2">
+        <div className="bg-muted/60 border-y border-border/40 px-[16px] py-[8px] space-y-2 font-sans">
           {lineComments.map((comment) => {
             const isEditing = editingCommentId === comment.id;
 

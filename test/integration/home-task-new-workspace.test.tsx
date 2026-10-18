@@ -8,6 +8,7 @@ import {
   getRepoSetting,
   getSessions,
   getWorkspaces,
+  setRepoSetting,
 } from "../../src/lib/api";
 import { render, screen, waitFor } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
@@ -40,14 +41,35 @@ describe("home-view task input", () => {
 
     await submitTask("Fix the login redirect");
 
-    await findGpuiRow("fix-the-login-redirect");
+    await findGpuiRow("treq/fix-the-login-redirect");
     await waitFor(async () => {
       const workspace = (await getWorkspaces(repoPath)).find(
-        (ws) => ws.branch_name === "fix-the-login-redirect",
+        (ws) => ws.branch_name === "treq/fix-the-login-redirect",
       );
       const sessions = await getSessions(repoPath);
       expect(workspace).toBeDefined();
       expect(sessions.map((s) => s.workspace_id)).toEqual([workspace?.id]);
+    });
+  });
+
+  it("applies the configured branch pattern and avoids prefixed name collisions", async () => {
+    await setRepoSetting(repoPath, "branch_name_pattern", "team/{name}");
+    await createWorkspace(repoPath, "team/fix-bug");
+    await createWorkspace(repoPath, "team/fix-bug-2");
+    render(<Dashboard />);
+    await findToggle();
+
+    await submitTask("Fix bug");
+
+    await findGpuiRow("team/fix-bug-3");
+    await waitFor(async () => {
+      const workspace = (await getWorkspaces(repoPath)).find(
+        (ws) => ws.branch_name === "team/fix-bug-3",
+      );
+      expect(workspace).toBeDefined();
+      expect((await getSessions(repoPath)).map((s) => s.workspace_id)).toEqual([
+        workspace?.id,
+      ]);
     });
   });
 

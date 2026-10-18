@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -9,6 +9,14 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { GhReviewThread } from "../../lib/api-types";
 import { SelectionQuoteToolbar } from "./SelectionQuoteToolbar";
+
+/**
+ * Posts a reply to a GitHub review thread. Provided only by screens that can
+ * write to the PR (the PR review screen); without it threads stay read-only.
+ */
+export const GithubThreadReplyContext = createContext<
+  ((threadId: string, body: string) => Promise<void>) | null
+>(null);
 
 export interface GithubQuote {
   text: string;
@@ -150,8 +158,76 @@ export function GithubCommentCard({
               onQuote={onQuote}
             />
           ))}
+          <ThreadReply threadId={thread.id} />
         </div>
       )}
+    </div>
+  );
+}
+
+function ThreadReply({ threadId }: { threadId: string }) {
+  const reply = useContext(GithubThreadReplyContext);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!reply) return null;
+
+  if (!open) {
+    return (
+      <button
+        className="text-xs text-muted-foreground hover:text-foreground font-sans"
+        onClick={() => setOpen(true)}
+      >
+        Reply
+      </button>
+    );
+  }
+
+  const send = async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    setError(null);
+    try {
+      await reply(threadId, text.trim());
+      setText("");
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5 font-sans">
+      <textarea
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
+          if (e.key === "Escape") setOpen(false);
+        }}
+        placeholder="Reply on GitHub…"
+        className="w-full min-h-[60px] rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <button
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setOpen(false)}
+        >
+          Cancel
+        </button>
+        <button
+          className="text-xs rounded bg-primary text-primary-foreground px-2 py-1 disabled:opacity-50"
+          disabled={sending || !text.trim()}
+          onClick={() => void send()}
+        >
+          Send reply
+        </button>
+      </div>
     </div>
   );
 }

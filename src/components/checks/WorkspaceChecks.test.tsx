@@ -20,6 +20,7 @@ vi.mock("../../lib/api", async () => {
     trustRepo: vi.fn(),
     listWorkflows: vi.fn(),
     listWorkflowRuns: vi.fn(),
+    getRunLogs: vi.fn(),
     getWorkspaceSetupStatus: vi.fn(),
     runWorkflow: vi.fn(),
     runWorkflowJob: vi.fn(),
@@ -89,6 +90,21 @@ beforeEach(() => {
 });
 
 describe("WorkspaceChecksPanel", () => {
+  it("shows the logs of a past run from run history", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getRunLogs).mockResolvedValue([
+      { body: "1 test failed", stream: "stderr" },
+    ] as Awaited<ReturnType<typeof api.getRunLogs>>);
+    render(<Harness />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Run history" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Run #9" }));
+    expect(await screen.findByText("[stderr] 1 test failed")).toBeTruthy();
+    expect(api.getRunLogs).toHaveBeenCalledWith("/repo", 9, "test");
+  });
+
   it("shows latest status and re-runs workflows and jobs", async () => {
     const user = userEvent.setup();
     vi.mocked(api.runWorkflowJob).mockResolvedValue({

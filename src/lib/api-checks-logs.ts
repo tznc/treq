@@ -81,6 +81,24 @@ export const listWorkflowRuns = async (
   });
 };
 
+export const getRunLogs = async (
+  repoPath: string,
+  runId: number,
+  jobId: string,
+): Promise<LogRecordView[]> => {
+  assertLocalOperation(repoPath, CHECKS_AND_LOGS);
+  return invoke("get_run_logs", {
+    repoPath,
+    runId,
+    jobId,
+    levels: null,
+    search: null,
+    stepIndex: null,
+    limit: null,
+    offset: null,
+  });
+};
+
 export const getWorkspaceSetupStatus = async (
   repoPath: string,
   workspaceId: number,

@@ -6,6 +6,7 @@ import type { GhReviewThread } from "../../lib/api-types";
 import {
   formatGithubCommentDate,
   GithubCommentCard,
+  GithubThreadReplyContext,
 } from "./GithubCommentCard";
 
 function thread(overrides: Partial<GhReviewThread> = {}): GhReviewThread {
@@ -190,5 +191,40 @@ describe("GithubCommentCard", () => {
     expect(
       within(toggle).getByRole("link", { name: "@reviewer-bot" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("GithubCommentCard replies", () => {
+  it("has no reply box without a reply handler", () => {
+    render(
+      <GithubCommentCard
+        thread={thread()}
+        collapsed={false}
+        onToggleCollapse={() => {}}
+        onQuote={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+  });
+
+  it("posts a reply to the thread and clears the box", async () => {
+    const user = userEvent.setup();
+    const reply = vi.fn().mockResolvedValue(undefined);
+    render(
+      <GithubThreadReplyContext.Provider value={reply}>
+        <GithubCommentCard
+          thread={thread()}
+          collapsed={false}
+          onToggleCollapse={() => {}}
+          onQuote={() => {}}
+        />
+      </GithubThreadReplyContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Reply" }));
+    const box = screen.getByPlaceholderText("Reply on GitHub…");
+    await user.type(box, "Done, renamed.");
+    await user.click(screen.getByRole("button", { name: "Send reply" }));
+    expect(reply).toHaveBeenCalledWith("PRRT_1", "Done, renamed.");
+    expect(screen.queryByPlaceholderText("Reply on GitHub…")).toBeNull();
   });
 });
