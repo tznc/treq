@@ -64,7 +64,6 @@ describe("GPUI onboarding screen", () => {
     expect(tool(snapshot, "gh")?.note).toBe(
       "Needed for pull requests and issues",
     );
-    // An agent is installed, so the agent group is not flagged.
     expect(snapshot.checklist.groups[1].error).toBe(false);
     expect(snapshot.remoteLabel).toBeTruthy();
   });

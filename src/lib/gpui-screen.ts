@@ -28,7 +28,7 @@ export interface GpuiChecklist {
 }
 
 /** One `<option>` of a `<select>`. */
-export interface GpuiSelectOption {
+interface GpuiSelectOption {
   value: string;
   label: string;
 }
@@ -41,7 +41,7 @@ export type GpuiSettingsTab =
   | "skills"
   | "preview";
 
-export interface GpuiApplicationSettings {
+interface GpuiApplicationSettings {
   theme: string;
   themeOptions: GpuiSelectOption[];
   zoom: number;
@@ -101,7 +101,7 @@ export interface GpuiPreviewSettings {
   features: { id: string; title: string; checked: boolean }[];
 }
 
-export interface GpuiSettingsScreen {
+interface GpuiSettingsScreen {
   kind: "settings";
   tab: GpuiSettingsTab;
   /** Visible tabs, in order. */
@@ -139,7 +139,7 @@ export type GpuiScreenAction =
 const GPUI_SCREEN_ACTION_EVENT = "gpui-screen-action";
 
 /** Push a screen to GPUI; null shows the webview. Failures are logged, not thrown. */
-export async function updateGpuiScreen(
+async function updateGpuiScreen(
   snapshot: GpuiScreenSnapshot | null,
 ): Promise<void> {
   try {
@@ -150,7 +150,7 @@ export async function updateGpuiScreen(
 }
 
 /** Listen for GPUI screen clicks sent to this webview window only. */
-export function listenGpuiScreenActions(
+function listenGpuiScreenActions(
   handler: (action: GpuiScreenAction) => void,
 ): Promise<() => void> {
   return getCurrentWebviewWindow().listen<GpuiScreenAction>(
