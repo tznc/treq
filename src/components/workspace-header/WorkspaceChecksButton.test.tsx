@@ -59,7 +59,10 @@ describe("WorkspaceChecksButton GitHub checks", () => {
 
     renderButton();
 
-    expect(await screen.findByText("GH 2/2")).toBeInTheDocument();
+    expect(await screen.findByText("2/2")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-checks-button")).toHaveTextContent(
+      /^2\/2$/,
+    );
     expect(
       screen.getByRole("button", { name: "Checks: GitHub 2/2" }),
     ).toBeInTheDocument();
@@ -83,7 +86,7 @@ describe("WorkspaceChecksButton GitHub checks", () => {
 
     expect(
       await screen.findByTestId("workspace-checks-button"),
-    ).toHaveTextContent("GH 1/2");
+    ).toHaveTextContent(/^1\/2$/);
     expect(screen.getByTestId("run-status-failed")).toBeInTheDocument();
   });
 
