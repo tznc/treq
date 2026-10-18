@@ -45,6 +45,9 @@ use sidebar::{Sidebar, SidebarAction};
 /// Set on `window` in the webview so the React app knows GPUI hosts it.
 const HOSTED_FLAG_SCRIPT: &str = "window.__TREQ_GPUI_SHELL__ = true;";
 
+/// Tells React that `TREQ_WEB_UI` keeps its screens, so it draws them whole.
+const WEB_UI_FLAG_SCRIPT: &str = "window.__TREQ_WEB_UI__ = true;";
+
 /// tauri-plugin-gpui stacks the webview above GPUI with an X11 child window
 /// on Linux, so a Wayland session runs GTK through XWayland. Call before GTK
 /// starts, while the process is still single-threaded.
@@ -181,7 +184,12 @@ pub fn open_window(
   // Same label as the window; see the module docs.
   let webview = window.add_child(
     WebviewBuilder::new(label, WebviewUrl::App(url.into()))
-      .initialization_script(HOSTED_FLAG_SCRIPT),
+      .initialization_script(HOSTED_FLAG_SCRIPT)
+      .initialization_script(if std::env::var_os(screen::WEB_UI_ENV).is_some() {
+        WEB_UI_FLAG_SCRIPT
+      } else {
+        ""
+      }),
     LogicalPosition::new(0., 0.),
     LogicalSize::new(1., 1.),
   )?;
@@ -249,14 +257,21 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| match snapshot {
-      None => shell.screen = None,
+      None => {
+        // A tooltip the screen showed would outlive it.
+        if shell.screen.take().is_some() {
+          defer_main(&shell.app, |_| popup::hide_tooltip());
+        }
+      }
       Some(snapshot) => {
         theme::set_kit_dark(snapshot.dark, cx);
         match &shell.screen {
           Some(screen) => screen.update(cx, |screen, cx| screen.set_snapshot(snapshot, cx)),
           None => {
             let sink = screen_sink(shell.app.clone(), shell.label.to_string());
-            shell.screen = Some(cx.new(|_| Screen::new(snapshot, sink)));
+            let popups = popup_sink(shell.app.clone(), shell.label.to_string());
+            let webview = shell.webview.clone();
+            shell.screen = Some(cx.new(|_| Screen::new(snapshot, sink, popups, webview)));
           }
         }
       }
@@ -331,6 +346,24 @@ fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
 pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
   let label = label.to_string();
   defer_main(app, move |app| {
+    // A screen's dropdown button asked React for this menu.
+    if let Some(anchor) = popup::take_dropdown_anchor() {
+      let dark = tauri_plugin_gpui::with_app({
+        let label = label.clone();
+        move |cx| {
+          let screen = cx
+            .try_global::<Shells>()
+            .and_then(|shells| shells.0.get(&label))
+            .and_then(WeakEntity::upgrade)
+            .and_then(|shell| shell.read(cx).screen.clone())?;
+          Some(screen.read(cx).snapshot().dark)
+        }
+      });
+      if let Ok(Some(dark)) = dark {
+        popup::show_dropdown(app, &label, entries, anchor, dark);
+        return;
+      }
+    }
     let anchor = tauri_plugin_gpui::with_app({
       let label = label.clone();
       move |cx| {

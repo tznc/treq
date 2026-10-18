@@ -108,13 +108,13 @@ describe("GPUI settings screen", () => {
     ).toHaveAttribute("data-state", "active");
   });
 
-  it("closes back to the previous page", async () => {
+  it("closes back to the workspace view", async () => {
     render(<Dashboard />);
     await openGpuiSettings();
     await findGpuiScreen("settings");
 
     sendGpuiScreenAction({ kind: "press", id: "settings.close" });
-    await waitFor(() => expect(gpuiScreen()).toBeNull());
+    await findGpuiScreen("workspace");
     expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
   });
 });

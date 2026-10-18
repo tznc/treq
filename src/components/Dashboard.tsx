@@ -1141,6 +1141,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const terminalPaneRef = useRef<WorkspaceTerminalPaneHandle>(null);
+  const [terminalMaximized, setTerminalMaximized] = useState(false);
 
   const { addToast } = useToast();
   const handleReturnToDashboard = () => {
@@ -3145,6 +3146,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             );
                           }}
                           onViewFullPrompt={handleViewFullPrompt}
+                          gpuiActive={
+                            isSessionView &&
+                            !isRemoteActive &&
+                            !terminalMaximized
+                          }
                         />
                       </ErrorBoundary>
                     </div>
@@ -3168,6 +3174,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     }
                     workspaceBranchByPath={workspaceBranchByPath}
                     onTerminalsChange={setTerminalSessionSummaries}
+                    onMaximizedChange={setTerminalMaximized}
                     resolveRemoteShell={
                       isRemoteActive ? resolveRemoteShell : undefined
                     }

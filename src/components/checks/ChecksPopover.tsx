@@ -5,6 +5,7 @@ import type { ChecksSummary } from "../../lib/checks-summary";
 import { ciStatusStyle } from "../../lib/ci-status";
 import type { WorkspaceChecks } from "../../hooks/useWorkspaceChecks";
 import { cn } from "../../lib/utils";
+import { useGpuiPart } from "../../lib/gpui-parts";
 import { CiChecksList } from "../CiStatusButton";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -62,9 +63,24 @@ export function ChecksPopover({
   const { summary } = checks;
   const ci = ciStatus && ciStatus.total > 0 ? ciStatus : null;
   const hasTreq = summary.state !== "none";
+  const status = combinedStatus(summary, ci);
+  // While it is open, the screen hands the header back to React to draw it.
+  useGpuiPart(
+    "checks",
+    hasTreq || ci
+      ? {
+          open,
+          status: status ?? null,
+          treq: hasTreq ? treqLabel(summary) : null,
+          github: ci
+            ? { label: `GH ${ci.passed}/${ci.total}`, state: ci.state }
+            : null,
+        }
+      : null,
+    { open: () => setOpen(true) },
+  );
   if (!hasTreq && !ci) return null;
 
-  const status = combinedStatus(summary, ci);
   const parts = [
     hasTreq && `Treq ${treqLabel(summary)}`,
     ci && `GitHub ${ci.passed}/${ci.total}`,

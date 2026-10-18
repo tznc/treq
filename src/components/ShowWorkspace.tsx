@@ -106,6 +106,9 @@ import {
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { WorkspaceDescription } from "./WorkspaceDescription";
+import { useGpuiWorkspaceScreen } from "./useGpuiWorkspaceScreen";
+import { GpuiPartsProvider, useGpuiPartsHost } from "../lib/gpui-parts";
+import type { GpuiPillTone, GpuiWorkspaceTab } from "../lib/gpui-screen";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import {
@@ -171,6 +174,11 @@ interface ShowWorkspaceProps {
   availableBranches?: BranchListItem[];
   branchesLoading?: boolean;
   onLoadAvailableBranches?: () => void | Promise<void>;
+  /**
+   * Under the GPUI shell, draw the header and tab row in GPUI. Off while
+   * another page covers the workspace or the terminal pane fills it.
+   */
+  gpuiActive?: boolean;
 }
 
 const StatusPip = ({ status }: { status?: string }) =>
@@ -224,6 +232,7 @@ export const ShowWorkspace = ({
   availableBranches = [],
   branchesLoading = false,
   onLoadAvailableBranches,
+  gpuiActive = false,
 }: ShowWorkspaceProps) => {
   const workingDirectory = workspace
     ? getFullWorkspacePath(workspace)
@@ -233,6 +242,8 @@ export const ShowWorkspace = ({
 
   const { addToast } = useToast();
   const logsEnabled = usePreviewFeature("logs");
+  const linearEnabled = usePreviewFeature("linearIntegration");
+  const gpuiParts = useGpuiPartsHost();
   const checksTarget = checksTargetOf(workspace);
   const { fontSize } = useTerminalSettingsStore();
 
@@ -1102,11 +1113,159 @@ export const ShowWorkspace = ({
   const handleStartAgentReview = (prompt: string, agent?: string) =>
     createAgentWithReview(prompt, "acceptEdits", "AI Review", agent);
 
+  // Display branch name as title: workspace branch if available, otherwise main repo branch
+  const branchTitle = workspace?.branch_name || mainRepoBranch || "main";
+  const hasSyncChanges =
+    !!syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0);
+  const homeRebaseTooltip = homeRebasing
+    ? "Rebasing..."
+    : `Rebase ${branchTitle} onto ${defaultBranch} (${homeRepoTargetAheadCount} new commit${
+        homeRepoTargetAheadCount === 1 ? "" : "s"
+      })`;
+  const onFeatureBranch = !!workspace && workspace.branch_name !== defaultBranch;
+  const mergeBlocked = rebasing || conflictCount > 0;
+  const mergeBlockedTooltip = rebasing
+    ? "Rebasing in progress..."
+    : `Cannot merge: ${conflictCount} conflict${
+        conflictCount === 1 ? "" : "s"
+      } detected`;
+  const pillTone = (tone: string): GpuiPillTone =>
+    tone === "conflict" || tone === "uncommitted" ? tone : "muted";
+  const gpuiFramed = useGpuiWorkspaceScreen({
+    active: gpuiActive && !!workingDirectory,
+    parts: gpuiParts,
+    detailsOpen,
+    header: {
+      branch: branchTitle,
+      home: !workspace,
+      linear:
+        workspace &&
+        linearEnabled &&
+        workspaceMetadata?.linear_issue_key &&
+        workspaceMetadata.linear_issue_url
+          ? {
+              key: workspaceMetadata.linear_issue_key,
+              url: workspaceMetadata.linear_issue_url,
+              title: workspaceMetadata.linear_issue_title ?? null,
+            }
+          : null,
+      homeTarget:
+        !workspace && branchTitle !== defaultBranch
+          ? {
+              branch: defaultBranch,
+              rebase:
+                homeRepoTargetAheadCount > 0
+                  ? {
+                      tooltip: homeRebaseTooltip,
+                      rebasing: homeRebasing,
+                      conflicts: homeRebaseDryRun?.would_conflict
+                        ? homeRebaseDryRun.conflicted_files
+                        : null,
+                    }
+                  : null,
+            }
+          : null,
+      stack:
+        !workspace && onCreateStackedWorkspace
+          ? { tooltip: `Create stacked workspace from ${branchTitle}` }
+          : null,
+      push:
+        workspace?.not_on_remote &&
+        (!remoteInfo || workspace.branch_name === defaultBranch)
+          ? { disabled: !!actionPending }
+          : null,
+      statusLoading: workspaceStatusPending,
+      sync:
+        (!workspace || !workspace.not_on_remote) && hasSyncChanges
+          ? {
+              ahead: syncStatus.ahead,
+              behind: syncStatus.behind,
+              disabled: !!actionPending,
+              spinning: actionPending === "sync",
+            }
+          : null,
+      merge: onFeatureBranch
+        ? {
+            passing: ciAllPassing,
+            disabled: mergeBlocked,
+            tooltip: mergeBlocked ? mergeBlockedTooltip : null,
+          }
+        : null,
+      details: !!workspace,
+      more: workspace && onDeleteWorkspace ? { disabled: !!actionPending } : null,
+      title:
+        workspace && workspaceTitle && workspaceTitle !== branchTitle
+          ? workspaceTitle
+          : null,
+      shows: {
+        target: onFeatureBranch,
+        viewPr: onFeatureBranch && !!effectiveRepoPath,
+        createPr: onFeatureBranch && !!effectiveRepoPath,
+        checks: !!checksTarget,
+        mergeQueue: onFeatureBranch && !workspace?.not_on_remote,
+      },
+    },
+    // The Browser view's switcher and address bar live in the tab row.
+    tabRow:
+      reviewSubView.switcher || reviewSubView.showBrowser
+        ? null
+        : {
+            tab: activeTab as GpuiWorkspaceTab,
+            commits:
+              commitsTabLabel?.kind === "count"
+                ? {
+                    kind: "count",
+                    count: commitsTabLabel.count,
+                    tone: pillTone(commitsTabLabel.tone),
+                  }
+                : commitsTabLabel,
+            changes: reviewTabPill && {
+              count: reviewTabPill.count,
+              tone: pillTone(reviewTabPill.tone),
+            },
+            logs: logsEnabled,
+            busy: rebasing
+              ? "Rebasing..."
+              : refreshingFiles
+                ? "Refreshing..."
+                : null,
+            loc:
+              workspaceLocStats &&
+              (workspaceLocStats.insertions > 0 ||
+                workspaceLocStats.deletions > 0)
+                ? {
+                    insertions: workspaceLocStats.insertions,
+                    deletions: workspaceLocStats.deletions,
+                  }
+                : null,
+          },
+    handlers: {
+      setTab: setActiveTab,
+      openBranchSwitcher: onOpenBranchSwitcher,
+      homeRebase: () => void handleHomeRebase(),
+      stack: onCreateStackedWorkspace,
+      push: () => void handlePushToRemote(),
+      sync: () => void handleSync(),
+      merge: onOpenMergePreview,
+      openDetails: () => setDetailsOpen(true),
+      deleteWorkspace:
+        workspace && onDeleteWorkspace
+          ? () => onDeleteWorkspace(workspace)
+          : undefined,
+    },
+  });
+  // GPUI draws the header and tab row; React keeps them mounted but hidden,
+  // so the parts they publish stay current.
+  const gpuiTabRow = gpuiFramed && !(reviewSubView.switcher || reviewSubView.showBrowser);
+
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">
       <div
         data-testid="workspace-tab-row"
-        className="flex-shrink-0 bg-background px-4 py-2 border-b border-border flex items-center gap-3"
+        className={cn(
+          "flex-shrink-0 bg-background px-4 py-2 border-b border-border flex items-center gap-3",
+          gpuiTabRow && "hidden",
+        )}
       >
         <div className="flex items-center gap-2 flex-shrink-0">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1490,16 +1649,14 @@ export const ShowWorkspace = ({
     </div>
   );
 
-  // Display branch name as title: workspace branch if available, otherwise main repo branch
-  const branchTitle = workspace?.branch_name || mainRepoBranch || "main";
-  const hasSyncChanges =
-    !!syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0);
-
   return (
-    <>
+    <GpuiPartsProvider registry={gpuiParts.registry}>
       <div className="h-full w-full flex flex-col bg-background">
         <div
-          className="border-b p-2 flex flex-col gap-1 flex-shrink-0"
+          className={cn(
+            "border-b p-2 flex flex-col gap-1 flex-shrink-0",
+            gpuiFramed && "hidden",
+          )}
           data-testid="show-workspace-header"
         >
           {/* Row 1: Branch name. Wraps so the actions drop to a second row
@@ -1605,11 +1762,7 @@ export const ShowWorkspace = ({
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {homeRebasing
-                                  ? "Rebasing..."
-                                  : `Rebase ${branchTitle} onto ${defaultBranch} (${homeRepoTargetAheadCount} new commit${
-                                      homeRepoTargetAheadCount === 1 ? "" : "s"
-                                    })`}
+                                {homeRebaseTooltip}
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -1793,14 +1946,8 @@ export const ShowWorkspace = ({
                         </Button>
                       </div>
                     </TooltipTrigger>
-                    {(rebasing || conflictCount > 0) && (
-                      <TooltipContent>
-                        {rebasing
-                          ? "Rebasing in progress..."
-                          : `Cannot merge: ${conflictCount} conflict${
-                              conflictCount === 1 ? "" : "s"
-                            } detected`}
-                      </TooltipContent>
+                    {mergeBlocked && (
+                      <TooltipContent>{mergeBlockedTooltip}</TooltipContent>
                     )}
                   </Tooltip>
                 </TooltipProvider>
@@ -1942,6 +2089,6 @@ export const ShowWorkspace = ({
           </div>
         </div>
       </div>
-    </>
+    </GpuiPartsProvider>
   );
 };

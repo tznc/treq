@@ -12,6 +12,8 @@ import type { FlattenedWorkspaceNode } from "./workspace-tree";
 declare global {
   interface Window {
     __TREQ_GPUI_SHELL__?: boolean;
+    /** `TREQ_WEB_UI` is set: React draws every screen, for comparison. */
+    __TREQ_WEB_UI__?: boolean;
   }
 }
 

@@ -6,6 +6,7 @@ import {
   useMergeQueueStatus,
 } from "../../hooks/useMergeQueueStatus";
 import { FEATURES } from "../../lib/features";
+import { useGpuiPart } from "../../lib/gpui-parts";
 import { isProRequiredError } from "../../lib/pro-required";
 import { WEB_URL } from "../../lib/supabase";
 import { Button } from "../ui/button";
@@ -45,12 +46,33 @@ const MergeQueueButtonInner = ({
   const { data: queueEnabled } = useMergeQueueEnabled(repoPath);
   const { data: queueStatus } = useMergeQueueStatus(repoPath, branchName);
   const { enqueue, dequeue } = useEnqueueWorkspace(repoPath, branchName);
-  if (queueEnabled !== true) return null;
 
   const isInQueue =
     !!queueStatus && !INACTIVE_STATUSES.includes(queueStatus.status);
+  const tooltip = queueStatus
+    ? queueStatus.status === "merged"
+      ? "Merged via queue"
+      : queueStatus.status === "failed"
+        ? `Failed: ${queueStatus.failure_reason ?? "unknown"}`
+        : `In merge queue at position ${queueStatus.position}`
+    : "Add this branch to the merge queue";
+  const secondary = !!queueStatus && queueStatus.status !== "dequeued";
+  const disabled = enqueue.isPending || dequeue.isPending;
+  useGpuiPart(
+    "mergeQueue",
+    queueEnabled === true
+      ? {
+          label: isInQueue ? "Queued" : "Add to Queue",
+          secondary,
+          disabled,
+          tooltip,
+        }
+      : null,
+    { press: () => void handleClick() },
+  );
+  if (queueEnabled !== true) return null;
 
-  const handleClick = async () => {
+  async function handleClick() {
     try {
       if (isInQueue) {
         await dequeue.mutateAsync();
@@ -77,36 +99,24 @@ const MergeQueueButtonInner = ({
         type: "error",
       });
     }
-  };
+  }
 
   return (
     <TooltipProvider delay={200}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            variant={
-              queueStatus && queueStatus.status !== "dequeued"
-                ? "secondary"
-                : "outline"
-            }
+            variant={secondary ? "secondary" : "outline"}
             size="sm"
             className="gap-1"
-            disabled={enqueue.isPending || dequeue.isPending}
+            disabled={disabled}
             onClick={handleClick}
           >
             <GitMerge className="w-4 h-4" />
             {isInQueue ? "Queued" : "Add to Queue"}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>
-          {queueStatus
-            ? queueStatus.status === "merged"
-              ? "Merged via queue"
-              : queueStatus.status === "failed"
-                ? `Failed: ${queueStatus.failure_reason ?? "unknown"}`
-                : `In merge queue at position ${queueStatus.position}`
-            : "Add this branch to the merge queue"}
-        </TooltipContent>
+        <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

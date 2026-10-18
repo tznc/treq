@@ -19,7 +19,8 @@ impl Harness {
       Rc::new(move |action, _| sent.borrow_mut().push(action))
     };
     cx.update(crate::gpui_shell::theme::init);
-    let (screen, cx) = cx.add_window_view(|_, _| Screen::new(snapshot, sink));
+    let popups: crate::gpui_shell::popup::PopupSink = Rc::new(|_, _| {});
+    let (screen, cx) = cx.add_window_view(|_, _| Screen::new(snapshot, sink, popups, None));
     let cx = cx.clone();
     Self { cx, screen, sent }
   }
@@ -260,4 +261,143 @@ fn settings_fields_are_as_tall_as_react_ones(cx: &mut TestAppContext) {
     let bounds = h.cx.debug_bounds(selector).expect("drawn");
     assert_eq!(bounds.size.height, gpui::px(40.), "{selector}");
   }
+}
+
+const WORKSPACE_JSON: &str = r#"{
+  "kind": "workspace",
+  "dark": false,
+  "header": {
+    "branch": "feature/login",
+    "home": false,
+    "linear": {"key": "ENG-12", "url": "https://linear.app/t/ENG-12", "title": "Login"},
+    "target": {"branch": "main", "loading": false, "disabled": false},
+    "homeTarget": null,
+    "stack": null,
+    "push": null,
+    "viewPr": {"number": 42, "state": "OPEN", "draft": false},
+    "createPr": null,
+    "statusLoading": false,
+    "sync": {"ahead": 2, "behind": 0, "disabled": false, "spinning": false},
+    "checks": {"status": "passed", "treq": "3/3", "github": {"label": "GH 4/4", "state": "success"}},
+    "mergeQueue": null,
+    "merge": {"passing": true, "disabled": false, "tooltip": null},
+    "details": true,
+    "more": {"disabled": false},
+    "title": "Add login"
+  },
+  "tabRow": {
+    "tab": "overview",
+    "commits": {"kind": "count", "count": 3, "tone": "muted"},
+    "changes": {"count": 5, "tone": "uncommitted"},
+    "logs": false,
+    "busy": null,
+    "loc": {"insertions": 12, "deletions": 4}
+  }
+}"#;
+
+fn workspace() -> ScreenSnapshot {
+  serde_json::from_str(WORKSPACE_JSON).expect("workspace snapshot")
+}
+
+/// The workspace screen in a window as wide as the app's default.
+fn workspace_harness(cx: &mut TestAppContext) -> Harness {
+  let h = Harness::new(cx, workspace());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  h
+}
+
+fn press(id: &str) -> ScreenAction {
+  ScreenAction::Press { id: id.into() }
+}
+
+#[gpui::test]
+fn workspace_header_sends_its_actions(cx: &mut TestAppContext) {
+  let mut h = workspace_harness(cx);
+  for selector in [
+    "workspace-target",
+    "workspace-view-pr",
+    "workspace-view-pr-web",
+    "workspace-sync",
+    "workspace-checks",
+    "workspace-merge",
+    "workspace-details",
+    "workspace-more",
+  ] {
+    h.click(selector);
+  }
+  h.click("workspace-linear");
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("workspace.target"),
+      press("workspace.viewPr"),
+      press("workspace.viewPrWeb"),
+      press("workspace.sync"),
+      press("workspace.checks"),
+      press("workspace.merge"),
+      press("workspace.details"),
+      press("workspace.more"),
+      ScreenAction::OpenUrl {
+        url: "https://linear.app/t/ENG-12".into()
+      },
+    ]
+  );
+}
+
+#[gpui::test]
+fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
+  let mut h = workspace_harness(cx);
+  assert!(h.drawn("commits-tab-count"));
+  assert!(h.drawn("review-change-count"));
+  assert!(h.drawn("loc-diff-marker"));
+  assert!(!h.drawn("workspace-tab-logs"));
+  h.click("workspace-tab-changes");
+  assert_eq!(h.sent(), vec![field("workspace.tab", "changes".into())]);
+}
+
+#[gpui::test]
+fn workspace_leaves_the_tab_row_to_react_without_one(cx: &mut TestAppContext) {
+  let mut h = workspace_harness(cx);
+  assert!(h.drawn("workspace-tab-row"));
+  h.update(|s| match &mut s.view {
+    View::Workspace(w) => w.tab_row = None,
+    _ => unreachable!(),
+  });
+  assert!(!h.drawn("workspace-tab-row"));
+  assert!(h.drawn("workspace-header"));
+  assert!(h.drawn("workspace-frame"));
+}
+
+#[gpui::test]
+fn workspace_frame_fills_the_space_below(cx: &mut TestAppContext) {
+  let mut h = workspace_harness(cx);
+  h.cx.run_until_parked();
+  let header = h.cx.debug_bounds("workspace-header").expect("header");
+  let row = h.cx.debug_bounds("workspace-tab-row").expect("tab row");
+  let frame = h.cx.debug_bounds("workspace-frame").expect("frame");
+  assert_eq!(row.top(), header.bottom());
+  assert_eq!(frame.top(), row.bottom());
+  assert!(frame.size.height > gpui::px(100.));
+}
+
+#[gpui::test]
+fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
+  let mut h = workspace_harness(cx);
+  h.update(|s| match &mut s.view {
+    View::Workspace(w) => {
+      w.header.home = true;
+      w.header.target = None;
+      w.header.stack = Some(workspace::Tooltip {
+        tooltip: "Create stacked workspace from main".into(),
+      });
+    }
+    _ => unreachable!(),
+  });
+  h.click("workspace-branch");
+  h.click("workspace-stack");
+  assert_eq!(
+    h.sent(),
+    vec![press("workspace.branchSwitcher"), press("workspace.stack")]
+  );
 }

@@ -100,6 +100,7 @@ pub struct Button {
   children: Vec<gpui::AnyElement>,
   on_click: Option<OnClick>,
   style: StyleRefinement,
+  hover_bg: Option<Hsla>,
 }
 
 impl Button {
@@ -113,7 +114,14 @@ impl Button {
       children: Vec::new(),
       on_click: None,
       style: StyleRefinement::default(),
+      hover_bg: None,
     }
+  }
+
+  /// The background on hover, in place of the variant's (`hover:bg-…`).
+  pub fn hover_bg(mut self, color: Hsla) -> Self {
+    self.hover_bg = Some(color);
+    self
   }
 
   pub fn variant(mut self, variant: Variant) -> Self {
@@ -197,34 +205,37 @@ impl RenderOnce for Button {
     };
     let disabled = self.disabled;
     let base = match self.variant {
-      Variant::Default => base
-        .bg(p.primary)
-        .shadow_sm()
-        .when(!disabled, |b| b.hover(|s| s.bg(p.primary.opacity(0.85)))),
-      Variant::Destructive => base.bg(p.destructive).shadow_sm().when(!disabled, |b| {
-        b.hover(|s| s.bg(p.destructive.opacity(0.85)))
-      }),
-      Variant::Ghost => base.when(!disabled, |b| b.hover(|s| s.bg(p.accent))),
-      // GPUI has no text decoration on hover for a whole subtree, so the
-      // link keeps its color and only underlines its text.
-      Variant::Link => base.when(!disabled, |b| b.hover(|s| s.underline())),
-      Variant::Outline => base
-        .border_1()
-        .border_color(p.input)
-        .bg(p.background)
-        .when(!disabled, |b| b.hover(|s| s.bg(p.accent))),
-      Variant::Secondary => base
-        .bg(p.secondary)
-        .when(!disabled, |b| b.hover(|s| s.bg(p.secondary.opacity(0.7)))),
+      Variant::Default => base.bg(p.primary).shadow_sm(),
+      Variant::Destructive => base.bg(p.destructive).shadow_sm(),
+      Variant::Ghost | Variant::Link => base,
+      Variant::Outline => base.border_1().border_color(p.input).bg(p.background),
+      Variant::Secondary => base.bg(p.secondary),
     };
+    let hover_bg = self.hover_bg.or(match self.variant {
+      Variant::Default => Some(p.primary.opacity(0.85)),
+      Variant::Destructive => Some(p.destructive.opacity(0.85)),
+      Variant::Ghost | Variant::Outline => Some(p.accent),
+      Variant::Link => None,
+      Variant::Secondary => Some(p.secondary.opacity(0.7)),
+    });
+    let link = self.variant == Variant::Link;
     let selector = self.id.to_string();
     let mut el = base.id(self.id).debug_selector(move || selector);
     el.style().refine(&self.style);
-    el.when(disabled, |b| b.opacity(0.4))
-      .when_some(self.on_click.filter(|_| !disabled), |b, f| {
-        b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
+    // GPUI has no text decoration on hover for a whole subtree, so a link
+    // keeps its color and only underlines its text.
+    el.when(!disabled, |b| {
+      b.hover(move |s| match hover_bg {
+        Some(bg) => s.bg(bg),
+        None if link => s.underline(),
+        None => s,
       })
-      .children(self.children)
+    })
+    .when(disabled, |b| b.opacity(0.4))
+    .when_some(self.on_click.filter(|_| !disabled), |b, f| {
+      b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
+    })
+    .children(self.children)
   }
 }
 

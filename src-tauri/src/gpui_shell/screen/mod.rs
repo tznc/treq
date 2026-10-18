@@ -13,13 +13,15 @@
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
+use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
 
-use super::theme;
+use super::{popup::PopupSink, theme};
 
 pub(super) mod checklist;
 mod onboarding;
 mod settings;
+mod workspace;
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +49,8 @@ pub enum View {
   /// No repository open: open one, or check the required tools.
   Onboarding(onboarding::Onboarding),
   Settings(Box<settings::Settings>),
+  /// The workspace view's header and tab row, with the webview below.
+  Workspace(Box<workspace::Workspace>),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -82,17 +86,29 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 pub struct Screen {
   snapshot: ScreenSnapshot,
   sink: ActionSink,
+  popups: PopupSink,
+  /// The window's webview, which a screen may frame part of itself around.
+  webview: Option<Webview<Wry>>,
   /// Screens with state of their own (text being edited, open dropdowns),
   /// kept while React keeps sending them.
   settings: Option<Entity<settings::SettingsView>>,
+  workspace: Option<Entity<workspace::WorkspaceView>>,
 }
 
 impl Screen {
-  pub fn new(snapshot: ScreenSnapshot, sink: ActionSink) -> Self {
+  pub fn new(
+    snapshot: ScreenSnapshot,
+    sink: ActionSink,
+    popups: PopupSink,
+    webview: Option<Webview<Wry>>,
+  ) -> Self {
     Self {
       snapshot,
       sink,
+      popups,
+      webview,
       settings: None,
+      workspace: None,
     }
   }
 
@@ -128,6 +144,9 @@ impl Render for Screen {
     if !matches!(self.snapshot.view, View::Settings(_)) {
       self.settings = None;
     }
+    if !matches!(self.snapshot.view, View::Workspace(_)) {
+      self.workspace = None;
+    }
     let ctx = Ctx {
       palette: theme::palette(dark),
       sink: &self.sink,
@@ -145,6 +164,23 @@ impl Render for Screen {
             let sink = self.sink.clone();
             let view = cx.new(|_| settings::SettingsView::new(screen, dark, sink));
             self.settings = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Workspace(screen) => {
+        let screen = (**screen).clone();
+        match &self.workspace {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_snapshot(screen, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (sink, popups) = (self.sink.clone(), self.popups.clone());
+            let webview = self.webview.clone();
+            let view =
+              cx.new(|_| workspace::WorkspaceView::new(screen, dark, sink, popups, webview));
+            self.workspace = Some(view.clone());
             view.into_any_element()
           }
         }

@@ -37,6 +37,7 @@ const WorkspaceTerminalPaneInner = ({
   onNavigateToWorkspace,
   workspaceBranchByPath,
   onTerminalsChange,
+  onMaximizedChange,
   resolveRemoteShell,
   className,
   ref,
@@ -50,6 +51,10 @@ const WorkspaceTerminalPaneInner = ({
   const [maximized, setMaximized] = useState(false);
   const { height, isResizingHeight, handleHeightResizeMouseDown } =
     useTerminalPaneHeightResize(maximized);
+  const covering = maximized && !collapsed;
+  useEffect(() => {
+    onMaximizedChange?.(covering);
+  }, [covering, onMaximizedChange]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const { scrollToTerminal, handleTerminalDoubleClick } =

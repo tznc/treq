@@ -29,6 +29,8 @@ use super::{
   theme::{self, Palette},
 };
 
+/// A dropdown's gap below its button: `sideOffset={4}`.
+const DROPDOWN_OFFSET: f32 = 4.;
 /// Room around a popup's box for its shadow.
 const SHADOW_MARGIN: f32 = 8.;
 /// Gap between a tooltip and its element: base-ui's `sideOffset` in
@@ -40,6 +42,9 @@ const EDGE_PADDING: f32 = 5.;
 /// `text-sm`: 14px on a 20px line.
 const TEXT_SIZE: f32 = 14.;
 const LINE_HEIGHT: f32 = 20.;
+/// A [`TooltipContent::List`] row: `text-xs`.
+const LIST_ITEM_SIZE: f32 = 11.;
+const LIST_ITEM_LINE: f32 = 16.;
 /// A menu row: `px-2 py-1.5 text-sm`.
 const ITEM_HEIGHT: f32 = 32.;
 const ITEM_PADDING_X: f32 = 8.;
@@ -75,6 +80,12 @@ pub enum TooltipContent {
     title: SharedString,
     conflicted: bool,
     pr: Option<PrState>,
+  },
+  /// A heading over a list of paths: `font-medium mb-1`, then `text-xs
+  /// font-mono` rows `space-y-0.5`, as the header's conflict warning.
+  List {
+    title: SharedString,
+    items: Vec<SharedString>,
   },
 }
 
@@ -228,9 +239,14 @@ struct PopupView {
 
 /// The width of `text` in `family` at `text-sm`, without kerning.
 fn text_width(cx: &App, text: &str, family: &'static str) -> f32 {
+  text_width_at(cx, text, family, TEXT_SIZE)
+}
+
+/// The width of `text` in `family` at `size` px, without kerning.
+fn text_width_at(cx: &App, text: &str, family: &'static str, size: f32) -> f32 {
   let system = cx.text_system();
   let font = system.resolve_font(&gpui::font(family));
-  let size = px(TEXT_SIZE);
+  let size = px(size);
   text
     .chars()
     .map(|ch| {
@@ -263,6 +279,16 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
         lines += 1;
       }
       (width, lines)
+    }
+    TooltipContent::List { title, items } => {
+      // The title is `font-medium`, a little wider than the regular face.
+      let width = items
+        .iter()
+        .map(|item| text_width_at(cx, item, theme::MONO_FONT, LIST_ITEM_SIZE))
+        .fold(text_width(cx, title, theme::SANS_FONT) * 1.03, f32::max);
+      let items = items.len() as f32;
+      let height = LINE_HEIGHT + 4. + items * LIST_ITEM_LINE + (items - 1.).max(0.) * 2.;
+      return ((width + 24. + 2.).ceil(), height + 12. + 2.);
     }
   };
   let lines = lines as f32;
@@ -511,6 +537,26 @@ impl PopupView {
               .child(pr.label()),
           )
         })
+        .into_any_element(),
+      TooltipContent::List { title, items } => div()
+        .flex()
+        .flex_col()
+        .child(
+          div()
+            .mb_1()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(title.clone()),
+        )
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .font_family(theme::MONO_FONT)
+            .text_size(px(LIST_ITEM_SIZE))
+            .line_height(px(LIST_ITEM_LINE))
+            .children(items.iter().cloned()),
+        )
         .into_any_element(),
     }
   }
@@ -898,6 +944,44 @@ thread_local! {
   static WINDOWS: RefCell<HashMap<String, PopupWindow>> = RefCell::default();
   /// A menu is open, so tooltips stay hidden, as under a React context menu.
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
+  /// The screen button a dropdown menu opens below, and when it was pressed.
+  static DROPDOWN_ANCHOR: Cell<Option<(Bounds<Pixels>, std::time::Instant)>> =
+    const { Cell::new(None) };
+}
+
+/// How long after its button's press React may open the dropdown.
+const DROPDOWN_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Records `anchor` (window coordinates) as the button whose press asks
+/// React for a menu, so the menu opens below it, as `DropdownMenuContent
+/// align="end"` does, instead of at the pointer.
+pub fn set_dropdown_anchor(anchor: Bounds<Pixels>) {
+  DROPDOWN_ANCHOR.with(|cell| cell.set(Some((anchor, std::time::Instant::now()))));
+}
+
+/// The button of a dropdown pressed just now, consumed by the menu it opens.
+pub fn take_dropdown_anchor() -> Option<Bounds<Pixels>> {
+  DROPDOWN_ANCHOR
+    .with(Cell::take)
+    .filter(|(_, at)| at.elapsed() < DROPDOWN_WINDOW)
+    .map(|(anchor, _)| anchor)
+}
+
+/// A dropdown's box below `anchor` with their right edges lined up (screen
+/// coordinates), `sideOffset={4}` away, flipped above where it would leave
+/// `screen`.
+pub fn place_dropdown(
+  anchor: Bounds<Pixels>,
+  size: (f32, f32),
+  screen: Bounds<Pixels>,
+) -> Point<Pixels> {
+  let (width, height) = size;
+  let x = (f32::from(anchor.right()) - width).max(f32::from(screen.left()));
+  let mut y = f32::from(anchor.bottom()) + DROPDOWN_OFFSET;
+  if y + height > f32::from(screen.bottom()) {
+    y = f32::from(anchor.top()) - DROPDOWN_OFFSET - height;
+  }
+  gpui::point(px(x), px(y))
 }
 
 /// The popup window for `slot` of window `owner`, built on first use. Main
@@ -1069,6 +1153,11 @@ pub fn hide_all() {
   hide(Slot::Menu);
 }
 
+/// Hides the tooltip. Main thread only.
+pub fn hide_tooltip() {
+  hide(Slot::Tooltip);
+}
+
 /// Hides the menus, as a click elsewhere does. Main thread only.
 pub fn hide_menus() {
   hide(Slot::Submenu);
@@ -1203,6 +1292,35 @@ pub fn show_menu(
     entries,
     theme::palette(dark),
     move |size, screen| place_menu(at, size, screen),
+  );
+}
+
+/// Opens a menu of `entries` for window `owner` below `anchor`, a button in
+/// the window's coordinates. Main thread only.
+pub fn show_dropdown(
+  app: &AppHandle,
+  owner: &str,
+  entries: Vec<MenuEntry>,
+  anchor: Bounds<Pixels>,
+  dark: bool,
+) {
+  let Some(client) = tauri::Manager::get_window(app, owner)
+    .as_ref()
+    .and_then(client_bounds)
+  else {
+    return;
+  };
+  MENU_OPEN.with(|open| open.set(true));
+  hide(Slot::Tooltip);
+  hide(Slot::Submenu);
+  let anchor = Bounds::new(anchor.origin + client.origin, anchor.size);
+  show_menu_at(
+    app,
+    Slot::Menu,
+    owner,
+    entries,
+    theme::palette(dark),
+    move |size, screen| place_dropdown(anchor, size, screen),
   );
 }
 

@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useCreateWorkspacePr } from "../hooks/useCreateWorkspacePr";
 import { useGitRemoteInfo, usePrInfoViaGh } from "../hooks/useMergeQueueStatus";
 import { getWorkspaces, pushWorkspaceToRemote } from "../lib/api";
+import { useGpuiPart } from "../lib/gpui-parts";
+import { popupNativeMenu } from "../lib/native-context-menu";
 import type { Workspace } from "../lib/api-types";
 import {
   buildGitHubComparePrUrl,
@@ -58,9 +60,53 @@ export function CreatePrButtonGroup({
 
   // `gh pr view <branch>` also returns closed and merged PRs. Only an open
   // PR blocks a new one; otherwise the branch can get a fresh PR.
-  if (!remoteInfo || prInfoLoading || prInfo?.state === "OPEN") {
-    return null;
-  }
+  const shown = !!remoteInfo && !prInfoLoading && prInfo?.state !== "OPEN";
+  const creating = createPending || pushingManually;
+  const pushAndCreate = needsPush;
+  const disabled = creating || !hasCommits;
+  const noCommitsTooltip =
+    "Make a commit before creating a pull request. Uncommitted working-copy changes don't count.";
+  const createLabel = creating
+    ? pushAndCreate
+      ? "Pushing & creating…"
+      : "Creating…"
+    : "Create PR";
+  const createTooltip = !hasCommits
+    ? noCommitsTooltip
+    : pushAndCreate
+      ? "Push this branch and create a pull request on GitHub"
+      : "Create a pull request on GitHub";
+  const menuTooltip = !hasCommits
+    ? noCommitsTooltip
+    : "More pull request options";
+  useGpuiPart(
+    "createPr",
+    shown
+      ? {
+          label: createLabel,
+          creating,
+          disabled,
+          tooltip: createTooltip,
+          menuTooltip,
+        }
+      : null,
+    {
+      create: () => void createPr(false),
+      menu: () =>
+        void popupNativeMenu([
+          {
+            kind: "item",
+            text: "Create draft PR",
+            onSelect: () => void createPr(true),
+          },
+          {
+            kind: "item",
+            text: "Create PR manually",
+            onSelect: () => void openManual(),
+          },
+        ]),
+    },
+  );
 
   // Agents rewrite the description with `treq set -d` while the view is open,
   // so read it at click time rather than from the polled workspace list.
@@ -70,8 +116,9 @@ export function CreatePrButtonGroup({
     return current ? (current.description ?? "") : body;
   };
 
-  const createPr = async (draft: boolean) =>
-    createWorkspacePr({
+  async function createPr(draft: boolean) {
+    if (!remoteInfo) return;
+    await createWorkspacePr({
       repoFullName: remoteInfo.full_name,
       branchName: workspace.branch_name,
       baseBranch,
@@ -84,8 +131,10 @@ export function CreatePrButtonGroup({
         return title;
       },
     });
+  }
 
-  const openManual = async () => {
+  async function openManual() {
+    if (!remoteInfo) return;
     setPushingManually(true);
     try {
       if (needsPush) {
@@ -111,13 +160,11 @@ export function CreatePrButtonGroup({
     } finally {
       setPushingManually(false);
     }
-  };
+  }
 
-  const creating = createPending || pushingManually;
-  const pushAndCreate = needsPush;
-  const disabled = creating || !hasCommits;
-  const noCommitsTooltip =
-    "Make a commit before creating a pull request. Uncommitted working-copy changes don't count.";
+  if (!remoteInfo || !shown) {
+    return null;
+  }
 
   return (
     <TooltipProvider delay={200}>
@@ -136,20 +183,10 @@ export function CreatePrButtonGroup({
               ) : (
                 <Github className="w-4 h-4" />
               )}
-              {creating
-                ? pushAndCreate
-                  ? "Pushing & creating…"
-                  : "Creating…"
-                : "Create PR"}
+              {createLabel}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>
-            {!hasCommits
-              ? noCommitsTooltip
-              : pushAndCreate
-                ? "Push this branch and create a pull request on GitHub"
-                : "Create a pull request on GitHub"}
-          </TooltipContent>
+          <TooltipContent>{createTooltip}</TooltipContent>
         </Tooltip>
         <DropdownMenu>
           <Tooltip>
@@ -166,9 +203,7 @@ export function CreatePrButtonGroup({
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent>
-              {!hasCommits ? noCommitsTooltip : "More pull request options"}
-            </TooltipContent>
+            <TooltipContent>{menuTooltip}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" sideOffset={4}>
             <DropdownMenuItem

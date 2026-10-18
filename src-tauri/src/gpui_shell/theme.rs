@@ -20,17 +20,27 @@ macro_rules! icons {
 
 icons! {
   ICON_ARCHIVE => "archive",
+  ICON_ARROW_RIGHT => "arrow-right",
   ICON_BOOK_OPEN => "book-open",
   ICON_BOT => "bot",
   ICON_BRANCH => "git-branch",
-  ICON_CIRCLE_ALERT => "circle-alert",
-  ICON_CIRCLE_CHECK => "circle-check",
+  // At lucide's default stroke, as React's header draws it; the sidebar's
+  // is thinner.
+  ICON_BRANCH_BOLD => "git-branch-bold",
   ICON_CHEVRON_DOWN => "chevron-down",
   ICON_CHEVRON_RIGHT => "chevron-right",
   ICON_CIRCLE => "circle",
+  ICON_CIRCLE_ALERT => "circle-alert",
+  ICON_CIRCLE_CHECK => "circle-check",
+  ICON_CIRCLE_DOT => "circle-dot",
   ICON_CIRCLE_X => "circle-x",
+  ICON_CODE => "code-xml",
+  ICON_COMMIT => "git-commit-horizontal",
+  ICON_COMPARE => "git-compare-arrows",
   ICON_COPY => "copy",
+  ICON_DATABASE => "database",
   ICON_EXTERNAL_LINK => "external-link",
+  ICON_FILE_DIFF => "file-diff",
   ICON_FLASK => "flask-conical",
   ICON_FOLDER_GIT => "folder-git-2",
   ICON_FOLDER_OPEN => "folder-open",
@@ -42,9 +52,14 @@ icons! {
   ICON_LAYERS => "layers-2",
   ICON_LINEAR => "list-todo",
   ICON_LINK => "link",
+  ICON_MERGE => "git-merge",
+  ICON_MORE => "ellipsis-vertical",
   ICON_PENCIL => "pencil",
   ICON_PLAY => "play",
   ICON_PLUG => "plug",
+  ICON_PR => "git-pull-request",
+  ICON_PR_CLOSED => "git-pull-request-closed",
+  ICON_PR_DRAFT => "git-pull-request-draft",
   ICON_REFRESH => "refresh-cw",
   ICON_SEARCH => "search",
   ICON_SERVER => "server",
@@ -53,8 +68,10 @@ icons! {
   ICON_TERMINAL => "terminal",
   ICON_TRASH => "trash-2",
   ICON_TRIANGLE_ALERT => "triangle-alert",
+  ICON_UPLOAD => "upload",
   ICON_USER => "user",
   ICON_X => "x",
+  ICON_ZAP => "zap",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
@@ -67,6 +84,10 @@ const INTER_SEMIBOLD: &[u8] =
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
 const JETBRAINS_MONO_REGULAR: &[u8] =
   include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+/// For `font-mono font-semibold` text. The web app ships no bolder mono
+/// face, so the webview synthesizes one from Regular; JetBrains' Bold (same
+/// subset), registered as weight 600, looks closest to that.
+const JETBRAINS_MONO_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf");
 
 pub const MONO_FONT: &str = "JetBrains Mono";
 
@@ -106,6 +127,7 @@ pub fn init(cx: &mut App) {
     Cow::Borrowed(INTER_MEDIUM),
     Cow::Borrowed(INTER_SEMIBOLD),
     Cow::Borrowed(JETBRAINS_MONO_REGULAR),
+    Cow::Borrowed(JETBRAINS_MONO_SEMIBOLD),
   ];
   if let Err(err) = cx.text_system().add_fonts(fonts) {
     log::error!("failed to load bundled fonts: {err:#}");
