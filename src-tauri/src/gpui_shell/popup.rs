@@ -1063,6 +1063,15 @@ fn popup_window(
     return None;
   }
   let view = view.borrow_mut().take()?;
+  // An X11 compositor (xcompmgr, picom) decides at a window's first map
+  // whether it is translucent, before GPUI has drawn into it, and shadows it
+  // as opaque: a dark box around the first menu shown. Mapping it once while
+  // it is still 1x1 settles that, so the first real show draws like the rest.
+  #[cfg(target_os = "linux")]
+  {
+    let _ = window.show();
+    let _ = window.hide();
+  }
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
       label,
