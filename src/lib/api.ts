@@ -95,6 +95,15 @@ export const gpuiSidebarUpdate = (
     snapshot,
   });
 
+/** Draws a screen in GPUI in place of this webview; null shows the webview. */
+export const gpuiScreenUpdate = (
+  snapshot: import("./gpui-screen").GpuiScreenSnapshot | null,
+): Promise<void> =>
+  invoke("gpui_screen_update", {
+    windowLabel: currentWindowLabel(),
+    snapshot,
+  });
+
 /** Opens a GPUI menu at the last right-click in this window's sidebar. */
 export const gpuiMenuShow = (
   entries: import("./native-context-menu").GpuiMenuEntry[],

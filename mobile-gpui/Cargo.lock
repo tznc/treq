@@ -12396,6 +12396,8 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "gix",
+ "gpui-kit",
+ "gtk",
  "ignore",
  "imara-diff 0.1.8",
  "jj-lib",

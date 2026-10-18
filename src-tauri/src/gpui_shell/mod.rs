@@ -30,10 +30,14 @@ use tauri_plugin_gpui::{
 };
 
 mod popup;
+mod screen;
 mod sidebar;
 mod theme;
+mod ui;
 
 pub use popup::{MenuEntry, Toast};
+pub use screen::ScreenSnapshot;
+use screen::{Screen, ScreenAction};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
 
@@ -83,12 +87,15 @@ pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 /// Root view of a shell window: the GPUI sidebar, once React sends it,
-/// next to the webview.
+/// next to the webview, or next to a GPUI screen that takes the webview's
+/// place.
 struct Shell {
   app: AppHandle,
   label: SharedString,
   webview: Option<Webview<Wry>>,
   sidebar: Option<gpui::Entity<Sidebar>>,
+  /// The screen GPUI draws instead of the webview, while React sends one.
+  screen: Option<gpui::Entity<Screen>>,
 }
 
 impl Render for Shell {
@@ -98,13 +105,15 @@ impl Render for Shell {
     cx: &mut gpui::Context<Self>,
   ) -> impl IntoElement {
     // Until React sends its theme, follow the OS.
-    let dark = self.sidebar.as_ref().map_or(
-      matches!(
+    let dark = self
+      .sidebar
+      .as_ref()
+      .map(|sidebar| sidebar.read(cx).snapshot().dark)
+      .or_else(|| self.screen.as_ref().map(|s| s.read(cx).snapshot().dark))
+      .unwrap_or(matches!(
         window.appearance(),
         gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
-      ),
-      |sidebar| sidebar.read(cx).snapshot().dark,
-    );
+      ));
     let app = self.app.clone();
     gpui::div()
       .size_full()
@@ -122,8 +131,12 @@ impl Render for Shell {
           .flex_1()
           .min_w_0()
           .h_full()
-          .when_some(self.webview.as_ref(), |this, webview| {
-            this.child(webview_frame(webview))
+          // Leaving the frame out hides the webview; React keeps running.
+          .when_some(self.screen.clone(), |this, screen| this.child(screen))
+          .when(self.screen.is_none(), |this| {
+            this.when_some(self.webview.as_ref(), |this, webview| {
+              this.child(webview_frame(webview))
+            })
           }),
       )
   }
@@ -156,6 +169,7 @@ pub fn open_window(
       label: shell_label.clone().into(),
       webview: None,
       sidebar: None,
+      screen: None,
     });
     cx.default_global::<Shells>()
       .0
@@ -224,6 +238,46 @@ pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnap
       log::warn!("failed to update the GPUI sidebar: {err}");
     }
   });
+}
+
+/// Draws `snapshot` in place of window `label`'s webview, or brings the
+/// webview back for `None`. `TREQ_WEB_UI` keeps the webview, so React's
+/// screens can be compared with GPUI's.
+pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapshot>) {
+  let snapshot = snapshot.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
+  let label = label.to_string();
+  let _ = app.run_on_main_thread(move || {
+    let result = update_shell(&label, move |shell, cx| match snapshot {
+      None => shell.screen = None,
+      Some(snapshot) => {
+        theme::set_kit_dark(snapshot.dark, cx);
+        match &shell.screen {
+          Some(screen) => screen.update(cx, |screen, cx| screen.set_snapshot(snapshot, cx)),
+          None => {
+            let sink = screen_sink(shell.app.clone(), shell.label.to_string());
+            shell.screen = Some(cx.new(|_| Screen::new(snapshot, sink)));
+          }
+        }
+      }
+    });
+    if let Err(err) = result {
+      log::warn!("failed to update the GPUI screen: {err}");
+    }
+  });
+}
+
+/// Sends screen actions to the webview of window `label`, as
+/// [`action_sink`] does for the sidebar.
+fn screen_sink(app: AppHandle, label: String) -> screen::ActionSink {
+  std::rc::Rc::new(move |action: ScreenAction, _| {
+    let (app, label) = (app.clone(), label.clone());
+    tauri::async_runtime::spawn(async move {
+      let target = tauri::EventTarget::webview_window(&label);
+      if let Err(err) = tauri::Emitter::emit_to(&app, target, screen::ACTION_EVENT, action) {
+        log::warn!("failed to send GPUI screen action: {err}");
+      }
+    });
+  })
 }
 
 /// Sends sidebar actions to the webview of window `label`. Tauri calls must

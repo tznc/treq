@@ -65,7 +65,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn((cmd: string, args?: Record<string, unknown>) => {
     trackPtyInvoke(cmd, args);
     // No native shell in jsdom; the call is only recorded for test/gpui-sidebar.ts.
-    if (cmd === "gpui_sidebar_update") return Promise.resolve();
+    if (cmd === "gpui_sidebar_update" || cmd === "gpui_screen_update")
+      return Promise.resolve();
     if (cmd.startsWith("jj_")) {
       jjCalls.push(cmd);
     }

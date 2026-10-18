@@ -1,7 +1,9 @@
 //! Colors, fonts and icons for GPUI views, matching the React app's theme
 //! tokens in `src/index.css`.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, rc::Rc};
+
+use gpui_kit::component as kit;
 
 use tauri_plugin_gpui::gpui::{self, hsla, rgb, App, AssetSource, Hsla, SharedString};
 
@@ -24,7 +26,10 @@ icons! {
   ICON_CIRCLE_CHECK => "circle-check",
   ICON_CHEVRON_DOWN => "chevron-down",
   ICON_CHEVRON_RIGHT => "chevron-right",
+  ICON_CIRCLE => "circle",
+  ICON_CIRCLE_X => "circle-x",
   ICON_COPY => "copy",
+  ICON_EXTERNAL_LINK => "external-link",
   ICON_FOLDER_OPEN => "folder-open",
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
@@ -35,7 +40,9 @@ icons! {
   ICON_LINEAR => "list-todo",
   ICON_LINK => "link",
   ICON_PENCIL => "pencil",
+  ICON_REFRESH => "refresh-cw",
   ICON_SEARCH => "search",
+  ICON_SERVER => "server",
   ICON_SETTINGS => "settings",
   ICON_SPINNER => "loader-circle",
   ICON_TERMINAL => "terminal",
@@ -81,7 +88,12 @@ impl AssetSource for Assets {
   }
 }
 
-/// App-level GPUI setup: fonts and the default text style.
+/// gpui-kit's theme in the React app's colors, light and dark (generated
+/// from its default theme with the tokens of `src/index.css`).
+const KIT_THEME: &str = include_str!("../../assets/gpui-theme.json");
+
+/// App-level GPUI setup: fonts, the default text style, and gpui-kit with
+/// the app's theme.
 pub fn init(cx: &mut App) {
   let fonts = vec![
     Cow::Borrowed(INTER_REGULAR),
@@ -91,6 +103,47 @@ pub fn init(cx: &mut App) {
   ];
   if let Err(err) = cx.text_system().add_fonts(fonts) {
     log::error!("failed to load bundled fonts: {err:#}");
+  }
+  gpui_kit::init(cx);
+  init_kit_theme(cx);
+}
+
+fn init_kit_theme(cx: &mut App) {
+  let set: kit::ThemeSet = match serde_json::from_str(KIT_THEME) {
+    Ok(set) => set,
+    Err(err) => {
+      log::error!("invalid gpui-kit theme: {err}");
+      return;
+    }
+  };
+  kit::Theme::change(kit::ThemeMode::Light, None, cx);
+  let theme = kit::Theme::global_mut(cx);
+  for config in set.themes {
+    if config.mode.is_dark() {
+      theme.dark_theme = Rc::new(config);
+    } else {
+      theme.light_theme = Rc::new(config);
+    }
+  }
+  kit::Theme::change(kit::ThemeMode::Light, None, cx);
+  let theme = kit::Theme::global_mut(cx);
+  theme.font_family = SANS_FONT.into();
+  theme.font_size = gpui::px(13.);
+  theme.mono_font_family = MONO_FONT.into();
+  theme.mono_font_size = gpui::px(13.);
+  theme.radius = gpui::px(8.);
+  theme.radius_lg = gpui::px(12.);
+}
+
+/// Puts gpui-kit's widgets in React's light or dark theme.
+pub fn set_kit_dark(dark: bool, cx: &mut App) {
+  let mode = if dark {
+    kit::ThemeMode::Dark
+  } else {
+    kit::ThemeMode::Light
+  };
+  if kit::Theme::global(cx).mode != mode {
+    kit::Theme::change(mode, None, cx);
   }
 }
 
@@ -125,6 +178,17 @@ pub struct Palette {
   /// Toast icons: `text-green-500`, and `text-yellow-600 dark:text-yellow-400`.
   pub toast_success: Hsla,
   pub toast_warning: Hsla,
+  pub card: Hsla,
+  pub card_foreground: Hsla,
+  pub primary_foreground: Hsla,
+  pub secondary: Hsla,
+  pub secondary_foreground: Hsla,
+  pub destructive_foreground: Hsla,
+  /// `--input`, the border of outline buttons and text fields.
+  pub input: Hsla,
+  pub ring: Hsla,
+  /// Tailwind green-500, a passed check.
+  pub success: Hsla,
 }
 
 /// A CSS `hsl(h s% l%)` token.
@@ -155,6 +219,15 @@ pub fn palette(dark: bool) -> Palette {
       stack_guide: rgb(0x93c5fd).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xfacc15).into(),
+      card: token(0., 0., 20.),
+      card_foreground: token(0., 0., 95.),
+      primary_foreground: token(0., 0., 100.),
+      secondary: token(0., 0., 25.),
+      secondary_foreground: token(0., 0., 95.),
+      destructive_foreground: token(0., 0., 100.),
+      input: token(0., 0., 25.),
+      ring: token(211., 100., 55.),
+      success: rgb(0x22c55e).into(),
     }
   } else {
     Palette {
@@ -178,6 +251,15 @@ pub fn palette(dark: bool) -> Palette {
       stack_guide: rgb(0x1e3a8a).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xca8a04).into(),
+      card: token(0., 0., 100.),
+      card_foreground: token(0., 0., 13.),
+      primary_foreground: token(0., 0., 100.),
+      secondary: token(220., 13., 95.),
+      secondary_foreground: token(0., 0., 13.),
+      destructive_foreground: token(0., 0., 100.),
+      input: token(220., 13., 91.),
+      ring: token(211., 100., 50.),
+      success: rgb(0x22c55e).into(),
     }
   }
 }
@@ -196,6 +278,14 @@ mod tests {
       assert!(bytes.is_some(), "{path} is not registered in ICONS");
     }
     assert!(Assets.load("icons/missing.svg").expect("load").is_none());
+  }
+
+  #[test]
+  fn kit_theme_has_a_light_and_a_dark_theme() {
+    let set: kit::ThemeSet = serde_json::from_str(KIT_THEME).expect("parse");
+    let modes: Vec<bool> = set.themes.iter().map(|t| t.mode.is_dark()).collect();
+    assert_eq!(modes.len(), 2);
+    assert!(modes.contains(&true) && modes.contains(&false));
   }
 
   #[test]
