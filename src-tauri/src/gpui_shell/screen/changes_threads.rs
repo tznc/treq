@@ -5,8 +5,6 @@
 
 use std::collections::HashMap;
 
-use similar::{ChangeTag, TextDiff};
-
 use super::{
   changes_review::{line_at, Side},
   commits_data::line_numbers,
@@ -145,6 +143,76 @@ fn plain(kind: RowKind, text: &str) -> Row {
   }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ChangeTag {
+  Equal,
+  Delete,
+  Insert,
+}
+
+/// A longest-common-subsequence diff of two token lists; suggestions are a
+/// few lines, so the quadratic table is fine.
+fn diff_tokens<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(ChangeTag, &'a str)> {
+  let (n, m) = (old.len(), new.len());
+  let mut lcs = vec![vec![0usize; m + 1]; n + 1];
+  for i in (0..n).rev() {
+    for j in (0..m).rev() {
+      lcs[i][j] = if old[i] == new[j] {
+        lcs[i + 1][j + 1] + 1
+      } else {
+        lcs[i + 1][j].max(lcs[i][j + 1])
+      };
+    }
+  }
+  let (mut i, mut j, mut out) = (0, 0, Vec::new());
+  while i < n || j < m {
+    if i < n && j < m && old[i] == new[j] {
+      out.push((ChangeTag::Equal, old[i]));
+      i += 1;
+      j += 1;
+    } else if j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j]) {
+      out.push((ChangeTag::Insert, new[j]));
+      j += 1;
+    } else {
+      out.push((ChangeTag::Delete, old[i]));
+      i += 1;
+    }
+  }
+  // Deletions before insertions within each changed run, as `diff` reports.
+  let mut k = 0;
+  while k < out.len() {
+    if out[k].0 == ChangeTag::Equal {
+      k += 1;
+      continue;
+    }
+    let start = k;
+    while k < out.len() && out[k].0 != ChangeTag::Equal {
+      k += 1;
+    }
+    out[start..k].sort_by_key(|(tag, _)| *tag != ChangeTag::Delete);
+  }
+  out
+}
+
+/// Runs of whitespace and of everything else, as `diffWords` splits them.
+fn words(text: &str) -> Vec<&str> {
+  let mut out = Vec::new();
+  let mut start = 0;
+  let mut space = None;
+  for (i, c) in text.char_indices() {
+    let is_space = c.is_whitespace();
+    if space.is_some_and(|s| s != is_space) {
+      out.push(&text[start..i]);
+      start = i;
+    }
+    space = Some(is_space);
+  }
+  if start < text.len() {
+    out.push(&text[start..]);
+  }
+  out
+}
+
 fn split_lines(text: &str) -> Vec<&str> {
   let mut lines: Vec<&str> = text.split('\n').collect();
   if lines.len() > 1 && lines.last() == Some(&"") {
@@ -154,21 +222,20 @@ fn split_lines(text: &str) -> Vec<&str> {
 }
 
 fn word_rows(removed: &str, added: &str) -> Option<[Row; 2]> {
-  let diff = TextDiff::from_words(removed, added);
-  let changes: Vec<_> = diff.iter_all_changes().collect();
+  let changes = diff_tokens(&words(removed), &words(added));
   let changed: usize = changes
     .iter()
-    .filter(|c| c.tag() != ChangeTag::Equal)
-    .map(|c| c.value().chars().count())
+    .filter(|(tag, _)| *tag != ChangeTag::Equal)
+    .map(|(_, text)| text.chars().count())
     .sum();
   let longest = removed.chars().count().max(added.chars().count()).max(1);
   if changed as f64 / longest as f64 > WORD_LEVEL_CHANGE_LIMIT {
     return None;
   }
   let (mut old, mut new) = (Vec::new(), Vec::new());
-  for c in changes {
-    let text = c.value().to_string();
-    match c.tag() {
+  for (tag, text) in changes {
+    let text = text.to_string();
+    match tag {
       ChangeTag::Delete => old.push(Segment {
         text,
         changed: true,
@@ -210,12 +277,13 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
     return None;
   }
   // Blocks of consecutive changes, as `diffLines` reports them.
-  let diff = TextDiff::from_lines(original, suggested);
+  let old: Vec<&str> = original.split_inclusive('\n').collect();
+  let new: Vec<&str> = suggested.split_inclusive('\n').collect();
   let mut parts: Vec<(ChangeTag, String)> = Vec::new();
-  for change in diff.iter_all_changes() {
+  for (change, value) in diff_tokens(&old, &new) {
     match parts.last_mut() {
-      Some((tag, text)) if *tag == change.tag() => text.push_str(change.value()),
-      _ => parts.push((change.tag(), change.value().to_string())),
+      Some((tag, text)) if *tag == change => text.push_str(value),
+      _ => parts.push((change, value.to_string())),
     }
   }
   let mut rows = Vec::new();

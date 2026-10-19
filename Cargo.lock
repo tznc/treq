@@ -12063,7 +12063,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.11.0",
- "similar",
  "syntect",
  "tauri",
  "tauri-build",
