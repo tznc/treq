@@ -59,6 +59,9 @@ vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
   popupNativeMenu: vi.fn(),
 }));
 beforeEach(() => {
+  // React's terminal pane, which most tests drive; gpui-terminal.test.tsx
+  // turns GPUI's on.
+  window.__TREQ_REACT_TERMINAL__ = true;
   window.__TREQ_GPUI_SHELL__ = true;
 });
 afterEach(() => closeTestPtys(tauriTest.invoke));

@@ -244,6 +244,7 @@ import {
   type WorkspaceTerminalPaneHandle,
 } from "./WorkspaceTerminalPane";
 import { useGpuiTerminalPane } from "./useGpuiTerminalPane";
+import { gpuiDrawsTerminalPane } from "../lib/gpui-screen";
 import {
   agentInfo,
   DEFAULT_AGENT,
@@ -2962,7 +2963,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // GPUI draws the terminal pane with the workspace screen, for local
   // repositories; React's pane steps in while GPUI steps aside.
   const [gpuiFramed, setGpuiFramed] = useState(false);
-  const gpuiTerminalEnabled = gpuiFramed && !isRemoteActive;
+  const gpuiTerminalEnabled =
+    gpuiFramed && !isRemoteActive && gpuiDrawsTerminalPane();
   const gpuiTerminalPending = useMemo(
     () =>
       Array.from(pendingSessionData, ([sessionId, data]) => ({

@@ -14,6 +14,8 @@ declare global {
     __TREQ_GPUI_SHELL__?: boolean;
     /** `TREQ_WEB_UI` is set: React draws every screen, for comparison. */
     __TREQ_WEB_UI__?: boolean;
+    /** React draws the terminal pane; tests of that pane set it. */
+    __TREQ_REACT_TERMINAL__?: boolean;
   }
 }
 

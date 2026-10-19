@@ -272,3 +272,8 @@ export function useGpuiScreen(
   }, [host]);
   return json !== null;
 }
+
+/** Whether GPUI may draw the terminal pane. */
+export function gpuiDrawsTerminalPane(): boolean {
+  return window.__TREQ_REACT_TERMINAL__ !== true;
+}

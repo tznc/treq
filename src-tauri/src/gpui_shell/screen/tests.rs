@@ -3779,3 +3779,27 @@ fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
   );
   assert!(h.drawn("terminal-expand"));
 }
+
+#[gpui::test]
+fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }],
+    }),
+  );
+  // Selecting the home repository makes its shell the active terminal.
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.workspace_id = None;
+    }
+  });
+  h.cx.run_until_parked();
+  h.cx.simulate_keystrokes("cmd-w");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-column-shell"));
+  assert!(h.drawn("terminal-column-agent"));
+  assert!(!host.calls().contains(&format!("close {}", agent_pty())));
+}

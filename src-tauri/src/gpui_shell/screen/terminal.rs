@@ -1113,10 +1113,24 @@ impl TerminalPane {
   }
 
   pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
-    if self.place != place {
-      self.place = place;
-      cx.notify();
+    if self.place == place {
+      return;
     }
+    let moved = self.place.working_directory != place.working_directory;
+    self.place = place;
+    // A newly selected workspace's first terminal becomes the active one.
+    if moved && !self.collapsed {
+      let dir = &self.place.working_directory;
+      let id = self
+        .columns
+        .iter()
+        .find(|c| self.column_key(c) == *dir)
+        .map(|c| c.id.clone());
+      if id.is_some() {
+        self.active = id;
+      }
+    }
+    cx.notify();
   }
 
   fn send(&self, field: &str, value: serde_json::Value, cx: &mut App) {
