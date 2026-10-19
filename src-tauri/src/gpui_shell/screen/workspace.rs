@@ -1419,6 +1419,8 @@ impl Render for WorkspaceView {
     let body = match code {
       // The tab, with React's terminal pane framed below it.
       Some(code) => {
+        // A dialog over the whole window would leave the webview on top.
+        let covered = code.read(cx).covers_window();
         let sent = self.content_height.clone();
         let sink = self.sink.clone();
         div()
@@ -1452,7 +1454,7 @@ impl Render for WorkspaceView {
               .flex_none()
               .h(px(self.route.frame_height.unwrap_or(FRAME_FALLBACK)))
               .debug_selector(|| "workspace-frame".into())
-              .child(frame(self.webview.as_ref())),
+              .when(!covered, |this| this.child(frame(self.webview.as_ref()))),
           )
       }
       None => div()

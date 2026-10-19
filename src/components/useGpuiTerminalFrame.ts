@@ -1,12 +1,23 @@
 import { type RefObject, useLayoutEffect, useState } from "react";
 
+/** Room for the controls' shadow (`shadow-sm`). */
+const SHADOW = 2;
+
 /**
- * Room above an expanded pane's top edge: its controls sit 28px above it
- * (`-top-7`), over the resize handle.
+ * The highest edge the pane draws: its own, or its controls', which sit
+ * above it (`-top-7`, or the collapsed pane's expand button).
  */
-const EXPANDED_OVERHANG = 28;
-/** A collapsed pane's bar keeps a 6px margin (`m-1.5`). */
-const COLLAPSED_MARGIN = 6;
+function paneTop(pane: HTMLElement): number {
+  const controls = pane.querySelectorAll<HTMLElement>(
+    '[data-testid="terminal-pane-controls"], [data-testid="terminal-pane-controls"] *',
+  );
+  let top = pane.getBoundingClientRect().top;
+  for (const el of controls) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) top = Math.min(top, rect.top);
+  }
+  return top;
+}
 
 /**
  * While GPUI draws the Code tab (`contentHeight` set), the terminal pane's
@@ -31,10 +42,8 @@ export function useGpuiTerminalFrame(
         '[data-testid="workspace-terminal-pane"]',
       );
       if (!pane) return;
-      const collapsed = pane.dataset.collapsed === "true";
-      const above = collapsed ? COLLAPSED_MARGIN : EXPANDED_OVERHANG;
       const bottom = root.getBoundingClientRect().bottom;
-      const height = bottom - pane.getBoundingClientRect().top + above;
+      const height = bottom - paneTop(pane) + SHADOW;
       setFrameHeight(Math.round(Math.min(contentHeight, height)));
     };
     measure();

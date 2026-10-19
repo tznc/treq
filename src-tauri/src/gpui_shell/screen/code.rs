@@ -14,6 +14,7 @@ use std::{sync::Arc, time::Duration};
 use gpui_kit::component::{
   input::{Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
+  Sizable,
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
@@ -421,8 +422,14 @@ impl CodeView {
       },
     ));
     task.update(cx, |task, cx| task.focus(window, cx));
+    self.focused = true;
     self.task = Some(task.clone());
     task
+  }
+
+  /// A dialog (the file picker) covers the whole window.
+  pub(super) fn covers_window(&self) -> bool {
+    self.picker.is_some()
   }
 
   /// `handleTextChange`: follows an `@` being typed.
@@ -1197,12 +1204,20 @@ impl CodeView {
           .child(
             ui::text(div(), TextSize::Sm)
               .debug_selector(|| "task-input".into())
-              .px_4()
+              // The textarea's own 4px inset makes up React's `px-4`.
+              .px_3()
               .pt_3()
               .pb_1()
               .min_h(px(44.))
               .max_h(px(200.))
-              .child(Textarea::new(&task).appearance(false).bordered(false)),
+              .child(
+                Textarea::new(&task)
+                  .appearance(false)
+                  .bordered(false)
+                  .xsmall()
+                  .text_size(px(13.))
+                  .line_height(px(20.)),
+              ),
           )
           .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
           .child(div().mt_auto().child(self.toolbar(p, cx))),
@@ -1909,7 +1924,8 @@ impl CodeView {
       .cursor_pointer()
       .when(row.current, |this| {
         this
-          .bg(p.primary.opacity(0.1))
+          // Opaque, or the shadow below shows through.
+          .bg(p.background.blend(p.primary.opacity(0.1)))
           .border_1()
           .border_color(p.primary.opacity(0.4))
           .shadow_sm()
@@ -2210,8 +2226,10 @@ impl CodeView {
       )));
     }
     let mut first = true;
-    for (g, (label, commits)) in group_by_day(&own).into_iter().enumerate() {
-      let mut group = div().when(g > 0 || tentative.is_some(), |this| this.mt_5());
+    for (label, commits) in group_by_day(&own) {
+      // `first:mt-0` never applies (the track line is the first child);
+      // block layout collapses the margin as Chromium does.
+      let mut group = div().mt_5();
       group = group.child(day_label(&label, p));
       for commit in &commits {
         group = group.child(self.commit_item(commit, Kind::Own, first, p, cx));
@@ -2280,10 +2298,8 @@ impl CodeView {
         div().child(format!("Recent on {}", log.target_branch))
       };
       track = track.child(separator(label, p));
-      for (g, (label, commits)) in group_by_day(&target).into_iter().enumerate() {
-        let mut group = div()
-          .when(g > 0, |this| this.mt_5())
-          .child(day_label(&label, p));
+      for (label, commits) in group_by_day(&target) {
+        let mut group = div().mt_5().child(day_label(&label, p));
         for commit in &commits {
           group = group.child(self.commit_item(commit, Kind::Target, false, p, cx));
         }
@@ -2343,6 +2359,7 @@ impl CodeView {
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
     let selector = id.to_string();
     let muted = p.muted;
+    let column = p.background.blend(p.muted.opacity(0.2));
     let body = div()
       .id(id)
       .debug_selector(move || selector)
@@ -2352,8 +2369,9 @@ impl CodeView {
       .rounded(px(8.))
       .cursor_pointer()
       .when(first && !target && !tentative, |this| {
+        // Opaque over the column's `bg-muted/20`, or the shadow shows through.
         this
-          .bg(p.accent.opacity(0.5))
+          .bg(column.blend(p.accent.opacity(0.5)))
           .p_2()
           .m_neg_2()
           .shadow_sm()
@@ -2361,7 +2379,7 @@ impl CodeView {
           .border_color(p.accent)
       })
       .when(tentative, |this| {
-        this.bg(yellow_bg).p_2().m_neg_2().shadow_sm()
+        this.bg(column.blend(yellow_bg)).p_2().m_neg_2().shadow_sm()
       })
       .when(target, |this| this.bg(p.muted.opacity(0.3)).p_2().m_neg_2())
       .hover(move |s| s.bg(muted.opacity(0.4)))
@@ -2473,12 +2491,15 @@ fn day_label(label: &str, p: &Palette) -> impl IntoElement {
 
 /// The dashed `Diverged from` / `Recent on` rule.
 fn separator(label: Div, p: &Palette) -> impl IntoElement {
+  // `border-t border-dashed`, as Chromium dashes a 1px border.
   let dashes = || {
     div()
       .flex_1()
-      .border_t_1()
-      .border_dashed()
-      .border_color(p.border)
+      .h(px(1.))
+      .overflow_hidden()
+      .flex()
+      .gap(px(3.))
+      .children((0..60).map(|_| div().flex_none().w(px(3.)).h(px(1.)).bg(p.border)))
   };
   div().my_4().pl_7().child(
     div()
