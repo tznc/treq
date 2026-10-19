@@ -105,6 +105,8 @@ icons! {
   ICON_TABLE => "table-2",
   ICON_FILE_CODE => "file-code-2",
   ICON_SQUARE_CHECK => "square-check-big",
+  ICON_MAXIMIZE => "maximize-2",
+  ICON_MINIMIZE => "minimize-2",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.

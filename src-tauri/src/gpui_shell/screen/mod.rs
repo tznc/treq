@@ -38,6 +38,8 @@ mod merge;
 mod onboarding;
 mod settings;
 mod settings_data;
+mod terminal_data;
+mod terminal_emu;
 mod workspace;
 mod workspace_data;
 

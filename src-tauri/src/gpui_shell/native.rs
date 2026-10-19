@@ -110,6 +110,11 @@ impl Backend {
     Self { app, label }
   }
 
+  /// The window's label.
+  pub fn label(&self) -> &str {
+    &self.label
+  }
+
   pub fn app(&self) -> &AppHandle {
     &self.app
   }
