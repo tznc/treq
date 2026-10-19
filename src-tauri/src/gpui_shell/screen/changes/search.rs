@@ -1,0 +1,492 @@
+//! The Changes tab's find bar (`useDiffSearch`, `SearchOverlay`): Cmd+F
+//! opens it, matches are marked in the diff and Enter steps through them.
+
+use std::ops::Range;
+use std::time::Duration;
+
+use gpui::{AnyElement, StyledText, Task};
+use gpui_kit::component::input::{Escape, Input, InputState};
+
+use super::*;
+
+/// `useDebounce(searchQuery, 150)`.
+const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// Where a match is: a diff line, or a line of a conflict region.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(in crate::gpui_shell::screen) enum MatchKey {
+  Line(String, usize, usize),
+  Conflict(String, usize),
+}
+
+/// A match's line and where it was drawn.
+type Drawn = (MatchKey, Bounds<Pixels>);
+
+#[derive(Default)]
+pub(in crate::gpui_shell::screen) struct Search {
+  pub(super) open: bool,
+  query: String,
+  /// The query after the debounce: what is matched.
+  pub(super) applied: String,
+  pub(in crate::gpui_shell::screen) current: usize,
+  /// Matches by line: the first's index overall and how many.
+  index: HashMap<MatchKey, (usize, usize)>,
+  pub(in crate::gpui_shell::screen) total: usize,
+  input: Option<Entity<InputState>>,
+  focus: bool,
+  /// Scroll the current match into view once it is drawn.
+  reveal: bool,
+  /// Where the current match was last drawn.
+  target: Rc<RefCell<Option<Drawn>>>,
+  debounce: Option<Task<()>>,
+  _subscription: Option<Subscription>,
+  /// Cmd+F anywhere in the window (`useKeyboardShortcut`).
+  _find_key: Option<Subscription>,
+}
+
+/// Byte ranges of `query` in `text`, ignoring case, left to right and
+/// not overlapping (a `gi` regex of the escaped query).
+pub(in crate::gpui_shell::screen) fn match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
+  let q: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
+  if q.is_empty() {
+    return Vec::new();
+  }
+  let chars: Vec<(usize, char)> = text.char_indices().collect();
+  let mut out = Vec::new();
+  let mut i = 0;
+  while i < chars.len() {
+    let (mut qi, mut j) = (0, i);
+    let mut ok = true;
+    while ok && qi < q.len() {
+      let Some(&(_, c)) = chars.get(j) else {
+        ok = false;
+        break;
+      };
+      for lower in c.to_lowercase() {
+        if q.get(qi) == Some(&lower) {
+          qi += 1;
+        } else {
+          ok = false;
+          break;
+        }
+      }
+      j += 1;
+    }
+    if ok {
+      let end = chars.get(j).map_or(text.len(), |c| c.0);
+      out.push(chars[i].0..end);
+      i = j;
+    } else {
+      i += 1;
+    }
+  }
+  out
+}
+
+/// A conflict region's lines as React searches them.
+pub(in crate::gpui_shell::screen) fn conflict_texts(conflict: &Conflict) -> Vec<String> {
+  if conflict.region.lines.is_empty() {
+    conflict
+      .region
+      .content
+      .split('\n')
+      .map(str::to_string)
+      .collect()
+  } else {
+    conflict
+      .region
+      .lines
+      .iter()
+      .map(|l| l.raw.clone())
+      .collect()
+  }
+}
+
+impl ChangesView {
+  /// Listens for Cmd+F in this view's window, focused or not.
+  pub(super) fn watch_find_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.search._find_key.is_some() {
+      return;
+    }
+    let id = window.window_handle().window_id();
+    self.search._find_key = Some(cx.observe_keystrokes(move |view, event, window, cx| {
+      let k = &event.keystroke;
+      if window.window_handle().window_id() == id
+        && k.key == "f"
+        && (k.modifiers.platform || k.modifiers.control)
+        && !k.modifiers.shift
+        && !k.modifiers.alt
+      {
+        view.open_search(cx);
+      }
+    }));
+  }
+
+  /// Cmd+F: opens the bar, or selects its text again.
+  pub(super) fn open_search(&mut self, cx: &mut Context<Self>) {
+    self.search.open = true;
+    self.search.focus = true;
+    cx.notify();
+  }
+
+  pub(super) fn close_search(&mut self, cx: &mut Context<Self>) {
+    let input = self.search.input.take();
+    self.search = Search {
+      target: self.search.target.clone(),
+      _find_key: self.search._find_key.take(),
+      ..Search::default()
+    };
+    drop(input);
+    cx.notify();
+  }
+
+  fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
+    self.search.query = query.clone();
+    self.search.current = 0;
+    self.search.debounce = Some(cx.spawn(async move |this, cx| {
+      cx.background_executor().timer(DEBOUNCE).await;
+      let _ = this.update(cx, |view, cx| {
+        view.search.applied = query;
+        view.search.current = 0;
+        cx.notify();
+      });
+    }));
+    cx.notify();
+  }
+
+  pub(super) fn step_match(&mut self, delta: isize, cx: &mut Context<Self>) {
+    let total = self.search.total as isize;
+    if total == 0 {
+      return;
+    }
+    self.search.current = (self.search.current as isize + delta).rem_euclid(total) as usize;
+    self.search.reveal = true;
+    cx.notify();
+  }
+
+  /// Builds the input once the bar opens, and focuses it when asked.
+  pub(super) fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if !self.search.open {
+      return;
+    }
+    let input = match &self.search.input {
+      Some(input) => input.clone(),
+      None => {
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+        self.search._subscription = Some(cx.subscribe(
+          &input,
+          |view, input, event: &InputEvent, cx| match event {
+            InputEvent::Change => {
+              let query = input.read(cx).value().to_string();
+              view.set_query(query, cx);
+            }
+            InputEvent::PressEnter { shift, .. } => {
+              view.step_match(if *shift { -1 } else { 1 }, cx)
+            }
+            _ => {}
+          },
+        ));
+        self.search.input = Some(input.clone());
+        input
+      }
+    };
+    if std::mem::take(&mut self.search.focus) {
+      input.update(cx, |input, cx| {
+        input.focus(window, cx);
+        input.select_all(window, cx);
+      });
+    }
+  }
+
+  /// `searchData`: every match, in React's order (conflicts, then the
+  /// working copy's files, then the committed ones shown).
+  pub(super) fn index_matches(&mut self) {
+    self.search.index.clear();
+    self.search.total = 0;
+    let query = self.search.applied.clone();
+    if query.is_empty() {
+      return;
+    }
+    let mut total = 0;
+    let mut index = HashMap::new();
+    let mut add = |key: MatchKey, text: &str, total: &mut usize| {
+      let n = match_ranges(text, &query).len();
+      if n > 0 {
+        index.insert(key, (*total, n));
+        *total += n;
+      }
+    };
+    let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
+    let mut files: Vec<(String, String, bool)> = self
+      .files()
+      .iter()
+      .map(|f| (f.path.clone(), f.status.clone(), f.old_path.is_some()))
+      .collect();
+    let working = files.len();
+    files.extend(
+      self
+        .visible_committed()
+        .into_iter()
+        .map(|f| (f.path, f.status, f.previous_path.is_some())),
+    );
+    for (path, _, _) in &files[..working] {
+      if !conflicted.contains(path) {
+        continue;
+      }
+      let hunks = self
+        .hunks
+        .get(path)
+        .map(|d| d.hunks.clone())
+        .unwrap_or_default();
+      for conflict in conflicts(path, &hunks) {
+        for (i, text) in conflict_texts(&conflict).iter().enumerate() {
+          add(MatchKey::Conflict(conflict.id.clone(), i), text, &mut total);
+        }
+      }
+    }
+    for (path, status, renamed) in &files {
+      let data = self.file_hunks(path);
+      let input = BodyInput {
+        path,
+        status,
+        renamed: *renamed,
+        data: data.as_ref(),
+        collapsed: self.collapsed_files.contains(path),
+        comment_activity: self.file_comment_activity(path),
+        expanded_large: self.expanded_large.contains(path),
+      };
+      if body(&input) != Body::Hunks {
+        continue;
+      }
+      let hunks = data.map(|d| d.hunks).unwrap_or_default();
+      let in_region = conflict_lines(&conflicts(path, &hunks));
+      for (h, hunk) in hunks.iter().enumerate() {
+        let numbers = line_numbers(hunk);
+        for (l, line) in hunk.lines.iter().enumerate() {
+          let new = numbers.get(l).and_then(|n| n.1);
+          if new.is_some_and(|n| in_region.contains_key(&(n as usize))) {
+            continue;
+          }
+          add(
+            MatchKey::Line(path.clone(), h, l),
+            line.get(1..).unwrap_or(""),
+            &mut total,
+          );
+        }
+      }
+    }
+    self.search.index = index;
+    self.search.total = total;
+    if self.search.current >= total {
+      self.search.current = 0;
+    }
+  }
+
+  /// The current match's offset within `key`'s line, if it is there.
+  fn current_in(&self, key: &MatchKey) -> Option<usize> {
+    let (first, n) = *self.search.index.get(key)?;
+    let current = self.search.current;
+    (current >= first && current < first + n).then(|| current - first)
+  }
+
+  /// A line's text with its matches marked (`mark.search-match`).
+  pub(super) fn marked_text(
+    &self,
+    key: MatchKey,
+    text: &str,
+    language: Option<&'static str>,
+  ) -> AnyElement {
+    let base = highlight::styled(text, language, self.dark);
+    if !self.search.index.contains_key(&key) {
+      return base.into_any_element();
+    }
+    let current = self.current_in(&key);
+    let primary = theme::palette(self.dark).primary;
+    let marks: Vec<(Range<usize>, Hsla)> = match_ranges(text, &self.search.applied)
+      .into_iter()
+      .enumerate()
+      .map(|(i, r)| {
+        (
+          r,
+          primary.opacity(if Some(i) == current { 0.6 } else { 0.3 }),
+        )
+      })
+      .collect();
+    let styled: StyledText = highlight::styled_marked(text, language, self.dark, &marks);
+    if current.is_none() {
+      return styled.into_any_element();
+    }
+    let target = self.search.target.clone();
+    div()
+      .relative()
+      .child(styled)
+      .child(
+        gpui::canvas(
+          move |bounds, _, _| {
+            *target.borrow_mut() = Some((key.clone(), bounds));
+          },
+          |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full(),
+      )
+      .into_any_element()
+  }
+
+  /// Scrolls the current match to the middle once it was drawn.
+  pub(super) fn reveal_match(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if !self.search.reveal {
+      return;
+    }
+    let Some(key) = self
+      .search
+      .index
+      .iter()
+      .find(|(k, _)| self.current_in(k).is_some())
+      .map(|(k, _)| k.clone())
+    else {
+      self.search.reveal = false;
+      return;
+    };
+    let drawn = self.search.target.borrow().clone();
+    match drawn {
+      Some((k, line)) if k == key => {
+        let view = self.scroll.bounds();
+        let offset = self.scroll.offset();
+        let delta = line.center().y - view.center().y;
+        self.scroll.set_offset(point(offset.x, offset.y - delta));
+        self.search.reveal = false;
+        cx.notify();
+      }
+      _ => cx.on_next_frame(window, |_, _, cx| cx.notify()),
+    }
+  }
+
+  /// `SearchOverlay`, top right of the diff.
+  pub(super) fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    if !self.search.open {
+      return None;
+    }
+    let input = self.search.input.clone()?;
+    let empty = self.search.query.trim().is_empty();
+    let shown = if self.search.total > 0 {
+      self.search.current + 1
+    } else {
+      0
+    };
+    let muted = p.muted_foreground;
+    let fg = p.foreground;
+    let accent = p.accent;
+    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
+      div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .size_5()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(2.))
+        .text_color(muted)
+        .when(disabled, |this| this.opacity(0.5))
+        .when(!disabled, |this| {
+          this
+            .cursor_pointer()
+            .hover(move |s| s.bg(accent).text_color(fg))
+        })
+        .child(ui::icon(icon, 16., muted))
+    };
+    Some(
+      div()
+        .id("diff-search")
+        .debug_selector(|| "diff-search".into())
+        .absolute()
+        .top_2()
+        .right_2()
+        .bg(p.background)
+        .border_1()
+        .border_color(p.border)
+        .rounded(px(6.))
+        .shadow_lg()
+        .p(px(2.))
+        .flex()
+        .items_center()
+        .gap(px(2.))
+        .capture_action(cx.listener(|view, _: &Escape, _, cx| {
+          view.close_search(cx);
+          cx.stop_propagation();
+        }))
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "diff-search-input".into())
+            .h_6()
+            .w_48()
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(p.input)
+            .child(Input::new(&input).appearance(false).bordered(false)),
+        )
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .debug_selector(|| "diff-search-count".into())
+            .px_2()
+            .whitespace_nowrap()
+            .text_color(muted)
+            .child(format!("{shown} of {}", self.search.total)),
+        )
+        .child(self.tip(
+          "diff-search-prev-tip".into(),
+          "Previous (Shift+Enter)",
+          icon_button("diff-search-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
+            this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
+          }),
+          cx,
+        ))
+        .child(self.tip(
+          "diff-search-next-tip".into(),
+          "Next (Enter)",
+          icon_button("diff-search-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
+            this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
+          }),
+          cx,
+        ))
+        .child(
+          self.tip(
+            "diff-search-close-tip".into(),
+            "Close (Esc)",
+            icon_button("diff-search-close", theme::ICON_X, false)
+              .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
+            cx,
+          ),
+        ),
+    )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::match_ranges;
+
+  #[test]
+  fn matches_ignore_case_and_do_not_overlap() {
+    assert_eq!(match_ranges("Logout logout", "LOG"), vec![0..3, 7..10]);
+    assert_eq!(match_ranges("aaaa", "aa"), vec![0..2, 2..4]);
+    assert_eq!(
+      match_ranges("abc", ""),
+      Vec::<std::ops::Range<usize>>::new()
+    );
+    assert_eq!(
+      match_ranges("ab", "abc"),
+      Vec::<std::ops::Range<usize>>::new()
+    );
+  }
+
+  #[test]
+  fn matches_keep_byte_offsets_past_wide_characters() {
+    assert_eq!(match_ranges("é x É", "é"), vec![0..2, 5..7]);
+  }
+}

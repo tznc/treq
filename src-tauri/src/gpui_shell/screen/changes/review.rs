@@ -886,7 +886,11 @@ impl ChangesView {
           .min_w_0()
           .px_2()
           .py(px(2.))
-          .child(highlight::styled(text, language, self.dark)),
+          .child(self.marked_text(
+            super::search::MatchKey::Line(path.to_string(), h, l),
+            text,
+            language,
+          )),
       )
   }
 

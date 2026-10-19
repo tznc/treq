@@ -247,10 +247,29 @@ pub(super) fn color(token: Token, dark: bool) -> Option<Hsla> {
 /// `line` drawn with its highlights; plain when the file has no language.
 pub(super) fn styled(line: &str, language: Option<&'static str>, dark: bool) -> StyledText {
   let text = SharedString::from(line.to_string());
+  StyledText::new(text).with_highlights(token_styles(line, language, dark))
+}
+
+/// [`styled`] with `marks` painted behind the text (search matches).
+pub(super) fn styled_marked(
+  line: &str,
+  language: Option<&'static str>,
+  dark: bool,
+  marks: &[(Range<usize>, Hsla)],
+) -> StyledText {
+  let text = SharedString::from(line.to_string());
+  StyledText::new(text).with_highlights(overlay(token_styles(line, language, dark), marks))
+}
+
+fn token_styles(
+  line: &str,
+  language: Option<&'static str>,
+  dark: bool,
+) -> Vec<(Range<usize>, HighlightStyle)> {
   let Some(language) = language else {
-    return StyledText::new(text);
+    return Vec::new();
   };
-  let highlights: Vec<(Range<usize>, HighlightStyle)> = spans(language, line)
+  spans(language, line)
     .iter()
     .filter_map(|(range, token)| {
       let italic = *token == Token::Italic || *token == Token::Comment && !dark;
@@ -269,8 +288,44 @@ pub(super) fn styled(line: &str, language: Option<&'static str>, dark: bool) -> 
         )
       })
     })
+    .collect()
+}
+
+/// Splits sorted, disjoint `styles` at the `marks`' edges so each piece
+/// carries both: `StyledText` takes no overlapping ranges.
+fn overlay(
+  styles: Vec<(Range<usize>, HighlightStyle)>,
+  marks: &[(Range<usize>, Hsla)],
+) -> Vec<(Range<usize>, HighlightStyle)> {
+  if marks.is_empty() {
+    return styles;
+  }
+  let mut edges: Vec<usize> = styles
+    .iter()
+    .flat_map(|(r, _)| [r.start, r.end])
+    .chain(marks.iter().flat_map(|(r, _)| [r.start, r.end]))
     .collect();
-  StyledText::new(text).with_highlights(highlights)
+  edges.sort_unstable();
+  edges.dedup();
+  let mut out: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
+  for pair in edges.windows(2) {
+    let piece = pair[0]..pair[1];
+    let token = styles
+      .iter()
+      .find(|(r, _)| r.start <= piece.start && piece.end <= r.end)
+      .map(|(_, s)| *s);
+    let mark = marks
+      .iter()
+      .find(|(r, _)| r.start <= piece.start && piece.end <= r.end)
+      .map(|(_, c)| *c);
+    if token.is_none() && mark.is_none() {
+      continue;
+    }
+    let mut style = token.unwrap_or_default();
+    style.background_color = mark;
+    out.push((piece, style));
+  }
+  out
 }
 
 #[cfg(test)]
@@ -282,6 +337,22 @@ mod tests {
       .iter()
       .map(|(r, t)| (&line[r.clone()], *t))
       .collect()
+  }
+
+  #[test]
+  fn marks_split_the_tokens_they_cross() {
+    let bold = HighlightStyle {
+      font_weight: Some(FontWeight::BOLD),
+      ..Default::default()
+    };
+    let red: Hsla = rgb(0xff0000).into();
+    let out = overlay(vec![(0..4, bold)], &[(2..6, red)]);
+    let ranges: Vec<_> = out.iter().map(|(r, _)| r.clone()).collect();
+    assert_eq!(ranges, vec![0..2, 2..4, 4..6]);
+    assert_eq!(out[0].1.background_color, None);
+    assert_eq!(out[1].1.background_color, Some(red));
+    assert_eq!(out[1].1.font_weight, Some(FontWeight::BOLD));
+    assert_eq!(out[2].1.font_weight, None);
   }
 
   #[test]

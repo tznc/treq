@@ -2520,3 +2520,30 @@ fn changes_tab_comments_a_dragged_selection(cx: &mut TestAppContext) {
   assert_eq!(saved[0]["end_line"], 3, "{saved}");
   assert_eq!(saved[0]["line_content"], serde_json::json!(["+b", "+c"]));
 }
+
+#[gpui::test]
+fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-card-a.rs");
+  h.cx.simulate_keystrokes("cmd-f");
+  assert!(h.drawn("diff-search"));
+  // a.rs: " a", "+b", "+c"; b.rs: "+d".
+  h.cx.simulate_input("b");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(150));
+  h.cx.run_until_parked();
+  let count = |h: &mut Harness| {
+    h.cx.run_until_parked();
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let search = &workspace.changes.as_ref().expect("changes").read(cx).search;
+      (search.current, search.total)
+    })
+  };
+  assert_eq!(count(&mut h), (0, 1));
+  h.cx.simulate_keystrokes("enter");
+  assert_eq!(count(&mut h), (0, 1));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("diff-search"));
+}

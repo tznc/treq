@@ -8,6 +8,7 @@
 //! [`changes_data`]: super::changes_data
 
 mod review;
+mod search;
 
 use std::{
   cell::RefCell,
@@ -141,6 +142,8 @@ pub struct ChangesView {
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
   /// Line comments, notes and the pending review.
   pub(super) review: review::Review,
+  /// The find bar.
+  pub(super) search: search::Search,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -198,6 +201,7 @@ impl ChangesView {
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
+      search: search::Search::default(),
       _subscriptions: Vec::new(),
     };
     this.hydrate_review(cx);
@@ -244,6 +248,7 @@ impl ChangesView {
       self.message_input = None;
       self.discard_dialog = false;
       self.review = review::Review::default();
+      self.close_search(cx);
       self.hydrate_review(cx);
       self.load_pr(cx);
     }
@@ -1227,6 +1232,10 @@ impl Render for ChangesView {
     self.tips.sync(cx);
     self.ensure_input(window, cx);
     self.ensure_review_inputs(window, cx);
+    self.watch_find_key(window, cx);
+    self.ensure_search_input(window, cx);
+    self.index_matches();
+    self.reveal_match(window, cx);
     self.scroll_to_file(window, cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
@@ -1261,7 +1270,16 @@ impl Render for ChangesView {
       .flex_col()
       .min_w_0()
       .children(self.action_bar(&p, cx))
-      .child(self.content(&p, cx));
+      .child(
+        div()
+          .flex_1()
+          .flex()
+          .flex_col()
+          .min_h_0()
+          .relative()
+          .child(self.content(&p, cx))
+          .children(self.search_bar(&p, cx)),
+      );
     let dialog = self.dialog(window, &p, cx);
     let finish = self.finish_popover(&p, cx);
     let review_dialog = self.review_dialog(window, &p, cx);
@@ -2861,7 +2879,7 @@ impl ChangesView {
         .collect()
     };
     let mut current = ConflictLineRole::Unknown;
-    for (raw, kind, role) in lines {
+    for (i, (raw, kind, role)) in lines.into_iter().enumerate() {
       if kind == ConflictLineKind::Marker {
         current = role;
       }
@@ -2919,7 +2937,11 @@ impl ChangesView {
             this.text_color(p.muted_foreground)
           })
           .children(label_el)
-          .child(div().flex_1().min_w_0().child(raw)),
+          .child(div().flex_1().min_w_0().child(self.marked_text(
+            search::MatchKey::Conflict(conflict.id.clone(), i),
+            &raw,
+            None,
+          ))),
       );
       let deleted_notice = |side: &'static str, fg: Hsla, border: Hsla, bg: Hsla| {
         div()
