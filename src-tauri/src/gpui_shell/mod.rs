@@ -30,6 +30,7 @@ use tauri_plugin_gpui::{
 };
 
 mod form;
+mod native;
 mod popup;
 mod screen;
 mod sidebar;
@@ -271,7 +272,11 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
             let sink = screen_sink(shell.app.clone(), shell.label.to_string());
             let popups = popup_sink(shell.app.clone(), shell.label.to_string());
             let webview = shell.webview.clone();
-            shell.screen = Some(cx.new(|_| Screen::new(snapshot, sink, popups, webview)));
+            let host = std::sync::Arc::new(native::Backend::new(
+              shell.app.clone(),
+              shell.label.to_string(),
+            ));
+            shell.screen = Some(cx.new(|_| Screen::new(snapshot, sink, popups, webview, host)));
           }
         }
       }

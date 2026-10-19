@@ -1,10 +1,6 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { FolderOpen, Server } from "lucide-react";
 import { useGpuiScreen } from "../lib/gpui-screen";
-import {
-  PrerequisiteChecklist,
-  useGpuiChecklist,
-} from "./PrerequisiteChecklist";
+import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
 import { Button } from "./ui/button";
 import {
   Card,
@@ -20,39 +16,15 @@ interface OnboardingProps {
   remoteLabel?: string;
 }
 
-/** Draws the onboarding screen in GPUI, with the same handlers. */
-function useGpuiOnboarding({
-  onOpenRepo,
-  onOpenRemoteSsh,
-  remoteLabel,
-}: Required<Pick<OnboardingProps, "onOpenRepo" | "remoteLabel">> &
-  Pick<OnboardingProps, "onOpenRemoteSsh">) {
-  const { checklist, recheck } = useGpuiChecklist();
-  useGpuiScreen(
-    {
-      kind: "onboarding",
-      remoteLabel: onOpenRemoteSsh ? remoteLabel : null,
-      checklist,
-    },
-    (action) => {
-      switch (action.kind) {
-        case "openRepo":
-          void onOpenRepo();
-          break;
-        case "openRemote":
-          void onOpenRemoteSsh?.();
-          break;
-        case "recheckPrerequisites":
-          recheck();
-          break;
-        case "openUrl":
-          void openUrl(action.url);
-          break;
-        default:
-          break;
-      }
-    },
-  );
+/**
+ * Draws the onboarding screen in GPUI, which runs the prerequisite check and
+ * opens repositories through the backend itself. Only the remote dialog is
+ * still React's.
+ */
+function useGpuiOnboarding(onOpenRemoteSsh?: () => Promise<void>) {
+  useGpuiScreen({ kind: "onboarding" }, (action) => {
+    if (action.kind === "openRemote") void onOpenRemoteSsh?.();
+  });
 }
 
 export const Onboarding: React.FC<OnboardingProps> = ({
@@ -60,7 +32,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({
   onOpenRemoteSsh,
   remoteLabel = "Open via SSH",
 }) => {
-  useGpuiOnboarding({ onOpenRepo, onOpenRemoteSsh, remoteLabel });
+  useGpuiOnboarding(onOpenRemoteSsh);
   return (
     <div className="flex h-screen items-center justify-center bg-background mx-auto">
       <Card className="w-96">

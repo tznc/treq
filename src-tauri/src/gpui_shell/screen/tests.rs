@@ -1,4 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+  cell::RefCell,
+  rc::Rc,
+  sync::{Arc, Mutex},
+};
 
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
 
@@ -11,8 +15,57 @@ struct Harness {
   sent: Rc<RefCell<Vec<ScreenAction>>>,
 }
 
+/// The backend, as the screens see it, recording what they asked of it.
+#[derive(Default)]
+struct FakeHost {
+  remote_ssh: bool,
+  /// What `check_prerequisites` reports.
+  installed: Vec<(&'static str, bool)>,
+  calls: Mutex<Vec<String>>,
+}
+
+impl FakeHost {
+  fn calls(&self) -> Vec<String> {
+    self.calls.lock().unwrap().clone()
+  }
+
+  fn record(&self, call: String) {
+    self.calls.lock().unwrap().push(call);
+  }
+}
+
+impl onboarding::OnboardingHost for FakeHost {
+  fn remote_ssh_enabled(&self) -> bool {
+    self.remote_ssh
+  }
+
+  fn check_prerequisites(&self) -> Vec<crate::core::PrerequisiteStatus> {
+    self.record("check".into());
+    self
+      .installed
+      .iter()
+      .map(|(binary, installed)| crate::core::PrerequisiteStatus {
+        binary: binary.to_string(),
+        installed: *installed,
+      })
+      .collect()
+  }
+
+  fn pick_repo(&self) {
+    self.record("pick_repo".into());
+  }
+
+  fn open_url(&self, url: &str) {
+    self.record(format!("open {url}"));
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, snapshot: ScreenSnapshot) -> Self {
+    Self::with_host(cx, snapshot, Arc::new(FakeHost::default()))
+  }
+
+  fn with_host(cx: &mut TestAppContext, snapshot: ScreenSnapshot, host: Arc<FakeHost>) -> Self {
     let sent = Rc::new(RefCell::new(Vec::new()));
     let sink: ActionSink = {
       let sent = sent.clone();
@@ -20,7 +73,7 @@ impl Harness {
     };
     cx.update(crate::gpui_shell::theme::init);
     let popups: crate::gpui_shell::popup::PopupSink = Rc::new(|_, _| {});
-    let (screen, cx) = cx.add_window_view(|_, _| Screen::new(snapshot, sink, popups, None));
+    let (screen, cx) = cx.add_window_view(|_, _| Screen::new(snapshot, sink, popups, None, host));
     let cx = cx.clone();
     Self { cx, screen, sent }
   }
@@ -52,53 +105,51 @@ impl Harness {
   }
 }
 
-const ONBOARDING_JSON: &str = r#"{
-  "kind": "onboarding",
-  "dark": false,
-  "remoteLabel": "Open cloud workspace",
-  "checklist": {
-    "title": "Before you start",
-    "validating": false,
-    "groups": [
-      {"label": "Required", "error": false, "tools": [
-        {"binary": "git", "label": "Git", "note": null, "required": true,
-         "installed": false, "installUrl": "https://git-scm.com/downloads"}
-      ]},
-      {"label": "Agent CLI (install at least one)", "error": true, "tools": [
-        {"binary": "claude", "label": "Claude Code", "note": null,
-         "required": false, "installed": null,
-         "installUrl": "https://code.claude.com/docs/en/setup"}
-      ]},
-      {"label": "Optional", "error": false, "tools": [
-        {"binary": "gh", "label": "GitHub CLI",
-         "note": "Needed for pull requests and issues", "required": false,
-         "installed": true, "installUrl": "https://cli.github.com/"}
-      ]}
-    ]
-  }
-}"#;
-
 fn onboarding() -> ScreenSnapshot {
-  serde_json::from_str(ONBOARDING_JSON).expect("parse")
+  serde_json::from_str(r#"{"kind": "onboarding", "dark": false}"#).expect("parse")
 }
 
 #[test]
-fn parses_onboarding_from_react() {
-  let snapshot = onboarding();
-  assert!(!snapshot.dark);
-  let View::Onboarding(screen) = snapshot.view else {
-    panic!("not onboarding");
+fn builds_the_checklist_from_the_check() {
+  let list = checklist::from_statuses("Before you start", None, true);
+  assert!(list.validating);
+  assert_eq!(list.groups.len(), 3);
+  // Nothing is reported missing before the first check returns.
+  assert!(!list.groups[1].error);
+  assert!(list
+    .groups
+    .iter()
+    .flat_map(|g| &g.tools)
+    .all(|t| t.installed.is_none()));
+
+  let statuses = [("git", false), ("claude", false), ("gh", true)].map(|(binary, installed)| {
+    crate::core::PrerequisiteStatus {
+      binary: binary.into(),
+      installed,
+    }
+  });
+  let list = checklist::from_statuses("Before you start", Some(&statuses), false);
+  let [required, agents, optional] = &list.groups[..] else {
+    panic!("three groups");
   };
-  assert_eq!(screen.remote_label.as_deref(), Some("Open cloud workspace"));
-  let groups = &screen.checklist.groups;
-  assert_eq!(groups.len(), 3);
-  assert!(groups[1].error);
-  assert_eq!(groups[0].tools[0].installed, Some(false));
-  assert_eq!(groups[1].tools[0].installed, None);
+  assert_eq!(required.label, "Required");
+  assert!(required.tools[0].required);
+  assert_eq!(required.tools[0].installed, Some(false));
+  assert!(agents.error, "no agent CLI is installed");
+  assert_eq!(agents.tools.len(), 4);
+  assert_eq!(optional.tools[0].installed, Some(true));
   assert_eq!(
-    groups[2].tools[0].note.as_deref(),
+    optional.tools[0].note.as_deref(),
     Some("Needed for pull requests and issues")
   );
+  // The binaries are the ones the backend checks, in its order.
+  let binaries: Vec<_> = list
+    .groups
+    .iter()
+    .flat_map(|g| &g.tools)
+    .map(|t| t.binary.as_str())
+    .collect();
+  assert_eq!(binaries, crate::core::PREREQUISITE_BINARIES);
 }
 
 #[test]
@@ -118,53 +169,47 @@ fn serializes_actions_as_react_reads_them() {
 }
 
 #[gpui::test]
-fn onboarding_buttons_send_their_actions(cx: &mut TestAppContext) {
-  let mut h = Harness::new(cx, onboarding());
-  h.click("onboarding-open-repo");
-  h.click("onboarding-open-remote");
-  h.click("prerequisites-recheck");
-  // Only the missing tool gets an install link.
+fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    installed: vec![("git", false), ("gh", true)],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  // The check ran as the screen opened.
   assert!(h.drawn("install-git"));
   assert!(!h.drawn("install-gh"));
-  assert!(!h.drawn("install-claude"));
+  h.click("onboarding-open-repo");
+  h.click("prerequisites-recheck");
   h.click("install-git");
+  // Only the remote dialog is still React's.
+  h.click("onboarding-open-remote");
   assert_eq!(
-    h.sent(),
-    vec![
-      ScreenAction::OpenRepo,
-      ScreenAction::OpenRemote,
-      ScreenAction::RecheckPrerequisites,
-      ScreenAction::OpenUrl {
-        url: "https://git-scm.com/downloads".into()
-      },
+    host.calls(),
+    [
+      "check",
+      "pick_repo",
+      "check",
+      "open https://git-scm.com/downloads"
     ]
   );
+  assert_eq!(h.sent(), vec![ScreenAction::OpenRemote]);
 }
 
 #[gpui::test]
-fn onboarding_hides_the_remote_button_without_a_label(cx: &mut TestAppContext) {
-  let mut h = Harness::new(cx, onboarding());
+fn onboarding_labels_the_remote_button_by_preview(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    remote_ssh: true,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
   assert!(h.drawn("onboarding-open-remote"));
-  h.update(|s| {
-    let View::Onboarding(screen) = &mut s.view else {
-      panic!("not onboarding");
-    };
-    screen.remote_label = None;
+  let label = h.screen.read_with(&h.cx, |screen, cx| {
+    screen
+      .onboarding
+      .as_ref()
+      .map(|view| view.read(cx).remote_label.clone())
   });
-  assert!(!h.drawn("onboarding-open-remote"));
-}
-
-#[gpui::test]
-fn recheck_is_disabled_while_checking(cx: &mut TestAppContext) {
-  let mut h = Harness::new(cx, onboarding());
-  h.update(|s| {
-    let View::Onboarding(screen) = &mut s.view else {
-      panic!("not onboarding");
-    };
-    screen.checklist.validating = true;
-  });
-  h.click("prerequisites-recheck");
-  assert!(h.sent().is_empty());
+  assert_eq!(label.as_deref(), Some("Open via SSH"));
 }
 
 const SETTINGS_JSON: &str = r#"{

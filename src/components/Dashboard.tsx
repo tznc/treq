@@ -102,7 +102,11 @@ import {
   type AutoReviewEvent,
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
-import { openRepositoryAtPath as openRepositoryAtPathShared } from "../lib/open-repository";
+import { useGpuiNativeEvents } from "../lib/gpui-native";
+import {
+  openRepositoryAtPath as openRepositoryAtPathShared,
+  showOpenedRepository,
+} from "../lib/open-repository";
 import {
   issueFromGitHub,
   issueFromLinear,
@@ -1628,16 +1632,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
     },
   });
 
+  const onRepositoryOpened = (path: string) => {
+    setRepoPath(path);
+    setSelectedWorkspace(null);
+    setActiveSessionId(null);
+    setSessionSelectedFile(null);
+  };
+
   const openRepositoryAtPath = (selected: string) =>
     openRepositoryAtPathShared(selected, {
       addToast,
-      onOpened: (path) => {
-        setRepoPath(path);
-        setSelectedWorkspace(null);
-        setActiveSessionId(null);
-        setSessionSelectedFile(null);
-      },
+      onOpened: onRepositoryOpened,
     });
+
+  // GPUI screens act through the backend; follow what they changed.
+  useGpuiNativeEvents((event) => {
+    switch (event.kind) {
+      case "repoOpened":
+        showOpenedRepository(event.path, onRepositoryOpened);
+        break;
+      case "toast":
+        addToast({
+          title: event.title,
+          description: event.description,
+          type: event.tone,
+        });
+        break;
+      default:
+    }
+  });
 
   const addSupportingRepoAtPath = async (selected: string) => {
     if (!mainRepoPath) return;

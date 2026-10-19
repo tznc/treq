@@ -10,7 +10,7 @@
 //! React keeps drawing its UI too, so pushing `null` (for a screen or dialog
 //! GPUI does not draw yet) brings the webview back with React's version.
 
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Webview, Wry};
@@ -47,7 +47,7 @@ pub struct ScreenSnapshot {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum View {
   /// No repository open: open one, or check the required tools.
-  Onboarding(onboarding::Onboarding),
+  Onboarding(onboarding::Route),
   Settings(Box<settings::Settings>),
   /// The workspace view's header and tab row, with the webview below.
   Workspace(Box<workspace::Workspace>),
@@ -82,6 +82,11 @@ pub enum ScreenAction {
 /// Where a screen sends its actions.
 pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
+/// Everything the screens drawn from the backend ask of it; faked in tests.
+pub trait Host: onboarding::OnboardingHost {}
+
+impl<T: onboarding::OnboardingHost> Host for T {}
+
 /// The GPUI view for whichever screen React pushed last.
 pub struct Screen {
   snapshot: ScreenSnapshot,
@@ -89,8 +94,10 @@ pub struct Screen {
   popups: PopupSink,
   /// The window's webview, which a screen may frame part of itself around.
   webview: Option<Webview<Wry>>,
+  host: Arc<dyn Host>,
   /// Screens with state of their own (text being edited, open dropdowns),
   /// kept while React keeps sending them.
+  onboarding: Option<Entity<onboarding::OnboardingView>>,
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
 }
@@ -101,12 +108,15 @@ impl Screen {
     sink: ActionSink,
     popups: PopupSink,
     webview: Option<Webview<Wry>>,
+    host: Arc<dyn Host>,
   ) -> Self {
     Self {
       snapshot,
       sink,
       popups,
       webview,
+      host,
+      onboarding: None,
       settings: None,
       workspace: None,
     }
@@ -141,6 +151,9 @@ impl Ctx<'_> {
 impl Render for Screen {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let dark = self.snapshot.dark;
+    if !matches!(self.snapshot.view, View::Onboarding(_)) {
+      self.onboarding = None;
+    }
     if !matches!(self.snapshot.view, View::Settings(_)) {
       self.settings = None;
     }
@@ -152,7 +165,18 @@ impl Render for Screen {
       sink: &self.sink,
     };
     let body = match &self.snapshot.view {
-      View::Onboarding(screen) => onboarding::render(screen, &ctx).into_any_element(),
+      View::Onboarding(_) => match &self.onboarding {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_dark(dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let (host, sink) = (self.host.clone(), self.sink.clone());
+          let view = cx.new(|cx| onboarding::OnboardingView::new(host, sink, dark, cx));
+          self.onboarding = Some(view.clone());
+          view.into_any_element()
+        }
+      },
       View::Settings(screen) => {
         let screen = (**screen).clone();
         match &self.settings {

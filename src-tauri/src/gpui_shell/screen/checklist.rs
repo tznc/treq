@@ -5,6 +5,7 @@ use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{div, prelude::*, px, FontWeight, SharedString};
 
 use super::{Ctx, ScreenAction};
+use crate::core::PrerequisiteStatus;
 use crate::gpui_shell::{
   theme,
   ui::{self, Button, Size, TextSize, Variant},
@@ -148,4 +149,117 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
         }),
     )
     .child(trailing)
+}
+
+/// Which group a tool is listed under.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+  Required,
+  Agent,
+  Optional,
+}
+
+/// A tool the checklist reports on (`PREREQUISITE_TOOLS` in React).
+struct Known {
+  binary: &'static str,
+  label: &'static str,
+  kind: Kind,
+  install_url: &'static str,
+  note: Option<&'static str>,
+}
+
+/// The tools, in display order. Their binaries are
+/// `core::PREREQUISITE_BINARIES`.
+const TOOLS: [Known; 6] = [
+  Known {
+    binary: "git",
+    label: "Git",
+    kind: Kind::Required,
+    install_url: "https://git-scm.com/downloads",
+    note: None,
+  },
+  Known {
+    binary: "claude",
+    label: "Claude Code",
+    kind: Kind::Agent,
+    install_url: "https://code.claude.com/docs/en/setup",
+    note: None,
+  },
+  Known {
+    binary: "codex",
+    label: "Codex",
+    kind: Kind::Agent,
+    install_url: "https://developers.openai.com/codex/cli",
+    note: None,
+  },
+  Known {
+    binary: "cursor-agent",
+    label: "Cursor Agent",
+    kind: Kind::Agent,
+    install_url: "https://cursor.com/docs/cli/installation",
+    note: None,
+  },
+  Known {
+    binary: "copilot",
+    label: "GitHub Copilot CLI",
+    kind: Kind::Agent,
+    install_url: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
+    note: None,
+  },
+  Known {
+    binary: "gh",
+    label: "GitHub CLI",
+    kind: Kind::Optional,
+    install_url: "https://cli.github.com/",
+    note: Some("Needed for pull requests and issues"),
+  },
+];
+
+const GROUPS: [(Kind, &str); 3] = [
+  (Kind::Required, "Required"),
+  (Kind::Agent, "Agent CLI (install at least one)"),
+  (Kind::Optional, "Optional"),
+];
+
+/// The checklist for `statuses` from `core::check_prerequisites`, or every
+/// tool still "Checking..." before the first check returns.
+pub fn from_statuses(
+  title: &str,
+  statuses: Option<&[PrerequisiteStatus]>,
+  validating: bool,
+) -> Checklist {
+  let installed = |binary: &str| {
+    statuses.map(|statuses| {
+      statuses
+        .iter()
+        .any(|status| status.binary == binary && status.installed)
+    })
+  };
+  let no_agent = statuses.is_some()
+    && !TOOLS
+      .iter()
+      .any(|tool| tool.kind == Kind::Agent && installed(tool.binary) == Some(true));
+  Checklist {
+    title: title.to_string(),
+    validating,
+    groups: GROUPS
+      .iter()
+      .map(|(kind, label)| Group {
+        label: label.to_string(),
+        error: *kind == Kind::Agent && no_agent,
+        tools: TOOLS
+          .iter()
+          .filter(|tool| tool.kind == *kind)
+          .map(|tool| Tool {
+            binary: tool.binary.to_string(),
+            label: tool.label.to_string(),
+            note: tool.note.map(str::to_string),
+            required: tool.kind == Kind::Required,
+            installed: installed(tool.binary),
+            install_url: tool.install_url.to_string(),
+          })
+          .collect(),
+      })
+      .collect(),
+  }
 }

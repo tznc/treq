@@ -11,7 +11,7 @@ import { useWindowModalBackdrop } from "./window-modals";
  * while a screen is pushed, and shows it again for null.
  */
 
-export interface GpuiChecklistTool {
+interface GpuiChecklistTool {
   binary: string;
   label: string;
   note: string | null;
@@ -202,13 +202,8 @@ export interface GpuiWorkspaceScreen {
 }
 
 export type GpuiScreenView =
-  | {
-      kind: "onboarding";
-      remoteLabel: string | null;
-      checklist: GpuiChecklist;
-    }
-  | GpuiSettingsScreen
-  | GpuiWorkspaceScreen;
+  /** GPUI reads its data from the backend and opens repositories itself. */
+  { kind: "onboarding" } | GpuiSettingsScreen | GpuiWorkspaceScreen;
 
 export type GpuiScreenSnapshot = GpuiScreenView & { dark: boolean };
 

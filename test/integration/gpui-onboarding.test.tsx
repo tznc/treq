@@ -1,100 +1,56 @@
 // @include-parallel
 import * as React from "react";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
-import type { GpuiChecklistTool } from "../../src/lib/gpui-screen";
+import type { GpuiNativeEvent } from "../../src/lib/gpui-native";
 import {
   findGpuiScreen,
   gpuiScreen,
   sendGpuiScreenAction,
 } from "../gpui-screen";
+import { findGpuiToast } from "../gpui-sidebar";
+import { emitOnTestBus } from "../test-event-bus";
 import { render, screen } from "../test-utils";
+import { createTestRepo } from "../utils";
 
-const FAKE_TOOL = path.resolve(__dirname, "../fake-agent/fake-agent.sh");
-
-function tool(
-  snapshot: Awaited<ReturnType<typeof findGpuiScreen<"onboarding">>>,
-  binary: string,
-): GpuiChecklistTool | undefined {
-  return snapshot.checklist.groups
-    .flatMap((g) => g.tools)
-    .find((t) => t.binary === binary);
+// GPUI draws the checklist and opens repositories through the backend
+// itself (gpui_shell/screen/onboarding.rs, tested in Rust); React only
+// follows what it did.
+function sendNativeEvent(event: GpuiNativeEvent) {
+  act(() => {
+    emitOnTestBus("gpui-native-event", event);
+  });
 }
 
 describe("GPUI onboarding screen", () => {
-  let searchDir: string;
-
   beforeEach(() => {
-    searchDir = fs.mkdtempSync(path.join(os.tmpdir(), "treq-gpui-onb-"));
-    const which = (process.env.PATH ?? "")
-      .split(path.delimiter)
-      .map((dir) => path.join(dir, "which"))
-      .find((candidate) => fs.existsSync(candidate));
-    if (!which) throw new Error("`which` must be on PATH");
-    fs.symlinkSync(which, path.join(searchDir, "which"));
-    process.env.TREQ_TEST_PREREQ_PATH = searchDir;
     window.history.replaceState({}, "", "/");
   });
 
-  afterEach(() => {
-    delete process.env.TREQ_TEST_PREREQ_PATH;
-    fs.rmSync(searchDir, { recursive: true, force: true });
+  it("asks GPUI for the screen without data of its own", async () => {
+    render(<Dashboard />);
+    const snapshot = await findGpuiScreen("onboarding");
+    expect(Object.keys(snapshot).sort()).toEqual(["dark", "kind"]);
   });
 
-  it("draws the same checklist React draws", async () => {
-    fs.symlinkSync(FAKE_TOOL, path.join(searchDir, "claude"));
+  it("switches to a repository GPUI opened", async () => {
+    const { repoPath } = createTestRepo(false);
+    // GPUI has initialized it and recorded it for the window.
+    await invoke("init_repo", { repoPath });
     render(<Dashboard />);
+    await findGpuiScreen("onboarding");
 
-    const snapshot = await findGpuiScreen("onboarding", (s) => {
-      expect(tool(s, "claude")?.installed).toBe(true);
+    sendNativeEvent({ kind: "repoOpened", path: repoPath });
+    sendNativeEvent({
+      kind: "toast",
+      title: "Repository Opened",
+      description: "Now viewing repo",
+      tone: "success",
     });
-    expect(snapshot.checklist.groups.map((g) => g.label)).toEqual([
-      "Required",
-      "Agent CLI (install at least one)",
-      "Optional",
-    ]);
-    expect(tool(snapshot, "git")).toMatchObject({
-      installed: false,
-      required: true,
-    });
-    expect(tool(snapshot, "gh")?.note).toBe(
-      "Needed for pull requests and issues",
-    );
-    expect(snapshot.checklist.groups[1].error).toBe(false);
-    expect(snapshot.remoteLabel).toBeTruthy();
-  });
-
-  it("flags the agent group when no agent CLI is installed", async () => {
-    render(<Dashboard />);
-    const snapshot = await findGpuiScreen("onboarding", (s) => {
-      expect(tool(s, "git")?.installed).toBe(false);
-    });
-    expect(snapshot.checklist.groups[1].error).toBe(true);
-  });
-
-  it("opens install links and re-checks through React's handlers", async () => {
-    render(<Dashboard />);
-    await findGpuiScreen("onboarding", (s) => {
-      expect(tool(s, "git")?.installed).toBe(false);
-    });
-
-    sendGpuiScreenAction({
-      kind: "openUrl",
-      url: "https://git-scm.com/downloads",
-    });
-    expect(vi.mocked(openUrl)).toHaveBeenCalledWith(
-      "https://git-scm.com/downloads",
-    );
-
-    fs.symlinkSync(FAKE_TOOL, path.join(searchDir, "git"));
-    sendGpuiScreenAction({ kind: "recheckPrerequisites" });
-    await findGpuiScreen("onboarding", (s) => {
-      expect(tool(s, "git")?.installed).toBe(true);
-    });
+    await vi.waitFor(() => expect(gpuiScreen()?.kind).not.toBe("onboarding"));
+    await findGpuiToast("Repository Opened");
   });
 
   it("brings the webview back while a React dialog is open", async () => {
