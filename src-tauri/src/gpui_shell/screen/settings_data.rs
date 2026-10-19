@@ -8,6 +8,7 @@ use crate::{
   core::{
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
+    skills::{self, InstalledSkill, SkillCatalogSkillView, SkillInstallScope},
   },
   gpui_shell::native::{Backend, NativeEvent},
   repo_config::{self, RepoConfig},
@@ -30,6 +31,22 @@ pub trait SettingsHost: ToolsHost {
   fn repo_settings(&self, repo_path: &str, keys: &[String]) -> Result<Values, String>;
   /// As `set_repo_setting`, for each value.
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String>;
+  /// The skill registry, each skill with its install state (`list_skill_catalog`).
+  fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String>;
+  fn installed_skills(&self, repo_path: Option<&str>) -> Result<Vec<InstalledSkill>, String>;
+  fn install_skill(
+    &self,
+    skill_id: &str,
+    scope: SkillInstallScope,
+    repo_path: Option<&str>,
+  ) -> Result<(), String>;
+  fn uninstall_skill(&self, skill_id: &str, repo_path: Option<&str>) -> Result<(), String>;
+  fn set_skill_scope(
+    &self,
+    skill_id: &str,
+    scope: SkillInstallScope,
+    repo_path: Option<&str>,
+  ) -> Result<(), String>;
   fn notify(&self, event: NativeEvent);
 }
 
@@ -88,8 +105,94 @@ impl SettingsHost for Backend {
     Ok(())
   }
 
+  fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String> {
+    let view =
+      tauri::async_runtime::block_on(crate::commands::skills::catalog_view(repo_path, None))?;
+    Ok(view.skills)
+  }
+
+  fn installed_skills(&self, repo_path: Option<&str>) -> Result<Vec<InstalledSkill>, String> {
+    skills::list_installed_skills(repo_path)
+  }
+
+  fn install_skill(
+    &self,
+    skill_id: &str,
+    scope: SkillInstallScope,
+    repo_path: Option<&str>,
+  ) -> Result<(), String> {
+    tauri::async_runtime::block_on(crate::commands::skills::download_and_install(
+      skill_id, scope, repo_path, None,
+    ))?;
+    self.with_db(skills::persist_app_index_setting)
+  }
+
+  fn uninstall_skill(&self, skill_id: &str, repo_path: Option<&str>) -> Result<(), String> {
+    skills::uninstall_skill(skill_id, repo_path)?;
+    self.with_db(skills::persist_app_index_setting)
+  }
+
+  fn set_skill_scope(
+    &self,
+    skill_id: &str,
+    scope: SkillInstallScope,
+    repo_path: Option<&str>,
+  ) -> Result<(), String> {
+    skills::set_skill_install_scope(skill_id, scope, repo_path)?;
+    self.with_db(skills::persist_app_index_setting)
+  }
+
   fn notify(&self, event: NativeEvent) {
     Backend::notify(self, event);
+  }
+}
+
+/// `skillMatches` and `skillMatchesScope`: the skills the search and the
+/// install-level filter (`all`, `application` or `repository`) leave.
+pub fn filter_skills<'a>(
+  skills: &'a [SkillCatalogSkillView],
+  query: &str,
+  scope: &str,
+) -> Vec<&'a SkillCatalogSkillView> {
+  let query = query.trim().to_lowercase();
+  skills
+    .iter()
+    .filter(|view| {
+      let skill = &view.skill;
+      let haystack = format!(
+        "{} {} {} {}",
+        skill.name,
+        skill.description.as_deref().unwrap_or_default(),
+        skill.source,
+        skill.category.as_deref().unwrap_or_default()
+      )
+      .to_lowercase();
+      query.is_empty() || haystack.contains(&query)
+    })
+    .filter(|view| match scope {
+      "application" => {
+        matches!(&view.installed, Some(i) if i.scope == SkillInstallScope::Application)
+      }
+      "repository" => {
+        matches!(&view.installed, Some(i) if i.scope == SkillInstallScope::Repository)
+      }
+      _ => true,
+    })
+    .collect()
+}
+
+pub fn scope_value(scope: SkillInstallScope) -> &'static str {
+  match scope {
+    SkillInstallScope::Application => "application",
+    SkillInstallScope::Repository => "repository",
+  }
+}
+
+pub fn parse_scope(value: &str) -> Option<SkillInstallScope> {
+  match value {
+    "application" => Some(SkillInstallScope::Application),
+    "repository" => Some(SkillInstallScope::Repository),
+    _ => None,
   }
 }
 

@@ -47,6 +47,9 @@ impl SearchableListItem for SelectOption {
 
 type Options = Vec<SelectOption>;
 
+/// A select control's state, as [`Controls::select`] returns it.
+pub type SelectStateOf = SelectState<Options>;
+
 /// The GPUI state of a screen's controls, by field name.
 pub struct Controls {
   sink: ActionSink,

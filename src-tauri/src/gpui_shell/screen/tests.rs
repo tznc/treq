@@ -26,6 +26,8 @@ struct FakeHost {
   /// What `.treq/config.yaml` sets.
   config: crate::repo_config::RepoConfig,
   setup_script: String,
+  /// The skill registry, as `skill_catalog` returns it.
+  skills: Vec<crate::core::skills::SkillCatalogSkillView>,
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
@@ -137,6 +139,52 @@ impl settings_data::SettingsHost for FakeHost {
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
     let pairs: Vec<_> = values.iter().map(|(k, v)| format!("{k}={v}")).collect();
     self.record(format!("set repo {repo_path} {}", pairs.join(" ")));
+    Ok(())
+  }
+
+  fn skill_catalog(
+    &self,
+    _: Option<&str>,
+  ) -> Result<Vec<crate::core::skills::SkillCatalogSkillView>, String> {
+    self.record("read skills".into());
+    Ok(self.skills.clone())
+  }
+
+  fn installed_skills(
+    &self,
+    _: Option<&str>,
+  ) -> Result<Vec<crate::core::skills::InstalledSkill>, String> {
+    Ok(
+      self
+        .skills
+        .iter()
+        .filter_map(|s| s.installed.clone())
+        .collect(),
+    )
+  }
+
+  fn install_skill(
+    &self,
+    skill_id: &str,
+    scope: crate::core::skills::SkillInstallScope,
+    repo_path: Option<&str>,
+  ) -> Result<(), String> {
+    self.record(format!("install {skill_id} {scope:?} {repo_path:?}"));
+    Err("checksum mismatch".into())
+  }
+
+  fn uninstall_skill(&self, skill_id: &str, _: Option<&str>) -> Result<(), String> {
+    self.record(format!("uninstall {skill_id}"));
+    Ok(())
+  }
+
+  fn set_skill_scope(
+    &self,
+    skill_id: &str,
+    scope: crate::core::skills::SkillInstallScope,
+    _: Option<&str>,
+  ) -> Result<(), String> {
+    self.record(format!("scope {skill_id} {scope:?}"));
     Ok(())
   }
 
@@ -943,4 +991,140 @@ fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
     h.sent(),
     vec![press("workspace.branchSwitcher"), press("workspace.stack")]
   );
+}
+
+fn skill(
+  id: &str,
+  name: &str,
+  installed: Option<&str>,
+) -> crate::core::skills::SkillCatalogSkillView {
+  serde_json::from_value(serde_json::json!({
+    "id": id,
+    "name": name,
+    "description": format!("{name} helps"),
+    "source": "anthropics/skills",
+    "category": "docs",
+    "url": format!("https://github.com/anthropics/skills/{id}"),
+    "installed": installed.map(|scope| serde_json::json!({
+      "id": id,
+      "name": name,
+      "checksum": "abc",
+      "scope": scope,
+    })),
+  }))
+  .expect("skill")
+}
+
+fn skills_harness(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  let host = Arc::new(FakeHost {
+    skills: vec![
+      skill("pdf", "PDF", Some("application")),
+      skill("docx", "Word", None),
+    ],
+    ..FakeHost::default()
+  });
+  let h = Harness::with_host(cx, settings_route("skills"), host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  (h, host)
+}
+
+fn settings_view(h: &mut Harness) -> Entity<settings::SettingsView> {
+  h.cx.run_until_parked();
+  h.screen
+    .read_with(&h.cx, |screen, _| screen.settings.clone())
+    .expect("settings drawn")
+}
+
+fn settings_act(h: &mut Harness, action: ScreenAction) {
+  let view = settings_view(h);
+  view.update(&mut h.cx, |view, cx| view.handle(action, cx));
+  h.cx.run_until_parked();
+}
+
+#[gpui::test]
+fn skills_tab_lists_and_filters_the_registry(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_harness(cx);
+  let skills = drawn_settings(&mut h).skills.expect("skills tab");
+  assert_eq!(skills.installed, 1);
+  let names: Vec<_> = skills.rows.iter().map(|r| r.name.as_str()).collect();
+  assert_eq!(names, ["PDF", "Word"]);
+  assert_eq!(skills.rows[0].installed.as_deref(), Some("application"));
+  assert!(h.drawn("skill-uninstall-pdf"));
+  assert!(h.drawn("skill-install-docx"));
+  assert_eq!(
+    host.calls().iter().filter(|c| *c == "read skills").count(),
+    1
+  );
+
+  settings_act(&mut h, field("skills.query", "WORD".into()));
+  let names: Vec<_> = drawn_settings(&mut h)
+    .skills
+    .expect("skills tab")
+    .rows
+    .into_iter()
+    .map(|r| r.name)
+    .collect();
+  assert_eq!(names, ["Word"]);
+
+  settings_act(&mut h, field("skills.query", "".into()));
+  settings_act(&mut h, field("skills.scope", "application".into()));
+  let rows = drawn_settings(&mut h).skills.expect("skills tab").rows;
+  assert_eq!(rows.len(), 1);
+  assert_eq!(rows[0].id, "pdf");
+}
+
+#[gpui::test]
+fn skills_install_asks_where_then_toasts_a_failure(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_harness(cx);
+  h.click("skill-install-docx");
+  assert!(h.drawn("skill-install-dialog"));
+  assert_eq!(
+    drawn_settings(&mut h)
+      .skills
+      .expect("skills tab")
+      .dialog
+      .map(|d| d.name),
+    Some("Word".into())
+  );
+  h.click("skill-dialog-repository");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("skill-install-dialog"));
+  assert_eq!(
+    host.writes(),
+    [
+      "install docx Repository Some(\"/repo\")",
+      "notify toast Skill library",
+    ]
+  );
+  let reads = host.calls().iter().filter(|c| *c == "read skills").count();
+  assert_eq!(reads, 2, "it reads the registry again");
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn skills_uninstall_and_move_between_levels(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_harness(cx);
+  h.click("skill-uninstall-pdf");
+  h.cx.run_until_parked();
+  settings_act(&mut h, field("skills.level:pdf", "repository".into()));
+  h.click("skill-source-pdf");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "uninstall pdf",
+      "scope pdf Repository",
+      "open https://github.com/anthropics/skills/pdf",
+    ]
+  );
+}
+
+#[gpui::test]
+fn skills_dialog_cancels(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_harness(cx);
+  h.click("skill-install-docx");
+  h.click("skill-dialog-cancel");
+  assert!(!h.drawn("skill-install-dialog"));
+  assert!(host.writes().is_empty());
 }

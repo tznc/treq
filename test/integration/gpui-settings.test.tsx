@@ -61,6 +61,8 @@ describe("GPUI settings screen", () => {
 
     showTab("preview");
     await findGpuiScreen("settings", (s) => expect(s.tab).toBe("preview"));
+    showTab("skills");
+    await findGpuiScreen("settings", (s) => expect(s.tab).toBe("skills"));
     showTab("account");
     await waitFor(() => expect(gpuiScreen()).toBeNull());
     expect(

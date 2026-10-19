@@ -1,6 +1,6 @@
-//! `SettingsPage`: the Repository, Application and Feature Preview tabs.
-//! React sends no screen for the other tabs yet, so they stay in the
-//! webview.
+//! `SettingsPage`: the Repository, Application, Skills and Feature Preview
+//! tabs. React sends no screen for Account and Integrations yet (they read
+//! Supabase), so they stay in the webview.
 //!
 //! Drawn from the backend directly: GPUI loads and saves the settings
 //! itself, then tells React (see `native`) so its stores and caches follow.
@@ -20,7 +20,8 @@ use super::{
 };
 use crate::{
   core::{
-    app_setup_script::AppSetupScriptStatus, feature_preview::PreviewFeature, PrerequisiteStatus,
+    app_setup_script::AppSetupScriptStatus, feature_preview::PreviewFeature,
+    skills::SkillCatalogSkillView, PrerequisiteStatus,
   },
   gpui_shell::{
     form::{self, Controls, SelectOption},
@@ -96,6 +97,39 @@ pub struct Settings {
   pub application: Option<Application>,
   pub repository: Option<Repository>,
   pub preview: Option<Preview>,
+  pub skills: Option<SkillsTab>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillsTab {
+  pub installed: usize,
+  pub loading: bool,
+  pub error: Option<String>,
+  pub query: String,
+  pub scope: String,
+  pub scope_options: Vec<SelectOption>,
+  pub rows: Vec<SkillRow>,
+  /// The skill whose install dialog is open, by name.
+  pub dialog: Option<SkillDialog>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillRow {
+  pub id: String,
+  pub name: String,
+  pub source: String,
+  pub description: Option<String>,
+  pub has_url: bool,
+  pub proprietary: bool,
+  /// The install level, when installed.
+  pub installed: Option<String>,
+  pub busy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillDialog {
+  pub name: String,
+  pub busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -303,6 +337,21 @@ impl Repo {
   }
 }
 
+/// The Skills tab (`SkillLibrarySettings`).
+#[derive(Default)]
+struct Skills {
+  /// `None` while the registry loads.
+  catalog: Option<Result<Vec<SkillCatalogSkillView>, String>>,
+  installed: usize,
+  query: String,
+  /// The install-level filter: `all`, `application` or `repository`.
+  scope: String,
+  /// The skill an action runs for.
+  pending: Option<String>,
+  /// The skill whose install dialog is open.
+  dialog: Option<String>,
+}
+
 /// The settings screen, its state from the backend, and its fields.
 pub struct SettingsView {
   host: Arc<dyn SettingsHost>,
@@ -320,6 +369,8 @@ pub struct SettingsView {
   validating: bool,
   setup: Setup,
   repo: Option<Repo>,
+  /// Loaded the first time the Skills tab shows.
+  skills: Option<Skills>,
 }
 
 impl SettingsView {
@@ -352,21 +403,26 @@ impl SettingsView {
       validating: false,
       setup: Setup::default(),
       repo: None,
+      skills: None,
     };
     this.load_app(cx);
     this.load_setup(cx);
     this.check(cx);
     this.set_repo(route.repo_path, cx);
+    this.show_skills(cx);
     this
   }
 
   pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
     if self.route != route || self.dark != dark {
-      if self.route.repo_path != route.repo_path {
+      let repo_moved = self.route.repo_path != route.repo_path;
+      if repo_moved {
         self.set_repo(route.repo_path.clone(), cx);
+        self.skills = None;
       }
       self.route = route;
       self.dark = dark;
+      self.show_skills(cx);
       cx.notify();
     }
   }
@@ -509,6 +565,102 @@ impl SettingsView {
   }
 
   /// Writes app settings now, as the theme, zoom and preview switches do.
+  /// Loads the skill registry the first time the Skills tab shows.
+  fn show_skills(&mut self, cx: &mut Context<Self>) {
+    if self.route.tab == Tab::Skills && self.skills.is_none() {
+      self.skills = Some(Skills {
+        scope: "all".into(),
+        ..Skills::default()
+      });
+      self.load_skills(cx);
+    }
+  }
+
+  fn load_skills(&mut self, cx: &mut Context<Self>) {
+    let repo = self.route.repo_path.clone();
+    self.spawn(
+      cx,
+      move |host| {
+        let repo = repo.as_deref();
+        (host.skill_catalog(repo), host.installed_skills(repo))
+      },
+      |view, (catalog, installed), _| {
+        if let Some(skills) = &mut view.skills {
+          skills.catalog = Some(catalog);
+          skills.installed = installed.map_or(0, |list| list.len());
+        }
+      },
+    );
+  }
+
+  /// Runs a skill action, then reads the registry again, as `runAction`.
+  fn skill_action(
+    &mut self,
+    skill_id: String,
+    cx: &mut Context<Self>,
+    work: impl FnOnce(&dyn SettingsHost, Option<&str>) -> Result<(), String> + Send + 'static,
+  ) {
+    let Some(skills) = &mut self.skills else {
+      return;
+    };
+    if skills.pending.is_some() {
+      return;
+    }
+    skills.pending = Some(skill_id);
+    let repo = self.route.repo_path.clone();
+    self.spawn(
+      cx,
+      move |host| work(host, repo.as_deref()),
+      |view, result, cx| {
+        if let Err(err) = result {
+          view
+            .host
+            .notify(toast(ToastTone::Error, "Skill library", err));
+        }
+        if let Some(skills) = &mut view.skills {
+          skills.pending = None;
+        }
+        view.load_skills(cx);
+      },
+    );
+  }
+
+  fn press_skill(&mut self, action: &str, id: &str, cx: &mut Context<Self>) {
+    let id = id.to_string();
+    match action {
+      "skills.install" => {
+        if let Some(skills) = &mut self.skills {
+          skills.dialog = Some(id);
+        }
+      }
+      "skills.dialog" => {
+        let Some(skill_id) = self.skills.as_mut().and_then(|s| s.dialog.take()) else {
+          return;
+        };
+        if let Some(scope) = data::parse_scope(&id) {
+          self.skill_action(skill_id.clone(), cx, move |host, repo| {
+            host.install_skill(&skill_id, scope, repo)
+          });
+        }
+      }
+      "skills.uninstall" => self.skill_action(id.clone(), cx, move |host, repo| {
+        host.uninstall_skill(&id, repo)
+      }),
+      "skills.source" => {
+        let url = self
+          .skills
+          .as_ref()
+          .and_then(|s| s.catalog.as_ref()?.as_ref().ok())
+          .and_then(|list| list.iter().find(|v| v.skill.id == id))
+          .and_then(|v| v.skill.url.clone());
+        if let Some(url) = url {
+          self.host.open_url(&url);
+        }
+      }
+      _ => {}
+    }
+  }
+
   fn write_settings(&self, values: Vec<(String, String)>, cx: &mut Context<Self>) {
     self.spawn(
       cx,
@@ -625,6 +777,10 @@ impl SettingsView {
   pub(super) fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
     match action {
       ScreenAction::Press { id } => match id.split_once(':') {
+        Some((action, skill)) if action.starts_with("skills.") => {
+          let skill = skill.to_string();
+          self.press_skill(action, &skill, cx);
+        }
         Some(("preview.docs", feature)) => {
           if let Some((_, _, path)) = data::PREVIEW_FEATURES
             .iter()
@@ -641,6 +797,11 @@ impl SettingsView {
           },
           "app.setupScript.run" => self.run_setup(cx),
           "repo.yaml.reload" => self.load_repo(cx),
+          "skills.dialog.cancel" => {
+            if let Some(skills) = &mut self.skills {
+              skills.dialog = None;
+            }
+          }
           _ => (self.react)(ScreenAction::Press { id }, cx),
         },
       },
@@ -669,6 +830,23 @@ impl SettingsView {
         let mut fields = repo.fields();
         fields.set(name, &value);
         repo.draft = Some(fields);
+      }
+      return;
+    }
+    if let Some(name) = field.strip_prefix("skills.") {
+      if let Some(id) = name.strip_prefix("level:") {
+        if let Some(scope) = data::parse_scope(&text) {
+          let id = id.to_string();
+          self.skill_action(id.clone(), cx, move |host, repo| {
+            host.set_skill_scope(&id, scope, repo)
+          });
+        }
+      } else if let Some(skills) = &mut self.skills {
+        match name {
+          "query" => skills.query = text,
+          "scope" => skills.scope = text,
+          _ => {}
+        }
       }
       return;
     }
@@ -830,6 +1008,53 @@ impl SettingsView {
         })
         .collect(),
     });
+    let skills = (tab == Tab::Skills)
+      .then_some(self.skills.as_ref())
+      .flatten()
+      .map(|skills| {
+        let pending = skills.pending.as_deref();
+        let (loading, error, catalog) = match &skills.catalog {
+          None => (true, None, &[][..]),
+          Some(Err(err)) => (false, Some(err.clone()), &[][..]),
+          Some(Ok(list)) => (false, None, &list[..]),
+        };
+        let rows = data::filter_skills(catalog, &skills.query, &skills.scope)
+          .into_iter()
+          .map(|view| SkillRow {
+            id: view.skill.id.clone(),
+            name: view.skill.name.clone(),
+            source: view.skill.source.clone(),
+            description: view.skill.description.clone().filter(|d| !d.is_empty()),
+            has_url: view.skill.url.is_some(),
+            proprietary: view.skill.proprietary,
+            installed: view
+              .installed
+              .as_ref()
+              .map(|i| data::scope_value(i.scope).to_string()),
+            busy: pending == Some(view.skill.id.as_str()),
+          })
+          .collect();
+        SkillsTab {
+          installed: skills.installed,
+          loading,
+          error,
+          query: skills.query.clone(),
+          scope: skills.scope.clone(),
+          scope_options: options(&[
+            ("all", "All"),
+            ("application", "Application"),
+            ("repository", "Repository"),
+          ]),
+          rows,
+          dialog: skills.dialog.as_ref().map(|id| SkillDialog {
+            name: catalog
+              .iter()
+              .find(|v| &v.skill.id == id)
+              .map_or_else(|| id.clone(), |v| v.skill.name.clone()),
+            busy: pending == Some(id.as_str()),
+          }),
+        }
+      });
     Settings {
       tab,
       tabs,
@@ -837,6 +1062,7 @@ impl SettingsView {
       application,
       repository,
       preview,
+      skills,
     }
   }
 
@@ -1024,11 +1250,21 @@ impl Render for SettingsView {
         Some(preview) => self.preview(preview, &p).into_any_element(),
         None => div().into_any_element(),
       },
+      Tab::Skills => match &s.skills {
+        Some(skills) => self.skills(skills, &p, window, cx).into_any_element(),
+        None => div().into_any_element(),
+      },
       // Not drawn by GPUI yet; React keeps the webview for these.
-      Tab::Account | Tab::Integrations | Tab::Skills => div().into_any_element(),
+      Tab::Account | Tab::Integrations => div().into_any_element(),
     };
+    let dialog = s
+      .skills
+      .as_ref()
+      .and_then(|skills| skills.dialog.clone())
+      .map(|dialog| self.skill_dialog(&dialog, &p));
 
     div()
+      .relative()
       .size_full()
       .flex()
       .flex_col()
@@ -1052,6 +1288,7 @@ impl Render for SettingsView {
               .child(div().flex_1().min_w_0().child(content)),
           ),
       )
+      .children(dialog)
   }
 }
 
@@ -1557,6 +1794,332 @@ impl SettingsView {
                 self.field(&format!("preview.{}", feature.id)),
               ))
           })),
+      )
+  }
+
+  fn skills(
+    &mut self,
+    tab: &SkillsTab,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let query = self.controls.input(
+      "skills.query",
+      &tab.query,
+      "Search by name or description",
+      window,
+      cx,
+    );
+    let scope = self
+      .controls
+      .select("skills.scope", &tab.scope_options, &tab.scope, window, cx);
+    let level_options = options(&[("application", "Application"), ("repository", "Repository")]);
+    let mut rows = Vec::new();
+    for row in &tab.rows {
+      let level = row.installed.as_ref().map(|value| {
+        self.controls.select(
+          &format!("skills.level:{}", row.id),
+          &level_options,
+          value,
+          window,
+          cx,
+        )
+      });
+      rows.push(self.skill_row(row, level, p));
+    }
+    div()
+      .flex()
+      .flex_col()
+      .gap_4()
+      .debug_selector(|| "skill-library-settings".into())
+      .child(
+        div()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_weight(FontWeight::SEMIBOLD)
+              .child("Skill library"),
+          )
+          .child(help(
+            "Browse the Treq skill registry and install skills into this application or the current repository. Installed skills are copied into new workspaces after checksum verification.",
+            p,
+            4.,
+          ))
+          .child(help(format!("{} installed", tab.installed), p, 4.)),
+      )
+      .child(
+        div()
+          .flex()
+          .flex_wrap()
+          .items_end()
+          .gap_3()
+          .child(
+            div()
+              .min_w(px(192.))
+              .flex_1()
+              .child(label("Search skills"))
+              .child(div().mt_2().child(form::input_field(
+                "skills-search",
+                &query,
+                false,
+                false,
+              ))),
+          )
+          .child(
+            div()
+              .min_w(px(160.))
+              .child(label("Install level"))
+              .child(div().mt_2().child(form::select_field("skills-scope", &scope, false))),
+          ),
+      )
+      .when(tab.loading, |this| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_color(p.muted_foreground)
+            .child(ui::spinner("skills-loading", 16., p.muted_foreground))
+            .child("Loading skill registry…"),
+        )
+      })
+      .when_some(tab.error.clone(), |this, err| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.destructive)
+            .child(err),
+        )
+      })
+      .when(!tab.loading && tab.error.is_none() && tab.rows.is_empty(), |this| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child("No skills match this search."),
+        )
+      })
+      .child(div().flex().flex_col().gap_3().children(rows))
+  }
+
+  /// `SkillRow`: one registry skill, with its install control.
+  fn skill_row(
+    &self,
+    row: &SkillRow,
+    level: Option<gpui::Entity<form::SelectStateOf>>,
+    p: &Palette,
+  ) -> gpui::Div {
+    let id = &row.id;
+    let selector = format!("skill-row-{id}");
+    div()
+      .relative()
+      .flex()
+      .flex_col()
+      .gap_2()
+      .border_1()
+      .border_color(p.border)
+      .rounded(px(6.))
+      .p_3()
+      .pr(px(48.))
+      .debug_selector(move || selector)
+      .when(row.installed.is_some(), |this| {
+        this.child(
+          div().absolute().top_2().right_2().child(
+            Button::new(format!("skill-uninstall-{id}"), p)
+              .variant(Variant::Outline)
+              .size(Size::IconXs)
+              .disabled(row.busy)
+              .border_color(p.destructive.opacity(0.3))
+              .text_color(p.destructive)
+              .hover_bg(p.destructive.opacity(0.1))
+              .icon(theme::ICON_TRASH, 14.)
+              .on_click(self.press(&format!("skills.uninstall:{id}"))),
+          ),
+        )
+      })
+      .child(
+        div()
+          // React's `space-y-2` counts the absolute uninstall button as the
+          // first child, so an installed skill's text starts 8px lower.
+          .when(row.installed.is_some(), |this| this.mt_2())
+          .flex()
+          .items_start()
+          .justify_between()
+          .gap_3()
+          .child(
+            div()
+              .min_w_0()
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .child(
+                    ui::text(div(), TextSize::Sm)
+                      .font_weight(FontWeight::MEDIUM)
+                      .truncate()
+                      .child(row.name.clone()),
+                  )
+                  .child(
+                    ui::text(div(), TextSize::Xs)
+                      .text_color(p.muted_foreground)
+                      .child(row.source.clone()),
+                  ),
+              )
+              .when_some(row.description.clone(), |this, description| {
+                this.child(
+                  ui::text(div().mt_1(), TextSize::Sm)
+                    .text_color(p.muted_foreground)
+                    .line_clamp(2)
+                    .child(description),
+                )
+              }),
+          )
+          .when(row.has_url, |this| {
+            let source = SharedString::from(format!("skill-source-{id}"));
+            let selector = source.to_string();
+            this.child(
+              div()
+                .id(source)
+                .debug_selector(move || selector)
+                .flex_none()
+                .mr_6()
+                .cursor_pointer()
+                .child(ui::icon(theme::ICON_BOOK_OPEN, 16., p.muted_foreground))
+                .on_click(self.press(&format!("skills.source:{id}"))),
+            )
+          }),
+      )
+      .map(|this| {
+        if row.proprietary {
+          this.child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child("Proprietary skills cannot be installed from the registry."),
+          )
+        } else if let Some(level) = level {
+          this.child(
+            div()
+              .flex()
+              .items_center()
+              .justify_end()
+              .gap_2()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .font_weight(FontWeight::MEDIUM)
+                  .child("Install level"),
+              )
+              .child(div().w(px(128.)).child(form::select_field(
+                format!("skill-level-{id}"),
+                &level,
+                row.busy,
+              ))),
+          )
+        } else {
+          this.child(
+            div().flex().justify_end().child(
+              Button::new(format!("skill-install-{id}"), p)
+                .size(Size::Sm)
+                .disabled(row.busy)
+                .label("Install…")
+                .on_click(self.press(&format!("skills.install:{id}"))),
+            ),
+          )
+        }
+      })
+  }
+
+  /// The install dialog: where to store the skill.
+  fn skill_dialog(&self, dialog: &SkillDialog, p: &Palette) -> impl IntoElement {
+    // "**Repository** writes …": the name bold within the sentence.
+    let paragraph = |strong: &str, rest: &str| {
+      let text = format!("{strong} {rest}");
+      let bold = gpui::HighlightStyle {
+        font_weight: Some(FontWeight::MEDIUM),
+        ..Default::default()
+      };
+      div().child(gpui::StyledText::new(text).with_highlights([(0..strong.len(), bold)]))
+    };
+    div()
+      .id("skill-install-dialog-backdrop")
+      .absolute()
+      .inset_0()
+      .flex()
+      .items_center()
+      .justify_center()
+      .bg(gpui::black().opacity(0.5))
+      .occlude()
+      .child(
+        div()
+          .id("skill-install-dialog")
+          .debug_selector(|| "skill-install-dialog".into())
+          .w_full()
+          .max_w(px(576.))
+          .mx_4()
+          .flex()
+          .flex_col()
+          .gap_4()
+          .p_6()
+          .rounded(px(8.))
+          .border_1()
+          .border_color(p.border)
+          .bg(p.background)
+          .shadow_lg()
+          .child(
+            div()
+              .flex()
+              .flex_col()
+              .gap_2()
+              .child(
+                ui::text(div(), TextSize::Lg)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .child(format!("Install {}", dialog.name)),
+              )
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child("Choose whether this skill is stored for every repository on this machine, or only for the current repository."),
+              ),
+          )
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .py_2()
+              .flex()
+              .flex_col()
+              .gap_3()
+              .child(paragraph(
+                "Repository",
+                "writes the skill under .treq/skills/ in this repository. Only this repository uses it.",
+              ))
+              .child(paragraph(
+                "Application",
+                "writes the skill into Treq application data. Every repository on this machine can use it.",
+              )),
+          )
+          .child(
+            div()
+              .flex()
+              .justify_end()
+              .gap_2()
+              .child(
+                Button::new("skill-dialog-cancel", p)
+                  .variant(Variant::Outline)
+                  .disabled(dialog.busy)
+                  .label("Cancel")
+                  .on_click(self.press("skills.dialog.cancel")),
+              )
+              .child(
+                Button::new("skill-dialog-application", p)
+                  .variant(Variant::Outline)
+                  .disabled(dialog.busy)
+                  .label("Install for application")
+                  .on_click(self.press("skills.dialog:application")),
+              )
+              .child(
+                Button::new("skill-dialog-repository", p)
+                  .disabled(dialog.busy)
+                  .label("Install for repository")
+                  .on_click(self.press("skills.dialog:repository")),
+              ),
+          ),
       )
   }
 }

@@ -15,11 +15,12 @@ type SettingsTabValue =
 const GPUI_SETTINGS_TABS: ReadonlySet<GpuiSettingsTab> = new Set([
   "repository",
   "application",
+  "skills",
   "preview",
 ]);
 
 /**
- * Draws the Repository, Application and Feature Preview tabs in GPUI, which
+ * Draws the Repository, Application, Skills and Feature Preview tabs in GPUI, which
  * loads and saves them through the backend itself and tells React what
  * changed (`useGpuiNativeEvents`). React keeps the tab and Close.
  */
