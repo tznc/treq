@@ -12101,6 +12101,7 @@ dependencies = [
  "gpui-pre",
  "gtk",
  "ignore",
+ "image",
  "imara-diff 0.1.8",
  "jj-lib",
  "libc",

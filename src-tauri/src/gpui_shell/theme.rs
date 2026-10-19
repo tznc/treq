@@ -91,6 +91,8 @@ icons! {
   ICON_USER => "user",
   ICON_X => "x",
   ICON_ZAP => "zap",
+  ICON_ZOOM_IN => "zoom-in",
+  ICON_ZOOM_OUT => "zoom-out",
   ICON_MINUS => "minus",
   ICON_EYE => "eye",
   ICON_EYE_OFF => "eye-off",

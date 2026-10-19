@@ -41,6 +41,8 @@ mod settings_data;
 mod terminal;
 mod terminal_data;
 mod terminal_emu;
+mod terminal_lightbox;
+mod terminal_send;
 mod workspace;
 mod workspace_data;
 

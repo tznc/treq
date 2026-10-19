@@ -16,14 +16,17 @@ use futures::StreamExt as _;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, relative, rgb, App, Bounds, ClipboardItem, Context, Div, Entity,
-  FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, ScrollWheelEvent,
+  self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
+  relative, rgb, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths, FocusHandle,
+  KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, ScrollWheelEvent,
   SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
   terminal_data::{self, AgentStart, Host, Live, Spawn},
-  terminal_emu::{self, encode_key, paste_bytes, Key, SelectKind},
+  terminal_emu::{self, encode_key, paste_bytes, Key, Mouse, MouseAction, SelectKind},
+  terminal_lightbox::{Lightbox, LightboxEvent},
+  terminal_send::{assets_for, shell_quote, SendAsset},
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
@@ -89,6 +92,8 @@ pub struct Route {
   pub sessions_revision: u64,
   /// Dashboard's latest commands; those newer than the last run go once.
   pub commands: Vec<Command>,
+  /// `treq send` attachments not yet dismissed (`treqSendStore`).
+  pub send_assets: Vec<SendAsset>,
 }
 
 /// `TerminalSessionSummary`, which the sidebar spins on.
@@ -239,6 +244,8 @@ pub struct TerminalView {
   /// Wheel movement not yet a whole line.
   scroll_rest: f32,
   selecting: bool,
+  /// The cell of the last mouse report, so a move within it sends none.
+  reported: Option<(usize, usize)>,
   cursor_on: bool,
   idle: u64,
   chat_due: bool,
@@ -268,6 +275,7 @@ impl TerminalView {
       bounds: Rc::default(),
       scroll_rest: 0.,
       selecting: false,
+      reported: None,
       cursor_on: true,
       idle: 0,
       chat_due: false,
@@ -503,6 +511,35 @@ impl TerminalView {
     cx.notify();
   }
 
+  /// `writeAgentMessage`: types `text` into the agent, noting it in the
+  /// session's chat log.
+  pub fn send_message(&self, text: &str) {
+    if let (Start::Agent { start, .. }, Some(live)) = (&self.start, &self.live) {
+      let (host, repo, id, screen, message) = (
+        self.host.clone(),
+        start.repo_path.clone(),
+        start.session_id,
+        live.screen_text(),
+        text.to_string(),
+      );
+      std::thread::spawn(move || {
+        if let Err(error) = host.record_chat_message(&repo, id, &screen, &message) {
+          log::warn!("record agent message failed: {error}");
+        }
+      });
+    }
+    if let Err(error) = self.host.write_pty(&self.pty, &format!("{text}\r")) {
+      log::warn!("pty write failed: {error}");
+    }
+  }
+
+  /// Text dropped on the terminal (`handleTerminalDrop`), once it runs.
+  fn insert(&self, text: &str) {
+    if self.status == Status::Ready {
+      self.write(text);
+    }
+  }
+
   pub fn write(&self, data: &str) {
     if let Some(live) = &self.live {
       live.typed(data);
@@ -598,9 +635,57 @@ impl TerminalView {
     Some((row, col, x - col as f32 * w > w / 2.))
   }
 
+  /// Sends a mouse event to the program, as xterm does once the program
+  /// turns mouse reporting on; returns whether it did. Shift (Linux and
+  /// Windows) leaves the mouse to selection, as in xterm.
+  fn report(
+    &mut self,
+    button: terminal_emu::Button,
+    action: MouseAction,
+    position: gpui::Point<Pixels>,
+    modifiers: gpui::Modifiers,
+  ) -> bool {
+    if self.status != Status::Ready
+      || !self.with_emulator(|e| e.mouse_reporting()).unwrap_or(false)
+      || (!cfg!(target_os = "macos") && modifiers.shift)
+    {
+      return false;
+    }
+    let Some((row, col, _)) = self.cell_at(position) else {
+      return true;
+    };
+    if action == MouseAction::Move && self.reported == Some((row, col)) {
+      return true;
+    }
+    self.reported = Some((row, col));
+    let mouse = Mouse {
+      button,
+      action,
+      row,
+      col,
+      shift: modifiers.shift,
+      alt: modifiers.alt,
+      ctrl: modifiers.control,
+    };
+    if let Some(bytes) = self.with_emulator(|e| e.encode_mouse(mouse)).flatten() {
+      let _ = self
+        .host
+        .write_pty(&self.pty, &String::from_utf8_lossy(&bytes));
+    }
+    true
+  }
+
   fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
     window.focus(&self.focus, cx);
     (self.on_event)(TermEvent::Focused, cx);
+    if let Some(button) = mouse_button(event.button) {
+      if self.report(button, MouseAction::Press, event.position, event.modifiers) {
+        return;
+      }
+    }
+    if event.button != MouseButton::Left {
+      return;
+    }
     let Some((row, col, right)) = self.cell_at(event.position) else {
       return;
     };
@@ -620,7 +705,30 @@ impl TerminalView {
     cx.notify();
   }
 
+  fn on_mouse_up(&mut self, event: &gpui::MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    self.selecting = false;
+    if let Some(button) = mouse_button(event.button) {
+      self.report(
+        button,
+        MouseAction::Release,
+        event.position,
+        event.modifiers,
+      );
+    }
+  }
+
   fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    let button = match event.pressed_button {
+      Some(pressed) => mouse_button(pressed),
+      None => Some(terminal_emu::Button::None),
+    };
+    if !self.selecting {
+      if let Some(button) = button {
+        if self.report(button, MouseAction::Move, event.position, event.modifiers) {
+          return;
+        }
+      }
+    }
     if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
       return;
     }
@@ -646,6 +754,17 @@ impl TerminalView {
       return;
     }
     self.scroll_rest -= lines as f32;
+    let wheel = if lines > 0 {
+      terminal_emu::Button::WheelUp
+    } else {
+      terminal_emu::Button::WheelDown
+    };
+    // xterm reports one wheel event, however far it went.
+    self.reported = None;
+    if self.report(wheel, MouseAction::Press, event.position, event.modifiers) {
+      cx.stop_propagation();
+      return;
+    }
     let alt = self.with_emulator(|e| e.alt_screen()).unwrap_or(false);
     if alt {
       // Full-screen programs scroll by arrow keys, as xterm sends them.
@@ -969,15 +1088,13 @@ impl Render for TerminalView {
       .cursor_text()
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+      .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
+      .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
       .on_mouse_move(cx.listener(Self::on_mouse_move))
-      .on_mouse_up(
-        MouseButton::Left,
-        cx.listener(|view, _, _, _| view.selecting = false),
-      )
-      .on_mouse_up_out(
-        MouseButton::Left,
-        cx.listener(|view, _, _, _| view.selecting = false),
-      )
+      .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+      .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))
+      .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
+      .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
       .on_scroll_wheel(cx.listener(Self::on_scroll))
       .child(
         gpui::canvas(
@@ -1055,6 +1172,10 @@ pub struct TerminalPane {
   last_command: u64,
   summaries: Vec<Summary>,
   tooltips: Tooltips,
+  /// The attachment under the mouse, which Cmd+C copies.
+  hovered_asset: Option<SendAsset>,
+  /// `SendAssetLightbox`, for the column it opened from.
+  lightbox: Option<(String, Entity<Lightbox>, Subscription)>,
   _keys: Option<Subscription>,
 }
 
@@ -1103,6 +1224,8 @@ impl TerminalPane {
       last_command: 0,
       summaries: Vec::new(),
       tooltips: Tooltips::new(popups, true),
+      hovered_asset: None,
+      lightbox: None,
       _keys: None,
     }
   }
@@ -1110,6 +1233,11 @@ impl TerminalPane {
   /// Whether the pane covers the tab (maximized and open).
   pub fn covers(&self) -> bool {
     self.maximized && !self.collapsed
+  }
+
+  /// The lightbox covers the whole window, webview and all.
+  pub fn covers_window(&self) -> bool {
+    self.lightbox.is_some()
   }
 
   pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
@@ -1608,8 +1736,248 @@ impl TerminalPane {
       let m = &k.modifiers;
       if let Some(found) = shortcut(&k.key, m.control, m.platform, m.shift, m.alt) {
         pane.shortcut(found, window, cx);
+      } else if k.key == "c" && (m.platform || m.control) && pane.lightbox.is_none() {
+        // `copySendAssetToClipboard`: the hovered attachment's quoted path.
+        if let Some(asset) = &pane.hovered_asset {
+          cx.write_to_clipboard(ClipboardItem::new_string(shell_quote(&asset.path)));
+        }
       }
     }));
+  }
+
+  /// The attachments shown over a column's terminal.
+  fn column_assets(&self, column: &Column, cx: &App) -> Vec<SendAsset> {
+    let pty = column.view.read(cx).pty.clone();
+    let active = self.active.as_deref() == Some(column.id.as_str());
+    assets_for(&self.route.send_assets, &pty, active)
+  }
+
+  fn open_lightbox(&mut self, column_id: &str, asset_id: &str, cx: &mut Context<Self>) {
+    let Some(column) = self.columns.iter().find(|c| c.id == column_id) else {
+      return;
+    };
+    let assets = self.column_assets(column, cx);
+    let Some(index) = assets.iter().position(|a| a.id == asset_id) else {
+      return;
+    };
+    let review = matches!(column.kind, Kind::Agent { .. });
+    let host = self.host.clone();
+    let lightbox = cx.new(|cx| Lightbox::new(host, assets, index, review, cx));
+    let id = column_id.to_string();
+    let subscription = cx.subscribe(&lightbox, move |pane, _, event: &LightboxEvent, cx| {
+      pane.on_lightbox(&id, event.clone(), cx)
+    });
+    self.hovered_asset = None;
+    self.lightbox = Some((column_id.to_string(), lightbox, subscription));
+    cx.notify();
+  }
+
+  fn on_lightbox(&mut self, column_id: &str, event: LightboxEvent, cx: &mut Context<Self>) {
+    match event {
+      LightboxEvent::Close => {
+        self.lightbox = None;
+        cx.notify();
+      }
+      LightboxEvent::SendReview(prompt) => {
+        if let Some(view) = self.view(column_id) {
+          view.read(cx).send_message(&prompt);
+        }
+      }
+      LightboxEvent::Toast {
+        title,
+        description,
+        tone,
+      } => super::workspace_data::WorkspaceHost::notify(
+        &*self.host,
+        crate::gpui_shell::native::NativeEvent::Toast {
+          title,
+          description,
+          tone,
+          action: None,
+        },
+      ),
+    }
+  }
+
+  /// Keeps the lightbox on its column's attachments; closes it once none
+  /// are left, or its column is gone.
+  fn sync_lightbox(&mut self, cx: &mut Context<Self>) {
+    let Some((column_id, lightbox, _)) = &self.lightbox else {
+      return;
+    };
+    let assets = self
+      .columns
+      .iter()
+      .find(|c| &c.id == column_id)
+      .map(|c| self.column_assets(c, cx))
+      .unwrap_or_default();
+    if assets.is_empty() {
+      self.lightbox = None;
+      return;
+    }
+    lightbox.update(cx, |l, cx| l.set_assets(assets, cx));
+  }
+
+  /// `TerminalSendPreviews`: the column's attachments over the top of its
+  /// terminal, under a fade, each a thumbnail to preview, drag or dismiss.
+  fn previews(&mut self, index: usize, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let column = &self.columns[index];
+    let assets = self.column_assets(column, cx);
+    if assets.is_empty() {
+      return None;
+    }
+    let column_id = column.id.clone();
+    let hovered = self.hovered_asset.as_ref().map(|a| a.id.clone());
+    let bg = rgb(TERMINAL_BG);
+    let thumbs = assets.into_iter().map(|asset| {
+      let id = asset.id.clone();
+      let shown = hovered.as_deref() == Some(id.as_str());
+      let (open_column, open_id) = (column_id.clone(), id.clone());
+      let (hover_asset, dismiss_id) = (asset.clone(), id.clone());
+      let media = if asset.is_image() {
+        div().size_full().child(
+          img(std::path::PathBuf::from(&asset.path))
+            .object_fit(ObjectFit::Contain)
+            .size_full()
+            .rounded(px(7.)),
+        )
+      } else {
+        ui::text(div(), TextSize::Xs)
+          .size_full()
+          .px_1()
+          .flex()
+          .flex_col()
+          .items_center()
+          .justify_center()
+          .gap_1()
+          .child(ui::icon(theme::ICON_FILE_TEXT, 16., rgb(0xd4d4d8).into()))
+          .child(
+            div()
+              .w_full()
+              .truncate()
+              .flex()
+              .justify_center()
+              .line_height(px(14.))
+              .child(asset.title.clone()),
+          )
+      };
+      let drag = SendAssetDrag {
+        path: asset.path.clone(),
+        title: asset.title.clone(),
+      };
+      div()
+        .id(SharedString::from(format!("terminal-send-preview-{id}")))
+        .debug_selector({
+          let id = id.clone();
+          move || format!("terminal-send-preview-{id}")
+        })
+        .relative()
+        .flex_none()
+        .h_20()
+        .w(px(144.))
+        .min_w(px(144.))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(gpui::white().opacity(if shown { 0.4 } else { 0.15 }))
+        .bg(rgb(0x2a2a2a))
+        .text_color(rgb(0xd4d4d8))
+        .shadow_md()
+        .cursor_grab()
+        .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
+          let id = &hover_asset.id;
+          if *hovered {
+            pane.hovered_asset = Some(hover_asset.clone());
+          } else if pane.hovered_asset.as_ref().is_some_and(|a| &a.id == id) {
+            pane.hovered_asset = None;
+          }
+          cx.notify();
+        }))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(cx.listener(move |pane, _, _, cx| pane.open_lightbox(&open_column, &open_id, cx)))
+        .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+        .child(media)
+        .when(shown, |d| {
+          d.child(
+            div()
+              .id(SharedString::from(format!("terminal-send-dismiss-{id}")))
+              .debug_selector({
+                let id = id.clone();
+                move || format!("terminal-send-dismiss-{id}")
+              })
+              .absolute()
+              .top(px(-8.))
+              .right(px(-8.))
+              .size_5()
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded_full()
+              .border_1()
+              .border_color(rgb(0x71717a))
+              .bg(rgb(0xc4c4c4))
+              .hover(|s| s.bg(rgb(0xd4d4d4)))
+              .shadow_md()
+              .cursor_pointer()
+              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+              .on_click(cx.listener(move |pane, _, _, cx| {
+                cx.stop_propagation();
+                pane.hovered_asset = None;
+                pane.send("terminal.dismissAsset", dismiss_id.clone().into(), cx);
+                cx.notify();
+              }))
+              .child(ui::icon(theme::ICON_X, 12., rgb(0x18181b).into())),
+          )
+        })
+    });
+    Some(
+      div()
+        .debug_selector(|| "terminal-send-previews".into())
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .child(
+          div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .flex_col()
+            .child(div().flex_1().bg(linear_gradient(
+              180.,
+              linear_color_stop(bg, 0.),
+              linear_color_stop(bg.opacity(0.85), 1.),
+            )))
+            .child(div().flex_1().bg(linear_gradient(
+              180.,
+              linear_color_stop(bg.opacity(0.85), 0.),
+              linear_color_stop(bg.opacity(0.), 1.),
+            ))),
+        )
+        .child(
+          div()
+            .id(SharedString::from(format!(
+              "terminal-send-previews-drop-{column_id}"
+            )))
+            .debug_selector(|| "terminal-send-previews-drop".into())
+            .relative()
+            .px_3()
+            .pb_8()
+            .pt_3()
+            .occlude()
+            .child(
+              div()
+                .id(SharedString::from(format!(
+                  "terminal-send-group-{column_id}"
+                )))
+                .flex()
+                .gap_2()
+                .overflow_x_scroll()
+                .pt_2()
+                .pr_2()
+                .children(thumbs),
+            ),
+        ),
+    )
   }
 
   fn min_width(&self) -> f32 {
@@ -1677,7 +2045,12 @@ impl TerminalPane {
         .hover(move |s| s.bg(accent))
         .child(ui::icon(icon, 12., fg))
     };
-    let tip = |text: &str| Some(TooltipContent::Text(text.to_string().into()));
+    let tip = |text: &'static str, keys: &'static str| {
+      Some(TooltipContent::Shortcut {
+        text: text.into(),
+        keys: keys.into(),
+      })
+    };
     let mut buttons: Vec<gpui::AnyElement> = Vec::new();
     if self.collapsed {
       let b = button("terminal-expand", theme::ICON_CHEVRON_UP).on_click(cx.listener(
@@ -1689,7 +2062,7 @@ impl TerminalPane {
       buttons.push(
         self
           .tooltips
-          .wrap("terminal-expand", Side::Top, tip("Expand  ⌘ + J"), b, cx)
+          .wrap("terminal-expand", Side::Top, tip("Expand", "⌘ + J"), b, cx)
           .into_any_element(),
       );
     } else {
@@ -1702,7 +2075,7 @@ impl TerminalPane {
             .wrap(
               "terminal-restore",
               Side::Top,
-              tip("Restore  ⌘ + Ctrl + J"),
+              tip("Restore", "⌘ + Ctrl + J"),
               b,
               cx,
             )
@@ -1717,7 +2090,7 @@ impl TerminalPane {
             .wrap(
               "terminal-maximize",
               Side::Top,
-              tip("Maximize  ⌘ + Ctrl + J"),
+              tip("Maximize", "⌘ + Ctrl + J"),
               b,
               cx,
             )
@@ -1737,7 +2110,7 @@ impl TerminalPane {
           .wrap(
             "terminal-collapse",
             Side::Top,
-            tip("Collapse  ⌘ + J"),
+            tip("Collapse", "⌘ + J"),
             b,
             cx,
           )
@@ -1849,7 +2222,10 @@ impl TerminalPane {
         let close = self.tooltips.wrap(
           format!("terminal-close-tip-{}", column.id),
           Side::Bottom,
-          Some(TooltipContent::Text("Close  ⌘ + W".into())),
+          Some(TooltipContent::Shortcut {
+            text: "Close".into(),
+            keys: "⌘ + W".into(),
+          }),
           close
             .h_6()
             .px_2()
@@ -1894,7 +2270,10 @@ impl TerminalPane {
         let close = self.tooltips.wrap(
           format!("terminal-close-tip-{}", column.id),
           Side::Bottom,
-          Some(TooltipContent::Text("Close  ⌘ + W".into())),
+          Some(TooltipContent::Shortcut {
+            text: "Close".into(),
+            keys: "⌘ + W".into(),
+          }),
           close
             .size_4()
             .opacity(0.6)
@@ -1930,6 +2309,7 @@ impl TerminalPane {
 
   fn column(&mut self, index: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let header = self.header(index, p, cx);
+    let previews = self.previews(index, cx);
     let min = self.min_width();
     let column = &self.columns[index];
     let (id, view, bounds) = (
@@ -1971,15 +2351,64 @@ impl TerminalPane {
       .child(header.when(active, |d| {
         d.debug_selector(|| "terminal-column-active".into())
       }))
-      .child(
+      .child({
+        let (on_asset, on_files) = (view.clone(), view.clone());
         div()
+          .relative()
           .flex_1()
           .min_h_0()
           .border_r_1()
           .border_color(p.border)
           .bg(rgb(TERMINAL_BG))
-          .child(view),
-      )
+          .on_drop(move |drag: &SendAssetDrag, _, cx| {
+            on_asset.read(cx).insert(&shell_quote(&drag.path));
+          })
+          .on_drop(move |paths: &ExternalPaths, _, cx| {
+            let text: Vec<String> = paths
+              .paths()
+              .iter()
+              .map(|p| shell_quote(&p.to_string_lossy()))
+              .collect();
+            if !text.is_empty() {
+              on_files.read(cx).insert(&text.join(" "));
+            }
+          })
+          .child(view)
+          .children(previews)
+      })
+  }
+}
+
+/// A `treq send` attachment being dragged onto a terminal
+/// (`setSendAssetDragData`).
+#[derive(Clone)]
+struct SendAssetDrag {
+  path: String,
+  title: String,
+}
+
+impl Render for SendAssetDrag {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    ui::text(div(), TextSize::Xs)
+      .px_2()
+      .py_1()
+      .rounded(px(6.))
+      .border_1()
+      .border_color(gpui::white().opacity(0.4))
+      .bg(rgb(0x2a2a2a))
+      .text_color(rgb(0xd4d4d8))
+      .shadow_md()
+      .child(self.title.clone())
+  }
+}
+
+/// The emulator's name for a mouse button xterm reports.
+fn mouse_button(button: MouseButton) -> Option<terminal_emu::Button> {
+  match button {
+    MouseButton::Left => Some(terminal_emu::Button::Left),
+    MouseButton::Middle => Some(terminal_emu::Button::Middle),
+    MouseButton::Right => Some(terminal_emu::Button::Right),
+    _ => None,
   }
 }
 
@@ -2002,6 +2431,7 @@ impl Render for TerminalPane {
       self.on_term_event(&id, event, window, cx);
     }
     self.tooltips.sync(cx);
+    self.sync_lightbox(cx);
     let p = theme::palette(true);
     if self.collapsed {
       return div()
@@ -2135,6 +2565,15 @@ impl Render for TerminalPane {
               .child(controls),
           ),
       )
+      .children(self.lightbox.as_ref().map(|(_, lightbox, _)| {
+        // Over the whole window, as React's portal to the body.
+        deferred(
+          anchored()
+            .position(point(px(0.), px(0.)))
+            .child(lightbox.clone()),
+        )
+        .with_priority(2)
+      }))
       .into_any_element()
   }
 }

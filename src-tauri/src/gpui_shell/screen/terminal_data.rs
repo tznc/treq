@@ -71,6 +71,23 @@ pub trait TerminalHost: LogsHost {
     session_id: i64,
     screen: &str,
   ) -> Result<(), String>;
+  /// `recordUserMessage`: what was sent to the agent, after `screen_before`.
+  fn record_chat_message(
+    &self,
+    repo_path: &str,
+    session_id: i64,
+    screen_before: &str,
+    text: &str,
+  ) -> Result<(), String>;
+  /// `read_file`: a `treq send` text attachment.
+  fn read_send_asset(&self, path: &str) -> Result<String, String>;
+  /// `write_send_review_image`: where the PNG landed.
+  fn write_send_review_image(
+    &self,
+    repo_path: &str,
+    name: &str,
+    png: &[u8],
+  ) -> Result<String, String>;
 }
 
 pub type Host = Arc<dyn TerminalHost>;
@@ -254,6 +271,31 @@ impl TerminalHost for Backend {
     screen: &str,
   ) -> Result<(), String> {
     crate::core::agent_chat::record_screen(repo_path, session_id, screen).map(drop)
+  }
+
+  fn record_chat_message(
+    &self,
+    repo_path: &str,
+    session_id: i64,
+    screen_before: &str,
+    text: &str,
+  ) -> Result<(), String> {
+    crate::core::agent_chat::record_user_message(repo_path, session_id, screen_before, text)
+      .map(drop)
+  }
+
+  fn read_send_asset(&self, path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| e.to_string())
+  }
+
+  fn write_send_review_image(
+    &self,
+    repo_path: &str,
+    name: &str,
+    png: &[u8],
+  ) -> Result<String, String> {
+    crate::send_dispatch::write_send_review_image_bytes(repo_path, name, png)
+      .map(|path| path.to_string_lossy().to_string())
   }
 }
 

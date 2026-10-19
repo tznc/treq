@@ -4,6 +4,7 @@ import type {
   GpuiTerminalCommand,
   GpuiTerminalRoute,
 } from "../lib/gpui-screen";
+import { useTreqSendStore } from "../stores/treqSendStore";
 import { agentSessionIdOf } from "./terminal/agentTerminalId";
 import type { WorkspaceTerminalPaneHandle } from "./workspace-terminal-pane/types";
 
@@ -78,10 +79,26 @@ export function useGpuiTerminalPane({
     enabled,
   ]);
 
+  const assets = useTreqSendStore((s) => s.assets);
+  const sendAssets = useMemo(
+    () =>
+      assets.map(({ id, repo, ptySessionId, mediaType, path, title }) => ({
+        id,
+        repo,
+        ptySessionId,
+        mediaType,
+        path,
+        title,
+      })),
+    [assets],
+  );
+
   const route = useMemo(
     () =>
-      enabled ? { activeSessionId, pending, sessionsRevision, commands } : null,
-    [enabled, activeSessionId, pending, sessionsRevision, commands],
+      enabled
+        ? { activeSessionId, pending, sessionsRevision, commands, sendAssets }
+        : null,
+    [enabled, activeSessionId, pending, sessionsRevision, commands, sendAssets],
   );
   return { route, handle };
 }

@@ -165,6 +165,18 @@ export interface GpuiTerminalRoute {
   /** Changes with the session list, so GPUI reads it again. */
   sessionsRevision: number;
   commands: GpuiTerminalCommand[];
+  /**
+   * `treq send` attachments (`treqSendStore`), which GPUI draws over the
+   * terminals; it sends "terminal.dismissAsset" with an id to drop one.
+   */
+  sendAssets: {
+    id: string;
+    repo: string;
+    ptySessionId: string | null;
+    mediaType: string;
+    path: string;
+    title: string;
+  }[];
 }
 
 /**
