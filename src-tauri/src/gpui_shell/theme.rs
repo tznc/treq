@@ -377,9 +377,11 @@ pub mod tw {
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;
+  pub const AMBER_200: u32 = 0xfde68a;
   pub const AMBER_300: u32 = 0xfcd34d;
   pub const AMBER_500: u32 = 0xf59e0b;
   pub const AMBER_700: u32 = 0xb45309;
+  pub const AMBER_800: u32 = 0x92400e;
   pub const BLUE_300: u32 = 0x93c5fd;
   pub const BLUE_400: u32 = 0x60a5fa;
   pub const BLUE_700: u32 = 0x1d4ed8;

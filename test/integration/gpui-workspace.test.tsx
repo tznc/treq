@@ -3,6 +3,7 @@ import * as React from "react";
 import { act, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
+import * as api from "../../src/lib/api";
 import { createWorkspace } from "../../src/lib/api";
 import { dispatchRefreshWorkspaceChanges } from "../../src/lib/change-file-drag";
 import type { GpuiNativeEvent } from "../../src/lib/gpui-native";
@@ -266,6 +267,28 @@ describe("GPUI workspace header", () => {
         expect(screen.getByPlaceholderText("Search branches...")).toBeTruthy();
       });
       await waitFor(() => expect(gpuiScreen()).toBeNull());
+    });
+
+    it("starts an agent with the review GPUI's Changes tab finished", async () => {
+      const alpha = await openAlpha();
+      const createSession = vi.spyOn(api, "createSession");
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "changes.review",
+        value: {
+          markdown: "# Review\n\nTighten this",
+          mode: "plan",
+          useIdleAgent: false,
+        },
+      });
+      await waitFor(() => {
+        expect(createSession).toHaveBeenCalledWith(
+          repoPath,
+          alpha.workspaceId,
+          "Code Review",
+        );
+      });
     });
 
     it("opens the merge preview in GPUI and comes back", async () => {

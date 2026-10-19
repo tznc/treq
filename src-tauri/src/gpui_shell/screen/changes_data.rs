@@ -13,7 +13,7 @@ use crate::{
   core::{self, WorkspaceFileHunksBatch},
   gpui_shell::native::Backend,
   jj::{JjDiffHunk, JjFileChange, JjRevisionDiff},
-  local_db::StashEntry,
+  local_db::{PendingReview, StashEntry},
 };
 
 /// `LARGE_DIFF_THRESHOLD`: changed lines past which a file's diff waits
@@ -92,6 +92,22 @@ pub trait ChangesHost: CommitsHost {
   fn editor_apps(&self) -> EditorApps;
   /// Shows `path` in the file manager.
   fn reveal(&self, path: &str);
+  /// The review kept for the workspace (`load_pending_review`).
+  fn load_review(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Result<Option<PendingReview>, String>;
+  /// `save_pending_review`: comments and notes as JSON.
+  fn save_review(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &str,
+    summary: Option<&str>,
+    notes: Option<&str>,
+  ) -> Result<(), String>;
+  fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
 }
 
 pub type Host = std::sync::Arc<dyn ChangesHost>;
@@ -159,6 +175,30 @@ impl ChangesHost for Backend {
 
   fn stash_all(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<StashEntry, String> {
     core::stash_workspace_changes(repo_path, workspace_id)
+  }
+
+  fn load_review(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Result<Option<PendingReview>, String> {
+    crate::local_db::get_pending_review(repo_path, workspace_id)
+  }
+
+  fn save_review(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &str,
+    summary: Option<&str>,
+    notes: Option<&str>,
+  ) -> Result<(), String> {
+    crate::local_db::save_pending_review(repo_path, workspace_id, comments, None, summary, notes)
+      .map(|_| ())
+  }
+
+  fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    crate::local_db::clear_pending_review(repo_path, workspace_id)
   }
 
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String> {

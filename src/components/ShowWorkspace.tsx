@@ -1207,6 +1207,7 @@ export const ShowWorkspace = ({
         : undefined,
       showCommitted: committedToggle ? setShowCommittedChanges : undefined,
       startReview: handleStartAgentReview,
+      sendReview: handleCreateAgentWithReview,
       reviewSubView: reviewSubView.select,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,

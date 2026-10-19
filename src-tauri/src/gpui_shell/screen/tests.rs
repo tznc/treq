@@ -4,7 +4,7 @@ use std::{
   sync::{Arc, Mutex},
 };
 
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext};
 
 use super::*;
 
@@ -44,6 +44,8 @@ struct FakeHost {
   description: String,
   /// What the Changes tab reads.
   working: Option<crate::jj::JjRevisionDiff>,
+  /// The kept review's comments JSON.
+  review: Mutex<Option<String>>,
   /// Whether confirmations are cancelled.
   decline: bool,
   calls: Mutex<Vec<String>>,
@@ -477,6 +479,50 @@ impl changes_data::ChangesHost for FakeHost {
 
   fn reveal(&self, path: &str) {
     self.record(format!("reveal {path}"));
+  }
+
+  fn load_review(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Result<Option<crate::local_db::PendingReview>, String> {
+    self.record(format!("read review {workspace_id}"));
+    Ok(
+      self
+        .review
+        .lock()
+        .unwrap()
+        .clone()
+        .map(|comments| crate::local_db::PendingReview {
+          id: 1,
+          workspace_id,
+          comments,
+          viewed_files: None,
+          summary_text: None,
+          conflict_comments: None,
+          created_at: String::new(),
+          updated_at: String::new(),
+        }),
+    )
+  }
+
+  fn save_review(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    comments: &str,
+    summary: Option<&str>,
+    _: Option<&str>,
+  ) -> Result<(), String> {
+    self.record(format!("save review {workspace_id} {summary:?}"));
+    *self.review.lock().unwrap() = Some(comments.to_string());
+    Ok(())
+  }
+
+  fn clear_review(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("clear review {workspace_id}"));
+    *self.review.lock().unwrap() = None;
+    Ok(())
   }
 }
 
@@ -2328,4 +2374,149 @@ fn changes_tab_reads_again_only_when_files_change(cx: &mut TestAppContext) {
   });
   h.drawn("changes-diff-viewer");
   assert_eq!(reads(&host), 2);
+}
+
+/// Comments line `+b` of a.rs with `text`.
+fn comment_line(h: &mut Harness, text: &str) {
+  h.click("add-comment-a.rs-0-1");
+  assert!(h.drawn("comment-input"));
+  h.click("comment-input");
+  h.cx.simulate_input(text);
+  h.click("comment-submit");
+  h.cx.run_until_parked();
+}
+
+fn settle_save(h: &mut Harness) {
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  h.cx.run_until_parked();
+}
+
+#[gpui::test]
+fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  assert!(!h.drawn("review-action-bar"));
+  comment_line(&mut h, "Nit");
+  assert!(h.drawn("inline-comment-card"));
+  assert!(h.drawn("review-action-bar"));
+  settle_save(&mut h);
+  assert!(host.writes().contains(&"save review 7 None".to_string()));
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(saved.contains("\"Nit\""), "{saved}");
+  assert!(saved.contains("\"file_path\":\"a.rs\""), "{saved}");
+  h.click("delete-comment");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("inline-comment-card"));
+  assert!(!h.drawn("review-action-bar"));
+  assert!(host.writes().contains(&"clear review 7".to_string()));
+}
+
+#[gpui::test]
+fn changes_tab_edits_a_comment(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  h.click("inline-comment-card");
+  assert!(h.drawn("comment-save"));
+  h.click("comment-edit");
+  h.cx.simulate_input("!");
+  h.click("comment-save");
+  settle_save(&mut h);
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(saved.contains("\"Nit!\""), "{saved}");
+}
+
+#[gpui::test]
+fn changes_tab_comments_a_file(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("add-file-comment-button");
+  assert!(h.drawn("comment-input"));
+  h.click("comment-input");
+  h.cx.simulate_input("Split this");
+  h.click("comment-submit");
+  assert!(h.drawn("file-comment-card"));
+  assert!(h.drawn("review-action-bar"));
+}
+
+#[gpui::test]
+fn changes_tab_reads_the_kept_review(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.review.lock().unwrap() = Some(
+    serde_json::json!([{
+      "id": "c1", "file_path": "a.rs", "hunk_id": "h", "start_line": 1, "end_line": 1,
+      "line_content": ["+b"], "text": "Kept", "created_at": "", "side": "new"
+    }])
+    .to_string(),
+  );
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(host.calls().contains(&"read review 7".to_string()));
+  assert!(h.drawn("inline-comment-card"));
+  assert!(h.drawn("review-action-bar"));
+}
+
+#[gpui::test]
+fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  h.click("finish-review");
+  assert!(h.drawn("finish-review-popover"));
+  h.click("review-plan");
+  h.cx.run_until_parked();
+  let sent = fields(&h, "changes.review");
+  assert_eq!(sent.len(), 1);
+  assert_eq!(sent[0]["mode"], "plan");
+  assert_eq!(sent[0]["useIdleAgent"], false);
+  let markdown = sent[0]["markdown"].as_str().unwrap_or_default();
+  assert!(
+    markdown.contains("Nit") && markdown.contains("a.rs"),
+    "{markdown}"
+  );
+  assert!(!h.drawn("review-action-bar"));
+  assert!(!h.drawn("finish-review-popover"));
+  assert!(host.writes().contains(&"clear review 7".to_string()));
+}
+
+#[gpui::test]
+fn changes_tab_discards_the_review_once_confirmed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  h.click("discard-review");
+  assert!(h.drawn("discard-review-dialog"));
+  h.click("confirm-discard-review");
+  assert!(!h.drawn("discard-review-dialog"));
+  assert!(!h.drawn("review-action-bar"));
+  assert!(!h.drawn("inline-comment-card"));
+}
+
+#[gpui::test]
+fn changes_tab_comments_a_dragged_selection(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.cx.run_until_parked();
+  let from = h
+    .cx
+    .debug_bounds("gutter-a.rs-0-1")
+    .expect("gutter")
+    .center();
+  let to = h
+    .cx
+    .debug_bounds("gutter-a.rs-0-2")
+    .expect("gutter")
+    .center();
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+  h.click("add-comment-a.rs-0-2");
+  h.click("comment-input");
+  h.cx.simulate_input("Both");
+  h.click("comment-submit");
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["start_line"], 2, "{saved}");
+  assert_eq!(saved[0]["end_line"], 3, "{saved}");
+  assert_eq!(saved[0]["line_content"], serde_json::json!(["+b", "+c"]));
 }

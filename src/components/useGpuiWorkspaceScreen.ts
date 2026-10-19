@@ -50,6 +50,12 @@ interface Handlers {
   showCommitted?: (show: boolean) => void;
   /** The Changes tab's Start Review: a review agent with `prompt`. */
   startReview?: (prompt: string, agent?: string) => void;
+  /** A finished review: an agent works through `markdown`. */
+  sendReview?: (
+    markdown: string,
+    mode: "plan" | "acceptEdits",
+    useIdleAgent: boolean,
+  ) => void;
   /** The Diff/Browser switcher. */
   reviewSubView?: (view: "diff" | "browser") => void;
   openBranchSwitcher?: () => void;
@@ -190,6 +196,14 @@ export function useGpuiWorkspaceScreen({
       case "changes.startReview": {
         const { prompt, agent } = value as { prompt: string; agent?: string };
         return handlers.startReview?.(prompt, agent ?? undefined);
+      }
+      case "changes.review": {
+        const { markdown, mode, useIdleAgent } = value as {
+          markdown: string;
+          mode: "plan" | "acceptEdits";
+          useIdleAgent: boolean;
+        };
+        return handlers.sendReview?.(markdown, mode, useIdleAgent);
       }
       case "changes.subView":
         if (value === "diff" || value === "browser") {

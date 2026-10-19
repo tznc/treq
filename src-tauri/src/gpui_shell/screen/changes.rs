@@ -7,6 +7,8 @@
 //!
 //! [`changes_data`]: super::changes_data
 
+mod review;
+
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -137,6 +139,8 @@ pub struct ChangesView {
   pub(super) scroll_to: Option<String>,
   /// The button a dropdown opens below, by key.
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
+  /// Line comments, notes and the pending review.
+  pub(super) review: review::Review,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -193,8 +197,10 @@ impl ChangesView {
       cards: Rc::default(),
       scroll_to: None,
       anchors: Rc::default(),
+      review: review::Review::default(),
       _subscriptions: Vec::new(),
     };
+    this.hydrate_review(cx);
     this.load(cx);
     this.load_pr(cx);
     this
@@ -237,6 +243,8 @@ impl ChangesView {
       self.message.clear();
       self.message_input = None;
       self.discard_dialog = false;
+      self.review = review::Review::default();
+      self.hydrate_review(cx);
       self.load_pr(cx);
     }
     if reread {
@@ -247,7 +255,7 @@ impl ChangesView {
 
   /// A dialog covers the whole window.
   pub(super) fn covers_window(&self) -> bool {
-    self.discard_dialog
+    self.discard_dialog || self.review.discard_dialog
   }
 
   fn home(&self) -> bool {
@@ -370,7 +378,11 @@ impl ChangesView {
         view.loading = false;
         view.field("changes.refreshing", false.into(), cx);
         match result {
-          Ok(snapshot) => view.apply(snapshot, cx),
+          Ok(snapshot) => {
+            if !view.park(&snapshot) {
+              view.apply(snapshot, cx);
+            }
+          }
           Err(err) => {
             view.toast(ToastTone::Error, "JJ Error", err);
             view.snapshot.get_or_insert_with(Snapshot::default);
@@ -456,6 +468,9 @@ impl ChangesView {
           Err(err) => log::warn!("Failed to load file hunks: {err}"),
         }
         view.unmark_stale(cx);
+        if batches.is_empty() {
+          view.prune_comments(cx);
+        }
         view.load_batches(generation, batches, cx);
       },
       cx,
@@ -1211,6 +1226,7 @@ impl Render for ChangesView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     self.ensure_input(window, cx);
+    self.ensure_review_inputs(window, cx);
     self.scroll_to_file(window, cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
@@ -1226,8 +1242,18 @@ impl Render for ChangesView {
           let files = view.files().to_vec();
           view.staging.select_all(&files);
           cx.notify();
+        } else if k.key == "escape" && view.review.selection.is_some() {
+          view.clear_selection(cx);
         }
-      }));
+      }))
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|view, _, _, cx| view.end_drag(cx)),
+      )
+      .on_mouse_up_out(
+        MouseButton::Left,
+        cx.listener(|view, _, _, cx| view.end_drag(cx)),
+      );
     let sidebar = self.sidebar(&p, cx);
     let main = div()
       .flex_1()
@@ -1237,7 +1263,14 @@ impl Render for ChangesView {
       .children(self.action_bar(&p, cx))
       .child(self.content(&p, cx));
     let dialog = self.dialog(window, &p, cx);
-    root.child(sidebar).child(main).children(dialog)
+    let finish = self.finish_popover(&p, cx);
+    let review_dialog = self.review_dialog(window, &p, cx);
+    root
+      .child(sidebar)
+      .child(main)
+      .children(dialog)
+      .children(finish)
+      .children(review_dialog)
   }
 }
 
@@ -2062,7 +2095,9 @@ impl ChangesView {
   /// `ReviewActionBar`: for now, "Start Review" on workspaces.
   fn action_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     self.parent.workspace.as_ref()?;
-    Some(
+    let bar = if self.show_review_bar() {
+      self.review_bar(p, cx).into_any_element()
+    } else {
       div()
         .flex()
         .items_center()
@@ -2073,16 +2108,15 @@ impl ChangesView {
         .bg(p.muted.opacity(0.8))
         .border_b_1()
         .border_color(p.border)
-        .child(
-          Button::new("start-agent-review", p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .gap_2()
-            .disabled(self.starting_review)
-            .icon(theme::ICON_BOT, 12.)
-            .label("Start Review")
-            .on_click(cx.listener(|view, _, _, cx| view.start_review(cx))),
-        ),
+        .child(self.start_review_button(p, cx))
+        .into_any_element()
+    };
+    Some(
+      div()
+        .flex()
+        .flex_col()
+        .children(self.stale_banner(p, cx))
+        .child(bar),
     )
   }
 
@@ -2237,7 +2271,7 @@ impl ChangesView {
       renamed: old_path.is_some(),
       data: data.as_ref(),
       collapsed: self.collapsed_files.contains(path),
-      comment_activity: false,
+      comment_activity: self.file_comment_activity(path),
       expanded_large: self.expanded_large.contains(path),
     };
     let shut = is_collapsed(&input);
@@ -2282,7 +2316,8 @@ impl ChangesView {
         .left_0()
         .size_full(),
       )
-      .child(header);
+      .child(header)
+      .children(self.file_comments(path, p, cx));
     if kind == Body::Collapsed {
       return card;
     }
@@ -2365,7 +2400,9 @@ impl ChangesView {
       }
       Body::Hunks => {
         let hunks = data.map(|d| d.hunks).unwrap_or_default();
-        card.child(self.hunks(path, &hunks, committed, conflicted_file, p, cx))
+        card
+          .children(self.outdated_comments(path, p, cx))
+          .child(self.hunks(path, &hunks, committed, conflicted_file, p, cx))
       }
       Body::Collapsed => card,
     };
@@ -2493,7 +2530,11 @@ impl ChangesView {
             .rounded(px(4.))
             .cursor_pointer()
             .hover(move |s| s.bg(accent))
-            .child(ui::icon(theme::ICON_MESSAGE_PLUS, 14., muted)),
+            .child(ui::icon(theme::ICON_MESSAGE_PLUS, 14., muted))
+            .on_click({
+              let path = path.to_string();
+              cx.listener(move |view, _, _, cx| view.add_file_comment(&path, cx))
+            }),
           cx,
         ),
       );
@@ -2720,19 +2761,25 @@ impl ChangesView {
         el = el.child(context_row(n, line, language, p));
       }
       let numbers = line_numbers(hunk);
-      for (l, line) in hunk.lines.iter().enumerate() {
-        let (old, new) = numbers.get(l).copied().unwrap_or((None, None));
+      for l in 0..hunk.lines.len() {
+        let new = numbers.get(l).and_then(|n| n.1);
         if let Some(region) = new.and_then(|n| in_region.get(&(n as usize)).copied()) {
           if regions[region].region.start_line == new.unwrap_or(0) as usize
             && drawn_regions.insert(region)
           {
-            el = el.child(self.conflict_card(&regions[region], p));
+            el = el.child(self.conflict_card(&regions[region], p, cx));
           }
           continue;
         }
-        el = el.child(diff_line(
-          path, h, l, line, old, new, language, conflicted, p,
-        ));
+        el = el.child(
+          self
+            .diff_line(path, hunks, h, l, language, conflicted, p, cx)
+            .on_mouse_down(
+              MouseButton::Right,
+              cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
+            ),
+        );
+        el = el.children(self.line_extras(path, hunks, h, l, p, cx));
       }
       // Drawn for committed files too, where React's click finds no hunk.
       if !(self
@@ -2779,7 +2826,12 @@ impl ChangesView {
   }
 
   /// `InlineConflictCard`: the region's lines by side.
-  fn conflict_card(&self, conflict: &Conflict, p: &Palette) -> impl IntoElement {
+  fn conflict_card(
+    &self,
+    conflict: &Conflict,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let region = &conflict.region;
     let dark = self.dark;
     let shade = |light: u32, dark_: u32| tw::color(if dark { dark_ } else { light });
@@ -2934,6 +2986,7 @@ impl ChangesView {
           .child(format!("lines {}–{}", region.start_line, region.end_line)),
       )
       .child(pre)
+      .children(self.note_section(conflict, p, cx))
   }
 
   fn dialog(
@@ -3087,105 +3140,5 @@ fn context_row(
           language,
           p.dark,
         )),
-    )
-}
-
-/// `HunkDiffLine`: the numbers, the comment button, the marker and the
-/// highlighted text.
-#[allow(clippy::too_many_arguments)]
-fn diff_line(
-  path: &str,
-  h: usize,
-  l: usize,
-  line: &str,
-  old: Option<u32>,
-  new: Option<u32>,
-  language: Option<&'static str>,
-  conflicted: bool,
-  p: &Palette,
-) -> impl IntoElement {
-  let kind = line_kind(line);
-  let bg = match kind {
-    LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-    LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
-    LineKind::Context => None,
-  };
-  let marker = match kind {
-    LineKind::Added => "+",
-    LineKind::Removed => "-",
-    LineKind::Context => " ",
-  };
-  let border = p.border.opacity(0.4);
-  let gutter_hover = p.muted.opacity(0.5);
-  let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
-  div()
-    .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
-    .group("diff-line")
-    .flex()
-    .when_some(bg, |this, bg| this.bg(bg))
-    .child(
-      div()
-        .id(SharedString::from(format!("gutter-{path}-{h}-{l}")))
-        .debug_selector(|| "line-gutter".into())
-        .w_24()
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap_1()
-        .border_r_1()
-        .border_color(border)
-        .text_color(p.muted_foreground)
-        .cursor_pointer()
-        .hover(move |s| s.bg(gutter_hover))
-        .child(
-          div()
-            .w_10()
-            .mr_1()
-            .flex()
-            .justify_end()
-            .child(old.map(|n| n.to_string()).unwrap_or_default()),
-        )
-        .child(
-          div()
-            .w_10()
-            .flex()
-            .justify_end()
-            .child(new.map(|n| n.to_string()).unwrap_or_default()),
-        ),
-    )
-    .child(
-      div()
-        .w_6()
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .when(!conflicted, |this| {
-          this.child(
-            div()
-              .p(px(2.))
-              .rounded(px(4.))
-              .bg(p.primary)
-              .opacity(0.)
-              .group_hover("diff-line", |s| s.opacity(1.))
-              .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground)),
-          )
-        }),
-    )
-    .child(
-      div()
-        .w_5()
-        .flex_none()
-        .flex()
-        .justify_center()
-        .child(marker),
-    )
-    .child(
-      div()
-        .flex_1()
-        .min_w_0()
-        .px_2()
-        .py(px(2.))
-        .child(highlight::styled(text, language, p.dark)),
     )
 }
