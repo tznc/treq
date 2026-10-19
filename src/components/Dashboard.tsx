@@ -239,6 +239,7 @@ import { Button } from "./ui/button";
 import { TooltipProvider } from "./ui/tooltip";
 import { useToast } from "./ui/toast";
 import { WorkspacePicker } from "./WorkspacePicker";
+import { useGpuiOverlays } from "./useGpuiOverlays";
 import {
   WorkspaceTerminalPane,
   type WorkspaceTerminalPaneHandle,
@@ -3095,6 +3096,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  // The palette's commands, shared by React's CommandPalette and GPUI's.
+  const paletteCommands: Record<string, () => void> = {
+    dashboard: handleReturnToDashboard,
+    settings: () => openSettings(),
+    "open-repository": () => void handleOpenRepository(),
+    "open-repository-new-window": () => void handleOpenRepositoryInNewWindow(),
+    "switch-branch": () => setShowBranchSwitcher(true),
+    "search-files": () => setShowFilePicker(true),
+    "go-to-workspace": () => setShowWorkspacePicker(true),
+    "create-workspace": handleCreateStackedWorkspace,
+    "delete-workspace": () => setShowWorkspaceDeletion(true),
+    "start-agent-with-prompt": () => setShowAgentPromptDialog(true),
+    "start-agent-terminal": () => void handleStartDefaultAgent(),
+    "open-prompt-history": () => {
+      setPromptHistoryFocusId(null);
+      setShowPromptHistory(true);
+    },
+    "open-stash": () => setShowStashModal(true),
+    "toggle-terminal": () => terminalPane()?.toggleCollapse(),
+    "maximize-terminal": () => terminalPane()?.toggleMaximize(),
+    "new-shell-terminal": () => terminalPane()?.createShellSession(),
+  };
+
+  // GPUI draws the palette and pickers over the whole window.
+  const gpuiOverlays = useGpuiOverlays({
+    enabled: !isRemoteActive,
+    palette: { open: showCommandPalette, setOpen: setShowCommandPalette },
+    shortcuts: {
+      open: showKeyboardShortcuts,
+      setOpen: setShowKeyboardShortcuts,
+    },
+    workspacePicker: {
+      open: showWorkspacePicker,
+      setOpen: setShowWorkspacePicker,
+    },
+    branchSwitcher: {
+      open: showBranchSwitcher,
+      setOpen: setShowBranchSwitcher,
+    },
+    repoPath: dataRepoPath,
+    // Hidden for remote repositories until the stash modal is routed.
+    stash: !isRemoteActive,
+    selectedWorkspace,
+    workspaces,
+    commands: paletteCommands,
+    onSelectWorkspace: (workspace) => void handleOpenSession(workspace),
+    onBranchChanged: handleBranchChanged,
+  });
+
   const sessionLayerStyle: CSSProperties = {
     visibility: isSessionView ? "visible" : "hidden",
     zIndex: isSessionView ? 10 : 0,
@@ -3634,37 +3684,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <CommandPalette
-                showCommandPalette={showCommandPalette}
+                showCommandPalette={showCommandPalette && !gpuiOverlays}
                 onCommandPaletteChange={setShowCommandPalette}
                 workspaces={workspaces}
-                onNavigateToDashboard={handleReturnToDashboard}
-                onNavigateToSettings={openSettings}
-                onOpenRepository={() => void handleOpenRepository()}
-                onOpenRepositoryInNewWindow={() =>
-                  void handleOpenRepositoryInNewWindow()
+                onNavigateToDashboard={paletteCommands.dashboard}
+                onNavigateToSettings={paletteCommands.settings}
+                onOpenRepository={paletteCommands["open-repository"]}
+                onOpenRepositoryInNewWindow={
+                  paletteCommands["open-repository-new-window"]
                 }
-                onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
-                onOpenFilePicker={() => setShowFilePicker(true)}
-                onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
-                onOpenWorkspaceDeletion={() => setShowWorkspaceDeletion(true)}
-                onCreateStackedWorkspace={handleCreateStackedWorkspace}
-                onToggleTerminal={() => terminalPane()?.toggleCollapse()}
-                onMaximizeTerminal={() => terminalPane()?.toggleMaximize()}
-                onStartAgentWithPrompt={() => setShowAgentPromptDialog(true)}
-                onStartAgentTerminal={() => void handleStartDefaultAgent()}
-                onOpenPromptHistory={() => {
-                  setPromptHistoryFocusId(null);
-                  setShowPromptHistory(true);
-                }}
+                onOpenBranchSwitcher={paletteCommands["switch-branch"]}
+                onOpenFilePicker={paletteCommands["search-files"]}
+                onOpenWorkspacePicker={paletteCommands["go-to-workspace"]}
+                onOpenWorkspaceDeletion={paletteCommands["delete-workspace"]}
+                onCreateStackedWorkspace={paletteCommands["create-workspace"]}
+                onToggleTerminal={paletteCommands["toggle-terminal"]}
+                onMaximizeTerminal={paletteCommands["maximize-terminal"]}
+                onStartAgentWithPrompt={
+                  paletteCommands["start-agent-with-prompt"]
+                }
+                onStartAgentTerminal={paletteCommands["start-agent-terminal"]}
+                onOpenPromptHistory={paletteCommands["open-prompt-history"]}
                 // Hidden for remote repositories until the stash modal is routed.
                 onOpenStash={
-                  isRemoteActive ? undefined : () => setShowStashModal(true)
+                  isRemoteActive ? undefined : paletteCommands["open-stash"]
                 }
-                onCreateShellTerminal={() =>
-                  terminalPane()?.createShellSession()
-                }
+                onCreateShellTerminal={paletteCommands["new-shell-terminal"]}
                 hasSelectedWorkspace={!!selectedWorkspace}
-                showBranchSwitcher={showBranchSwitcher}
+                showBranchSwitcher={showBranchSwitcher && !gpuiOverlays}
                 onBranchSwitcherChange={setShowBranchSwitcher}
                 onBranchChanged={handleBranchChanged}
                 showWorkspaceDeletion={showWorkspaceDeletion}
@@ -3699,7 +3746,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <KeyboardShortcutsModal
-                open={showKeyboardShortcuts}
+                open={showKeyboardShortcuts && !gpuiOverlays}
                 onOpenChange={setShowKeyboardShortcuts}
               />
 
@@ -3736,7 +3783,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <WorkspacePicker
-                open={showWorkspacePicker}
+                open={showWorkspacePicker && !gpuiOverlays}
                 onOpenChange={setShowWorkspacePicker}
                 workspaces={workspaces}
                 sessions={sessions}

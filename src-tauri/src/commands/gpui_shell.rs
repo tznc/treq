@@ -100,6 +100,34 @@ pub fn gpui_screen_update(
   let _ = (app, window_label, snapshot);
 }
 
+/// Shows Dashboard's open window-wide dialog (command palette, keyboard
+/// shortcuts, workspace picker, branch switcher) in GPUI over the whole of
+/// window `window_label`, or closes it for `null`. A no-op outside the GPUI
+/// shell.
+#[tauri::command]
+pub fn gpui_overlay_update(
+  app: AppHandle,
+  window_label: String,
+  snapshot: Option<serde_json::Value>,
+) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    if !crate::gpui_shell::is_enabled(&app) {
+      return;
+    }
+    let snapshot = match snapshot.map(serde_json::from_value).transpose() {
+      Ok(snapshot) => snapshot,
+      Err(err) => {
+        log::warn!("invalid GPUI overlay snapshot: {err}");
+        return;
+      }
+    };
+    crate::gpui_shell::update_overlay(&app, &window_label, snapshot);
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = (app, window_label, snapshot);
+}
+
 /// Runs the action of a GPUI screen's toast button (`NativeEvent::Toast`'s
 /// `action`), once. A no-op for an unknown or used id.
 #[tauri::command]

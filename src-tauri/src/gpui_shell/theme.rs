@@ -112,6 +112,13 @@ icons! {
   ICON_CROWN => "crown",
   ICON_LOG_OUT => "log-out",
   ICON_WRENCH => "wrench",
+  ICON_APP_WINDOW => "app-window",
+  ICON_FILE_SEARCH => "file-search",
+  ICON_HISTORY => "history",
+  ICON_CHEVRONS_UP_DOWN => "chevrons-up-down",
+  ICON_LIST_CHECKS => "list-checks",
+  ICON_SHIELD_CHECK => "shield-check",
+  ICON_ROTATE_CW => "rotate-cw",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.

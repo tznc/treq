@@ -104,6 +104,15 @@ export const gpuiScreenUpdate = (
     snapshot,
   });
 
+/** Shows a dialog in GPUI over this whole window; null closes it. */
+export const gpuiOverlayUpdate = (
+  snapshot: import("./gpui-overlay").GpuiOverlaySnapshot | null,
+): Promise<void> =>
+  invoke("gpui_overlay_update", {
+    windowLabel: currentWindowLabel(),
+    snapshot,
+  });
+
 /** Opens a GPUI menu at the last right-click in this window's sidebar. */
 export const gpuiMenuShow = (
   entries: import("./native-context-menu").GpuiMenuEntry[],

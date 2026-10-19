@@ -62,6 +62,9 @@ beforeEach(() => {
   // React's terminal pane, which most tests drive; gpui-terminal.test.tsx
   // turns GPUI's on.
   window.__TREQ_REACT_TERMINAL__ = true;
+  // React's palette and pickers, which most tests drive;
+  // gpui-overlays.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_OVERLAYS__ = true;
   window.__TREQ_GPUI_SHELL__ = true;
 });
 afterEach(() => closeTestPtys(tauriTest.invoke));
