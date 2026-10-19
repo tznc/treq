@@ -14,7 +14,7 @@ static INDEXED_WORKSPACES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 /// created workspace, in the background so workspace creation itself isn't
 /// slowed down. Checks are blocked for the workspace until this finishes —
 /// see `core::checks::ensure_setup_script_complete`.
-fn spawn_setup_script_if_configured(workspace: &Workspace) {
+pub(crate) fn spawn_setup_script_if_configured(workspace: &Workspace) {
   let script = match crate::core::configured_setup_script(&workspace.repo_path) {
     Ok(Some(script)) => script,
     Ok(None) => return,

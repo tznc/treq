@@ -1,4 +1,6 @@
 import { useRunningCheckFiles } from "../hooks/useWorkspaceChecks";
+import type { Workspace } from "../lib/api";
+import type { SessionCreationInfo } from "../types/sessions";
 import type { useGpuiPartsHost } from "../lib/gpui-parts";
 import {
   type GpuiScreenAction,
@@ -19,6 +21,17 @@ type Route = Omit<
 
 interface Handlers {
   setTab: (tab: GpuiWorkspaceTab) => void;
+  /** The Code tab's height, which GPUI frames the terminal pane below. */
+  contentHeight?: (height: number) => void;
+  /** The Code tab's file list: open a file or folder in the file browser. */
+  openEntry?: (entry: { name: string; isDirectory: boolean }) => void;
+  openFilePicker?: () => void;
+  /** The Code tab's commit history: show the commit in the Commits tab. */
+  openCommit?: (changeId: string) => void;
+  /** The Code tab's stack: go to another workspace. */
+  navigateToWorkspace?: (workspace: Workspace) => void;
+  /** The Code tab started an agent session. */
+  sessionCreated?: (session: SessionCreationInfo) => void;
   openBranchSwitcher?: () => void;
   stack?: () => void;
   merge?: () => void;
@@ -96,6 +109,8 @@ export function useGpuiWorkspaceScreen({
         return call("mergeQueue", "press");
       case "workspace.merge":
         return handlers.merge?.();
+      case "code.filePicker":
+        return handlers.openFilePicker?.();
       case "workspace.details":
         return handlers.openDetails();
       case "workspace.more": {
@@ -115,6 +130,29 @@ export function useGpuiWorkspaceScreen({
     }
   };
 
+  const field = (name: string, value: unknown) => {
+    switch (name) {
+      case "workspace.tab":
+        if (TABS.includes(value as GpuiWorkspaceTab)) {
+          handlers.setTab(value as GpuiWorkspaceTab);
+        }
+        return;
+      case "workspace.contentHeight":
+        return handlers.contentHeight?.(value as number);
+      case "code.open":
+        return handlers.openEntry?.(
+          value as { name: string; isDirectory: boolean },
+        );
+      case "code.commit":
+        return handlers.openCommit?.(value as string);
+      case "code.stack":
+        return handlers.navigateToWorkspace?.(value as Workspace);
+      case "code.sessionCreated":
+        return handlers.sessionCreated?.(value as SessionCreationInfo);
+      default:
+    }
+  };
+
   return useGpuiScreen(
     active && !popoverOpen ? view : null,
     (action: GpuiScreenAction) => {
@@ -124,12 +162,7 @@ export function useGpuiWorkspaceScreen({
           press(action.id);
           break;
         case "field":
-          if (
-            action.field === "workspace.tab" &&
-            TABS.includes(action.value as GpuiWorkspaceTab)
-          ) {
-            handlers.setTab(action.value as GpuiWorkspaceTab);
-          }
+          field(action.field, action.value);
           break;
         default:
       }

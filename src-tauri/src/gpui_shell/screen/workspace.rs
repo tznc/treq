@@ -17,11 +17,13 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration
 use serde::Deserialize;
 use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div,
+  self, div, prelude::*, px, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
   FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Window,
 };
 
 use super::{
+  code::{CodeView, Parent},
+  code_data::CodeHost,
   workspace_data::{
     workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
   },
@@ -275,6 +277,11 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
+  code_host: Arc<dyn CodeHost>,
+  /// The Code tab, while GPUI draws it.
+  pub(super) code: Option<Entity<CodeView>>,
+  /// The tab's height last sent to React (`workspace.contentHeight`).
+  content_height: Rc<std::cell::Cell<f32>>,
   /// React, for what the header does not do itself.
   react: ActionSink,
   /// This view's own handler, which defers to after the current update.
@@ -304,7 +311,7 @@ pub struct WorkspaceView {
 impl WorkspaceView {
   pub fn new(
     route: Route,
-    host: Arc<dyn WorkspaceHost>,
+    host: Arc<dyn CodeHost>,
     react: ActionSink,
     dark: bool,
     popups: PopupSink,
@@ -325,7 +332,10 @@ impl WorkspaceView {
       }
     });
     let mut this = Self {
-      host,
+      host: host.clone(),
+      code_host: host,
+      code: None,
+      content_height: Rc::default(),
       react,
       sink,
       route,
@@ -1338,6 +1348,49 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
     .child(count(format!("-{}", loc.deletions), red))
 }
 
+/// The frame's height before React measured its terminal pane: the
+/// collapsed pane's bar.
+const FRAME_FALLBACK: f32 = 40.;
+
+impl WorkspaceView {
+  /// The Code tab's view while GPUI draws it, kept in step with the header.
+  fn code_view(&mut self, cx: &mut Context<Self>) -> Option<Entity<CodeView>> {
+    let loaded = self
+      .loaded
+      .as_ref()
+      .filter(|_| self.route.code && self.route.tab == Tab::Overview);
+    let Some(loaded) = loaded else {
+      self.code = None;
+      self.content_height.set(0.);
+      return None;
+    };
+    let parent = Parent {
+      repo_path: self.route.repo_path.clone(),
+      workspace: loaded.workspace.clone(),
+      conflicted_files: loaded
+        .status
+        .as_ref()
+        .map(|s| s.conflicted_files.clone())
+        .unwrap_or_default(),
+      default_branch: self.route.default_target().to_string(),
+      revision: self.route.revision,
+    };
+    let dark = self.dark;
+    if let Some(code) = &self.code {
+      code.update(cx, |code, cx| code.set_parent(parent, dark, cx));
+      return Some(code.clone());
+    }
+    let (host, react, popups) = (
+      self.code_host.clone(),
+      self.react.clone(),
+      self.popups.clone(),
+    );
+    let code = cx.new(|cx| CodeView::new(parent, host, react, popups, dark, cx));
+    self.code = Some(code.clone());
+    Some(code)
+  }
+}
+
 impl Render for WorkspaceView {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.sync_tooltip_popup(cx);
@@ -1356,11 +1409,57 @@ impl Render for WorkspaceView {
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_row(&row, &p));
-    let frame = match &self.webview {
+    let code = self.code_view(cx);
+    let frame = |webview: Option<&Webview<Wry>>| match webview {
       Some(webview) => tauri_plugin_gpui::webview_frame(webview)
         .size_full()
         .into_any_element(),
       None => div().size_full().into_any_element(),
+    };
+    let body = match code {
+      // The tab, with React's terminal pane framed below it.
+      Some(code) => {
+        let sent = self.content_height.clone();
+        let sink = self.sink.clone();
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .flex()
+          .flex_col()
+          .child(
+            gpui::canvas(
+              move |bounds, _, cx| {
+                let height = f32::from(bounds.size.height).round();
+                if sent.replace(height) != height {
+                  sink(
+                    ScreenAction::Field {
+                      field: "workspace.contentHeight".into(),
+                      value: height.into(),
+                    },
+                    cx,
+                  );
+                }
+              },
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+          )
+          .child(div().flex_1().min_h_0().child(code))
+          .child(
+            div()
+              .flex_none()
+              .h(px(self.route.frame_height.unwrap_or(FRAME_FALLBACK)))
+              .debug_selector(|| "workspace-frame".into())
+              .child(frame(self.webview.as_ref())),
+          )
+      }
+      None => div()
+        .flex_1()
+        .min_h_0()
+        .debug_selector(|| "workspace-frame".into())
+        .child(frame(self.webview.as_ref())),
     };
     div()
       .size_full()
@@ -1370,12 +1469,6 @@ impl Render for WorkspaceView {
       .text_color(p.foreground)
       .child(header)
       .children(tab_row)
-      .child(
-        div()
-          .flex_1()
-          .min_h_0()
-          .debug_selector(|| "workspace-frame".into())
-          .child(frame),
-      )
+      .child(body)
   }
 }

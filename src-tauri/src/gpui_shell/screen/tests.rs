@@ -34,6 +34,11 @@ struct FakeHost {
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
+  /// What the Code tab reads.
+  overview: code_data::Overview,
+  history: Option<crate::jj::JjLogResult>,
+  workspaces: Vec<crate::local_db::Workspace>,
+  files: Vec<String>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -247,6 +252,101 @@ impl merge::MergeHost for FakeHost {
   ) -> Result<(), String> {
     self.record(format!("merge {workspace_id} {strategy:?} {message:?}"));
     self.merge_error.clone().map_or(Ok(()), Err)
+  }
+}
+
+impl code_data::CodeHost for FakeHost {
+  fn overview(&self, _: &str, workspace_id: Option<i64>) -> Result<code_data::Overview, String> {
+    self.record(format!("read overview {workspace_id:?}"));
+    Ok(self.overview.clone())
+  }
+
+  fn commits(
+    &self,
+    _: &str,
+    workspace_id: Option<i64>,
+    include_target: bool,
+    limit: Option<usize>,
+  ) -> Result<crate::jj::JjLogResult, String> {
+    self.record(format!(
+      "read commits {workspace_id:?} {include_target} {limit:?}"
+    ));
+    self.history.clone().ok_or_else(|| "no history".into())
+  }
+
+  fn workspaces(&self, _: &str) -> Result<Vec<crate::local_db::Workspace>, String> {
+    self.record("read workspaces".into());
+    Ok(self.workspaces.clone())
+  }
+
+  fn set_submodule_synced(&self, _: &str, path: &str, enabled: bool) -> Result<(), String> {
+    self.record(format!("sync submodule {path} {enabled}"));
+    Ok(())
+  }
+
+  fn set_description(&self, _: &str, workspace_id: i64, description: &str) -> Result<(), String> {
+    self.record(format!("set description {workspace_id} {description:?}"));
+    Ok(())
+  }
+
+  fn search_files(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    _: &str,
+    query: &str,
+    limit: usize,
+  ) -> Result<Vec<String>, String> {
+    self.record(format!("read files {query:?}"));
+    Ok(
+      self
+        .files
+        .iter()
+        .filter(|f| !query.is_empty() && f.contains(query))
+        .take(limit)
+        .cloned()
+        .collect(),
+    )
+  }
+
+  fn devcontainers_enabled(&self) -> bool {
+    false
+  }
+
+  fn devcontainer_status(&self, _: &str) -> crate::core::devcontainer::DevcontainerStatus {
+    crate::core::devcontainer::DevcontainerStatus {
+      configured: false,
+      config_path: None,
+      cli_available: false,
+      running: false,
+    }
+  }
+
+  fn devcontainer_up(
+    &self,
+    repo_path: &str,
+  ) -> Result<crate::core::devcontainer::DevcontainerStatus, String> {
+    self.record("devcontainer up".into());
+    Ok(self.devcontainer_status(repo_path))
+  }
+
+  fn branch_names(&self, _: &str) -> Result<std::collections::HashSet<String>, String> {
+    self.record("read branches".into());
+    Ok(["treq/fix-login".to_string()].into())
+  }
+
+  fn create_workspace(&self, _: &str, branch: &str, title: &str) -> Result<i64, String> {
+    self.record(format!("create workspace {branch} {title:?}"));
+    Ok(9)
+  }
+
+  fn create_session(&self, _: &str, workspace_id: Option<i64>, name: &str) -> Result<i64, String> {
+    self.record(format!("create session {workspace_id:?} {name:?}"));
+    Ok(31)
+  }
+
+  fn pick_files(&self) -> Option<Vec<String>> {
+    None
   }
 }
 
@@ -1374,4 +1474,189 @@ fn merge_preview_without_commits_cannot_merge(cx: &mut TestAppContext) {
   h.click("merge-strategy");
   assert!(!h.drawn("merge-strategy-menu"));
   assert_eq!(host.writes(), ["notify toast Failed to load merge preview"]);
+}
+
+/// The feature workspace's Code tab, with two files and two commits.
+fn code_host() -> FakeHost {
+  let mut loaded = feature_loaded();
+  if let Some(ws) = loaded.workspace.as_mut() {
+    ws.description = Some("Fix the login flow".into());
+  }
+  let entry = |name: &str, is_directory: bool| crate::core::WorkspaceEntry {
+    name: name.into(),
+    path: format!("/repo/.treq/workspaces/login/{name}"),
+    is_directory,
+    modified_at: None,
+    submodule_pin: None,
+    submodule_synced: None,
+    status: None,
+  };
+  FakeHost {
+    loaded,
+    pr: open_pr(),
+    overview: code_data::Overview {
+      entries: vec![entry("src", true), entry("README.md", false)],
+      readme: Some("# Login".into()),
+    },
+    history: serde_json::from_value(serde_json::json!({
+      "commits": [commit("a", 10, 4), commit("b", 2, 0)],
+      "target_branch": "main",
+      "workspace_branch": "feature/login"
+    }))
+    .ok(),
+    files: vec!["src/login.rs".into(), "src/logout.rs".into()],
+    ..FakeHost::default()
+  }
+}
+
+fn code_route() -> ScreenSnapshot {
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["frameHeight"] = 120.into();
+  serde_json::from_value(route).expect("code route")
+}
+
+fn fields(h: &Harness, name: &str) -> Vec<serde_json::Value> {
+  h.sent()
+    .into_iter()
+    .filter_map(|a| match a {
+      ScreenAction::Field { field, value } if field == name => Some(value),
+      _ => None,
+    })
+    .collect()
+}
+
+#[gpui::test]
+fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  for selector in [
+    "workspace-code",
+    "agent-task-input",
+    "workspace-description",
+    "code-go-to-file",
+    "code-entry-src",
+    "code-entry-README.md",
+    "code-readme",
+    "commit-item-a",
+    "commit-item-b",
+    "workspace-frame",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  let calls = host.calls();
+  assert!(
+    calls.contains(&"read overview Some(7)".to_string()),
+    "{calls:?}"
+  );
+  assert!(
+    calls.iter().any(|c| c.starts_with("read commits Some(7)")),
+    "{calls:?}"
+  );
+}
+
+#[gpui::test]
+fn code_tab_hands_navigation_to_react(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.click("code-entry-src");
+  h.click("commit-item-b");
+  h.click("code-go-to-file");
+  h.cx.run_until_parked();
+  assert_eq!(
+    fields(&h, "code.open"),
+    vec![serde_json::json!({"name": "src", "isDirectory": true})]
+  );
+  assert_eq!(fields(&h, "code.commit"), vec![serde_json::json!("b")]);
+  assert!(h.sent().contains(&press("code.filePicker")));
+}
+
+#[gpui::test]
+fn code_tab_starts_a_task_in_the_workspace(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("agent-task-input");
+  h.cx.simulate_input("fix the login button");
+  h.click("task-submit");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&r#"create session Some(7) "fix the login button""#.to_string()),
+    "{:?}",
+    host.writes()
+  );
+  let created = fields(&h, "code.sessionCreated");
+  assert_eq!(created.len(), 1, "{:?}", h.sent());
+  assert_eq!(created[0]["sessionId"], 31);
+  assert_eq!(created[0]["workspaceId"], 7);
+  assert_eq!(created[0]["pendingPrompt"], "fix the login button");
+  assert_eq!(created[0]["permissionMode"], "acceptEdits");
+  assert_eq!(created[0]["agent"], "claude");
+}
+
+#[gpui::test]
+fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.loaded.workspace = None;
+  let mut route = route_json(None, "main");
+  route["code"] = true.into();
+  let route = serde_json::from_value(route).expect("home route");
+  let (mut h, host) = workspace_harness(cx, host, route);
+  assert!(h.drawn("task-new-workspace"));
+  h.click("agent-task-input");
+  h.cx.simulate_input("fix login");
+  h.click("task-submit");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  let create = writes
+    .iter()
+    .find(|c| c.starts_with("create workspace "))
+    .unwrap_or_else(|| panic!("{writes:?}"));
+  // `treq/fix-login` is taken, so the branch gets a suffix.
+  assert!(
+    create.starts_with("create workspace treq/fix-login-"),
+    "{create}"
+  );
+  assert!(
+    writes.contains(&r#"create session Some(9) "fix login""#.to_string()),
+    "{writes:?}"
+  );
+  assert_eq!(fields(&h, "code.sessionCreated")[0]["workspaceId"], 9);
+}
+
+#[gpui::test]
+fn code_tab_suggests_files_for_mentions(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("agent-task-input");
+  h.cx.simulate_input("look at @log");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  assert!(h.drawn("task-mentions"));
+  assert!(h.drawn("task-mention-0") && h.drawn("task-mention-1"));
+  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
+  h.click("task-mention-1");
+  h.cx.run_until_parked();
+  let text = h.screen.read_with(&h.cx, |s, cx| {
+    let code = s.workspace.as_ref()?.read(cx).code.clone()?;
+    Some(code.read(cx).task_text.clone())
+  });
+  assert_eq!(text.as_deref(), Some("look at @src/logout.rs "));
+}
+
+#[gpui::test]
+fn code_tab_saves_the_description(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("workspace-description-edit");
+  assert!(h.drawn("workspace-description-input"));
+  h.cx.simulate_input("!");
+  h.click("workspace-description-save");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|c| c.starts_with("set description 7 ") && c.contains('!')),
+    "{:?}",
+    host.writes()
+  );
+  assert!(!h.drawn("workspace-description-input"));
 }

@@ -179,6 +179,13 @@ interface ShowWorkspaceProps {
    * another page covers the workspace or the terminal pane fills it.
    */
   gpuiActive?: boolean;
+  /** Under GPUI's Code tab: how tall the terminal pane it frames below is. */
+  gpuiFrameHeight?: number | null;
+  /**
+   * The height GPUI's Code tab takes, which the terminal pane's layer spans
+   * so the pane sits in GPUI's frame; null while React draws the tab.
+   */
+  onGpuiContentHeight?: (height: number | null) => void;
 }
 
 const StatusPip = ({ status }: { status?: string }) =>
@@ -233,6 +240,8 @@ export const ShowWorkspace = ({
   branchesLoading = false,
   onLoadAvailableBranches,
   gpuiActive = false,
+  gpuiFrameHeight = null,
+  onGpuiContentHeight,
 }: ShowWorkspaceProps) => {
   const workingDirectory = workspace
     ? getFullWorkspacePath(workspace)
@@ -1127,6 +1136,8 @@ export const ShowWorkspace = ({
     : `Cannot merge: ${conflictCount} conflict${
         conflictCount === 1 ? "" : "s"
       } detected`;
+  // GPUI draws the Code tab, with the terminal pane framed below it.
+  const gpuiCode = activeTab === "overview" && !showFileBrowserInCode;
   const gpuiFramed = useGpuiWorkspaceScreen({
     active: gpuiActive && !!workingDirectory && !!effectiveRepoPath,
     parts: gpuiParts,
@@ -1140,9 +1151,24 @@ export const ShowWorkspace = ({
       tabRow: !(reviewSubView.switcher || reviewSubView.showBrowser),
       retargeting: rebasing,
       refreshing: refreshingFiles,
+      code: gpuiCode,
+      frameHeight: gpuiFrameHeight,
     },
     handlers: {
       setTab: setActiveTab,
+      contentHeight: (height) => onGpuiContentHeight?.(height),
+      openEntry: ({ name, isDirectory }) =>
+        handleOverviewEntryClick({
+          name,
+          is_directory: isDirectory,
+        } as DirectoryEntry),
+      openFilePicker: onOpenFilePicker,
+      openCommit: (changeId) => {
+        setScrollToCommitId(changeId);
+        setActiveTab("commits");
+      },
+      navigateToWorkspace: onNavigateToWorkspace,
+      sessionCreated: onSessionCreated,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,
       merge: onOpenMergePreview,
@@ -1153,6 +1179,10 @@ export const ShowWorkspace = ({
           : undefined,
     },
   });
+  const gpuiDrawsCode = gpuiFramed && gpuiCode;
+  useEffect(() => {
+    if (!gpuiDrawsCode) onGpuiContentHeight?.(null);
+  }, [gpuiDrawsCode, onGpuiContentHeight]);
   // GPUI draws the header and tab row; React keeps them mounted but hidden,
   // so the parts they publish stay current.
   const gpuiTabRow =

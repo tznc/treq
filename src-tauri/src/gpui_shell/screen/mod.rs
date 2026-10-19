@@ -22,6 +22,9 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 use super::{popup::PopupSink, theme};
 
 pub(super) mod checklist;
+mod code;
+mod code_data;
+mod file_picker;
 mod merge;
 mod onboarding;
 mod settings;
@@ -92,12 +95,15 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
 pub trait Host:
-  onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost
+  onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost + code_data::CodeHost
 {
 }
 
 impl<T> Host for T where
-  T: onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost
+  T: onboarding::OnboardingHost
+    + settings_data::SettingsHost
+    + merge::MergeHost
+    + code_data::CodeHost
 {
 }
 

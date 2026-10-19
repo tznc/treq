@@ -35,6 +35,8 @@ mod popup;
 mod screen;
 mod sidebar;
 mod theme;
+mod time;
+mod tooltips;
 mod ui;
 
 pub use popup::{MenuEntry, Toast};

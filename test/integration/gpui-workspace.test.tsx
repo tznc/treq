@@ -84,6 +84,53 @@ describe("GPUI workspace header", () => {
     });
   });
 
+  it("draws the Code tab in GPUI on the overview only", async () => {
+    render(<Dashboard />);
+    const home = await findGpuiScreen("workspace");
+    expect(home.code).toBe(true);
+
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "workspace.tab",
+      value: "changes",
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("changes");
+      expect(s.code).toBe(false);
+    });
+  });
+
+  it("opens a commit from the Code tab's history", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "code.commit",
+      value: "zzzzzzzz",
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("commits");
+    });
+  });
+
+  it("opens the file browser in React for a Code tab entry", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.code).toBe(true);
+    });
+
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "code.open",
+      value: { name: "README.md", isDirectory: false },
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("overview");
+      expect(s.code).toBe(false);
+    });
+  });
+
   it("hands the window back to React for the branch switcher", async () => {
     render(<Dashboard />);
     await findGpuiScreen("workspace");

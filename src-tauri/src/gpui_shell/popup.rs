@@ -94,6 +94,7 @@ pub enum TooltipContent {
 pub enum Side {
   Right,
   Bottom,
+  Top,
 }
 
 /// A tooltip change from a sidebar. `anchor` is in the window's coordinates.
@@ -449,6 +450,10 @@ pub fn place_tooltip(
     Side::Bottom => (
       anchor_left + (f32::from(anchor.size.width) - width) / 2.,
       f32::from(anchor.bottom()) + TOOLTIP_OFFSET,
+    ),
+    Side::Top => (
+      anchor_left + (f32::from(anchor.size.width) - width) / 2.,
+      anchor_top - TOOLTIP_OFFSET - height,
     ),
   };
   let min_x = f32::from(viewport.left()) + EDGE_PADDING;

@@ -51,6 +51,13 @@ pub struct Route {
   pub merge_queue: Option<MergeQueue>,
   /// Bumped whenever React refreshes its caches, so GPUI reads again.
   pub revision: u64,
+  /// GPUI draws the Code tab (React's file browser is closed).
+  #[serde(default)]
+  pub code: bool,
+  /// How tall React's part below the tab (the terminal pane) is, once it
+  /// measured it.
+  #[serde(default)]
+  pub frame_height: Option<f32>,
 }
 
 impl Route {
@@ -64,7 +71,7 @@ impl Route {
   }
 
   /// `defaultTargetBranch`.
-  fn default_target(&self) -> &str {
+  pub(super) fn default_target(&self) -> &str {
     if self.home_branch.is_empty() {
       DEFAULT_BRANCH
     } else {

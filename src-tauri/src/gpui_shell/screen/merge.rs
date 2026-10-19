@@ -95,7 +95,7 @@ pub trait MergeHost: WorkspaceHost {
 }
 
 /// `getFullWorkspacePath`.
-fn full_path(workspace: &Workspace) -> String {
+pub(super) fn full_path(workspace: &Workspace) -> String {
   if workspace.workspace_path.starts_with('/') {
     workspace.workspace_path.clone()
   } else {

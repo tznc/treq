@@ -66,6 +66,10 @@ export interface GpuiWorkspaceScreen {
   } | null;
   /** Bumped whenever React refreshes its caches, so GPUI reads again. */
   revision: number;
+  /** GPUI draws the Code tab; React's file browser is closed. */
+  code: boolean;
+  /** How tall the terminal pane GPUI frames below the Code tab is, once measured. */
+  frameHeight: number | null;
 }
 
 /**
@@ -94,7 +98,11 @@ export type GpuiScreenAction =
   | { kind: "recheckPrerequisites" }
   | { kind: "openUrl"; url: string }
   /** A control's new value; `field` names it, e.g. "app.theme". */
-  | { kind: "field"; field: string; value: string | number | boolean }
+  | {
+      kind: "field";
+      field: string;
+      value: string | number | boolean | Record<string, unknown>;
+    }
   /** A slider released at `value`. */
   | { kind: "commit"; field: string; value: number }
   /** A button; `id` names it, e.g. "settings.save". */

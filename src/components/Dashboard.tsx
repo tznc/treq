@@ -213,6 +213,7 @@ import {
 } from "./remote/RemoteStatusBanner";
 import { SettingsPage } from "./SettingsPage";
 import { ShowWorkspace } from "./ShowWorkspace";
+import { useGpuiTerminalFrame } from "./useGpuiTerminalFrame";
 import { StashModal } from "./StashModal";
 import type { BranchListItem } from "./TargetBranchSelector";
 import type {
@@ -1147,6 +1148,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const terminalPaneRef = useRef<WorkspaceTerminalPaneHandle>(null);
   const [terminalMaximized, setTerminalMaximized] = useState(false);
+  // While GPUI draws the Code tab: its height, and the terminal pane's frame.
+  const [gpuiContentHeight, setGpuiContentHeight] = useState<number | null>(
+    null,
+  );
+  const sessionLayerRef = useRef<HTMLDivElement>(null);
+  const gpuiFrameHeight = useGpuiTerminalFrame(
+    sessionLayerRef,
+    gpuiContentHeight,
+  );
 
   const { addToast } = useToast();
   const handleReturnToDashboard = () => {
@@ -2933,6 +2943,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     visibility: isSessionView ? "visible" : "hidden",
     zIndex: isSessionView ? 10 : 0,
     pointerEvents: isSessionView ? "auto" : "none",
+    // GPUI's Code tab: the layer keeps the tab's height, so the pane keeps
+    // its size, and the webview shows only the pane at its bottom.
+    ...(gpuiContentHeight !== null && {
+      top: "auto",
+      height: gpuiContentHeight,
+    }),
   };
 
   const remoteSetupDialog = (
@@ -3061,6 +3077,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <main className="relative flex w-full min-w-0 flex-1 flex-col bg-background">
                 {/* Sessions Layer - ALWAYS RENDERED ONCE */}
                 <div
+                  ref={sessionLayerRef}
                   className="absolute inset-0 flex flex-col workspace-terminal-container overflow-hidden"
                   style={sessionLayerStyle}
                 >
@@ -3188,6 +3205,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             !isRemoteActive &&
                             !terminalMaximized
                           }
+                          gpuiFrameHeight={gpuiFrameHeight}
+                          onGpuiContentHeight={setGpuiContentHeight}
                         />
                       </ErrorBoundary>
                     </div>

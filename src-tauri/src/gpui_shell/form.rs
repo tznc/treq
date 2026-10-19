@@ -305,6 +305,25 @@ pub fn switch(
   palette: &Palette,
   on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+  switch_sized(
+    id,
+    checked,
+    disabled,
+    palette,
+    (36., 20., 16.),
+    move |value: &bool, window: &mut Window, cx: &mut App| on_change(*value, window, cx),
+  )
+}
+
+/// A switch `(width, height, thumb)` pixels, as a `className` resizes it.
+pub fn switch_sized(
+  id: impl Into<SharedString>,
+  checked: bool,
+  disabled: bool,
+  palette: &Palette,
+  (width, height, thumb): (f32, f32, f32),
+  on_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
   let id: SharedString = id.into();
   let selector = id.to_string();
   div()
@@ -313,8 +332,8 @@ pub fn switch(
     .flex()
     .flex_none()
     .items_center()
-    .w(px(36.))
-    .h(px(20.))
+    .w(px(width))
+    .h(px(height))
     .rounded_full()
     .border_2()
     .border_color(gpui_kit::transparent_black())
@@ -327,15 +346,15 @@ pub fn switch(
     .when(disabled, |this| this.opacity(0.5))
     .child(
       div()
-        .size(px(16.))
+        .size(px(thumb))
         .rounded_full()
         .bg(palette.background)
         .shadow_lg()
-        .when(checked, |this| this.ml(px(16.))),
+        .when(checked, |this| this.ml(px(width - 4. - thumb))),
     )
     .when(!disabled, |this| {
       this
         .cursor_pointer()
-        .on_click(move |_, window, cx| on_change(!checked, window, cx))
+        .on_click(move |_, window, cx| on_change(&!checked, window, cx))
     })
 }
