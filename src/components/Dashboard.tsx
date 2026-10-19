@@ -170,6 +170,7 @@ import {
   clearSWRCache,
   fetchAndCache,
   invalidateQueries,
+  revalidateKeys,
   pollMs,
 } from "../lib/swr-cache";
 import { getFullWorkspacePath } from "../lib/utils";
@@ -1650,6 +1651,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     switch (event.kind) {
       case "repoOpened":
         showOpenedRepository(event.path, onRepositoryOpened);
+        break;
+      case "settingsChanged":
+        void revalidateKeys([
+          "settings-batch-hydrate",
+          "app-setup-script-status",
+        ]);
+        void invalidateQueries(["setting"]);
+        break;
+      case "repoSettingsChanged":
+        void invalidateQueries(["repo-settings", event.repoPath]);
         break;
       case "toast":
         addToast({

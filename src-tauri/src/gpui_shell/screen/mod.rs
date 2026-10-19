@@ -21,6 +21,7 @@ use super::{popup::PopupSink, theme};
 pub(super) mod checklist;
 mod onboarding;
 mod settings;
+mod settings_data;
 mod workspace;
 
 #[cfg(test)]
@@ -48,7 +49,7 @@ pub struct ScreenSnapshot {
 pub enum View {
   /// No repository open: open one, or check the required tools.
   Onboarding(onboarding::Route),
-  Settings(Box<settings::Settings>),
+  Settings(settings::Route),
   /// The workspace view's header and tab row, with the webview below.
   Workspace(Box<workspace::Workspace>),
 }
@@ -83,9 +84,9 @@ pub enum ScreenAction {
 pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
-pub trait Host: onboarding::OnboardingHost {}
+pub trait Host: onboarding::OnboardingHost + settings_data::SettingsHost {}
 
-impl<T: onboarding::OnboardingHost> Host for T {}
+impl<T: onboarding::OnboardingHost + settings_data::SettingsHost> Host for T {}
 
 /// The GPUI view for whichever screen React pushed last.
 pub struct Screen {
@@ -177,16 +178,16 @@ impl Render for Screen {
           view.into_any_element()
         }
       },
-      View::Settings(screen) => {
-        let screen = (**screen).clone();
+      View::Settings(route) => {
+        let route = route.clone();
         match &self.settings {
           Some(view) => {
-            view.update(cx, |view, cx| view.set_snapshot(screen, dark, cx));
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
             view.clone().into_any_element()
           }
           None => {
-            let sink = self.sink.clone();
-            let view = cx.new(|_| settings::SettingsView::new(screen, dark, sink));
+            let (host, sink) = (self.host.clone(), self.sink.clone());
+            let view = cx.new(|cx| settings::SettingsView::new(route, host, sink, dark, cx));
             self.settings = Some(view.clone());
             view.into_any_element()
           }

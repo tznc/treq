@@ -21,6 +21,11 @@ struct FakeHost {
   remote_ssh: bool,
   /// What `check_prerequisites` reports.
   installed: Vec<(&'static str, bool)>,
+  /// App and repository settings, by key.
+  settings: Mutex<settings_data::Values>,
+  /// What `.treq/config.yaml` sets.
+  config: crate::repo_config::RepoConfig,
+  setup_script: String,
   calls: Mutex<Vec<String>>,
 }
 
@@ -34,11 +39,115 @@ impl FakeHost {
   }
 }
 
+impl FakeHost {
+  fn with_settings(pairs: &[(&str, &str)]) -> Self {
+    Self {
+      settings: Mutex::new(
+        pairs
+          .iter()
+          .map(|(k, v)| (k.to_string(), Some(v.to_string())))
+          .collect(),
+      ),
+      ..Self::default()
+    }
+  }
+
+  fn setting(&self, key: &str) -> Option<String> {
+    self.settings.lock().unwrap().get(key).cloned().flatten()
+  }
+
+  /// The calls that change something, without the reads.
+  fn writes(&self) -> Vec<String> {
+    self
+      .calls()
+      .into_iter()
+      .filter(|c| !c.starts_with("check") && !c.starts_with("read"))
+      .collect()
+  }
+}
+
 impl onboarding::OnboardingHost for FakeHost {
   fn remote_ssh_enabled(&self) -> bool {
     self.remote_ssh
   }
 
+  fn pick_repo(&self) {
+    self.record("pick_repo".into());
+  }
+}
+
+impl settings_data::SettingsHost for FakeHost {
+  fn settings(&self, keys: &[String]) -> Result<settings_data::Values, String> {
+    self.record("read settings".into());
+    Ok(keys.iter().map(|k| (k.clone(), self.setting(k))).collect())
+  }
+
+  fn set_settings(&self, values: &[(String, String)]) -> Result<(), String> {
+    let pairs: Vec<_> = values.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    self.record(format!("set {}", pairs.join(" ")));
+    let mut settings = self.settings.lock().unwrap();
+    for (k, v) in values {
+      settings.insert(k.clone(), Some(v.clone()));
+    }
+    Ok(())
+  }
+
+  fn setup_script(&self) -> Result<crate::core::app_setup_script::AppSetupScriptStatus, String> {
+    self.record("read setup".into());
+    Ok(crate::core::app_setup_script::AppSetupScriptStatus {
+      script: self.setup_script.clone(),
+      always_run: false,
+      last_run_at: None,
+      last_status: None,
+      running: false,
+    })
+  }
+
+  fn save_setup_script(&self, script: &str, always_run: bool) -> Result<(), String> {
+    self.record(format!("save setup {script:?} {always_run}"));
+    Ok(())
+  }
+
+  fn run_setup_script(&self) {
+    self.record("run setup".into());
+  }
+
+  fn repo_config(&self, repo_path: &str) -> Result<crate::repo_config::RepoConfig, String> {
+    self.record(format!("read config {repo_path}"));
+    Ok(self.config.clone())
+  }
+
+  fn repo_settings(
+    &self,
+    repo_path: &str,
+    keys: &[String],
+  ) -> Result<settings_data::Values, String> {
+    self.record(format!("read repo {repo_path}"));
+    Ok(
+      keys
+        .iter()
+        .map(|k| (k.clone(), self.setting(&format!("{repo_path}:{k}"))))
+        .collect(),
+    )
+  }
+
+  fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
+    let pairs: Vec<_> = values.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    self.record(format!("set repo {repo_path} {}", pairs.join(" ")));
+    Ok(())
+  }
+
+  fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {
+    let json = serde_json::to_value(&event).expect("serialize");
+    let mut line = format!("notify {}", json["kind"].as_str().unwrap_or_default());
+    if let Some(title) = json["title"].as_str() {
+      line += &format!(" {title}");
+    }
+    self.record(line);
+  }
+}
+
+impl checklist::ToolsHost for FakeHost {
   fn check_prerequisites(&self) -> Vec<crate::core::PrerequisiteStatus> {
     self.record("check".into());
     self
@@ -49,10 +158,6 @@ impl onboarding::OnboardingHost for FakeHost {
         installed: *installed,
       })
       .collect()
-  }
-
-  fn pick_repo(&self) {
-    self.record("pick_repo".into());
   }
 
   fn open_url(&self, url: &str) {
@@ -212,40 +317,19 @@ fn onboarding_labels_the_remote_button_by_preview(cx: &mut TestAppContext) {
   assert_eq!(label.as_deref(), Some("Open via SSH"));
 }
 
-const SETTINGS_JSON: &str = r#"{
-  "kind": "settings",
-  "dark": false,
-  "tab": "repository",
-  "tabs": ["repository", "application", "account", "integrations", "preview"],
-  "save": {"label": "Save Settings", "disabled": false},
-  "application": null,
-  "repository": {
-    "yamlCard": null,
+fn settings_route(tab: &str) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "settings",
+    "dark": false,
+    "tab": tab,
+    "repoPath": "/repo",
     "currentBranch": "main",
-    "loading": false,
-    "fields": {
-      "branchNamePattern": "treq/{name}",
-      "includedFiles": "",
-      "defaultModel": "",
-      "defaultAgent": "",
-      "autoPush": false,
-      "ignoreGeneratedAgentFiles": true,
-      "reviewPrompt": "",
-      "reviewAgent": "",
-      "autoReviewTrigger": "off"
-    },
-    "managed": [],
-    "modelOptions": [{"value": "", "label": "Use Application Default"}],
-    "agentOptions": [{"value": "", "label": "Use Application Default"}],
-    "reviewAgentOptions": [{"value": "", "label": "Use Default Agent"}],
-    "triggerOptions": [{"value": "off", "label": "Off"}],
-    "error": null
-  },
-  "preview": null
-}"#;
+  }))
+  .expect("parse")
+}
 
 fn settings() -> ScreenSnapshot {
-  serde_json::from_str(SETTINGS_JSON).expect("parse")
+  settings_route("repository")
 }
 
 fn field(field: &str, value: serde_json::Value) -> ScreenAction {
@@ -255,26 +339,191 @@ fn field(field: &str, value: serde_json::Value) -> ScreenAction {
   }
 }
 
+/// The settings screen as last drawn.
+fn drawn_settings(h: &mut Harness) -> settings::Settings {
+  h.cx.run_until_parked();
+  h.screen.read_with(&h.cx, |screen, cx| {
+    screen
+      .settings
+      .as_ref()
+      .expect("settings drawn")
+      .read(cx)
+      .screen()
+  })
+}
+
 #[gpui::test]
-fn settings_controls_send_their_actions(cx: &mut TestAppContext) {
-  let mut h = Harness::new(cx, settings());
+fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[
+    ("/repo:ignore_generated_treq_paths", "true"),
+    ("/repo:auto_review_trigger", "on-push"),
+  ]));
+  let mut h = Harness::with_host(cx, settings(), host.clone());
+  let screen = drawn_settings(&mut h);
+  let repo = screen.repository.expect("repository tab");
+  assert!(!repo.loading);
+  assert_eq!(repo.current_branch.as_deref(), Some("main"));
+  assert_eq!(repo.fields.branch_name_pattern, "treq/{name}");
+  assert!(repo.fields.ignore_generated_agent_files);
+  // The trigger's old name reads as the new one.
+  assert_eq!(repo.fields.auto_review_trigger, "on-pull");
+  assert_eq!(repo.model_options[0].label, "Use Application Default");
+
   h.click("settings-tab-application");
   h.click("settings-auto-push");
   h.click("settings-ignore-generated");
   h.click("settings-save");
   h.click("settings-close");
+  // React still owns the tab and closing the page.
   assert_eq!(
     h.sent(),
     vec![
       field("settings.tab", "application".into()),
-      field("repo.autoPush", true.into()),
-      field("repo.ignoreGeneratedAgentFiles", false.into()),
-      ScreenAction::Press {
-        id: "settings.save".into()
-      },
-      ScreenAction::Press {
-        id: "settings.close".into()
-      },
+      press("settings.close"),
+    ]
+  );
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true ignore_generated_treq_paths=false review_prompt= review_agent= auto_review_trigger=on-pull",
+      "notify repoSettingsChanged",
+      "notify toast Settings saved",
+    ]
+  );
+}
+
+#[gpui::test]
+fn settings_takes_typed_values(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings());
+  // Controls report edits from inside the screen's update.
+  h.click("settings-branch-pattern");
+  h.cx.simulate_input("x");
+  let fields = drawn_settings(&mut h).repository.expect("drawn").fields;
+  assert!(fields.branch_name_pattern.contains('x'), "{fields:?}");
+}
+
+#[gpui::test]
+fn settings_disables_what_the_yaml_file_sets(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    config: crate::repo_config::RepoConfig {
+      branch_name_pattern: Some("team/{name}".into()),
+      review_agent: Some("codex".into()),
+      ..Default::default()
+    },
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings(), host.clone());
+  let repo = drawn_settings(&mut h).repository.expect("repository tab");
+  assert_eq!(repo.managed, ["branchNamePattern", "reviewAgent"]);
+  assert_eq!(
+    repo.yaml_card,
+    Some(settings::YamlCard {
+      error: None,
+      loading: false
+    })
+  );
+  h.click("settings-yaml-reload");
+  h.cx.run_until_parked();
+  let reads = host
+    .calls()
+    .iter()
+    .filter(|c| *c == "read config /repo")
+    .count();
+  assert_eq!(reads, 2);
+}
+
+#[gpui::test]
+fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[
+    ("terminal_font_size", "13"),
+    ("ui_zoom", "120"),
+  ]));
+  let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
+  let app = drawn_settings(&mut h).application.expect("application tab");
+  // A size older builds allowed shows as the nearest preset.
+  assert_eq!(app.font_size, "12");
+  assert_eq!(app.zoom, 120.);
+  assert!(app.notify_agent_finished);
+  assert_eq!(app.conflict_marker_style, "git");
+  assert_eq!(app.checklist.title, "Command-line tools");
+
+  let view = h
+    .screen
+    .read_with(&h.cx, |s, _| s.settings.clone().expect("drawn"));
+  let send = |h: &mut Harness, action: ScreenAction| {
+    view.update(&mut h.cx, |view, cx| view.handle(action, cx));
+  };
+  send(&mut h, field("app.theme", "dark".into()));
+  send(&mut h, field("app.fontSize", "16".into()));
+  send(&mut h, field("app.defaultAgent", "codex".into()));
+  h.click("settings-save");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "set theme=dark",
+      "notify settingsChanged",
+      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true terminal_font_size=16 ui_zoom=120",
+      "notify settingsChanged",
+      "notify toast Settings Saved",
+    ]
+  );
+}
+
+#[gpui::test]
+fn settings_runs_only_the_saved_setup_script(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    setup_script: "brew install jj".into(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
+  let setup = drawn_settings(&mut h)
+    .application
+    .expect("drawn")
+    .setup_script;
+  assert!(setup.can_run);
+  assert_eq!(setup.status, "Never run");
+  // The Run row is below the fold of the test window.
+  let view = h
+    .screen
+    .read_with(&h.cx, |s, _| s.settings.clone().expect("drawn"));
+  view.update(&mut h.cx, |view, cx| {
+    view.handle(press("app.setupScript.run"), cx)
+  });
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["run setup"]);
+
+  view.update(&mut h.cx, |view, cx| {
+    view.handle(field("app.setupScript", "brew install gh".into()), cx)
+  });
+  let setup = drawn_settings(&mut h)
+    .application
+    .expect("drawn")
+    .setup_script;
+  assert!(!setup.can_run);
+  assert_eq!(setup.status, "Save settings to run the edited script.");
+}
+
+#[gpui::test]
+fn settings_switches_previews_itself(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.skillsInstallation",
+    "false",
+  )]));
+  let mut h = Harness::with_host(cx, settings_route("preview"), host.clone());
+  let screen = drawn_settings(&mut h);
+  assert!(!screen.tabs.contains(&settings::Tab::Skills));
+  h.click("settings-preview-skillsInstallation");
+  h.click("settings-preview-docs-logs");
+  h.cx.run_until_parked();
+  assert!(drawn_settings(&mut h).tabs.contains(&settings::Tab::Skills));
+  assert_eq!(
+    host.writes(),
+    [
+      "set feature_preview.skillsInstallation=true",
+      "notify settingsChanged",
+      "open http://localhost:3001/docs/concepts/logs",
     ]
   );
 }

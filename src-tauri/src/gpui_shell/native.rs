@@ -20,6 +20,11 @@ pub const EVENT: &str = "gpui-native-event";
 pub enum NativeEvent {
   /// The window now shows the repository at `path`.
   RepoOpened { path: String },
+  /// App settings (`set_setting` keys) changed.
+  SettingsChanged,
+  /// The settings of the repository at `repo_path` changed.
+  #[serde(rename_all = "camelCase")]
+  RepoSettingsChanged { repo_path: String },
   Toast {
     title: String,
     description: String,
@@ -32,6 +37,20 @@ pub enum NativeEvent {
 pub enum ToastTone {
   Success,
   Error,
+}
+
+/// The website the docs links open, as React's `WEB_URL`.
+pub fn web_url() -> String {
+  const PACKAGE_JSON: &str = include_str!("../../../package.json");
+  let env = if cfg!(debug_assertions) {
+    "dev"
+  } else {
+    "prod"
+  };
+  serde_json::from_str::<serde_json::Value>(PACKAGE_JSON)
+    .ok()
+    .and_then(|pkg| pkg["env"][env]["webUrl"].as_str().map(str::to_string))
+    .unwrap_or_else(|| "https://treq.dev".to_string())
 }
 
 /// The backend, as seen from window `label`'s screens.

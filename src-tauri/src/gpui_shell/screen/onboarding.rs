@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{div, prelude::*, px, Context, FontWeight, Window};
 
 use super::{
-  checklist::{self, Checklist},
+  checklist::{self, Checklist, ToolsHost},
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
@@ -40,13 +40,10 @@ pub struct Onboarding {
 }
 
 /// What the onboarding screen asks of the backend; faked in tests.
-pub trait OnboardingHost: Send + Sync {
+pub trait OnboardingHost: ToolsHost {
   fn remote_ssh_enabled(&self) -> bool;
-  /// Blocks: called off the main thread.
-  fn check_prerequisites(&self) -> Vec<PrerequisiteStatus>;
   /// Asks for a folder, then opens it in this window.
   fn pick_repo(&self);
-  fn open_url(&self, url: &str);
 }
 
 impl OnboardingHost for Backend {
@@ -54,16 +51,8 @@ impl OnboardingHost for Backend {
     self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::RemoteSsh))
   }
 
-  fn check_prerequisites(&self) -> Vec<PrerequisiteStatus> {
-    core::check_prerequisites()
-  }
-
   fn pick_repo(&self) {
     pick_repo(self.clone());
-  }
-
-  fn open_url(&self, url: &str) {
-    Backend::open_url(self, url);
   }
 }
 

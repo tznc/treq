@@ -1,5 +1,4 @@
 import { useRepoYamlConfig } from "../hooks/useRepoYamlConfig";
-import { useGpuiPart } from "../lib/gpui-parts";
 import type { RepoYamlConfig } from "../lib/api-extra";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
@@ -27,13 +26,6 @@ function hasAnyValue(config: RepoYamlConfig): boolean {
  */
 export function RepoYamlConfigCard({ repoPath }: RepoYamlConfigCardProps) {
   const { config, loading, error, reload } = useRepoYamlConfig(repoPath);
-  useGpuiPart(
-    "yamlCard",
-    error || (config && hasAnyValue(config))
-      ? { error: error ?? null, loading }
-      : null,
-    { reload: () => void reload() },
-  );
 
   if (error) {
     return (

@@ -64,6 +64,11 @@ export function invalidateQueries(prefix?: readonly unknown[]) {
   return Promise.all([regular, ...infinite]);
 }
 
+/** Revalidate the SWR keys that are one of `keys`, which `invalidateQueries` cannot match. */
+export function revalidateKeys(keys: readonly string[]) {
+  return scopedMutate((key) => typeof key === "string" && keys.includes(key));
+}
+
 export function setQueryData<T>(key: unknown[], data: T) {
   return scopedMutate(key, data, { revalidate: false });
 }

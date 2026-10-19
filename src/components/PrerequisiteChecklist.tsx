@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import useSWR from "swr";
 import { checkPrerequisites } from "../lib/api";
-import type { GpuiChecklist } from "../lib/gpui-screen";
 import {
   PREREQUISITE_TOOLS,
   type PrerequisiteGroup,
@@ -130,43 +129,3 @@ export const PrerequisiteChecklist = ({
     </section>
   );
 };
-
-/** The checklist as GPUI draws it, from the same check, and a re-check. */
-export function useGpuiChecklist(title = "Before you start"): {
-  checklist: GpuiChecklist;
-  recheck: () => void;
-} {
-  const { data, isValidating, mutate } = useSWR(
-    ["prerequisites"],
-    checkPrerequisites,
-  );
-  const installed = data && new Map(data.map((s) => [s.binary, s.installed]));
-  const noAgent =
-    installed !== undefined &&
-    !PREREQUISITE_TOOLS.some(
-      (t) => t.group === "agent" && installed.get(t.binary),
-    );
-  return {
-    checklist: {
-      title,
-      validating: isValidating,
-      groups: (Object.keys(GROUP_LABELS) as PrerequisiteGroup[]).map(
-        (group) => ({
-          label: GROUP_LABELS[group],
-          error: group === "agent" && noAgent,
-          tools: PREREQUISITE_TOOLS.filter((t) => t.group === group).map(
-            (tool) => ({
-              binary: tool.binary,
-              label: tool.label,
-              note: tool.note ?? null,
-              required: tool.group === "required",
-              installed: installed?.get(tool.binary) ?? null,
-              installUrl: tool.installUrl,
-            }),
-          ),
-        }),
-      ),
-    },
-    recheck: () => void mutate(),
-  };
-}

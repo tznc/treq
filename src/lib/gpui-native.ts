@@ -9,6 +9,8 @@ import { isGpuiShellHost } from "./gpui-shell";
  */
 export type GpuiNativeEvent =
   | { kind: "repoOpened"; path: string }
+  | { kind: "settingsChanged" }
+  | { kind: "repoSettingsChanged"; repoPath: string }
   | {
       kind: "toast";
       title: string;

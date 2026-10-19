@@ -11,28 +11,6 @@ import { useWindowModalBackdrop } from "./window-modals";
  * while a screen is pushed, and shows it again for null.
  */
 
-interface GpuiChecklistTool {
-  binary: string;
-  label: string;
-  note: string | null;
-  required: boolean;
-  /** null while the check is still running. */
-  installed: boolean | null;
-  installUrl: string;
-}
-
-export interface GpuiChecklist {
-  title: string;
-  validating: boolean;
-  groups: { label: string; error: boolean; tools: GpuiChecklistTool[] }[];
-}
-
-/** One `<option>` of a `<select>`. */
-interface GpuiSelectOption {
-  value: string;
-  label: string;
-}
-
 export type GpuiSettingsTab =
   | "repository"
   | "application"
@@ -41,77 +19,15 @@ export type GpuiSettingsTab =
   | "skills"
   | "preview";
 
-interface GpuiApplicationSettings {
-  theme: string;
-  themeOptions: GpuiSelectOption[];
-  zoom: number;
-  zoomMin: number;
-  zoomMax: number;
-  zoomStep: number;
-  fontSize: string;
-  fontSizeOptions: GpuiSelectOption[];
-  defaultModel: string;
-  modelOptions: GpuiSelectOption[];
-  defaultAgent: string;
-  agentOptions: GpuiSelectOption[];
-  conflictMarkerStyle: string;
-  conflictOptions: GpuiSelectOption[];
-  notifyAgentFinished: boolean;
-  checklist: GpuiChecklist;
-  setupScript: {
-    script: string;
-    alwaysRun: boolean;
-    /** Status not loaded yet: the editor is disabled. */
-    loading: boolean;
-    canRun: boolean;
-    /** The line beside Run: the status, or why it cannot run. */
-    status: string;
-    /** `status` is a load error, drawn in the destructive color. */
-    statusError: boolean;
-  };
-}
-
-export interface GpuiRepositorySettings {
-  /** The `.treq/config.yaml` card, or null when it is not shown. */
-  yamlCard: { error: string | null; loading: boolean } | null;
-  currentBranch: string | null;
-  /** "Loading settings..." in place of the fields. */
-  loading: boolean;
-  fields: {
-    branchNamePattern: string;
-    includedFiles: string;
-    defaultModel: string;
-    defaultAgent: string;
-    autoPush: boolean;
-    ignoreGeneratedAgentFiles: boolean;
-    reviewPrompt: string;
-    reviewAgent: string;
-    autoReviewTrigger: string;
-  };
-  /** Fields `.treq/config.yaml` sets, drawn disabled. */
-  managed: string[];
-  modelOptions: GpuiSelectOption[];
-  agentOptions: GpuiSelectOption[];
-  reviewAgentOptions: GpuiSelectOption[];
-  triggerOptions: GpuiSelectOption[];
-  error: string | null;
-}
-
-export interface GpuiPreviewSettings {
-  features: { id: string; title: string; checked: boolean }[];
-}
-
+/**
+ * GPUI loads and saves the settings itself
+ * (src-tauri/src/gpui_shell/screen/settings.rs); React says which tab shows.
+ */
 interface GpuiSettingsScreen {
   kind: "settings";
   tab: GpuiSettingsTab;
-  /** Visible tabs, in order. */
-  tabs: GpuiSettingsTab[];
-  /** The header's save button, or null without one. */
-  save: { label: string; disabled: boolean } | null;
-  application: GpuiApplicationSettings | null;
-  /** null without a repository: "Set repository in Application tab". */
-  repository: GpuiRepositorySettings | null;
-  preview: GpuiPreviewSettings | null;
+  repoPath: string | null;
+  currentBranch: string | null;
 }
 
 /** A count pill's colors: `commitsTabLabel.ts` and `reviewTabPill.ts` tones. */

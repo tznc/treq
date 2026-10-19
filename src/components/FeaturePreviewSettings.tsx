@@ -1,6 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { PREVIEW_FEATURES, type PreviewFeatureId } from "../lib/features";
-import { useGpuiPart } from "../lib/gpui-parts";
+import { PREVIEW_FEATURES } from "../lib/features";
 import { WEB_URL } from "../lib/supabase";
 import { useFeaturePreviewStore } from "../stores/featurePreviewStore";
 import { Label } from "./ui/label";
@@ -9,24 +8,6 @@ import { Switch } from "./ui/switch";
 export function FeaturePreviewSettings() {
   const flags = useFeaturePreviewStore((s) => s.flags);
   const setPreviewFeature = useFeaturePreviewStore((s) => s.setPreviewFeature);
-  useGpuiPart(
-    "preview",
-    {
-      features: PREVIEW_FEATURES.map((feature) => ({
-        id: feature.id,
-        title: feature.title,
-        checked: flags[feature.id],
-      })),
-    },
-    {
-      openDocs: (id: string) => {
-        const feature = PREVIEW_FEATURES.find((f) => f.id === id);
-        if (feature) void openUrl(`${WEB_URL}${feature.docsPath}`);
-      },
-      toggle: (id: PreviewFeatureId, checked: boolean) =>
-        void setPreviewFeature(id, checked),
-    },
-  );
 
   return (
     <div className="space-y-6" data-testid="feature-preview-settings">

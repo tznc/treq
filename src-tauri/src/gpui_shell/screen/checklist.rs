@@ -5,11 +5,29 @@ use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{div, prelude::*, px, FontWeight, SharedString};
 
 use super::{Ctx, ScreenAction};
-use crate::core::PrerequisiteStatus;
+use crate::core::{self, PrerequisiteStatus};
 use crate::gpui_shell::{
+  native::Backend,
   theme,
   ui::{self, Button, Size, TextSize, Variant},
 };
+
+/// What a screen with the checklist asks of the backend; faked in tests.
+pub trait ToolsHost: Send + Sync {
+  /// Blocks: called off the main thread.
+  fn check_prerequisites(&self) -> Vec<PrerequisiteStatus>;
+  fn open_url(&self, url: &str);
+}
+
+impl ToolsHost for Backend {
+  fn check_prerequisites(&self) -> Vec<PrerequisiteStatus> {
+    core::check_prerequisites()
+  }
+
+  fn open_url(&self, url: &str) {
+    Backend::open_url(self, url);
+  }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]

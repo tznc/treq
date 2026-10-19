@@ -1,9 +1,7 @@
 import { useImperativeHandle, useState, type Ref } from "react";
 import useSWR from "swr";
 import { useRepoYamlConfig } from "../hooks/useRepoYamlConfig";
-import { AGENTS } from "../lib/agents";
 import { getRepoSetting, setRepoSetting } from "../lib/api";
-import { useGpuiPart } from "../lib/gpui-parts";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
@@ -37,22 +35,6 @@ const normalizeAutoReviewTrigger = (stored: string | null): string => {
   }
   return "off";
 };
-
-/** The Claude Code model `<option>`s, after the "default" one. */
-export const CLAUDE_MODEL_OPTIONS = [
-  { value: "sonnet", label: "Sonnet" },
-  { value: "opus", label: "Opus" },
-  { value: "haiku", label: "Haiku" },
-  { value: "sonnet[1m]", label: "Sonnet (1M)" },
-  { value: "opusplan", label: "Opus Plan" },
-];
-
-const AUTO_REVIEW_TRIGGER_OPTIONS = [
-  { value: "off", label: "Off" },
-  { value: "on-commit", label: "On commit" },
-  { value: "on-rebase", label: "On rebase" },
-  { value: "on-pull", label: "On pull from remote" },
-];
 
 export const RepositorySettingsContent = ({
   repoPath,
@@ -234,67 +216,6 @@ export const RepositorySettingsContent = ({
   };
 
   useImperativeHandle(ref, () => ({ save: handleSave }));
-
-  // The same fields for the GPUI settings screen, with the same setters.
-  const setters: Record<string, (value: never) => void> = {
-    branchNamePattern: setBranchNamePattern,
-    includedFiles: setIncludedFiles,
-    defaultModel: setDefaultModel,
-    defaultAgent: setDefaultAgent,
-    autoPush: setAutoPush,
-    ignoreGeneratedAgentFiles: setIgnoreGeneratedAgentFiles,
-    reviewPrompt: setReviewPrompt,
-    reviewAgent: setReviewAgent,
-    autoReviewTrigger: setAutoReviewTrigger,
-  };
-  const managedFields = Object.entries({
-    branchNamePattern: branchNamePatternManaged,
-    includedFiles: includedFilesManaged,
-    defaultModel: defaultModelManaged,
-    defaultAgent: defaultAgentManaged,
-    reviewPrompt: reviewPromptManaged,
-    reviewAgent: reviewAgentManaged,
-    autoReviewTrigger: autoReviewTriggerManaged,
-  })
-    .filter(([, managed]) => managed)
-    .map(([field]) => field);
-  const agentOptions = AGENTS.map((a) => ({ value: a.id, label: a.label }));
-  useGpuiPart(
-    "repository",
-    {
-      loading: loading || yamlConfigLoading,
-      fields: {
-        branchNamePattern,
-        includedFiles,
-        defaultModel,
-        defaultAgent,
-        autoPush,
-        ignoreGeneratedAgentFiles,
-        reviewPrompt,
-        reviewAgent,
-        autoReviewTrigger,
-      },
-      managed: managedFields,
-      modelOptions: [
-        { value: "", label: "Use Application Default" },
-        ...CLAUDE_MODEL_OPTIONS,
-      ],
-      agentOptions: [
-        { value: "", label: "Use Application Default" },
-        ...agentOptions,
-      ],
-      reviewAgentOptions: [
-        { value: "", label: "Use Default Agent" },
-        ...agentOptions,
-      ],
-      triggerOptions: AUTO_REVIEW_TRIGGER_OPTIONS,
-      error,
-    },
-    {
-      setField: (field: string, value: string | boolean) =>
-        setters[field]?.(value as never),
-    },
-  );
 
   if (loading || yamlConfigLoading) {
     return (

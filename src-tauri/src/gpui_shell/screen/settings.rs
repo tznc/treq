@@ -1,17 +1,34 @@
 //! `SettingsPage`: the Repository, Application and Feature Preview tabs.
 //! React sends no screen for the other tabs yet, so they stay in the
 //! webview.
+//!
+//! Drawn from the backend directly: GPUI loads and saves the settings
+//! itself, then tells React (see `native`) so its stores and caches follow.
+//! React still owns which tab shows and closing the page.
+
+use std::{rc::Rc, sync::Arc, time::Duration};
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, FontWeight, SharedString, Window,
 };
 
-use super::{checklist, ActionSink, ScreenAction};
-use crate::gpui_shell::{
-  form::{self, Controls, SelectOption},
-  theme::{self, Palette},
-  ui::{self, Button, Size, TextSize, Variant},
+use super::{
+  checklist,
+  settings_data::{self as data, AppFields, SettingsHost},
+  ActionSink, ScreenAction,
+};
+use crate::{
+  core::{
+    app_setup_script::AppSetupScriptStatus, feature_preview::PreviewFeature, PrerequisiteStatus,
+  },
+  gpui_shell::{
+    form::{self, Controls, SelectOption},
+    native::{self, NativeEvent, ToastTone},
+    theme::{self, Palette},
+    ui::{self, Button, Size, TextSize, Variant},
+  },
+  repo_config::RepoConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -60,8 +77,18 @@ impl Tab {
   }
 }
 
+/// What React sends: the tab it shows and the repository in view.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Route {
+  pub tab: Tab,
+  pub repo_path: Option<String>,
+  /// The home repository's branch, as the workspace header shows it.
+  pub current_branch: Option<String>,
+}
+
+/// What the screen draws.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
   pub tab: Tab,
   pub tabs: Vec<Tab>,
@@ -71,14 +98,13 @@ pub struct Settings {
   pub preview: Option<Preview>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SaveButton {
   pub label: String,
   pub disabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Application {
   pub theme: String,
   pub theme_options: Vec<SelectOption>,
@@ -99,8 +125,7 @@ pub struct Application {
   pub setup_script: SetupScript,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SetupScript {
   pub script: String,
   pub always_run: bool,
@@ -110,8 +135,7 @@ pub struct SetupScript {
   pub status_error: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Repository {
   pub yaml_card: Option<YamlCard>,
   pub current_branch: Option<String>,
@@ -125,14 +149,13 @@ pub struct Repository {
   pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct YamlCard {
   pub error: Option<String>,
   pub loading: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RepositoryFields {
   pub branch_name_pattern: String,
   pub included_files: String,
@@ -145,41 +168,675 @@ pub struct RepositoryFields {
   pub auto_review_trigger: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Preview {
-  pub features: Vec<PreviewFeature>,
+  pub features: Vec<PreviewFeatureRow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct PreviewFeature {
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreviewFeatureRow {
   pub id: String,
   pub title: String,
   pub checked: bool,
 }
 
-/// The settings screen and the GPUI state of its fields.
-pub struct SettingsView {
-  snapshot: Settings,
-  dark: bool,
-  sink: ActionSink,
-  controls: Controls,
+/// `{ value, label }` pairs as `SelectOption`s.
+fn options(pairs: &[(&str, &str)]) -> Vec<SelectOption> {
+  pairs
+    .iter()
+    .map(|(value, label)| SelectOption {
+      value: value.to_string(),
+      label: label.to_string(),
+    })
+    .collect()
 }
 
-impl SettingsView {
-  pub fn new(snapshot: Settings, dark: bool, sink: ActionSink) -> Self {
+/// `AGENTS` in `src/lib/agents.ts`, after a first "default" option.
+fn agent_options(default: &str) -> Vec<SelectOption> {
+  options(&[
+    ("", default),
+    ("claude", "Claude"),
+    ("codex", "Codex"),
+    ("cursor", "Cursor"),
+    ("copilot", "Copilot"),
+  ])
+}
+
+/// `CLAUDE_MODEL_OPTIONS`, after a first "default" option.
+fn model_options(default: &str) -> Vec<SelectOption> {
+  options(&[
+    ("", default),
+    ("sonnet", "Sonnet"),
+    ("opus", "Opus"),
+    ("haiku", "Haiku"),
+    ("sonnet[1m]", "Sonnet (1M)"),
+    ("opusplan", "Opus Plan"),
+  ])
+}
+
+/// The app setup script's status and unsaved edits.
+#[derive(Default)]
+struct Setup {
+  status: Option<AppSetupScriptStatus>,
+  error: Option<String>,
+  script: Option<String>,
+  always_run: Option<bool>,
+  /// Set from a Run click until the status reports the run.
+  starting: bool,
+  polling: bool,
+}
+
+impl Setup {
+  fn script(&self) -> String {
+    self
+      .script
+      .clone()
+      .or_else(|| self.status.as_ref().map(|s| s.script.clone()))
+      .unwrap_or_default()
+  }
+
+  fn always_run(&self) -> bool {
+    self
+      .always_run
+      .or_else(|| self.status.as_ref().map(|s| s.always_run))
+      .unwrap_or(false)
+  }
+
+  /// `setupScriptRunState`.
+  fn view(&self) -> SetupScript {
+    let script = self.script();
+    let unsaved = self.status.as_ref().is_some_and(|s| script != s.script);
+    let can_run = self
+      .status
+      .as_ref()
+      .is_some_and(|s| !s.running && !self.starting && !unsaved && !s.script.trim().is_empty());
+    let (status, status_error) = match (&self.error, &self.status) {
+      (Some(error), _) => (format!("Could not load the setup script: {error}"), true),
+      (None, _) if unsaved => ("Save settings to run the edited script.".into(), false),
+      (None, Some(status)) => (data::setup_status_text(status), false),
+      (None, None) => (String::new(), false),
+    };
+    SetupScript {
+      script,
+      always_run: self.always_run(),
+      loading: self.status.is_none(),
+      can_run,
+      status,
+      status_error,
+    }
+  }
+}
+
+/// The Repository tab's state for one repository.
+struct Repo {
+  path: String,
+  /// `None` until loaded.
+  loaded: Option<Result<RepositoryFields, String>>,
+  /// The fields as edited, kept across reloads, as React's draft.
+  draft: Option<RepositoryFields>,
+  config: Option<Result<RepoConfig, String>>,
+  /// `.treq/config.yaml` is being read.
+  config_loading: bool,
+  saving: bool,
+  save_error: Option<String>,
+}
+
+impl Repo {
+  fn new(path: String) -> Self {
     Self {
-      snapshot,
-      dark,
-      controls: Controls::new(sink.clone()),
-      sink,
+      path,
+      loaded: None,
+      draft: None,
+      config: None,
+      config_loading: true,
+      saving: false,
+      save_error: None,
     }
   }
 
-  pub fn set_snapshot(&mut self, snapshot: Settings, dark: bool, cx: &mut Context<Self>) {
-    if self.snapshot != snapshot || self.dark != dark {
-      self.snapshot = snapshot;
+  fn fields(&self) -> RepositoryFields {
+    match (&self.draft, &self.loaded) {
+      (Some(draft), _) => draft.clone(),
+      (None, Some(Ok(loaded))) => loaded.clone(),
+      _ => RepositoryFields::default(),
+    }
+  }
+}
+
+/// The settings screen, its state from the backend, and its fields.
+pub struct SettingsView {
+  host: Arc<dyn SettingsHost>,
+  /// React's handlers, for the tab and Close.
+  react: ActionSink,
+  /// This view's own handler, which the drawn controls call.
+  sink: ActionSink,
+  route: Route,
+  dark: bool,
+  controls: Controls,
+  /// `None` until loaded.
+  app: Option<AppFields>,
+  preview: Vec<(PreviewFeature, bool)>,
+  statuses: Option<Vec<PrerequisiteStatus>>,
+  validating: bool,
+  setup: Setup,
+  repo: Option<Repo>,
+}
+
+impl SettingsView {
+  pub fn new(
+    route: Route,
+    host: Arc<dyn SettingsHost>,
+    react: ActionSink,
+    dark: bool,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    let view = cx.weak_entity();
+    // Controls report changes from inside this view's update, so handle them
+    // after it.
+    let sink: ActionSink = Rc::new(move |action, cx| {
+      let view = view.clone();
+      cx.defer(move |cx| {
+        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+      });
+    });
+    let mut this = Self {
+      host,
+      react,
+      controls: Controls::new(sink.clone()),
+      sink,
+      route: route.clone(),
+      dark,
+      app: None,
+      preview: data::preview_flags(&data::Values::new()),
+      statuses: None,
+      validating: false,
+      setup: Setup::default(),
+      repo: None,
+    };
+    this.load_app(cx);
+    this.load_setup(cx);
+    this.check(cx);
+    this.set_repo(route.repo_path, cx);
+    this
+  }
+
+  pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
+    if self.route != route || self.dark != dark {
+      if self.route.repo_path != route.repo_path {
+        self.set_repo(route.repo_path.clone(), cx);
+      }
+      self.route = route;
       self.dark = dark;
       cx.notify();
+    }
+  }
+
+  /// Runs `work` off the main thread, then `done` with its result here.
+  fn spawn<T: Send + 'static>(
+    &self,
+    cx: &mut Context<Self>,
+    work: impl FnOnce(&dyn SettingsHost) -> T + Send + 'static,
+    done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+  ) {
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let result = cx.background_spawn(async move { work(&*host) }).await;
+      let _ = this.update(cx, |view, cx| {
+        done(view, result, cx);
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  fn load_app(&mut self, cx: &mut Context<Self>) {
+    self.spawn(
+      cx,
+      |host| host.settings(&data::app_keys()),
+      |view, values, _| match values {
+        Ok(values) => {
+          view.app = Some(AppFields::from_values(&values));
+          view.preview = data::preview_flags(&values);
+        }
+        Err(err) => log::warn!("failed to load the settings: {err}"),
+      },
+    );
+  }
+
+  fn load_setup(&mut self, cx: &mut Context<Self>) {
+    self.spawn(
+      cx,
+      |host| host.setup_script(),
+      |view, status, cx| view.set_setup_status(status, cx),
+    );
+  }
+
+  fn set_setup_status(
+    &mut self,
+    status: Result<AppSetupScriptStatus, String>,
+    cx: &mut Context<Self>,
+  ) {
+    match status {
+      Ok(status) => {
+        let running = status.running;
+        self.setup.status = Some(status);
+        self.setup.error = None;
+        if running {
+          self.poll_setup(cx);
+        }
+      }
+      Err(err) => self.setup.error = Some(err),
+    }
+  }
+
+  /// Reads the status every second while the script runs.
+  fn poll_setup(&mut self, cx: &mut Context<Self>) {
+    if self.setup.polling {
+      return;
+    }
+    self.setup.polling = true;
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(Duration::from_secs(1)).await;
+      let host = host.clone();
+      let status = cx
+        .background_spawn(async move { host.setup_script() })
+        .await;
+      let running = status.as_ref().is_ok_and(|s| s.running);
+      let alive = this
+        .update(cx, |view, cx| {
+          if let Ok(status) = status {
+            view.setup.status = Some(status);
+          }
+          view.setup.polling = running;
+          cx.notify();
+        })
+        .is_ok();
+      if !running || !alive {
+        break;
+      }
+    })
+    .detach();
+  }
+
+  fn check(&mut self, cx: &mut Context<Self>) {
+    self.validating = true;
+    cx.notify();
+    self.spawn(
+      cx,
+      |host| host.check_prerequisites(),
+      |view, statuses, _| {
+        view.statuses = Some(statuses);
+        view.validating = false;
+      },
+    );
+  }
+
+  fn set_repo(&mut self, path: Option<String>, cx: &mut Context<Self>) {
+    self.repo = path.filter(|p| !p.is_empty()).map(Repo::new);
+    self.load_repo(cx);
+  }
+
+  /// Reads `.treq/config.yaml`, which writes what it sets into the
+  /// repository's settings, then the settings.
+  fn load_repo(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = &mut self.repo else {
+      return;
+    };
+    repo.config_loading = true;
+    let path = repo.path.clone();
+    self.spawn(
+      cx,
+      {
+        let path = path.clone();
+        move |host| {
+          let config = host.repo_config(&path);
+          let fields = host
+            .repo_settings(&path, &data::repo_keys())
+            .map(|values| RepositoryFields::from_values(&values));
+          (config, fields)
+        }
+      },
+      move |view, (config, fields), _| {
+        let Some(repo) = view.repo.as_mut().filter(|repo| repo.path == path) else {
+          return;
+        };
+        repo.config = Some(config);
+        repo.config_loading = false;
+        repo.loaded = Some(fields);
+      },
+    );
+  }
+
+  /// Writes app settings now, as the theme, zoom and preview switches do.
+  fn write_settings(&self, values: Vec<(String, String)>, cx: &mut Context<Self>) {
+    self.spawn(
+      cx,
+      move |host| {
+        let result = host.set_settings(&values);
+        if result.is_ok() {
+          host.notify(NativeEvent::SettingsChanged);
+        }
+        result
+      },
+      |_, result, _| {
+        if let Err(err) = result {
+          log::warn!("failed to save a setting: {err}");
+        }
+      },
+    );
+  }
+
+  fn save_application(&mut self, cx: &mut Context<Self>) {
+    let Some(app) = self.app.clone() else {
+      return;
+    };
+    // Unedited, the script may be the "" of an unloaded status.
+    let script = (self.setup.script.is_some() || self.setup.always_run.is_some())
+      .then(|| (self.setup.script(), self.setup.always_run()));
+    self.spawn(
+      cx,
+      move |host| {
+        let result = host
+          .set_settings(&app.to_values())
+          .and_then(|()| match &script {
+            Some((script, always_run)) => host.save_setup_script(script, *always_run),
+            None => Ok(()),
+          });
+        match &result {
+          Ok(()) => {
+            host.notify(NativeEvent::SettingsChanged);
+            host.notify(toast(
+              ToastTone::Success,
+              "Settings Saved",
+              "Application settings updated successfully",
+            ));
+          }
+          Err(err) => host.notify(toast(ToastTone::Error, "Error", err)),
+        }
+        (result, host.setup_script())
+      },
+      |view, (_, status), cx| view.set_setup_status(status, cx),
+    );
+  }
+
+  fn save_repository(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_mut().filter(|repo| !repo.saving) else {
+      return;
+    };
+    repo.saving = true;
+    let (path, values) = (repo.path.clone(), repo.fields().to_values());
+    self.spawn(
+      cx,
+      {
+        let path = path.clone();
+        move |host| {
+          let result = host.set_repo_settings(&path, &values);
+          match &result {
+            Ok(()) => {
+              host.notify(NativeEvent::RepoSettingsChanged {
+                repo_path: path.clone(),
+              });
+              host.notify(toast(
+                ToastTone::Success,
+                "Settings saved",
+                "Repository settings have been updated successfully.",
+              ));
+            }
+            Err(err) => host.notify(toast(
+              ToastTone::Error,
+              "Error",
+              format!("Failed to save settings: {err}"),
+            )),
+          }
+          result
+        }
+      },
+      move |view, result, _| {
+        let Some(repo) = view.repo.as_mut().filter(|repo| repo.path == path) else {
+          return;
+        };
+        repo.saving = false;
+        if let Err(err) = result {
+          repo.save_error = Some(format!("Failed to save settings: {err}"));
+        }
+      },
+    );
+  }
+
+  fn run_setup(&mut self, cx: &mut Context<Self>) {
+    if !self.setup.view().can_run {
+      return;
+    }
+    self.setup.starting = true;
+    self.spawn(
+      cx,
+      |host| {
+        host.run_setup_script();
+        host.setup_script()
+      },
+      |view, status, cx| {
+        view.setup.starting = false;
+        view.set_setup_status(status, cx);
+      },
+    );
+  }
+
+  pub(super) fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
+    match action {
+      ScreenAction::Press { id } => match id.split_once(':') {
+        Some(("preview.docs", feature)) => {
+          if let Some((_, _, path)) = data::PREVIEW_FEATURES
+            .iter()
+            .find(|(f, _, _)| f.as_str() == feature)
+          {
+            self.host.open_url(&format!("{}{path}", native::web_url()));
+          }
+        }
+        _ => match id.as_str() {
+          "settings.save" => match self.route.tab {
+            Tab::Application => self.save_application(cx),
+            Tab::Repository => self.save_repository(cx),
+            _ => {}
+          },
+          "app.setupScript.run" => self.run_setup(cx),
+          "repo.yaml.reload" => self.load_repo(cx),
+          _ => (self.react)(ScreenAction::Press { id }, cx),
+        },
+      },
+      ScreenAction::Field { field, value } => self.set_field(field, value, cx),
+      ScreenAction::Commit { field, value } if field == "app.zoom" => {
+        let zoom = value.as_f64().unwrap_or(100.) as f32;
+        if let Some(app) = &mut self.app {
+          app.zoom = zoom;
+        }
+        self.write_settings(
+          vec![("ui_zoom".into(), (zoom.round() as i64).to_string())],
+          cx,
+        );
+      }
+      ScreenAction::RecheckPrerequisites => self.check(cx),
+      ScreenAction::OpenUrl { url } => self.host.open_url(&url),
+      other => (self.react)(other, cx),
+    }
+    cx.notify();
+  }
+
+  fn set_field(&mut self, field: String, value: serde_json::Value, cx: &mut Context<Self>) {
+    let text = value.as_str().unwrap_or_default().to_string();
+    if let Some(name) = field.strip_prefix("repo.") {
+      if let Some(repo) = &mut self.repo {
+        let mut fields = repo.fields();
+        fields.set(name, &value);
+        repo.draft = Some(fields);
+      }
+      return;
+    }
+    if let Some(id) = field.strip_prefix("preview.") {
+      let on = value.as_bool().unwrap_or_default();
+      if let Some((feature, checked)) = self.preview.iter_mut().find(|(f, _)| f.as_str() == id) {
+        *checked = on;
+        let key = feature.setting_key();
+        self.write_settings(vec![(key, on.to_string())], cx);
+      }
+      return;
+    }
+    match field.as_str() {
+      "app.setupScript" => self.setup.script = Some(text),
+      "app.setupScriptAlwaysRun" => self.setup.always_run = value.as_bool(),
+      "settings.tab" => (self.react)(ScreenAction::Field { field, value }, cx),
+      _ => {
+        let Some(app) = &mut self.app else {
+          return;
+        };
+        match field.as_str() {
+          "app.theme" => {
+            app.theme = text.clone();
+            self.write_settings(vec![("theme".into(), text)], cx);
+          }
+          "app.zoom" => app.zoom = value.as_f64().unwrap_or(100.) as f32,
+          "app.fontSize" => {
+            if let Ok(size) = text.parse() {
+              app.font_size = size;
+            }
+          }
+          "app.defaultModel" => app.default_model = text,
+          "app.defaultAgent" => app.default_agent = text,
+          "app.conflictMarkerStyle" => app.conflict_marker_style = text,
+          "app.notifyAgentFinished" => app.notify_agent_finished = value.as_bool().unwrap_or(true),
+          _ => {}
+        }
+      }
+    }
+  }
+
+  fn preview_on(&self, feature: PreviewFeature) -> bool {
+    self.preview.iter().any(|(f, on)| *f == feature && *on)
+  }
+
+  /// What to draw, from the state above.
+  pub(super) fn screen(&self) -> Settings {
+    let tab = self.route.tab;
+    let mut tabs = vec![
+      Tab::Repository,
+      Tab::Application,
+      Tab::Account,
+      Tab::Integrations,
+    ];
+    if self.preview_on(PreviewFeature::SkillsInstallation) {
+      tabs.push(Tab::Skills);
+    }
+    tabs.push(Tab::Preview);
+    let save = match tab {
+      Tab::Application => Some(SaveButton {
+        label: "Save Settings".into(),
+        disabled: false,
+      }),
+      Tab::Repository => self.repo.as_ref().map(|repo| SaveButton {
+        label: if repo.saving {
+          "Saving..."
+        } else {
+          "Save Settings"
+        }
+        .into(),
+        disabled: repo.saving,
+      }),
+      _ => None,
+    };
+    let application = (tab == Tab::Application).then(|| {
+      let app = self
+        .app
+        .clone()
+        .unwrap_or_else(|| AppFields::from_values(&data::Values::new()));
+      Application {
+        theme: app.theme,
+        theme_options: options(&[("system", "System"), ("light", "Light"), ("dark", "Dark")]),
+        zoom: app.zoom,
+        zoom_min: data::ZOOM.0,
+        zoom_max: data::ZOOM.1,
+        zoom_step: data::ZOOM.2,
+        font_size: data::nearest_font_size(app.font_size).to_string(),
+        font_size_options: data::FONT_SIZES
+          .iter()
+          .map(|(size, label)| SelectOption {
+            value: size.to_string(),
+            label: label.to_string(),
+          })
+          .collect(),
+        default_model: app.default_model,
+        model_options: model_options("Default"),
+        default_agent: app.default_agent,
+        agent_options: agent_options("Default (Claude)"),
+        conflict_marker_style: app.conflict_marker_style,
+        conflict_options: options(&[
+          ("git", "Git Diff3 (Default)"),
+          ("diff", "JJ Diff"),
+          ("snapshot", "JJ Snapshot"),
+        ]),
+        notify_agent_finished: app.notify_agent_finished,
+        checklist: checklist::from_statuses(
+          "Command-line tools",
+          self.statuses.as_deref(),
+          self.validating,
+        ),
+        setup_script: self.setup.view(),
+      }
+    });
+    let repository = self
+      .repo
+      .as_ref()
+      .filter(|_| tab == Tab::Repository)
+      .map(|repo| {
+        let config = repo.config.as_ref().and_then(|c| c.as_ref().ok());
+        let config_error = repo
+          .config
+          .as_ref()
+          .and_then(|c| c.as_ref().err())
+          .map(|err| format!("Failed to load .treq/config.yaml: {err}"));
+        let load_error = repo
+          .loaded
+          .as_ref()
+          .and_then(|l| l.as_ref().err())
+          .map(|err| format!("Failed to load settings: {err}"));
+        Repository {
+          yaml_card: (config_error.is_some() || config.is_some_and(data::sets_any_value))
+            .then_some(YamlCard {
+              error: config_error,
+              loading: repo.config_loading,
+            }),
+          current_branch: self.route.current_branch.clone(),
+          loading: repo.loaded.is_none() || repo.config_loading,
+          fields: repo.fields(),
+          managed: config.map(data::managed_fields).unwrap_or_default(),
+          model_options: model_options("Use Application Default"),
+          agent_options: agent_options("Use Application Default"),
+          review_agent_options: agent_options("Use Default Agent"),
+          trigger_options: options(&[
+            ("off", "Off"),
+            ("on-commit", "On commit"),
+            ("on-rebase", "On rebase"),
+            ("on-pull", "On pull from remote"),
+          ]),
+          error: repo.save_error.clone().or(load_error),
+        }
+      });
+    let preview = (tab == Tab::Preview).then(|| Preview {
+      features: data::PREVIEW_FEATURES
+        .iter()
+        .map(|(feature, title, _)| PreviewFeatureRow {
+          id: feature.as_str().to_string(),
+          title: title.to_string(),
+          checked: self.preview_on(*feature),
+        })
+        .collect(),
+    });
+    Settings {
+      tab,
+      tabs,
+      save,
+      application,
+      repository,
+      preview,
     }
   }
 
@@ -199,6 +856,14 @@ impl SettingsView {
         cx,
       )
     }
+  }
+}
+
+fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEvent {
+  NativeEvent::Toast {
+    title: title.into(),
+    description: description.to_string(),
+    tone,
   }
 }
 
@@ -251,7 +916,7 @@ fn switch_row(name: &str, help_text: &str, switch: impl IntoElement, p: &Palette
 impl Render for SettingsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let p = theme::palette(self.dark);
-    let s = self.snapshot.clone();
+    let s = self.screen();
 
     let header = div()
       .flex()

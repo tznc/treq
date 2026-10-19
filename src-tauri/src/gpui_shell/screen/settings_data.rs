@@ -1,0 +1,379 @@
+//! What the settings screen reads from and writes to the backend, with the
+//! defaults React's `SettingsPage` applies to what it reads.
+
+use std::collections::HashMap;
+
+use super::{checklist::ToolsHost, settings::RepositoryFields};
+use crate::{
+  core::{
+    app_setup_script::{self, AppSetupScriptStatus},
+    feature_preview::{self, PreviewFeature},
+  },
+  gpui_shell::native::{Backend, NativeEvent},
+  repo_config::{self, RepoConfig},
+};
+
+pub type Values = HashMap<String, Option<String>>;
+
+/// What the settings screen asks of the backend; faked in tests. Everything
+/// but `notify` and `open_url` blocks, so it is called off the main thread.
+pub trait SettingsHost: ToolsHost {
+  fn settings(&self, keys: &[String]) -> Result<Values, String>;
+  fn set_settings(&self, values: &[(String, String)]) -> Result<(), String>;
+  fn setup_script(&self) -> Result<AppSetupScriptStatus, String>;
+  fn save_setup_script(&self, script: &str, always_run: bool) -> Result<(), String>;
+  /// Starts a run; the status reports it as running once this returns.
+  fn run_setup_script(&self);
+  /// Parses `.treq/config.yaml` and writes what it sets into the repository's
+  /// settings, as `load_repo_yaml_config`.
+  fn repo_config(&self, repo_path: &str) -> Result<RepoConfig, String>;
+  fn repo_settings(&self, repo_path: &str, keys: &[String]) -> Result<Values, String>;
+  /// As `set_repo_setting`, for each value.
+  fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String>;
+  fn notify(&self, event: NativeEvent);
+}
+
+impl SettingsHost for Backend {
+  fn settings(&self, keys: &[String]) -> Result<Values, String> {
+    self.with_db(|db| db.get_settings_batch(keys).map_err(|e| e.to_string()))
+  }
+
+  fn set_settings(&self, values: &[(String, String)]) -> Result<(), String> {
+    self.with_db(|db| {
+      values
+        .iter()
+        .try_for_each(|(key, value)| db.set_setting(key, value))
+        .map_err(|e| e.to_string())
+    })
+  }
+
+  fn setup_script(&self) -> Result<AppSetupScriptStatus, String> {
+    self.with_db(app_setup_script::get_status)
+  }
+
+  fn save_setup_script(&self, script: &str, always_run: bool) -> Result<(), String> {
+    self.with_db(|db| app_setup_script::save(db, script, always_run))
+  }
+
+  fn run_setup_script(&self) {
+    app_setup_script::spawn_run_if_needed(app_setup_script::Trigger::Manual);
+  }
+
+  fn repo_config(&self, repo_path: &str) -> Result<RepoConfig, String> {
+    let config = repo_config::parse_config(repo_path)?;
+    self.with_db(|db| repo_config::sync_to_settings(db, repo_path, &config))?;
+    Ok(config)
+  }
+
+  fn repo_settings(&self, repo_path: &str, keys: &[String]) -> Result<Values, String> {
+    self.with_db(|db| {
+      keys
+        .iter()
+        .map(|key| Ok((key.clone(), db.get_repo_setting(repo_path, key)?)))
+        .collect::<rusqlite::Result<Values>>()
+        .map_err(|e| e.to_string())
+    })
+  }
+
+  fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
+    for (key, value) in values {
+      self.with_db(|db| {
+        db.set_repo_setting(repo_path, key, value)
+          .map_err(|e| e.to_string())
+      })?;
+      if key == "ignore_generated_treq_paths" && value == "true" {
+        crate::jj::ensure_optional_gitignore_entries(repo_path).map_err(|e| e.to_string())?;
+      }
+    }
+    Ok(())
+  }
+
+  fn notify(&self, event: NativeEvent) {
+    Backend::notify(self, event);
+  }
+}
+
+pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
+
+/// `PREVIEW_FEATURES` in `src/lib/features.ts`: each feature's title and
+/// its page on the website.
+pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 6] = [
+  (
+    PreviewFeature::SkillsInstallation,
+    "Skills installation",
+    "/docs/how-to/installing-skills",
+  ),
+  (
+    PreviewFeature::RemoteSsh,
+    "Remote SSH",
+    "/docs/how-to/remote-ssh-workspaces",
+  ),
+  (
+    PreviewFeature::LinearIntegration,
+    "Linear integration",
+    "/docs/concepts/linear-integration",
+  ),
+  (PreviewFeature::Logs, "Logs", "/docs/concepts/logs"),
+  (PreviewFeature::Browser, "Browser", "/docs/concepts/browser"),
+  (
+    PreviewFeature::Devcontainers,
+    "Devcontainer environments",
+    "/docs/how-to/devcontainer-environments",
+  ),
+];
+
+/// `MIN_ZOOM`, `MAX_ZOOM` and `ZOOM_STEP`.
+pub const ZOOM: (f32, f32, f32) = (50., 200., 5.);
+
+/// `FONT_SIZE_PRESETS`: size and label.
+pub const FONT_SIZES: [(u32, &str); 5] = [
+  (10, "Extra Small"),
+  (12, "Small"),
+  (14, "Medium (default)"),
+  (16, "Large"),
+  (18, "Extra Large"),
+];
+
+/// `nearestFontSizePreset`: older builds allowed any size from 8 to 32.
+pub fn nearest_font_size(size: u32) -> u32 {
+  FONT_SIZES
+    .iter()
+    .map(|(preset, _)| *preset)
+    .fold(FONT_SIZES[0].0, |best, preset| {
+      if preset.abs_diff(size) < best.abs_diff(size) {
+        preset
+      } else {
+        best
+      }
+    })
+}
+
+/// The Application tab's values, as last loaded or edited.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppFields {
+  pub theme: String,
+  pub zoom: f32,
+  /// The stored size, saved as is unless a preset is picked.
+  pub font_size: u32,
+  pub default_model: String,
+  pub default_agent: String,
+  pub conflict_marker_style: String,
+  pub notify_agent_finished: bool,
+}
+
+/// The keys the screen loads: the Application tab's and the preview flags.
+pub fn app_keys() -> Vec<String> {
+  [
+    "theme",
+    "ui_zoom",
+    "terminal_font_size",
+    "default_model",
+    "default_agent",
+    "conflict_marker_style",
+    NOTIFY_AGENT_FINISHED,
+  ]
+  .into_iter()
+  .map(str::to_string)
+  .chain(PREVIEW_FEATURES.iter().map(|(f, _, _)| f.setting_key()))
+  .collect()
+}
+
+fn int_in(values: &Values, key: &str, min: u32, max: u32) -> Option<u32> {
+  let value = values.get(key)?.as_deref()?.trim().parse::<u32>().ok()?;
+  (min..=max).contains(&value).then_some(value)
+}
+
+fn string(values: &Values, key: &str) -> Option<String> {
+  values.get(key).cloned().flatten()
+}
+
+impl AppFields {
+  /// With React's defaults (`settingsHydration`, `SettingsPage`).
+  pub fn from_values(values: &Values) -> Self {
+    let theme = string(values, "theme")
+      .filter(|theme| ["light", "dark", "system"].contains(&theme.as_str()))
+      .unwrap_or_else(|| "system".into());
+    Self {
+      theme,
+      zoom: int_in(values, "ui_zoom", ZOOM.0 as u32, ZOOM.1 as u32).unwrap_or(100) as f32,
+      font_size: int_in(values, "terminal_font_size", 8, 32).unwrap_or(14),
+      default_model: string(values, "default_model").unwrap_or_default(),
+      default_agent: string(values, "default_agent").unwrap_or_default(),
+      conflict_marker_style: string(values, "conflict_marker_style")
+        .unwrap_or_else(|| "git".into()),
+      // On unless turned off, as the backend reads it.
+      notify_agent_finished: string(values, NOTIFY_AGENT_FINISHED)
+        .is_none_or(|value| value.trim() != "false"),
+    }
+  }
+
+  /// What Save writes, in `handleSaveApplicationSettings`'s order.
+  pub fn to_values(&self) -> Vec<(String, String)> {
+    [
+      ("default_model", self.default_model.clone()),
+      ("default_agent", self.default_agent.clone()),
+      ("conflict_marker_style", self.conflict_marker_style.clone()),
+      (
+        NOTIFY_AGENT_FINISHED,
+        self.notify_agent_finished.to_string(),
+      ),
+      ("terminal_font_size", self.font_size.to_string()),
+      ("ui_zoom", (self.zoom.round() as i64).to_string()),
+    ]
+    .map(|(key, value)| (key.to_string(), value))
+    .to_vec()
+  }
+}
+
+/// Whether each preview is on, as `parsePreviewSetting`.
+pub fn preview_flags(values: &Values) -> Vec<(PreviewFeature, bool)> {
+  PREVIEW_FEATURES
+    .iter()
+    .map(|(feature, _, _)| {
+      let on = match string(values, &feature.setting_key()).as_deref() {
+        Some("true") => true,
+        Some("false") => false,
+        _ => feature_preview::compile_default(*feature),
+      };
+      (*feature, on)
+    })
+    .collect()
+}
+
+/// The repository settings behind each field, in the order React saves them.
+const REPO_KEYS: [&str; 9] = [
+  "branch_name_pattern",
+  "included_copy_files",
+  "default_model",
+  "default_agent",
+  "auto_push",
+  "ignore_generated_treq_paths",
+  "review_prompt",
+  "review_agent",
+  "auto_review_trigger",
+];
+
+pub fn repo_keys() -> Vec<String> {
+  REPO_KEYS.map(str::to_string).to_vec()
+}
+
+/// `normalizeAutoReviewTrigger`: `"on-push"` is the old name of `"on-pull"`.
+fn auto_review_trigger(stored: Option<&str>) -> String {
+  match stored {
+    Some("on-push") => "on-pull",
+    Some(trigger @ ("on-commit" | "on-rebase" | "on-pull")) => trigger,
+    _ => "off",
+  }
+  .to_string()
+}
+
+impl Default for RepositoryFields {
+  fn default() -> Self {
+    Self::from_values(&Values::new())
+  }
+}
+
+impl RepositoryFields {
+  pub fn from_values(values: &Values) -> Self {
+    let get = |key: &str| string(values, key).filter(|value| !value.is_empty());
+    Self {
+      branch_name_pattern: get("branch_name_pattern").unwrap_or_else(|| "treq/{name}".into()),
+      included_files: get("included_copy_files").unwrap_or_default(),
+      default_model: get("default_model").unwrap_or_default(),
+      default_agent: get("default_agent").unwrap_or_default(),
+      auto_push: get("auto_push").as_deref() == Some("true"),
+      ignore_generated_agent_files: get("ignore_generated_treq_paths").as_deref() == Some("true"),
+      review_prompt: get("review_prompt").unwrap_or_default(),
+      review_agent: get("review_agent").unwrap_or_default(),
+      auto_review_trigger: auto_review_trigger(get("auto_review_trigger").as_deref()),
+    }
+  }
+
+  pub fn to_values(&self) -> Vec<(String, String)> {
+    let values = [
+      self.branch_name_pattern.clone(),
+      self.included_files.clone(),
+      self.default_model.clone(),
+      self.default_agent.clone(),
+      self.auto_push.to_string(),
+      self.ignore_generated_agent_files.to_string(),
+      self.review_prompt.clone(),
+      self.review_agent.clone(),
+      self.auto_review_trigger.clone(),
+    ];
+    REPO_KEYS
+      .iter()
+      .zip(values)
+      .map(|(key, value)| (key.to_string(), value))
+      .collect()
+  }
+
+  /// Sets the field GPUI names `field` (as in `"autoPush"`) to `value`.
+  pub fn set(&mut self, field: &str, value: &serde_json::Value) {
+    let text = || value.as_str().unwrap_or_default().to_string();
+    let flag = || value.as_bool().unwrap_or_default();
+    match field {
+      "branchNamePattern" => self.branch_name_pattern = text(),
+      "includedFiles" => self.included_files = text(),
+      "defaultModel" => self.default_model = text(),
+      "defaultAgent" => self.default_agent = text(),
+      "autoPush" => self.auto_push = flag(),
+      "ignoreGeneratedAgentFiles" => self.ignore_generated_agent_files = flag(),
+      "reviewPrompt" => self.review_prompt = text(),
+      "reviewAgent" => self.review_agent = text(),
+      "autoReviewTrigger" => self.auto_review_trigger = text(),
+      _ => {}
+    }
+  }
+}
+
+/// The fields `.treq/config.yaml` sets, which the screen disables.
+pub fn managed_fields(config: &RepoConfig) -> Vec<String> {
+  [
+    ("branchNamePattern", config.branch_name_pattern.is_some()),
+    ("includedFiles", config.included_copy_files.is_some()),
+    ("defaultModel", config.default_model.is_some()),
+    ("defaultAgent", config.default_agent.is_some()),
+    ("reviewPrompt", config.review_prompt.is_some()),
+    ("reviewAgent", config.review_agent.is_some()),
+    ("autoReviewTrigger", config.auto_review_trigger.is_some()),
+  ]
+  .into_iter()
+  .filter(|(_, managed)| *managed)
+  .map(|(field, _)| field.to_string())
+  .collect()
+}
+
+/// `RepoYamlConfigCard`'s `hasAnyValue`: whether the card shows.
+pub fn sets_any_value(config: &RepoConfig) -> bool {
+  config.branch_name_pattern.is_some()
+    || config.default_model.is_some()
+    || config.default_agent.is_some()
+    || config.target_branch.is_some()
+    || config
+      .included_copy_files
+      .as_ref()
+      .is_some_and(|files| !files.is_empty())
+}
+
+/// `formatStatus` for the Run row.
+pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
+  if status.running {
+    return "Running…".into();
+  }
+  let Some(ran_at) = &status.last_run_at else {
+    return "Never run".into();
+  };
+  // `toLocaleString()` in an en-US locale.
+  let ran_at = chrono::DateTime::parse_from_rfc3339(ran_at)
+    .map(|at| {
+      at.with_timezone(&chrono::Local)
+        .format("%-m/%-d/%Y, %-I:%M:%S %p")
+        .to_string()
+    })
+    .unwrap_or_else(|_| ran_at.clone());
+  format!(
+    "Last run {ran_at} · {}",
+    status.last_status.as_deref().unwrap_or("unknown")
+  )
+}

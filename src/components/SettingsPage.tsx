@@ -44,17 +44,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import { AgentOptions } from "./AgentOptions";
 import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
-import { GpuiPartsProvider, useGpuiPartsHost } from "../lib/gpui-parts";
-import { AppSetupScriptSettings } from "./AppSetupScriptSettings";
-import { useAppSetupScript } from "./useAppSetupScript";
-import {
-  type SettingsTabValue,
-  useGpuiSettingsScreen,
-} from "./useGpuiSettingsScreen";
 
 const NOTIFY_AGENT_FINISHED_SETTING = "notify_agent_finished";
+import { AppSetupScriptSettings } from "./AppSetupScriptSettings";
+import { useAppSetupScript } from "./useAppSetupScript";
+import { useGpuiSettingsScreen } from "./useGpuiSettingsScreen";
 
-type TabValue = SettingsTabValue;
+type TabValue =
+  | "application"
+  | "repository"
+  | "account"
+  | "integrations"
+  | "skills"
+  | "preview";
 
 interface SettingsPageProps {
   repoPath: string;
@@ -158,43 +160,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     await repositorySettingsRef.current?.save();
   };
 
-  const gpuiParts = useGpuiPartsHost();
   useGpuiSettingsScreen({
     currentTab,
     setCurrentTab,
-    skillsInstallation,
     repoPath,
     currentBranch: currentBranch ?? null,
-    savingRepository,
-    parts: gpuiParts,
-    application: {
-      theme,
-      setTheme: (value) => void setTheme(value as "system" | "light" | "dark"),
-      zoom: localZoom,
-      setZoomDraft: setLocalZoom,
-      commitZoom: (value) => {
-        setLocalZoom(null);
-        void setZoom(value);
-      },
-      fontSize: nearestFontSizePreset(localFontSize),
-      setFontSize: setLocalFontSize,
-      defaultModel,
-      setDefaultModel,
-      defaultAgent,
-      setDefaultAgent,
-      conflictMarkerStyle,
-      setConflictMarkerStyle,
-      notifyAgentFinished,
-      setNotifyAgentFinished: setNotifyDraft,
-      setupScript,
-    },
     onClose,
-    onSaveApplication: handleSaveApplicationSettings,
-    onSaveRepository: handleSaveRepositorySettings,
   });
 
   return (
-    <GpuiPartsProvider registry={gpuiParts.registry}>
+    <>
       <div className="h-full flex flex-col bg-background">
         {/* Header */}
         <div className="border-b border-border px-6 py-2 flex items-center justify-between">
@@ -485,8 +460,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       </div>
 
       {/* Note: Git Init Dialog removed - JJ doesn't need this */}
-    </GpuiPartsProvider>
+    </>
   );
 };
-
-/** Tabs GPUI draws; the webview keeps the others for now. */
