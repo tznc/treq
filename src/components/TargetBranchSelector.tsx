@@ -34,7 +34,6 @@ export const TargetBranchSelector: React.FC<TargetBranchSelectorProps> = ({
     setOpen(value);
     onOpenChange?.(value);
   };
-  // While it is open, the screen hands the header back to React to draw it.
   useGpuiPart(
     "target",
     { open, branch: targetBranch, loading, disabled: !!disabled || loading },

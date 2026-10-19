@@ -19,13 +19,23 @@ use crate::{
     RemoteSyncStatus, WorkspaceStatus,
   },
   github::{GitRemoteInfo, PrCiStatus, PrInfo},
-  gpui_shell::native::{Backend, NativeEvent},
+  gpui_shell::{
+    native::{Backend, NativeEvent},
+    popover::data::{read_checks, ChecksData},
+  },
   jj::{self, HomeRebaseDryRunResult, JjLogResult},
   local_db,
 };
 
 /// `ShowWorkspace`'s `defaultBranch`: the literal it compares branches with.
 pub const DEFAULT_BRANCH: &str = "main";
+
+/// The Browser view's state, which React's `BrowserPanel` owns.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct BrowserRoute {
+  /// The address the page shows.
+  pub url: String,
+}
 
 /// What React sends: which workspace shows, and the state of the flows it
 /// still runs (target branch, Changes refresh, PR creation, checks).
@@ -38,8 +48,6 @@ pub struct Route {
   /// The home repository's checked-out branch (`mainRepoBranch`).
   pub home_branch: String,
   pub tab: Tab,
-  /// False while the Browser view puts its own row there.
-  pub tab_row: bool,
   /// The target branch is being changed (`rebasing`).
   pub retargeting: bool,
   /// The Changes tab is refreshing its files.
@@ -49,6 +57,13 @@ pub struct Route {
   pub running_checks: Vec<String>,
   /// The merge queue button, from Supabase.
   pub merge_queue: Option<MergeQueue>,
+  /// Workflow files running as a whole (`isRunning(filename)`), where
+  /// `running_checks` also holds those running a single job.
+  #[serde(default)]
+  pub running_workflows: Vec<String>,
+  /// The workspace's setup script is being re-run from this window.
+  #[serde(default)]
+  pub setup_rerunning: bool,
   /// Bumped whenever React refreshes its caches, so GPUI reads again.
   pub revision: u64,
   /// GPUI draws the Code tab (React's file browser is closed).
@@ -74,6 +89,9 @@ pub struct Route {
   /// the tab row offers the Diff/Browser switcher.
   #[serde(default)]
   pub review_switcher: bool,
+  /// The Browser view shows: its address bar takes the tab row's slot.
+  #[serde(default)]
+  pub browser: Option<BrowserRoute>,
   /// The Logs tab's source (`LogSource`) while it shows.
   #[serde(default)]
   pub logs_source: Option<String>,
@@ -106,51 +124,6 @@ impl Route {
   }
 }
 
-/// `summarizeChecks`: the latest run of each workflow rolled up.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ChecksSummary {
-  pub workflows: Vec<String>,
-  /// The latest run's status by workflow file, when it has run.
-  pub latest: Vec<(String, String)>,
-}
-
-impl ChecksSummary {
-  /// `(state, passed, total)`, with `running` overriding the stored status.
-  fn rollup(&self, running: &[String]) -> (&'static str, usize, usize) {
-    let (mut passed, mut failed, mut runs) = (0, 0, 0);
-    for workflow in &self.workflows {
-      let status = if running.contains(workflow) {
-        Some("running")
-      } else {
-        self
-          .latest
-          .iter()
-          .find(|(file, _)| file == workflow)
-          .map(|(_, status)| status.as_str())
-      };
-      match status {
-        Some("passed") => passed += 1,
-        Some("failed") => failed += 1,
-        Some("running") => runs += 1,
-        _ => {}
-      }
-    }
-    let total = self.workflows.len();
-    let state = if total == 0 {
-      "none"
-    } else if runs > 0 {
-      "running"
-    } else if failed > 0 {
-      "failed"
-    } else if passed == total {
-      "passed"
-    } else {
-      "not-run"
-    };
-    (state, passed, total)
-  }
-}
-
 /// Everything the header shows, read in one go off the main thread.
 #[derive(Clone, Default)]
 pub struct Loaded {
@@ -166,7 +139,7 @@ pub struct Loaded {
   /// Commits on the target branch the home branch lacks.
   pub home_ahead: usize,
   pub home_dry_run: Option<HomeRebaseDryRunResult>,
-  pub checks: Option<ChecksSummary>,
+  pub checks: Option<ChecksData>,
   pub linear_enabled: bool,
   pub logs_enabled: bool,
 }
@@ -264,23 +237,7 @@ impl WorkspaceHost for Backend {
     let home_dry_run = (on_home_feature && home_ahead > 0 && !home_branch.is_empty())
       .then(|| jj::jj_dry_run_home_repo_rebase(repo, home_branch, DEFAULT_BRANCH).ok())
       .flatten();
-    let checks = route.workspace_id.map(|id| {
-      let workflows = core::list_workflows_sync(repo).unwrap_or_default();
-      let latest = workflows
-        .iter()
-        .filter_map(|w| {
-          let run = core::list_workflow_runs_sync(repo, id, &w.filename, 1)
-            .ok()?
-            .into_iter()
-            .next()?;
-          Some((w.filename.clone(), run.status))
-        })
-        .collect();
-      ChecksSummary {
-        workflows: workflows.into_iter().map(|w| w.filename).collect(),
-        latest,
-      }
-    });
+    let checks = route.workspace_id.map(|id| read_checks(repo, id));
     let (linear_enabled, logs_enabled) = self.with_db(|db| {
       (
         feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
@@ -638,7 +595,7 @@ pub fn workspace_view(
   };
 
   let has_conflict = conflict_count > 0 || status.is_some_and(|s| s.partial.has_conflicts);
-  let tab_row = route.tab_row.then(|| {
+  let tab_row = Some({
     let review = loaded.review_count;
     let has_uncommitted =
       loaded.uncommitted_count > 0 || status.is_some_and(|s| s.partial.has_changes);

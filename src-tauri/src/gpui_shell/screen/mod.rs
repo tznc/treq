@@ -21,6 +21,7 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 
 pub use modal::Modal;
 pub(super) use modal::ModalOpen;
+pub(super) use workspace_data::WorkspaceHost;
 
 use super::{
   popup::{PopupRequest, PopupSink},
@@ -57,7 +58,7 @@ mod terminal_emu;
 mod terminal_lightbox;
 mod terminal_send;
 mod workspace;
-mod workspace_data;
+pub(super) mod workspace_data;
 mod workspace_deletion;
 mod workspace_dialog;
 mod workspace_dialog_data;

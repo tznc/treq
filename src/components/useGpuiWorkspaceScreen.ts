@@ -1,4 +1,5 @@
-import { useRunningCheckFiles } from "../hooks/useWorkspaceChecks";
+import { useRunningChecksOf } from "../hooks/useWorkspaceChecks";
+import { DEFAULT_BROWSER_URL } from "./browser-panel/utils";
 import type { JjLogCommit, Workspace } from "../lib/api";
 import type { AgentReviewComment } from "../lib/api-types-review";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
@@ -15,12 +16,28 @@ import { popupNativeMenu } from "../lib/native-context-menu";
 import { useCacheRevision } from "../lib/swr-cache";
 
 /** The header controls whose React flows GPUI still asks for (`useGpuiPart`). */
-type PartControl = "target" | "viewPr" | "createPr" | "checks" | "mergeQueue";
+type PartControl =
+  | "target"
+  | "viewPr"
+  | "createPr"
+  | "checks"
+  | "mergeQueue"
+  | "browser";
 
 type Route = Omit<
   GpuiWorkspaceScreen,
-  "kind" | "creatingPr" | "runningChecks" | "mergeQueue" | "revision"
->;
+  | "kind"
+  | "browser"
+  | "creatingPr"
+  | "runningChecks"
+  | "runningWorkflows"
+  | "setupRerunning"
+  | "mergeQueue"
+  | "revision"
+> & {
+  /** The Browser view shows; its url comes from `BrowserPanel`'s part. */
+  showBrowser: boolean;
+};
 
 interface Handlers {
   setTab: (tab: GpuiWorkspaceTab) => void;
@@ -68,14 +85,16 @@ interface Handlers {
   openBranchSwitcher?: () => void;
   stack?: () => void;
   merge?: () => void;
-  openDetails: () => void;
+  /** The target branch popover picked a branch: retarget the workspace. */
+  selectTarget?: (branch: string) => void;
+  /** The Details popover's "View full prompt". */
+  viewFullPrompt?: (promptId: number) => void;
   deleteWorkspace?: () => void;
 }
 
 const TABS: GpuiWorkspaceTab[] = ["overview", "commits", "changes", "logs"];
 
 interface PartState {
-  open?: boolean;
   creating?: boolean;
 }
 
@@ -86,48 +105,56 @@ interface PartState {
  * of the flows it still runs. Returns whether GPUI draws them, so React
  * leaves its own out of the frame.
  *
- * An open popover (target branch, checks, details) is React's: the screen
- * steps aside until it closes, so React draws the header with it.
+ * The popovers under the header's target branch, checks and details buttons
+ * are GPUI's too: they open in its modal window, so the screen stays. What
+ * only React can do goes back here: retargeting, running and trusting
+ * workflow checks (`useWorkspaceChecks`), the prompt history.
  */
 export function useGpuiWorkspaceScreen({
   active,
   parts,
   route,
-  detailsOpen,
   handlers,
 }: {
   active: boolean;
   parts: ReturnType<typeof useGpuiPartsHost>;
   route: Route;
-  detailsOpen: boolean;
   handlers: Handlers;
 }): boolean {
   const revision = useCacheRevision(active);
-  const runningChecks = useRunningCheckFiles(route.workspaceId);
+  const running = useRunningChecksOf(route.workspaceId);
   const part = (key: PartControl) =>
     (parts.parts[key] as PartState | null | undefined) ?? null;
-  const popoverOpen =
-    detailsOpen || !!part("target")?.open || !!part("checks")?.open;
 
+  const { showBrowser, ...rest } = route;
   const view: GpuiWorkspaceScreen = {
     kind: "workspace",
-    ...route,
+    ...rest,
+    browser: showBrowser
+      ? {
+          url:
+            (parts.parts.browser as { url?: string } | null | undefined)?.url ??
+            DEFAULT_BROWSER_URL,
+        }
+      : null,
     creatingPr: !!part("createPr")?.creating,
-    runningChecks,
+    runningChecks: running.files,
+    runningWorkflows: running.workflows,
+    setupRerunning: running.setup,
     mergeQueue:
       (parts.parts.mergeQueue as GpuiWorkspaceScreen["mergeQueue"]) ?? null,
     revision,
   };
 
-  const call = (key: PartControl, name: string) =>
-    (parts.handlers(key)?.[name] as (() => void) | undefined)?.();
+  const call = (key: PartControl, name: string, ...args: unknown[]) =>
+    (parts.handlers(key)?.[name] as ((...a: unknown[]) => void) | undefined)?.(
+      ...args,
+    );
 
   const press = (id: string) => {
     switch (id) {
       case "workspace.branchSwitcher":
         return handlers.openBranchSwitcher?.();
-      case "workspace.target":
-        return call("target", "open");
       case "workspace.stack":
         return handlers.stack?.();
       case "workspace.viewPr":
@@ -136,16 +163,22 @@ export function useGpuiWorkspaceScreen({
         return call("createPr", "create");
       case "workspace.createPrMenu":
         return call("createPr", "menu");
-      case "workspace.checks":
-        return call("checks", "open");
+      case "workspace.checksRunAll":
+        return call("checks", "runAll");
+      case "workspace.checksTrust":
+        return call("checks", "trust");
+      case "workspace.checksRerunSetup":
+        return call("checks", "rerunSetup");
+      case "workspace.checksLogs":
+        return call("checks", "viewLogs");
+      case "browser.reload":
+        return call("browser", "reload");
       case "workspace.mergeQueue":
         return call("mergeQueue", "press");
       case "workspace.merge":
         return handlers.merge?.();
       case "code.filePicker":
         return handlers.openFilePicker?.();
-      case "workspace.details":
-        return handlers.openDetails();
       case "workspace.more": {
         const remove = handlers.deleteWorkspace;
         if (!remove) return;
@@ -170,6 +203,14 @@ export function useGpuiWorkspaceScreen({
           handlers.setTab(value as GpuiWorkspaceTab);
         }
         return;
+      case "workspace.target":
+        return handlers.selectTarget?.(value as string);
+      case "workspace.viewFullPrompt":
+        return handlers.viewFullPrompt?.(value as number);
+      case "browser.navigate":
+        return call("browser", "navigate", value);
+      case "workspace.checksRun":
+        return call("checks", "run", value);
       case "workspace.contentHeight":
         return handlers.contentHeight?.(value as number);
       case "code.open":
@@ -233,19 +274,16 @@ export function useGpuiWorkspaceScreen({
     }
   };
 
-  return useGpuiScreen(
-    active && !popoverOpen ? view : null,
-    (action: GpuiScreenAction) => {
-      if (!active) return;
-      switch (action.kind) {
-        case "press":
-          press(action.id);
-          break;
-        case "field":
-          field(action.field, action.value);
-          break;
-        default:
-      }
-    },
-  );
+  return useGpuiScreen(active ? view : null, (action: GpuiScreenAction) => {
+    if (!active) return;
+    switch (action.kind) {
+      case "press":
+        press(action.id);
+        break;
+      case "field":
+        field(action.field, action.value);
+        break;
+      default:
+    }
+  });
 }

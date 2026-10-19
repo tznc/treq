@@ -1166,14 +1166,12 @@ export const ShowWorkspace = ({
   const gpuiFramed = useGpuiWorkspaceScreen({
     active: gpuiActive && !!workingDirectory && !!effectiveRepoPath,
     parts: gpuiParts,
-    detailsOpen,
     route: {
       repoPath: effectiveRepoPath,
       workspaceId: workspace?.id ?? null,
       homeBranch: mainRepoBranch ?? "",
       tab: activeTab as GpuiWorkspaceTab,
-      // The Browser view's switcher and address bar live in the tab row.
-      tabRow: !reviewSubView.showBrowser,
+      showBrowser: reviewSubView.showBrowser,
       retargeting: rebasing,
       refreshing: refreshingFiles,
       code: gpuiCode,
@@ -1183,8 +1181,7 @@ export const ShowWorkspace = ({
       moveTargets:
         changeFilesMove?.targets.filter((t) => t.branch !== sourceBranch) ?? [],
       changesRevision,
-      reviewSwitcher:
-        reviewSubView.switcherEnabled && !reviewSubView.showBrowser,
+      reviewSwitcher: reviewSubView.switcherEnabled,
       logsSource: activeTab === "logs" ? logsSource : null,
       logsKey,
       terminal: gpuiTerminal?.route ?? null,
@@ -1228,7 +1225,8 @@ export const ShowWorkspace = ({
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,
       merge: onOpenMergePreview,
-      openDetails: () => setDetailsOpen(true),
+      selectTarget: (branch) => void handleTargetBranchSelect(branch),
+      viewFullPrompt: (promptId) => onViewFullPrompt?.(promptId),
       deleteWorkspace:
         workspace && onDeleteWorkspace
           ? () => onDeleteWorkspace(workspace)
@@ -1243,9 +1241,10 @@ export const ShowWorkspace = ({
   useEffect(() => {
     if (!gpuiDrawsCode) onGpuiContentHeight?.(null);
   }, [gpuiDrawsCode, onGpuiContentHeight]);
-  // GPUI draws the header and tab row; React keeps them mounted but hidden,
-  // so the parts they publish stay current.
-  const gpuiTabRow = gpuiFramed && !reviewSubView.showBrowser;
+  // GPUI draws the header and tab row (the Browser view's address bar
+  // included); React keeps them mounted but hidden, so the parts they
+  // publish stay current.
+  const gpuiTabRow = gpuiFramed;
 
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">

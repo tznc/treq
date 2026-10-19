@@ -33,6 +33,7 @@ mod form;
 mod modal;
 pub mod native;
 mod overlay;
+mod popover;
 mod popup;
 mod screen;
 mod sidebar;

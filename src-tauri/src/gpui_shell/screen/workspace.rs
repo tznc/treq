@@ -4,16 +4,18 @@
 //! The header reads its data from the backend ([`workspace_data`]) and
 //! pushes, syncs and rebases the home branch itself. React says which
 //! workspace shows, and draws the tab's content in the frame, leaving its own
-//! header and tab row out of it (its "framed" layout). Popovers (target
-//! branch, checks, details) and dialogs are still React's: pressing one asks
-//! React to open it, and React takes the whole webview back while it is
-//! open. Menus are GPUI's, opened by React below the button that asked for
-//! them.
+//! header and tab row out of it (its "framed" layout). The popovers under the
+//! target branch, checks and details buttons are GPUI's too (see
+//! [`popover`](crate::gpui_shell::popover)): they open in the modal window,
+//! over the framed webview, and hand back to React only what it still owns
+//! (retargeting, running workflows). Menus are GPUI's, opened by React below
+//! the button that asked for them.
 //!
 //! [`workspace_data`]: super::workspace_data
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
+use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{
@@ -36,7 +38,9 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
+  form,
   native::{NativeEvent, ToastTone},
+  popover::{self, Popover, PopoverHost},
   popup::{self, PopupRequest, PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   ui::{self, Button, Size, TextSize, Variant},
@@ -44,6 +48,19 @@ use crate::gpui_shell::{
 
 /// React's base-ui tooltips open after 200ms (`TooltipProvider delay={200}`).
 const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
+
+/// `AddressBar`: the Browser view's text field, which follows the url the
+/// page shows and keeps what is typed until Enter navigates.
+struct AddressBar {
+  input: Entity<InputState>,
+  /// The url last copied into the field.
+  url: String,
+  _subscription: gpui::Subscription,
+}
+
+/// The message under a url `AddressBar` rejects.
+pub(super) const BROWSER_URL_HINT: &str =
+  "Only http://localhost, http://127.0.0.1 and file:// URLs are supported";
 
 /// Where the terminal pane was last placed: the repository, workspace and
 /// sessions revision.
@@ -53,7 +70,6 @@ type TerminalPlace = (String, Option<i64>, u64);
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
   pub header: Header,
-  /// None: React draws the tab row in the frame.
   pub tab_row: Option<TabRow>,
 }
 
@@ -287,10 +303,15 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
+  popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
+  /// The header popover that shows in the modal window, if one does.
+  popover: Option<(Entity<Popover>, gpui::Subscription)>,
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
+  /// The Browser view's address bar, while it shows.
+  address: Option<AddressBar>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
   /// The Commits tab, while GPUI draws it.
@@ -367,8 +388,11 @@ impl WorkspaceView {
     });
     let mut this = Self {
       host: host.clone(),
+      popover_host: host.clone(),
+      popover: None,
       code_host: host,
       terminal: None,
+      address: None,
       code: None,
       commits: None,
       changes: None,
@@ -405,6 +429,7 @@ impl WorkspaceView {
     self.route = route;
     self.dark = dark;
     if moved {
+      self.close_popover(cx);
       self.loaded = None;
       self.pr = PrCache::default();
       self.pending = Pending::None;
@@ -479,6 +504,89 @@ impl WorkspaceView {
       self.snapshot = snapshot;
       cx.notify();
     }
+    self.sync_popover(cx);
+  }
+
+  /// What the Checks popover draws, from what the header read.
+  fn checks_input(&self) -> Option<popover::ChecksInput> {
+    let loaded = self.loaded.as_ref()?;
+    Some(popover::ChecksInput {
+      data: loaded.checks.clone()?,
+      ci: self.pr.ci.clone().filter(|ci| ci.total > 0),
+      running: self.route.running_checks.clone(),
+      running_workflows: self.route.running_workflows.clone(),
+      setup_rerunning: self.route.setup_rerunning,
+      logs: loaded.logs_enabled,
+    })
+  }
+
+  /// The popover that header button `key` opens, for the shown workspace.
+  fn popover_kind(&self, key: &str) -> Option<popover::Kind> {
+    let loaded = self.loaded.as_ref()?;
+    let repo_path = self.route.repo_path.clone();
+    match key {
+      "workspace-details" => {
+        let workspace = loaded.workspace.as_ref()?;
+        Some(popover::Kind::Details(popover::DetailsSpec {
+          repo_path,
+          workspace_id: workspace.id,
+          branch: workspace.branch_name.clone(),
+          target: workspace
+            .target_branch
+            .clone()
+            .unwrap_or_else(|| self.route.default_target().to_string()),
+          created_at: workspace.created_at.clone(),
+        }))
+      }
+      "workspace-target" => {
+        let target = self.snapshot.as_ref()?.header.target.as_ref()?;
+        Some(popover::Kind::Target(popover::TargetSpec {
+          repo_path,
+          current: target.branch.clone(),
+        }))
+      }
+      "workspace-checks" => Some(popover::Kind::Checks(self.checks_input()?)),
+      _ => None,
+    }
+  }
+
+  /// Opens the popover under header button `key` in the modal window.
+  fn open_popover(&mut self, key: &'static str, cx: &mut Context<Self>) {
+    let Some(anchor) = self.bounds.borrow().get(key).copied() else {
+      return;
+    };
+    let Some(kind) = self.popover_kind(key) else {
+      return;
+    };
+    self.close_popover(cx);
+    let (host, react, dark) = (self.popover_host.clone(), self.react.clone(), self.dark);
+    let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
+    let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
+      this.close_popover(cx)
+    });
+    self.popover = Some((popover.clone(), subscription));
+    (self.popups)(PopupRequest::ShowPopover { popover, dark }, cx);
+  }
+
+  fn close_popover(&mut self, cx: &mut Context<Self>) {
+    if self.popover.take().is_some() {
+      (self.popups)(PopupRequest::HidePopover, cx);
+    }
+  }
+
+  /// Passes the open popover what changed under it.
+  fn sync_popover(&mut self, cx: &mut Context<Self>) {
+    let Some(popover) = self.popover.as_ref().map(|(popover, _)| popover.clone()) else {
+      return;
+    };
+    let input = self.checks_input();
+    let dark = self.dark;
+    popover.update(cx, |popover, cx| {
+      popover.set_dark(dark, cx);
+      if let Some(input) = input {
+        popover.set_checks(input, cx);
+      }
+    });
   }
 
   pub(super) fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
@@ -497,6 +605,9 @@ impl WorkspaceView {
             host.rebase_home(&repo, &branch)
           })
         }
+        "workspace.details" => self.open_popover("workspace-details", cx),
+        "workspace.target" => self.open_popover("workspace-target", cx),
+        "workspace.checks" => self.open_popover("workspace-checks", cx),
         "workspace.viewPrWeb" => {
           if let Some(Some(pr)) = &self.pr.pr {
             self.host.open_url(&pr.url);
@@ -753,7 +864,13 @@ impl WorkspaceView {
           .on_click(self.press("workspace.target"));
         left = left
           .child(ui::icon(theme::ICON_ARROW_RIGHT, 16., p.muted_foreground))
-          .child(button);
+          .child(
+            div()
+              .relative()
+              .flex_none()
+              .child(button)
+              .child(self.record_bounds("workspace-target")),
+          );
       }
     } else {
       left = left.child(
@@ -879,7 +996,13 @@ impl WorkspaceView {
       right = right.child(self.sync(sync, p, cx));
     }
     if let Some(checks) = &h.checks {
-      right = right.child(self.checks(checks, p));
+      right = right.child(
+        div()
+          .relative()
+          .flex_none()
+          .child(self.checks(checks, p))
+          .child(self.record_bounds("workspace-checks")),
+      );
     }
     if let Some(queue) = &h.merge_queue {
       let button = Button::new("workspace-merge-queue", p)
@@ -940,14 +1063,20 @@ impl WorkspaceView {
     }
     if h.details {
       right = right.child(
-        Button::new("workspace-details", p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .gap_1()
-          .px_2()
-          .icon(theme::ICON_INFO, 16.)
-          .label("Details")
-          .on_click(self.press("workspace.details")),
+        div()
+          .relative()
+          .flex_none()
+          .child(
+            Button::new("workspace-details", p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .gap_1()
+              .px_2()
+              .icon(theme::ICON_INFO, 16.)
+              .label("Details")
+              .on_click(self.press("workspace.details")),
+          )
+          .child(self.record_bounds("workspace-details")),
       );
     }
     if let Some(more) = &h.more {
@@ -1206,7 +1335,117 @@ impl WorkspaceView {
       .on_click(self.press("workspace.checks"))
   }
 
-  fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+  /// Creates the address bar when the Browser view opens, drops it when it
+  /// closes, and follows the url the page navigates to.
+  fn sync_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(browser) = self.route.browser.as_ref() else {
+      self.address = None;
+      return;
+    };
+    let url = browser.url.clone();
+    match &mut self.address {
+      Some(address) => {
+        if address.url != url {
+          address.url = url.clone();
+          address
+            .input
+            .update(cx, |input, cx| input.set_value(url, window, cx));
+        }
+      }
+      None => {
+        let input = cx.new(|cx| {
+          InputState::new(window, cx)
+            .placeholder("http://localhost:3000 or file:///path/to/index.html")
+        });
+        input.update(cx, |input, cx| input.set_value(url.clone(), window, cx));
+        let subscription =
+          cx.subscribe(&input, |view, input, event: &InputEvent, cx| match event {
+            InputEvent::Change => cx.notify(),
+            InputEvent::PressEnter { .. } => {
+              let value = input.read(cx).value().trim().to_string();
+              if !value.is_empty() && crate::core::browser_url::is_allowed_browser_url(&value) {
+                (view.react)(
+                  ScreenAction::Field {
+                    field: "browser.navigate".into(),
+                    value: value.into(),
+                  },
+                  cx,
+                );
+              }
+            }
+            _ => {}
+          });
+        self.address = Some(AddressBar {
+          input,
+          url,
+          _subscription: subscription,
+        });
+      }
+    }
+  }
+
+  /// `AddressBar.tsx`: the field with its reload button inside, and the
+  /// reason for a url it would not open.
+  fn address_bar(&self, p: &Palette, cx: &App) -> Option<Div> {
+    let address = self.address.as_ref()?;
+    let draft = address.input.read(cx).value().trim().to_string();
+    let valid = draft.is_empty() || crate::core::browser_url::is_allowed_browser_url(&draft);
+    let field = form::input_field("browser-address", &address.input, false, false);
+    Some(
+      div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+          div()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .child(field)
+            .when(!valid, |this| {
+              this.child(
+                div()
+                  .absolute()
+                  .inset_0()
+                  .rounded(px(6.))
+                  .border_1()
+                  .border_color(p.destructive)
+                  .debug_selector(|| "browser-address-invalid".into()),
+              )
+            })
+            .child(
+              div()
+                .absolute()
+                .right(px(4.))
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .child(
+                  Button::new("browser-reload", p)
+                    .variant(Variant::Ghost)
+                    .size(Size::IconXs)
+                    .icon(theme::ICON_ROTATE_CW, 14.)
+                    .on_click(self.press("browser.reload")),
+                ),
+            ),
+        )
+        .when(!valid, |this| {
+          this.child(
+            ui::text(div(), TextSize::Xs)
+              .debug_selector(|| "browser-address-error".into())
+              .whitespace_nowrap()
+              .truncate()
+              .text_color(p.destructive)
+              .child(BROWSER_URL_HINT),
+          )
+        }),
+    )
+  }
+
+  fn tab_row(&self, row: &TabRow, p: &Palette, cx: &App) -> Div {
     let dark = self.dark;
     let pill = |count: u32, tone: Tone, id: &'static str| {
       let (bg, fg) = match tone {
@@ -1338,12 +1577,16 @@ impl WorkspaceView {
             |this| this.child(self.review_switcher(p)),
           ),
       )
-      .child(div().flex_1().min_w_0())
+      .child(
+        self
+          .address_bar(p, cx)
+          .unwrap_or_else(|| div().flex_1().min_w_0()),
+      )
       .child(status)
   }
 
-  /// `useReviewSubView`'s Diff/Browser switcher, while the Diff view shows:
-  /// picking Browser hands the tab back to React.
+  /// `useReviewSubView`'s Diff/Browser switcher, which names the view that
+  /// shows; picking one hands the choice to React.
   fn review_switcher(&self, p: &Palette) -> impl IntoElement {
     let (bounds, popups, sink, dark) = (
       self.bounds.clone(),
@@ -1351,6 +1594,7 @@ impl WorkspaceView {
       self.sink.clone(),
       self.dark,
     );
+    let browser = self.route.browser.is_some();
     let pick = move |view: &'static str| {
       let sink = sink.clone();
       move |cx: &mut App| {
@@ -1377,8 +1621,15 @@ impl WorkspaceView {
           .variant(Variant::Ghost)
           .size(Size::Sm)
           .gap(px(6.))
-          .icon(theme::ICON_FILE_DIFF, 16.)
-          .label("Diff")
+          .icon(
+            if browser {
+              theme::ICON_GLOBE
+            } else {
+              theme::ICON_FILE_DIFF
+            },
+            16.,
+          )
+          .label(if browser { "Browser" } else { "Diff" })
           .child(ui::icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground))
           .on_click(move |_, _, cx| {
             let Some(anchor) = bounds.borrow().get("review-switcher").copied() else {
@@ -1644,8 +1895,9 @@ impl Body {
 }
 
 impl Render for WorkspaceView {
-  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.sync_tooltip_popup(cx);
+    self.sync_address(window, cx);
     let p = theme::palette(self.dark);
     let snapshot = self.snapshot.clone();
     let header = match &snapshot {
@@ -1660,7 +1912,7 @@ impl Render for WorkspaceView {
     };
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
-      .map(|row| self.tab_row(&row, &p));
+      .map(|row| self.tab_row(&row, &p, cx));
     let code = self.tab_body(cx);
     // A dialog drawn over the screen cannot cover the webview, so the
     // frame steps aside while one is open.
