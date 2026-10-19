@@ -57,6 +57,7 @@ import {
   updateSessionAccess,
   openSystemLogDir,
   gpuiToastAction,
+  type StashEntry,
   type Workspace,
 } from "../lib/api";
 import { requestOpenSystemLogs } from "../lib/open-logs-request";
@@ -243,8 +244,13 @@ import {
   WorkspaceTerminalPane,
   type WorkspaceTerminalPaneHandle,
 } from "./WorkspaceTerminalPane";
+import { useGpuiAgentModals } from "./useGpuiAgentModals";
 import { useGpuiTerminalPane } from "./useGpuiTerminalPane";
-import { gpuiDrawsTerminalPane } from "../lib/gpui-screen";
+import { startAgentTask } from "../lib/startAgentTask";
+import {
+  type GpuiAgentPromptStart,
+  gpuiDrawsTerminalPane,
+} from "../lib/gpui-screen";
 import {
   agentInfo,
   DEFAULT_AGENT,
@@ -348,6 +354,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     number | null
   >(null);
   const [showStashModal, setShowStashModal] = useState(false);
+  // GPUI's prompt dialog handed a prompt over, and React is starting it.
+  const [agentPromptStarting, setAgentPromptStarting] = useState(false);
   const [runPromptRequest, setRunPromptRequest] = useState<{
     prompt?: string;
     workspaceId: number | null;
@@ -2159,6 +2167,59 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (!open) setRunPromptRequest(null);
   };
 
+  // GPUI's prompt dialog hands the prompt over; React starts the session.
+  const handleGpuiAgentPromptStart = async (
+    start: GpuiAgentPromptStart,
+  ): Promise<void> => {
+    const agent = toAgentKind(start.agent);
+    if (!agent || agentPromptStarting) return;
+    setAgentPromptStarting(true);
+    try {
+      const session = await startAgentTask({
+        repoPath: dataRepoPath,
+        workspaceId: start.workspaceId,
+        text: start.prompt,
+        issue: start.issue ? (runPromptRequest?.issue ?? null) : null,
+        agent,
+        mode: start.mode,
+        saveAsRepoDefault: start.saveAsRepoDefault,
+        addToast,
+      });
+      if (!session) return;
+      handleSessionCreated(session);
+      handleAgentPromptDialogOpenChange(false);
+    } catch (error) {
+      addToast({
+        title: "Failed to create task",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    } finally {
+      setAgentPromptStarting(false);
+    }
+  };
+
+  const handleStashApplyToNewWorkspace = (entry: StashEntry) => {
+    setShowStashModal(false);
+    const source =
+      entry.workspace_id != null
+        ? (workspaces.find((w) => w.id === entry.workspace_id) ?? null)
+        : null;
+    setUnifiedDialogDefaults({
+      sourceWorkspace: source,
+      targetBranch: source?.branch_name,
+      applyStashId: entry.id,
+      applyStashCommit: {
+        hash: entry.short_commit_id,
+        message: `Stash from ${entry.workspace_label}`,
+        timestamp: entry.created_at,
+      },
+      preSelectedCommits: [entry.short_commit_id],
+      activeTab: "commits",
+      description: `Apply stash ${entry.short_commit_id} (${entry.files_changed.length} files, +${entry.additions}/-${entry.deletions})`,
+    });
+  };
+
   const handleStartDefaultAgent = async () => {
     const configuredAgent =
       (await getRepoSetting(repoPath, "default_agent")) ||
@@ -2991,6 +3052,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const terminalPane = (): WorkspaceTerminalPaneHandle | null =>
     gpuiTerminalEnabled ? gpuiTerminal.handle : terminalPaneRef.current;
 
+  // GPUI draws the agent prompt, prompt history and stash dialogs over its
+  // screen; React's own stay closed meanwhile.
+  const gpuiModals = useGpuiAgentModals({
+    repoPath: dataRepoPath,
+    agentPrompt: {
+      open: showAgentPromptDialog,
+      defaultBranch: effectiveDefaultBranch,
+      workspaces,
+      initialPrompt: runPromptRequest?.prompt,
+      initialWorkspaceId: runPromptRequest?.workspaceId ?? null,
+      issue: runPromptRequest?.issue ?? null,
+      starting: agentPromptStarting,
+    },
+    promptHistory: { open: showPromptHistory, focusId: promptHistoryFocusId },
+    stash: { open: showStashModal, workspaces: visibleWorkspaces },
+    handlers: {
+      closeAgentPrompt: () => handleAgentPromptDialogOpenChange(false),
+      startAgent: (start) => void handleGpuiAgentPromptStart(start),
+      closePromptHistory: () => handlePromptHistoryOpenChange(false),
+      runPrompt: handleRunPrompt,
+      closeStash: () => setShowStashModal(false),
+      applyStashToNew: handleStashApplyToNewWorkspace,
+    },
+  });
+
   // The terminal pane's callbacks, shared by React's pane and GPUI's.
   const handleTerminalActiveSessionChange = (sessionId: number | null) => {
     if (sessionId === null) {
@@ -3679,7 +3765,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <AgentPromptDialog
-                open={showAgentPromptDialog}
+                open={showAgentPromptDialog && !gpuiModals}
                 onOpenChange={handleAgentPromptDialogOpenChange}
                 repoPath={dataRepoPath}
                 defaultBranch={effectiveDefaultBranch}
@@ -3691,7 +3777,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <PromptHistoryModal
-                open={showPromptHistory}
+                open={showPromptHistory && !gpuiModals}
                 onOpenChange={handlePromptHistoryOpenChange}
                 repoPath={dataRepoPath}
                 initialSelectedId={promptHistoryFocusId}
@@ -3704,7 +3790,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <StashModal
-                open={showStashModal}
+                open={showStashModal && !gpuiModals}
                 onOpenChange={setShowStashModal}
                 repoPath={dataRepoPath}
                 workspaces={visibleWorkspaces}
@@ -3712,27 +3798,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   void invalidateQueries(["workspace-changed-files"]);
                   void invalidateQueries(["workspace-diff"]);
                 }}
-                onApplyToNewWorkspace={(entry) => {
-                  setShowStashModal(false);
-                  const source =
-                    entry.workspace_id != null
-                      ? (workspaces.find((w) => w.id === entry.workspace_id) ??
-                        null)
-                      : null;
-                  setUnifiedDialogDefaults({
-                    sourceWorkspace: source,
-                    targetBranch: source?.branch_name,
-                    applyStashId: entry.id,
-                    applyStashCommit: {
-                      hash: entry.short_commit_id,
-                      message: `Stash from ${entry.workspace_label}`,
-                      timestamp: entry.created_at,
-                    },
-                    preSelectedCommits: [entry.short_commit_id],
-                    activeTab: "commits",
-                    description: `Apply stash ${entry.short_commit_id} (${entry.files_changed.length} files, +${entry.additions}/-${entry.deletions})`,
-                  });
-                }}
+                onApplyToNewWorkspace={handleStashApplyToNewWorkspace}
               />
 
               <WorkspacePicker

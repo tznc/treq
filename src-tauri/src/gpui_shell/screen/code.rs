@@ -851,18 +851,18 @@ fn pulse(el: Div, id: &'static str) -> impl IntoElement {
   )
 }
 
-fn tw(color: u32) -> Hsla {
+pub(super) fn tw(color: u32) -> Hsla {
   rgb(color).into()
 }
 
-const BLUE_400: u32 = 0x60a5fa;
-const BLUE_500: u32 = 0x3b82f6;
+pub(super) const BLUE_400: u32 = 0x60a5fa;
+pub(super) const BLUE_500: u32 = 0x3b82f6;
 const GREEN_400: u32 = 0x4ade80;
-const GREEN_500: u32 = 0x22c55e;
-const GREEN_600: u32 = 0x16a34a;
+pub(super) const GREEN_500: u32 = 0x22c55e;
+pub(super) const GREEN_600: u32 = 0x16a34a;
 const RED_400: u32 = 0xf87171;
 const RED_500: u32 = 0xef4444;
-const RED_600: u32 = 0xdc2626;
+pub(super) const RED_600: u32 = 0xdc2626;
 const YELLOW_500: u32 = 0xeab308;
 
 /// `rounded-lg border` around a section.
@@ -871,7 +871,7 @@ fn section(p: &Palette) -> Div {
 }
 
 /// A dropdown's panel (`DropdownMenuContent`), drawn over the tab.
-fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
+pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
   div()
     .id(id)
     .debug_selector(move || id.into())
@@ -887,7 +887,7 @@ fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
 }
 
 /// A `DropdownMenuItem`.
-fn menu_item(id: impl Into<SharedString>, p: &Palette, disabled: bool) -> Stateful<Div> {
+pub(super) fn menu_item(id: impl Into<SharedString>, p: &Palette, disabled: bool) -> Stateful<Div> {
   let id: SharedString = id.into();
   let selector = id.to_string();
   let hover = p.menu_accent;
@@ -907,7 +907,7 @@ fn menu_item(id: impl Into<SharedString>, p: &Palette, disabled: bool) -> Statef
 }
 
 /// A native `<input type="checkbox">`, 14px, in `accent`.
-fn checkbox(
+pub(super) fn checkbox(
   id: impl Into<SharedString>,
   checked: bool,
   accent: Hsla,
@@ -938,7 +938,7 @@ fn checkbox(
 }
 
 /// `ui/kbd.tsx`.
-fn kbd(p: &Palette, text: &str) -> Div {
+pub(super) fn kbd(p: &Palette, text: &str) -> Div {
   ui::text(div(), TextSize::Xs)
     .h(px(20.))
     .min_w(px(20.))
@@ -953,7 +953,7 @@ fn kbd(p: &Palette, text: &str) -> Div {
     .child(text.to_string())
 }
 
-fn agent_icon(agent: Agent) -> &'static str {
+pub(super) fn agent_icon(agent: Agent) -> &'static str {
   match agent {
     Agent::Claude => theme::ICON_AGENT_CLAUDE,
     Agent::Codex => theme::ICON_AGENT_CODEX,

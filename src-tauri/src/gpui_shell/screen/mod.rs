@@ -19,7 +19,13 @@ use serde::{Deserialize, Serialize};
 use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
 
-use super::{popup::PopupSink, theme};
+pub use modal::Modal;
+pub(super) use modal::ModalOpen;
+
+use super::{
+  popup::{PopupRequest, PopupSink},
+  theme,
+};
 
 mod changes;
 mod changes_data;
@@ -35,6 +41,7 @@ mod highlight;
 mod logs;
 mod logs_data;
 mod merge;
+mod modal;
 mod onboarding;
 mod settings;
 mod settings_data;
@@ -111,6 +118,7 @@ pub trait Host:
   + settings_data::SettingsHost
   + merge::MergeHost
   + terminal_data::TerminalHost
+  + modal::ModalsHost
 {
 }
 
@@ -119,6 +127,7 @@ impl<T> Host for T where
     + settings_data::SettingsHost
     + merge::MergeHost
     + terminal_data::TerminalHost
+    + modal::ModalsHost
 {
 }
 
@@ -136,6 +145,11 @@ pub struct Screen {
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
   merge: Option<Entity<merge::MergeView>>,
+  /// The dialog drawn over the screen, whichever it is, and its views.
+  modal: Option<Modal>,
+  agent_prompt: Option<Entity<modal::agent_prompt::AgentPromptView>>,
+  prompt_history: Option<Entity<modal::prompt_history::PromptHistoryView>>,
+  stash: Option<Entity<modal::stash::StashView>>,
 }
 
 impl Screen {
@@ -156,7 +170,23 @@ impl Screen {
       settings: None,
       workspace: None,
       merge: None,
+      modal: None,
+      agent_prompt: None,
+      prompt_history: None,
+      stash: None,
     }
+  }
+
+  /// Draws `modal` over the screen, or closes the open one for `None`. The
+  /// dialog's own state (typed text, the selection) lasts while React keeps
+  /// sending the same kind of dialog.
+  pub fn set_modal(&mut self, modal: Option<Modal>, cx: &mut Context<Self>) {
+    if self.modal == modal {
+      return;
+    }
+    cx.set_global(ModalOpen(modal.is_some()));
+    self.modal = modal;
+    cx.notify();
   }
 
   pub fn snapshot(&self) -> &ScreenSnapshot {
@@ -200,6 +230,7 @@ impl Render for Screen {
     if !matches!(self.snapshot.view, View::MergePreview(_)) {
       self.merge = None;
     }
+    let modal = self.modal_view(dark, cx);
     let ctx = Ctx {
       palette: theme::palette(dark),
       sink: &self.sink,
@@ -273,5 +304,67 @@ impl Render for Screen {
       .text_color(ctx.palette.foreground)
       .font_family(theme::SANS_FONT)
       .child(body)
+      .children(modal)
+  }
+}
+
+impl Screen {
+  /// The open dialog's view, kept while the same kind stays open.
+  fn modal_view(&mut self, dark: bool, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    let env = || modal::Env {
+      host: self.host.clone(),
+      react: self.sink.clone(),
+      popups: self.popups.clone(),
+    };
+    let route = self.modal.clone();
+    if !matches!(route, Some(Modal::AgentPrompt(_))) && self.agent_prompt.take().is_some() {
+      // A tooltip the dialog showed would outlive it.
+      (self.popups)(PopupRequest::HideTooltip, cx);
+    }
+    if !matches!(route, Some(Modal::PromptHistory(_))) {
+      self.prompt_history = None;
+    }
+    if !matches!(route, Some(Modal::Stash(_))) {
+      self.stash = None;
+    }
+    match route? {
+      Modal::AgentPrompt(route) => Some(match &self.agent_prompt {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let env = env();
+          let view = cx.new(|cx| modal::agent_prompt::AgentPromptView::new(env, route, dark, cx));
+          self.agent_prompt = Some(view.clone());
+          view.into_any_element()
+        }
+      }),
+      Modal::PromptHistory(route) => Some(match &self.prompt_history {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let env = env();
+          let view =
+            cx.new(|cx| modal::prompt_history::PromptHistoryView::new(env, route, dark, cx));
+          self.prompt_history = Some(view.clone());
+          view.into_any_element()
+        }
+      }),
+      Modal::Stash(route) => Some(match &self.stash {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let env = env();
+          let view = cx.new(|cx| modal::stash::StashView::new(env, route, dark, cx));
+          self.stash = Some(view.clone());
+          view.into_any_element()
+        }
+      }),
+    }
   }
 }

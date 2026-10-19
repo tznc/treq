@@ -104,6 +104,15 @@ export const gpuiScreenUpdate = (
     snapshot,
   });
 
+/** Draws a dialog in GPUI over this window's screen; null closes it. */
+export const gpuiModalUpdate = (
+  modal: import("./gpui-screen").GpuiModal | null,
+): Promise<void> =>
+  invoke("gpui_modal_update", {
+    windowLabel: currentWindowLabel(),
+    modal,
+  });
+
 /** Opens a GPUI menu at the last right-click in this window's sidebar. */
 export const gpuiMenuShow = (
   entries: import("./native-context-menu").GpuiMenuEntry[],
