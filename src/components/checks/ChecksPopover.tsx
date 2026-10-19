@@ -64,7 +64,6 @@ export function ChecksPopover({
   const ci = ciStatus && ciStatus.total > 0 ? ciStatus : null;
   const hasTreq = summary.state !== "none";
   const status = combinedStatus(summary, ci);
-  // While it is open, the screen hands the header back to React to draw it.
   useGpuiPart(
     "checks",
     hasTreq || ci
@@ -77,7 +76,20 @@ export function ChecksPopover({
             : null,
         }
       : null,
-    { open: () => setOpen(true) },
+    {
+      open: () => setOpen(true),
+      // GPUI draws the popover and asks for the flows React still runs.
+      run: (filename: string) => {
+        const workflow = checks.workflows.find(
+          (wf) => wf.filename === filename,
+        );
+        if (workflow) void checks.runWorkflow(workflow).catch(() => undefined);
+      },
+      runAll: () => void checks.runAll().catch(() => undefined),
+      trust: () => void checks.trust(),
+      rerunSetup: () => void checks.rerunSetup(),
+      viewLogs: () => onOpenLogs?.(),
+    },
   );
   if (!hasTreq && !ci) return null;
 

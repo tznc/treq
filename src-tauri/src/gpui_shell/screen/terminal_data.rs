@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
   core::agent_command::{self, AgentPaths, AutoCommand},
-  gpui_shell::native::Backend,
+  gpui_shell::{native::Backend, popover::PopoverHost},
   lock_ext::LockExt,
 };
 
@@ -48,7 +48,7 @@ pub struct Prepared {
   pub skill_write_warning: Option<String>,
 }
 
-pub trait TerminalHost: LogsHost {
+pub trait TerminalHost: LogsHost + PopoverHost {
   /// Starts a PTY unless one with the id runs; its output arrives through
   /// [`TerminalHost::listen`].
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String>;

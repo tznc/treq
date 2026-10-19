@@ -3,6 +3,10 @@
 //! window, backdrop included, gets a borderless transparent window of its
 //! own, placed over the shell window's client area and kept above it. Unlike
 //! the popups (`popup`), it takes focus, for its search field.
+//!
+//! The workspace header's popovers (`popover`) open here too, over a
+//! transparent backdrop, so one can drop over the framed webview and a click
+//! outside it closes it.
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
@@ -14,19 +18,24 @@ use tauri_plugin_gpui::{
 
 use super::{
   overlay::{Overlay, OverlayHost, OverlaySnapshot},
+  popover::Popover,
   popup,
   screen::ActionSink,
   theme,
 };
 
-/// The modal window's root: the open dialog, if any.
+/// The modal window's root: the open dialog or popover, if any.
 struct ModalRoot {
   overlay: Option<Entity<Overlay>>,
+  popover: Option<Entity<Popover>>,
 }
 
 impl Render for ModalRoot {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    div().size_full().children(self.overlay.clone())
+    div()
+      .size_full()
+      .children(self.overlay.clone())
+      .children(self.popover.clone())
   }
 }
 
@@ -83,7 +92,10 @@ fn modal_window(
   let attached = window.attach_gpui_with(
     GpuiOptions::default().focus(true).transparent(true),
     move |cx| {
-      let root = cx.new(|_| ModalRoot { overlay: None });
+      let root = cx.new(|_| ModalRoot {
+        overlay: None,
+        popover: None,
+      });
       *slot.borrow_mut() = Some(root.downgrade());
       root
     },
@@ -145,7 +157,11 @@ pub fn update(
   sink: ActionSink,
 ) {
   let Some(snapshot) = snapshot else {
-    hide(app, owner);
+    // React pushes `None` whenever no dialog is open, which must not close
+    // a popover.
+    if !popover_open(owner) {
+      hide(app, owner);
+    }
     return;
   };
   let Some((window, root)) = modal_window(app, owner) else {
@@ -162,6 +178,7 @@ pub fn update(
           .filter(|o| o.read(cx).view().same_dialog(&snapshot.view))
           .cloned();
         let opened = root.overlay.is_none();
+        root.popover = None;
         match reuse {
           Some(overlay) => overlay.update(cx, |o, cx| o.set_snapshot(snapshot, cx)),
           None => {
@@ -182,6 +199,48 @@ pub fn update(
   }
 }
 
+/// Shows `popover` over window `owner`, in place of what it showed.
+/// Main thread only, outside a GPUI update.
+pub fn show_popover(app: &AppHandle, owner: &str, popover: Entity<Popover>, dark: bool) {
+  let Some((window, root)) = modal_window(app, owner) else {
+    return;
+  };
+  let _ = tauri_plugin_gpui::with_app(move |cx| {
+    // The search field's colors.
+    theme::set_kit_dark(dark, cx);
+    let _ = root.update(cx, |root, cx| {
+      root.overlay = None;
+      root.popover = Some(popover);
+      cx.notify();
+    });
+  });
+  popup::hide_all();
+  cover(app, owner, &window);
+  let _ = window.show();
+  cover(app, owner, &window);
+  let _ = window.set_focus();
+}
+
+/// Closes window `owner`'s popover, if it shows one.
+pub fn hide_popover(app: &AppHandle, owner: &str) {
+  if popover_open(owner) {
+    hide(app, owner);
+  }
+}
+
+/// Whether window `owner`'s modal window shows a popover.
+fn popover_open(owner: &str) -> bool {
+  let Some(root) = MODALS.with(|modals| modals.borrow().get(owner).map(|m| m.root.clone())) else {
+    return false;
+  };
+  tauri_plugin_gpui::with_app(move |cx| {
+    root
+      .read_with(cx, |root, _| root.popover.is_some())
+      .unwrap_or(false)
+  })
+  .unwrap_or(false)
+}
+
 /// Closes window `owner`'s dialog and gives the window its focus back.
 fn hide(app: &AppHandle, owner: &str) {
   let Some((window, root)) = MODALS.with(|modals| {
@@ -198,6 +257,7 @@ fn hide(app: &AppHandle, owner: &str) {
   let _ = tauri_plugin_gpui::with_app(move |cx| {
     let _ = root.update(cx, |root, cx| {
       root.overlay = None;
+      root.popover = None;
       cx.notify();
     });
   });

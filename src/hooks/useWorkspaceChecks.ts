@@ -48,16 +48,29 @@ function setRunning(key: string, on: boolean) {
   });
 }
 
-/** Workflow files of workspace `workspaceId` running from this window. */
-export function useRunningCheckFiles(workspaceId: number | null): string[] {
+/** What runs from this window in workspace `workspaceId`, for GPUI's header. */
+export interface RunningChecks {
+  /** Workflow files running, a single job of them included. */
+  files: string[];
+  /** Workflow files running as a whole (`isRunning(filename)`). */
+  workflows: string[];
+  /** The setup script is being re-run. */
+  setup: boolean;
+}
+
+export function useRunningChecksOf(workspaceId: number | null): RunningChecks {
   const running = useRunningChecks((state) => state.running);
-  if (workspaceId === null) return [];
+  if (workspaceId === null) return { files: [], workflows: [], setup: false };
   const prefix = `${workspaceId}:`;
-  const files = Object.keys(running)
+  const keys = Object.keys(running)
     .filter((key) => key.startsWith(prefix))
-    .map((key) => key.slice(prefix.length).split(":")[0])
-    .filter((file) => file !== "<setup>");
-  return [...new Set(files)];
+    .map((key) => key.slice(prefix.length));
+  const files = keys.map((key) => key.split(":")[0]);
+  return {
+    files: [...new Set(files.filter((file) => file !== "<setup>"))],
+    workflows: keys.filter((key) => !key.includes(":") && key !== "<setup>"),
+    setup: keys.includes("<setup>"),
+  };
 }
 
 function runKey(workspaceId: number, filename: string, jobId?: string) {

@@ -293,6 +293,22 @@ impl workspace_data::WorkspaceHost for FakeHost {
   }
 }
 
+impl crate::gpui_shell::popover::PopoverHost for FakeHost {
+  fn starting_prompt(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Option<crate::gpui_shell::popover::data::StartingPrompt> {
+    self.record(format!("read starting prompt {workspace_id}"));
+    None
+  }
+
+  fn branches(&self, repo_path: &str) -> Result<Vec<crate::jj::JjBranch>, String> {
+    self.record(format!("list branches {repo_path}"));
+    Ok(Vec::new())
+  }
+}
+
 impl merge::MergeHost for FakeHost {
   fn merge_preview(&self, _: &str, workspace_id: i64) -> merge::Preview {
     self.record(format!("read merge {workspace_id}"));
@@ -1519,7 +1535,6 @@ fn route_json(workspace_id: Option<i64>, home_branch: &str) -> serde_json::Value
     "workspaceId": workspace_id,
     "homeBranch": home_branch,
     "tab": "overview",
-    "tabRow": true,
     "retargeting": false,
     "refreshing": false,
     "creatingPr": false,
@@ -1610,11 +1625,18 @@ fn feature_loaded() -> workspace_data::Loaded {
     commits: Some(serde_json::from_value(commits).expect("commits")),
     review_count: 5,
     uncommitted_count: 2,
-    checks: Some(workspace_data::ChecksSummary {
-      workflows: vec!["a.yml".into(), "b.yml".into(), "c.yml".into()],
-      latest: ["a.yml", "b.yml", "c.yml"]
-        .map(|f| (f.to_string(), "passed".to_string()))
-        .to_vec(),
+    checks: Some(crate::gpui_shell::popover::data::ChecksData {
+      workflows: ["a.yml", "b.yml", "c.yml"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, f)| crate::gpui_shell::popover::data::Workflow {
+          filename: f.into(),
+          name: f.into(),
+          latest: Some((i as i64 + 1, "passed".into())),
+        })
+        .collect(),
+      trusted: true,
+      setup: None,
     }),
     linear_enabled: true,
     ..Default::default()
@@ -1712,12 +1734,9 @@ fn workspace_header_offers_the_home_rebase() {
 fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   for selector in [
-    "workspace-target",
     "workspace-view-pr",
     "workspace-view-pr-web",
-    "workspace-checks",
     "workspace-merge",
-    "workspace-details",
     "workspace-more",
   ] {
     h.click(selector);
@@ -1727,11 +1746,8 @@ fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
   assert_eq!(
     h.sent(),
     vec![
-      press("workspace.target"),
       press("workspace.viewPr"),
-      press("workspace.checks"),
       press("workspace.merge"),
-      press("workspace.details"),
       press("workspace.more"),
     ]
   );
@@ -1798,16 +1814,100 @@ fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn workspace_leaves_the_tab_row_to_react_without_one(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+fn workspace_keeps_the_tab_row_while_the_browser_shows(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("http://localhost:3000"));
   assert!(h.drawn("workspace-tab-row"));
-  h.update(|s| match &mut s.view {
-    View::Workspace(route) => route.tab_row = false,
-    _ => unreachable!(),
-  });
-  assert!(!h.drawn("workspace-tab-row"));
+  assert!(h.drawn("browser-address"));
+  assert!(h.drawn("browser-reload"));
   assert!(h.drawn("workspace-header"));
   assert!(h.drawn("workspace-frame"));
+}
+
+impl Harness {
+  /// What was sent to React for the controls whose id starts with `prefix`.
+  fn sent_for(&self, prefix: &str) -> Vec<ScreenAction> {
+    self
+      .sent()
+      .into_iter()
+      .filter(|action| match action {
+        ScreenAction::Press { id } => id.starts_with(prefix),
+        ScreenAction::Field { field, .. } => field.starts_with(prefix),
+        _ => false,
+      })
+      .collect()
+  }
+}
+
+fn browser_route(url: &str) -> ScreenSnapshot {
+  let mut route = changes_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.review_switcher = true;
+    r.browser = Some(workspace_data::BrowserRoute { url: url.into() });
+  }
+  route
+}
+
+fn set_browser_url(h: &mut Harness, url: &str) {
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.browser = Some(workspace_data::BrowserRoute { url: url.into() });
+    }
+  });
+}
+
+#[gpui::test]
+fn browser_reload_asks_react_to_reload(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("http://localhost:3000"));
+  h.click("browser-reload");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent_for("browser."), vec![press("browser.reload")]);
+}
+
+#[gpui::test]
+fn browser_address_reports_a_url_it_would_not_open(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("https://example.com"));
+  assert!(h.drawn("browser-address-error"));
+  assert!(h.drawn("browser-address-invalid"));
+  set_browser_url(&mut h, "http://127.0.0.1:8080/x");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("browser-address-error"));
+  assert!(!h.drawn("browser-address-invalid"));
+}
+
+#[gpui::test]
+fn browser_address_navigates_on_enter(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route(""));
+  h.click("browser-address");
+  h.cx.simulate_input(" http://localhost:5173 ");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent_for("browser."),
+    vec![field("browser.navigate", "http://localhost:5173".into())]
+  );
+}
+
+#[gpui::test]
+fn browser_address_ignores_enter_for_a_refused_url(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route(""));
+  h.click("browser-address");
+  h.cx.simulate_input("https://example.com");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(h.sent_for("browser.").is_empty());
+  assert!(h.drawn("browser-address-error"));
+}
+
+#[gpui::test]
+fn browser_switcher_names_the_view_that_shows(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("http://localhost:3000"));
+  assert!(h.drawn("review-switcher"));
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.browser = None;
+    }
+  });
+  assert!(!h.drawn("browser-address"));
 }
 
 #[gpui::test]
@@ -3946,6 +4046,24 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
       if text == "Expand" && keys == "⌘ + J")
   });
   assert!(shown, "{:?}", h.popups.borrow());
+}
+
+#[gpui::test]
+fn header_buttons_open_their_popovers_in_the_modal_window(cx: &mut TestAppContext) {
+  for button in ["workspace-details", "workspace-target", "workspace-checks"] {
+    let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+    h.click(button);
+    h.cx.run_until_parked();
+    let opened = h
+      .popups
+      .borrow()
+      .iter()
+      .any(|p| matches!(p, PopupRequest::ShowPopover { .. }));
+    assert!(opened, "{button}: {:?}", h.popups.borrow());
+    // The screen stays: nothing is handed to React to draw.
+    assert!(h.drawn("workspace-header"));
+    assert!(h.sent().is_empty(), "{button}");
+  }
 }
 
 fn send_assets() -> serde_json::Value {

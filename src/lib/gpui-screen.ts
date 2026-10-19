@@ -97,8 +97,6 @@ export interface GpuiWorkspaceScreen {
   /** The home repository's checked-out branch. */
   homeBranch: string;
   tab: GpuiWorkspaceTab;
-  /** false: React draws the tab row in the frame, as the Browser view's address bar lives there. */
-  tabRow: boolean;
   /** The target branch is being changed. */
   retargeting: boolean;
   /** The Changes tab is refreshing its files. */
@@ -106,6 +104,10 @@ export interface GpuiWorkspaceScreen {
   creatingPr: boolean;
   /** Workflow files started from this window that have not reported yet. */
   runningChecks: string[];
+  /** Those running as a whole, not just a job of them. */
+  runningWorkflows: string[];
+  /** The workspace's setup script is being re-run from this window. */
+  setupRerunning: boolean;
   mergeQueue: {
     label: string;
     secondary: boolean;
@@ -126,8 +128,14 @@ export interface GpuiWorkspaceScreen {
   moveTargets: { branch: string; label: string }[];
   /** Bumped when the workspace's files change or the window gains focus. */
   changesRevision: number;
-  /** The tab row offers the Diff/Browser switcher (browser preview, Diff shown). */
+  /** The tab row offers the Diff/Browser switcher (browser preview, Changes tab). */
   reviewSwitcher: boolean;
+  /**
+   * The Browser view shows: GPUI draws its address bar in the tab row, and
+   * the framed webview holds only the page. GPUI presses "browser.reload"
+   * and sets "browser.navigate" to a url.
+   */
+  browser: { url: string } | null;
   /** The Logs tab's source while it shows (`LogSource`). */
   logsSource: string | null;
   /** Bumped by "open in Logs" links, so GPUI's Logs tab starts over on `logsSource`. */

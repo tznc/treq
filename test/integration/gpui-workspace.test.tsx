@@ -9,11 +9,13 @@ import { dispatchRefreshWorkspaceChanges } from "../../src/lib/change-file-drag"
 import type { GpuiNativeEvent } from "../../src/lib/gpui-native";
 import { popupNativeMenu } from "../../src/lib/native-context-menu";
 import {
+  findGpuiModal,
   findGpuiScreen,
   gpuiScreen,
   sendGpuiScreenAction,
 } from "../gpui-screen";
 import { clickGpuiRow, findGpuiToast, gpuiMenuLabels } from "../gpui-sidebar";
+import { useFeaturePreviewStore } from "../../src/stores/featurePreviewStore";
 import { emitOnTestBus } from "../test-event-bus";
 import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
@@ -44,7 +46,7 @@ describe("GPUI workspace header", () => {
     expect(home.repoPath).toBe(repoPath);
     expect(home.workspaceId).toBeNull();
     expect(home.tab).toBe("overview");
-    expect(home.tabRow).toBe(true);
+    expect(home.browser).toBeNull();
     expect(home.retargeting).toBe(false);
     expect(home.runningChecks).toEqual([]);
   });
@@ -247,22 +249,111 @@ describe("GPUI workspace header", () => {
       expect(alpha.creatingPr).toBe(false);
     });
 
-    it("steps aside while React's details popover is open", async () => {
+    it("keeps drawing while GPUI's header popovers are open", async () => {
       await openAlpha();
 
       press("workspace.details");
-      await screen.findByTestId("workspace-details-popover");
-      await waitFor(() => expect(gpuiScreen()).toBeNull());
+      press("workspace.target");
+      press("workspace.checks");
+      expect(screen.queryByTestId("workspace-details-popover")).toBeNull();
+      expect(gpuiScreen()).not.toBeNull();
     });
 
-    it("opens the target branch picker in React", async () => {
+    it("retargets the workspace to the branch GPUI's picker chose", async () => {
+      const alpha = await openAlpha();
+      const updateWorkspace = vi
+        .spyOn(api, "updateWorkspace")
+        .mockRejectedValue(new Error("stop"));
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "workspace.target",
+        value: "develop",
+      });
+      await waitFor(() => {
+        expect(updateWorkspace).toHaveBeenCalledWith(
+          repoPath,
+          alpha.workspaceId,
+          "develop",
+        );
+      });
+    });
+
+    it("opens the prompt history GPUI's details popover asks for", async () => {
+      window.__TREQ_REACT_MODALS__ = false;
       await openAlpha();
 
-      await waitFor(() => {
-        press("workspace.target");
-        expect(screen.getByPlaceholderText("Search branches...")).toBeTruthy();
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "workspace.viewFullPrompt",
+        value: 12,
       });
-      await waitFor(() => expect(gpuiScreen()).toBeNull());
+      const dialog = await findGpuiModal("promptHistory");
+      expect(dialog.initialSelectedId).toBe(12);
+    });
+
+    it("draws the Browser view's address bar in GPUI's tab row", async () => {
+      useFeaturePreviewStore.setState({
+        flags: { ...useFeaturePreviewStore.getState().flags, browser: true },
+      });
+      const open = vi
+        .spyOn(api, "openBrowserWebview")
+        .mockResolvedValue(undefined);
+      const navigate = vi
+        .spyOn(api, "navigateBrowserWebview")
+        .mockResolvedValue(undefined);
+      vi.spyOn(api, "closeBrowserWebview").mockResolvedValue(undefined);
+      vi.spyOn(api, "syncBrowserWebviewBounds").mockResolvedValue(undefined);
+      vi.spyOn(api, "listenBrowserUrlChanged").mockImplementation(() =>
+        Promise.resolve(() => {}),
+      );
+      await openAlpha();
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "workspace.tab",
+        value: "changes",
+      });
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.reviewSwitcher).toBe(true);
+      });
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "changes.subView",
+        value: "browser",
+      });
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.browser).toEqual({ url: "http://localhost:3000" });
+      });
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "browser.navigate",
+        value: "http://localhost:5173",
+      });
+      await waitFor(() => {
+        expect(open).toHaveBeenCalledWith(
+          "http://localhost:5173",
+          expect.any(Number),
+          expect.any(Number),
+          expect.any(Number),
+          expect.any(Number),
+        );
+      });
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.browser).toEqual({ url: "http://localhost:5173" });
+      });
+
+      press("browser.reload");
+      await waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith("http://localhost:5173");
+      });
+    });
+
+    it("tells GPUI which workflows are running", async () => {
+      const alpha = await openAlpha();
+      expect(alpha.runningWorkflows).toEqual([]);
+      expect(alpha.browser).toBeNull();
     });
 
     it("starts an agent with the review GPUI's Changes tab finished", async () => {
