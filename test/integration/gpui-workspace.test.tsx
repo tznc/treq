@@ -11,7 +11,7 @@ import {
   gpuiScreen,
   sendGpuiScreenAction,
 } from "../gpui-screen";
-import { clickGpuiRow, gpuiMenuLabels } from "../gpui-sidebar";
+import { clickGpuiRow, findGpuiToast, gpuiMenuLabels } from "../gpui-sidebar";
 import { emitOnTestBus } from "../test-event-bus";
 import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
@@ -67,7 +67,7 @@ describe("GPUI workspace header", () => {
       description: "Fetched and pushed; resolve remaining conflicts locally",
       tone: "warning",
     });
-    await screen.findByText("Synced with conflicts");
+    await findGpuiToast("Synced with conflicts");
   });
 
   it("switches tabs through React", async () => {
