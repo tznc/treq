@@ -901,6 +901,7 @@ pub fn run() {
       commands::gpui_sidebar_update,
       commands::gpui_screen_update,
       commands::gpui_modal_update,
+      commands::gpui_overlay_update,
       commands::gpui_menu_show,
       commands::gpui_menu_hide,
       commands::gpui_toasts_update,

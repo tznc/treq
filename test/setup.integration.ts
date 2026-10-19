@@ -65,6 +65,9 @@ beforeEach(() => {
   // React's agent prompt, prompt history and stash dialogs, which most tests
   // drive; gpui-modals.test.tsx turns GPUI's on.
   window.__TREQ_REACT_MODALS__ = true;
+  // React's palette and pickers, which most tests drive;
+  // gpui-overlays.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_OVERLAYS__ = true;
   window.__TREQ_GPUI_SHELL__ = true;
 });
 afterEach(() => closeTestPtys(tauriTest.invoke));

@@ -18,6 +18,8 @@ declare global {
     __TREQ_REACT_TERMINAL__?: boolean;
     /** React draws the agent prompt, prompt history and stash dialogs; tests of those set it. */
     __TREQ_REACT_MODALS__?: boolean;
+    /** React draws Dashboard's palette and pickers; tests of them set it. */
+    __TREQ_REACT_OVERLAYS__?: boolean;
   }
 }
 

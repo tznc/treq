@@ -1319,7 +1319,7 @@ pub fn hide_menus() {
 }
 
 /// The client area of `window` on screen, in logical pixels.
-fn client_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
+pub(super) fn client_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
   let scale = window.scale_factor().ok()? as f32;
   let position = window.inner_position().ok()?;
   let size = window.inner_size().ok()?;

@@ -30,7 +30,9 @@ use tauri_plugin_gpui::{
 };
 
 mod form;
+mod modal;
 pub mod native;
+mod overlay;
 mod popup;
 mod screen;
 mod sidebar;
@@ -39,6 +41,7 @@ mod time;
 mod tooltips;
 mod ui;
 
+pub use overlay::OverlaySnapshot;
 pub use popup::{MenuEntry, Toast};
 pub use screen::{Modal, ScreenSnapshot};
 use screen::{Screen, ScreenAction};
@@ -124,10 +127,21 @@ impl Render for Shell {
         gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
       ));
     let app = self.app.clone();
+    let palette_sink = overlay_sink(self.app.clone(), self.label.to_string());
     gpui::div()
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
+      // Cmd+K pressed in GPUI (the webview's keys reach React directly)
+      // opens the command palette, as Dashboard's shortcut does.
+      .capture_key_down(move |event, _, cx| {
+        let keystroke = &event.keystroke;
+        let m = keystroke.modifiers;
+        if keystroke.key == "k" && m.secondary() && !m.shift && !m.alt {
+          let id = "overlay.commandPalette".to_string();
+          palette_sink(ScreenAction::Press { id }, cx);
+        }
+      })
       // A click anywhere in the window closes an open menu, as one outside
       // a native menu does.
       .capture_any_mouse_down(move |_, _, _| defer_main(&app, |_| popup::hide_menus()))
@@ -328,6 +342,31 @@ fn screen_sink(app: AppHandle, label: String) -> screen::ActionSink {
   })
 }
 
+/// Shows `snapshot`'s dialog over the whole of window `label` (see
+/// `overlay`), or closes it for `None`.
+pub fn update_overlay(app: &AppHandle, label: &str, snapshot: Option<OverlaySnapshot>) {
+  let label = label.to_string();
+  defer_main(app, move |app| {
+    let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
+    let sink = overlay_sink(app.clone(), label.clone());
+    modal::update(app, &label, snapshot, host, sink);
+  });
+}
+
+/// Sends overlay actions to the webview of window `label`, as
+/// [`screen_sink`] does for screens.
+fn overlay_sink(app: AppHandle, label: String) -> screen::ActionSink {
+  std::rc::Rc::new(move |action: ScreenAction, _| {
+    let (app, label) = (app.clone(), label.clone());
+    tauri::async_runtime::spawn(async move {
+      let target = tauri::EventTarget::webview_window(&label);
+      if let Err(err) = tauri::Emitter::emit_to(&app, target, overlay::ACTION_EVENT, action) {
+        log::warn!("failed to send GPUI overlay action: {err}");
+      }
+    });
+  })
+}
+
 /// Sends sidebar actions to the webview of window `label`. Tauri calls must
 /// not run inside a GPUI update, so each send runs in a task.
 fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
@@ -444,15 +483,20 @@ pub fn update_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
   });
 }
 
-/// Keeps window `label`'s toasts in its corner as it moves or resizes.
+/// Keeps window `label`'s toasts in its corner, and its open dialog over
+/// it, as it moves or resizes.
 pub fn place_toasts(app: &AppHandle, label: &str) {
   let label = label.to_string();
-  defer_main(app, move |app| popup::place_owner_toasts(app, &label));
+  defer_main(app, move |app| {
+    popup::place_owner_toasts(app, &label);
+    modal::place(app, &label);
+  });
 }
 
 /// Forgets a destroyed window's shell.
 pub fn forget_window(label: &str) {
   popup::forget_owner(label);
+  modal::forget(label);
   let label = label.to_string();
   let _ = tauri_plugin_gpui::with_app(move |cx| {
     if let Some(shells) = cx.try_global::<Shells>() {
