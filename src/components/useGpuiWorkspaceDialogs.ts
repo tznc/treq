@@ -1,10 +1,10 @@
 import { useRef } from "react";
 import type { Workspace } from "../lib/api";
 import {
-  type GpuiModal,
-  type GpuiModalWorkspace,
+  type GpuiWorkspaceModal,
+  type GpuiDialogWorkspace,
   type GpuiScreenAction,
-  useGpuiModal,
+  useGpuiWorkspaceModal,
 } from "../lib/gpui-screen";
 import type { WorkspaceDialogDefaults } from "./UnifiedWorkspaceDialog";
 
@@ -29,7 +29,7 @@ interface Handlers {
   cancelChangeMove: () => void;
 }
 
-function modalWorkspace(workspace: Workspace): GpuiModalWorkspace {
+function modalWorkspace(workspace: Workspace): GpuiDialogWorkspace {
   return {
     id: workspace.id,
     branchName: workspace.branch_name,
@@ -39,7 +39,10 @@ function modalWorkspace(workspace: Workspace): GpuiModalWorkspace {
 
 function dialogSource(
   source: Workspace | null | undefined,
-): Extract<GpuiModal, { kind: "workspaceDialog" }>["defaults"]["source"] {
+): Extract<
+  GpuiWorkspaceModal,
+  { kind: "workspaceDialog" }
+>["defaults"]["source"] {
   if (source === undefined) return { kind: "create" };
   if (source === null) return { kind: "home" };
   return {
@@ -82,7 +85,7 @@ export function useGpuiWorkspaceDialogs({
   deletion: boolean;
   changeMove: ChangeMove | null;
   handlers: Handlers;
-}): GpuiModal["kind"] | null {
+}): GpuiWorkspaceModal["kind"] | null {
   // Each open of the workspace dialog starts it fresh.
   const opened = useRef<{
     defaults: WorkspaceDialogDefaults | null;
@@ -95,7 +98,7 @@ export function useGpuiWorkspaceDialogs({
     };
   }
 
-  let modal: GpuiModal | null = null;
+  let modal: GpuiWorkspaceModal | null = null;
   if (workspaceDialog) {
     const { sourceWorkspace, ...rest } = workspaceDialog;
     modal = {
@@ -156,6 +159,6 @@ export function useGpuiWorkspaceDialogs({
     }
   };
 
-  const draws = useGpuiModal(enabled, modal, onAction);
+  const draws = useGpuiWorkspaceModal(enabled, modal, onAction);
   return draws && modal ? modal.kind : null;
 }

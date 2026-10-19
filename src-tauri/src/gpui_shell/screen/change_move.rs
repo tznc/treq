@@ -9,9 +9,9 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
-  modal::{dialog_description, dialog_header, dialog_panel, press},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::WorkspaceDialogHost,
+  workspace_modal::{dialog_description, dialog_header, dialog_panel, press},
   ActionSink,
 };
 use crate::{

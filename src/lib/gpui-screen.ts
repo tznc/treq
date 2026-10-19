@@ -187,7 +187,7 @@ export type GpuiScreenView =
   | GpuiMergePreviewScreen;
 
 /** A workspace as the GPUI dialogs need it. */
-export interface GpuiModalWorkspace {
+export interface GpuiDialogWorkspace {
   id: number;
   branchName: string;
   workspacePath: string;
@@ -199,7 +199,7 @@ export interface GpuiModalWorkspace {
  * open; GPUI does the work through the backend and hands back closing,
  * the workspace it made, and the workspace to delete.
  */
-export type GpuiModal =
+export type GpuiWorkspaceModal =
   /** `UnifiedWorkspaceDialog`; `key` changes with each open. */
   | {
       kind: "workspaceDialog";
@@ -237,8 +237,8 @@ export type GpuiModal =
   | {
       kind: "workspaceDeletion";
       repoPath: string;
-      workspaces: GpuiModalWorkspace[];
-      currentWorkspace: GpuiModalWorkspace | null;
+      workspaces: GpuiDialogWorkspace[];
+      currentWorkspace: GpuiDialogWorkspace | null;
     }
   /** The `AlertDialog` confirming a move of dropped files. */
   | {
@@ -253,13 +253,14 @@ export type GpuiModal =
 export type GpuiScreenSnapshot = GpuiScreenView & {
   dark: boolean;
   /** The dialog GPUI draws over the screen, while one is open. */
-  modal?: GpuiModal;
+  modal?: GpuiWorkspaceModal;
 };
 
 /** The open GPUI dialog, and how many mounted screens GPUI is asked to draw. */
-const useGpuiModalStore = create<{ modal: GpuiModal | null; screens: number }>(
-  () => ({ modal: null, screens: 0 }),
-);
+const useGpuiWorkspaceModalStore = create<{
+  modal: GpuiWorkspaceModal | null;
+  screens: number;
+}>(() => ({ modal: null, screens: 0 }));
 
 export type GpuiScreenAction =
   | { kind: "openRepo" }
@@ -312,7 +313,7 @@ export function useGpuiScreen(
   const host = isGpuiShellHost() && window.__TREQ_WEB_UI__ !== true;
   const dark = useThemeStore((s) => s.actualTheme()) === "dark";
   const domModal = useWindowModalBackdrop(host) !== null;
-  const modal = useGpuiModalStore((s) => s.modal);
+  const modal = useGpuiWorkspaceModalStore((s) => s.modal);
   // A GPUI dialog covers the window, so a webview modal closing under it
   // (the command palette opening Delete Workspace) does not drop the screen.
   const json =
@@ -323,9 +324,9 @@ export function useGpuiScreen(
   const wants = host && view !== null;
   useEffect(() => {
     if (!wants) return;
-    useGpuiModalStore.setState((s) => ({ screens: s.screens + 1 }));
+    useGpuiWorkspaceModalStore.setState((s) => ({ screens: s.screens + 1 }));
     return () =>
-      useGpuiModalStore.setState((s) => ({ screens: s.screens - 1 }));
+      useGpuiWorkspaceModalStore.setState((s) => ({ screens: s.screens - 1 }));
   }, [wants]);
 
   // Starts at null so a screen that never drew sends no null, which would
@@ -366,9 +367,9 @@ export function useGpuiScreen(
  * whether GPUI draws Dashboard's dialogs now; React draws its own when not
  * (no GPUI screen shows, or the integration tests' React dialogs).
  */
-export function useGpuiModal(
+export function useGpuiWorkspaceModal(
   enabled: boolean,
-  modal: GpuiModal | null,
+  modal: GpuiWorkspaceModal | null,
   onAction: (action: GpuiScreenAction) => void,
 ): boolean {
   const host =
@@ -376,16 +377,19 @@ export function useGpuiModal(
     isGpuiShellHost() &&
     window.__TREQ_WEB_UI__ !== true &&
     window.__TREQ_REACT_WORKSPACE_DIALOGS__ !== true;
-  const screens = useGpuiModalStore((s) => s.screens);
+  const screens = useGpuiWorkspaceModalStore((s) => s.screens);
   const draws = host && screens > 0;
   const json = draws && modal ? JSON.stringify(modal) : null;
 
   useEffect(() => {
-    useGpuiModalStore.setState({
-      modal: json === null ? null : (JSON.parse(json) as GpuiModal),
+    useGpuiWorkspaceModalStore.setState({
+      modal: json === null ? null : (JSON.parse(json) as GpuiWorkspaceModal),
     });
   }, [json]);
-  useEffect(() => () => useGpuiModalStore.setState({ modal: null }), []);
+  useEffect(
+    () => () => useGpuiWorkspaceModalStore.setState({ modal: null }),
+    [],
+  );
 
   const latest = useRef(onAction);
   latest.current = onAction;

@@ -401,13 +401,14 @@ fn dialog(defaults: serde_json::Value) -> ScreenSnapshot {
 
 fn dialog_view(h: &mut Harness) -> Entity<workspace_dialog::WorkspaceDialog> {
   h.cx.run_until_parked();
-  h.screen.read_with(&h.cx, |screen, _| match &screen.modal {
-    Some(open) => match &open.modal {
-      modal::Modal::WorkspaceDialog(view) => view.clone(),
-      _ => panic!("another dialog is open"),
-    },
-    None => panic!("no dialog is open"),
-  })
+  h.screen
+    .read_with(&h.cx, |screen, _| match &screen.workspace_modal {
+      Some(open) => match &open.modal {
+        workspace_modal::Modal::WorkspaceDialog(view) => view.clone(),
+        _ => panic!("another dialog is open"),
+      },
+      None => panic!("no dialog is open"),
+    })
 }
 
 fn pause(h: &mut Harness) {
@@ -613,7 +614,7 @@ fn moves_picked_hunks_to_an_existing_workspace(cx: &mut TestAppContext) {
   let view = dialog_view(&mut h);
   h.cx.read(|cx| {
     let view = view.read(cx);
-    assert_eq!(view.file_state("a.rs"), modal::Check::Some);
+    assert_eq!(view.file_state("a.rs"), workspace_modal::Check::Some);
     assert_eq!(view.target_workspace_id, Some(8));
     assert_eq!(view.submit_label(), "Move 1 to Existing Workspace");
   });
@@ -748,7 +749,7 @@ fn change_move() -> ScreenSnapshot {
 #[test]
 fn the_move_confirmation_counts_the_files() {
   let route = match change_move().modal {
-    Some(modal::ModalRoute::ConfirmChangeMove(route)) => route,
+    Some(workspace_modal::ModalRoute::ConfirmChangeMove(route)) => route,
     _ => unreachable!(),
   };
   assert_eq!(route.title(), "Move 2 files to signup?");

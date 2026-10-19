@@ -4,7 +4,7 @@ import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../src/lib/api";
-import type { GpuiModal } from "../../src/lib/gpui-screen";
+import type { GpuiWorkspaceModal } from "../../src/lib/gpui-screen";
 import {
   findGpuiScreen,
   gpuiScreen,
@@ -16,13 +16,13 @@ import { createTestRepo, openRepo } from "../utils";
 
 const press = (id: string) => sendGpuiScreenAction({ kind: "press", id });
 
-async function findGpuiModal<K extends GpuiModal["kind"]>(
+async function findGpuiModal<K extends GpuiWorkspaceModal["kind"]>(
   kind: K,
-): Promise<Extract<GpuiModal, { kind: K }>> {
+): Promise<Extract<GpuiWorkspaceModal, { kind: K }>> {
   const shown = await findGpuiScreen("workspace", (s) => {
     expect(s.modal?.kind).toBe(kind);
   });
-  return shown.modal as Extract<GpuiModal, { kind: K }>;
+  return shown.modal as Extract<GpuiWorkspaceModal, { kind: K }>;
 }
 
 async function waitForNoGpuiModal() {

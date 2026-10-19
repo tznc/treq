@@ -9,7 +9,7 @@ use tauri_plugin_gpui::gpui::{
   MouseButton, SharedString, Subscription, Window,
 };
 
-use super::{modal::press, ActionSink, ScreenAction};
+use super::{workspace_modal::press, ActionSink, ScreenAction};
 use crate::gpui_shell::{
   theme::{self, Palette},
   ui::{self, TextSize},

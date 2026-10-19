@@ -36,7 +36,6 @@ mod highlight;
 mod logs;
 mod logs_data;
 mod merge;
-mod modal;
 mod onboarding;
 mod rename_dialog;
 mod settings;
@@ -49,6 +48,7 @@ mod workspace_data;
 mod workspace_deletion;
 mod workspace_dialog;
 mod workspace_dialog_data;
+mod workspace_modal;
 
 #[cfg(test)]
 mod tests;
@@ -69,7 +69,7 @@ pub struct ScreenSnapshot {
   pub view: View,
   /// The Dashboard dialog open over the screen.
   #[serde(default)]
-  pub modal: Option<modal::ModalRoute>,
+  pub modal: Option<workspace_modal::ModalRoute>,
 }
 
 /// One screen's data, tagged by `kind`.
@@ -148,7 +148,7 @@ pub struct Screen {
   workspace: Option<Entity<workspace::WorkspaceView>>,
   merge: Option<Entity<merge::MergeView>>,
   /// The dialog drawn over the screen, while React keeps it open.
-  modal: Option<modal::OpenModal>,
+  workspace_modal: Option<workspace_modal::OpenModal>,
 }
 
 impl Screen {
@@ -169,7 +169,7 @@ impl Screen {
       settings: None,
       workspace: None,
       merge: None,
-      modal: None,
+      workspace_modal: None,
     }
   }
 
@@ -215,12 +215,12 @@ impl Render for Screen {
       self.merge = None;
     }
     match &self.snapshot.modal {
-      None => self.modal = None,
-      Some(route) => match &self.modal {
+      None => self.workspace_modal = None,
+      Some(route) => match &self.workspace_modal {
         Some(open) if open.is_for(route) => open.update(route, dark, cx),
         _ => {
           let host: Arc<dyn workspace_dialog_data::WorkspaceDialogHost> = self.host.clone();
-          self.modal = Some(modal::OpenModal::open(
+          self.workspace_modal = Some(workspace_modal::OpenModal::open(
             route,
             host,
             self.sink.clone(),
@@ -230,10 +230,10 @@ impl Render for Screen {
         }
       },
     }
-    let modal = self.modal.as_ref().filter(|open| open.shown(cx));
+    let workspace_modal = self.workspace_modal.as_ref().filter(|open| open.shown(cx));
     // The webview is a window of its own; a dialog over it must hide it.
-    let covered = modal.is_some();
-    let modal = modal.map(modal::OpenModal::element);
+    let covered = workspace_modal.is_some();
+    let workspace_modal = workspace_modal.map(workspace_modal::OpenModal::element);
     let ctx = Ctx {
       palette: theme::palette(dark),
       sink: &self.sink,
@@ -311,6 +311,6 @@ impl Render for Screen {
       .text_color(ctx.palette.foreground)
       .font_family(theme::SANS_FONT)
       .child(body)
-      .children(modal)
+      .children(workspace_modal)
   }
 }

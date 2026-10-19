@@ -19,11 +19,13 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
-  modal::{checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check},
   workspace_deletion::matches,
   workspace_dialog_data::{
     self as data, branch_from_title, branch_name_error, new_workspace_chain, ChainEntry, Position,
     Route, Source, StashCommit, Submit, Submitted, Tab, WorkspaceDialogHost,
+  },
+  workspace_modal::{
+    checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check,
   },
   ActionSink, ScreenAction,
 };
