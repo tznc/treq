@@ -15,9 +15,6 @@ import { emitOnTestBus } from "../test-event-bus";
 import { render, screen } from "../test-utils";
 import { createTestRepo } from "../utils";
 
-// GPUI draws the checklist and opens repositories through the backend
-// itself (gpui_shell/screen/onboarding.rs, tested in Rust); React only
-// follows what it did.
 function sendNativeEvent(event: GpuiNativeEvent) {
   act(() => {
     emitOnTestBus("gpui-native-event", event);
@@ -37,7 +34,6 @@ describe("GPUI onboarding screen", () => {
 
   it("switches to a repository GPUI opened", async () => {
     const { repoPath } = createTestRepo(false);
-    // GPUI has initialized it and recorded it for the window.
     await invoke("init_repo", { repoPath });
     render(<Dashboard />);
     await findGpuiScreen("onboarding");
