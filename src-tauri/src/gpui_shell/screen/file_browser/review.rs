@@ -1,0 +1,557 @@
+//! The file browser's review: comment cards and boxes, the Cmd+F bar, the
+//! Finish review popover and the Discard dialog.
+
+use super::*;
+
+impl FileBrowserView {
+  /// `FileCommentSection`.
+  pub(super) fn comment_section(
+    &self,
+    comments: &[&LineComment],
+    input: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let mut section = div()
+      .debug_selector(|| "file-comment-section".into())
+      .border_b_1()
+      .border_color(p.border)
+      .bg(p.muted.opacity(0.2))
+      .px_4()
+      .py_3()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .font_family(theme::SANS_FONT)
+      .text_size(px(13.))
+      .line_height(px(20.));
+    for c in comments {
+      section = section.child(self.comment_card(c, p, cx));
+    }
+    if input {
+      section = section.child(self.comment_input(p, cx));
+    }
+    section
+  }
+
+  pub(super) fn comment_card(
+    &self,
+    c: &LineComment,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
+    let box_ = || {
+      div()
+        .bg(p.background)
+        .rounded(px(6.))
+        .p_3()
+        .border_1()
+        .border_color(p.border.opacity(0.6))
+    };
+    if self.editing.as_deref() == Some(c.id.as_str()) {
+      let discard = c.id.clone();
+      return box_()
+        .child(self.edit_box(
+          p,
+          cx.listener(move |view, _, _, cx| view.delete_comment(&discard, cx)),
+          cx,
+        ))
+        .into_any_element();
+    }
+    let (edit, delete, body) = (c.id.clone(), c.id.clone(), c.text.clone());
+    let muted = p.muted_foreground;
+    let accent = p.accent;
+    box_()
+      .id(SharedString::from(format!("comment-{}", c.id)))
+      .debug_selector(|| "file-comment-card".into())
+      .group("comment-card")
+      .cursor_pointer()
+      .hover(|s| s.shadow_md())
+      .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
+      .child(
+        div()
+          .flex()
+          .items_start()
+          .gap_2()
+          .child(
+            div()
+              .mt(px(2.))
+              .flex_none()
+              .opacity(0.)
+              .group_hover("comment-card", |s| s.opacity(1.))
+              .child(ui::icon(theme::ICON_PENCIL, 12., muted)),
+          )
+          .child(div().flex_1().whitespace_normal().child(c.text.clone()))
+          .child(
+            self.tip(
+              format!("delete-comment-tip-{}", c.id),
+              "Delete comment",
+              Side::Top,
+              div()
+                .id(SharedString::from(format!("delete-comment-{}", c.id)))
+                .debug_selector(|| "delete-comment".into())
+                .flex_none()
+                .p_1()
+                .rounded(px(4.))
+                .hover(move |s| s.bg(accent))
+                .child(ui::icon(theme::ICON_X, 12., muted))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  cx.stop_propagation();
+                  view.delete_comment(&delete, cx);
+                })),
+              cx,
+            ),
+          ),
+      )
+      .into_any_element()
+  }
+
+  /// `CommentEditInput`: Discard, Cancel, Save.
+  pub(super) fn edit_box(
+    &self,
+    p: &Palette,
+    on_discard: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let empty = self.edit_text.trim().is_empty();
+    div()
+      .debug_selector(|| "comment-edit".into())
+      .flex()
+      .flex_col()
+      .gap_2()
+      .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+        let k = &e.keystroke;
+        if k.key == "escape" {
+          cx.stop_propagation();
+          view.cancel_edit(cx);
+        } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+          cx.stop_propagation();
+          view.save_edit(cx);
+        }
+      }))
+      .children(self.edit_input.as_ref().map(|i| Textarea::new(&i.state)))
+      .child(
+        div()
+          .flex()
+          .justify_between()
+          .gap_2()
+          .child(
+            Button::new("comment-discard", p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .text_color(p.destructive)
+              .label("Discard")
+              .on_click(on_discard),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_2()
+              .child(
+                Button::new("comment-edit-cancel", p)
+                  .variant(Variant::Ghost)
+                  .size(Size::Sm)
+                  .label("Cancel")
+                  .on_click(cx.listener(|view, _, _, cx| view.cancel_edit(cx))),
+              )
+              .child(
+                Button::new("comment-save", p)
+                  .size(Size::Sm)
+                  .disabled(empty)
+                  .label("Save")
+                  .on_click(cx.listener(|view, _, _, cx| view.save_edit(cx))),
+              ),
+          ),
+      )
+  }
+
+  /// `CommentInput`.
+  pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let empty = self.draft_text.trim().is_empty();
+    div()
+      .debug_selector(|| "comment-input".into())
+      .bg(p.muted)
+      .border_1()
+      .border_color(p.border)
+      .rounded(px(8.))
+      .px_4()
+      .py_3()
+      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+      .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+        let k = &e.keystroke;
+        if k.key == "escape" {
+          cx.stop_propagation();
+          view.cancel_draft(cx);
+        } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+          cx.stop_propagation();
+          view.submit_draft(cx);
+        }
+      }))
+      .children(
+        self
+          .draft_input
+          .as_ref()
+          .map(|i| div().mb_2().child(Textarea::new(&i.state))),
+      )
+      .child(
+        div()
+          .flex()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("comment-cancel", p)
+              .variant(Variant::Ghost)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.cancel_draft(cx))),
+          )
+          .child(
+            Button::new("comment-submit", p)
+              .disabled(empty)
+              .label("Add Comment")
+              .on_click(cx.listener(|view, _, _, cx| view.submit_draft(cx))),
+          ),
+      )
+  }
+
+  /// `SearchOverlay`, top right of the code.
+  pub(super) fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    if !self.search.open {
+      return None;
+    }
+    let input = self.search.input.clone()?;
+    let empty = self.search.query.trim().is_empty();
+    let total = self.search.matches.len();
+    let shown = if total > 0 {
+      self.search.current + 1
+    } else {
+      0
+    };
+    let muted = p.muted_foreground;
+    let fg = p.foreground;
+    let accent = p.accent;
+    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
+      div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .size_5()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(2.))
+        .text_color(muted)
+        .when(disabled, |this| this.opacity(0.5))
+        .when(!disabled, |this| {
+          this
+            .cursor_pointer()
+            .hover(move |s| s.bg(accent).text_color(fg))
+        })
+        .child(ui::icon(icon, 16., muted))
+    };
+    Some(
+      div()
+        .id("file-search")
+        .debug_selector(|| "file-search".into())
+        .absolute()
+        .top_2()
+        .right_2()
+        .bg(p.background)
+        .border_1()
+        .border_color(p.border)
+        .rounded(px(6.))
+        .shadow_lg()
+        .p(px(2.))
+        .flex()
+        .items_center()
+        .gap(px(2.))
+        .font_family(theme::SANS_FONT)
+        .capture_action(cx.listener(|view, _: &Escape, _, cx| {
+          view.close_search(cx);
+          cx.stop_propagation();
+        }))
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "file-search-input".into())
+            .h_6()
+            .w_48()
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(p.input)
+            .child(Input::new(&input).appearance(false).bordered(false)),
+        )
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .debug_selector(|| "file-search-count".into())
+            .px_2()
+            .whitespace_nowrap()
+            .text_color(muted)
+            .child(format!("{shown} of {total}")),
+        )
+        .child(self.tip(
+          "file-search-prev-tip",
+          "Previous (Shift+Enter)",
+          Side::Top,
+          icon_button("file-search-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
+            this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
+          }),
+          cx,
+        ))
+        .child(self.tip(
+          "file-search-next-tip",
+          "Next (Enter)",
+          Side::Top,
+          icon_button("file-search-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
+            this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
+          }),
+          cx,
+        ))
+        .child(
+          self.tip(
+            "file-search-close-tip",
+            "Close (Esc)",
+            Side::Top,
+            icon_button("file-search-close", theme::ICON_X, false)
+              .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
+            cx,
+          ),
+        ),
+    )
+  }
+
+  /// The Finish review popover, under its button.
+  pub(super) fn finish_popover(
+    &self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    if !self.finish_open || self.comments.is_empty() {
+      return None;
+    }
+    let anchor = self.anchors.borrow().get("finish-review").copied()?;
+    let n = self.comments.len();
+    let width = 320.;
+    let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
+    let checked = self.use_idle;
+    let checkbox = div()
+      .id("use-idle-agent")
+      .debug_selector(|| "use-idle-agent".into())
+      .flex()
+      .items_center()
+      .gap(px(6.))
+      .cursor_pointer()
+      .child(
+        div()
+          .size(px(14.))
+          .rounded(px(3.))
+          .border_1()
+          .border_color(if checked { p.primary } else { p.border })
+          .bg(if checked { p.primary } else { p.background })
+          .flex()
+          .items_center()
+          .justify_center()
+          .when(checked, |this| {
+            this.child(ui::icon(theme::ICON_CHECK, 10., p.primary_foreground))
+          }),
+      )
+      .child(
+        ui::text(div(), TextSize::Xs)
+          .text_color(p.muted_foreground)
+          .child("Send to idle agent if one is available"),
+      )
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.use_idle = !view.use_idle;
+        cx.notify();
+      }));
+    let close = |view: &mut Self, cx: &mut Context<Self>| {
+      view.finish_open = false;
+      cx.notify();
+    };
+    let panel = div()
+      .id("finish-review-popover")
+      .debug_selector(|| "finish-review-popover".into())
+      .w(px(width))
+      .relative()
+      .p_4()
+      .rounded(px(8.))
+      .border_1()
+      .border_color(p.border)
+      .bg(p.popover)
+      .text_color(p.popover_foreground)
+      .shadow_md()
+      .occlude()
+      .on_mouse_down_out(cx.listener(move |view, _, _, cx| close(view, cx)))
+      .child(
+        div().absolute().top_2().right_2().child(
+          Button::new("finish-review-close", p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .px_1()
+            .icon(theme::ICON_X, 16.)
+            .on_click(cx.listener(move |view, _, _, cx| close(view, cx))),
+        ),
+      )
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap_3()
+          .child(
+            div()
+              .child(
+                div()
+                  .font_weight(FontWeight::MEDIUM)
+                  .mb_1()
+                  .child("Finish your review"),
+              )
+              .child(
+                div()
+                  .text_color(p.muted_foreground)
+                  .child(format!("{} will be submitted.", count_label(n, "comment"))),
+              ),
+          )
+          .children(self.summary_input.as_ref().map(|i| Textarea::new(&i.state)))
+          .child(checkbox)
+          .child(
+            div()
+              .flex()
+              .justify_between()
+              .gap_2()
+              .child(
+                Button::new("copy-review", p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .gap_2()
+                  .icon(
+                    if self.copied_review {
+                      theme::ICON_CHECK
+                    } else {
+                      theme::ICON_COPY
+                    },
+                    12.,
+                  )
+                  .label(if self.copied_review { "Copied" } else { "Copy" })
+                  .on_click(cx.listener(|view, _, _, cx| view.copy_review(cx))),
+              )
+              .child(
+                div()
+                  .flex()
+                  .gap_2()
+                  .child(
+                    Button::new("review-plan", p)
+                      .variant(Variant::Secondary)
+                      .size(Size::Sm)
+                      .label("Plan")
+                      .on_click(cx.listener(|view, _, _, cx| view.send_review(true, cx))),
+                  )
+                  .child(
+                    Button::new("review-edit", p)
+                      .size(Size::Sm)
+                      .label("Edit")
+                      .on_click(cx.listener(|view, _, _, cx| view.send_review(false, cx))),
+                  ),
+              ),
+          ),
+      );
+    Some(deferred(anchored().position(at).child(panel)).with_priority(1))
+  }
+
+  /// "Discard review?".
+  pub(super) fn discard_dialog(
+    &self,
+    window: &mut Window,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    if !self.discard_dialog {
+      return None;
+    }
+    let viewport = window.viewport_size();
+    let n = self.comments.len();
+    let close = |view: &mut Self, cx: &mut Context<Self>| {
+      view.discard_dialog = false;
+      cx.notify();
+    };
+    let panel = div()
+      .id("discard-review-dialog")
+      .debug_selector(|| "discard-review-dialog".into())
+      .w_full()
+      .max_w(px(512.))
+      .p_6()
+      .rounded(px(16.))
+      .border_1()
+      .border_color(p.border.opacity(0.5))
+      .bg(p.popover)
+      .text_color(p.popover_foreground)
+      .shadow_2xl()
+      .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
+        if e.keystroke.key == "escape" {
+          cx.stop_propagation();
+          close(view, cx);
+        }
+      }))
+      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap(px(6.))
+          .child(
+            ui::text(div(), TextSize::Lg)
+              .line_height(px(15.))
+              .font_weight(FontWeight::SEMIBOLD)
+              .child("Discard review?"),
+          )
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child(format!(
+                "This will discard all {n} pending {}. This action cannot be undone.",
+                if n == 1 { "comment" } else { "comments" }
+              )),
+          ),
+      )
+      .child(
+        div()
+          .mt_4()
+          .flex()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("keep-reviewing", p)
+              .variant(Variant::Ghost)
+              .label("Keep reviewing")
+              .on_click(cx.listener(move |view, _, _, cx| close(view, cx))),
+          )
+          .child(
+            Button::new("confirm-discard-review", p)
+              .variant(Variant::Destructive)
+              .label("Discard")
+              .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx))),
+          ),
+      );
+    Some(
+      deferred(
+        anchored().position(point(px(0.), px(0.))).child(
+          div()
+            .id("discard-review-backdrop")
+            .w(viewport.width)
+            .h(viewport.height)
+            .p_4()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::black().opacity(0.4))
+            .occlude()
+            .on_mouse_down(
+              MouseButton::Left,
+              cx.listener(move |view, _, _, cx| close(view, cx)),
+            )
+            .child(panel),
+        ),
+      )
+      .with_priority(2),
+    )
+  }
+}

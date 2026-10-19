@@ -102,6 +102,9 @@ pub struct Route {
   /// (a remote repository's).
   #[serde(default)]
   pub terminal: Option<super::terminal::Route>,
+  /// GPUI draws the Code tab's file browser (`showFileBrowserInCode`).
+  #[serde(default)]
+  pub file_browser: Option<super::file_browser::Route>,
 }
 
 impl Route {

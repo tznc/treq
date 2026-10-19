@@ -37,6 +37,7 @@ icons! {
   // is thinner.
   ICON_BRANCH_BOLD => "git-branch-bold",
   ICON_CHEVRON_DOWN => "chevron-down",
+  ICON_CHEVRON_LEFT => "chevron-left",
   ICON_CHEVRONS_UP_DOWN => "chevrons-up-down",
   ICON_CHEVRON_RIGHT => "chevron-right",
   ICON_CIRCLE => "circle",

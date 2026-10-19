@@ -48,7 +48,7 @@ pub struct Prepared {
   pub skill_write_warning: Option<String>,
 }
 
-pub trait TerminalHost: LogsHost + PopoverHost {
+pub trait TerminalHost: LogsHost + PopoverHost + super::file_browser_data::FileBrowserHost {
   /// Starts a PTY unless one with the id runs; its output arrives through
   /// [`TerminalHost::listen`].
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String>;

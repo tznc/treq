@@ -221,6 +221,73 @@ describe("GPUI workspace header", () => {
     });
   });
 
+  describe("with GPUI's file browser", () => {
+    beforeEach(() => {
+      window.__TREQ_REACT_FILE_BROWSER__ = false;
+    });
+
+    async function openReadme() {
+      render(<Dashboard />);
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.code).toBe(true);
+      });
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "code.open",
+        value: { name: "README.md", isDirectory: false },
+      });
+      return findGpuiScreen("workspace", (s) => {
+        expect(s.fileBrowser).not.toBeNull();
+      });
+    }
+
+    it("draws the file browser in GPUI for a Code tab entry", async () => {
+      const s = await openReadme();
+      expect(s.tab).toBe("overview");
+      expect(s.code).toBe(true);
+      expect(s.fileBrowser).toEqual({
+        selectedFile: expect.stringMatching(/\/README\.md$/),
+        expandedDir: null,
+      });
+      expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    });
+
+    it("opens a folder entry expanded", async () => {
+      render(<Dashboard />);
+      await findGpuiScreen("workspace");
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "code.open",
+        value: { name: "src", isDirectory: true },
+      });
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.fileBrowser).toEqual({
+          selectedFile: null,
+          expandedDir: expect.stringMatching(/\/src$/),
+        });
+      });
+    });
+
+    it("goes back to the Code tab's file list", async () => {
+      await openReadme();
+      press("fileBrowser.back");
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.fileBrowser).toBeNull();
+        expect(s.code).toBe(true);
+      });
+    });
+
+    it("asks GPUI's file browser to read again when files change", async () => {
+      const { changesRevision } = await openReadme();
+      act(() => {
+        dispatchRefreshWorkspaceChanges();
+      });
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.changesRevision).toBeGreaterThan(changesRevision);
+      });
+    });
+  });
+
   it("hands the window back to React for the branch switcher", async () => {
     render(<Dashboard />);
     await findGpuiScreen("workspace");
@@ -366,6 +433,29 @@ describe("GPUI workspace header", () => {
         value: {
           markdown: "# Review\n\nTighten this",
           mode: "plan",
+          useIdleAgent: false,
+        },
+      });
+      await waitFor(() => {
+        expect(createSession).toHaveBeenCalledWith(
+          repoPath,
+          alpha.workspaceId,
+          "Code Review",
+        );
+      });
+    });
+
+    it("starts an agent with the review GPUI's file browser finished", async () => {
+      window.__TREQ_REACT_FILE_BROWSER__ = false;
+      const alpha = await openAlpha();
+      const createSession = vi.spyOn(api, "createSession");
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "fileBrowser.review",
+        value: {
+          markdown: "# Review\n\nRename this",
+          mode: "acceptEdits",
           useIdleAgent: false,
         },
       });

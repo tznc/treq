@@ -101,3 +101,91 @@ fn directory_status(
     None
   }
 }
+
+/// When `path` was last modified, as RFC 3339; `None` when it is missing.
+pub fn file_modified_at(path: &str) -> Option<String> {
+  std::fs::metadata(path)
+    .ok()
+    .and_then(|metadata| metadata.modified().ok())
+    .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339())
+}
+
+/// The immediate children of the directory at `path`, leaving out what the
+/// repository's ignore files ignore: directories first, then by name.
+pub fn list_directory(path: &str) -> Result<Vec<WorkspaceEntry>, String> {
+  use std::path::Path;
+
+  let base_path = Path::new(path);
+  if !base_path.is_dir() {
+    return Err(format!("Directory does not exist: {}", path));
+  }
+  let mut files = Vec::new();
+
+  let walker = ignore::WalkBuilder::new(path)
+    .max_depth(Some(1))
+    .hidden(false)
+    .git_ignore(true)
+    .git_global(true)
+    .git_exclude(true)
+    .parents(true)
+    .build();
+
+  for entry in walker.flatten() {
+    let entry_path = entry.path();
+    if entry_path == base_path {
+      continue;
+    }
+    if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
+      let full = entry_path.to_string_lossy().to_string();
+      files.push(WorkspaceEntry {
+        name: name.to_string(),
+        modified_at: file_modified_at(&full),
+        path: full,
+        is_directory: entry_path.is_dir(),
+        submodule_pin: None,
+        submodule_synced: None,
+        status: None,
+      });
+    }
+  }
+
+  files.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+    (true, false) => std::cmp::Ordering::Less,
+    (false, true) => std::cmp::Ordering::Greater,
+    _ => a.name.cmp(&b.name),
+  });
+
+  Ok(files)
+}
+
+#[cfg(test)]
+mod list_directory_tests {
+  use super::*;
+  use tempfile::TempDir;
+
+  #[test]
+  fn lists_directories_before_files() {
+    let temp = TempDir::new().unwrap();
+    std::fs::write(temp.path().join("a.txt"), "a").unwrap();
+    std::fs::create_dir(temp.path().join("z")).unwrap();
+    let entries = list_directory(&temp.path().to_string_lossy()).unwrap();
+    let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["z", "a.txt"]);
+    assert!(entries[0].is_directory);
+  }
+
+  #[test]
+  fn returns_error_when_directory_missing() {
+    let temp = TempDir::new().unwrap();
+    assert!(list_directory(&temp.path().join("gone").to_string_lossy()).is_err());
+  }
+
+  #[test]
+  fn modified_at_is_none_for_missing_file() {
+    let temp = TempDir::new().unwrap();
+    assert_eq!(
+      file_modified_at(&temp.path().join("gone").to_string_lossy()),
+      None
+    );
+  }
+}

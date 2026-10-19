@@ -116,7 +116,7 @@ export interface GpuiWorkspaceScreen {
   } | null;
   /** Bumped whenever React refreshes its caches, so GPUI reads again. */
   revision: number;
-  /** GPUI draws the tab: Commits, or Code while React's file browser is closed. */
+  /** GPUI draws the tab: Commits, or Code (with its file browser unless React draws that). */
   code: boolean;
   /** The change the Commits tab should scroll to and open, until it says it did. */
   scrollToCommit: string | null;
@@ -142,6 +142,11 @@ export interface GpuiWorkspaceScreen {
   logsKey: number;
   /** GPUI draws the terminal pane below the tab; null while React does (remote). */
   terminal: GpuiTerminalRoute | null;
+  /** GPUI draws the Code tab's file browser, opened on this file or folder (full paths). */
+  fileBrowser: {
+    selectedFile: string | null;
+    expandedDir: string | null;
+  } | null;
 }
 
 /** A Dashboard request of the terminal pane (its imperative handle). */
@@ -659,6 +664,11 @@ export function useGpuiWorkspaceModal(
     };
   }, [draws]);
   return draws;
+}
+
+/** Whether GPUI may draw the Code tab's file browser. */
+export function gpuiDrawsFileBrowser(): boolean {
+  return window.__TREQ_REACT_FILE_BROWSER__ !== true;
 }
 
 /** Whether GPUI may draw the terminal pane. */

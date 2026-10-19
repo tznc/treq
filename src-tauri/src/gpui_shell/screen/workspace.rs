@@ -28,6 +28,8 @@ use super::{
   code::{CodeView, Parent},
   commits::CommitsView,
   commits_data::CommitsHost,
+  file_browser::{FileBrowserView, Opening},
+  file_browser_data::FileBrowserHost,
   logs::LogsView,
   logs_data::LogsHost,
   terminal::{Place, TerminalPane},
@@ -314,6 +316,8 @@ pub struct WorkspaceView {
   address: Option<AddressBar>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
+  /// The Code tab's file browser, while GPUI draws it.
+  pub(super) file_browser: Option<Entity<FileBrowserView>>,
   /// The Commits tab, while GPUI draws it.
   pub(super) commits: Option<Entity<CommitsView>>,
   /// The Changes tab, while GPUI draws it.
@@ -394,6 +398,7 @@ impl WorkspaceView {
       terminal: None,
       address: None,
       code: None,
+      file_browser: None,
       commits: None,
       changes: None,
       logs: None,
@@ -1783,6 +1788,7 @@ impl WorkspaceView {
       loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes | Tab::Logs))
     else {
       self.code = None;
+      self.file_browser = None;
       self.commits = None;
       self.changes = None;
       self.logs = None;
@@ -1808,6 +1814,7 @@ impl WorkspaceView {
     );
     if tab == Tab::Logs {
       self.code = None;
+      self.file_browser = None;
       self.commits = None;
       self.changes = None;
       let key = self.route.logs_key;
@@ -1827,6 +1834,7 @@ impl WorkspaceView {
     self.logs = None;
     if tab == Tab::Changes {
       self.code = None;
+      self.file_browser = None;
       self.commits = None;
       let options = changes::Options {
         show_committed: self.route.show_committed,
@@ -1845,6 +1853,7 @@ impl WorkspaceView {
     let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
       self.code = None;
+      self.file_browser = None;
       let scroll_to = self.route.scroll_to_commit.clone();
       if let Some(commits) = &self.commits {
         commits.update(cx, |view, cx| view.set_parent(parent, scroll_to, dark, cx));
@@ -1855,6 +1864,23 @@ impl WorkspaceView {
       return Some(Body::Commits(commits));
     }
     self.commits = None;
+    if let Some(route) = self.route.file_browser.clone() {
+      self.code = None;
+      let opening = Opening {
+        route,
+        revision: self.route.changes_revision,
+      };
+      if let Some(browser) = &self.file_browser {
+        browser.update(cx, |view, cx| view.set_parent(parent, opening, dark, cx));
+        return Some(Body::FileBrowser(browser.clone()));
+      }
+      let host: Arc<dyn FileBrowserHost> = self.code_host.clone();
+      let browser =
+        cx.new(|cx| FileBrowserView::new(parent, opening, host, react, popups, dark, cx));
+      self.file_browser = Some(browser.clone());
+      return Some(Body::FileBrowser(browser));
+    }
+    self.file_browser = None;
     if let Some(code) = &self.code {
       code.update(cx, |code, cx| code.set_parent(parent, dark, cx));
       return Some(Body::Code(code.clone()));
@@ -1868,6 +1894,7 @@ impl WorkspaceView {
 /// The tab drawn above the terminal pane.
 enum Body {
   Code(Entity<CodeView>),
+  FileBrowser(Entity<FileBrowserView>),
   Commits(Entity<CommitsView>),
   Changes(Entity<ChangesView>),
   Logs(Entity<LogsView>),
@@ -1878,6 +1905,7 @@ impl Body {
   fn covers_window(&self, cx: &App) -> bool {
     match self {
       Body::Code(code) => code.read(cx).covers_window(),
+      Body::FileBrowser(browser) => browser.read(cx).covers_window(),
       Body::Commits(commits) => commits.read(cx).covers_window(),
       Body::Changes(changes) => changes.read(cx).covers_window(),
       Body::Logs(_) => false,
@@ -1887,6 +1915,7 @@ impl Body {
   fn into_any_element(self) -> gpui::AnyElement {
     match self {
       Body::Code(code) => code.into_any_element(),
+      Body::FileBrowser(browser) => browser.into_any_element(),
       Body::Commits(commits) => commits.into_any_element(),
       Body::Changes(changes) => changes.into_any_element(),
       Body::Logs(logs) => logs.into_any_element(),

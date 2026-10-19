@@ -46,6 +46,8 @@ interface Handlers {
   /** The Code tab's file list: open a file or folder in the file browser. */
   openEntry?: (entry: { name: string; isDirectory: boolean }) => void;
   openFilePicker?: () => void;
+  /** The file browser's Back: the Code tab's file list again. */
+  closeFileBrowser?: () => void;
   /** The Code tab's commit history: show the commit in the Commits tab. */
   openCommit?: (changeId: string) => void;
   /** The Code tab's stack: go to another workspace. */
@@ -179,6 +181,8 @@ export function useGpuiWorkspaceScreen({
         return handlers.merge?.();
       case "code.filePicker":
         return handlers.openFilePicker?.();
+      case "fileBrowser.back":
+        return handlers.closeFileBrowser?.();
       case "workspace.more": {
         const remove = handlers.deleteWorkspace;
         if (!remove) return;
@@ -247,7 +251,8 @@ export function useGpuiWorkspaceScreen({
       }
       case "changes.agentComment":
         return handlers.sendAgentComment?.(value as AgentReviewComment);
-      case "changes.review": {
+      case "changes.review":
+      case "fileBrowser.review": {
         const { markdown, mode, useIdleAgent } = value as {
           markdown: string;
           mode: "plan" | "acceptEdits";
