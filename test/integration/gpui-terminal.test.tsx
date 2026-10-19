@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { type GpuiTerminalRoute } from "../../src/lib/gpui-screen";
+import { useTreqSendStore } from "../../src/stores/treqSendStore";
 import { findGpuiScreen, sendGpuiScreenAction } from "../gpui-screen";
 import { render, screen, within } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
@@ -99,6 +100,35 @@ describe("GPUI terminal pane", () => {
     await findTerminal((t) => expect(t.activeSessionId).toBe(activeSessionId));
     terminalField("closeSession", activeSessionId);
     await findTerminal((t) => expect(t.activeSessionId).toBeNull());
+  }, 30000);
+
+  it("hands GPUI the treq send attachments and drops the one it dismisses", async () => {
+    render(<Dashboard />);
+    await findTerminal((t) => expect(t.sendAssets).toEqual([]));
+    useTreqSendStore.getState().ingestPayload({
+      kind: "send",
+      request_id: "req-1",
+      repo: "/repo",
+      pty_session_id: "session-1-1",
+      media_type: "image",
+      path: "/tmp/shot.png",
+      title: "Shot",
+    });
+    await findTerminal((t) =>
+      expect(t.sendAssets).toEqual([
+        {
+          id: "req-1",
+          repo: "/repo",
+          ptySessionId: "session-1-1",
+          mediaType: "image",
+          path: "/tmp/shot.png",
+          title: "Shot",
+        },
+      ]),
+    );
+    terminalField("dismissAsset", "req-1");
+    await findTerminal((t) => expect(t.sendAssets).toEqual([]));
+    expect(useTreqSendStore.getState().assets).toEqual([]);
   }, 30000);
 
   it("asks React for a new agent when GPUI's pane does", async () => {

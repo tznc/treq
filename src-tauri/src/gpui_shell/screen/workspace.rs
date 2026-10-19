@@ -1679,13 +1679,15 @@ impl Render for WorkspaceView {
       // pane below.
       (code, Some(pane)) => {
         let covered = pane.read(cx).covers();
+        // The webview would stay on top of the pane's lightbox.
+        let lightbox = pane.read(cx).covers_window();
         let container = pane.read(cx).container.clone();
         let content = match code {
           Some(code) => code.into_any_element(),
           None => div()
             .size_full()
             .debug_selector(|| "workspace-frame".into())
-            .child(frame(self.webview.as_ref()))
+            .when(!lightbox, |this| this.child(frame(self.webview.as_ref())))
             .into_any_element(),
         };
         div()

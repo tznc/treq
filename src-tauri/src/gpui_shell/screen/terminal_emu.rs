@@ -180,6 +180,72 @@ impl Emulator {
     self.term.mode().contains(TermMode::ALT_SCREEN)
   }
 
+  /// Whether the program asked for mouse events (DECSET 1000, 1002, 1003).
+  pub fn mouse_reporting(&self) -> bool {
+    self.term.mode().intersects(TermMode::MOUSE_MODE)
+  }
+
+  /// The report xterm sends for a mouse event, in the encoding the program
+  /// asked for; `None` when the program doesn't want it.
+  pub fn encode_mouse(&self, mouse: Mouse) -> Option<Vec<u8>> {
+    let mode = *self.term.mode();
+    if !mode.intersects(TermMode::MOUSE_MODE) {
+      return None;
+    }
+    let held = mouse.button != Button::None;
+    let wheel = matches!(mouse.button, Button::WheelUp | Button::WheelDown);
+    let wanted = match mouse.action {
+      MouseAction::Move if held => mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION),
+      MouseAction::Move => mode.contains(TermMode::MOUSE_MOTION),
+      MouseAction::Release => !wheel,
+      MouseAction::Press => held,
+    };
+    if !wanted {
+      return None;
+    }
+    let sgr = mode.contains(TermMode::SGR_MOUSE);
+    let mut code: u32 = match mouse.button {
+      Button::Left => 0,
+      Button::Middle => 1,
+      Button::Right => 2,
+      Button::None => 3,
+      Button::WheelUp => 64,
+      Button::WheelDown => 65,
+    };
+    if mouse.action == MouseAction::Release && !sgr {
+      code = 3;
+    }
+    if mouse.action == MouseAction::Move {
+      code += 32;
+    }
+    code += 4 * u32::from(mouse.shift) + 8 * u32::from(mouse.alt) + 16 * u32::from(mouse.ctrl);
+    let col = mouse.col.min(self.size.cols - 1) as u32 + 1;
+    let row = mouse.row.min(self.size.rows - 1) as u32 + 1;
+    if sgr {
+      let end = if mouse.action == MouseAction::Release {
+        'm'
+      } else {
+        'M'
+      };
+      return Some(format!("\x1b[<{code};{col};{row}{end}").into_bytes());
+    }
+    // The X10 encoding: each value a character offset by 32. Plain bytes
+    // stop at 127 here, since the PTY takes text.
+    let limit = if mode.contains(TermMode::UTF8_MOUSE) {
+      2047
+    } else {
+      127
+    };
+    let mut out = String::from("\x1b[M");
+    for value in [code + 32, col + 32, row + 32] {
+      if value > limit {
+        return None;
+      }
+      out.push(char::from_u32(value)?);
+    }
+    Some(out.into_bytes())
+  }
+
   /// Viewport point for a cell, accounting for scrollback.
   fn point(&self, line: usize, col: usize) -> Point {
     let line = line.min(self.size.rows - 1) as i32 - self.display_offset() as i32;
@@ -380,6 +446,38 @@ impl Emulator {
       cursor: shown.then_some((row as usize, cursor.column.0)),
     }
   }
+}
+
+/// The mouse button of a [`Mouse`] event; `None` for motion with no button.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Button {
+  #[default]
+  Left,
+  Middle,
+  Right,
+  None,
+  WheelUp,
+  WheelDown,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MouseAction {
+  #[default]
+  Press,
+  Release,
+  Move,
+}
+
+/// A mouse event over the grid, at a viewport cell.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Mouse {
+  pub button: Button,
+  pub action: MouseAction,
+  pub row: usize,
+  pub col: usize,
+  pub shift: bool,
+  pub alt: bool,
+  pub ctrl: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -685,6 +783,111 @@ mod tests {
     assert!(!emu.app_cursor());
     emu.feed(b"\x1b[?1h\x1b[?2004h\x1b[?1049h");
     assert!(emu.app_cursor() && emu.bracketed_paste() && emu.alt_screen());
+  }
+
+  fn mouse(button: Button, action: MouseAction, row: usize, col: usize) -> Mouse {
+    Mouse {
+      button,
+      action,
+      row,
+      col,
+      ..Mouse::default()
+    }
+  }
+
+  #[test]
+  fn reports_nothing_until_the_program_asks() {
+    let emu = Emulator::new(80, 24);
+    assert!(!emu.mouse_reporting());
+    assert_eq!(
+      emu.encode_mouse(mouse(Button::Left, MouseAction::Press, 0, 0)),
+      None
+    );
+  }
+
+  #[test]
+  fn reports_clicks_like_xterm() {
+    let mut emu = Emulator::new(200, 24);
+    emu.feed(b"\x1b[?1000h");
+    assert!(emu.mouse_reporting());
+    let enc = |emu: &Emulator, m: Mouse| emu.encode_mouse(m).map(|b| String::from_utf8(b).unwrap());
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Press, 2, 4)).as_deref(),
+      Some("\x1b[M %#")
+    );
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Release, 2, 4)).as_deref(),
+      Some("\x1b[M#%#")
+    );
+    // Clicks only: no motion.
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Move, 2, 5)),
+      None
+    );
+    assert_eq!(
+      enc(&emu, mouse(Button::WheelUp, MouseAction::Press, 0, 0)).as_deref(),
+      Some("\x1b[M`!!")
+    );
+    assert_eq!(
+      enc(
+        &emu,
+        Mouse {
+          ctrl: true,
+          shift: true,
+          ..mouse(Button::Right, MouseAction::Press, 0, 0)
+        }
+      )
+      .as_deref(),
+      Some("\x1b[M6!!")
+    );
+    // Too far right for the default encoding.
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Press, 0, 95)),
+      None
+    );
+  }
+
+  #[test]
+  fn reports_sgr_and_motion_modes() {
+    let mut emu = Emulator::new(300, 24);
+    emu.feed(b"\x1b[?1002h\x1b[?1006h");
+    let enc = |emu: &Emulator, m: Mouse| emu.encode_mouse(m).map(|b| String::from_utf8(b).unwrap());
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Press, 1, 200)).as_deref(),
+      Some("\x1b[<0;201;2M")
+    );
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Move, 1, 201)).as_deref(),
+      Some("\x1b[<32;202;2M")
+    );
+    assert_eq!(
+      enc(&emu, mouse(Button::Left, MouseAction::Release, 1, 201)).as_deref(),
+      Some("\x1b[<0;202;2m")
+    );
+    // Drag mode reports motion only with a button held.
+    assert_eq!(
+      enc(&emu, mouse(Button::None, MouseAction::Move, 1, 1)),
+      None
+    );
+    assert_eq!(
+      enc(&emu, mouse(Button::WheelDown, MouseAction::Press, 0, 0)).as_deref(),
+      Some("\x1b[<65;1;1M")
+    );
+    emu.feed(b"\x1b[?1003h");
+    assert_eq!(
+      enc(&emu, mouse(Button::None, MouseAction::Move, 1, 1)).as_deref(),
+      Some("\x1b[<35;2;2M")
+    );
+  }
+
+  #[test]
+  fn reports_utf8_coordinates() {
+    let mut emu = Emulator::new(300, 24);
+    emu.feed(b"\x1b[?1000h\x1b[?1005h");
+    let bytes = emu
+      .encode_mouse(mouse(Button::Left, MouseAction::Press, 0, 199))
+      .unwrap();
+    assert_eq!(String::from_utf8(bytes).unwrap(), "\x1b[M \u{e8}!");
   }
 
   #[test]

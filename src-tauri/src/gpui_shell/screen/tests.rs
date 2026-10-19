@@ -696,6 +696,27 @@ impl terminal_data::TerminalHost for FakeHost {
     self.record(format!("record chat {session_id} {screen:?}"));
     Ok(())
   }
+
+  fn record_chat_message(
+    &self,
+    _: &str,
+    session_id: i64,
+    _: &str,
+    text: &str,
+  ) -> Result<(), String> {
+    self.record(format!("chat message {session_id} {text:?}"));
+    Ok(())
+  }
+
+  fn read_send_asset(&self, path: &str) -> Result<String, String> {
+    self.record(format!("read asset {path}"));
+    Ok("first\nsecond\nthird".into())
+  }
+
+  fn write_send_review_image(&self, repo: &str, name: &str, png: &[u8]) -> Result<String, String> {
+    self.record(format!("write review image {name} ({} bytes)", png.len()));
+    Ok(format!("{repo}/.treq/send/{name}"))
+  }
 }
 
 impl FakeHost {
@@ -3903,6 +3924,229 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!h.drawn("terminal-column-shell"));
   assert!(h.drawn("terminal-column-agent"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
+}
+
+#[gpui::test]
+fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("terminal-expand")
+    .expect("expand")
+    .center();
+  h.cx.simulate_mouse_move(at, None, Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let shown = h.popups.borrow().iter().any(|p| {
+    matches!(p, PopupRequest::ShowTooltip { content: TooltipContent::Shortcut { text, keys }, .. }
+      if text == "Expand" && keys == "⌘ + J")
+  });
+  assert!(shown, "{:?}", h.popups.borrow());
+}
+
+fn send_assets() -> serde_json::Value {
+  let pty = agent_pty();
+  serde_json::json!([
+    { "id": "t1", "repo": "/repo", "ptySessionId": pty, "mediaType": "text",
+      "path": "/tmp/notes.txt", "title": "notes.txt" },
+    { "id": "i1", "repo": "/repo", "ptySessionId": pty, "mediaType": "image",
+      "path": "/tmp/treq-missing-shot.png", "title": "shot.png" },
+    { "id": "b1", "repo": "/repo", "ptySessionId": pty, "mediaType": "browser",
+      "path": "/tmp/page", "title": "page" },
+    { "id": "o1", "repo": "/repo", "ptySessionId": "session-other-9", "mediaType": "text",
+      "path": "/tmp/other.txt", "title": "other.txt" },
+  ])
+}
+
+fn send_harness(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({ "activeSessionId": 3, "sendAssets": send_assets() }),
+  );
+  (h, host)
+}
+
+fn hover(h: &mut Harness, selector: &'static str) {
+  h.cx.run_until_parked();
+  let at = h.cx.debug_bounds(selector).expect(selector).center();
+  h.cx.simulate_mouse_move(at, None, Modifiers::none());
+  h.cx.run_until_parked();
+}
+
+fn pty_writes(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("write "))
+    .collect()
+}
+
+#[gpui::test]
+fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  assert!(h.drawn("terminal-send-previews"));
+  assert!(h.drawn("terminal-send-preview-t1"));
+  assert!(h.drawn("terminal-send-preview-i1"));
+  // Browser previews are the browser panel's; other terminals keep theirs.
+  assert!(!h.drawn("terminal-send-preview-b1"));
+  assert!(!h.drawn("terminal-send-preview-o1"));
+  assert!(!h.drawn("terminal-send-dismiss-t1"));
+  hover(&mut h, "terminal-send-preview-t1");
+  assert!(h.drawn("terminal-send-dismiss-t1"));
+  // Cmd+C over a thumbnail copies its quoted path.
+  h.cx.simulate_keystrokes("cmd-c");
+  assert_eq!(
+    h.cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+    Some("'/tmp/notes.txt'")
+  );
+  hover(&mut h, "terminal-send-preview-t1");
+  h.click("terminal-send-dismiss-t1");
+  assert!(h.sent().contains(&ScreenAction::Field {
+    field: "terminal.dismissAsset".into(),
+    value: "t1".into(),
+  }));
+  assert!(!h.drawn("treq-send-preview-lightbox"));
+}
+
+#[gpui::test]
+fn lightbox_sends_line_comments_on_a_text_attachment(cx: &mut TestAppContext) {
+  let (mut h, host) = send_harness(cx);
+  h.click("terminal-send-preview-t1");
+  assert!(h.drawn("treq-send-preview-lightbox"));
+  assert!(host
+    .calls()
+    .contains(&"read asset /tmp/notes.txt".to_string()));
+  assert!(h.drawn("treq-send-text-line-3"));
+  // Text has no zoom.
+  assert!(!h.drawn("treq-send-zoom-in"));
+  h.click("treq-send-text-line-2");
+  assert!(h.drawn("treq-send-line-comment-composer"));
+  h.cx.simulate_input("rename this");
+  h.click("treq-send-line-comment-save");
+  assert!(!h.drawn("treq-send-line-comment-composer"));
+  assert!(h.drawn("treq-send-line-comment-1"));
+  h.click("treq-send-review-input");
+  h.cx.simulate_input("Thanks");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  let prompt = "Review of notes.txt\n\nFile: /tmp/notes.txt\n\nThanks\n\nInline comments:\n\nnotes.txt:2\n```\nsecond\n```\n> rename this\n";
+  assert!(
+    host.calls().contains(&format!("chat message 3 {prompt:?}")),
+    "{:?}",
+    host.calls()
+  );
+  let sent = format!("write {} {:?}", agent_pty(), format!("{prompt}\r"));
+  assert!(pty_writes(&host).contains(&sent), "{:?}", pty_writes(&host));
+  // Sent: nothing is left to lose on close.
+  assert!(!h.drawn("treq-send-line-comment-1"));
+  h.click("treq-send-close");
+  assert!(!h.drawn("treq-send-preview-lightbox"));
+}
+
+#[gpui::test]
+fn lightbox_asks_before_dropping_unsent_comments(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  h.click("terminal-send-preview-t1");
+  h.click("treq-send-close");
+  assert!(!h.drawn("treq-send-preview-lightbox"));
+  h.click("terminal-send-preview-t1");
+  h.click("treq-send-review-input");
+  h.cx.simulate_input("hmm");
+  h.cx.simulate_keystrokes("escape");
+  assert!(h.drawn("treq-send-unsaved-dialog"));
+  h.click("treq-send-unsaved-keep");
+  assert!(!h.drawn("treq-send-unsaved-dialog"));
+  assert!(h.drawn("treq-send-preview-lightbox"));
+  h.click("treq-send-close");
+  h.click("treq-send-unsaved-discard");
+  assert!(!h.drawn("treq-send-preview-lightbox"));
+}
+
+#[gpui::test]
+fn lightbox_moves_between_attachments(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  h.click("terminal-send-preview-t1");
+  assert!(h.drawn("treq-send-text-preview"));
+  h.click("treq-send-next");
+  assert!(h.drawn("treq-send-highlight-surface"));
+  assert!(h.drawn("treq-send-zoom-in"));
+  h.cx.simulate_keystrokes("left");
+  assert!(h.drawn("treq-send-text-preview"));
+}
+
+#[gpui::test]
+fn lightbox_highlights_an_image_region_for_the_review(cx: &mut TestAppContext) {
+  let (mut h, host) = send_harness(cx);
+  h.click("terminal-send-preview-i1");
+  let surface = h
+    .cx
+    .debug_bounds("treq-send-highlight-surface")
+    .expect("surface");
+  let width = f32::from(surface.size.width);
+  // A click without a drag zooms in, and again out.
+  h.click("treq-send-highlight-surface");
+  assert!(h.drawn("treq-send-highlight-layer"));
+  let zoomed = h.cx.debug_bounds("treq-send-highlight-layer").unwrap();
+  assert!((f32::from(zoomed.size.width) - width * 2.).abs() < 1.);
+  h.cx.simulate_click(
+    zoomed.origin + gpui::point(gpui::px(50.), gpui::px(50.)),
+    Modifiers::none(),
+  );
+  assert!(h.drawn("treq-send-highlight-surface"));
+  let surface = h.cx.debug_bounds("treq-send-highlight-surface").unwrap();
+  let from = surface.origin + gpui::point(gpui::px(10.), gpui::px(10.));
+  let to = surface.origin + gpui::point(gpui::px(200.), gpui::px(150.));
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+  assert!(h.drawn("treq-send-highlight-1"));
+  assert!(h.drawn("treq-send-highlight-comment-1"));
+  h.click("treq-send-review-input");
+  h.cx.simulate_input("too big");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  // The image can't be read here, so the review goes without it.
+  assert!(host
+    .calls()
+    .contains(&"notify toast Could not attach highlighted image".to_string()));
+  let writes = pty_writes(&host);
+  assert!(
+    writes.iter().any(
+      |w| w.contains("File: /tmp/treq-missing-shot.png") && w.contains("Highlights:\\n1. Region")
+    ),
+    "{writes:?}"
+  );
+  assert!(!h.drawn("treq-send-highlight-1"));
+}
+
+#[gpui::test]
+fn terminal_reports_the_mouse_once_the_program_asks(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  h.click("terminal-body");
+  assert!(pty_writes(&host).is_empty(), "no reports before asked");
+  host.output(&pty, "\x1b[?1000h\x1b[?1006h");
+  h.cx.run_until_parked();
+  h.click("terminal-body");
+  let writes = pty_writes(&host);
+  assert_eq!(writes.len(), 2, "{writes:?}");
+  assert!(
+    writes[0].contains("[<0;") && writes[0].ends_with("M\""),
+    "{writes:?}"
+  );
+  assert!(
+    writes[1].contains("[<0;") && writes[1].ends_with("m\""),
+    "{writes:?}"
+  );
 }
 
 // The dialogs drawn over a screen: agent prompt, prompt history and stashes.

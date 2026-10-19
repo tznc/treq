@@ -192,6 +192,7 @@ import {
   type ChangeFilesMoveTarget,
   ChangeFilesMoveProvider,
 } from "./ChangeFilesMoveContext";
+import { useTreqSendStore } from "../stores/treqSendStore";
 import { useThemeStore } from "../stores/themeStore";
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -3209,6 +3210,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
       case "terminal.summaries":
         return setTerminalSessionSummaries(value as TerminalSessionSummary[]);
+      case "terminal.dismissAsset":
+        return useTreqSendStore.getState().dismissAsset(value as string);
       case "terminal.shortcut": {
         // The app's own shortcuts, pressed while GPUI's terminal has focus.
         const mac = navigator.platform.toUpperCase().includes("MAC");

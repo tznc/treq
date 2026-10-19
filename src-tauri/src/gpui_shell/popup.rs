@@ -87,6 +87,23 @@ pub enum TooltipContent {
     title: SharedString,
     items: Vec<SharedString>,
   },
+  /// Text and its shortcut in a `Kbd` chip: `flex items-center gap-1.5`,
+  /// as the terminal pane's control tooltips.
+  Shortcut {
+    text: SharedString,
+    keys: SharedString,
+  },
+}
+
+/// `ui/kbd.tsx`'s `Kbd`: `h-5 min-w-5 px-1 rounded-sm text-xs font-medium`.
+const KBD_HEIGHT: f32 = 20.;
+const KBD_PADDING_X: f32 = 4.;
+/// `gap-1.5` between a [`TooltipContent::Shortcut`]'s text and its chip.
+const KBD_GAP: f32 = 6.;
+
+/// A [`TooltipContent::Shortcut`]'s chip width for `keys`.
+fn kbd_width(keys_width: f32) -> f32 {
+  (keys_width + 2. * KBD_PADDING_X).max(KBD_HEIGHT)
 }
 
 /// Which side of its element a tooltip sits on.
@@ -389,6 +406,14 @@ fn text_width_at(cx: &App, text: &str, family: &'static str, size: f32) -> f32 {
 fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
   let (width, lines) = match content {
     TooltipContent::Text(text) => (text_width(cx, text, theme::SANS_FONT), 1),
+    TooltipContent::Shortcut { text, keys } => {
+      // The chip's `font-medium` is a little wider than the regular face.
+      let keys = text_width_at(cx, keys, theme::SANS_FONT, LIST_ITEM_SIZE) * 1.03;
+      (
+        text_width(cx, text, theme::SANS_FONT) + KBD_GAP + kbd_width(keys),
+        1,
+      )
+    }
     TooltipContent::Branch {
       title,
       conflicted,
@@ -631,6 +656,29 @@ impl PopupView {
     let palette = &self.palette;
     match content {
       TooltipContent::Text(text) => div().child(text.clone()).into_any_element(),
+      TooltipContent::Shortcut { text, keys } => div()
+        .flex()
+        .items_center()
+        .gap(px(KBD_GAP))
+        .child(text.clone())
+        .child(
+          div()
+            .debug_selector(|| "tooltip-kbd".into())
+            .h(px(KBD_HEIGHT))
+            .min_w(px(KBD_HEIGHT))
+            .px(px(KBD_PADDING_X))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .bg(palette.muted)
+            .text_color(palette.muted_foreground)
+            .text_size(px(LIST_ITEM_SIZE))
+            .line_height(px(LIST_ITEM_LINE))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(keys.clone()),
+        )
+        .into_any_element(),
       TooltipContent::Branch {
         title,
         conflicted,

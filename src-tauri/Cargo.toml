@@ -33,7 +33,7 @@ gui = [
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
 # Left out of the NAPI test addon, which has no windows.
-gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:syntect", "dep:two-face", "dep:alacritty_terminal"]
+gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image"]
 tauri-test = ["gui", "dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
@@ -70,6 +70,8 @@ syntect = { version = "5.3.0", default-features = false, features = ["parsing", 
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"], optional = true }
 # Terminal emulation for the GPUI terminal pane: parses PTY output into a grid.
 alacritty_terminal = { version = "0.26", default-features = false, optional = true }
+# Draws review highlights onto `treq send` images (gpui_shell terminal pane).
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [dependencies]
 tauri = { version = "2.12", features = ["protocol-asset", "unstable"], optional = true }
