@@ -1,0 +1,256 @@
+//! Dashboard's dialogs, drawn by GPUI over whichever screen shows.
+//!
+//! React keeps the state that says which dialog is open (Dashboard's
+//! `unifiedDialogDefaults`, `renameTarget`, `showWorkspaceDeletion` and
+//! `pendingChangeMove`) and sends it as the snapshot's `modal`. GPUI draws
+//! the dialog over the whole window, sidebar included, and does the work
+//! through the backend; it hands back only what React still owns: closing
+//! the dialog, opening the workspace it made, and deleting a workspace.
+
+use std::sync::Arc;
+
+use serde::Deserialize;
+use tauri_plugin_gpui::gpui::{
+  self, div, prelude::*, px, Context, Div, Entity, FontWeight, Hsla, Pixels, SharedString, Stateful,
+};
+
+use super::{
+  change_move::{ChangeMoveDialog, ChangeMoveRoute},
+  rename_dialog::{RenameDialog, RenameRoute},
+  workspace_deletion::{DeletionRoute, WorkspaceDeletion},
+  workspace_dialog::WorkspaceDialog,
+  workspace_dialog_data::{self, WorkspaceDialogHost},
+  ActionSink, ScreenAction,
+};
+use crate::gpui_shell::{
+  theme::{self, Palette},
+  ui::{self, TextSize},
+};
+
+/// The dialog React has open, tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ModalRoute {
+  /// `UnifiedWorkspaceDialog`.
+  WorkspaceDialog(Box<workspace_dialog_data::Route>),
+  /// `RenameWorkspaceDialog`.
+  RenameWorkspace(RenameRoute),
+  /// `WorkspaceDeletion`, the command palette's "Delete Workspace".
+  WorkspaceDeletion(DeletionRoute),
+  /// The `AlertDialog` that confirms moving dropped files.
+  ConfirmChangeMove(ChangeMoveRoute),
+}
+
+impl ModalRoute {
+  /// Routes with the same identity update one dialog; another one opens a
+  /// fresh dialog.
+  fn identity(&self) -> (u8, String) {
+    match self {
+      ModalRoute::WorkspaceDialog(route) => (0, route.key.to_string()),
+      ModalRoute::RenameWorkspace(route) => (1, route.workspace_id.to_string()),
+      ModalRoute::WorkspaceDeletion(_) => (2, String::new()),
+      ModalRoute::ConfirmChangeMove(route) => (3, route.files.join("\0")),
+    }
+  }
+}
+
+/// The open dialog's view.
+pub enum Modal {
+  WorkspaceDialog(Entity<WorkspaceDialog>),
+  RenameWorkspace(Entity<RenameDialog>),
+  WorkspaceDeletion(Entity<WorkspaceDeletion>),
+  ConfirmChangeMove(Entity<ChangeMoveDialog>),
+}
+
+/// A dialog and the route it was opened for.
+pub struct OpenModal {
+  identity: (u8, String),
+  pub modal: Modal,
+}
+
+impl OpenModal {
+  pub fn open<V: 'static>(
+    route: &ModalRoute,
+    host: Arc<dyn WorkspaceDialogHost>,
+    sink: ActionSink,
+    dark: bool,
+    cx: &mut Context<V>,
+  ) -> Self {
+    let modal = match route.clone() {
+      ModalRoute::WorkspaceDialog(route) => {
+        Modal::WorkspaceDialog(cx.new(|cx| WorkspaceDialog::new(*route, host, sink, dark, cx)))
+      }
+      ModalRoute::RenameWorkspace(route) => {
+        Modal::RenameWorkspace(cx.new(|cx| RenameDialog::new(route, host, sink, dark, cx)))
+      }
+      ModalRoute::WorkspaceDeletion(route) => {
+        Modal::WorkspaceDeletion(cx.new(|cx| WorkspaceDeletion::new(route, sink, dark, cx)))
+      }
+      ModalRoute::ConfirmChangeMove(route) => {
+        Modal::ConfirmChangeMove(cx.new(|cx| ChangeMoveDialog::new(route, host, sink, dark, cx)))
+      }
+    };
+    Self {
+      identity: route.identity(),
+      modal,
+    }
+  }
+
+  /// Whether `route` belongs to this dialog.
+  pub fn is_for(&self, route: &ModalRoute) -> bool {
+    self.identity == route.identity()
+  }
+
+  /// Passes React's newer route and theme to the open dialog.
+  pub fn update<V: 'static>(&self, route: &ModalRoute, dark: bool, cx: &mut Context<V>) {
+    match (&self.modal, route.clone()) {
+      (Modal::WorkspaceDialog(view), ModalRoute::WorkspaceDialog(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
+      (Modal::RenameWorkspace(view), ModalRoute::RenameWorkspace(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
+      (Modal::WorkspaceDeletion(view), ModalRoute::WorkspaceDeletion(route)) => {
+        view.update(cx, |view, cx| view.set_route(route, dark, cx))
+      }
+      (Modal::ConfirmChangeMove(view), ModalRoute::ConfirmChangeMove(route)) => {
+        view.update(cx, |view, cx| view.set_route(route, dark, cx))
+      }
+      _ => {}
+    }
+  }
+
+  /// Whether the dialog still shows; one that asked React to close it
+  /// hides at once.
+  pub fn shown(&self, cx: &gpui::App) -> bool {
+    match &self.modal {
+      Modal::WorkspaceDialog(view) => !view.read(cx).dismissed,
+      Modal::RenameWorkspace(view) => !view.read(cx).dismissed,
+      Modal::WorkspaceDeletion(view) => !view.read(cx).dismissed,
+      Modal::ConfirmChangeMove(view) => !view.read(cx).dismissed,
+    }
+  }
+
+  pub fn element(&self) -> gpui::AnyElement {
+    match &self.modal {
+      Modal::WorkspaceDialog(view) => view.clone().into_any_element(),
+      Modal::RenameWorkspace(view) => view.clone().into_any_element(),
+      Modal::WorkspaceDeletion(view) => view.clone().into_any_element(),
+      Modal::ConfirmChangeMove(view) => view.clone().into_any_element(),
+    }
+  }
+}
+
+/// Sends `Press { id }`.
+pub fn press(sink: &ActionSink, id: &str, cx: &mut gpui::App) {
+  sink(ScreenAction::Press { id: id.into() }, cx);
+}
+
+/// `ui/dialog.tsx`'s backdrop (`bg-black/40`, `p-4`) over the whole window,
+/// and its `DialogContent` panel, `max_width` wide at most.
+pub fn dialog_panel(
+  id: &'static str,
+  max_width: f32,
+  viewport: gpui::Size<Pixels>,
+  p: &Palette,
+) -> (Stateful<Div>, Div) {
+  let backdrop = div()
+    .id(SharedString::from(format!("{id}-backdrop")))
+    .w(viewport.width)
+    .h(viewport.height)
+    .p_4()
+    .flex()
+    .items_center()
+    .justify_center()
+    .bg(gpui::black().opacity(0.4))
+    .occlude();
+  let panel = div()
+    .debug_selector(move || id.into())
+    .w_full()
+    .max_w(px(max_width))
+    .p_6()
+    .rounded(px(16.))
+    .border_1()
+    .border_color(p.border.opacity(0.5))
+    .bg(p.popover)
+    .text_color(p.popover_foreground)
+    .font_family(theme::SANS_FONT)
+    .shadow_2xl();
+  (backdrop, panel)
+}
+
+/// `DialogTitle`: `text-lg font-semibold leading-none`.
+pub fn dialog_title(title: impl Into<SharedString>) -> Div {
+  ui::text(div(), TextSize::Lg)
+    .line_height(px(15.))
+    .font_weight(FontWeight::SEMIBOLD)
+    .child(title.into())
+}
+
+/// `DialogDescription`: `text-sm text-muted-foreground`.
+pub fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
+  ui::text(div(), TextSize::Sm)
+    .text_color(p.muted_foreground)
+    .child(text.into())
+}
+
+/// `DialogHeader`: `flex flex-col space-y-1.5`.
+pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
+  div()
+    .flex()
+    .flex_col()
+    .gap(px(6.))
+    .child(dialog_title(title))
+    .child(description)
+}
+
+/// `<Label className="text-xs">`: `font-medium leading-none`.
+pub fn label_xs(text: impl Into<SharedString>) -> Div {
+  ui::text(div(), TextSize::Xs)
+    .line_height(px(11.))
+    .font_weight(FontWeight::MEDIUM)
+    .child(text.into())
+}
+
+/// A checkbox's state; `Some` is the indeterminate dash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Check {
+  On,
+  Off,
+  Some,
+}
+
+/// A native `<input type="checkbox" className="rounded">`: 13px, the
+/// webview's blue accent when checked.
+pub fn checkbox(
+  id: impl Into<SharedString>,
+  state: Check,
+  disabled: bool,
+  p: &Palette,
+) -> Stateful<Div> {
+  let id: SharedString = id.into();
+  let selector = id.to_string();
+  let accent: Hsla = gpui::rgb(theme::tw::BLUE_500).into();
+  div()
+    .id(id)
+    .debug_selector(move || selector)
+    .size(px(13.))
+    .flex_none()
+    .flex()
+    .items_center()
+    .justify_center()
+    .rounded(px(3.))
+    .when(disabled, |this| this.opacity(0.5))
+    .map(|this| match state {
+      Check::On => this
+        .bg(accent)
+        .child(ui::icon(theme::ICON_CHECK, 11., gpui::white())),
+      Check::Some => this
+        .bg(accent)
+        .child(ui::icon(theme::ICON_MINUS, 11., gpui::white())),
+      Check::Off => this
+        .border_1()
+        .border_color(p.muted_foreground)
+        .bg(p.background),
+    })
+}

@@ -27,6 +27,7 @@ use super::{
   theme,
 };
 
+mod change_move;
 mod changes;
 mod changes_data;
 mod changes_review;
@@ -45,6 +46,7 @@ mod modal;
 mod onboarding;
 mod remote;
 mod remote_data;
+mod rename_dialog;
 mod settings;
 mod settings_data;
 mod terminal;
@@ -52,6 +54,10 @@ mod terminal_data;
 mod terminal_emu;
 mod workspace;
 mod workspace_data;
+mod workspace_deletion;
+mod workspace_dialog;
+mod workspace_dialog_data;
+mod workspace_modal;
 
 #[cfg(test)]
 mod tests;
@@ -73,6 +79,9 @@ pub struct ScreenSnapshot {
   pub remote: remote::Route,
   #[serde(flatten)]
   pub view: View,
+  /// The Dashboard dialog open over the screen.
+  #[serde(default)]
+  pub modal: Option<workspace_modal::ModalRoute>,
 }
 
 /// One screen's data, tagged by `kind`.
@@ -125,6 +134,7 @@ pub trait Host:
   + terminal_data::TerminalHost
   + modal::ModalsHost
   + remote_data::RemoteHost
+  + workspace_dialog_data::WorkspaceDialogHost
 {
 }
 
@@ -135,6 +145,7 @@ impl<T> Host for T where
     + terminal_data::TerminalHost
     + modal::ModalsHost
     + remote_data::RemoteHost
+    + workspace_dialog_data::WorkspaceDialogHost
 {
 }
 
@@ -159,6 +170,8 @@ pub struct Screen {
   stash: Option<Entity<modal::stash::StashView>>,
   /// The remote dialogs, while one is open.
   remote: Option<Entity<remote::RemoteView>>,
+  /// The dialog drawn over the screen, while React keeps it open.
+  workspace_modal: Option<workspace_modal::OpenModal>,
 }
 
 impl Screen {
@@ -184,6 +197,7 @@ impl Screen {
       prompt_history: None,
       stash: None,
       remote: None,
+      workspace_modal: None,
     }
   }
 
@@ -240,6 +254,26 @@ impl Render for Screen {
     if !matches!(self.snapshot.view, View::MergePreview(_)) {
       self.merge = None;
     }
+    match &self.snapshot.modal {
+      None => self.workspace_modal = None,
+      Some(route) => match &self.workspace_modal {
+        Some(open) if open.is_for(route) => open.update(route, dark, cx),
+        _ => {
+          let host: Arc<dyn workspace_dialog_data::WorkspaceDialogHost> = self.host.clone();
+          self.workspace_modal = Some(workspace_modal::OpenModal::open(
+            route,
+            host,
+            self.sink.clone(),
+            dark,
+            cx,
+          ));
+        }
+      },
+    }
+    let workspace_modal = self.workspace_modal.as_ref().filter(|open| open.shown(cx));
+    // The webview is a window of its own; a dialog over it must hide it.
+    let covered = workspace_modal.is_some();
+    let workspace_modal = workspace_modal.map(workspace_modal::OpenModal::element);
     let modal = self.modal_view(dark, cx);
     let ctx = Ctx {
       palette: theme::palette(dark),
@@ -278,7 +312,10 @@ impl Render for Screen {
         let route = (**route).clone();
         match &self.workspace {
           Some(view) => {
-            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.update(cx, |view, cx| {
+              view.set_covered(covered, cx);
+              view.set_route(route, dark, cx)
+            });
             view.clone().into_any_element()
           }
           None => {
@@ -287,6 +324,7 @@ impl Render for Screen {
             let view = cx.new(|cx| {
               workspace::WorkspaceView::new(route, host, sink, dark, popups, webview, cx)
             });
+            view.update(cx, |view, cx| view.set_covered(covered, cx));
             self.workspace = Some(view.clone());
             view.into_any_element()
           }
@@ -312,7 +350,9 @@ impl Render for Screen {
     // workspace stops framing it.
     let remote_open = self.snapshot.remote.is_open();
     if let Some(workspace) = &self.workspace {
-      workspace.update(cx, |workspace, cx| workspace.set_covered(remote_open, cx));
+      workspace.update(cx, |workspace, cx| {
+        workspace.set_covered(remote_open || covered, cx)
+      });
     }
     let remote = if remote_open {
       let route = self.snapshot.remote.clone();
@@ -343,6 +383,7 @@ impl Render for Screen {
       .font_family(theme::SANS_FONT)
       .child(body)
       .children(remote)
+      .children(workspace_modal)
       .children(modal)
   }
 }

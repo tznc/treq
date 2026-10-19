@@ -214,12 +214,6 @@ export interface GpuiRemoteRoute {
   ambiguous: string | null;
 }
 
-export type GpuiScreenSnapshot = GpuiScreenView & {
-  dark: boolean;
-  /** The remote dialogs open over the screen; absent with none. */
-  remote?: GpuiRemoteRoute;
-};
-
 interface GpuiRemoteStore {
   /** What the remote dialogs show, null with none open. */
   route: GpuiRemoteRoute | null;
@@ -250,6 +244,82 @@ export function useGpuiDrawsRemoteDialogs(): boolean {
   const drawing = useGpuiRemoteStore((s) => s.drawing > 0);
   return gpuiDrawsRemoteDialogs() && drawing;
 }
+/** A workspace as the GPUI dialogs need it. */
+export interface GpuiDialogWorkspace {
+  id: number;
+  branchName: string;
+  workspacePath: string;
+}
+
+/**
+ * Dashboard's dialogs that GPUI draws over whichever screen shows
+ * (src-tauri/src/gpui_shell/screen/modal.rs). React keeps which one is
+ * open; GPUI does the work through the backend and hands back closing,
+ * the workspace it made, and the workspace to delete.
+ */
+export type GpuiWorkspaceModal =
+  /** `UnifiedWorkspaceDialog`; `key` changes with each open. */
+  | {
+      kind: "workspaceDialog";
+      repoPath: string;
+      key: number;
+      defaults: {
+        targetBranch?: string;
+        source:
+          | { kind: "create" }
+          | { kind: "home" }
+          | {
+              kind: "workspace";
+              id: number;
+              branchName: string;
+              targetBranch: string | null;
+            };
+        preSelectedCommits?: string[];
+        preSelectedFiles?: string[];
+        description?: string;
+        title?: string;
+        branchName?: string;
+        activeTab?: "commits" | "changes";
+        applyStashId?: number;
+        applyStashCommit?: { hash: string; message: string; timestamp: string };
+      };
+    }
+  /** `RenameWorkspaceDialog`. */
+  | {
+      kind: "renameWorkspace";
+      repoPath: string;
+      workspaceId: number;
+      branchName: string;
+    }
+  /** The command palette's `WorkspaceDeletion`. */
+  | {
+      kind: "workspaceDeletion";
+      repoPath: string;
+      workspaces: GpuiDialogWorkspace[];
+      currentWorkspace: GpuiDialogWorkspace | null;
+    }
+  /** The `AlertDialog` confirming a move of dropped files. */
+  | {
+      kind: "confirmChangeMove";
+      repoPath: string;
+      files: string[];
+      sourceBranch: string;
+      destinationBranch: string;
+      destinationLabel: string;
+    };
+
+/** The open GPUI dialog, and how many mounted screens GPUI is asked to draw. */
+const useGpuiWorkspaceModalStore = create<{
+  modal: GpuiWorkspaceModal | null;
+  screens: number;
+}>(() => ({ modal: null, screens: 0 }));
+export type GpuiScreenSnapshot = GpuiScreenView & {
+  dark: boolean;
+  /** The remote dialogs open over the screen; absent with none. */
+  remote?: GpuiRemoteRoute;
+  /** The workspace dialog GPUI draws over the screen, while one is open. */
+  modal?: GpuiWorkspaceModal;
+};
 
 export type GpuiScreenAction =
   | { kind: "openRepo" }
@@ -379,11 +449,19 @@ export function useGpuiScreen(
 ): boolean {
   const host = isGpuiShellHost() && window.__TREQ_WEB_UI__ !== true;
   const dark = useThemeStore((s) => s.actualTheme()) === "dark";
-  const modal = useWindowModalBackdrop(host) !== null;
+  const domModal = useWindowModalBackdrop(host) !== null;
   const remote = useGpuiRemoteStore((s) => s.route);
+  const modal = useGpuiWorkspaceModalStore((s) => s.modal);
+  // A GPUI dialog covers the window, so a webview modal closing under it
+  // (the command palette opening Delete Workspace) does not drop the screen.
   const json =
-    host && view && !modal
-      ? JSON.stringify({ ...view, dark, ...(remote ? { remote } : {}) })
+    host && view && (!domModal || modal)
+      ? JSON.stringify({
+          ...view,
+          dark,
+          ...(remote ? { remote } : {}),
+          ...(modal ? { modal } : {}),
+        })
       : null;
 
   // Tells Dashboard a screen is there for GPUI to draw its dialogs over.
@@ -394,6 +472,14 @@ export function useGpuiScreen(
     return () =>
       useGpuiRemoteStore.setState((s) => ({ drawing: s.drawing - 1 }));
   }, [drawing]);
+
+  const wants = host && view !== null;
+  useEffect(() => {
+    if (!wants) return;
+    useGpuiWorkspaceModalStore.setState((s) => ({ screens: s.screens + 1 }));
+    return () =>
+      useGpuiWorkspaceModalStore.setState((s) => ({ screens: s.screens - 1 }));
+  }, [wants]);
 
   // Starts at null so a screen that never drew sends no null, which would
   // clear the screen another component pushed.
@@ -497,6 +583,50 @@ export function useGpuiModal(
       void unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [host]);
+}
+
+/**
+ * Opens `modal` over the GPUI screen while it is non-null and GPUI is
+ * drawing a screen, and runs `onAction` for the screen's clicks. Returns
+ * whether GPUI draws Dashboard's dialogs now; React draws its own when not
+ * (no GPUI screen shows, or the integration tests' React dialogs).
+ */
+export function useGpuiWorkspaceModal(
+  enabled: boolean,
+  modal: GpuiWorkspaceModal | null,
+  onAction: (action: GpuiScreenAction) => void,
+): boolean {
+  const host =
+    enabled &&
+    isGpuiShellHost() &&
+    window.__TREQ_WEB_UI__ !== true &&
+    window.__TREQ_REACT_WORKSPACE_DIALOGS__ !== true;
+  const screens = useGpuiWorkspaceModalStore((s) => s.screens);
+  const draws = host && screens > 0;
+  const json = draws && modal ? JSON.stringify(modal) : null;
+
+  useEffect(() => {
+    useGpuiWorkspaceModalStore.setState({
+      modal: json === null ? null : (JSON.parse(json) as GpuiWorkspaceModal),
+    });
+  }, [json]);
+  useEffect(
+    () => () => useGpuiWorkspaceModalStore.setState({ modal: null }),
+    [],
+  );
+
+  const latest = useRef(onAction);
+  latest.current = onAction;
+  useEffect(() => {
+    if (!draws) return;
+    const unlisten = listenGpuiScreenActions((action) =>
+      latest.current(action),
+    );
+    return () => {
+      void unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, [draws]);
+  return draws;
 }
 
 /** Whether GPUI may draw the terminal pane. */
