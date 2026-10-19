@@ -91,6 +91,30 @@ impl Controls {
     window: &mut Window,
     cx: &mut Context<V>,
   ) -> Entity<InputState> {
+    self.text_input(field, value, placeholder, false, window, cx)
+  }
+
+  /// `<Input type="password">`: the text drawn as dots.
+  pub fn password<V: 'static>(
+    &mut self,
+    field: &str,
+    value: &str,
+    placeholder: &str,
+    window: &mut Window,
+    cx: &mut Context<V>,
+  ) -> Entity<InputState> {
+    self.text_input(field, value, placeholder, true, window, cx)
+  }
+
+  fn text_input<V: 'static>(
+    &mut self,
+    field: &str,
+    value: &str,
+    placeholder: &str,
+    masked: bool,
+    window: &mut Window,
+    cx: &mut Context<V>,
+  ) -> Entity<InputState> {
     if let Some(state) = self.inputs.get(field).cloned() {
       if !state.read(cx).focus_handle(cx).is_focused(window) && state.read(cx).value() != value {
         state.update(cx, |s, cx| s.set_value(value.to_string(), window, cx));
@@ -101,6 +125,7 @@ impl Controls {
       InputState::new(window, cx)
         .placeholder(placeholder.to_string())
         .default_value(value.to_string())
+        .masked(masked)
     });
     let (sink, name) = (self.sink.clone(), field.to_string());
     self._subscriptions.push(

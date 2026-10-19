@@ -30,6 +30,51 @@ const SettingRow: React.FC<{
   </div>
 );
 
+type AddToast = ReturnType<typeof useToastStore.getState>["addToast"];
+
+/**
+ * Opens Linear's OAuth page for this account, or toasts why it cannot.
+ * GPUI's Integrations tab starts it too (`useGpuiSettingsScreen`).
+ */
+export async function startLinearOAuth(addToast: AddToast): Promise<void> {
+  try {
+    const { data, error } = await supabase.functions.invoke(
+      "create-linear-oauth-intent",
+      { body: {} },
+    );
+    if (error && isProRequiredError(error)) {
+      // The server decides entitlement; the Pro gate above is display only.
+      addToast({
+        title: "Linear OAuth needs Pro",
+        description:
+          "Add a personal Linear API key above to use Linear on the Free plan.",
+        type: "info",
+        action: {
+          label: "Upgrade to Pro",
+          onClick: () => void openUrl(`${WEB_URL}/dashboard`),
+        },
+      });
+      return;
+    }
+    if (error) {
+      throw new Error(
+        error instanceof Error ? error.message : JSON.stringify(error),
+      );
+    }
+    if (data?.authorization_url) {
+      await openUrl(data.authorization_url);
+    } else {
+      throw new Error("No authorization URL returned");
+    }
+  } catch (err) {
+    addToast({
+      title: "Error starting OAuth flow",
+      description: err instanceof Error ? err.message : String(err),
+      type: "error",
+    });
+  }
+}
+
 export const LinearIntegrationSettings: React.FC<
   LinearIntegrationSettingsProps
 > = ({ repoPath }) => {
@@ -80,40 +125,7 @@ export const LinearIntegrationSettings: React.FC<
   const handleConnectViaOAuth = async () => {
     try {
       setAuthLoading(true);
-      const { data, error } = await supabase.functions.invoke(
-        "create-linear-oauth-intent",
-        { body: {} },
-      );
-      if (error && isProRequiredError(error)) {
-        // The server decides entitlement; the Pro gate above is display only.
-        addToast({
-          title: "Linear OAuth needs Pro",
-          description:
-            "Add a personal Linear API key above to use Linear on the Free plan.",
-          type: "info",
-          action: {
-            label: "Upgrade to Pro",
-            onClick: () => void openUrl(`${WEB_URL}/dashboard`),
-          },
-        });
-        return;
-      }
-      if (error) {
-        throw new Error(
-          error instanceof Error ? error.message : JSON.stringify(error),
-        );
-      }
-      if (data?.authorization_url) {
-        await openUrl(data.authorization_url);
-      } else {
-        throw new Error("No authorization URL returned");
-      }
-    } catch (err) {
-      addToast({
-        title: "Error starting OAuth flow",
-        description: err instanceof Error ? err.message : String(err),
-        type: "error",
-      });
+      await startLinearOAuth(addToast);
     } finally {
       setAuthLoading(false);
     }

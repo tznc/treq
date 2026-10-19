@@ -47,6 +47,8 @@ pub trait SettingsHost: ToolsHost {
     scope: SkillInstallScope,
     repo_path: Option<&str>,
   ) -> Result<(), String>;
+  /// The bytes at `url`, for the account's avatar.
+  fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
   fn notify(&self, event: NativeEvent);
 }
 
@@ -140,6 +142,17 @@ impl SettingsHost for Backend {
   ) -> Result<(), String> {
     skills::set_skill_install_scope(skill_id, scope, repo_path)?;
     self.with_db(skills::persist_app_index_setting)
+  }
+
+  fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::block_on(async {
+      let response = reqwest::get(url)
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| e.to_string())?;
+      let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+      Ok(bytes.to_vec())
+    })
   }
 
   fn notify(&self, event: NativeEvent) {

@@ -84,18 +84,28 @@ pub enum ToastTone {
   Error,
 }
 
+fn package_json() -> serde_json::Value {
+  const PACKAGE_JSON: &str = include_str!("../../../package.json");
+  serde_json::from_str(PACKAGE_JSON).unwrap_or_default()
+}
+
 /// The website the docs links open, as React's `WEB_URL`.
 pub fn web_url() -> String {
-  const PACKAGE_JSON: &str = include_str!("../../../package.json");
   let env = if cfg!(debug_assertions) {
     "dev"
   } else {
     "prod"
   };
-  serde_json::from_str::<serde_json::Value>(PACKAGE_JSON)
-    .ok()
-    .and_then(|pkg| pkg["env"][env]["webUrl"].as_str().map(str::to_string))
-    .unwrap_or_else(|| "https://treq.dev".to_string())
+  package_json()["env"][env]["webUrl"]
+    .as_str()
+    .map_or_else(|| "https://treq.dev".to_string(), str::to_string)
+}
+
+/// Whether `flag` is on in React's `FEATURES` (package.json `featureFlags`).
+pub fn feature_flag(flag: &str) -> bool {
+  package_json()["featureFlags"][flag]
+    .as_bool()
+    .unwrap_or(false)
 }
 
 /// The backend, as seen from window `label`'s screens.

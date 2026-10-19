@@ -1,16 +1,24 @@
-//! `SettingsPage`: the Repository, Application, Skills and Feature Preview
-//! tabs. React sends no screen for Account and Integrations yet (they read
-//! Supabase), so they stay in the webview.
+//! `SettingsPage`: every tab.
 //!
 //! Drawn from the backend directly: GPUI loads and saves the settings
 //! itself, then tells React (see `native`) so its stores and caches follow.
-//! React still owns which tab shows and closing the page.
+//! React still owns which tab shows, closing the page, and the Supabase
+//! session the Account and Integrations tabs show (see `account`).
 
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, FontWeight, SharedString, Window,
+};
+
+mod account;
+
+// The tests read what the tabs draw by these names.
+#[cfg_attr(not(test), allow(unused_imports))]
+pub use account::{
+  AccountRoute, AccountTab, CloudCard, CloudUsage, GithubSection, IntegrationsTab, LinearSection,
+  StatusTone,
 };
 
 use super::{
@@ -26,7 +34,9 @@ use crate::{
   gpui_shell::{
     form::{self, Controls, SelectOption},
     native::{self, NativeEvent, ToastTone},
+    popup::PopupSink,
     theme::{self, Palette},
+    tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
   repo_config::RepoConfig,
@@ -86,6 +96,9 @@ pub struct Route {
   pub repo_path: Option<String>,
   /// The home repository's branch, as the workspace header shows it.
   pub current_branch: Option<String>,
+  /// The auth store, while the Account or Integrations tab shows.
+  #[serde(default)]
+  pub account: Option<Box<AccountRoute>>,
 }
 
 /// What the screen draws.
@@ -98,6 +111,8 @@ pub struct Settings {
   pub repository: Option<Repository>,
   pub preview: Option<Preview>,
   pub skills: Option<SkillsTab>,
+  pub account: Option<AccountTab>,
+  pub integrations: Option<IntegrationsTab>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -371,6 +386,14 @@ pub struct SettingsView {
   repo: Option<Repo>,
   /// Loaded the first time the Skills tab shows.
   skills: Option<Skills>,
+  account: account::State,
+  tips: Tooltips,
+}
+
+impl HasTooltips for SettingsView {
+  fn tooltips(&mut self) -> &mut Tooltips {
+    &mut self.tips
+  }
 }
 
 impl SettingsView {
@@ -379,6 +402,7 @@ impl SettingsView {
     host: Arc<dyn SettingsHost>,
     react: ActionSink,
     dark: bool,
+    popups: PopupSink,
     cx: &mut Context<Self>,
   ) -> Self {
     let view = cx.weak_entity();
@@ -404,25 +428,37 @@ impl SettingsView {
       setup: Setup::default(),
       repo: None,
       skills: None,
+      account: account::State::default(),
+      tips: Tooltips::new(popups, dark),
     };
     this.load_app(cx);
     this.load_setup(cx);
     this.check(cx);
     this.set_repo(route.repo_path, cx);
     this.show_skills(cx);
+    if this.route.tab == Tab::Integrations {
+      this.load_linear(cx);
+    }
+    this.sync_account(cx);
     this
   }
 
   pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
     if self.route != route || self.dark != dark {
       let repo_moved = self.route.repo_path != route.repo_path;
+      let tab_moved = self.route.tab != route.tab;
       if repo_moved {
         self.set_repo(route.repo_path.clone(), cx);
         self.skills = None;
       }
       self.route = route;
       self.dark = dark;
+      self.tips.dark = dark;
       self.show_skills(cx);
+      if self.route.tab == Tab::Integrations && (repo_moved || tab_moved) {
+        self.load_linear(cx);
+      }
+      self.sync_account(cx);
       cx.notify();
     }
   }
@@ -776,6 +812,7 @@ impl SettingsView {
 
   pub(super) fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
     match action {
+      ScreenAction::Press { id } if self.press_account(&id, cx) => {}
       ScreenAction::Press { id } => match id.split_once(':') {
         Some((action, skill)) if action.starts_with("skills.") => {
           let skill = skill.to_string();
@@ -824,6 +861,9 @@ impl SettingsView {
   }
 
   fn set_field(&mut self, field: String, value: serde_json::Value, cx: &mut Context<Self>) {
+    if self.set_account_field(&field, &value) {
+      return;
+    }
     let text = value.as_str().unwrap_or_default().to_string();
     if let Some(name) = field.strip_prefix("repo.") {
       if let Some(repo) = &mut self.repo {
@@ -1063,6 +1103,8 @@ impl SettingsView {
       repository,
       preview,
       skills,
+      account: (tab == Tab::Account).then(|| self.account_tab()),
+      integrations: (tab == Tab::Integrations).then(|| self.integrations_tab()),
     }
   }
 
@@ -1142,6 +1184,7 @@ fn switch_row(name: &str, help_text: &str, switch: impl IntoElement, p: &Palette
 
 impl Render for SettingsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.tips.sync(cx);
     let p = theme::palette(self.dark);
     let s = self.screen();
 
@@ -1255,14 +1298,33 @@ impl Render for SettingsView {
         Some(skills) => self.skills(skills, &p, window, cx).into_any_element(),
         None => div().into_any_element(),
       },
-      // Not drawn by GPUI yet; React keeps the webview for these.
-      Tab::Account | Tab::Integrations => div().into_any_element(),
+      Tab::Account => match &s.account {
+        Some(account) => self.account(account, &p, window, cx),
+        None => div().into_any_element(),
+      },
+      Tab::Integrations => match &s.integrations {
+        Some(integrations) => self
+          .integrations(integrations, &p, window, cx)
+          .into_any_element(),
+        None => div().into_any_element(),
+      },
     };
     let dialog = s
       .skills
       .as_ref()
       .and_then(|skills| skills.dialog.clone())
       .map(|dialog| self.skill_dialog(&dialog, &p));
+    let delete_dialog = match &s.account {
+      Some(AccountTab::SignedIn(signed_in))
+        if signed_in
+          .cloud
+          .as_ref()
+          .is_some_and(|c| c.confirming_delete) =>
+      {
+        Some(self.cloud_delete_dialog(&p).into_any_element())
+      }
+      _ => None,
+    };
 
     div()
       .relative()
@@ -1290,6 +1352,7 @@ impl Render for SettingsView {
           ),
       )
       .children(dialog)
+      .children(delete_dialog)
   }
 }
 

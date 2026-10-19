@@ -107,6 +107,11 @@ icons! {
   ICON_SQUARE_CHECK => "square-check-big",
   ICON_MAXIMIZE => "maximize-2",
   ICON_MINIMIZE => "minimize-2",
+  ICON_CLOUD => "cloud",
+  ICON_CREDIT_CARD => "credit-card",
+  ICON_CROWN => "crown",
+  ICON_LOG_OUT => "log-out",
+  ICON_WRENCH => "wrench",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
@@ -421,4 +426,8 @@ pub mod tw {
   pub const RED_900: u32 = 0x7f1d1d;
   pub const RED_950: u32 = 0x450a0a;
   pub const YELLOW_950: u32 = 0x422006;
+  pub const GREEN_400: u32 = 0x4ade80;
+  pub const GREEN_700: u32 = 0x15803d;
+  pub const YELLOW_400: u32 = 0xfacc15;
+  pub const YELLOW_600: u32 = 0xca8a04;
 }

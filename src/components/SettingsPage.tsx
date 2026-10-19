@@ -166,6 +166,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     repoPath,
     currentBranch: currentBranch ?? null,
     onClose,
+    cloudWorkspace,
   });
 
   return (

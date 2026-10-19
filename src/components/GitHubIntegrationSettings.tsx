@@ -145,6 +145,21 @@ const MergeQueueSetting: React.FC<{
   );
 };
 
+/**
+ * The `github_repositories` rows the signed-in account can see. GPUI's
+ * Integrations tab reads them through `useGpuiSettingsScreen` with the same
+ * key, so both share one fetch.
+ */
+export function useGitHubRepositories(userId: string | null | undefined) {
+  return useSWR(userId ? ["github-repositories", userId] : null, async () => {
+    const { data, error } = await supabase
+      .from("github_repositories")
+      .select("id, full_name, private, default_branch, installation_id");
+    if (error) throw error;
+    return (data ?? []) as GitHubRepository[];
+  });
+}
+
 export const GitHubIntegrationSettings: React.FC<
   GitHubIntegrationSettingsProps
 > = ({ repoPath }) => {
@@ -162,13 +177,7 @@ export const GitHubIntegrationSettings: React.FC<
     data: repositories = [],
     isLoading: loading,
     error: reposError,
-  } = useSWR(isSignedIn ? ["github-repositories", userId] : null, async () => {
-    const { data, error } = await supabase
-      .from("github_repositories")
-      .select("id, full_name, private, default_branch, installation_id");
-    if (error) throw error;
-    return (data ?? []) as GitHubRepository[];
-  });
+  } = useGitHubRepositories(isSignedIn ? userId : null);
   const failed = Boolean(reposError);
 
   if (authLoading) {
