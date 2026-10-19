@@ -64,6 +64,19 @@ struct FakeHost {
   sinks: Mutex<Vec<(String, Sink)>>,
   /// Whether confirmations are cancelled.
   decline: bool,
+  /// What the workspace dialogs read: commits ahead, branches, the home
+  /// branch, branches that exist locally or on the remote, and symlink
+  /// suggestions.
+  ahead: Vec<crate::core::WorkspaceCommit>,
+  branches: Vec<crate::jj::JjBranch>,
+  home_branch: Option<String>,
+  local_branches: Vec<String>,
+  remote_branches: Vec<String>,
+  suggestions: Vec<String>,
+  /// Workspace dialog calls that fail, by name (`"new_workspace"`, ...).
+  failing: Vec<&'static str>,
+  /// Workspaces the dialogs created.
+  created: Mutex<Vec<crate::local_db::Workspace>>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -3803,3 +3816,130 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(h.drawn("terminal-column-agent"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
 }
+
+impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
+  fn all_workspaces(&self, _: &str) -> Result<Vec<crate::local_db::Workspace>, String> {
+    let mut all = self.workspaces.clone();
+    all.extend(self.created.lock().unwrap().iter().cloned());
+    Ok(all)
+  }
+
+  fn commits_ahead(&self, _: &str, id: i64) -> Result<Vec<crate::core::WorkspaceCommit>, String> {
+    self.record(format!("read ahead {id}"));
+    Ok(self.ahead.clone())
+  }
+
+  fn repo_branches(&self, _: &str) -> Result<Vec<crate::jj::JjBranch>, String> {
+    self.record("read branches".into());
+    Ok(self.branches.clone())
+  }
+
+  fn fetch_in_background(&self, _: &str) {
+    self.record("fetch".into());
+  }
+
+  fn default_branch(&self, _: &str) -> Result<String, String> {
+    Ok("main".into())
+  }
+
+  fn current_branch(&self, _: &str) -> Result<Option<String>, String> {
+    Ok(self.home_branch.clone())
+  }
+
+  fn branch_status(&self, _: &str, branch: &str) -> Result<crate::jj::BranchStatus, String> {
+    self.record(format!("check branch {branch}"));
+    let remote = self.remote_branches.iter().any(|b| b == branch);
+    Ok(crate::jj::BranchStatus {
+      local_exists: self.local_branches.iter().any(|b| b == branch),
+      remote_exists: remote,
+      remote_name: remote.then(|| "origin".into()),
+      remote_ref: remote.then(|| format!("origin/{branch}")),
+    })
+  }
+
+  fn gitignore_suggestions(&self, _: &str) -> Vec<String> {
+    self.suggestions.clone()
+  }
+
+  fn new_workspace(
+    &self,
+    _: &str,
+    branch: &str,
+    source: Option<&str>,
+    metadata: Option<&str>,
+  ) -> Result<i64, String> {
+    self.record(format!(
+      "create {branch} from {} {}",
+      source.unwrap_or("-"),
+      metadata.unwrap_or("-")
+    ));
+    if self.failing.contains(&"new_workspace") {
+      return Err("create failed".into());
+    }
+    let mut created = self.created.lock().unwrap();
+    let id = 100 + created.len() as i64;
+    created.push(workspace_dialogs::workspace(id, branch, None));
+    Ok(id)
+  }
+
+  fn move_changes(
+    &self,
+    _: &str,
+    source: &str,
+    destination: &str,
+    request: crate::core::WorkspaceMoveRequest,
+  ) -> Result<(), String> {
+    self.record(format!(
+      "move {source} -> {destination} files={:?} commits={:?}",
+      request.files, request.commits
+    ));
+    if self.failing.contains(&"move_changes") {
+      return Err("move failed".into());
+    }
+    Ok(())
+  }
+
+  fn retarget(
+    &self,
+    _: &str,
+    workspace: &crate::local_db::Workspace,
+    target: &str,
+  ) -> Result<(), String> {
+    self.record(format!("retarget {} -> {target}", workspace.branch_name));
+    Ok(())
+  }
+
+  fn apply_stash(&self, _: &str, stash_id: i64, branch: &str) -> Result<(), String> {
+    self.record(format!("apply stash {stash_id} onto {branch}"));
+    if self.failing.contains(&"apply_stash") {
+      return Err("stash failed".into());
+    }
+    Ok(())
+  }
+
+  fn rename_workspace(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    branch: &str,
+    dry_run: bool,
+  ) -> Result<crate::core::RenameWorkspaceResult, String> {
+    self.record(format!(
+      "rename {workspace_id} -> {branch}{}",
+      if dry_run { " (dry run)" } else { "" }
+    ));
+    let taken = self.local_branches.iter().any(|b| b == branch);
+    Ok(crate::core::RenameWorkspaceResult {
+      success: !taken,
+      message: if taken {
+        format!("Branch '{branch}' already exists")
+      } else {
+        String::new()
+      },
+      workspace: None,
+      updated_children_ids: Vec::new(),
+    })
+  }
+}
+
+mod workspace_dialogs;

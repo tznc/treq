@@ -185,6 +185,7 @@ import {
 } from "../stores/featurePreviewStore";
 import { useGpuiSidebar } from "../hooks/useGpuiSidebar";
 import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
+import { useGpuiWorkspaceDialogs } from "./useGpuiWorkspaceDialogs";
 import {
   type ChangeFilesMoveTarget,
   ChangeFilesMoveProvider,
@@ -2237,6 +2238,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setPendingChangeMove(request);
   };
 
+  /** The confirmed files moved: close the confirmation and refresh. */
+  const handleChangeMoved = async () => {
+    setPendingChangeMove(null);
+    await invalidateQueries(["workspaces", queryRepoKey]);
+    await invalidateQueries(["workspace-statuses", queryRepoKey]);
+    if (repoPath) {
+      await invalidateReviewChangeCount(
+        repoPath,
+        selectedWorkspace?.id ?? null,
+      );
+    }
+    dispatchRefreshWorkspaceChanges();
+  };
+
   const handleConfirmChangeMove = async () => {
     if (!pendingChangeMove || !repoPath) return;
     setChangeMovePending(true);
@@ -2256,14 +2271,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         description: `Moved ${pendingChangeMove.files.length} file(s) to ${pendingChangeMove.destinationLabel}`,
         type: "success",
       });
-      setPendingChangeMove(null);
-      await invalidateQueries(["workspaces", queryRepoKey]);
-      await invalidateQueries(["workspace-statuses", queryRepoKey]);
-      await invalidateReviewChangeCount(
-        repoPath,
-        selectedWorkspace?.id ?? null,
-      );
-      dispatchRefreshWorkspaceChanges();
+      await handleChangeMoved();
     } catch (error) {
       addToast({
         title: "Failed to move files",
@@ -2857,6 +2865,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
     dispatchRefreshWorkspaceChanges();
   };
 
+  /** `UnifiedWorkspaceDialog` made or filled `workspaceId`: open it. */
+  const handleWorkspaceCreated = async (workspaceId: number) => {
+    await invalidateQueries(["workspaces", queryRepoKey]);
+    invalidateQueries(["workspace-statuses", queryRepoKey]);
+    const updatedWorkspaces = await fetchAndCache(
+      ["workspaces", queryRepoKey],
+      () => getWorkspaces(dataRepoPath),
+    );
+    const newWorkspace = updatedWorkspaces.find((w) => w.id === workspaceId);
+    if (newWorkspace) {
+      handleOpenSession(newWorkspace);
+    }
+  };
+
+  // GPUI draws these dialogs over its screens; React draws the rest.
+  const gpuiDialog = useGpuiWorkspaceDialogs({
+    enabled: !isRemoteActive,
+    repoPath: dataRepoPath,
+    changeMoveRepoPath: repoPath ?? "",
+    workspaces,
+    currentWorkspace: selectedWorkspace,
+    workspaceDialog: unifiedDialogDefaults,
+    rename: renameTarget,
+    deletion: showWorkspaceDeletion,
+    changeMove: pendingChangeMove,
+    handlers: {
+      closeWorkspaceDialog: () => setUnifiedDialogDefaults(null),
+      workspaceCreated: (id) => void handleWorkspaceCreated(id),
+      closeRename: () => setRenameTarget(null),
+      closeDeletion: () => setShowWorkspaceDeletion(false),
+      deleteWorkspace: (workspace) => void handleDelete(workspace),
+      changeMoved: () => void handleChangeMoved(),
+      cancelChangeMove: () => setPendingChangeMove(null),
+    },
+  });
+
   const isSessionView = viewMode === "session" || viewMode === "show-workspace";
   const sidebarWidth = useSidebarWidthStore((s) => s.width);
   const dark = useThemeStore((s) => s.actualTheme()) === "dark";
@@ -3219,7 +3263,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 />
               )}
               {gpuiSidebarSources}
-              {renameTarget && (
+              {renameTarget && gpuiDialog !== "renameWorkspace" && (
                 <RenameWorkspaceDialog
                   open
                   onOpenChange={(open) => {
@@ -3567,7 +3611,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {/* Note: MergeDialog removed - git-specific feature */}
 
               <AlertDialog
-                open={pendingChangeMove !== null}
+                open={
+                  pendingChangeMove !== null &&
+                  gpuiDialog !== "confirmChangeMove"
+                }
                 onOpenChange={(open) => {
                   if (!open && !changeMovePending) setPendingChangeMove(null);
                 }}
@@ -3611,26 +3658,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </AlertDialog>
 
               <UnifiedWorkspaceDialog
-                open={unifiedDialogDefaults !== null}
+                open={
+                  unifiedDialogDefaults !== null &&
+                  gpuiDialog !== "workspaceDialog"
+                }
                 onOpenChange={(open) => {
                   if (!open) setUnifiedDialogDefaults(null);
                 }}
                 repoPath={dataRepoPath}
                 defaults={unifiedDialogDefaults ?? {}}
-                onSuccess={async (workspaceId) => {
-                  await invalidateQueries(["workspaces", queryRepoKey]);
-                  invalidateQueries(["workspace-statuses", queryRepoKey]);
-                  const updatedWorkspaces = await fetchAndCache(
-                    ["workspaces", queryRepoKey],
-                    () => getWorkspaces(dataRepoPath),
-                  );
-                  const newWorkspace = updatedWorkspaces.find(
-                    (w) => w.id === workspaceId,
-                  );
-                  if (newWorkspace) {
-                    handleOpenSession(newWorkspace);
-                  }
-                }}
+                onSuccess={handleWorkspaceCreated}
               />
 
               <CommandPalette
@@ -3667,7 +3704,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 showBranchSwitcher={showBranchSwitcher}
                 onBranchSwitcherChange={setShowBranchSwitcher}
                 onBranchChanged={handleBranchChanged}
-                showWorkspaceDeletion={showWorkspaceDeletion}
+                showWorkspaceDeletion={
+                  showWorkspaceDeletion && gpuiDialog !== "workspaceDeletion"
+                }
                 onWorkspaceDeletionChange={setShowWorkspaceDeletion}
                 currentWorkspace={selectedWorkspace}
                 onDeleteWorkspace={handleDelete}

@@ -16,6 +16,8 @@ declare global {
     __TREQ_WEB_UI__?: boolean;
     /** React draws the terminal pane; tests of that pane set it. */
     __TREQ_REACT_TERMINAL__?: boolean;
+    /** React draws Dashboard's workspace dialogs; tests of them set it. */
+    __TREQ_REACT_WORKSPACE_DIALOGS__?: boolean;
   }
 }
 

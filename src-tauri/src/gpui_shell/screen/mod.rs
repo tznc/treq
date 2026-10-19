@@ -21,6 +21,7 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 
 use super::{popup::PopupSink, theme};
 
+mod change_move;
 mod changes;
 mod changes_data;
 mod changes_review;
@@ -35,7 +36,9 @@ mod highlight;
 mod logs;
 mod logs_data;
 mod merge;
+mod modal;
 mod onboarding;
+mod rename_dialog;
 mod settings;
 mod settings_data;
 mod terminal;
@@ -43,6 +46,9 @@ mod terminal_data;
 mod terminal_emu;
 mod workspace;
 mod workspace_data;
+mod workspace_deletion;
+mod workspace_dialog;
+mod workspace_dialog_data;
 
 #[cfg(test)]
 mod tests;
@@ -61,6 +67,9 @@ pub struct ScreenSnapshot {
   pub dark: bool,
   #[serde(flatten)]
   pub view: View,
+  /// The Dashboard dialog open over the screen.
+  #[serde(default)]
+  pub modal: Option<modal::ModalRoute>,
 }
 
 /// One screen's data, tagged by `kind`.
@@ -111,6 +120,7 @@ pub trait Host:
   + settings_data::SettingsHost
   + merge::MergeHost
   + terminal_data::TerminalHost
+  + workspace_dialog_data::WorkspaceDialogHost
 {
 }
 
@@ -119,6 +129,7 @@ impl<T> Host for T where
     + settings_data::SettingsHost
     + merge::MergeHost
     + terminal_data::TerminalHost
+    + workspace_dialog_data::WorkspaceDialogHost
 {
 }
 
@@ -136,6 +147,8 @@ pub struct Screen {
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
   merge: Option<Entity<merge::MergeView>>,
+  /// The dialog drawn over the screen, while React keeps it open.
+  modal: Option<modal::OpenModal>,
 }
 
 impl Screen {
@@ -156,6 +169,7 @@ impl Screen {
       settings: None,
       workspace: None,
       merge: None,
+      modal: None,
     }
   }
 
@@ -200,6 +214,26 @@ impl Render for Screen {
     if !matches!(self.snapshot.view, View::MergePreview(_)) {
       self.merge = None;
     }
+    match &self.snapshot.modal {
+      None => self.modal = None,
+      Some(route) => match &self.modal {
+        Some(open) if open.is_for(route) => open.update(route, dark, cx),
+        _ => {
+          let host: Arc<dyn workspace_dialog_data::WorkspaceDialogHost> = self.host.clone();
+          self.modal = Some(modal::OpenModal::open(
+            route,
+            host,
+            self.sink.clone(),
+            dark,
+            cx,
+          ));
+        }
+      },
+    }
+    let modal = self.modal.as_ref().filter(|open| open.shown(cx));
+    // The webview is a window of its own; a dialog over it must hide it.
+    let covered = modal.is_some();
+    let modal = modal.map(modal::OpenModal::element);
     let ctx = Ctx {
       palette: theme::palette(dark),
       sink: &self.sink,
@@ -237,7 +271,10 @@ impl Render for Screen {
         let route = (**route).clone();
         match &self.workspace {
           Some(view) => {
-            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.update(cx, |view, cx| {
+              view.set_covered(covered, cx);
+              view.set_route(route, dark, cx)
+            });
             view.clone().into_any_element()
           }
           None => {
@@ -246,6 +283,7 @@ impl Render for Screen {
             let view = cx.new(|cx| {
               workspace::WorkspaceView::new(route, host, sink, dark, popups, webview, cx)
             });
+            view.update(cx, |view, cx| view.set_covered(covered, cx));
             self.workspace = Some(view.clone());
             view.into_any_element()
           }
@@ -273,5 +311,6 @@ impl Render for Screen {
       .text_color(ctx.palette.foreground)
       .font_family(theme::SANS_FONT)
       .child(body)
+      .children(modal)
   }
 }

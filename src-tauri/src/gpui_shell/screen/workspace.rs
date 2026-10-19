@@ -324,6 +324,8 @@ pub struct WorkspaceView {
   tooltip_sent: Rc<RefCell<Option<SharedString>>>,
   /// Where dropdown buttons were last drawn, in window coordinates.
   bounds: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
+  /// A Dashboard dialog covers the window, so the webview stays out.
+  covered: bool,
   _poll: Task<()>,
 }
 
@@ -374,10 +376,19 @@ impl WorkspaceView {
       tooltip: None,
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
+      covered: false,
       _poll: poll,
     };
     this.load(cx);
     this
+  }
+
+  /// Leaves the webview out of the frame while a dialog covers the window.
+  pub fn set_covered(&mut self, covered: bool, cx: &mut Context<Self>) {
+    if self.covered != covered {
+      self.covered = covered;
+      cx.notify();
+    }
   }
 
   pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
@@ -1646,7 +1657,8 @@ impl Render for WorkspaceView {
       .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_row(&row, &p));
     let code = self.tab_body(cx);
-    let frame = |webview: Option<&Webview<Wry>>| match webview {
+    let modal = self.covered;
+    let frame = |webview: Option<&Webview<Wry>>| match webview.filter(|_| !modal) {
       Some(webview) => tauri_plugin_gpui::webview_frame(webview)
         .size_full()
         .into_any_element(),
