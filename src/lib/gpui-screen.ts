@@ -192,12 +192,54 @@ interface GpuiMergePreviewScreen {
   workspaceId: number;
 }
 
+/**
+ * PrReviewScreen, which GPUI reads, comments on and submits itself
+ * (src-tauri/src/gpui_shell/screen/pr_review.rs). It presses
+ * "prReview.close" to leave and sends "prReview.startAgentReview"
+ * ({ prompt, agent }) to open the agent terminal.
+ */
+interface GpuiPrReviewScreen {
+  kind: "prReview";
+  repoPath: string;
+  prNumber: number;
+}
+
+/**
+ * GitHubPanel's Merge Queue tab (src-tauri/src/gpui_shell/screen/merge_queue.rs).
+ * The queue lives in Supabase, so React sends its entries; GPUI reads the
+ * workspaces' stats and the target branch's tip from the backend.
+ */
+interface GpuiMergeQueueScreen {
+  kind: "mergeQueue";
+  repoPath: string;
+  fullName: string | null;
+  remoteLoading: boolean;
+  isPro: boolean;
+  queueEnabled: boolean | null;
+  queueLoading: boolean;
+  entries: {
+    branch_name: string;
+    pr_number: number | null;
+    pr_title?: string | null;
+    status: string;
+    position: number;
+    target_branch: string;
+    insertions?: number | null;
+    deletions?: number | null;
+  }[];
+  dequeuing: boolean;
+  showMergedHistory: boolean;
+  historyLimit: number;
+}
+
 export type GpuiScreenView =
   /** GPUI reads its data from the backend and opens repositories itself. */
   | { kind: "onboarding" }
   | GpuiSettingsScreen
   | GpuiWorkspaceScreen
-  | GpuiMergePreviewScreen;
+  | GpuiMergePreviewScreen
+  | GpuiPrReviewScreen
+  | GpuiMergeQueueScreen;
 
 /** `CloudWorkspaceCard`'s state, which GPUI draws in the settings page and the remote setup dialog. */
 export type GpuiCloudState = NonNullable<GpuiAccountState["cloud"]>;
@@ -342,7 +384,7 @@ export type GpuiScreenAction =
   | {
       kind: "field";
       field: string;
-      value: string | number | boolean | Record<string, unknown>;
+      value: string | number | boolean | unknown[] | Record<string, unknown>;
     }
   /** A slider released at `value`. */
   | { kind: "commit"; field: string; value: number }

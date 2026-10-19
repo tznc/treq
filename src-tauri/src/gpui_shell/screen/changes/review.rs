@@ -52,11 +52,11 @@ pub(in crate::gpui_shell::screen) struct Review {
   /// Where the comment box is open.
   pub draft: Option<Pending>,
   pub draft_text: String,
-  draft_input: Option<Input>,
+  pub(super) draft_input: Option<Input>,
   /// The comment, or the conflict's note, being edited.
   pub editing: Option<String>,
   pub edit_text: String,
-  edit_input: Option<Input>,
+  pub(super) edit_input: Option<Input>,
   pub notes: Vec<ConflictNote>,
   /// The conflict whose note box is open.
   pub note_open: Option<String>,
@@ -141,6 +141,9 @@ impl ChangesView {
 
   /// Writes the review after edits settle, or forgets it once empty.
   fn save_review(&mut self, cx: &mut Context<Self>) {
+    if self.read_only() {
+      return;
+    }
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
@@ -276,6 +279,12 @@ impl ChangesView {
     if text.is_empty() {
       return;
     }
+    if self.read_only() {
+      if let Some(draft) = self.review.draft.clone() {
+        self.submit_pr_draft(draft, text, cx);
+      }
+      return;
+    }
     let Some(draft) = self.review.draft.take() else {
       return;
     };
@@ -299,6 +308,13 @@ impl ChangesView {
   }
 
   fn delete_comment(&mut self, id: &str, cx: &mut Context<Self>) {
+    if self.read_only() {
+      if self.review.editing.as_deref() == Some(id) {
+        self.cancel_edit(cx);
+      }
+      self.delete_pr_draft(id.to_string(), cx);
+      return;
+    }
     self.review.comments.retain(|c| c.id != id);
     if self.review.editing.as_deref() == Some(id) {
       self.cancel_edit(cx);
@@ -317,6 +333,12 @@ impl ChangesView {
   fn save_edit(&mut self, cx: &mut Context<Self>) {
     let text = self.review.edit_text.trim().to_string();
     if text.is_empty() {
+      return;
+    }
+    if self.read_only() {
+      if let Some(id) = self.review.editing.clone() {
+        self.save_pr_edit(id, text, cx);
+      }
       return;
     }
     let Some(id) = self.review.editing.take() else {
@@ -410,7 +432,7 @@ impl ChangesView {
 
   /// `hasConflicts || comments.length>0`.
   pub(super) fn show_review_bar(&self) -> bool {
-    !self.conflicted().is_empty() || !self.review.comments.is_empty()
+    !self.read_only() && !self.conflicted().is_empty() || !self.review.comments.is_empty()
   }
 
   fn all_conflicts(&self) -> Vec<Conflict> {

@@ -52,6 +52,11 @@ struct FakeHost {
   /// The pull request's review threads and the review agent's comments.
   threads: Vec<crate::github::GhReviewThread>,
   agent: Mutex<Vec<crate::local_db::AgentReviewComment>>,
+  /// What the PR review reads: the remote's `owner/repo`, the PR's diff and
+  /// the signed-in login. Its drafts are `agent`.
+  pr_remote: Option<String>,
+  pr_diff: Option<Result<String, String>>,
+  pr_viewer: Option<String>,
   /// What the Logs tab reads.
   logs: Vec<crate::core::checks_logs::LogRecordView>,
   workflows: Vec<crate::core::checks::WorkflowInfo>,
@@ -5315,4 +5320,6 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
   }
 }
 
+mod merge_queue;
+mod pr_review;
 mod workspace_dialogs;

@@ -1,0 +1,1050 @@
+//! The GitHub panel on its Merge Queue tab (`GitHubPanel` with
+//! `MergeQueueTab`): queued branches grouped into stacks above the target
+//! branch they land on, with merged history below it.
+//!
+//! The queue lives in Supabase, which only React reaches: React sends its
+//! entries and the account's plan, and runs what changes the queue
+//! (`mergeQueue.dequeue`, the history page, the refresh). GPUI reads what
+//! the backend knows itself ([`merge_queue_data`]): each queued workspace's
+//! lines changed, the default branch and the target branch's tip.
+//!
+//! [`MergeQueueView::tab`] draws only the tab, for a GitHub panel drawn in
+//! GPUI to host; [`MergeQueueView`]'s own render adds the panel's header
+//! and tabs around it.
+//!
+//! [`merge_queue_data`]: super::merge_queue_data
+
+use std::{collections::HashMap, sync::Arc, time::Duration};
+
+use serde::Deserialize;
+use serde_json::json;
+use tauri_plugin_gpui::gpui::{
+  self, div, prelude::*, px, AnyElement, App, ClipboardItem, Context, Div, FontWeight, Hsla,
+  SharedString, Task, Window,
+};
+
+use super::{
+  code_data::diff_stats,
+  merge_queue_data::{
+    bar_widths, history_page, max_change, partition, status_label, tip_title, with_local_stats,
+    MergeQueueHost, QueueEntry, QueueStack, HISTORY_PAGE,
+  },
+  ActionSink, ScreenAction,
+};
+use crate::gpui_shell::{
+  native,
+  popup::{PopupSink, Side, TooltipContent},
+  theme::{self, tw, Palette},
+  tooltips::{HasTooltips, Tooltips},
+  ui::{self, Button, Size, TextSize, Variant},
+};
+
+/// What React sends: the panel's remote and plan, and the queue it read.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Route {
+  pub repo_path: String,
+  /// The GitHub remote's `owner/repo`, once read.
+  pub full_name: Option<String>,
+  pub remote_loading: bool,
+  pub is_pro: bool,
+  /// `get_merge_queue_enabled`, `None` until read.
+  pub queue_enabled: Option<bool>,
+  pub queue_loading: bool,
+  pub entries: Vec<QueueEntry>,
+  /// A Remove is running.
+  pub dequeuing: bool,
+  pub show_merged_history: bool,
+  pub history_limit: usize,
+}
+
+/// What the tab read from the backend.
+#[derive(Debug, Clone, Default)]
+struct Local {
+  default_branch: Option<String>,
+  /// The home repository's newest commit: short id and full id.
+  tip: Option<(String, String)>,
+  /// Lines changed by each queued branch's workspace.
+  stats: HashMap<String, (u32, u32)>,
+}
+
+/// `STACK_DOCS_URL`.
+fn stack_docs() -> String {
+  format!(
+    "{}/docs/concepts/workspaces#stacks-and-rebasing",
+    native::web_url()
+  )
+}
+
+pub struct MergeQueueView {
+  host: Arc<dyn MergeQueueHost>,
+  react: ActionSink,
+  route: Route,
+  dark: bool,
+  tips: Tooltips,
+  local: Local,
+  /// The branches the stats were read for.
+  read_for: Option<(String, Vec<String>)>,
+  pub(super) copied: bool,
+  copied_reset: Option<Task<()>>,
+}
+
+impl HasTooltips for MergeQueueView {
+  fn tooltips(&mut self) -> &mut Tooltips {
+    &mut self.tips
+  }
+}
+
+impl MergeQueueView {
+  pub fn new(
+    route: Route,
+    host: Arc<dyn MergeQueueHost>,
+    react: ActionSink,
+    dark: bool,
+    popups: PopupSink,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    let mut this = Self {
+      host,
+      react,
+      route,
+      dark,
+      tips: Tooltips::new(popups, dark),
+      local: Local::default(),
+      read_for: None,
+      copied: false,
+      copied_reset: None,
+    };
+    this.load(cx);
+    this
+  }
+
+  pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
+    if self.dark != dark {
+      self.dark = dark;
+      self.tips.dark = dark;
+    }
+    if self.route != route {
+      if self.route.repo_path != route.repo_path {
+        self.local = Local::default();
+      }
+      self.route = route;
+      self.load(cx);
+    }
+    cx.notify();
+  }
+
+  fn branches(&self) -> Vec<String> {
+    self
+      .route
+      .entries
+      .iter()
+      .map(|e| e.branch_name.clone())
+      .collect()
+  }
+
+  /// Reads the default branch, the tip and the queued workspaces' stats,
+  /// once per repository and set of queued branches.
+  fn load(&mut self, cx: &mut Context<Self>) {
+    let key = (self.route.repo_path.clone(), self.branches());
+    if self.read_for.as_ref() == Some(&key) {
+      return;
+    }
+    self.read_for = Some(key.clone());
+    let host = self.host.clone();
+    let entries = self.route.entries.clone();
+    let repo = self.route.repo_path.clone();
+    cx.spawn(async move |this, cx| {
+      let local = cx
+        .background_spawn(async move {
+          let default_branch = host.default_branch(&repo).ok();
+          let tip = host
+            .commits(&repo, None, false, Some(1))
+            .ok()
+            .and_then(|log| log.commits.into_iter().next())
+            .map(|c| (c.short_id, c.commit_id));
+          let mut stats = HashMap::new();
+          if !entries.is_empty() {
+            let workspaces = host.workspaces(&repo).unwrap_or_default();
+            for entry in &entries {
+              if entry.insertions.is_some() || entry.deletions.is_some() {
+                continue;
+              }
+              let Some(ws) = workspaces
+                .iter()
+                .find(|w| w.branch_name == entry.branch_name)
+              else {
+                continue;
+              };
+              if let Ok(log) = host.commits(&repo, Some(ws.id), false, None) {
+                stats.insert(entry.branch_name.clone(), diff_stats(&log.commits));
+              }
+            }
+          }
+          Local {
+            default_branch,
+            tip,
+            stats,
+          }
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        if view.read_for.as_ref() == Some(&key) {
+          view.local = local;
+          cx.notify();
+        }
+      });
+    })
+    .detach();
+  }
+
+  fn send(&self, action: ScreenAction, cx: &mut App) {
+    let react = self.react.clone();
+    cx.defer(move |cx| react(action, cx));
+  }
+
+  fn press(&self, id: &str, cx: &mut App) {
+    self.send(ScreenAction::Press { id: id.into() }, cx);
+  }
+
+  fn field(&self, field: &str, value: serde_json::Value, cx: &mut App) {
+    self.send(
+      ScreenAction::Field {
+        field: field.into(),
+        value,
+      },
+      cx,
+    );
+  }
+
+  fn dequeue(&self, branches: Vec<String>, cx: &mut App) {
+    self.field("mergeQueue.dequeue", json!(branches), cx);
+  }
+
+  fn copy_tip(&mut self, cx: &mut Context<Self>) {
+    let Some((short, full)) = self.local.tip.clone() else {
+      return;
+    };
+    let value = if full.is_empty() { short } else { full };
+    cx.write_to_clipboard(ClipboardItem::new_string(value));
+    self.copied = true;
+    self.copied_reset = Some(cx.spawn(async move |this, cx| {
+      cx.background_executor()
+        .timer(Duration::from_millis(1500))
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        view.copied = false;
+        cx.notify();
+      });
+    }));
+    cx.notify();
+  }
+
+  fn shade(&self, light: u32, dark: u32) -> Hsla {
+    tw::color(if self.dark { dark } else { light })
+  }
+}
+
+impl Render for MergeQueueView {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.tips.sync(cx);
+    let p = theme::palette(self.dark);
+    let panel = self.panel(&p, cx);
+    div()
+      .debug_selector(|| "github-panel".into())
+      .size_full()
+      .flex()
+      .bg(p.background)
+      .text_color(p.foreground)
+      .child(panel)
+  }
+}
+
+impl MergeQueueView {
+  /// `GitHubPanel`'s list column on the Merge Queue tab.
+  fn panel(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let route = &self.route;
+    let heading = if route.remote_loading {
+      ui::text(div(), TextSize::Sm)
+        .text_color(p.muted_foreground)
+        .child("Loading…")
+    } else if let Some(name) = &route.full_name {
+      ui::text(div(), TextSize::Sm)
+        .debug_selector(|| "github-repo-name".into())
+        .font_family(theme::MONO_FONT)
+        .child(name.clone())
+    } else {
+      ui::text(div(), TextSize::Sm)
+        .text_color(p.destructive)
+        .child("No GitHub remote")
+    };
+    let header = div()
+      .flex()
+      .flex_none()
+      .items_center()
+      .px_4()
+      .pt_4()
+      .pb_2()
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(ui::icon(theme::ICON_GITHUB, 20., p.muted_foreground))
+          .child(
+            heading
+              .font_weight(FontWeight::SEMIBOLD)
+              .line_height(px(16.25)),
+          ),
+      );
+    let tab = |id: &'static str, label: &'static str, active: bool| {
+      let bg = p.background;
+      ui::text(div(), TextSize::Sm)
+        .id(id)
+        .debug_selector(move || id.into())
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .px_3()
+        .py_1()
+        .rounded(px(6.))
+        .font_weight(FontWeight::MEDIUM)
+        .cursor_pointer()
+        .when(active, |this| {
+          this.bg(p.background).text_color(p.foreground).shadow_sm()
+        })
+        .when(!active, |this| {
+          let fg = p.foreground;
+          this
+            .text_color(p.muted_foreground)
+            .hover(move |s| s.bg(bg.opacity(0.5)).text_color(fg))
+        })
+        .child(label)
+    };
+    let pro = (!route.is_pro).then(|| {
+      ui::text(div(), TextSize::Sm)
+        .font_weight(FontWeight::SEMIBOLD)
+        .line_height(px(13.))
+        .px_1()
+        .py(px(1.))
+        .rounded(px(4.))
+        .bg(tw::color(tw::GREEN_500).opacity(0.2))
+        .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
+        .child("PRO")
+    });
+    let tabs = div().flex_none().px_4().pb_2().child(
+      div()
+        .flex()
+        .gap_1()
+        .p_1()
+        .rounded(px(6.))
+        .bg(p.muted)
+        .child(
+          tab("github-tab-issues", "Issues", false)
+            .on_click(cx.listener(|view, _, _, cx| view.press("github.tab:issues", cx))),
+        )
+        .child(
+          tab("github-tab-prs", "Pull Requests", false)
+            .on_click(cx.listener(|view, _, _, cx| view.press("github.tab:prs", cx))),
+        )
+        .child(tab("github-tab-merge-queue", "Merge Queue", true).children(pro)),
+    );
+    let toolbar = (route.is_pro && route.queue_enabled == Some(true) && route.full_name.is_some())
+      .then(|| self.toolbar(p, cx));
+    let body = self.tab(p, cx);
+    div()
+      .flex_1()
+      .flex()
+      .flex_col()
+      .min_w_0()
+      .overflow_hidden()
+      .child(header)
+      .child(div().flex().child(tabs).child(div().flex_1()))
+      .children(toolbar)
+      .child(
+        div()
+          .id("merge-queue-body")
+          .flex_1()
+          .min_h_0()
+          .flex()
+          .flex_col()
+          .children(body),
+      )
+  }
+
+  /// The Merged toggle and Refresh (`merge-queue-toolbar`).
+  fn toolbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let on = self.route.show_merged_history;
+    let fg = p.foreground;
+    let check = div()
+      .size(px(14.))
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded(px(2.))
+      .border_1()
+      .when(on, |this| {
+        this.border_color(p.primary).bg(p.primary).child(ui::icon(
+          theme::ICON_CHECK,
+          12.,
+          p.primary_foreground,
+        ))
+      })
+      .when(!on, |this| {
+        this.border_color(p.muted_foreground.opacity(0.4))
+      });
+    let merged = ui::text(div(), TextSize::Sm)
+      .id("merge-queue-merged")
+      .debug_selector(|| "merge-queue-merged".into())
+      .flex()
+      .items_center()
+      .gap(px(6.))
+      .h_7()
+      .px_2()
+      .rounded(px(6.))
+      .border_1()
+      .cursor_pointer()
+      .when(on, |this| {
+        this
+          .border_color(p.primary.opacity(0.4))
+          .bg(p.primary.opacity(0.1))
+          .text_color(p.foreground)
+      })
+      .when(!on, |this| {
+        this
+          .border_color(p.border)
+          .bg(p.background)
+          .text_color(p.muted_foreground)
+          .hover(move |s| s.text_color(fg))
+      })
+      .child(check)
+      .child("Merged")
+      .on_click(cx.listener(move |view, _, _, cx| {
+        view.field("mergeQueue.showMerged", json!(!on), cx);
+      }));
+    let refresh = Button::new("merge-queue-refresh", p)
+      .variant(Variant::Ghost)
+      .size(Size::Icon)
+      .w(px(28.))
+      .h(px(28.))
+      .icon(theme::ICON_REFRESH, 14.)
+      .on_click(cx.listener(|view, _, _, cx| view.press("mergeQueue.refresh", cx)));
+    div()
+      .debug_selector(|| "merge-queue-toolbar".into())
+      .flex()
+      .flex_none()
+      .items_center()
+      .gap_2()
+      .px_4()
+      .pb_2()
+      .child(merged)
+      .child(div().flex_1())
+      .child(self.tips.wrap(
+        "merge-queue-refresh-tip",
+        Side::Bottom,
+        Some(TooltipContent::Text("Refresh".into())),
+        refresh,
+        cx,
+      ))
+  }
+
+  /// `MergeQueueTab`: the upsell, the opt-in, or the queue.
+  pub fn tab(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    if !self.route.is_pro {
+      return Some(self.upsell(p).into_any_element());
+    }
+    self.route.full_name.as_ref()?;
+    if self.route.queue_enabled != Some(true) {
+      return Some(self.disabled(p, cx).into_any_element());
+    }
+    Some(self.list(p, cx).into_any_element())
+  }
+
+  /// `MergeQueueUpsell`.
+  fn upsell(&self, p: &Palette) -> impl IntoElement {
+    let green = self.shade(tw::GREEN_600, tw::GREEN_400);
+    let host = self.host.clone();
+    div()
+      .debug_selector(|| "merge-queue-upsell".into())
+      .size_full()
+      .flex()
+      .items_center()
+      .justify_center()
+      .p_6()
+      .child(
+        div()
+          .max_w(px(448.))
+          .w_full()
+          .rounded(px(12.))
+          .border_1()
+          .border_color(p.border)
+          .bg(gpui::linear_gradient(
+            135.,
+            gpui::linear_color_stop(p.muted.opacity(0.4), 0.),
+            gpui::linear_color_stop(tw::color(tw::GREEN_500).opacity(0.05), 1.),
+          ))
+          .p_8()
+          .flex()
+          .flex_col()
+          .items_center()
+          .gap_4()
+          .child(
+            div()
+              .size_12()
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded_full()
+              .bg(tw::color(tw::GREEN_500).opacity(0.15))
+              .child(ui::icon(theme::ICON_ROCKET, 24., green)),
+          )
+          .child(
+            div()
+              .flex()
+              .flex_col()
+              .items_center()
+              .gap_2()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .px(px(6.))
+                  .py(px(2.))
+                  .rounded(px(4.))
+                  .bg(tw::color(tw::GREEN_500).opacity(0.2))
+                  .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
+                  .child("PRO"),
+              )
+              .child(
+                ui::text(div(), TextSize::Lg)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .child("Unlock Merge Queue"),
+              )
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .line_height(px(13. * 1.625))
+                  .text_center()
+                  .text_color(p.muted_foreground)
+                  .child(
+                    "Queue stacked PRs, run CI in parallel lanes, and merge with confidence. \
+                     Upgrade to Pro to manage your repository's merge queue from Treq.",
+                  ),
+              ),
+          )
+          .child(
+            Button::new("merge-queue-upgrade", p)
+              .size(Size::Lg)
+              .w_full()
+              .gap_2()
+              .bg(tw::color(tw::GREEN_600))
+              .hover_bg(tw::color(tw::GREEN_700))
+              .text_color(gpui::white())
+              .child(ui::icon(theme::ICON_ROCKET, 16., gpui::white()))
+              .child("Upgrade to Pro")
+              .on_click(move |_, _, _| host.open_url(&format!("{}/dashboard", native::web_url()))),
+          ),
+      )
+  }
+
+  /// `MergeQueueDisabled`.
+  fn disabled(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .debug_selector(|| "merge-queue-disabled".into())
+      .size_full()
+      .flex()
+      .flex_col()
+      .items_center()
+      .justify_center()
+      .p_8()
+      .gap_3()
+      .child(ui::icon(theme::ICON_MERGE, 32., p.muted_foreground))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("The merge queue is off for this repository."),
+      )
+      .child(
+        Button::new("merge-queue-enable", p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .label("Enable it in Settings › Integrations")
+          .on_click(cx.listener(|view, _, _, cx| view.press("mergeQueue.openSettings", cx))),
+      )
+  }
+
+  /// `MergeQueueList`: the stacks, the target branch, then merged history.
+  fn list(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
+    if self.route.queue_loading {
+      return div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .py_12()
+        .child(ui::spinner("merge-queue-loading", 20., p.muted_foreground));
+    }
+    let entries = with_local_stats(&self.route.entries, &self.local.stats);
+    let (active, history) = partition(&entries);
+    let limit = if self.route.show_merged_history {
+      self.route.history_limit
+    } else {
+      0
+    };
+    let (visible, more) = history_page(&history, limit);
+    let target = active
+      .first()
+      .map(|s| s.target_branch.clone())
+      .or_else(|| history.first().map(|s| s.target_branch.clone()))
+      .or_else(|| self.local.default_branch.clone())
+      .unwrap_or_else(|| "main".into());
+    let tip_entry = history.first().and_then(|s| s.entries.first());
+    let mut column = div().relative().flex().flex_col().gap_3();
+    if active.is_empty() {
+      column = column.child(
+        div().py_8().child(
+          div()
+            .debug_selector(|| "merge-queue-empty".into())
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .py_12()
+            .gap_3()
+            .text_color(p.muted_foreground)
+            .child(ui::icon(theme::ICON_MERGE, 32., p.muted_foreground))
+            .child(ui::text(div(), TextSize::Sm).child("Merge queue is empty.")),
+        ),
+      );
+    } else {
+      for stack in active.iter().rev() {
+        column = column.child(self.stack_block(stack, true, p, cx));
+      }
+    }
+    column = column.child(self.target_marker(&target, tip_title(tip_entry), p, cx));
+    if self.route.show_merged_history && !visible.is_empty() {
+      let mut past = div()
+        .debug_selector(|| "merge-queue-history".into())
+        .flex()
+        .flex_col()
+        .gap_3()
+        .pt_1();
+      for stack in &visible {
+        past = past.child(self.stack_block(stack, false, p, cx));
+      }
+      if more {
+        let next = self.route.history_limit + HISTORY_PAGE;
+        past = past.child(
+          div().flex().justify_center().pt_1().pb_1().child(
+            Button::new("merge-queue-load-more", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Load more")
+              .on_click(cx.listener(move |view, _, _, cx| {
+                view.field("mergeQueue.historyLimit", json!(next), cx)
+              })),
+          ),
+        );
+      }
+      column = column.child(past);
+    }
+    // The rail runs through every card and the gaps between them, under
+    // the nodes: the cards are drawn without a background of their own,
+    // which is the panel's.
+    let rail = div()
+      .debug_selector(|| "merge-queue-rail".into())
+      .absolute()
+      .left(px(35. - 12.))
+      .top_0()
+      .bottom_0()
+      .w(px(2.))
+      .bg(p.border);
+    div()
+      .debug_selector(|| "merge-queue-list".into())
+      .size_full()
+      .flex()
+      .flex_col()
+      .child(
+        div()
+          .id("merge-queue-scroll")
+          .flex_1()
+          .overflow_y_scroll()
+          .p_3()
+          .child(div().relative().child(rail).child(column)),
+      )
+  }
+
+  /// `QueueStackBlock`: the stack's branches, next to merge at the bottom.
+  fn stack_block(
+    &mut self,
+    stack: &QueueStack,
+    removable: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let is_stack = stack.entries.len() > 1;
+    let key = stack.entries[0].branch_name.clone();
+    let max = max_change(&stack.entries);
+    let dequeuing = self.route.dequeuing;
+    let selector = if is_stack {
+      format!("merge-queue-stack-{key}")
+    } else {
+      format!("merge-queue-single-{key}")
+    };
+    let mut card = div()
+      .debug_selector(move || selector)
+      .rounded(px(8.))
+      .border_1()
+      .border_color(p.border)
+      .p_4();
+    if is_stack {
+      let n = stack.entries.len();
+      let branches: Vec<String> = stack
+        .entries
+        .iter()
+        .map(|e| e.branch_name.clone())
+        .collect();
+      let help = div()
+        .id(SharedString::from(format!("stack-help-{key}")))
+        .cursor_pointer()
+        .child(ui::icon(
+          theme::ICON_CIRCLE_HELP,
+          14.,
+          p.muted_foreground.opacity(0.7),
+        ))
+        .on_click({
+          let host = self.host.clone();
+          move |_, _, _| host.open_url(&stack_docs())
+        });
+      card = card.child(
+        ui::text(div(), TextSize::Sm)
+          .flex()
+          .items_center()
+          .gap(px(6.))
+          .font_weight(FontWeight::SEMIBOLD)
+          .text_color(p.muted_foreground)
+          .mb_3()
+          .pl(px(26.))
+          .child(ui::icon(theme::ICON_LAYERS, 16., p.muted_foreground))
+          .child(format!("Stack of {n}"))
+          .child(
+            self.tips.wrap(
+              format!("stack-help-tip-{key}"),
+              Side::Top,
+              Some(TooltipContent::Text(
+                format!(
+                  "Stacked PRs merge bottom-up into {}: the lowest PR lands first, then each PR \
+                 above it.",
+                  stack.target_branch
+                )
+                .into(),
+              )),
+              help,
+              cx,
+            ),
+          )
+          .child(div().flex_1())
+          .when(removable, |this| {
+            this.child(
+              Button::new(SharedString::from(format!("merge-queue-remove-{key}")), p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .h_7()
+                .font_weight(FontWeight::NORMAL)
+                .disabled(dequeuing)
+                .label("Remove")
+                .on_click(cx.listener(move |view, _, _, cx| view.dequeue(branches.clone(), cx))),
+            )
+          }),
+      );
+    }
+    let mut list = div().flex().flex_col();
+    for entry in stack.entries.iter().rev() {
+      list = list.child(self.entry_row(entry, is_stack, removable, max, p, cx));
+    }
+    card.child(list)
+  }
+
+  #[allow(clippy::too_many_arguments)]
+  fn entry_row(
+    &self,
+    entry: &QueueEntry,
+    in_stack: bool,
+    removable: bool,
+    max: u32,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let node = match entry.status.as_str() {
+      "testing" => tw::color(tw::AMBER_500),
+      "merging" => tw::color(tw::GREEN_500),
+      "merged" => tw::color(tw::GREEN_600),
+      "failed" => tw::color(tw::RED_500),
+      _ => p.muted_foreground,
+    };
+    let (chip_bg, chip_fg) = match entry.status.as_str() {
+      "testing" => (
+        tw::color(tw::AMBER_500).opacity(0.2),
+        self.shade(tw::AMBER_600, tw::AMBER_400),
+      ),
+      "failed" => (
+        tw::color(tw::RED_500).opacity(0.2),
+        self.shade(tw::RED_600, tw::RED_400),
+      ),
+      "merged" | "merging" => (
+        tw::color(tw::GREEN_500).opacity(0.2),
+        self.shade(tw::GREEN_600, tw::GREEN_400),
+      ),
+      _ => (p.muted, p.muted_foreground),
+    };
+    let (insertions, deletions) = (entry.insertions.unwrap_or(0), entry.deletions.unwrap_or(0));
+    let branch = entry.branch_name.clone();
+    let selector = format!("merge-queue-entry-{}", entry.position);
+    div()
+      .debug_selector(move || selector)
+      .flex()
+      .w_full()
+      .items_start()
+      .gap_3()
+      .py_2()
+      .child(
+        div().flex_none().mt(px(2.)).size(px(14.)).child(
+          div()
+            .size(px(14.))
+            .rounded_full()
+            .border_2()
+            .border_color(p.background)
+            .bg(node),
+        ),
+      )
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .min_w_0()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .flex_none()
+                  .text_color(p.muted_foreground)
+                  .child(format!("#{}", entry.position)),
+              )
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .truncate()
+                  .font_weight(FontWeight::MEDIUM)
+                  .child(match entry.pr_number {
+                    Some(n) => format!("PR #{n}"),
+                    None => "No PR".into(),
+                  }),
+              )
+              .when(removable && !in_stack, |this| {
+                this.child(
+                  div().ml_auto().child(
+                    Button::new(
+                      SharedString::from(format!("merge-queue-remove-{}", entry.branch_name)),
+                      p,
+                    )
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .h_7()
+                    .font_weight(FontWeight::NORMAL)
+                    .disabled(self.route.dequeuing)
+                    .label("Remove")
+                    .on_click(
+                      cx.listener(move |view, _, _, cx| view.dequeue(vec![branch.clone()], cx)),
+                    ),
+                  ),
+                )
+              }),
+          )
+          .child(
+            div()
+              .flex()
+              .flex_wrap()
+              .items_center()
+              .gap_2()
+              .mt(px(2.))
+              .min_w_0()
+              .child(
+                ui::text(div(), TextSize::Xs)
+                  .flex_none()
+                  .px_2()
+                  .py(px(2.))
+                  .rounded_full()
+                  .bg(chip_bg)
+                  .text_color(chip_fg)
+                  .child(status_label(&entry.status).to_string()),
+              )
+              .child(
+                ui::text(div(), TextSize::Xs)
+                  .min_w_0()
+                  .truncate()
+                  .font_family(theme::MONO_FONT)
+                  .text_color(p.muted_foreground)
+                  .child(format!("{} → {}", entry.branch_name, entry.target_branch)),
+              )
+              .children(self.diff_stats(insertions, deletions, max, p)),
+          ),
+      )
+  }
+
+  /// `DiffStatsInline`: `+N`, the bar, `-N`.
+  fn diff_stats(&self, insertions: u32, deletions: u32, max: u32, p: &Palette) -> Option<Div> {
+    if insertions == 0 && deletions == 0 {
+      return None;
+    }
+    let (add, del) = bar_widths(insertions, deletions, max);
+    let (green, red) = (
+      self.shade(tw::GREEN_600, tw::GREEN_400),
+      self.shade(tw::RED_600, tw::RED_400),
+    );
+    let half = super::merge_queue_data::BAR_HALF;
+    Some(
+      div()
+        .debug_selector(|| "diff-stats-inline".into())
+        .ml_auto()
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .font_family(theme::MONO_FONT)
+            .text_color(green)
+            .child(format!("+{insertions}")),
+        )
+        .child(
+          div()
+            .flex()
+            .flex_none()
+            .h(px(6.))
+            .items_center()
+            .child(
+              div()
+                .w(px(half))
+                .h_full()
+                .flex()
+                .justify_end()
+                .child(div().h_full().w(px(add)).bg(green)),
+            )
+            .child(div().w(px(1.)).h_full().bg(p.border))
+            .child(
+              div()
+                .w(px(half))
+                .h_full()
+                .flex()
+                .child(div().h_full().w(px(del)).bg(red)),
+            ),
+        )
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .font_family(theme::MONO_FONT)
+            .text_color(red)
+            .child(format!("-{deletions}")),
+        ),
+    )
+  }
+
+  /// `TargetBranchMarker`: where the stacks land, and its tip.
+  fn target_marker(
+    &mut self,
+    target: &str,
+    title: Option<String>,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let tip = self.local.tip.clone().map(|(short, _)| short);
+    let copied = self.copied;
+    let copy = tip.as_ref().map(|short| {
+      let button = Button::new("merge-queue-copy-sha", p)
+        .variant(Variant::Ghost)
+        .size(Size::IconXs)
+        .text_color(p.muted_foreground)
+        .icon(
+          if copied {
+            theme::ICON_CHECK
+          } else {
+            theme::ICON_COPY
+          },
+          12.,
+        )
+        .on_click(cx.listener(|view, _, _, cx| view.copy_tip(cx)));
+      div()
+        .ml_auto()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(2.))
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .debug_selector(|| "merge-queue-tip-sha".into())
+            .font_family(theme::MONO_FONT)
+            .text_color(p.muted_foreground)
+            .child(short.clone()),
+        )
+        .child(self.tips.wrap(
+          "merge-queue-copy-sha-tip",
+          Side::Top,
+          Some(TooltipContent::Text(
+            if copied { "Copied" } else { "Copy commit SHA" }.into(),
+          )),
+          button,
+          cx,
+        ))
+    });
+    div()
+      .debug_selector(|| "merge-queue-target".into())
+      .flex()
+      .items_center()
+      .gap_3()
+      .py_2()
+      .pl_4()
+      .text_color(p.muted_foreground)
+      .child(
+        div()
+          .flex_none()
+          .size(px(14.))
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(ui::icon(theme::ICON_ARROW_DOWN, 14., p.muted_foreground)),
+      )
+      .child(
+        div()
+          .min_w_0()
+          .flex_1()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(
+            div()
+              .min_w_0()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(
+                ui::text(div(), TextSize::Xs)
+                  .debug_selector(|| "merge-queue-target-branch".into())
+                  .flex_none()
+                  .px(px(6.))
+                  .py(px(2.))
+                  .rounded(px(4.))
+                  .font_family(theme::MONO_FONT)
+                  .font_weight(FontWeight::MEDIUM)
+                  .bg(p.muted)
+                  .text_color(p.foreground)
+                  .child(target.to_string()),
+              )
+              .children(title.map(|t| {
+                ui::text(div(), TextSize::Sm)
+                  .min_w_0()
+                  .truncate()
+                  .text_color(p.foreground)
+                  .child(t)
+              })),
+          )
+          .children(copy),
+      )
+  }
+}

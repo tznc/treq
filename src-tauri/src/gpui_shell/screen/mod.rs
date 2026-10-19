@@ -42,8 +42,12 @@ mod highlight;
 mod logs;
 mod logs_data;
 mod merge;
+mod merge_queue;
+mod merge_queue_data;
 mod modal;
 mod onboarding;
+mod pr_review;
+mod pr_review_data;
 mod remote;
 mod remote_data;
 mod rename_dialog;
@@ -97,6 +101,10 @@ pub enum View {
   Workspace(Box<workspace_data::Route>),
   /// The commits and files a workspace merges, and the merge.
   MergePreview(merge::Route),
+  /// A GitHub pull request's diff, reviewed and submitted to GitHub.
+  PrReview(pr_review::Route),
+  /// The GitHub panel on its Merge Queue tab.
+  MergeQueue(merge_queue::Route),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -133,6 +141,8 @@ pub trait Host:
   onboarding::OnboardingHost
   + settings_data::SettingsHost
   + merge::MergeHost
+  + merge_queue_data::MergeQueueHost
+  + pr_review_data::PrReviewHost
   + terminal_data::TerminalHost
   + modal::ModalsHost
   + remote_data::RemoteHost
@@ -144,6 +154,8 @@ impl<T> Host for T where
   T: onboarding::OnboardingHost
     + settings_data::SettingsHost
     + merge::MergeHost
+    + merge_queue_data::MergeQueueHost
+    + pr_review_data::PrReviewHost
     + terminal_data::TerminalHost
     + modal::ModalsHost
     + remote_data::RemoteHost
@@ -165,6 +177,8 @@ pub struct Screen {
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
   merge: Option<Entity<merge::MergeView>>,
+  pr_review: Option<Entity<pr_review::PrReviewView>>,
+  merge_queue: Option<Entity<merge_queue::MergeQueueView>>,
   /// The dialog drawn over the screen, whichever it is, and its views.
   modal: Option<Modal>,
   agent_prompt: Option<Entity<modal::agent_prompt::AgentPromptView>>,
@@ -194,6 +208,8 @@ impl Screen {
       settings: None,
       workspace: None,
       merge: None,
+      pr_review: None,
+      merge_queue: None,
       modal: None,
       agent_prompt: None,
       prompt_history: None,
@@ -255,6 +271,12 @@ impl Render for Screen {
     }
     if !matches!(self.snapshot.view, View::MergePreview(_)) {
       self.merge = None;
+    }
+    if !matches!(self.snapshot.view, View::PrReview(_)) {
+      self.pr_review = None;
+    }
+    if !matches!(self.snapshot.view, View::MergeQueue(_)) {
+      self.merge_queue = None;
     }
     match &self.snapshot.modal {
       None => self.workspace_modal = None,
@@ -343,6 +365,38 @@ impl Render for Screen {
             let (host, sink) = (self.host.clone(), self.sink.clone());
             let view = cx.new(|cx| merge::MergeView::new(route, host, sink, dark, cx));
             self.merge = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::PrReview(route) => {
+        let route = route.clone();
+        match &self.pr_review {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view =
+              cx.new(|cx| pr_review::PrReviewView::new(route, host, sink, dark, popups, cx));
+            self.pr_review = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::MergeQueue(route) => {
+        let route = route.clone();
+        match &self.merge_queue {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view =
+              cx.new(|cx| merge_queue::MergeQueueView::new(route, host, sink, dark, popups, cx));
+            self.merge_queue = Some(view.clone());
             view.into_any_element()
           }
         }
