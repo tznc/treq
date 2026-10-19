@@ -22,7 +22,6 @@ export type GpuiNativeEvent =
       action?: { label: string; id: number };
     };
 
-
 const GPUI_NATIVE_EVENT = "gpui-native-event";
 
 /** Runs `onEvent` for each native event while mounted in the GPUI shell. */
