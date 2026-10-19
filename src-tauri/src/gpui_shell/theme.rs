@@ -122,6 +122,9 @@ icons! {
   ICON_LIST_CHECKS => "list-checks",
   ICON_SHIELD_CHECK => "shield-check",
   ICON_ROTATE_CW => "rotate-cw",
+  ICON_LIST_FILTER => "list-filter",
+  ICON_SPARKLES => "sparkles",
+  ICON_SCROLL_TEXT => "scroll-text",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.

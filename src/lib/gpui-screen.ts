@@ -192,12 +192,34 @@ interface GpuiMergePreviewScreen {
   workspaceId: number;
 }
 
+/**
+ * GitHubPanel's Issues and Pull Requests tabs, which GPUI reads and changes
+ * through the backend itself (src-tauri/src/gpui_shell/screen/github.rs).
+ * React says what the URL route shows, and GPUI hands back navigation as
+ * `github.*` presses (`useGpuiGithubScreen`).
+ */
+interface GpuiGithubScreen {
+  kind: "github";
+  repoPath: string;
+  tab: "issues" | "prs";
+  filter: "draft" | "open" | "closed" | "all";
+  /** The issue or pull request whose detail shows. */
+  selected: number | null;
+  /** The new issue form or new pull request dialog is open. */
+  creating: boolean;
+  /** The Merge Queue tab, when the build offers it; React draws that tab. */
+  mergeQueue: { pro: boolean } | null;
+  /** Workflow runs started from this window (`useRunningCheckKeys`). */
+  runningChecks: string[];
+}
+
 export type GpuiScreenView =
   /** GPUI reads its data from the backend and opens repositories itself. */
   | { kind: "onboarding" }
   | GpuiSettingsScreen
   | GpuiWorkspaceScreen
-  | GpuiMergePreviewScreen;
+  | GpuiMergePreviewScreen
+  | GpuiGithubScreen;
 
 /** `CloudWorkspaceCard`'s state, which GPUI draws in the settings page and the remote setup dialog. */
 export type GpuiCloudState = NonNullable<GpuiAccountState["cloud"]>;

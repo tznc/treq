@@ -964,7 +964,7 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
 
 /// `MarkdownContent`'s prose, at `size`/`line` (16/28 for `prose`, 14/24
 /// for `prose-sm`).
-fn markdown(
+pub(super) fn markdown(
   id: impl Into<SharedString>,
   text: &str,
   size: f32,

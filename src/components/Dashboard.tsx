@@ -3698,6 +3698,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {viewMode === "github" && !prReviewRoute && (
                     <GitHubPanel
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       onOpenSettings={openSettings}
                       onStartPromptFromIssue={(issue) =>
                         handleStartPromptFromIssue(issueFromGitHub(issue))

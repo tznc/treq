@@ -90,6 +90,8 @@ struct FakeHost {
   failing: Vec<&'static str>,
   /// Workspaces the dialogs created.
   created: Mutex<Vec<crate::local_db::Workspace>>,
+  /// What the GitHub view reads.
+  github: github::Fake,
   calls: Mutex<Vec<String>>,
 }
 
@@ -5315,4 +5317,5 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
   }
 }
 
+mod github;
 mod workspace_dialogs;

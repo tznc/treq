@@ -130,6 +130,39 @@ pub fn locale(timestamp: &str) -> String {
   locale_in(timestamp, &Local)
 }
 
+/// `toLocaleDateString` with a short month in en-US: `Oct 19, 2026`.
+pub fn date_in<Tz: TimeZone>(timestamp: &str, zone: &Tz) -> String
+where
+  Tz::Offset: std::fmt::Display,
+{
+  match parse(timestamp) {
+    Some(date) => date.with_timezone(zone).format("%b %-d, %Y").to_string(),
+    None => timestamp.to_string(),
+  }
+}
+
+pub fn date(timestamp: &str) -> String {
+  date_in(timestamp, &Local)
+}
+
+/// `RunHistory`'s `formatRunTime` in en-US: `Oct 19, 01:05:09 PM`.
+pub fn run_time_in<Tz: TimeZone>(timestamp: &str, zone: &Tz) -> String
+where
+  Tz::Offset: std::fmt::Display,
+{
+  match parse(timestamp) {
+    Some(date) => date
+      .with_timezone(zone)
+      .format("%b %-d, %I:%M:%S %p")
+      .to_string(),
+    None => timestamp.to_string(),
+  }
+}
+
+pub fn run_time(timestamp: &str) -> String {
+  run_time_in(timestamp, &Local)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -206,5 +239,16 @@ mod tests {
       "1/3/2026, 12:00:00 AM"
     );
     assert_eq!(locale_in("bogus", &utc), "bogus");
+  }
+
+  #[test]
+  fn dates_and_run_times_read_like_en_us() {
+    let utc = chrono::Utc;
+    assert_eq!(date_in("2026-01-03T13:05:09Z", &utc), "Jan 3, 2026");
+    assert_eq!(date_in("bogus", &utc), "bogus");
+    assert_eq!(
+      run_time_in("2026-10-19T13:05:09Z", &utc),
+      "Oct 19, 01:05:09 PM"
+    );
   }
 }
