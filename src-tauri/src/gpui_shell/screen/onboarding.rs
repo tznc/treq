@@ -2,7 +2,8 @@
 //!
 //! Drawn from the backend directly: GPUI runs the prerequisite check and
 //! opens the repository itself, then tells React (see `native`). Only the
-//! remote button still goes to React, whose dialog GPUI does not draw yet.
+//! remote button still goes to React, which opens the remote dialog GPUI
+//! draws (`screen/remote.rs`).
 
 use std::{rc::Rc, sync::Arc};
 
