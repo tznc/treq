@@ -74,6 +74,12 @@ pub struct Route {
   /// the tab row offers the Diff/Browser switcher.
   #[serde(default)]
   pub review_switcher: bool,
+  /// The Logs tab's source (`LogSource`) while it shows.
+  #[serde(default)]
+  pub logs_source: Option<String>,
+  /// Bumped by "open in Logs" links, so the tab starts over on `logs_source`.
+  #[serde(default)]
+  pub logs_key: u64,
 }
 
 impl Route {

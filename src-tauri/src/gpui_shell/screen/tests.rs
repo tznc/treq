@@ -13,6 +13,7 @@ struct Harness {
   cx: VisualTestContext,
   screen: Entity<Screen>,
   sent: Rc<RefCell<Vec<ScreenAction>>>,
+  popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
 }
 
 /// The backend, as the screens see it, recording what they asked of it.
@@ -49,6 +50,11 @@ struct FakeHost {
   /// The pull request's review threads and the review agent's comments.
   threads: Vec<crate::github::GhReviewThread>,
   agent: Mutex<Vec<crate::local_db::AgentReviewComment>>,
+  /// What the Logs tab reads.
+  logs: Vec<crate::core::checks_logs::LogRecordView>,
+  workflows: Vec<crate::core::checks::WorkflowInfo>,
+  chats: Vec<crate::core::agent_chat::AgentChat>,
+  sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
   /// Whether confirmations are cancelled.
   decline: bool,
   calls: Mutex<Vec<String>>,
@@ -566,6 +572,97 @@ impl changes_data::ChangesHost for FakeHost {
   }
 }
 
+impl logs_data::LogsHost for FakeHost {
+  fn repo_logs(
+    &self,
+    _: &str,
+    query: &crate::core::checks_logs::LogQuery,
+  ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
+    self.record(format!(
+      "read check logs {:?} {:?} {:?}",
+      query.levels, query.search, query.workflows
+    ));
+    Ok(self.logs.clone())
+  }
+
+  fn log_timeseries(
+    &self,
+    _: &str,
+    _: &crate::core::checks_logs::LogQuery,
+  ) -> Result<Vec<crate::core::checks_logs::LogBucket>, String> {
+    Ok(Vec::new())
+  }
+
+  fn app_setup_logs(
+    &self,
+    _: &crate::core::checks_logs::LogQuery,
+  ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
+    self.record("read app setup logs".into());
+    Ok(Vec::new())
+  }
+
+  fn system_logs(
+    &self,
+    query: &crate::core::checks_logs::LogQuery,
+  ) -> Result<Vec<crate::core::checks_logs::LogRecordView>, String> {
+    self.record(format!("read system logs {:?}", query.search));
+    Ok(self.logs.clone())
+  }
+
+  fn open_system_log_dir(&self) -> Result<(), String> {
+    self.record("open log folder".into());
+    Ok(())
+  }
+
+  fn workflows(&self, _: &str) -> Result<Vec<crate::core::checks::WorkflowInfo>, String> {
+    Ok(self.workflows.clone())
+  }
+
+  fn agent_chats(&self, _: &str) -> Result<Vec<crate::core::agent_chat::AgentChatSummary>, String> {
+    Ok(
+      self
+        .chats
+        .iter()
+        .map(|c| crate::core::agent_chat::AgentChatSummary {
+          session_id: c.session_id,
+          pty_session_id: c.pty_session_id.clone(),
+          name: c.name.clone(),
+          agent: "claude".into(),
+          workspace_id: c.workspace_id,
+          created_at: c.created_at.clone(),
+          message_count: c.messages.len(),
+        })
+        .collect(),
+    )
+  }
+
+  fn agent_chat(
+    &self,
+    _: &str,
+    session_id: i64,
+  ) -> Result<Option<crate::core::agent_chat::AgentChat>, String> {
+    self.record(format!("read agent chat {session_id}"));
+    Ok(
+      self
+        .chats
+        .iter()
+        .find(|c| c.session_id == session_id)
+        .cloned(),
+    )
+  }
+
+  fn run_sql(&self, _: &str, sql: &str) -> Result<crate::core::checks_logs::SqlResult, String> {
+    self.record(format!(
+      "run sql {}",
+      sql.lines().next().unwrap_or_default()
+    ));
+    self
+      .sql
+      .clone()
+      .unwrap_or_else(|| Err("no such table".into()))
+  }
+}
+
 impl commits_data::CommitsHost for FakeHost {
   fn log(
     &self,
@@ -733,10 +830,42 @@ impl Harness {
       Rc::new(move |action, _| sent.borrow_mut().push(action))
     };
     cx.update(crate::gpui_shell::theme::init);
-    let popups: crate::gpui_shell::popup::PopupSink = Rc::new(|_, _| {});
+    let shown = Rc::new(RefCell::new(Vec::new()));
+    let popups: crate::gpui_shell::popup::PopupSink = {
+      let shown = shown.clone();
+      Rc::new(move |request, _| shown.borrow_mut().push(request))
+    };
     let (screen, cx) = cx.add_window_view(|_, _| Screen::new(snapshot, sink, popups, None, host));
     let cx = cx.clone();
-    Self { cx, screen, sent }
+    Self {
+      cx,
+      screen,
+      sent,
+      popups: shown,
+    }
+  }
+
+  /// Picks `text` in the menu shown last, as a click on it would.
+  fn pick(&mut self, text: &str) {
+    use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
+    self.cx.run_until_parked();
+    let entries = match self.popups.borrow().last() {
+      Some(PopupRequest::ShowDropdown { entries, .. } | PopupRequest::ShowMenu { entries, .. }) => {
+        entries.clone()
+      }
+      _ => panic!("no menu is shown"),
+    };
+    let id = entries
+      .iter()
+      .find_map(|e| match e {
+        MenuEntry::Item { id, text: t, .. } if t == text => Some(*id),
+        _ => None,
+      })
+      .unwrap_or_else(|| panic!("{text} is not in the menu"));
+    self
+      .cx
+      .update(|_, cx| crate::gpui_shell::popup::pick_native(id, cx));
+    self.cx.run_until_parked();
   }
 
   fn drawn(&mut self, selector: &'static str) -> bool {
@@ -2722,4 +2851,166 @@ fn changes_tab_sends_an_agent_comment_to_react(cx: &mut TestAppContext) {
   assert_eq!(sent.len(), 1);
   assert_eq!(sent[0]["id"], "ag");
   assert_eq!(sent[0]["comment_text"], "Use one line");
+}
+
+fn log_record(body: &str, severity: &str) -> crate::core::checks_logs::LogRecordView {
+  crate::core::checks_logs::LogRecordView {
+    timestamp: "2026-10-19T10:00:01.250Z".into(),
+    severity_number: 9,
+    severity_text: severity.into(),
+    body: body.into(),
+    trace_id: String::new(),
+    span_id: String::new(),
+    run_id: 3,
+    job_id: "build".into(),
+    step_index: 0,
+    step_name: "Test".into(),
+    stream: "stdout".into(),
+  }
+}
+
+fn logs_host() -> FakeHost {
+  let mut host = code_host();
+  host.logs = vec![
+    log_record("compiling", "INFO"),
+    log_record("test failed", "ERROR"),
+  ];
+  host
+}
+
+fn logs_route(source: Option<&str>) -> ScreenSnapshot {
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["tab"] = "logs".into();
+  route["logsSource"] = source.into();
+  serde_json::from_value(route).expect("logs route")
+}
+
+#[gpui::test]
+fn logs_tab_lists_the_check_logs(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
+  for selector in [
+    "logs-tab",
+    "repo-logs-output",
+    "repo-log-line",
+    "log-level-filter",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(
+    host
+      .calls()
+      .contains(&"read check logs None None Some([])".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn logs_tab_sends_a_picked_line_to_an_agent(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, logs_host(), logs_route(None));
+  assert!(!h.drawn("log-inspect-panel"));
+  h.click("repo-log-line");
+  assert!(h.drawn("log-inspect-panel"));
+  assert!(h.drawn("selection-count"));
+  h.click("send-to-agent");
+  h.cx.run_until_parked();
+  let sent = fields(&h, "logs.sendToAgent");
+  assert_eq!(sent.len(), 1);
+  let prompt = sent[0].as_str().unwrap_or_default();
+  assert!(
+    prompt.starts_with("Here are 1 log line from my check logs."),
+    "{prompt}"
+  );
+  assert!(prompt.contains("  build/Test  "), "{prompt}");
+}
+
+#[gpui::test]
+fn logs_tab_opens_on_the_source_react_asks_for(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(Some("system")));
+  assert!(h.drawn("system-logs-output"));
+  h.click("open-log-folder");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"open log folder".to_string()));
+}
+
+#[gpui::test]
+fn logs_tab_switches_source_from_its_menu(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
+  assert!(h.drawn("repo-logs-output"));
+  h.click("log-source");
+  h.pick("System");
+  assert!(h.drawn("system-logs-output"));
+  assert!(host.calls().contains(&"read system logs None".to_string()));
+}
+
+#[gpui::test]
+fn logs_tab_shows_an_agent_chat(cx: &mut TestAppContext) {
+  use crate::core::agent_chat::{AgentChat, AgentType, ChatMessage, ChatRole};
+  let mut host = logs_host();
+  host.chats = vec![AgentChat {
+    session_id: 4,
+    pty_session_id: "p".into(),
+    name: "Fix login".into(),
+    agent: AgentType::Claude,
+    workspace_id: Some(7),
+    created_at: String::new(),
+    screen_before_last_user_message: String::new(),
+    messages: vec![ChatMessage {
+      id: 1,
+      role: ChatRole::User,
+      message: "Why does login fail?".into(),
+      time: "2026-10-19T10:00:00Z".into(),
+    }],
+  }];
+  let (mut h, host) = workspace_harness(cx, host, logs_route(Some("agent-chats")));
+  assert!(h.drawn("agent-chat-output"));
+  assert!(h.drawn("agent-chat-line"));
+  assert!(host.calls().contains(&"read agent chat 4".to_string()));
+}
+
+#[gpui::test]
+fn logs_tab_runs_a_query_in_the_explorer(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
+  h.click("logs-explorer-view");
+  assert!(h.drawn("logs-sql-explorer"));
+  assert!(h.drawn("sql-editor"));
+  h.click("run-query");
+  h.cx.run_until_parked();
+  assert!(
+    host.calls().contains(
+      &"run sql SELECT timestamp, severityText, json_extract(attributes, '$.job_id') AS job_id,"
+        .to_string()
+    ),
+    "{:?}",
+    host.calls()
+  );
+  assert!(h.drawn("sql-error"));
+  assert!(!h.drawn("send-resultset-to-agent"));
+}
+
+#[gpui::test]
+fn logs_tab_sends_a_result_set_to_an_agent(cx: &mut TestAppContext) {
+  let mut host = logs_host();
+  host.sql = Some(Ok(crate::core::checks_logs::SqlResult {
+    columns: vec!["job_id".into()],
+    rows: vec![vec![Some("build".into())]],
+    row_count: 1,
+  }));
+  let (mut h, _) = workspace_harness(cx, host, logs_route(None));
+  h.click("logs-explorer-view");
+  h.click("run-query");
+  h.cx.run_until_parked();
+  assert!(h.drawn("sql-results"));
+  h.click("send-resultset-to-agent");
+  h.cx.run_until_parked();
+  let sent = fields(&h, "logs.sendToAgent");
+  assert_eq!(sent.len(), 1);
+  assert!(
+    sent[0]
+      .as_str()
+      .unwrap_or_default()
+      .contains("Result (1 row):"),
+    "{sent:?}"
+  );
 }

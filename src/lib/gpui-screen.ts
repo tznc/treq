@@ -80,6 +80,10 @@ export interface GpuiWorkspaceScreen {
   changesRevision: number;
   /** The tab row offers the Diff/Browser switcher (browser preview, Diff shown). */
   reviewSwitcher: boolean;
+  /** The Logs tab's source while it shows (`LogSource`). */
+  logsSource: string | null;
+  /** Bumped by "open in Logs" links, so GPUI's Logs tab starts over on `logsSource`. */
+  logsKey: number;
 }
 
 /**

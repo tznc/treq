@@ -32,6 +32,8 @@ mod commits;
 mod commits_data;
 mod file_picker;
 mod highlight;
+mod logs;
+mod logs_data;
 mod merge;
 mod onboarding;
 mod settings;
@@ -102,10 +104,7 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
 pub trait Host:
-  onboarding::OnboardingHost
-  + settings_data::SettingsHost
-  + merge::MergeHost
-  + changes_data::ChangesHost
+  onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost + logs_data::LogsHost
 {
 }
 
@@ -113,7 +112,7 @@ impl<T> Host for T where
   T: onboarding::OnboardingHost
     + settings_data::SettingsHost
     + merge::MergeHost
-    + changes_data::ChangesHost
+    + logs_data::LogsHost
 {
 }
 

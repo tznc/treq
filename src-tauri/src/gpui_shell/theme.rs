@@ -102,6 +102,9 @@ icons! {
   ICON_WAND => "wand-sparkles",
   ICON_QUOTE => "quote",
   ICON_GLOBE => "globe",
+  ICON_TABLE => "table-2",
+  ICON_FILE_CODE => "file-code-2",
+  ICON_SQUARE_CHECK => "square-check-big",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
@@ -408,5 +411,12 @@ pub mod tw {
   pub const YELLOW_50: u32 = 0xfefce8;
   pub const YELLOW_100: u32 = 0xfef9c3;
   pub const YELLOW_500: u32 = 0xeab308;
+  pub const YELLOW_300: u32 = 0xfde047;
+  pub const AMBER_400: u32 = 0xfbbf24;
+  pub const AMBER_600: u32 = 0xd97706;
+  pub const RED_50: u32 = 0xfef2f2;
+  pub const RED_200: u32 = 0xfecaca;
+  pub const RED_900: u32 = 0x7f1d1d;
+  pub const RED_950: u32 = 0x450a0a;
   pub const YELLOW_950: u32 = 0x422006;
 }

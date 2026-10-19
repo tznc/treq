@@ -8,7 +8,7 @@
 //! [`changes_data`]: super::changes_data
 
 mod review;
-mod search;
+pub(in crate::gpui_shell::screen) mod search;
 mod threads;
 
 use std::{

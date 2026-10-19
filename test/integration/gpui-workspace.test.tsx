@@ -321,6 +321,24 @@ describe("GPUI workspace header", () => {
       });
     });
 
+    it("starts an agent with the log lines GPUI's Logs tab sends", async () => {
+      const alpha = await openAlpha();
+      const createSession = vi.spyOn(api, "createSession");
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "logs.sendToAgent",
+        value: "Here are 1 log line from my check logs.",
+      });
+      await waitFor(() => {
+        expect(createSession).toHaveBeenCalledWith(
+          repoPath,
+          alpha.workspaceId,
+          "Logs",
+        );
+      });
+    });
+
     it("opens the merge preview in GPUI and comes back", async () => {
       const alpha = await openAlpha();
 

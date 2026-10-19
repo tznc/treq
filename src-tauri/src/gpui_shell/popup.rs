@@ -213,6 +213,14 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
   build(items, &mut next)
 }
 
+/// Picks native menu item `id`, as a click on it would.
+#[cfg(test)]
+pub fn pick_native(id: u32, cx: &mut App) {
+  if let Some(pick) = native_pick(id) {
+    pick(cx);
+  }
+}
+
 fn native_pick(id: u32) -> Option<Pick> {
   (id >= NATIVE_ID_BASE)
     .then(|| NATIVE_PICKS.with(|picks| picks.borrow().get(&id).cloned()))

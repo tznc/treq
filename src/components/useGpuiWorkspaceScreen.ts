@@ -59,6 +59,8 @@ interface Handlers {
     mode: "plan" | "acceptEdits",
     useIdleAgent: boolean,
   ) => void;
+  /** The Logs tab's "Send to agent": an agent works through `prompt`. */
+  sendLogsToAgent?: (prompt: string) => void;
   /** The Diff/Browser switcher. */
   reviewSubView?: (view: "diff" | "browser") => void;
   openBranchSwitcher?: () => void;
@@ -210,6 +212,8 @@ export function useGpuiWorkspaceScreen({
         };
         return handlers.sendReview?.(markdown, mode, useIdleAgent);
       }
+      case "logs.sendToAgent":
+        return handlers.sendLogsToAgent?.(value as string);
       case "changes.subView":
         if (value === "diff" || value === "browser") {
           handlers.reviewSubView?.(value);

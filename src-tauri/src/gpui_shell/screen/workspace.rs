@@ -23,10 +23,11 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   changes::{self, ChangesView},
-  changes_data::ChangesHost,
   code::{CodeView, Parent},
   commits::CommitsView,
   commits_data::CommitsHost,
+  logs::LogsView,
+  logs_data::LogsHost,
   workspace_data::{
     workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
   },
@@ -280,13 +281,15 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
-  code_host: Arc<dyn ChangesHost>,
+  code_host: Arc<dyn LogsHost>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
   /// The Commits tab, while GPUI draws it.
   pub(super) commits: Option<Entity<CommitsView>>,
   /// The Changes tab, while GPUI draws it.
   pub(super) changes: Option<Entity<ChangesView>>,
+  /// The Logs tab and the `logs_key` it started on.
+  logs: Option<(Entity<LogsView>, u64)>,
   /// The tab's height last sent to React (`workspace.contentHeight`).
   content_height: Rc<std::cell::Cell<f32>>,
   /// React, for what the header does not do itself.
@@ -318,7 +321,7 @@ pub struct WorkspaceView {
 impl WorkspaceView {
   pub fn new(
     route: Route,
-    host: Arc<dyn ChangesHost>,
+    host: Arc<dyn LogsHost>,
     react: ActionSink,
     dark: bool,
     popups: PopupSink,
@@ -344,6 +347,7 @@ impl WorkspaceView {
       code: None,
       commits: None,
       changes: None,
+      logs: None,
       content_height: Rc::default(),
       react,
       sink,
@@ -1437,11 +1441,12 @@ impl WorkspaceView {
     let loaded = self.loaded.as_ref().filter(|_| self.route.code);
     let tab = self.route.tab;
     let Some(loaded) =
-      loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes))
+      loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes | Tab::Logs))
     else {
       self.code = None;
       self.commits = None;
       self.changes = None;
+      self.logs = None;
       self.content_height.set(0.);
       return None;
     };
@@ -1462,6 +1467,25 @@ impl WorkspaceView {
       self.react.clone(),
       self.popups.clone(),
     );
+    if tab == Tab::Logs {
+      self.code = None;
+      self.commits = None;
+      self.changes = None;
+      let key = self.route.logs_key;
+      if let Some((logs, started)) = &self.logs {
+        if *started == key {
+          let repo = self.route.repo_path.clone();
+          logs.update(cx, |view, cx| view.set_repo(repo, dark, cx));
+          return Some(Body::Logs(logs.clone()));
+        }
+      }
+      let host: Arc<dyn LogsHost> = host;
+      let (repo, source) = (self.route.repo_path.clone(), self.route.logs_source.clone());
+      let logs = cx.new(|cx| LogsView::new(repo, source.as_deref(), host, react, popups, dark, cx));
+      self.logs = Some((logs.clone(), key));
+      return Some(Body::Logs(logs));
+    }
+    self.logs = None;
     if tab == Tab::Changes {
       self.code = None;
       self.commits = None;
@@ -1507,6 +1531,7 @@ enum Body {
   Code(Entity<CodeView>),
   Commits(Entity<CommitsView>),
   Changes(Entity<ChangesView>),
+  Logs(Entity<LogsView>),
 }
 
 impl Body {
@@ -1516,6 +1541,7 @@ impl Body {
       Body::Code(code) => code.read(cx).covers_window(),
       Body::Commits(commits) => commits.read(cx).covers_window(),
       Body::Changes(changes) => changes.read(cx).covers_window(),
+      Body::Logs(_) => false,
     }
   }
 
@@ -1524,6 +1550,7 @@ impl Body {
       Body::Code(code) => code.into_any_element(),
       Body::Commits(commits) => commits.into_any_element(),
       Body::Changes(changes) => changes.into_any_element(),
+      Body::Logs(logs) => logs.into_any_element(),
     }
   }
 }
