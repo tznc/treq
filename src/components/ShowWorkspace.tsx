@@ -1136,8 +1136,11 @@ export const ShowWorkspace = ({
     : `Cannot merge: ${conflictCount} conflict${
         conflictCount === 1 ? "" : "s"
       } detected`;
-  // GPUI draws the Code tab, with the terminal pane framed below it.
-  const gpuiCode = activeTab === "overview" && !showFileBrowserInCode;
+  // GPUI draws the Code and Commits tabs, with the terminal pane framed
+  // below them.
+  const gpuiCode =
+    (activeTab === "overview" && !showFileBrowserInCode) ||
+    activeTab === "commits";
   const gpuiFramed = useGpuiWorkspaceScreen({
     active: gpuiActive && !!workingDirectory && !!effectiveRepoPath,
     parts: gpuiParts,
@@ -1152,6 +1155,7 @@ export const ShowWorkspace = ({
       retargeting: rebasing,
       refreshing: refreshingFiles,
       code: gpuiCode,
+      scrollToCommit: activeTab === "commits" ? scrollToCommitId : null,
       frameHeight: gpuiFrameHeight,
     },
     handlers: {
@@ -1169,6 +1173,14 @@ export const ShowWorkspace = ({
       },
       navigateToWorkspace: onNavigateToWorkspace,
       sessionCreated: onSessionCreated,
+      commitScrolled: () => setScrollToCommitId(null),
+      moveCommitToNew: onMoveCommitToNewWorkspace
+        ? (commit) => onMoveCommitToNewWorkspace(commit, workspace)
+        : undefined,
+      moveCommitToExisting: onMoveCommitToExistingWorkspace
+        ? (commit) => onMoveCommitToExistingWorkspace(commit, workspace)
+        : undefined,
+      commitStashed: onCommitStashed,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,
       merge: onOpenMergePreview,

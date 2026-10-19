@@ -1090,6 +1090,7 @@ fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEven
     title: title.into(),
     description: description.to_string(),
     tone,
+    action: None,
   }
 }
 

@@ -66,8 +66,10 @@ export interface GpuiWorkspaceScreen {
   } | null;
   /** Bumped whenever React refreshes its caches, so GPUI reads again. */
   revision: number;
-  /** GPUI draws the Code tab; React's file browser is closed. */
+  /** GPUI draws the tab: Commits, or Code while React's file browser is closed. */
   code: boolean;
+  /** The change the Commits tab should scroll to and open, until it says it did. */
+  scrollToCommit: string | null;
   /** How tall the terminal pane GPUI frames below the Code tab is, once measured. */
   frameHeight: number | null;
 }

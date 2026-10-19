@@ -33,7 +33,47 @@ pub enum NativeEvent {
     title: String,
     description: String,
     tone: ToastTone,
+    /// A button that runs a [`register_toast_action`] closure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action: Option<ToastAction>,
   },
+}
+
+/// A toast's button: `label`, running the action registered as `id`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ToastAction {
+  pub label: String,
+  pub id: u64,
+}
+
+type PendingAction = Box<dyn FnOnce() + Send>;
+
+/// The toast buttons not yet clicked, by id.
+fn toast_actions() -> &'static std::sync::Mutex<(u64, std::collections::HashMap<u64, PendingAction>)>
+{
+  static ACTIONS: std::sync::OnceLock<
+    std::sync::Mutex<(u64, std::collections::HashMap<u64, PendingAction>)>,
+  > = std::sync::OnceLock::new();
+  ACTIONS.get_or_init(Default::default)
+}
+
+/// Keeps `action` until its toast's button is clicked; returns its id for
+/// [`ToastAction`].
+pub fn register_toast_action(action: impl FnOnce() + Send + 'static) -> u64 {
+  let mut actions = toast_actions().lock_or_recover();
+  actions.0 += 1;
+  let id = actions.0;
+  actions.1.insert(id, Box::new(action));
+  id
+}
+
+/// Runs, once, the action of the toast button `id` (`gpui_toast_action`).
+/// Blocks for as long as the action does.
+pub fn run_toast_action(id: u64) {
+  let action = toast_actions().lock_or_recover().1.remove(&id);
+  if let Some(action) = action {
+    action();
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -108,6 +148,7 @@ impl Backend {
       title: title.into(),
       description: description.into(),
       tone,
+      action: None,
     });
   }
 

@@ -39,6 +39,11 @@ struct FakeHost {
   history: Option<crate::jj::JjLogResult>,
   workspaces: Vec<crate::local_db::Workspace>,
   files: Vec<String>,
+  /// What the Commits tab reads.
+  diff: Option<crate::jj::JjRevisionDiff>,
+  description: String,
+  /// Whether confirmations are cancelled.
+  decline: bool,
   calls: Mutex<Vec<String>>,
 }
 
@@ -347,6 +352,143 @@ impl code_data::CodeHost for FakeHost {
 
   fn pick_files(&self) -> Option<Vec<String>> {
     None
+  }
+}
+
+impl commits_data::CommitsHost for FakeHost {
+  fn log(
+    &self,
+    _: &str,
+    workspace_id: Option<i64>,
+    target_limit: Option<usize>,
+    home_limit: Option<usize>,
+  ) -> Result<crate::jj::JjLogResult, String> {
+    self.record(format!(
+      "read log {workspace_id:?} {target_limit:?} {home_limit:?}"
+    ));
+    self.history.clone().ok_or_else(|| "no log".into())
+  }
+
+  fn commit_diff(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    revision: &str,
+  ) -> Result<crate::jj::JjRevisionDiff, String> {
+    self.record(format!("read diff {revision}"));
+    self.diff.clone().ok_or_else(|| "no diff".into())
+  }
+
+  fn commit_file_diff(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    revision: &str,
+    file_path: &str,
+  ) -> Result<crate::jj::JjFileDiff, String> {
+    self.record(format!("read file diff {revision} {file_path}"));
+    self
+      .diff
+      .as_ref()
+      .and_then(|d| {
+        d.hunks_by_file
+          .iter()
+          .find(|f| f.path == file_path)
+          .cloned()
+      })
+      .ok_or_else(|| "no file diff".into())
+  }
+
+  fn abandon(&self, _: &str, _: i64, change_id: &str) -> Result<String, String> {
+    self.record(format!("abandon {change_id}"));
+    Ok("op1".into())
+  }
+
+  fn undo_operation(&self, _: &str, _: Option<i64>, operation_id: &str) -> Result<(), String> {
+    self.record(format!("undo operation {operation_id}"));
+    Ok(())
+  }
+
+  fn stash(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
+    self.record(format!("stash {change_id}"));
+    Ok("st1".into())
+  }
+
+  fn undo_commit(&self, _: &str, _: i64, change_id: &str) -> Result<(), String> {
+    self.record(format!("undo commit {change_id}"));
+    Ok(())
+  }
+
+  fn revert(&self, _: &str, _: i64, change_id: &str) -> Result<(), String> {
+    self.record(format!("revert {change_id}"));
+    Ok(())
+  }
+
+  fn shift_to_now(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("shift to now {workspace_id}"));
+    Ok(())
+  }
+
+  fn commit_description(&self, _: &str, _: i64, change_id: &str) -> Result<String, String> {
+    self.record(format!("read description {change_id}"));
+    Ok(self.description.clone())
+  }
+
+  fn describe(&self, _: &str, _: i64, change_id: &str, description: &str) -> Result<(), String> {
+    self.record(format!("describe {change_id} {description:?}"));
+    Ok(())
+  }
+
+  fn shift_timestamp(
+    &self,
+    _: &str,
+    _: i64,
+    change_id: &str,
+    shift: &commits_data::TimeShift,
+  ) -> Result<(), String> {
+    self.record(format!("shift {change_id} {shift:?}"));
+    Ok(())
+  }
+
+  fn start_resolve(
+    &self,
+    _: &str,
+    workspace_id: Option<i64>,
+    change_ids: Option<Vec<String>>,
+  ) -> Result<crate::core::ResolveConflictsSession, String> {
+    self.record(format!("start resolve {workspace_id:?} {change_ids:?}"));
+    serde_json::from_value(serde_json::json!({
+      "targets": change_ids.unwrap_or_default().iter().map(|c| serde_json::json!({
+        "change_id": c, "commit_id": c, "description": "", "conflicted_files": [],
+        "resolve_path": "/r", "workspace_id": 4, "workspace_name": "w"
+      })).collect::<Vec<_>>(),
+      "agent_cwd": "/r/cwd", "source_workspace_id": workspace_id, "workspace_slug": "w"
+    }))
+    .map_err(|e| e.to_string())
+  }
+
+  fn resolve_prompt(&self, prompt: &str, _: &crate::core::ResolveConflictsSession) -> String {
+    format!("resolve: {prompt}")
+  }
+
+  fn snapshot_working_copy(&self, path: &str) -> Result<String, String> {
+    self.record(format!("snapshot {path}"));
+    Ok("snap1".into())
+  }
+
+  fn discard_all(&self, path: &str) -> Result<(), String> {
+    self.record(format!("discard {path}"));
+    Ok(())
+  }
+
+  fn restore_snapshot(&self, path: &str, snapshot_id: &str) -> Result<(), String> {
+    self.record(format!("restore {path} {snapshot_id}"));
+    Ok(())
+  }
+
+  fn confirm(&self, title: &str, _: &str) -> bool {
+    self.record(format!("confirm {title}"));
+    !self.decline
   }
 }
 
@@ -1659,4 +1801,231 @@ fn code_tab_saves_the_description(cx: &mut TestAppContext) {
     host.writes()
   );
   assert!(!h.drawn("workspace-description-input"));
+}
+
+fn commits_host() -> FakeHost {
+  let mut host = code_host();
+  host.diff = serde_json::from_value(serde_json::json!({
+    "committed_files": [{
+      "path": "src/a.rs", "status": "M", "previous_path": null,
+      "changed_line_count": 2, "diff_deferred": false
+    }],
+    "hunks_by_file": [{
+      "path": "src/a.rs",
+      "hunks": [{"id": "h", "header": "@@ -1,2 +1,3 @@", "lines": [" a", "+b", "+c"], "patch": ""}]
+    }],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host.description = "work".into();
+  host
+}
+
+fn commits_route() -> ScreenSnapshot {
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["tab"] = "commits".into();
+  serde_json::from_value(route).expect("commits route")
+}
+
+#[gpui::test]
+fn commits_tab_lists_commits_and_opens_their_diffs(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  for selector in [
+    "workspace-commits",
+    "commit-row-a",
+    "commit-row-b",
+    "shift-commits-to-now",
+    "workspace-frame",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(!h.drawn("workspace-code"));
+  assert!(host
+    .calls()
+    .contains(&"read log Some(7) None None".to_string()));
+  h.click("commit-row-a");
+  assert!(h.drawn("commit-file-row"));
+  assert!(host.calls().contains(&"read diff a".to_string()));
+  // The newest commit can be undone; every own commit edited and moved.
+  for selector in [
+    "edit-description-a",
+    "undo-commit-a",
+    "revert-commit-a",
+    "edit-timestamp-a",
+    "move-commit-a",
+    "stash-commit-button",
+    "delete-commit-a",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  h.click("commit-file-row");
+  assert!(!h.drawn("add-comment-0-1"));
+  h.click("commit-row-a");
+  assert!(!h.drawn("commit-file-row"));
+}
+
+#[gpui::test]
+fn commits_tab_abandons_once_confirmed(cx: &mut TestAppContext) {
+  let mut declined = commits_host();
+  declined.decline = true;
+  let (mut h, host) = workspace_harness(cx, declined, commits_route());
+  h.click("commit-row-a");
+  h.click("delete-commit-a");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"confirm Delete Commit".to_string()));
+  assert!(!host.writes().iter().any(|w| w.starts_with("abandon")));
+}
+
+#[gpui::test]
+fn commits_tab_removes_an_abandoned_commit(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("delete-commit-a");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"abandon a".to_string()));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  assert!(!h.drawn("commit-row-a"));
+  assert!(h.drawn("commit-row-b"));
+}
+
+#[gpui::test]
+fn commits_tab_opens_the_commit_react_asked_for(cx: &mut TestAppContext) {
+  let mut route = commits_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.scroll_to_commit = Some("b".into());
+  }
+  let (mut h, host) = workspace_harness(cx, commits_host(), route);
+  assert!(h.drawn("commit-file-row"));
+  assert!(host.calls().contains(&"read diff b".to_string()));
+  assert_eq!(fields(&h, "commits.scrolled").len(), 1);
+}
+
+#[gpui::test]
+fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("add-comment-0-1");
+  assert!(h.drawn("comment-input"));
+  h.cx.simulate_input("why?");
+  h.click("comment-edit");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&r#"create session Some(7) "Code Comment""#.to_string()),
+    "{:?}",
+    host.writes()
+  );
+  let created = fields(&h, "code.sessionCreated");
+  assert_eq!(
+    created[0]["pendingPrompt"],
+    "src/a.rs:2 (commit a)\n```\n+b\n```\n> why?\n"
+  );
+  assert_eq!(created[0]["permissionMode"], "acceptEdits");
+  assert!(!h.drawn("comment-input"));
+}
+
+#[gpui::test]
+fn commits_tab_edits_a_description(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("edit-description-a");
+  assert!(h.drawn("edit-description-dialog"));
+  assert!(host.calls().contains(&"read description a".to_string()));
+  h.cx.simulate_input("!");
+  h.click("description-save");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|w| w.starts_with("describe a ") && w.contains('!')),
+    "{:?}",
+    host.writes()
+  );
+  assert!(!h.drawn("edit-description-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_shifts_the_stack_from_the_timestamp_dialog(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("edit-timestamp-a");
+  assert!(h.drawn("edit-timestamp-dialog"));
+  // Nothing to apply until a duration is entered.
+  h.click("timestamp-apply");
+  h.cx.run_until_parked();
+  assert!(!host.writes().iter().any(|w| w.starts_with("shift a")));
+  h.click("shift-stack-to-now");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"shift to now 7".to_string()));
+  assert!(!h.drawn("edit-timestamp-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  if let Some(log) = host.history.as_mut() {
+    log.commits[0].has_conflicts = true;
+  }
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  assert!(h.drawn("resolve-conflicts-banner"));
+  h.click("resolve-conflicts-button");
+  assert!(h.drawn("resolve-conflicts-dialog"));
+  assert!(host
+    .calls()
+    .contains(&r#"start resolve Some(7) Some(["a"])"#.to_string()));
+  h.click("resolve-conflicts-submit");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&r#"create session Some(7) "Resolve a""#.to_string()),
+    "{:?}",
+    host.writes()
+  );
+  let created = fields(&h, "code.sessionCreated");
+  assert_eq!(created[0]["workspacePath"], "/r/cwd");
+  assert_eq!(created[0]["pendingPrompt"], "resolve: ");
+  assert!(!h.drawn("resolve-conflicts-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_discards_the_tentative_working_copy(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  if let Some(log) = host.history.as_mut() {
+    log.tentative_working_copy = serde_json::from_value(serde_json::json!({
+      "commit": commit("wc", 1, 0),
+      "workspace_label": "login"
+    }))
+    .ok();
+  }
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-wc");
+  h.click("delete-tentative-changes");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    writes.iter().any(|w| w.starts_with("snapshot ")),
+    "{writes:?}"
+  );
+  assert!(
+    writes.iter().any(|w| w.starts_with("discard ")),
+    "{writes:?}"
+  );
+  assert!(!h.drawn("commit-row-wc"));
+}
+
+#[gpui::test]
+fn commits_tab_hands_moves_to_react(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, commits_host(), commits_route());
+  h.click("commit-row-a");
+  h.click("move-commit-a");
+  h.click("move-commit-existing");
+  h.cx.run_until_parked();
+  assert_eq!(fields(&h, "commits.moveToExisting")[0]["change_id"], "a");
+  assert!(!h.drawn("move-commit-menu"));
 }

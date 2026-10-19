@@ -99,3 +99,17 @@ pub fn gpui_screen_update(
   #[cfg(not(all(desktop, feature = "gpui-shell")))]
   let _ = (app, window_label, snapshot);
 }
+
+/// Runs the action of a GPUI screen's toast button (`NativeEvent::Toast`'s
+/// `action`), once. A no-op for an unknown or used id.
+#[tauri::command]
+pub async fn gpui_toast_action(id: u64) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    let _ =
+      tauri::async_runtime::spawn_blocking(move || crate::gpui_shell::native::run_toast_action(id))
+        .await;
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = id;
+}

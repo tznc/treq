@@ -58,6 +58,9 @@ pub struct Route {
   /// measured it.
   #[serde(default)]
   pub frame_height: Option<f32>,
+  /// The commit the Commits tab should scroll to and open.
+  #[serde(default)]
+  pub scroll_to_commit: Option<String>,
 }
 
 impl Route {

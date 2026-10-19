@@ -1,5 +1,5 @@
 import { useRunningCheckFiles } from "../hooks/useWorkspaceChecks";
-import type { Workspace } from "../lib/api";
+import type { JjLogCommit, Workspace } from "../lib/api";
 import type { SessionCreationInfo } from "../types/sessions";
 import type { useGpuiPartsHost } from "../lib/gpui-parts";
 import {
@@ -30,8 +30,15 @@ interface Handlers {
   openCommit?: (changeId: string) => void;
   /** The Code tab's stack: go to another workspace. */
   navigateToWorkspace?: (workspace: Workspace) => void;
-  /** The Code tab started an agent session. */
+  /** The Code or Commits tab started an agent session. */
   sessionCreated?: (session: SessionCreationInfo) => void;
+  /** The Commits tab showed the commit `openCommit` asked for. */
+  commitScrolled?: () => void;
+  /** The Commits tab: move a commit to a new or an existing workspace. */
+  moveCommitToNew?: (commit: JjLogCommit) => void;
+  moveCommitToExisting?: (commit: JjLogCommit) => void;
+  /** The Commits tab stashed a commit. */
+  commitStashed?: () => void;
   openBranchSwitcher?: () => void;
   stack?: () => void;
   merge?: () => void;
@@ -149,6 +156,14 @@ export function useGpuiWorkspaceScreen({
         return handlers.navigateToWorkspace?.(value as Workspace);
       case "code.sessionCreated":
         return handlers.sessionCreated?.(value as SessionCreationInfo);
+      case "commits.scrolled":
+        return handlers.commitScrolled?.();
+      case "commits.moveToNew":
+        return handlers.moveCommitToNew?.(value as JjLogCommit);
+      case "commits.moveToExisting":
+        return handlers.moveCommitToExisting?.(value as JjLogCommit);
+      case "commits.stashed":
+        return handlers.commitStashed?.();
       default:
     }
   };

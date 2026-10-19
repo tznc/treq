@@ -27,6 +27,7 @@ icons! {
   ICON_ARROW_DOWN => "arrow-down",
   ICON_ARROW_LEFT => "arrow-left",
   ICON_ARROW_RIGHT => "arrow-right",
+  ICON_ARROW_RIGHT_LEFT => "arrow-right-left",
   ICON_BOOK_OPEN => "book-open",
   ICON_BOT => "bot",
   ICON_BOX => "box",
@@ -43,6 +44,7 @@ icons! {
   ICON_CIRCLE_DOT => "circle-dot",
   ICON_CIRCLE_HELP => "circle-help",
   ICON_CIRCLE_X => "circle-x",
+  ICON_CLOCK => "clock",
   ICON_CODE => "code-xml",
   ICON_COMMIT => "git-commit-horizontal",
   ICON_COMPARE => "git-compare-arrows",
@@ -76,6 +78,7 @@ icons! {
   ICON_PR_CLOSED => "git-pull-request-closed",
   ICON_PR_DRAFT => "git-pull-request-draft",
   ICON_REFRESH => "refresh-cw",
+  ICON_ROTATE_CCW => "rotate-ccw",
   ICON_SEARCH => "search",
   ICON_SERVER => "server",
   ICON_SETTINGS => "settings",
@@ -83,6 +86,7 @@ icons! {
   ICON_TERMINAL => "terminal",
   ICON_TRASH => "trash-2",
   ICON_TRIANGLE_ALERT => "triangle-alert",
+  ICON_UNDO => "undo-2",
   ICON_UPLOAD => "upload",
   ICON_USER => "user",
   ICON_X => "x",
@@ -345,4 +349,25 @@ mod tests {
       .windows(family.len())
       .any(|w| w == family.as_slice()));
   }
+}
+
+/// Tailwind palette colors views use outside the theme tokens.
+pub mod tw {
+  use super::{rgb, Hsla};
+
+  pub fn color(hex: u32) -> Hsla {
+    rgb(hex).into()
+  }
+
+  pub const BLUE_500: u32 = 0x3b82f6;
+  pub const BLUE_600: u32 = 0x2563eb;
+  pub const EMERALD_500: u32 = 0x10b981;
+  pub const GREEN_500: u32 = 0x22c55e;
+  pub const GREEN_600: u32 = 0x16a34a;
+  pub const RED_500: u32 = 0xef4444;
+  pub const RED_600: u32 = 0xdc2626;
+  pub const YELLOW_50: u32 = 0xfefce8;
+  pub const YELLOW_100: u32 = 0xfef9c3;
+  pub const YELLOW_500: u32 = 0xeab308;
+  pub const YELLOW_950: u32 = 0x422006;
 }

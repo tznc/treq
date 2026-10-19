@@ -102,7 +102,7 @@ import {
   type AutoReviewEvent,
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
-import { useGpuiNativeEvents } from "../lib/gpui-native";
+import { runGpuiToastAction, useGpuiNativeEvents } from "../lib/gpui-native";
 import {
   openRepositoryAtPath as openRepositoryAtPathShared,
   showOpenedRepository,
@@ -1675,13 +1675,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
       case "workspaceChanged":
         void invalidateQueries();
         break;
-      case "toast":
+      case "toast": {
+        const { action } = event;
         addToast({
           title: event.title,
           description: event.description,
           type: event.tone,
+          ...(action
+            ? {
+                action: {
+                  label: action.label,
+                  onClick: () => void runGpuiToastAction(action.id),
+                },
+              }
+            : {}),
         });
         break;
+      }
       default:
     }
   });

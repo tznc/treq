@@ -23,7 +23,8 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   code::{CodeView, Parent},
-  code_data::CodeHost,
+  commits::CommitsView,
+  commits_data::CommitsHost,
   workspace_data::{
     workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
   },
@@ -277,9 +278,11 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
-  code_host: Arc<dyn CodeHost>,
+  code_host: Arc<dyn CommitsHost>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
+  /// The Commits tab, while GPUI draws it.
+  pub(super) commits: Option<Entity<CommitsView>>,
   /// The tab's height last sent to React (`workspace.contentHeight`).
   content_height: Rc<std::cell::Cell<f32>>,
   /// React, for what the header does not do itself.
@@ -311,7 +314,7 @@ pub struct WorkspaceView {
 impl WorkspaceView {
   pub fn new(
     route: Route,
-    host: Arc<dyn CodeHost>,
+    host: Arc<dyn CommitsHost>,
     react: ActionSink,
     dark: bool,
     popups: PopupSink,
@@ -335,6 +338,7 @@ impl WorkspaceView {
       host: host.clone(),
       code_host: host,
       code: None,
+      commits: None,
       content_height: Rc::default(),
       react,
       sink,
@@ -497,6 +501,7 @@ impl WorkspaceView {
             (true, true) => ToastTone::Warning,
             (true, false) => ToastTone::Success,
           },
+          action: None,
         });
         view
           .host
@@ -1353,14 +1358,13 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
 const FRAME_FALLBACK: f32 = 40.;
 
 impl WorkspaceView {
-  /// The Code tab's view while GPUI draws it, kept in step with the header.
-  fn code_view(&mut self, cx: &mut Context<Self>) -> Option<Entity<CodeView>> {
-    let loaded = self
-      .loaded
-      .as_ref()
-      .filter(|_| self.route.code && self.route.tab == Tab::Overview);
-    let Some(loaded) = loaded else {
+  /// The tab GPUI draws (Code or Commits), kept in step with the header.
+  fn tab_body(&mut self, cx: &mut Context<Self>) -> Option<Body> {
+    let loaded = self.loaded.as_ref().filter(|_| self.route.code);
+    let tab = self.route.tab;
+    let Some(loaded) = loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits)) else {
       self.code = None;
+      self.commits = None;
       self.content_height.set(0.);
       return None;
     };
@@ -1376,18 +1380,53 @@ impl WorkspaceView {
       revision: self.route.revision,
     };
     let dark = self.dark;
-    if let Some(code) = &self.code {
-      code.update(cx, |code, cx| code.set_parent(parent, dark, cx));
-      return Some(code.clone());
-    }
     let (host, react, popups) = (
       self.code_host.clone(),
       self.react.clone(),
       self.popups.clone(),
     );
+    if tab == Tab::Commits {
+      self.code = None;
+      let scroll_to = self.route.scroll_to_commit.clone();
+      if let Some(commits) = &self.commits {
+        commits.update(cx, |view, cx| view.set_parent(parent, scroll_to, dark, cx));
+        return Some(Body::Commits(commits.clone()));
+      }
+      let commits = cx.new(|cx| CommitsView::new(parent, scroll_to, host, react, popups, dark, cx));
+      self.commits = Some(commits.clone());
+      return Some(Body::Commits(commits));
+    }
+    self.commits = None;
+    if let Some(code) = &self.code {
+      code.update(cx, |code, cx| code.set_parent(parent, dark, cx));
+      return Some(Body::Code(code.clone()));
+    }
     let code = cx.new(|cx| CodeView::new(parent, host, react, popups, dark, cx));
     self.code = Some(code.clone());
-    Some(code)
+    Some(Body::Code(code))
+  }
+}
+
+/// The tab drawn above the terminal pane.
+enum Body {
+  Code(Entity<CodeView>),
+  Commits(Entity<CommitsView>),
+}
+
+impl Body {
+  /// A dialog over the whole window would leave the webview on top.
+  fn covers_window(&self, cx: &App) -> bool {
+    match self {
+      Body::Code(code) => code.read(cx).covers_window(),
+      Body::Commits(commits) => commits.read(cx).covers_window(),
+    }
+  }
+
+  fn into_any_element(self) -> gpui::AnyElement {
+    match self {
+      Body::Code(code) => code.into_any_element(),
+      Body::Commits(commits) => commits.into_any_element(),
+    }
   }
 }
 
@@ -1409,7 +1448,7 @@ impl Render for WorkspaceView {
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_row(&row, &p));
-    let code = self.code_view(cx);
+    let code = self.tab_body(cx);
     let frame = |webview: Option<&Webview<Wry>>| match webview {
       Some(webview) => tauri_plugin_gpui::webview_frame(webview)
         .size_full()
@@ -1419,8 +1458,7 @@ impl Render for WorkspaceView {
     let body = match code {
       // The tab, with React's terminal pane framed below it.
       Some(code) => {
-        // A dialog over the whole window would leave the webview on top.
-        let covered = code.read(cx).covers_window();
+        let covered = code.covers_window(cx);
         let sent = self.content_height.clone();
         let sink = self.sink.clone();
         div()
@@ -1448,7 +1486,7 @@ impl Render for WorkspaceView {
             .absolute()
             .size_full(),
           )
-          .child(div().flex_1().min_h_0().child(code))
+          .child(div().flex_1().min_h_0().child(code.into_any_element()))
           .child(
             div()
               .flex_none()

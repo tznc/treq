@@ -280,6 +280,7 @@ impl MergeView {
       title: title.into(),
       description: description.into(),
       tone,
+      action: None,
     });
   }
 

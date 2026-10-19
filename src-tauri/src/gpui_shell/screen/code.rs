@@ -85,19 +85,19 @@ fn tell(host: &dyn CodeHost, event: NativeEvent) {
 }
 
 impl Parent {
-  fn key(&self) -> (String, Option<i64>) {
+  pub(super) fn key(&self) -> (String, Option<i64>) {
     (
       self.repo_path.clone(),
       self.workspace.as_ref().map(|w| w.id),
     )
   }
 
-  fn workspace_id(&self) -> Option<i64> {
+  pub(super) fn workspace_id(&self) -> Option<i64> {
     self.workspace.as_ref().map(|w| w.id)
   }
 
   /// `workingDirectory`.
-  fn working_directory(&self) -> String {
+  pub(super) fn working_directory(&self) -> String {
     self
       .workspace
       .as_ref()
@@ -361,6 +361,7 @@ impl CodeView {
         title: title.into(),
         description: description.into(),
         tone,
+        action: None,
       },
     );
   }

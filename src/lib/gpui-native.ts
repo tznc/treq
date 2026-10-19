@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef } from "react";
 import { isGpuiShellHost } from "./gpui-shell";
@@ -18,7 +19,14 @@ export type GpuiNativeEvent =
       title: string;
       description: string;
       tone: "success" | "warning" | "error";
+      /** A button whose click GPUI handles: {@link runGpuiToastAction}. */
+      action?: { label: string; id: number };
     };
+
+/** Runs the GPUI toast button `id`, once. */
+export function runGpuiToastAction(id: number): Promise<void> {
+  return invoke("gpui_toast_action", { id });
+}
 
 const GPUI_NATIVE_EVENT = "gpui-native-event";
 

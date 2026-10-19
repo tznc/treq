@@ -24,6 +24,8 @@ use super::{popup::PopupSink, theme};
 pub(super) mod checklist;
 mod code;
 mod code_data;
+mod commits;
+mod commits_data;
 mod file_picker;
 mod merge;
 mod onboarding;
@@ -95,7 +97,10 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
 pub trait Host:
-  onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost + code_data::CodeHost
+  onboarding::OnboardingHost
+  + settings_data::SettingsHost
+  + merge::MergeHost
+  + commits_data::CommitsHost
 {
 }
 
@@ -103,7 +108,7 @@ impl<T> Host for T where
   T: onboarding::OnboardingHost
     + settings_data::SettingsHost
     + merge::MergeHost
-    + code_data::CodeHost
+    + commits_data::CommitsHost
 {
 }
 

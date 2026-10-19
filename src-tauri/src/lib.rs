@@ -903,6 +903,7 @@ pub fn run() {
       commands::gpui_menu_show,
       commands::gpui_menu_hide,
       commands::gpui_toasts_update,
+      commands::gpui_toast_action,
       commands::acknowledge_agent_dispatch,
       commands::detect_editor_apps,
       commands::get_treq_bin_dir,

@@ -111,6 +111,41 @@ describe("GPUI workspace header", () => {
     });
     await findGpuiScreen("workspace", (s) => {
       expect(s.tab).toBe("commits");
+      expect(s.code).toBe(true);
+      expect(s.scrollToCommit).toBe("zzzzzzzz");
+    });
+
+    // The Commits tab says it showed the commit, so React stops asking.
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "commits.scrolled",
+      value: null,
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("commits");
+      expect(s.scrollToCommit).toBeNull();
+    });
+  });
+
+  it("shows the Changes tab when the Commits tab asks for it", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "workspace.tab",
+      value: "commits",
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.code).toBe(true);
+    });
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "workspace.tab",
+      value: "changes",
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("changes");
+      expect(s.code).toBe(false);
     });
   });
 

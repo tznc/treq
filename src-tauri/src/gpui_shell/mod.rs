@@ -30,7 +30,7 @@ use tauri_plugin_gpui::{
 };
 
 mod form;
-mod native;
+pub mod native;
 mod popup;
 mod screen;
 mod sidebar;
