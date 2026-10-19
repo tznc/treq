@@ -1,7 +1,9 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef } from "react";
+import { create } from "zustand";
 import { useThemeStore } from "../stores/themeStore";
 import { gpuiScreenUpdate } from "./api";
+import type { SshEndpoint } from "./api-types-remote";
 import { isGpuiShellHost } from "./gpui-shell";
 import { useWindowModalBackdrop } from "./window-modals";
 
@@ -185,7 +187,69 @@ export type GpuiScreenView =
   | GpuiWorkspaceScreen
   | GpuiMergePreviewScreen;
 
-export type GpuiScreenSnapshot = GpuiScreenView & { dark: boolean };
+/** `CloudWorkspaceCard`'s state, which GPUI draws in the settings page and the remote setup dialog. */
+export type GpuiCloudState = NonNullable<GpuiAccountState["cloud"]>;
+
+/**
+ * The remote repository dialogs Dashboard opens over any screen, which GPUI
+ * draws (src-tauri/src/gpui_shell/screen/remote.rs). Each is null while
+ * closed. GPUI presses "remote.*" and sets "remote.registerUserManaged" and
+ * "remote.terminal.open" (useGpuiRemoteDialogs).
+ */
+export interface GpuiRemoteRoute {
+  /** RemoteSetupDialog. */
+  setup: {
+    allowUserManaged: boolean;
+    cloud: GpuiCloudState;
+    /** React is registering the endpoint the form confirmed. */
+    registering: boolean;
+  } | null;
+  /** RemoteTerminalDialog. */
+  terminal: {
+    endpoint: SshEndpoint;
+    repositoryId: string;
+    workspaceId: string;
+  } | null;
+  /** RemoteAmbiguousMutationDialog: why the change could not be verified. */
+  ambiguous: string | null;
+}
+
+export type GpuiScreenSnapshot = GpuiScreenView & {
+  dark: boolean;
+  /** The remote dialogs open over the screen; absent with none. */
+  remote?: GpuiRemoteRoute;
+};
+
+interface GpuiRemoteStore {
+  /** What the remote dialogs show, null with none open. */
+  route: GpuiRemoteRoute | null;
+  /** How many mounted screens GPUI draws now. */
+  drawing: number;
+}
+
+/** Dashboard's remote dialogs, and whether a GPUI screen is there to draw them. */
+export const useGpuiRemoteStore = create<GpuiRemoteStore>(() => ({
+  route: null,
+  drawing: 0,
+}));
+
+/** Whether GPUI may draw the remote dialogs. */
+export function gpuiDrawsRemoteDialogs(): boolean {
+  return (
+    isGpuiShellHost() &&
+    window.__TREQ_WEB_UI__ !== true &&
+    window.__TREQ_REACT_REMOTE_DIALOGS__ !== true
+  );
+}
+
+/**
+ * Whether GPUI draws the remote dialogs now: it does over any screen it
+ * draws, and React draws them over its own views.
+ */
+export function useGpuiDrawsRemoteDialogs(): boolean {
+  const drawing = useGpuiRemoteStore((s) => s.drawing > 0);
+  return gpuiDrawsRemoteDialogs() && drawing;
+}
 
 export type GpuiScreenAction =
   | { kind: "openRepo" }
@@ -217,7 +281,7 @@ async function updateGpuiScreen(
 }
 
 /** Listen for GPUI screen clicks sent to this webview window only. */
-function listenGpuiScreenActions(
+export function listenGpuiScreenActions(
   handler: (action: GpuiScreenAction) => void,
 ): Promise<() => void> {
   return getCurrentWebviewWindow().listen<GpuiScreenAction>(
@@ -238,8 +302,20 @@ export function useGpuiScreen(
   const host = isGpuiShellHost() && window.__TREQ_WEB_UI__ !== true;
   const dark = useThemeStore((s) => s.actualTheme()) === "dark";
   const modal = useWindowModalBackdrop(host) !== null;
+  const remote = useGpuiRemoteStore((s) => s.route);
   const json =
-    host && view && !modal ? JSON.stringify({ ...view, dark }) : null;
+    host && view && !modal
+      ? JSON.stringify({ ...view, dark, ...(remote ? { remote } : {}) })
+      : null;
+
+  // Tells Dashboard a screen is there for GPUI to draw its dialogs over.
+  const drawing = json !== null;
+  useEffect(() => {
+    if (!drawing) return;
+    useGpuiRemoteStore.setState((s) => ({ drawing: s.drawing + 1 }));
+    return () =>
+      useGpuiRemoteStore.setState((s) => ({ drawing: s.drawing - 1 }));
+  }, [drawing]);
 
   // Starts at null so a screen that never drew sends no null, which would
   // clear the screen another component pushed.

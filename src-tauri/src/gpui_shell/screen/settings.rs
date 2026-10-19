@@ -12,7 +12,7 @@ use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, FontWeight, SharedString, Window,
 };
 
-mod account;
+pub(super) mod account;
 
 // The tests read what the tabs draw by these names.
 #[cfg_attr(not(test), allow(unused_imports))]

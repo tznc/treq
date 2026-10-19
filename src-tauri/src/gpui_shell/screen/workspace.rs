@@ -318,6 +318,8 @@ pub struct WorkspaceView {
   dark: bool,
   popups: PopupSink,
   webview: Option<Webview<Wry>>,
+  /// A dialog covers the window, which the framed webview would paint over.
+  covered: bool,
   /// The element whose tooltip is pending or shown (`true`).
   tooltip: Option<(SharedString, bool)>,
   /// The tooltip whose popup is open.
@@ -328,6 +330,19 @@ pub struct WorkspaceView {
 }
 
 impl WorkspaceView {
+  #[cfg(test)]
+  pub fn is_covered(&self) -> bool {
+    self.covered
+  }
+
+  /// Stops framing the webview while a dialog covers the window.
+  pub fn set_covered(&mut self, covered: bool, cx: &mut Context<Self>) {
+    if self.covered != covered {
+      self.covered = covered;
+      cx.notify();
+    }
+  }
+
   pub fn new(
     route: Route,
     host: Arc<dyn TerminalHost>,
@@ -371,6 +386,7 @@ impl WorkspaceView {
       dark,
       popups,
       webview,
+      covered: false,
       tooltip: None,
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
@@ -1646,11 +1662,12 @@ impl Render for WorkspaceView {
       .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_row(&row, &p));
     let code = self.tab_body(cx);
+    let window_covered = self.covered;
     let frame = |webview: Option<&Webview<Wry>>| match webview {
-      Some(webview) => tauri_plugin_gpui::webview_frame(webview)
+      Some(webview) if !window_covered => tauri_plugin_gpui::webview_frame(webview)
         .size_full()
         .into_any_element(),
-      None => div().size_full().into_any_element(),
+      _ => div().size_full().into_any_element(),
     };
     let body = match (code, self.sync_terminal(cx)) {
       // The tab, or React's view framed in its place, with GPUI's terminal

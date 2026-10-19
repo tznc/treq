@@ -1359,7 +1359,7 @@ impl CommitsView {
 }
 
 /// `ui/dialog.tsx`: the backdrop over the whole window and the panel.
-fn dialog_panel(
+pub(super) fn dialog_panel(
   id: &'static str,
   max_width: f32,
   viewport: gpui::Size<Pixels>,
@@ -1389,14 +1389,14 @@ fn dialog_panel(
   (backdrop, panel)
 }
 
-fn dialog_title(title: impl IntoElement) -> Div {
+pub(super) fn dialog_title(title: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
     .line_height(px(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(title)
 }
 
-fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
+pub(super) fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
   ui::text(div(), TextSize::Sm)
     .text_color(p.muted_foreground)
     .child(text.into())

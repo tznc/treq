@@ -64,6 +64,13 @@ struct FakeHost {
   sinks: Mutex<Vec<(String, Sink)>>,
   /// Whether confirmations are cancelled.
   decline: bool,
+  /// What the remote dialogs read: the `~/.ssh` keys, the host key a
+  /// machine presents (default `SHA256:abc123`), the alias `~/.ssh/config`
+  /// resolves and the sessions running on the endpoint.
+  ssh_keys: Vec<crate::core::remote_local_keys::LocalSshIdentity>,
+  host_key: Option<Result<String, String>>,
+  resolved_alias: Option<Result<crate::core::remote_ssh_config::ResolvedSshAlias, String>>,
+  remote_sessions: Option<Result<Vec<crate::core::pty_remote_supervisor::PtySessionInfo>, String>>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -932,6 +939,48 @@ impl checklist::ToolsHost for FakeHost {
 
   fn open_url(&self, url: &str) {
     self.record(format!("open {url}"));
+  }
+}
+
+impl remote_data::RemoteHost for FakeHost {
+  fn ssh_aliases(&self) -> Vec<String> {
+    vec!["devbox".into(), "staging".into()]
+  }
+
+  fn ssh_identities(&self) -> Vec<crate::core::remote_local_keys::LocalSshIdentity> {
+    self.ssh_keys.clone()
+  }
+
+  fn probe_host_key(&self, hostname: &str, port: u16) -> Result<String, String> {
+    self.record(format!("probe {hostname}:{port}"));
+    self
+      .host_key
+      .clone()
+      .unwrap_or_else(|| Ok("SHA256:abc123".into()))
+  }
+
+  fn resolve_alias(
+    &self,
+    alias: &str,
+  ) -> Result<crate::core::remote_ssh_config::ResolvedSshAlias, String> {
+    self.record(format!("resolve {alias}"));
+    self
+      .resolved_alias
+      .clone()
+      .unwrap_or_else(|| Err("unknown alias".into()))
+  }
+
+  fn persistent_sessions(
+    &self,
+    endpoint: &crate::core::remote_control_plane::SshEndpoint,
+    repo: &str,
+    workspace: &str,
+  ) -> Result<Vec<crate::core::pty_remote_supervisor::PtySessionInfo>, String> {
+    self.record(format!("sessions {}:{repo}:{workspace}", endpoint.hostname));
+    self
+      .remote_sessions
+      .clone()
+      .unwrap_or_else(|| Ok(Vec::new()))
   }
 }
 
@@ -3802,4 +3851,476 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!h.drawn("terminal-column-shell"));
   assert!(h.drawn("terminal-column-agent"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
+}
+
+// -- The remote dialogs ------------------------------------------------------
+
+fn remote_snapshot(remote: serde_json::Value) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "onboarding",
+    "dark": false,
+    "remote": remote,
+  }))
+  .expect("parse")
+}
+
+fn setup_route(allow_user_managed: bool, cloud: serde_json::Value) -> serde_json::Value {
+  serde_json::json!({
+    "setup": { "allowUserManaged": allow_user_managed, "cloud": cloud }
+  })
+}
+
+fn remote_harness(
+  cx: &mut TestAppContext,
+  host: FakeHost,
+  remote: serde_json::Value,
+) -> (Harness, Arc<FakeHost>) {
+  workspace_harness(cx, host, remote_snapshot(remote))
+}
+
+fn ssh_key(label: &str) -> crate::core::remote_local_keys::LocalSshIdentity {
+  crate::core::remote_local_keys::LocalSshIdentity {
+    reference: format!("/home/me/.ssh/{label}.pub"),
+    label: label.into(),
+    fingerprint_sha256: "SHA256:key".into(),
+    algorithm: "ssh-ed25519".into(),
+  }
+}
+
+fn endpoint_json() -> serde_json::Value {
+  serde_json::json!({
+    "id": "user-managed-1",
+    "instance_id": null,
+    "source": { "type": "user_managed" },
+    "hostname": "devbox.example",
+    "port": 22,
+    "username": "me",
+    "host_keys": [],
+    "authentication": { "type": "public_key", "key_reference": "/home/me/.ssh/id_ed25519.pub" },
+  })
+}
+
+fn terminal_remote_route() -> serde_json::Value {
+  serde_json::json!({
+    "terminal": {
+      "endpoint": endpoint_json(),
+      "repositoryId": "/srv/project",
+      "workspaceId": "root",
+    }
+  })
+}
+
+fn remote_session(
+  label: &str,
+  running: bool,
+) -> crate::core::pty_remote_supervisor::PtySessionInfo {
+  crate::core::pty_remote_supervisor::PtySessionInfo {
+    session_name: format!("treq-pty-{label}"),
+    workspace: "root".into(),
+    label: label.into(),
+    running,
+  }
+}
+
+#[test]
+fn parses_the_remote_dialogs_from_the_snapshot() {
+  let snapshot = remote_snapshot(serde_json::json!({
+    "setup": { "allowUserManaged": true, "registering": true, "cloud": { "submitting": true } },
+    "ambiguous": "connection reset",
+  }));
+  let setup = snapshot.remote.setup.as_ref().expect("setup");
+  assert!(setup.allow_user_managed && setup.registering && setup.cloud.submitting);
+  assert!(snapshot.remote.is_open());
+  assert!(!remote_snapshot(serde_json::json!({})).remote.is_open());
+  // An empty reason is no reason, as `Boolean(reason)` reads it.
+  assert!(!remote_snapshot(serde_json::json!({ "ambiguous": "" }))
+    .remote
+    .is_open());
+  let terminal = remote_snapshot(terminal_remote_route());
+  assert_eq!(
+    terminal
+      .remote
+      .terminal
+      .expect("terminal")
+      .endpoint
+      .hostname,
+    "devbox.example"
+  );
+}
+
+#[gpui::test]
+fn setup_dialog_offers_both_paths_and_goes_back(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(true, serde_json::json!({})),
+  );
+  assert!(h.drawn("remote-setup-dialog"));
+  assert!(h.drawn("remote-setup-managed"));
+  assert!(h.drawn("remote-setup-own-vm"));
+  assert!(!h.drawn("remote-setup-back"));
+  h.click("remote-setup-managed");
+  assert!(h.drawn("cloud-create"));
+  assert!(!h.drawn("remote-setup-managed"));
+  h.click("remote-setup-back");
+  assert!(h.drawn("remote-setup-managed"));
+  assert!(!h.drawn("cloud-create"));
+}
+
+#[gpui::test]
+fn setup_dialog_opens_on_the_cloud_workspace_without_the_preview(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(false, serde_json::json!({})),
+  );
+  assert!(h.drawn("cloud-create"));
+  assert!(!h.drawn("remote-setup-managed"));
+  // Nothing to go back to.
+  assert!(!h.drawn("remote-setup-back"));
+}
+
+#[gpui::test]
+fn setup_dialog_hands_the_cloud_workspace_flows_to_react(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(false, serde_json::json!({})),
+  );
+  h.click("cloud-create");
+  assert_eq!(h.sent(), vec![press("remote.cloud.provision")]);
+
+  let failed = serde_json::json!({
+    "instance": { "status": "failed", "providerResourceId": "sprite-1", "diskQuotaGb": 10 },
+    "endpoint": { "username": "treq", "hostname": "vm.example", "port": 22 },
+  });
+  h.update(|s| *s = remote_snapshot(setup_route(false, failed.clone())));
+  h.click("cloud-repair");
+  // Deleting asks first, in a confirmation of its own.
+  h.click("cloud-delete");
+  assert!(h.drawn("cloud-delete-dialog"));
+  h.click("cloud-delete-cancel");
+  assert!(!h.drawn("cloud-delete-dialog"));
+  h.click("cloud-delete");
+  h.click("cloud-delete-confirm");
+  assert!(!h.drawn("cloud-delete-dialog"));
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("remote.cloud.provision"),
+      press("remote.cloud.repair"),
+      press("remote.cloud.delete"),
+    ]
+  );
+
+  let ready = serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "sprite-1", "diskQuotaGb": 10 },
+    "endpoint": { "username": "treq", "hostname": "vm.example", "port": 22 },
+  });
+  h.update(|s| *s = remote_snapshot(setup_route(false, ready.clone())));
+  h.click("cloud-open-repositories");
+  assert_eq!(
+    h.sent().last(),
+    Some(&press("remote.cloud.openRepositories"))
+  );
+
+  let pro = serde_json::json!({ "provisioningError": "[pro_required] Upgrade to create one." });
+  h.update(|s| *s = remote_snapshot(setup_route(false, pro.clone())));
+  h.click("cloud-upgrade");
+  assert_eq!(host.writes().len(), 1);
+  assert!(host.writes()[0].starts_with("open ") && host.writes()[0].ends_with("/dashboard"));
+}
+
+#[gpui::test]
+fn setup_dialog_closes_from_its_backdrop_only(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(true, serde_json::json!({})),
+  );
+  assert!(h.drawn("remote-setup-dialog"));
+  // A click in the panel stays in the dialog.
+  h.click("remote-setup-dialog");
+  assert!(h.sent().is_empty());
+  h.cx
+    .simulate_click(gpui::point(gpui::px(5.), gpui::px(5.)), Modifiers::none());
+  assert_eq!(h.sent(), vec![press("remote.setup.close")]);
+}
+
+fn own_vm_host() -> FakeHost {
+  FakeHost {
+    ssh_keys: vec![ssh_key("id_rsa"), ssh_key("id_ed25519")],
+    ..FakeHost::default()
+  }
+}
+
+fn type_into(h: &mut Harness, selector: &'static str, text: &str) {
+  h.click(selector);
+  h.cx.simulate_input(text);
+}
+
+#[gpui::test]
+fn user_managed_form_confirms_the_host_key_before_registering(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  assert!(h.drawn("remote-hostname"));
+  // Continue waits for a hostname and a username; the key is the default.
+  h.click("remote-continue");
+  assert!(host.writes().is_empty());
+  type_into(&mut h, "remote-hostname", " devbox.example ");
+  h.click("remote-continue");
+  assert!(host.writes().is_empty());
+  type_into(&mut h, "remote-username", "me");
+  h.click("remote-continue");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["probe devbox.example:22"]);
+  assert!(h.drawn("remote-trust-confirmation"));
+  // Nothing is registered until trust is confirmed, and Continue is gone.
+  assert!(h.sent().is_empty());
+  assert!(!h.drawn("remote-continue"));
+
+  h.click("remote-trust-connect");
+  assert_eq!(
+    fields(&h, "remote.registerUserManaged"),
+    vec![serde_json::json!({
+      "display_name": "devbox.example",
+      "hostname": "devbox.example",
+      "port": 22,
+      "username": "me",
+      "host_key_fingerprint": "SHA256:abc123",
+      "auth_identity_reference": "/home/me/.ssh/id_ed25519.pub",
+      "alias": null,
+    })]
+  );
+}
+
+#[gpui::test]
+fn user_managed_form_can_decline_the_host_key(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  type_into(&mut h, "remote-display-name", "Dev box");
+  type_into(&mut h, "remote-hostname", "10.0.0.4");
+  type_into(&mut h, "remote-username", "me");
+  // Typed after the default 22.
+  type_into(&mut h, "remote-port", "22");
+  h.click("remote-continue");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["probe 10.0.0.4:2222"]);
+  h.click("remote-trust-cancel");
+  assert!(!h.drawn("remote-trust-confirmation"));
+  assert!(h.drawn("remote-continue"));
+  assert!(h.sent().is_empty());
+  h.click("remote-continue");
+  h.click("remote-trust-connect");
+  let values = fields(&h, "remote.registerUserManaged");
+  assert_eq!(values[0]["display_name"], "Dev box");
+  assert_eq!(values[0]["port"], 2222);
+}
+
+#[gpui::test]
+fn user_managed_form_shows_why_the_host_key_failed(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    host_key: Some(Err("connection refused".into())),
+    ..own_vm_host()
+  };
+  let (mut h, _) = remote_harness(cx, host, setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  type_into(&mut h, "remote-hostname", "10.0.0.4");
+  type_into(&mut h, "remote-username", "me");
+  h.click("remote-continue");
+  assert!(h.drawn("remote-probe-error"));
+  assert!(!h.drawn("remote-trust-confirmation"));
+  assert!(h.drawn("remote-continue"));
+}
+
+#[gpui::test]
+fn user_managed_form_fills_from_an_ssh_alias(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    resolved_alias: Some(Ok(crate::core::remote_ssh_config::ResolvedSshAlias {
+      alias: "prod".into(),
+      hostname: "prod.example".into(),
+      port: 2200,
+      username: Some("deploy".into()),
+      identity_file: None,
+    })),
+    ..own_vm_host()
+  };
+  let (mut h, host) = remote_harness(cx, host, setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  assert!(!h.drawn("remote-alias"));
+  h.click("remote-alias-toggle");
+  assert!(h.drawn("remote-alias"));
+  h.click("remote-alias-autofill");
+  // Needs an alias first.
+  assert!(host.writes().is_empty());
+  type_into(&mut h, "remote-alias", "prod");
+  h.click("remote-alias-autofill");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["resolve prod"]);
+  h.click("remote-continue");
+  h.cx.run_until_parked();
+  // The alias only filled the fields: the host key is still confirmed.
+  assert_eq!(host.writes(), ["resolve prod", "probe prod.example:2200"]);
+  h.click("remote-trust-connect");
+  let values = fields(&h, "remote.registerUserManaged");
+  assert_eq!(values[0]["username"], "deploy");
+  assert_eq!(values[0]["alias"], "prod");
+}
+
+#[gpui::test]
+fn user_managed_form_is_locked_while_react_registers(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  type_into(&mut h, "remote-hostname", "10.0.0.4");
+  type_into(&mut h, "remote-username", "me");
+  h.click("remote-continue");
+  h.click("remote-trust-connect");
+  // Back is disabled until React is done.
+  h.click("remote-setup-back");
+  assert!(h.drawn("remote-hostname"));
+  for registering in [true, false] {
+    h.update(|s| s.remote.setup.as_mut().expect("setup").registering = registering);
+  }
+  h.click("remote-setup-back");
+  assert!(h.drawn("remote-setup-managed"));
+}
+
+#[gpui::test]
+fn terminal_dialog_lists_sessions_to_reattach(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    remote_sessions: Some(Ok(vec![
+      remote_session("claude-1", true),
+      remote_session("shell-2", false),
+    ])),
+    ..FakeHost::default()
+  };
+  let (mut h, host) = remote_harness(cx, host, terminal_remote_route());
+  assert!(h.drawn("remote-terminal-dialog"));
+  assert_eq!(host.writes(), ["sessions devbox.example:/srv/project:root"]);
+  assert!(h.drawn("remote-reattach-1"));
+  // A stopped session cannot be reattached.
+  h.click("remote-reattach-1");
+  assert!(h.sent().is_empty());
+  h.click("remote-reattach-0");
+  h.click("remote-start-new");
+  assert_eq!(
+    fields(&h, "remote.terminal.open"),
+    vec![
+      serde_json::json!({ "label": "claude-1", "reattach": true }),
+      serde_json::json!({ "label": null, "reattach": false }),
+    ]
+  );
+}
+
+#[gpui::test]
+fn terminal_dialog_starts_a_session_when_listing_fails(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    remote_sessions: Some(Err("ssh: connect refused".into())),
+    ..FakeHost::default()
+  };
+  let (mut h, _) = remote_harness(cx, host, terminal_remote_route());
+  assert!(h.drawn("remote-terminal-error"));
+  assert!(!h.drawn("remote-reattach-0"));
+  h.click("remote-start-new");
+  assert_eq!(
+    fields(&h, "remote.terminal.open"),
+    vec![serde_json::json!({ "label": null, "reattach": false })]
+  );
+}
+
+#[gpui::test]
+fn terminal_dialog_lists_again_for_another_workspace(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(cx, FakeHost::default(), terminal_remote_route());
+  assert!(h.drawn("remote-start-new"));
+  h.update(|s| s.remote.terminal.as_mut().expect("terminal").workspace_id = "feature".into());
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "sessions devbox.example:/srv/project:root",
+      "sessions devbox.example:/srv/project:feature"
+    ]
+  );
+  h.click("remote-terminal-dialog");
+  assert!(h.sent().is_empty());
+  h.cx
+    .simulate_click(gpui::point(gpui::px(5.), gpui::px(5.)), Modifiers::none());
+  assert_eq!(h.sent(), vec![press("remote.terminal.close")]);
+}
+
+#[gpui::test]
+fn ambiguous_dialog_dismisses_or_refreshes(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({ "ambiguous": "Connection reset while pushing" }),
+  );
+  assert!(h.drawn("remote-ambiguous-dialog"));
+  assert!(h.drawn("remote-ambiguous-reason"));
+  h.click("remote-ambiguous-dismiss");
+  h.click("remote-ambiguous-refresh");
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("remote.ambiguous.dismiss"),
+      press("remote.ambiguous.refresh")
+    ]
+  );
+  h.update(|s| s.remote.ambiguous = None);
+  assert!(!h.drawn("remote-ambiguous-dialog"));
+}
+
+#[gpui::test]
+fn dialogs_stack_in_react_order(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({
+      "setup": { "allowUserManaged": true, "cloud": {} },
+      "ambiguous": "Connection reset",
+    }),
+  );
+  // The later dialog is above the earlier: its buttons take the click.
+  h.click("remote-ambiguous-dismiss");
+  assert_eq!(h.sent(), vec![press("remote.ambiguous.dismiss")]);
+}
+
+#[gpui::test]
+fn workspace_stops_framing_the_webview_under_a_dialog(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, FakeHost::default(), workspace_route());
+  let covered = |h: &Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      screen
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.read(cx).is_covered())
+    })
+  };
+  h.cx.run_until_parked();
+  assert_eq!(covered(&h), Some(false));
+  h.update(|s| s.remote.ambiguous = Some("Connection reset".into()));
+  h.cx.run_until_parked();
+  assert_eq!(covered(&h), Some(true));
+  h.update(|s| s.remote.ambiguous = None);
+  h.cx.run_until_parked();
+  assert_eq!(covered(&h), Some(false));
+}
+
+#[gpui::test]
+fn user_managed_form_suggests_ssh_config_aliases(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
+  h.click("remote-setup-own-vm");
+  assert!(!h.drawn("remote-hostname-suggestion-0"));
+  type_into(&mut h, "remote-hostname", "DEV");
+  h.cx.run_until_parked();
+  // Aliases that contain what is typed, whatever the case; "staging" does not.
+  assert!(h.drawn("remote-hostname-suggestion-0"));
+  assert!(!h.drawn("remote-hostname-suggestion-1"));
+  h.click("remote-hostname-suggestion-0");
+  // Picking one only fills the field: nothing is probed or trusted.
+  assert!(!h.drawn("remote-hostname-suggestion-0"));
+  type_into(&mut h, "remote-username", "me");
+  h.click("remote-continue");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["probe devbox:22"]);
 }

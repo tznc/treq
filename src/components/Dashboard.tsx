@@ -166,6 +166,7 @@ import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
 import { remoteForceCutoff } from "../lib/api-extra";
 import { RemoteRepositorySelector } from "./remote/RemoteRepositorySelector";
 import { RemoteTerminalDialog } from "./RemoteTerminalDialog";
+import { useGpuiRemoteDialogs } from "./useGpuiRemoteDialogs";
 import { invalidateReviewChangeCount } from "../lib/review-change-count";
 import {
   clearSWRCache,
@@ -3107,9 +3108,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }),
   };
 
+  // The dialog GPUI draws over its screens, and what it hands back.
+  const remoteTerminalDialog =
+    showRemoteTerminalDialog &&
+    activeSshEndpoint &&
+    activeRepository?.canonicalPath
+      ? {
+          endpoint: activeSshEndpoint,
+          repositoryId: activeRepository.canonicalPath,
+          ...resolveRemoteTerminalTarget(
+            activeRepository.canonicalPath,
+            isRemoteActive && selectedWorkspace
+              ? {
+                  workspace_name: selectedWorkspace.workspace_name,
+                  workspace_path: getFullWorkspacePath(selectedWorkspace),
+                }
+              : null,
+          ),
+        }
+      : null;
+  const gpuiDrawsRemote = useGpuiRemoteDialogs({
+    setupOpen: showRemoteSetupDialog,
+    allowUserManaged: remoteSshEnabled,
+    cloudWorkspace: {
+      instanceStatus,
+      provisioningStage,
+      provisioningError,
+      usage: cloudUsage,
+      usageError: cloudUsageError,
+      onProvision: handleProvisionManaged,
+      onWake: handleWakeManaged,
+      onRepair: handleReprovisionManaged,
+      onDelete: handleDeleteManagedInstance,
+      onOpenRepositories: handleOpenManagedRepositories,
+    },
+    onCloseSetup: () => setShowRemoteSetupDialog(false),
+    onRegisterUserManaged: handleRegisterUserManaged,
+    terminal: remoteTerminalDialog,
+    onCloseTerminal: () => setShowRemoteTerminalDialog(false),
+    onOpenTerminalTarget: (target) =>
+      terminalPaneRef.current?.openRemoteSession(target),
+  });
+
   const remoteSetupDialog = (
     <RemoteSetupDialog
-      open={showRemoteSetupDialog}
+      open={showRemoteSetupDialog && !gpuiDrawsRemote}
       onOpenChange={setShowRemoteSetupDialog}
       sshConfigAliasSuggestions={remoteSshHosts}
       allowUserManaged={remoteSshEnabled}
@@ -3747,7 +3790,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <RemoteAmbiguousMutationDialog />
               {activeSshEndpoint && activeRepository?.canonicalPath && (
                 <RemoteTerminalDialog
-                  open={showRemoteTerminalDialog}
+                  open={showRemoteTerminalDialog && !gpuiDrawsRemote}
                   onOpenChange={setShowRemoteTerminalDialog}
                   endpoint={activeSshEndpoint}
                   repositoryId={activeRepository.canonicalPath}

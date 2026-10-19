@@ -1,3 +1,4 @@
+import { useGpuiDrawsRemoteDialogs } from "../../lib/gpui-screen";
 import {
   refreshRemoteRepository,
   useRemoteMutationFeedback,
@@ -14,10 +15,12 @@ import {
 export function RemoteAmbiguousMutationDialog() {
   const reason = useRemoteMutationFeedback((s) => s.ambiguousReason);
   const clearAmbiguous = useRemoteMutationFeedback((s) => s.clearAmbiguous);
+  // GPUI draws it over its screens (useGpuiRemoteDialogs).
+  const gpuiDraws = useGpuiDrawsRemoteDialogs();
 
   return (
     <Dialog
-      open={Boolean(reason)}
+      open={Boolean(reason) && !gpuiDraws}
       onOpenChange={(open) => !open && clearAmbiguous()}
     >
       <DialogContent>
