@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   type GpuiAccountState,
+  type GpuiCloudState,
   type GpuiScreenAction,
   type GpuiSettingsTab,
   useGpuiScreen,
@@ -8,6 +9,7 @@ import {
 import { useAuthStore } from "../stores/authStore";
 import { useToastStore } from "../stores/toastStore";
 import type { CloudWorkspaceControls } from "./AccountSettings";
+import type { CloudWorkspaceCardProps } from "./remote/CloudWorkspaceCard";
 import { useGitHubRepositories } from "./GitHubIntegrationSettings";
 import { startLinearOAuth } from "./LinearIntegrationSettings";
 
@@ -26,6 +28,44 @@ const CLOUD_ACTIONS = {
   "cloud.repair": "onRepair",
   "cloud.delete": "onDelete",
 } as const;
+
+/**
+ * The cloud workspace card as GPUI draws it, in the settings page and the
+ * remote setup dialog.
+ */
+export function toGpuiCloudState(
+  cloudWorkspace: CloudWorkspaceCardProps,
+  submitting: boolean,
+): GpuiCloudState {
+  return {
+    instance: cloudWorkspace.instanceStatus?.instance
+      ? {
+          status: cloudWorkspace.instanceStatus.instance.status,
+          providerResourceId:
+            cloudWorkspace.instanceStatus.instance.provider_resource_id,
+          diskQuotaGb: cloudWorkspace.instanceStatus.instance.disk_quota_gb,
+        }
+      : null,
+    endpoint: cloudWorkspace.instanceStatus?.endpoint
+      ? {
+          username: cloudWorkspace.instanceStatus.endpoint.username,
+          hostname: cloudWorkspace.instanceStatus.endpoint.hostname,
+          port: cloudWorkspace.instanceStatus.endpoint.port,
+        }
+      : null,
+    provisioningStage: cloudWorkspace.provisioningStage ?? null,
+    provisioningError: cloudWorkspace.provisioningError ?? null,
+    usage: cloudWorkspace.usage
+      ? {
+          repositoryCount: cloudWorkspace.usage.repository_count,
+          workspaceCount: cloudWorkspace.usage.workspace_count,
+          diskUsedBytes: cloudWorkspace.usage.disk_used_bytes,
+        }
+      : null,
+    usageError: cloudWorkspace.usageError ?? null,
+    submitting,
+  };
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -83,36 +123,7 @@ function useGpuiAccount(
           : null,
         devCallback: { loading: devLoading, error: devError },
         cloud: cloudWorkspace
-          ? {
-              instance: cloudWorkspace.instanceStatus?.instance
-                ? {
-                    status: cloudWorkspace.instanceStatus.instance.status,
-                    providerResourceId:
-                      cloudWorkspace.instanceStatus.instance
-                        .provider_resource_id,
-                    diskQuotaGb:
-                      cloudWorkspace.instanceStatus.instance.disk_quota_gb,
-                  }
-                : null,
-              endpoint: cloudWorkspace.instanceStatus?.endpoint
-                ? {
-                    username: cloudWorkspace.instanceStatus.endpoint.username,
-                    hostname: cloudWorkspace.instanceStatus.endpoint.hostname,
-                    port: cloudWorkspace.instanceStatus.endpoint.port,
-                  }
-                : null,
-              provisioningStage: cloudWorkspace.provisioningStage ?? null,
-              provisioningError: cloudWorkspace.provisioningError ?? null,
-              usage: cloudWorkspace.usage
-                ? {
-                    repositoryCount: cloudWorkspace.usage.repository_count,
-                    workspaceCount: cloudWorkspace.usage.workspace_count,
-                    diskUsedBytes: cloudWorkspace.usage.disk_used_bytes,
-                  }
-                : null,
-              usageError: cloudWorkspace.usageError ?? null,
-              submitting: cloudSubmitting,
-            }
+          ? toGpuiCloudState(cloudWorkspace, cloudSubmitting)
           : null,
         github:
           signedIn && tab === "integrations"

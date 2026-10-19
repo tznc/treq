@@ -86,6 +86,7 @@ icons! {
   ICON_SETTINGS => "settings",
   ICON_SPINNER => "loader-circle",
   ICON_TERMINAL => "terminal",
+  ICON_TERMINAL_SQUARE => "terminal-square",
   ICON_TRASH => "trash-2",
   ICON_TRIANGLE_ALERT => "triangle-alert",
   ICON_UNDO => "undo-2",

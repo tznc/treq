@@ -318,6 +318,8 @@ pub struct WorkspaceView {
   dark: bool,
   popups: PopupSink,
   webview: Option<Webview<Wry>>,
+  /// A dialog covers the window, which the framed webview would paint over.
+  covered: bool,
   /// The element whose tooltip is pending or shown (`true`).
   tooltip: Option<(SharedString, bool)>,
   /// The tooltip whose popup is open.
@@ -328,6 +330,19 @@ pub struct WorkspaceView {
 }
 
 impl WorkspaceView {
+  #[cfg(test)]
+  pub fn is_covered(&self) -> bool {
+    self.covered
+  }
+
+  /// Stops framing the webview while a dialog covers the window.
+  pub fn set_covered(&mut self, covered: bool, cx: &mut Context<Self>) {
+    if self.covered != covered {
+      self.covered = covered;
+      cx.notify();
+    }
+  }
+
   pub fn new(
     route: Route,
     host: Arc<dyn TerminalHost>,
@@ -371,6 +386,7 @@ impl WorkspaceView {
       dark,
       popups,
       webview,
+      covered: false,
       tooltip: None,
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
@@ -1648,9 +1664,10 @@ impl Render for WorkspaceView {
     let code = self.tab_body(cx);
     // A dialog drawn over the screen cannot cover the webview, so the
     // frame steps aside while one is open.
-    let dialog_open = cx
-      .try_global::<super::modal::ModalOpen>()
-      .is_some_and(|m| m.0);
+    let dialog_open = self.covered
+      || cx
+        .try_global::<super::modal::ModalOpen>()
+        .is_some_and(|m| m.0);
     let frame = |webview: Option<&Webview<Wry>>| match webview {
       Some(webview) if !dialog_open => tauri_plugin_gpui::webview_frame(webview)
         .size_full()

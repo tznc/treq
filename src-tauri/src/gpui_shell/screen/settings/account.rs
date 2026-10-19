@@ -20,6 +20,7 @@ use crate::gpui_shell::{
   popup::{Side, TooltipContent},
   screen::ScreenAction,
   theme::{self, tw, Palette},
+  tooltips::{HasTooltips, Tooltips},
   ui::{self, Button, Size, TextSize, Variant},
 };
 
@@ -381,7 +382,10 @@ fn first_line(text: &str) -> String {
   text.split('\n').next().unwrap_or_default().to_string()
 }
 
-fn cloud_card(cloud: &CloudRoute, confirming_delete: bool) -> CloudCard {
+pub(in crate::gpui_shell::screen) fn cloud_card(
+  cloud: &CloudRoute,
+  confirming_delete: bool,
+) -> CloudCard {
   let record = cloud.instance.as_ref();
   // A deleted instance keeps its provider resource id, but there is nothing
   // left to manage.
@@ -861,6 +865,325 @@ fn red(p: &Palette) -> gpui::Hsla {
   tw::color(if p.dark { tw::RED_400 } else { tw::RED_600 })
 }
 
+/// A click handler that presses the button `id` of a view.
+pub(in crate::gpui_shell::screen) type ClickFn =
+  Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App)>;
+
+/// Names the button `id` of a view's, for the view that draws a card.
+pub(in crate::gpui_shell::screen) type PressFn<'a> = &'a dyn Fn(&str) -> ClickFn;
+
+/// `CloudWorkspaceCard`. Its buttons press `cloud.repair`, `cloud.delete.ask`,
+/// `cloud.openRepositories`, `cloud.wake`, `cloud.provision` and
+/// `cloud.upgrade`, as `press` names them for the view that draws it.
+pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
+  c: &CloudCard,
+  p: &Palette,
+  tips: &Tooltips,
+  press: PressFn,
+  cx: &mut Context<V>,
+) -> impl IntoElement {
+  let red = red(p);
+  let actions = c.instance.as_ref().map(|instance| {
+    let repair = instance.repairable.then(|| {
+      let button = Button::new("cloud-repair", p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .h(px(28.))
+        .gap(px(6.))
+        .disabled(c.submitting)
+        .child(ui::icon(theme::ICON_WRENCH, 14., p.foreground))
+        .label("Repair")
+        .on_click(press("cloud.repair"));
+      tips.wrap(
+        "cloud-repair",
+        Side::Bottom,
+        Some(TooltipContent::Text(
+          "Re-run Treq setup on this cloud workspace. Files and repositories are kept.".into(),
+        )),
+        button,
+        cx,
+      )
+    });
+    let delete = Button::new("cloud-delete", p)
+      .variant(Variant::Ghost)
+      .size(Size::Icon)
+      .w(px(28.))
+      .h(px(28.))
+      .disabled(c.submitting)
+      .child(ui::icon(theme::ICON_TRASH, 16., p.muted_foreground))
+      .on_click(press("cloud.delete.ask"));
+    let delete = tips.wrap(
+      "cloud-delete",
+      Side::Bottom,
+      Some(TooltipContent::Text(
+        "Delete this cloud workspace and all data on it".into(),
+      )),
+      delete,
+      cx,
+    );
+    div()
+      .ml_auto()
+      .flex()
+      .items_center()
+      .gap_1()
+      .children(repair)
+      .child(delete)
+  });
+
+  let body: AnyElement = match (&c.instance, &c.create) {
+    (Some(instance), _) => {
+      let usage = instance.usage.as_ref().map(|usage| match usage {
+        CloudUsage::Error(error) => ui::text(div(), TextSize::Xs)
+          .truncate()
+          .text_color(red)
+          .child(error.clone())
+          .into_any_element(),
+        CloudUsage::Loading => div()
+          .text_color(p.muted_foreground)
+          .child("Loading usage...")
+          .into_any_element(),
+        CloudUsage::Report {
+          summary,
+          size,
+          percent,
+        } => div()
+          .flex()
+          .flex_col()
+          .gap(px(6.))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .justify_between()
+              .text_color(p.muted_foreground)
+              .child(summary.clone())
+              .child(size.clone()),
+          )
+          .child(
+            div()
+              .debug_selector(|| "cloud-disk-usage".into())
+              .h(px(6.))
+              .rounded_full()
+              .overflow_hidden()
+              .bg(p.muted)
+              .child(
+                div()
+                  .h_full()
+                  .w(gpui::relative(*percent as f32 / 100.))
+                  .bg(if *percent >= 90 {
+                    p.destructive
+                  } else {
+                    p.primary
+                  }),
+              ),
+          )
+          .into_any_element(),
+      });
+      let open = instance.open_repositories.then(|| {
+        Button::new("cloud-open-repositories", p)
+          .size(Size::Sm)
+          .label("Open repositories")
+          .on_click(press("cloud.openRepositories"))
+      });
+      let wake = instance.wake.then(|| {
+        Button::new("cloud-wake", p)
+          .size(Size::Sm)
+          .disabled(c.submitting)
+          .label("Wake")
+          .on_click(press("cloud.wake"))
+      });
+      let buttons = (open.is_some() || wake.is_some()).then(|| {
+        div()
+          .flex()
+          .flex_wrap()
+          .gap_2()
+          .children(open)
+          .children(wake)
+      });
+      ui::text(div(), TextSize::Sm)
+        .mt_3()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(
+          div()
+            .child(
+              div()
+                .font_weight(FontWeight::MEDIUM)
+                .child(instance.label.clone()),
+            )
+            .when_some(instance.endpoint.clone(), |this, endpoint| {
+              this.child(div().text_color(p.muted_foreground).child(endpoint))
+            }),
+        )
+        .children(usage)
+        .children(buttons)
+        .into_any_element()
+    }
+    (None, Some(create)) => div()
+      .mt_2()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Treq creates one persistent cloud workspace for your account, with Treq, JJ, Git, and agents installed. Location, CPU, memory, and storage are managed for you."),
+      )
+      .child(
+        Button::new("cloud-create", p)
+          .size(Size::Sm)
+          .w_full()
+          .disabled(create.disabled)
+          .when(create.spinning, |this| {
+            this.child(ui::spinner("cloud-create-spinner", 14., p.primary_foreground))
+          })
+          .label(create.label.clone())
+          .on_click(press("cloud.provision")),
+      )
+      .when_some(create.stage.clone(), |this, stage| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child(stage),
+        )
+      })
+      .into_any_element(),
+    (None, None) => div().into_any_element(),
+  };
+
+  let green = tw::color(tw::GREEN_500);
+  div()
+    .debug_selector(|| "cloud-workspace-card".into())
+    .rounded(px(8.))
+    .border_1()
+    .border_color(p.border)
+    .p_4()
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(ui::icon(theme::ICON_CLOUD, 16., p.foreground))
+        .child(
+          div()
+            .font_weight(FontWeight::MEDIUM)
+            .child("Cloud workspace"),
+        )
+        .children(actions),
+    )
+    .child(body)
+    .when_some(c.pro_required.clone(), |this, message| {
+      this.child(
+        ui::text(div(), TextSize::Sm)
+          .mt_3()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .rounded(px(4.))
+              .bg(green.opacity(0.2))
+              .px(px(6.))
+              .py(px(2.))
+              .font_weight(FontWeight::SEMIBOLD)
+              .text_color(tw::color(if p.dark {
+                tw::GREEN_400
+              } else {
+                tw::GREEN_700
+              }))
+              .child("PRO"),
+          )
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .text_color(p.muted_foreground)
+              .child(message),
+          )
+          .child(
+            Button::new("cloud-upgrade", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Upgrade to Pro")
+              .on_click(press("cloud.upgrade")),
+          ),
+      )
+    })
+    .when_some(c.error.clone(), |this, error| {
+      this.child(
+        ui::text(div().mt_3(), TextSize::Xs)
+          .truncate()
+          .text_color(red)
+          .child(error),
+      )
+    })
+}
+
+/// The cloud workspace's delete confirmation (`AlertDialog`), pressing
+/// `cloud.delete.cancel` and `cloud.delete.confirm`.
+pub(in crate::gpui_shell::screen) fn cloud_delete_dialog_element(
+  p: &Palette,
+  press: PressFn,
+) -> impl IntoElement {
+  div()
+    .id("cloud-delete-dialog-backdrop")
+    .absolute()
+    .inset_0()
+    .flex()
+    .items_center()
+    .justify_center()
+    .bg(gpui::black().opacity(0.5))
+    .occlude()
+    .child(
+      div()
+        .id("cloud-delete-dialog")
+        .debug_selector(|| "cloud-delete-dialog".into())
+        .w_full()
+        .max_w(px(512.))
+        .mx_4()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .p_6()
+        .rounded(px(8.))
+        .border_1()
+        .border_color(p.border)
+        .bg(p.background)
+        .shadow_lg()
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(heading("Delete cloud workspace?"))
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .text_color(p.muted_foreground)
+                .child("This permanently deletes the cloud machine and all data on it, including cloned repositories, uncommitted changes, and agent sessions. This cannot be undone."),
+            ),
+        )
+        .child(
+          div()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+              Button::new("cloud-delete-cancel", p)
+                .variant(Variant::Outline)
+                .label("Cancel")
+                .on_click(press("cloud.delete.cancel")),
+            )
+            .child(
+              Button::new("cloud-delete-confirm", p)
+                .variant(Variant::Destructive)
+                .label("Delete")
+                .on_click(press("cloud.delete.confirm")),
+            ),
+        ),
+    )
+}
+
 impl SettingsView {
   pub(super) fn account(
     &mut self,
@@ -1133,302 +1456,12 @@ impl SettingsView {
 
   /// `CloudWorkspaceCard`.
   fn cloud_card(&mut self, c: &CloudCard, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let red = red(p);
-    let actions = c.instance.as_ref().map(|instance| {
-      let repair = instance.repairable.then(|| {
-        let button = Button::new("cloud-repair", p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .h(px(28.))
-          .gap(px(6.))
-          .disabled(c.submitting)
-          .child(ui::icon(theme::ICON_WRENCH, 14., p.foreground))
-          .label("Repair")
-          .on_click(self.press("cloud.repair"));
-        self.tips.wrap(
-          "cloud-repair",
-          Side::Bottom,
-          Some(TooltipContent::Text(
-            "Re-run Treq setup on this cloud workspace. Files and repositories are kept.".into(),
-          )),
-          button,
-          cx,
-        )
-      });
-      let delete = Button::new("cloud-delete", p)
-        .variant(Variant::Ghost)
-        .size(Size::Icon)
-        .w(px(28.))
-        .h(px(28.))
-        .disabled(c.submitting)
-        .child(ui::icon(theme::ICON_TRASH, 16., p.muted_foreground))
-        .on_click(self.press("cloud.delete.ask"));
-      let delete = self.tips.wrap(
-        "cloud-delete",
-        Side::Bottom,
-        Some(TooltipContent::Text(
-          "Delete this cloud workspace and all data on it".into(),
-        )),
-        delete,
-        cx,
-      );
-      div()
-        .ml_auto()
-        .flex()
-        .items_center()
-        .gap_1()
-        .children(repair)
-        .child(delete)
-    });
-
-    let body: AnyElement = match (&c.instance, &c.create) {
-      (Some(instance), _) => {
-        let usage = instance.usage.as_ref().map(|usage| match usage {
-          CloudUsage::Error(error) => ui::text(div(), TextSize::Xs)
-            .truncate()
-            .text_color(red)
-            .child(error.clone())
-            .into_any_element(),
-          CloudUsage::Loading => div()
-            .text_color(p.muted_foreground)
-            .child("Loading usage...")
-            .into_any_element(),
-          CloudUsage::Report {
-            summary,
-            size,
-            percent,
-          } => div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(
-              div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .text_color(p.muted_foreground)
-                .child(summary.clone())
-                .child(size.clone()),
-            )
-            .child(
-              div()
-                .debug_selector(|| "cloud-disk-usage".into())
-                .h(px(6.))
-                .rounded_full()
-                .overflow_hidden()
-                .bg(p.muted)
-                .child(
-                  div()
-                    .h_full()
-                    .w(gpui::relative(*percent as f32 / 100.))
-                    .bg(if *percent >= 90 {
-                      p.destructive
-                    } else {
-                      p.primary
-                    }),
-                ),
-            )
-            .into_any_element(),
-        });
-        let open = instance.open_repositories.then(|| {
-          Button::new("cloud-open-repositories", p)
-            .size(Size::Sm)
-            .label("Open repositories")
-            .on_click(self.press("cloud.openRepositories"))
-        });
-        let wake = instance.wake.then(|| {
-          Button::new("cloud-wake", p)
-            .size(Size::Sm)
-            .disabled(c.submitting)
-            .label("Wake")
-            .on_click(self.press("cloud.wake"))
-        });
-        let buttons = (open.is_some() || wake.is_some()).then(|| {
-          div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(open)
-            .children(wake)
-        });
-        ui::text(div(), TextSize::Sm)
-          .mt_3()
-          .flex()
-          .flex_col()
-          .gap_3()
-          .child(
-            div()
-              .child(
-                div()
-                  .font_weight(FontWeight::MEDIUM)
-                  .child(instance.label.clone()),
-              )
-              .when_some(instance.endpoint.clone(), |this, endpoint| {
-                this.child(div().text_color(p.muted_foreground).child(endpoint))
-              }),
-          )
-          .children(usage)
-          .children(buttons)
-          .into_any_element()
-      }
-      (None, Some(create)) => div()
-        .mt_2()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("Treq creates one persistent cloud workspace for your account, with Treq, JJ, Git, and agents installed. Location, CPU, memory, and storage are managed for you."),
-        )
-        .child(
-          Button::new("cloud-create", p)
-            .size(Size::Sm)
-            .w_full()
-            .disabled(create.disabled)
-            .when(create.spinning, |this| {
-              this.child(ui::spinner("cloud-create-spinner", 14., p.primary_foreground))
-            })
-            .label(create.label.clone())
-            .on_click(self.press("cloud.provision")),
-        )
-        .when_some(create.stage.clone(), |this, stage| {
-          this.child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(stage),
-          )
-        })
-        .into_any_element(),
-      (None, None) => div().into_any_element(),
-    };
-
-    let green = tw::color(tw::GREEN_500);
-    div()
-      .debug_selector(|| "cloud-workspace-card".into())
-      .rounded(px(8.))
-      .border_1()
-      .border_color(p.border)
-      .p_4()
-      .child(
-        ui::text(div(), TextSize::Sm)
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(ui::icon(theme::ICON_CLOUD, 16., p.foreground))
-          .child(
-            div()
-              .font_weight(FontWeight::MEDIUM)
-              .child("Cloud workspace"),
-          )
-          .children(actions),
-      )
-      .child(body)
-      .when_some(c.pro_required.clone(), |this, message| {
-        this.child(
-          ui::text(div(), TextSize::Sm)
-            .mt_3()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-              ui::text(div(), TextSize::Xs)
-                .rounded(px(4.))
-                .bg(green.opacity(0.2))
-                .px(px(6.))
-                .py(px(2.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(tw::color(if p.dark {
-                  tw::GREEN_400
-                } else {
-                  tw::GREEN_700
-                }))
-                .child("PRO"),
-            )
-            .child(
-              div()
-                .flex_1()
-                .min_w_0()
-                .text_color(p.muted_foreground)
-                .child(message),
-            )
-            .child(
-              Button::new("cloud-upgrade", p)
-                .variant(Variant::Outline)
-                .size(Size::Sm)
-                .label("Upgrade to Pro")
-                .on_click(self.press("cloud.upgrade")),
-            ),
-        )
-      })
-      .when_some(c.error.clone(), |this, error| {
-        this.child(
-          ui::text(div().mt_3(), TextSize::Xs)
-            .truncate()
-            .text_color(red)
-            .child(error),
-        )
-      })
+    cloud_card_element(c, p, &self.tips, &|id| Box::new(self.press(id)), cx)
   }
 
   /// The cloud workspace's delete confirmation (`AlertDialog`).
   pub(super) fn cloud_delete_dialog(&self, p: &Palette) -> impl IntoElement {
-    div()
-      .id("cloud-delete-dialog-backdrop")
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(gpui::black().opacity(0.5))
-      .occlude()
-      .child(
-        div()
-          .id("cloud-delete-dialog")
-          .debug_selector(|| "cloud-delete-dialog".into())
-          .w_full()
-          .max_w(px(512.))
-          .mx_4()
-          .flex()
-          .flex_col()
-          .gap_4()
-          .p_6()
-          .rounded(px(8.))
-          .border_1()
-          .border_color(p.border)
-          .bg(p.background)
-          .shadow_lg()
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_2()
-              .child(heading("Delete cloud workspace?"))
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("This permanently deletes the cloud machine and all data on it, including cloned repositories, uncommitted changes, and agent sessions. This cannot be undone."),
-              ),
-          )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("cloud-delete-cancel", p)
-                  .variant(Variant::Outline)
-                  .label("Cancel")
-                  .on_click(self.press("cloud.delete.cancel")),
-              )
-              .child(
-                Button::new("cloud-delete-confirm", p)
-                  .variant(Variant::Destructive)
-                  .label("Delete")
-                  .on_click(self.press("cloud.delete.confirm")),
-              ),
-          ),
-      )
+    cloud_delete_dialog_element(p, &|id| Box::new(self.press(id)))
   }
 
   pub(super) fn integrations(

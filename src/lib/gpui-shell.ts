@@ -20,6 +20,8 @@ declare global {
     __TREQ_REACT_MODALS__?: boolean;
     /** React draws Dashboard's palette and pickers; tests of them set it. */
     __TREQ_REACT_OVERLAYS__?: boolean;
+    /** React draws the remote repository dialogs; tests of those dialogs set it. */
+    __TREQ_REACT_REMOTE_DIALOGS__?: boolean;
   }
 }
 

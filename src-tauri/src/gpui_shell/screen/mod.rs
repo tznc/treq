@@ -43,6 +43,8 @@ mod logs_data;
 mod merge;
 mod modal;
 mod onboarding;
+mod remote;
+mod remote_data;
 mod settings;
 mod settings_data;
 mod terminal;
@@ -66,6 +68,9 @@ pub const WEB_UI_ENV: &str = "TREQ_WEB_UI";
 pub struct ScreenSnapshot {
   /// React's resolved theme, which can differ from the OS appearance.
   pub dark: bool,
+  /// The remote dialogs open over the screen.
+  #[serde(default)]
+  pub remote: remote::Route,
   #[serde(flatten)]
   pub view: View,
 }
@@ -119,6 +124,7 @@ pub trait Host:
   + merge::MergeHost
   + terminal_data::TerminalHost
   + modal::ModalsHost
+  + remote_data::RemoteHost
 {
 }
 
@@ -128,6 +134,7 @@ impl<T> Host for T where
     + merge::MergeHost
     + terminal_data::TerminalHost
     + modal::ModalsHost
+    + remote_data::RemoteHost
 {
 }
 
@@ -150,6 +157,8 @@ pub struct Screen {
   agent_prompt: Option<Entity<modal::agent_prompt::AgentPromptView>>,
   prompt_history: Option<Entity<modal::prompt_history::PromptHistoryView>>,
   stash: Option<Entity<modal::stash::StashView>>,
+  /// The remote dialogs, while one is open.
+  remote: Option<Entity<remote::RemoteView>>,
 }
 
 impl Screen {
@@ -174,6 +183,7 @@ impl Screen {
       agent_prompt: None,
       prompt_history: None,
       stash: None,
+      remote: None,
     }
   }
 
@@ -298,12 +308,41 @@ impl Render for Screen {
         }
       }
     };
+    // A dialog over the whole window would leave the webview on top, so the
+    // workspace stops framing it.
+    let remote_open = self.snapshot.remote.is_open();
+    if let Some(workspace) = &self.workspace {
+      workspace.update(cx, |workspace, cx| workspace.set_covered(remote_open, cx));
+    }
+    let remote = if remote_open {
+      let route = self.snapshot.remote.clone();
+      Some(match &self.remote {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone()
+        }
+        None => {
+          let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+          let view = cx.new(|cx| {
+            let mut view = remote::RemoteView::new(host, sink, popups, dark);
+            view.set_route(route, dark, cx);
+            view
+          });
+          self.remote = Some(view.clone());
+          view
+        }
+      })
+    } else {
+      self.remote = None;
+      None
+    };
     div()
       .size_full()
       .bg(ctx.palette.background)
       .text_color(ctx.palette.foreground)
       .font_family(theme::SANS_FONT)
       .child(body)
+      .children(remote)
       .children(modal)
   }
 }
