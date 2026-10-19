@@ -3413,6 +3413,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <MergePreviewPage
                       workspace={mergeWorkspace}
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       onCancel={() => {
                         setMergeWorkspace(null);
                         setViewMode("show-workspace");

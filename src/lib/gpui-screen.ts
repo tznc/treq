@@ -68,9 +68,23 @@ export interface GpuiWorkspaceScreen {
   revision: number;
 }
 
+/**
+ * MergePreviewPage, which GPUI reads and merges itself
+ * (src-tauri/src/gpui_shell/screen/merge.rs). It presses
+ * "mergePreview.cancel" to leave and "mergePreview.merged" once merged.
+ */
+interface GpuiMergePreviewScreen {
+  kind: "mergePreview";
+  repoPath: string;
+  workspaceId: number;
+}
+
 export type GpuiScreenView =
   /** GPUI reads its data from the backend and opens repositories itself. */
-  { kind: "onboarding" } | GpuiSettingsScreen | GpuiWorkspaceScreen;
+  | { kind: "onboarding" }
+  | GpuiSettingsScreen
+  | GpuiWorkspaceScreen
+  | GpuiMergePreviewScreen;
 
 export type GpuiScreenSnapshot = GpuiScreenView & { dark: boolean };
 

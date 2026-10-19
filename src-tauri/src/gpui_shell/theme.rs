@@ -20,6 +20,7 @@ macro_rules! icons {
 
 icons! {
   ICON_ARCHIVE => "archive",
+  ICON_ARROW_LEFT => "arrow-left",
   ICON_ARROW_RIGHT => "arrow-right",
   ICON_BOOK_OPEN => "book-open",
   ICON_BOT => "bot",
@@ -41,6 +42,7 @@ icons! {
   ICON_DATABASE => "database",
   ICON_EXTERNAL_LINK => "external-link",
   ICON_FILE_DIFF => "file-diff",
+  ICON_FILE_TEXT => "file-text",
   ICON_FLASK => "flask-conical",
   ICON_FOLDER_GIT => "folder-git-2",
   ICON_FOLDER_OPEN => "folder-open",

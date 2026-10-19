@@ -22,6 +22,7 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 use super::{popup::PopupSink, theme};
 
 pub(super) mod checklist;
+mod merge;
 mod onboarding;
 mod settings;
 mod settings_data;
@@ -56,6 +57,8 @@ pub enum View {
   Settings(settings::Route),
   /// The workspace view's header and tab row, with the webview below.
   Workspace(Box<workspace_data::Route>),
+  /// The commits and files a workspace merges, and the merge.
+  MergePreview(merge::Route),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -89,12 +92,12 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
 pub trait Host:
-  onboarding::OnboardingHost + settings_data::SettingsHost + workspace_data::WorkspaceHost
+  onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost
 {
 }
 
 impl<T> Host for T where
-  T: onboarding::OnboardingHost + settings_data::SettingsHost + workspace_data::WorkspaceHost
+  T: onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost
 {
 }
 
@@ -111,6 +114,7 @@ pub struct Screen {
   onboarding: Option<Entity<onboarding::OnboardingView>>,
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
+  merge: Option<Entity<merge::MergeView>>,
 }
 
 impl Screen {
@@ -130,6 +134,7 @@ impl Screen {
       onboarding: None,
       settings: None,
       workspace: None,
+      merge: None,
     }
   }
 
@@ -170,6 +175,9 @@ impl Render for Screen {
     }
     if !matches!(self.snapshot.view, View::Workspace(_)) {
       self.workspace = None;
+    }
+    if !matches!(self.snapshot.view, View::MergePreview(_)) {
+      self.merge = None;
     }
     let ctx = Ctx {
       palette: theme::palette(dark),
@@ -217,6 +225,21 @@ impl Render for Screen {
               workspace::WorkspaceView::new(route, host, sink, dark, popups, webview, cx)
             });
             self.workspace = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::MergePreview(route) => {
+        let route = route.clone();
+        match &self.merge {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink) = (self.host.clone(), self.sink.clone());
+            let view = cx.new(|cx| merge::MergeView::new(route, host, sink, dark, cx));
+            self.merge = Some(view.clone());
             view.into_any_element()
           }
         }

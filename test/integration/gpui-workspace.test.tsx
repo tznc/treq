@@ -130,6 +130,33 @@ describe("GPUI workspace header", () => {
       await waitFor(() => expect(gpuiScreen()).toBeNull());
     });
 
+    it("opens the merge preview in GPUI and comes back", async () => {
+      const alpha = await openAlpha();
+
+      press("workspace.merge");
+      const preview = await findGpuiScreen("mergePreview");
+      expect(preview).toEqual({
+        kind: "mergePreview",
+        dark: false,
+        repoPath,
+        workspaceId: alpha.workspaceId,
+      });
+
+      press("mergePreview.cancel");
+      await findGpuiScreen("workspace", (s) => {
+        expect(s.workspaceId).toBe(alpha.workspaceId);
+      });
+    });
+
+    it("leaves the merge preview once GPUI merged", async () => {
+      await openAlpha();
+      press("workspace.merge");
+      await findGpuiScreen("mergePreview");
+
+      press("mergePreview.merged");
+      await findGpuiScreen("workspace");
+    });
+
     it("opens the more menu with Delete Workspace", async () => {
       await openAlpha();
       vi.mocked(popupNativeMenu).mockClear();

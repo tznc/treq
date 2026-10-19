@@ -31,6 +31,9 @@ struct FakeHost {
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
+  /// What the merge preview reads, and whether merging fails.
+  merge: merge::Preview,
+  merge_error: Option<String>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -226,6 +229,24 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {
     settings_data::SettingsHost::notify(self, event);
+  }
+}
+
+impl merge::MergeHost for FakeHost {
+  fn merge_preview(&self, _: &str, workspace_id: i64) -> merge::Preview {
+    self.record(format!("read merge {workspace_id}"));
+    self.merge.clone()
+  }
+
+  fn merge(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    message: &str,
+    strategy: merge::Strategy,
+  ) -> Result<(), String> {
+    self.record(format!("merge {workspace_id} {strategy:?} {message:?}"));
+    self.merge_error.clone().map_or(Ok(()), Err)
   }
 }
 
@@ -1127,4 +1148,230 @@ fn skills_dialog_cancels(cx: &mut TestAppContext) {
   h.click("skill-dialog-cancel");
   assert!(!h.drawn("skill-install-dialog"));
   assert!(host.writes().is_empty());
+}
+
+fn merge_route() -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "mergePreview",
+    "dark": false,
+    "repoPath": "/repo",
+    "workspaceId": 7,
+  }))
+  .expect("parse")
+}
+
+fn merge_workspace(metadata: Option<&str>) -> crate::local_db::Workspace {
+  serde_json::from_value(serde_json::json!({
+    "id": 7,
+    "repo_path": "/repo",
+    "workspace_name": "feature",
+    "workspace_path": "feature",
+    "branch_name": "feature",
+    "created_at": "2026-10-19T00:00:00Z",
+    "refreshed_at": null,
+    "metadata": metadata,
+    "target_branch": "develop",
+    "title": "Feature",
+    "description": null,
+    "moved_files": null,
+    "not_on_remote": false,
+    "sparse_patterns": null,
+  }))
+  .expect("workspace")
+}
+
+fn merge_preview(commits: usize) -> merge::Preview {
+  let commit = |i: usize| {
+    serde_json::json!({
+      "commit_id": format!("c{i}"),
+      "short_id": format!("c{i}"),
+      "change_id": format!("k{i}"),
+      "description": format!("Change {i}"),
+      "author_name": "Zn",
+      "timestamp": "2026-10-19T00:00:00Z",
+      "parent_ids": [],
+      "is_working_copy": false,
+      "bookmarks": [],
+      "is_immutable": false,
+      "insertions": 3,
+      "deletions": 1,
+    })
+  };
+  merge::Preview {
+    workspace: Some(merge_workspace(Some(r#"{"description": "Adds a thing"}"#))),
+    commits: Some(
+      serde_json::from_value(serde_json::json!({
+        "commits": (0..commits).map(commit).collect::<Vec<_>>(),
+        "total_count": commits,
+      }))
+      .expect("commits"),
+    ),
+    diff: Some(
+      serde_json::from_value(serde_json::json!({
+        "committed_files": [{
+          "path": "src/a.rs",
+          "status": "M",
+          "previous_path": null,
+          "changed_line_count": 2,
+          "diff_deferred": false,
+        }],
+        "hunks_by_file": [{
+          "path": "src/a.rs",
+          "hunks": [{
+            "id": "h0",
+            "header": "@@ -1 +1 @@",
+            "lines": ["-old", "+new"],
+            "patch": "",
+          }],
+        }],
+        "too_large_to_render": false,
+      }))
+      .expect("diff"),
+    ),
+    error: None,
+  }
+}
+
+fn merge_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
+  let host = Arc::new(host);
+  let mut h = Harness::with_host(cx, merge_route(), host.clone());
+  assert!(h.drawn("merge-confirm"));
+  (h, host)
+}
+
+fn merge_view<T>(h: &mut Harness, f: impl FnOnce(&merge::MergeView) -> T) -> T {
+  h.screen.read_with(&h.cx, |screen, cx| {
+    f(screen.merge.as_ref().expect("merge view").read(cx))
+  })
+}
+
+#[test]
+fn merge_messages_follow_the_strategy() {
+  let ws = merge_workspace(Some(r#"{"description": "Adds a thing"}"#));
+  assert_eq!(
+    merge::default_message(&ws, merge::Strategy::Merge),
+    "Merge feature into develop\n\nAdds a thing"
+  );
+  assert_eq!(
+    merge::default_message(&ws, merge::Strategy::Squash),
+    "Adds a thing"
+  );
+  assert_eq!(merge::default_message(&ws, merge::Strategy::Rebase), "");
+  let bare = merge_workspace(Some("not json"));
+  assert_eq!(
+    merge::default_message(&bare, merge::Strategy::Merge),
+    "Merge feature into develop"
+  );
+}
+
+#[gpui::test]
+fn merge_preview_merges_then_hands_back(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge_preview(2),
+      ..FakeHost::default()
+    },
+  );
+  assert!(h.drawn("merge-file-src/a.rs"));
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "merge 7 Merge \"Merge feature into develop\\n\\nAdds a thing\"",
+      "notify toast Workspace merged",
+    ]
+  );
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Press {
+      id: "mergePreview.merged".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_picks_a_strategy(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge_preview(2),
+      merge_error: Some("conflicts".into()),
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-strategy");
+  assert!(h.drawn("merge-strategy-menu"));
+  h.click("merge-strategy-rebase");
+  assert!(!h.drawn("merge-strategy-menu"));
+  assert_eq!(
+    merge_view(&mut h, |v| (v.strategy, v.message())),
+    (merge::Strategy::Rebase, String::new())
+  );
+  h.click("merge-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["merge 7 Rebase \"\"", "notify toast Merge failed"]
+  );
+  assert!(h.sent().is_empty());
+  assert!(!merge_view(&mut h, |v| v.merging));
+}
+
+#[gpui::test]
+fn merge_preview_keeps_what_was_typed(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge_preview(1),
+      ..FakeHost::default()
+    },
+  );
+  h.screen.update(&mut h.cx, |screen, cx| {
+    let view = screen.merge.clone().expect("merge view");
+    view.update(cx, |view, _| view.draft = Some("Ship it".into()));
+  });
+  h.click("merge-strategy");
+  h.click("merge-strategy-squash");
+  assert_eq!(merge_view(&mut h, |v| v.message()), "Ship it");
+}
+
+#[gpui::test]
+fn merge_preview_collapses_files_and_goes_back(cx: &mut TestAppContext) {
+  let (mut h, _) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge_preview(1),
+      ..FakeHost::default()
+    },
+  );
+  assert!(h.drawn("merge-hunk-0-0"));
+  h.click("merge-file-src/a.rs");
+  assert!(!h.drawn("merge-hunk-0-0"));
+  h.click("merge-back");
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Press {
+      id: "mergePreview.cancel".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn merge_preview_without_commits_cannot_merge(cx: &mut TestAppContext) {
+  let (mut h, host) = merge_harness(
+    cx,
+    FakeHost {
+      merge: merge::Preview {
+        error: Some("no such revision".into()),
+        ..merge::Preview::default()
+      },
+      ..FakeHost::default()
+    },
+  );
+  h.click("merge-confirm");
+  h.click("merge-strategy");
+  assert!(!h.drawn("merge-strategy-menu"));
+  assert_eq!(host.writes(), ["notify toast Failed to load merge preview"]);
 }
