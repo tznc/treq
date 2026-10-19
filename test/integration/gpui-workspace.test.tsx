@@ -100,11 +100,8 @@ describe("GPUI workspace header", () => {
       expect(s.tab).toBe("changes");
       expect(s.code).toBe(true);
     });
-    // The home repository has no committed files to show.
     expect(changes.showCommitted).toBeNull();
     expect(changes.moveTargets).toEqual([]);
-    expect(changes.reviewSwitcher).toBe(false);
-    expect(screen.queryByTestId("changes-diff-viewer")).toBeNull();
   });
 
   it("asks GPUI's Changes tab to read again when files change", async () => {
@@ -172,7 +169,6 @@ describe("GPUI workspace header", () => {
       expect(s.scrollToCommit).toBe("zzzzzzzz");
     });
 
-    // The Commits tab says it showed the commit, so React stops asking.
     sendGpuiScreenAction({
       kind: "field",
       field: "commits.scrolled",
@@ -287,6 +283,40 @@ describe("GPUI workspace header", () => {
           repoPath,
           alpha.workspaceId,
           "Code Review",
+        );
+      });
+    });
+
+    it("starts an agent with the agent comment GPUI's Changes tab sends", async () => {
+      const alpha = await openAlpha();
+      const createSession = vi.spyOn(api, "createSession");
+
+      sendGpuiScreenAction({
+        kind: "field",
+        field: "changes.agentComment",
+        value: {
+          id: "ag",
+          repo_path: repoPath,
+          target_type: "workspace_diff",
+          target_id: String(alpha.workspaceId),
+          file_path: "a.rs",
+          hunk_id: null,
+          start_line: 2,
+          end_line: 2,
+          side: "new",
+          comment_text: "Use one line",
+          suggested_replacement: null,
+          status: "open",
+          source: "local-agent",
+          created_at: "",
+          resolved_at: null,
+        },
+      });
+      await waitFor(() => {
+        expect(createSession).toHaveBeenCalledWith(
+          repoPath,
+          alpha.workspaceId,
+          "Review Comment",
         );
       });
     });

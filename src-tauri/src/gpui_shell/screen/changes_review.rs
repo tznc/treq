@@ -14,7 +14,7 @@ use crate::{jj::JjDiffHunk, local_db::PendingReview};
 /// `FILE_COMMENT_HUNK_ID`: a comment on the whole file.
 pub const FILE_HUNK: &str = "__file__";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Side {
   Old,
@@ -74,6 +74,16 @@ pub struct Pending {
   pub end_line: u32,
   pub line_content: Vec<String>,
   pub side: Side,
+  /// The GitHub review comment it quotes (`githubMeta`).
+  pub quote: Option<Quote>,
+}
+
+/// A quoted GitHub review comment's author and link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Quote {
+  pub author: String,
+  pub avatar_url: Option<String>,
+  pub url: String,
 }
 
 impl Pending {
@@ -86,6 +96,7 @@ impl Pending {
       end_line: 0,
       line_content: vec![],
       side: Side::New,
+      quote: None,
     }
   }
 
@@ -100,10 +111,10 @@ impl Pending {
       text: text.into(),
       created_at: now,
       line_side: Some(self.side),
-      source: None,
-      github_author: None,
-      github_avatar_url: None,
-      github_comment_url: None,
+      source: self.quote.as_ref().map(|_| "github".into()),
+      github_author: self.quote.as_ref().map(|q| q.author.clone()),
+      github_avatar_url: self.quote.as_ref().and_then(|q| q.avatar_url.clone()),
+      github_comment_url: self.quote.as_ref().map(|q| q.url.clone()),
     }
   }
 
@@ -142,6 +153,7 @@ pub fn pending_for_line(path: &str, hunks: &[JjDiffHunk], at: LineRef) -> Option
     end_line: number,
     line_content: vec![hunk.lines.get(at.1)?.clone()],
     side,
+    quote: None,
   })
 }
 
@@ -178,6 +190,7 @@ pub fn pending_for_selection(
     end_line: max,
     line_content: content,
     side: if old { Side::Old } else { Side::New },
+    quote: None,
   })
 }
 
@@ -439,6 +452,7 @@ mod tests {
       end_line: end,
       line_content: vec!["+x".into()],
       side,
+      quote: None,
     }
     .comment("fix", "1".into(), "now".into())
   }

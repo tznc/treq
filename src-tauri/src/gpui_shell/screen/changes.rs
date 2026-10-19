@@ -9,6 +9,7 @@
 
 mod review;
 mod search;
+mod threads;
 
 use std::{
   cell::RefCell,
@@ -144,6 +145,8 @@ pub struct ChangesView {
   pub(super) review: review::Review,
   /// The find bar.
   pub(super) search: search::Search,
+  /// GitHub review threads and the review agent's comments.
+  pub(super) threads: threads::Threads,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -202,10 +205,12 @@ impl ChangesView {
       anchors: Rc::default(),
       review: review::Review::default(),
       search: search::Search::default(),
+      threads: threads::Threads::default(),
       _subscriptions: Vec::new(),
     };
     this.hydrate_review(cx);
     this.load(cx);
+    this.watch_threads(cx);
     this.load_pr(cx);
     this
   }
@@ -249,6 +254,7 @@ impl ChangesView {
       self.discard_dialog = false;
       self.review = review::Review::default();
       self.close_search(cx);
+      self.watch_threads(cx);
       self.hydrate_review(cx);
       self.load_pr(cx);
     }
@@ -1234,6 +1240,7 @@ impl Render for ChangesView {
     self.ensure_review_inputs(window, cx);
     self.watch_find_key(window, cx);
     self.ensure_search_input(window, cx);
+    self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
     self.scroll_to_file(window, cx);
@@ -2419,6 +2426,7 @@ impl ChangesView {
       Body::Hunks => {
         let hunks = data.map(|d| d.hunks).unwrap_or_default();
         card
+          .children(self.unplaced_threads(path, p, cx))
           .children(self.outdated_comments(path, p, cx))
           .child(self.hunks(path, &hunks, committed, conflicted_file, p, cx))
       }

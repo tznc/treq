@@ -1144,7 +1144,7 @@ export const ShowWorkspace = ({
     : `Cannot merge: ${conflictCount} conflict${
         conflictCount === 1 ? "" : "s"
       } detected`;
-  // GPUI draws the Code and Commits tabs, with the terminal pane framed
+  // GPUI draws the Code, Commits and Changes tabs, with the terminal pane
   // below them.
   const gpuiCode =
     (activeTab === "overview" && !showFileBrowserInCode) ||
@@ -1208,6 +1208,7 @@ export const ShowWorkspace = ({
       showCommitted: committedToggle ? setShowCommittedChanges : undefined,
       startReview: handleStartAgentReview,
       sendReview: handleCreateAgentWithReview,
+      sendAgentComment: handleSendAgentReviewCommentToAgent,
       reviewSubView: reviewSubView.select,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,
@@ -1574,7 +1575,7 @@ export const ShowWorkspace = ({
             openRequest={reviewSubView.openRequest}
             toolbarSlot={reviewSubView.toolbarSlot}
           />
-        ) : gpuiDrawsCode ? null : (
+        ) : (
           <ChangesDiffViewer
             key={`changes-${workingDirectory}`}
             workspacePath={workingDirectory}

@@ -118,6 +118,10 @@ export const gpuiToastsUpdate = (
 ): Promise<void> =>
   invoke("gpui_toasts_update", { windowLabel: currentWindowLabel(), toasts });
 
+/** Runs the GPUI toast button `id`, once. */
+export const gpuiToastAction = (id: number): Promise<void> =>
+  invoke("gpui_toast_action", { id });
+
 // Database API
 export const getWorkspaces = (repoPath: string): Promise<Workspace[]> =>
   transportGetWorkspaces(repoPath, () =>

@@ -391,8 +391,13 @@ pub mod tw {
   pub const RED_400: u32 = 0xf87171;
   pub const RED_700: u32 = 0xb91c1c;
   pub const SKY_300: u32 = 0x7dd3fc;
+  pub const SKY_400: u32 = 0x38bdf8;
   pub const SKY_500: u32 = 0x0ea5e9;
+  pub const SKY_600: u32 = 0x0284c7;
   pub const SKY_700: u32 = 0x0369a1;
+  pub const VIOLET_400: u32 = 0xa78bfa;
+  pub const VIOLET_500: u32 = 0x8b5cf6;
+  pub const VIOLET_600: u32 = 0x7c3aed;
   pub const ZINC_300: u32 = 0xd4d4d8;
   pub const ZINC_500: u32 = 0x71717a;
   pub const ZINC_700: u32 = 0x3f3f46;

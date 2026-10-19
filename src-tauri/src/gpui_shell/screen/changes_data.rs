@@ -11,9 +11,10 @@ use super::commits_data::CommitsHost;
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole, ConflictRegionView, ConflictStyle},
   core::{self, WorkspaceFileHunksBatch},
+  github::GhReviewThread,
   gpui_shell::native::Backend,
   jj::{JjDiffHunk, JjFileChange, JjRevisionDiff},
-  local_db::{PendingReview, StashEntry},
+  local_db::{AgentReviewComment, PendingReview, StashEntry},
 };
 
 /// `LARGE_DIFF_THRESHOLD`: changed lines past which a file's diff waits
@@ -108,6 +109,19 @@ pub trait ChangesHost: CommitsHost {
     notes: Option<&str>,
   ) -> Result<(), String>;
   fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// The review threads of `branch`'s pull request (`gh_list_pr_review_threads`);
+  /// none without a GitHub remote or a pull request.
+  fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String>;
+  /// The review agent's comments on the workspace's diff.
+  fn agent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Result<Vec<AgentReviewComment>, String>;
+  fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
+  fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
+  /// Splices the comment's suggested change into its file.
+  fn apply_agent_suggestion(&self, repo_path: &str, id: &str) -> Result<(), String>;
 }
 
 pub type Host = std::sync::Arc<dyn ChangesHost>;
@@ -199,6 +213,52 @@ impl ChangesHost for Backend {
 
   fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
     crate::local_db::clear_pending_review(repo_path, workspace_id)
+  }
+
+  fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String> {
+    let Some(remote) = crate::github::get_git_remote_url_impl(repo_path)? else {
+      return Ok(Vec::new());
+    };
+    let pr = crate::pr_status::global()
+      .get_cached(repo_path, branch)
+      .flatten();
+    let Some(pr) = pr else {
+      return Ok(Vec::new());
+    };
+    let gh = crate::binary_paths::get_binary_path("gh")
+      .or_else(|| crate::binary_paths::detect_binary("gh"))
+      .ok_or_else(|| "gh CLI not found".to_string())?;
+    crate::github::gh_list_pr_review_threads_impl(
+      &gh,
+      &remote.owner,
+      &remote.repo,
+      pr.number,
+      &crate::binary_paths::get_extended_path(),
+    )
+  }
+
+  fn agent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Result<Vec<AgentReviewComment>, String> {
+    crate::local_db::list_agent_review_comments(
+      repo_path,
+      super::changes_threads::WORKSPACE_DIFF,
+      &workspace_id.to_string(),
+    )
+  }
+
+  fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    crate::local_db::resolve_agent_review_comment(repo_path, id)
+  }
+
+  fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    crate::local_db::delete_agent_review_comment(repo_path, id)
+  }
+
+  fn apply_agent_suggestion(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    crate::commands::agent_review::apply_agent_review_suggestion(repo_path.into(), id.into())
   }
 
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String> {

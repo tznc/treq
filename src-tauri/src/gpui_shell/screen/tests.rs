@@ -46,6 +46,9 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
+  /// The pull request's review threads and the review agent's comments.
+  threads: Vec<crate::github::GhReviewThread>,
+  agent: Mutex<Vec<crate::local_db::AgentReviewComment>>,
   /// Whether confirmations are cancelled.
   decline: bool,
   calls: Mutex<Vec<String>>,
@@ -522,6 +525,43 @@ impl changes_data::ChangesHost for FakeHost {
   fn clear_review(&self, _: &str, workspace_id: i64) -> Result<(), String> {
     self.record(format!("clear review {workspace_id}"));
     *self.review.lock().unwrap() = None;
+    Ok(())
+  }
+
+  fn review_threads(
+    &self,
+    _: &str,
+    branch: &str,
+  ) -> Result<Vec<crate::github::GhReviewThread>, String> {
+    self.record(format!("read threads {branch}"));
+    Ok(self.threads.clone())
+  }
+
+  fn agent_comments(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Result<Vec<crate::local_db::AgentReviewComment>, String> {
+    self.record(format!("read agent comments {workspace_id}"));
+    Ok(self.agent.lock().unwrap().clone())
+  }
+
+  fn resolve_agent_comment(&self, _: &str, id: &str) -> Result<(), String> {
+    self.record(format!("resolve agent comment {id}"));
+    for c in self.agent.lock().unwrap().iter_mut().filter(|c| c.id == id) {
+      c.status = "resolved".into();
+    }
+    Ok(())
+  }
+
+  fn delete_agent_comment(&self, _: &str, id: &str) -> Result<(), String> {
+    self.record(format!("delete agent comment {id}"));
+    self.agent.lock().unwrap().retain(|c| c.id != id);
+    Ok(())
+  }
+
+  fn apply_agent_suggestion(&self, _: &str, id: &str) -> Result<(), String> {
+    self.record(format!("apply agent suggestion {id}"));
     Ok(())
   }
 }
@@ -2546,4 +2586,129 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   assert_eq!(count(&mut h), (0, 1));
   h.cx.simulate_keystrokes("escape");
   assert!(!h.drawn("diff-search"));
+}
+
+fn gh_thread(id: &str, line: i64, resolved: bool) -> crate::github::GhReviewThread {
+  crate::github::GhReviewThread {
+    id: id.into(),
+    is_resolved: resolved,
+    is_outdated: false,
+    path: "a.rs".into(),
+    line: Some(line),
+    diff_side: "RIGHT".into(),
+    comments: vec![crate::github::GhReviewComment {
+      id: format!("{id}-c"),
+      body: "Why two lines?".into(),
+      author: crate::github::GhAuthor {
+        login: "octo".into(),
+        avatar_url: None,
+      },
+      created_at: "2026-03-04T00:00:00Z".into(),
+      diff_hunk: String::new(),
+      url: "https://github.com/o/r/pull/1#c".into(),
+    }],
+  }
+}
+
+fn agent_comment(suggested: Option<&str>) -> crate::local_db::AgentReviewComment {
+  serde_json::from_value(serde_json::json!({
+    "id": "ag", "repo_path": "/repo", "target_type": "workspace_diff", "target_id": "7",
+    "file_path": "a.rs", "hunk_id": null, "start_line": 2, "end_line": 2, "side": "new",
+    "comment_text": "Use one line", "suggested_replacement": suggested, "status": "open",
+    "source": "local-agent", "created_at": "", "resolved_at": null
+  }))
+  .expect("agent comment")
+}
+
+#[gpui::test]
+fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false), gh_thread("t2", 40, true)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(
+    host
+      .calls()
+      .contains(&"read threads feature/login".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  // Line 2 is in the diff; line 40 is not, so it sits above the file.
+  assert!(h.drawn("github-comment-card"));
+  assert!(h.drawn("github-outdated-threads"));
+  // The resolved one starts folded.
+  assert!(h.drawn("github-thread-collapsed-preview"));
+}
+
+#[gpui::test]
+fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("github-comment-quote");
+  assert!(h.drawn("comment-input"));
+  h.click("comment-input");
+  h.cx.simulate_input("Agreed");
+  h.click("comment-submit");
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["source"], "github", "{saved}");
+  assert_eq!(saved[0]["github_author"], "octo");
+  assert_eq!(
+    saved[0]["line_content"],
+    serde_json::json!(["Why two lines?"])
+  );
+  assert_eq!(saved[0]["start_line"], 2);
+}
+
+#[gpui::test]
+fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(Some("b and c"))];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("agent-review-comment-card"));
+  assert!(h.drawn("agent-review-suggestion"));
+  h.click("agent-resolve-ag");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"resolve agent comment ag".to_string()));
+  assert!(!h.drawn("agent-review-comment-card"));
+}
+
+#[gpui::test]
+fn changes_tab_applies_an_agent_suggestion_and_reads_again(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(Some("b and c"))];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  let reads = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read workspace diff"))
+      .count()
+  };
+  h.drawn("agent-review-comment-card");
+  assert_eq!(reads(&host), 1);
+  h.click("agent-apply-ag");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"apply agent suggestion ag".to_string()));
+  assert_eq!(reads(&host), 2);
+}
+
+#[gpui::test]
+fn changes_tab_sends_an_agent_comment_to_react(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(!h.drawn("agent-apply-ag"));
+  h.click("agent-send-ag");
+  h.cx.run_until_parked();
+  let sent = fields(&h, "changes.agentComment");
+  assert_eq!(sent.len(), 1);
+  assert_eq!(sent[0]["id"], "ag");
+  assert_eq!(sent[0]["comment_text"], "Use one line");
 }

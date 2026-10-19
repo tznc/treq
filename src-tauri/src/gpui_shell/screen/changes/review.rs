@@ -10,7 +10,7 @@ use crate::gpui_shell::screen::{
   changes_review::{
     comments_under, count_label, is_outdated, line_has_comment, line_location, outdated_label,
     outdated_markdown, pending_for_line, pending_for_selection, review_markdown, stale_names,
-    ConflictNote, LineComment, Pending, Stored,
+    ConflictNote, LineComment, Pending, Stored, FILE_HUNK,
   },
   commits_data::{selection, LineRef},
 };
@@ -258,7 +258,7 @@ impl ChangesView {
     }
   }
 
-  fn open_draft(&mut self, draft: Pending, cx: &mut Context<Self>) {
+  pub(super) fn open_draft(&mut self, draft: Pending, cx: &mut Context<Self>) {
     self.review.draft = Some(draft);
     self.review.draft_text.clear();
     self.review.draft_input = None;
@@ -922,6 +922,7 @@ impl ChangesView {
       }
       out.push(list.into_any_element());
     }
+    out.extend(self.line_threads(path, hunks, h, l, p, cx));
     let here = self
       .review
       .draft
@@ -1086,7 +1087,7 @@ impl ChangesView {
   }
 
   /// `CommentInput`.
-  fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let empty = self.review.draft_text.trim().is_empty();
     let label = self.review.draft.as_ref().and_then(|d| d.label());
     div()
@@ -1112,6 +1113,26 @@ impl ChangesView {
         }
       }))
       .children(label.map(|label| div().mb_2().text_color(p.muted_foreground).child(label)))
+      .children(self.review.draft.as_ref().and_then(|d| {
+        let quote = d.quote.as_ref()?;
+        Some(
+          div()
+            .mb_2()
+            .border_l_2()
+            .border_color(tw::color(tw::SKY_500).opacity(0.5))
+            .pl_3()
+            .italic()
+            .text_color(p.muted_foreground)
+            .child(
+              ui::text(div(), TextSize::Xs)
+                .font_weight(FontWeight::MEDIUM)
+                .not_italic()
+                .mb(px(2.))
+                .child(format!("Quoting @{}", quote.author)),
+            )
+            .child(d.line_content.join(" ")),
+        )
+      }))
       .children(
         self
           .review
@@ -1150,7 +1171,7 @@ impl ChangesView {
         .review
         .draft
         .as_ref()
-        .is_some_and(|d| d.file_path == path && d.at.is_none())
+        .is_some_and(|d| d.file_path == path && d.hunk_id == FILE_HUNK)
   }
 
   /// `FileCommentSection`.
@@ -1185,7 +1206,7 @@ impl ChangesView {
       .review
       .draft
       .as_ref()
-      .is_some_and(|d| d.file_path == path && d.at.is_none())
+      .is_some_and(|d| d.file_path == path && d.hunk_id == FILE_HUNK)
     {
       section = section.child(self.comment_input(p, cx));
     }

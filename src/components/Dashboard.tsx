@@ -56,6 +56,7 @@ import {
   removeSupportingRepo,
   updateSessionAccess,
   openSystemLogDir,
+  gpuiToastAction,
   type Workspace,
 } from "../lib/api";
 import { requestOpenSystemLogs } from "../lib/open-logs-request";
@@ -102,7 +103,7 @@ import {
   type AutoReviewEvent,
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
-import { runGpuiToastAction, useGpuiNativeEvents } from "../lib/gpui-native";
+import { useGpuiNativeEvents } from "../lib/gpui-native";
 import {
   openRepositoryAtPath as openRepositoryAtPathShared,
   showOpenedRepository,
@@ -1685,7 +1686,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             ? {
                 action: {
                   label: action.label,
-                  onClick: () => void runGpuiToastAction(action.id),
+                  onClick: () => void gpuiToastAction(action.id),
                 },
               }
             : {}),

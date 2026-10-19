@@ -11,7 +11,7 @@ function paneTop(pane: HTMLElement): number {
   const controls = pane.querySelectorAll<HTMLElement>(
     '[data-testid="terminal-pane-controls"], [data-testid="terminal-pane-controls"] *',
   );
-  let top = pane.getBoundingClientRect().top;
+  let { top } = pane.getBoundingClientRect();
   for (const el of controls) {
     const rect = el.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) top = Math.min(top, rect.top);
@@ -42,7 +42,7 @@ export function useGpuiTerminalFrame(
         '[data-testid="workspace-terminal-pane"]',
       );
       if (!pane) return;
-      const bottom = root.getBoundingClientRect().bottom;
+      const { bottom } = root.getBoundingClientRect();
       const height = bottom - paneTop(pane) + SHADOW;
       setFrameHeight(Math.round(Math.min(contentHeight, height)));
     };

@@ -24,6 +24,7 @@ use super::{popup::PopupSink, theme};
 mod changes;
 mod changes_data;
 mod changes_review;
+mod changes_threads;
 pub(super) mod checklist;
 mod code;
 mod code_data;

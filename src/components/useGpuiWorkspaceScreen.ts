@@ -1,5 +1,6 @@
 import { useRunningCheckFiles } from "../hooks/useWorkspaceChecks";
 import type { JjLogCommit, Workspace } from "../lib/api";
+import type { AgentReviewComment } from "../lib/api-types-review";
 import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
 import type { ParsedFileChange } from "../lib/git-utils";
 import type { SessionCreationInfo } from "../types/sessions";
@@ -50,6 +51,8 @@ interface Handlers {
   showCommitted?: (show: boolean) => void;
   /** The Changes tab's Start Review: a review agent with `prompt`. */
   startReview?: (prompt: string, agent?: string) => void;
+  /** An agent review comment's "Send to agent". */
+  sendAgentComment?: (comment: AgentReviewComment) => void;
   /** A finished review: an agent works through `markdown`. */
   sendReview?: (
     markdown: string,
@@ -197,6 +200,8 @@ export function useGpuiWorkspaceScreen({
         const { prompt, agent } = value as { prompt: string; agent?: string };
         return handlers.startReview?.(prompt, agent ?? undefined);
       }
+      case "changes.agentComment":
+        return handlers.sendAgentComment?.(value as AgentReviewComment);
       case "changes.review": {
         const { markdown, mode, useIdleAgent } = value as {
           markdown: string;
