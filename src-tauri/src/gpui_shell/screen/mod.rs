@@ -219,8 +219,9 @@ impl Render for Screen {
             view.clone().into_any_element()
           }
           None => {
-            let (host, sink) = (self.host.clone(), self.sink.clone());
-            let view = cx.new(|cx| settings::SettingsView::new(route, host, sink, dark, cx));
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view =
+              cx.new(|cx| settings::SettingsView::new(route, host, sink, dark, popups, cx));
             self.settings = Some(view.clone());
             view.into_any_element()
           }

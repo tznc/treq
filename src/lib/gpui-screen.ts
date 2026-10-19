@@ -28,6 +28,52 @@ interface GpuiSettingsScreen {
   tab: GpuiSettingsTab;
   repoPath: string | null;
   currentBranch: string | null;
+  /** The auth store, while the Account or Integrations tab shows. */
+  account: GpuiAccountState | null;
+}
+
+/**
+ * What the Account and Integrations tabs show of the Supabase session,
+ * which only React holds (src-tauri/src/gpui_shell/screen/settings/account.rs).
+ * GPUI hands back what needs it: sign-out, the token exchange, the cloud
+ * workspace actions and Linear OAuth.
+ */
+export interface GpuiAccountState {
+  loading: boolean;
+  signingIn: boolean;
+  signInError: string | null;
+  /** Set while there is a session. */
+  user: { name: string; email: string | null; avatarUrl: string | null } | null;
+  subscription: {
+    plan: string;
+    status: string;
+    currentPeriodEnd: string | null;
+  } | null;
+  devCallback: { loading: boolean; error: string | null };
+  cloud: {
+    instance: {
+      status: string;
+      providerResourceId: string | null;
+      diskQuotaGb: number;
+    } | null;
+    endpoint: { username: string; hostname: string; port: number } | null;
+    provisioningStage: string | null;
+    provisioningError: string | null;
+    usage: {
+      repositoryCount: number;
+      workspaceCount: number;
+      diskUsedBytes: number;
+    } | null;
+    usageError: string | null;
+    submitting: boolean;
+  } | null;
+  /** The account's GitHub repositories, while signed in on Integrations. */
+  github: {
+    loading: boolean;
+    failed: boolean;
+    repositories: { id: number; fullName: string; private: boolean }[];
+  } | null;
+  linearOauthLoading: boolean;
 }
 
 export type GpuiWorkspaceTab = "overview" | "commits" | "changes" | "logs";

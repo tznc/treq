@@ -214,6 +214,11 @@ impl settings_data::SettingsHost for FakeHost {
     Ok(())
   }
 
+  fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
+    self.record(format!("fetch {url}"));
+    Err("offline".into())
+  }
+
   fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {
     let json = serde_json::to_value(&event).expect("serialize");
     let mut line = format!("notify {}", json["kind"].as_str().unwrap_or_default());
@@ -1729,6 +1734,459 @@ fn skills_dialog_cancels(cx: &mut TestAppContext) {
   h.click("skill-install-docx");
   h.click("skill-dialog-cancel");
   assert!(!h.drawn("skill-install-dialog"));
+  assert!(host.writes().is_empty());
+}
+
+/// What React sends of its auth store and cloud workspace flows, signed
+/// out, with `patch` merged in.
+fn account_state(patch: serde_json::Value) -> serde_json::Value {
+  let mut state = serde_json::json!({
+    "loading": false,
+    "signingIn": false,
+    "signInError": null,
+    "user": null,
+    "subscription": null,
+    "devCallback": { "loading": false, "error": null },
+    "cloud": null,
+    "github": null,
+    "linearOauthLoading": false,
+  });
+  if let (Some(state), Some(patch)) = (state.as_object_mut(), patch.as_object()) {
+    for (key, value) in patch {
+      state.insert(key.clone(), value.clone());
+    }
+  }
+  state
+}
+
+fn ada() -> serde_json::Value {
+  serde_json::json!({ "name": "Ada", "email": "ada@example.com", "avatarUrl": null })
+}
+
+fn pro() -> serde_json::Value {
+  serde_json::json!({ "plan": "pro", "status": "active", "currentPeriodEnd": "2026-11-01T12:00:00Z" })
+}
+
+fn account_route(tab: &str, account: serde_json::Value) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "settings",
+    "dark": false,
+    "tab": tab,
+    "repoPath": "/repo",
+    "currentBranch": "main",
+    "account": account,
+  }))
+  .expect("parse")
+}
+
+#[gpui::test]
+fn account_signs_in_through_the_browser(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let route = account_route(
+    "account",
+    account_state(serde_json::json!({ "signInError": "token expired" })),
+  );
+  let mut h = Harness::with_host(cx, route, host.clone());
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedOut { error, .. } = account else {
+    panic!("signed out: {account:?}");
+  };
+  assert_eq!(error.as_deref(), Some("Sign-in failed: token expired"));
+  h.click("account-sign-in");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/sign-in?source=desktop"]
+  );
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_shows_loading_and_signing_in(cx: &mut TestAppContext) {
+  let route = account_route(
+    "account",
+    account_state(serde_json::json!({ "loading": true })),
+  );
+  let mut h = Harness::new(cx, route);
+  assert_eq!(
+    drawn_settings(&mut h).account,
+    Some(settings::AccountTab::Loading)
+  );
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.account =
+        serde_json::from_value(account_state(serde_json::json!({ "signingIn": true })))
+          .expect("account");
+    }
+  });
+  assert_eq!(
+    drawn_settings(&mut h).account,
+    Some(settings::AccountTab::SigningIn)
+  );
+  assert!(h.drawn("account-signing-in"));
+}
+
+#[gpui::test]
+fn account_hands_a_pasted_callback_token_to_react(cx: &mut TestAppContext) {
+  let route = account_route("account", account_state(serde_json::json!({})));
+  let mut h = Harness::new(cx, route);
+  settings_act(
+    &mut h,
+    field("account.callbackUrl", "treq://auth/callback?token=".into()),
+  );
+  h.click("account-dev-callback-go");
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedOut { dev, .. } = account else {
+    panic!("signed out");
+  };
+  assert_eq!(
+    dev.expect("dev builds offer it").error.as_deref(),
+    Some("No token found in URL")
+  );
+  assert!(h.sent().is_empty());
+
+  settings_act(
+    &mut h,
+    field(
+      "account.callbackUrl",
+      " treq://auth/callback?token=abc&x=1 ".into(),
+    ),
+  );
+  h.click("account-dev-callback-go");
+  settings_act(&mut h, field("account.callbackUrl", "rawtoken".into()));
+  h.click("account-dev-callback-go");
+  assert_eq!(
+    h.sent(),
+    [
+      field("account.devCallback", "abc".into()),
+      field("account.devCallback", "rawtoken".into()),
+    ]
+  );
+}
+
+#[gpui::test]
+fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut user = ada();
+  user["avatarUrl"] = "https://example.com/ada.png".into();
+  let route = account_route(
+    "account",
+    account_state(serde_json::json!({ "user": user, "subscription": pro() })),
+  );
+  let mut h = Harness::with_host(cx, route, host.clone());
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedIn(signed_in) = account else {
+    panic!("signed in: {account:?}");
+  };
+  assert_eq!(signed_in.name, "Ada");
+  assert_eq!(signed_in.email.as_deref(), Some("ada@example.com"));
+  assert!(signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Active".into(), settings::StatusTone::Good))
+  );
+  assert_eq!(
+    signed_in.period,
+    Some(("Renews on".into(), "11/1/2026".into()))
+  );
+  assert_eq!(signed_in.manage_label, "Manage Subscription");
+
+  h.click("account-manage-subscription");
+  h.click("account-sign-out");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "fetch https://example.com/ada.png",
+      "open http://localhost:3001/dashboard"
+    ]
+  );
+  assert_eq!(h.sent(), [press("account.signOut")]);
+}
+
+#[gpui::test]
+fn account_offers_pro_on_the_free_plan(cx: &mut TestAppContext) {
+  let route = account_route(
+    "account",
+    account_state(serde_json::json!({
+      "user": ada(),
+      "subscription": { "plan": "free", "status": "canceled", "currentPeriodEnd": null },
+    })),
+  );
+  let mut h = Harness::new(cx, route);
+  let Some(settings::AccountTab::SignedIn(signed_in)) = drawn_settings(&mut h).account else {
+    panic!("signed in");
+  };
+  assert!(!signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Canceling".into(), settings::StatusTone::Warn))
+  );
+  assert_eq!(signed_in.period, None);
+  assert_eq!(signed_in.manage_label, "Upgrade to Pro");
+}
+
+fn cloud(patch: serde_json::Value) -> serde_json::Value {
+  let mut cloud = serde_json::json!({
+    "instance": null,
+    "endpoint": null,
+    "provisioningStage": null,
+    "provisioningError": null,
+    "usage": null,
+    "usageError": null,
+    "submitting": false,
+  });
+  if let (Some(cloud), Some(patch)) = (cloud.as_object_mut(), patch.as_object()) {
+    for (key, value) in patch {
+      cloud.insert(key.clone(), value.clone());
+    }
+  }
+  cloud
+}
+
+fn signed_in_with_cloud(cloud: serde_json::Value) -> ScreenSnapshot {
+  account_route(
+    "account",
+    account_state(serde_json::json!({ "user": ada(), "subscription": pro(), "cloud": cloud })),
+  )
+}
+
+fn cloud_card(h: &mut Harness) -> settings::CloudCard {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedIn(signed_in)) => signed_in.cloud.expect("cloud card"),
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn cloud_workspace_creates_through_react(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, signed_in_with_cloud(cloud(serde_json::json!({}))));
+  let card = cloud_card(&mut h);
+  assert_eq!(card.instance, None);
+  assert_eq!(
+    card.create.as_ref().map(|c| c.label.as_str()),
+    Some("Create cloud workspace")
+  );
+  h.click("cloud-create");
+  assert_eq!(h.sent(), [press("cloud.provision")]);
+
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.account = serde_json::from_value(account_state(serde_json::json!({
+        "user": ada(),
+        "cloud": cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })),
+      })))
+      .expect("account");
+    }
+  });
+  let create = cloud_card(&mut h).create.expect("create");
+  assert_eq!(create.label, "Creating...");
+  assert!(create.disabled && create.spinning);
+  assert_eq!(create.stage.as_deref(), Some("Requesting provisioning..."));
+}
+
+#[gpui::test]
+fn cloud_workspace_shows_usage_and_deletes_after_confirming(cx: &mut TestAppContext) {
+  let ready = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "endpoint": { "username": "treq", "hostname": "box.treq.dev", "port": 2222 },
+    "usage": { "repositoryCount": 3, "workspaceCount": 7, "diskUsedBytes": 1932735283u64 },
+  }));
+  let mut h = Harness::new(cx, signed_in_with_cloud(ready));
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  let instance = cloud_card(&mut h).instance.expect("instance");
+  assert_eq!(instance.label, "Ready");
+  assert_eq!(instance.endpoint.as_deref(), Some("treq@box.treq.dev:2222"));
+  assert!(!instance.repairable);
+  assert_eq!(
+    instance.usage,
+    Some(settings::CloudUsage::Report {
+      summary: "7 workspaces across 3 repositories".into(),
+      size: "1.8 GB of 5 GB".into(),
+      percent: 36,
+    })
+  );
+  assert!(!h.drawn("cloud-repair"));
+  h.click("cloud-open-repositories");
+  h.click("cloud-delete");
+  assert!(h.drawn("cloud-delete-dialog"));
+  h.click("cloud-delete-cancel");
+  assert!(!h.drawn("cloud-delete-dialog"));
+  h.click("cloud-delete");
+  h.click("cloud-delete-confirm");
+  assert!(!h.drawn("cloud-delete-dialog"));
+  assert_eq!(
+    h.sent(),
+    [press("cloud.openRepositories"), press("cloud.delete")]
+  );
+}
+
+#[gpui::test]
+fn cloud_workspace_repairs_and_upsells_pro(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let degraded = cloud(serde_json::json!({
+    "instance": { "status": "degraded", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "provisioningError": "[pro_required] Cloud workspaces need Pro.\nhttp 402",
+  }));
+  let mut h = Harness::with_host(cx, signed_in_with_cloud(degraded), host.clone());
+  let card = cloud_card(&mut h);
+  assert!(card.instance.expect("instance").repairable);
+  assert_eq!(
+    card.pro_required.as_deref(),
+    Some("Cloud workspaces need Pro.")
+  );
+  assert_eq!(card.error, None);
+  h.click("cloud-repair");
+  h.click("cloud-upgrade");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), [press("cloud.repair")]);
+  assert_eq!(host.writes(), ["open http://localhost:3001/dashboard"]);
+
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.account = serde_json::from_value(account_state(serde_json::json!({
+        "user": ada(),
+        "cloud": cloud(serde_json::json!({
+          "instance": { "status": "failed", "providerResourceId": null, "diskQuotaGb": 5 },
+          "provisioningError": "[http_502] exec failed\nstack",
+        })),
+      })))
+      .expect("account");
+    }
+  });
+  let card = cloud_card(&mut h);
+  assert_eq!(card.error.as_deref(), Some("[http_502] exec failed"));
+  assert_eq!(
+    card.create.map(|c| c.label),
+    Some("Retry cloud workspace creation".into())
+  );
+}
+
+#[gpui::test]
+fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.linearIntegration",
+    "false",
+  )]));
+  let route = account_route("integrations", account_state(serde_json::json!({})));
+  let mut h = Harness::with_host(cx, route, host.clone());
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  assert_eq!(integrations.github, settings::GithubSection::SignedOut);
+  assert_eq!(integrations.linear, None);
+  h.click("integrations-sign-in");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/sign-in?source=desktop"]
+  );
+}
+
+#[gpui::test]
+fn integrations_list_public_repositories_on_the_free_plan(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.linearIntegration",
+    "false",
+  )]));
+  let github = serde_json::json!({
+    "loading": false,
+    "failed": false,
+    "repositories": [
+      { "id": 1, "fullName": "acme/public", "private": false },
+      { "id": 2, "fullName": "acme/private", "private": true },
+    ],
+  });
+  let route = account_route(
+    "integrations",
+    account_state(serde_json::json!({ "user": ada(), "github": github })),
+  );
+  let mut h = Harness::with_host(cx, route, host.clone());
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  assert_eq!(
+    integrations.github,
+    settings::GithubSection::SignedIn {
+      scope: "Public repositories".into(),
+      description: "1 enabled.".into(),
+      repositories: vec![("acme/public".into(), false)],
+    }
+  );
+  h.click("github-manage");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/dashboard?tab=integrations"]
+  );
+}
+
+fn linear_harness(
+  cx: &mut TestAppContext,
+  pro: bool,
+  key: Option<&str>,
+) -> (Harness, Arc<FakeHost>) {
+  let mut settings = vec![("feature_preview.linearIntegration", "true")];
+  settings.extend(key.map(|key| ("/repo:linear_api_key", key)));
+  let host = Arc::new(FakeHost::with_settings(&settings));
+  let subscription = if pro {
+    self::pro()
+  } else {
+    serde_json::Value::Null
+  };
+  let route = account_route(
+    "integrations",
+    account_state(serde_json::json!({ "user": ada(), "subscription": subscription })),
+  );
+  let h = Harness::with_host(cx, route, host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  (h, host)
+}
+
+fn linear_section(h: &mut Harness) -> settings::LinearSection {
+  drawn_settings(h)
+    .integrations
+    .expect("integrations")
+    .linear
+    .expect("linear")
+}
+
+#[gpui::test]
+fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, false, None);
+  let linear = linear_section(&mut h);
+  assert_eq!(linear.description, "Free plan: provide your API key");
+  assert_eq!(linear.edit_label, "Add API Key");
+  assert!(!linear.oauth);
+  h.click("linear-api-key-edit");
+  assert!(linear_section(&mut h).editing);
+  settings_act(&mut h, field("linear.apiKey", "lin_api_1".into()));
+  h.click("linear-api-key-save");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "set repo /repo linear_api_key=lin_api_1",
+      "notify repoSettingsChanged",
+      "notify toast API Key saved",
+    ]
+  );
+  let linear = linear_section(&mut h);
+  assert!(!linear.editing);
+  assert_eq!(linear.description, "Direct API access configured");
+  assert_eq!(linear.edit_label, "Update API Key");
+}
+
+#[gpui::test]
+fn linear_connects_via_oauth_through_react_on_pro(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, true, Some("lin_api_1"));
+  let linear = linear_section(&mut h);
+  assert!(linear.oauth);
+  assert!(linear.key_priority_note);
+  assert_eq!(
+    linear.oauth_description,
+    "API key takes priority, but you can also connect via OAuth"
+  );
+  h.click("linear-oauth");
+  assert_eq!(h.sent(), [press("linear.oauth")]);
   assert!(host.writes().is_empty());
 }
 
