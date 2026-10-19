@@ -1,9 +1,10 @@
 // @include-parallel
 import * as React from "react";
-import { waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace } from "../../src/lib/api";
+import type { GpuiNativeEvent } from "../../src/lib/gpui-native";
 import { popupNativeMenu } from "../../src/lib/native-context-menu";
 import {
   findGpuiScreen,
@@ -11,10 +12,17 @@ import {
   sendGpuiScreenAction,
 } from "../gpui-screen";
 import { clickGpuiRow, gpuiMenuLabels } from "../gpui-sidebar";
+import { emitOnTestBus } from "../test-event-bus";
 import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 
 const press = (id: string) => sendGpuiScreenAction({ kind: "press", id });
+
+function sendNativeEvent(event: GpuiNativeEvent) {
+  act(() => {
+    emitOnTestBus("gpui-native-event", event);
+  });
+}
 
 describe("GPUI workspace header", () => {
   let repoPath: string;
@@ -25,15 +33,41 @@ describe("GPUI workspace header", () => {
     openRepo(repoPath);
   });
 
-  it("draws the home repository's header and tab row", async () => {
+  it("asks GPUI for the home repository's route", async () => {
     render(<Dashboard />);
 
     const home = await findGpuiScreen("workspace", (s) => {
-      expect(s.header.branch).toBe(defaultBranch);
+      expect(s.homeBranch).toBe(defaultBranch);
     });
-    expect(home.header.home).toBe(true);
-    expect(home.header.details).toBe(false);
-    expect(home.tabRow?.tab).toBe("overview");
+    expect(home.repoPath).toBe(repoPath);
+    expect(home.workspaceId).toBeNull();
+    expect(home.tab).toBe("overview");
+    expect(home.tabRow).toBe(true);
+    expect(home.retargeting).toBe(false);
+    expect(home.runningChecks).toEqual([]);
+  });
+
+  it("asks GPUI to read again after a push or sync", async () => {
+    render(<Dashboard />);
+    const { revision } = await findGpuiScreen("workspace");
+
+    sendNativeEvent({ kind: "workspaceChanged", repoPath });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.revision).toBeGreaterThan(revision);
+    });
+  });
+
+  it("shows the toasts GPUI sends", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+
+    sendNativeEvent({
+      kind: "toast",
+      title: "Synced with conflicts",
+      description: "Fetched and pushed; resolve remaining conflicts locally",
+      tone: "warning",
+    });
+    await screen.findByText("Synced with conflicts");
   });
 
   it("switches tabs through React", async () => {
@@ -46,7 +80,7 @@ describe("GPUI workspace header", () => {
       value: "commits",
     });
     await findGpuiScreen("workspace", (s) => {
-      expect(s.tabRow?.tab).toBe("commits");
+      expect(s.tab).toBe("commits");
     });
   });
 
@@ -68,18 +102,14 @@ describe("GPUI workspace header", () => {
       render(<Dashboard />);
       await clickGpuiRow("feat/alpha");
       return findGpuiScreen("workspace", (s) => {
-        expect(s.header.branch).toBe("feat/alpha");
+        expect(s.workspaceId).not.toBeNull();
       });
     }
 
-    it("draws the workspace's controls", async () => {
+    it("asks GPUI for the workspace's route", async () => {
       const alpha = await openAlpha();
-      expect(alpha.header.home).toBe(false);
-      expect(alpha.header.details).toBe(true);
-      expect(alpha.header.more).toEqual({ disabled: false });
-      await findGpuiScreen("workspace", (s) => {
-        expect(s.header.target?.branch).toBe(defaultBranch);
-      });
+      expect(alpha.repoPath).toBe(repoPath);
+      expect(alpha.creatingPr).toBe(false);
     });
 
     it("steps aside while React's details popover is open", async () => {
@@ -92,12 +122,11 @@ describe("GPUI workspace header", () => {
 
     it("opens the target branch picker in React", async () => {
       await openAlpha();
-      await findGpuiScreen("workspace", (s) => {
-        expect(s.header.target).not.toBeNull();
-      });
 
-      press("workspace.target");
-      await screen.findByPlaceholderText("Search branches...");
+      await waitFor(() => {
+        press("workspace.target");
+        expect(screen.getByPlaceholderText("Search branches...")).toBeTruthy();
+      });
       await waitFor(() => expect(gpuiScreen()).toBeNull());
     });
 

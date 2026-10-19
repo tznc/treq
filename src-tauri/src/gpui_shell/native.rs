@@ -25,6 +25,10 @@ pub enum NativeEvent {
   /// The settings of the repository at `repo_path` changed.
   #[serde(rename_all = "camelCase")]
   RepoSettingsChanged { repo_path: String },
+  /// Something in the repository at `repo_path` changed (a push, sync or
+  /// rebase), so everything React read from it is stale.
+  #[serde(rename_all = "camelCase")]
+  WorkspaceChanged { repo_path: String },
   Toast {
     title: String,
     description: String,
@@ -36,6 +40,7 @@ pub enum NativeEvent {
 #[serde(rename_all = "camelCase")]
 pub enum ToastTone {
   Success,
+  Warning,
   Error,
 }
 

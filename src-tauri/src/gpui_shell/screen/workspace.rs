@@ -1,23 +1,34 @@
 //! The workspace view's header and tab row (React's `ShowWorkspace`), with
 //! the webview framed below them.
 //!
-//! React draws the tab's content in the frame and leaves its own header and
-//! tab row out of it (its "framed" layout). Popovers (target branch, checks,
-//! details) are still React's: pressing one asks React to open it, and React
-//! takes the whole webview back while it is open. Menus are GPUI's, opened by
-//! React below the button that asked for them.
+//! The header reads its data from the backend ([`workspace_data`]) and
+//! pushes, syncs and rebases the home branch itself. React says which
+//! workspace shows, and draws the tab's content in the frame, leaving its own
+//! header and tab row out of it (its "framed" layout). Popovers (target
+//! branch, checks, details) and dialogs are still React's: pressing one asks
+//! React to open it, and React takes the whole webview back while it is
+//! open. Menus are GPUI's, opened by React below the button that asked for
+//! them.
+//!
+//! [`workspace_data`]: super::workspace_data
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
 use serde::Deserialize;
 use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div,
-  FontWeight, Hsla, Pixels, SharedString, Stateful, Window,
+  FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Window,
 };
 
-use super::{ActionSink, ScreenAction};
+use super::{
+  workspace_data::{
+    workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
+  },
+  ActionSink, ScreenAction,
+};
 use crate::gpui_shell::{
+  native::{NativeEvent, ToastTone},
   popup::{self, PopupRequest, PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   ui::{self, Button, Size, TextSize, Variant},
@@ -257,12 +268,28 @@ mod tw {
   pub const YELLOW: [u32; 4] = [YELLOW_400, YELLOW_500, YELLOW_600, YELLOW_700];
 }
 
-/// The header and tab row, which keep their hovered tooltip between
-/// snapshots.
+/// How often the branch's pull request is re-read from the PR poller's
+/// cache, which the poller itself refreshes.
+const PR_POLL: Duration = Duration::from_secs(5);
+
+/// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
-  snapshot: Workspace,
-  dark: bool,
+  host: Arc<dyn WorkspaceHost>,
+  /// React, for what the header does not do itself.
+  react: ActionSink,
+  /// This view's own handler, which defers to after the current update.
   sink: ActionSink,
+  route: Route,
+  /// `None` until the first load for `route`'s workspace.
+  loaded: Option<Loaded>,
+  pr: PrCache,
+  pending: Pending,
+  loading: bool,
+  /// Another load was asked for while one ran.
+  reload: bool,
+  /// What `loaded` draws as, `None` before it is.
+  snapshot: Option<Workspace>,
+  dark: bool,
   popups: PopupSink,
   webview: Option<Webview<Wry>>,
   /// The element whose tooltip is pending or shown (`true`).
@@ -271,34 +298,204 @@ pub struct WorkspaceView {
   tooltip_sent: Rc<RefCell<Option<SharedString>>>,
   /// Where dropdown buttons were last drawn, in window coordinates.
   bounds: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
+  _poll: Task<()>,
 }
 
 impl WorkspaceView {
   pub fn new(
-    snapshot: Workspace,
+    route: Route,
+    host: Arc<dyn WorkspaceHost>,
+    react: ActionSink,
     dark: bool,
-    sink: ActionSink,
     popups: PopupSink,
     webview: Option<Webview<Wry>>,
+    cx: &mut Context<Self>,
   ) -> Self {
-    Self {
-      snapshot,
-      dark,
+    let view = cx.weak_entity();
+    let sink: ActionSink = Rc::new(move |action, cx| {
+      let view = view.clone();
+      cx.defer(move |cx| {
+        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+      });
+    });
+    let poll = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(PR_POLL).await;
+      if this.update(cx, |view, cx| view.read_pr(cx)).is_err() {
+        break;
+      }
+    });
+    let mut this = Self {
+      host,
+      react,
       sink,
+      route,
+      loaded: None,
+      pr: PrCache::default(),
+      pending: Pending::None,
+      loading: false,
+      reload: false,
+      snapshot: None,
+      dark,
       popups,
       webview,
       tooltip: None,
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
+      _poll: poll,
+    };
+    this.load(cx);
+    this
+  }
+
+  pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
+    if self.route == route && self.dark == dark {
+      return;
+    }
+    let moved = self.route.key() != route.key();
+    let stale = moved || self.route.revision != route.revision;
+    self.route = route;
+    self.dark = dark;
+    if moved {
+      self.loaded = None;
+      self.pr = PrCache::default();
+      self.pending = Pending::None;
+    }
+    if stale {
+      self.load(cx);
+    }
+    self.rebuild(cx);
+  }
+
+  /// Reads everything again off the main thread; a load asked for while one
+  /// runs happens after it, once.
+  fn load(&mut self, cx: &mut Context<Self>) {
+    if self.loading {
+      self.reload = true;
+      return;
+    }
+    self.loading = true;
+    let (host, route) = (self.host.clone(), self.route.clone());
+    cx.spawn(async move |this, cx| {
+      let key = route.key();
+      let loaded = cx.background_spawn(async move { host.load(&route) }).await;
+      let _ = this.update(cx, |view, cx| {
+        view.loading = false;
+        if view.route.key() == key {
+          view.loaded = Some(loaded);
+          view.read_pr(cx);
+          view.rebuild(cx);
+        }
+        if std::mem::take(&mut view.reload) {
+          view.load(cx);
+        }
+      });
+    })
+    .detach();
+  }
+
+  /// The branch whose pull request the header shows, if any.
+  fn pr_branch(&self) -> Option<String> {
+    let loaded = self.loaded.as_ref()?;
+    let workspace = loaded.workspace.as_ref()?;
+    (loaded.remote.is_some() && workspace.branch_name != DEFAULT_BRANCH)
+      .then(|| workspace.branch_name.clone())
+  }
+
+  fn read_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(branch) = self.pr_branch() else {
+      return;
+    };
+    let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    let key = self.route.key();
+    cx.spawn(async move |this, cx| {
+      let pr = cx
+        .background_spawn(async move { host.pr_cache(&repo, &branch) })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        if view.route.key() == key && view.pr != pr {
+          view.pr = pr;
+          view.rebuild(cx);
+        }
+      });
+    })
+    .detach();
+  }
+
+  fn rebuild(&mut self, cx: &mut Context<Self>) {
+    let snapshot = self.loaded.as_ref().map(|loaded| {
+      let (header, tab_row) = workspace_view(&self.route, loaded, &self.pr, self.pending);
+      Workspace { header, tab_row }
+    });
+    if self.snapshot != snapshot {
+      self.snapshot = snapshot;
+      cx.notify();
     }
   }
 
-  pub fn set_snapshot(&mut self, snapshot: Workspace, dark: bool, cx: &mut Context<Self>) {
-    if self.snapshot != snapshot || self.dark != dark {
-      self.snapshot = snapshot;
-      self.dark = dark;
-      cx.notify();
+  pub(super) fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
+    let (repo, workspace_id) = (self.route.repo_path.clone(), self.route.workspace_id);
+    match action {
+      ScreenAction::Press { id } => match id.as_str() {
+        "workspace.push" => self.run(Pending::Push, cx, move |host| {
+          host.push(&repo, workspace_id)
+        }),
+        "workspace.sync" => self.run(Pending::Sync, cx, move |host| {
+          host.sync(&repo, workspace_id)
+        }),
+        "workspace.homeRebase" if !self.route.home_branch.is_empty() => {
+          let branch = self.route.home_branch.clone();
+          self.run(Pending::HomeRebase, cx, move |host| {
+            host.rebase_home(&repo, &branch)
+          })
+        }
+        "workspace.viewPrWeb" => {
+          if let Some(Some(pr)) = &self.pr.pr {
+            self.host.open_url(&pr.url);
+          }
+        }
+        _ => (self.react)(ScreenAction::Press { id }, cx),
+      },
+      ScreenAction::OpenUrl { url } => self.host.open_url(&url),
+      action => (self.react)(action, cx),
     }
+  }
+
+  /// Runs a header action off the main thread, then toasts its outcome and
+  /// reads everything again, as React's handlers do.
+  fn run(
+    &mut self,
+    pending: Pending,
+    cx: &mut Context<Self>,
+    work: impl FnOnce(&dyn WorkspaceHost) -> Outcome + Send + 'static,
+  ) {
+    if self.pending != Pending::None {
+      return;
+    }
+    self.pending = pending;
+    self.rebuild(cx);
+    let host = self.host.clone();
+    let repo_path = self.route.repo_path.clone();
+    cx.spawn(async move |this, cx| {
+      let outcome = cx.background_spawn(async move { work(&*host) }).await;
+      let _ = this.update(cx, |view, cx| {
+        view.pending = Pending::None;
+        view.host.notify(NativeEvent::Toast {
+          title: outcome.title,
+          description: outcome.description,
+          tone: match (outcome.ok, outcome.warning) {
+            (false, _) => ToastTone::Error,
+            (true, true) => ToastTone::Warning,
+            (true, false) => ToastTone::Success,
+          },
+        });
+        view
+          .host
+          .notify(NativeEvent::WorkspaceChanged { repo_path });
+        view.load(cx);
+        view.rebuild(cx);
+      });
+    })
+    .detach();
   }
 
   fn press(&self, id: &'static str) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
@@ -427,8 +624,7 @@ impl WorkspaceView {
     }
   }
 
-  fn header(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let h = &self.snapshot.header;
+  fn header(&self, h: &Header, p: &Palette, cx: &mut Context<Self>) -> Div {
     let dark = self.dark;
     let mono_title = |text: &str| {
       ui::text(div(), TextSize::Sm)
@@ -1146,11 +1342,19 @@ impl Render for WorkspaceView {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.sync_tooltip_popup(cx);
     let p = theme::palette(self.dark);
-    let header = self.header(&p, cx);
-    let tab_row = self
-      .snapshot
-      .tab_row
-      .clone()
+    let snapshot = self.snapshot.clone();
+    let header = match &snapshot {
+      Some(snapshot) => self.header(&snapshot.header, &p, cx),
+      // Until the first load: the empty bar, as tall as a row of buttons.
+      None => div()
+        .flex_none()
+        .h(px(49.))
+        .border_b_1()
+        .border_color(p.border)
+        .debug_selector(|| "workspace-header".into()),
+    };
+    let tab_row = snapshot
+      .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_row(&row, &p));
     let frame = match &self.webview {
       Some(webview) => tauri_plugin_gpui::webview_frame(webview)

@@ -26,6 +26,9 @@ struct FakeHost {
   /// What `.treq/config.yaml` sets.
   config: crate::repo_config::RepoConfig,
   setup_script: String,
+  /// What the workspace header reads.
+  loaded: workspace_data::Loaded,
+  pr: workspace_data::PrCache,
   calls: Mutex<Vec<String>>,
 }
 
@@ -144,6 +147,37 @@ impl settings_data::SettingsHost for FakeHost {
       line += &format!(" {title}");
     }
     self.record(line);
+  }
+}
+
+impl workspace_data::WorkspaceHost for FakeHost {
+  fn load(&self, route: &workspace_data::Route) -> workspace_data::Loaded {
+    self.record(format!("read workspace {}", route.revision));
+    self.loaded.clone()
+  }
+
+  fn pr_cache(&self, _: &str, branch: &str) -> workspace_data::PrCache {
+    self.record(format!("read pr {branch}"));
+    self.pr.clone()
+  }
+
+  fn push(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
+    self.record(format!("push {workspace_id:?}"));
+    workspace_data::Outcome::ok("Pushed to remote", "Changes pushed successfully".into())
+  }
+
+  fn sync(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
+    self.record(format!("sync {workspace_id:?}"));
+    workspace_data::Outcome::failed("Sync failed", "offline".into())
+  }
+
+  fn rebase_home(&self, _: &str, branch: &str) -> workspace_data::Outcome {
+    self.record(format!("rebase {branch}"));
+    workspace_data::Outcome::ok("Rebase complete", "Branch rebased onto target".into())
+  }
+
+  fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {
+    settings_data::SettingsHost::notify(self, event);
   }
 }
 
@@ -558,8 +592,6 @@ fn settings_fields_are_as_tall_as_react_ones(cx: &mut TestAppContext) {
 }
 
 const WORKSPACE_JSON: &str = r#"{
-  "kind": "workspace",
-  "dark": false,
   "header": {
     "branch": "feature/login",
     "home": false,
@@ -589,30 +621,210 @@ const WORKSPACE_JSON: &str = r#"{
   }
 }"#;
 
-fn workspace() -> ScreenSnapshot {
-  serde_json::from_str(WORKSPACE_JSON).expect("workspace snapshot")
+fn route_json(workspace_id: Option<i64>, home_branch: &str) -> serde_json::Value {
+  serde_json::json!({
+    "kind": "workspace",
+    "dark": false,
+    "repoPath": "/repo",
+    "workspaceId": workspace_id,
+    "homeBranch": home_branch,
+    "tab": "overview",
+    "tabRow": true,
+    "retargeting": false,
+    "refreshing": false,
+    "creatingPr": false,
+    "runningChecks": [],
+    "mergeQueue": null,
+    "revision": 0
+  })
+}
+
+fn workspace_route() -> ScreenSnapshot {
+  serde_json::from_value(route_json(Some(7), "main")).expect("workspace route")
+}
+
+fn route_of(snapshot: &ScreenSnapshot) -> &workspace_data::Route {
+  match &snapshot.view {
+    View::Workspace(route) => route,
+    _ => unreachable!(),
+  }
+}
+
+fn workspace_row(branch: &str) -> serde_json::Value {
+  serde_json::json!({
+    "id": 7,
+    "repo_path": "/repo",
+    "workspace_name": "login",
+    "workspace_path": "/repo/.treq/workspaces/login",
+    "branch_name": branch,
+    "created_at": "2026-10-19T00:00:00Z",
+    "refreshed_at": null,
+    "metadata": r#"{"linear_issue_key":"ENG-12","linear_issue_url":"https://linear.app/t/ENG-12","linear_issue_title":"Login"}"#,
+    "target_branch": "main",
+    "title": "Add login",
+    "description": null,
+    "moved_files": null,
+    "not_on_remote": false,
+    "sparse_patterns": null
+  })
+}
+
+fn commit(id: &str, insertions: u32, deletions: u32) -> serde_json::Value {
+  serde_json::json!({
+    "commit_id": id,
+    "short_id": id,
+    "change_id": id,
+    "description": "work",
+    "author_name": "Zn",
+    "timestamp": "2026-10-19T00:00:00Z",
+    "parent_ids": [],
+    "is_working_copy": false,
+    "bookmarks": [],
+    "is_immutable": false,
+    "insertions": insertions,
+    "deletions": deletions
+  })
+}
+
+/// A feature workspace two commits ahead of its remote, with an open pull
+/// request, as the header in `WORKSPACE_JSON` shows.
+fn feature_loaded() -> workspace_data::Loaded {
+  let row = workspace_row("feature/login");
+  let ahead = serde_json::json!({"hash": "a", "timestamp": "t", "message": "m"});
+  let status = serde_json::json!({
+    "current": row,
+    "has_conflicts": false,
+    "has_changes": true,
+    "commits_ahead": 3,
+    "conflicted_files": [],
+    "remote_sync": {"type": "Ahead", "data": {"count": 2}},
+    "target": null,
+    "children": [],
+    "dag_nodes": [],
+    "conflicted_workspace_ids": [],
+    "commits_ahead_of_target": [ahead, ahead, ahead]
+  });
+  let commits = serde_json::json!({
+    "commits": [commit("a", 10, 4), commit("b", 2, 0)],
+    "target_branch": "main",
+    "workspace_branch": "feature/login"
+  });
+  workspace_data::Loaded {
+    workspace: Some(serde_json::from_value(row).expect("workspace")),
+    status: Some(serde_json::from_value(status).expect("status")),
+    remote: Some(crate::github::GitRemoteInfo {
+      owner: "tznc".into(),
+      repo: "treq".into(),
+      full_name: "tznc/treq".into(),
+    }),
+    commits: Some(serde_json::from_value(commits).expect("commits")),
+    review_count: 5,
+    uncommitted_count: 2,
+    checks: Some(workspace_data::ChecksSummary {
+      workflows: vec!["a.yml".into(), "b.yml".into(), "c.yml".into()],
+      latest: ["a.yml", "b.yml", "c.yml"]
+        .map(|f| (f.to_string(), "passed".to_string()))
+        .to_vec(),
+    }),
+    linear_enabled: true,
+    ..Default::default()
+  }
+}
+
+fn open_pr() -> workspace_data::PrCache {
+  workspace_data::PrCache {
+    pr: Some(Some(crate::github::PrInfo {
+      number: 42,
+      title: "Add login".into(),
+      state: "OPEN".into(),
+      url: "https://github.com/tznc/treq/pull/42".into(),
+      head_ref_name: "feature/login".into(),
+      base_ref_name: "main".into(),
+      merge_state_status: None,
+      is_draft: false,
+    })),
+    ci: Some(crate::github::PrCiStatus {
+      state: "success".into(),
+      total: 4,
+      passed: 4,
+      failed: 0,
+      pending: 0,
+      checks: vec![],
+    }),
+  }
+}
+
+fn feature_host() -> FakeHost {
+  FakeHost {
+    loaded: feature_loaded(),
+    pr: open_pr(),
+    ..FakeHost::default()
+  }
 }
 
 /// The workspace screen in a window as wide as the app's default.
-fn workspace_harness(cx: &mut TestAppContext) -> Harness {
-  let h = Harness::new(cx, workspace());
+fn workspace_harness(
+  cx: &mut TestAppContext,
+  host: FakeHost,
+  snapshot: ScreenSnapshot,
+) -> (Harness, Arc<FakeHost>) {
+  let host = Arc::new(host);
+  let h = Harness::with_host(cx, snapshot, host.clone());
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
-  h
+  (h, host)
 }
 
 fn press(id: &str) -> ScreenAction {
   ScreenAction::Press { id: id.into() }
 }
 
+#[test]
+fn workspace_header_is_what_react_drew() {
+  let expected: workspace::Workspace = serde_json::from_str(WORKSPACE_JSON).expect("parse");
+  let (header, tab_row) = workspace_data::workspace_view(
+    route_of(&workspace_route()),
+    &feature_loaded(),
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  assert_eq!(header, expected.header);
+  assert_eq!(tab_row, expected.tab_row);
+}
+
+#[test]
+fn workspace_header_offers_the_home_rebase() {
+  let route: ScreenSnapshot = serde_json::from_value(route_json(None, "feat/home")).expect("route");
+  let loaded = workspace_data::Loaded {
+    home_ahead: 2,
+    ..Default::default()
+  };
+  let (header, _) = workspace_data::workspace_view(
+    route_of(&route),
+    &loaded,
+    &workspace_data::PrCache::default(),
+    workspace_data::Pending::None,
+  );
+  assert!(header.home);
+  assert_eq!(header.branch, "feat/home");
+  let target = header.home_target.expect("home target");
+  assert_eq!(
+    target.rebase.expect("rebase").tooltip,
+    "Rebase feat/home onto main (2 new commits)"
+  );
+  assert_eq!(
+    header.stack.expect("stack").tooltip,
+    "Create stacked workspace from feat/home"
+  );
+}
+
 #[gpui::test]
-fn workspace_header_sends_its_actions(cx: &mut TestAppContext) {
-  let mut h = workspace_harness(cx);
+fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   for selector in [
     "workspace-target",
     "workspace-view-pr",
     "workspace-view-pr-web",
-    "workspace-sync",
     "workspace-checks",
     "workspace-merge",
     "workspace-details",
@@ -621,41 +833,86 @@ fn workspace_header_sends_its_actions(cx: &mut TestAppContext) {
     h.click(selector);
   }
   h.click("workspace-linear");
+  h.cx.run_until_parked();
   assert_eq!(
     h.sent(),
     vec![
       press("workspace.target"),
       press("workspace.viewPr"),
-      press("workspace.viewPrWeb"),
-      press("workspace.sync"),
       press("workspace.checks"),
       press("workspace.merge"),
       press("workspace.details"),
       press("workspace.more"),
-      ScreenAction::OpenUrl {
-        url: "https://linear.app/t/ENG-12".into()
-      },
+    ]
+  );
+  assert_eq!(
+    host.writes(),
+    vec![
+      "open https://github.com/tznc/treq/pull/42",
+      "open https://linear.app/t/ENG-12",
     ]
   );
 }
 
 #[gpui::test]
+fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-sync");
+  h.cx.run_until_parked();
+  assert!(h.sent().is_empty());
+  assert_eq!(
+    host.writes(),
+    vec![
+      "sync Some(7)",
+      "notify toast Sync failed",
+      "notify workspaceChanged",
+    ]
+  );
+  let reads = host
+    .calls()
+    .iter()
+    .filter(|c| c.starts_with("read workspace"))
+    .count();
+  assert_eq!(reads, 2, "it reads the workspace again after syncing");
+}
+
+#[gpui::test]
+fn workspace_header_reads_again_when_react_refreshes(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  assert!(h.drawn("workspace-sync"));
+  h.update(|s| s.dark = true);
+  h.update(|s| match &mut s.view {
+    View::Workspace(route) => route.revision = 3,
+    _ => unreachable!(),
+  });
+  h.cx.run_until_parked();
+  let reads: Vec<_> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read workspace"))
+    .collect();
+  assert_eq!(reads, vec!["read workspace 0", "read workspace 3"]);
+  assert!(host.calls().contains(&"read pr feature/login".to_string()));
+}
+
+#[gpui::test]
 fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
-  let mut h = workspace_harness(cx);
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
   assert!(h.drawn("commits-tab-count"));
   assert!(h.drawn("review-change-count"));
   assert!(h.drawn("loc-diff-marker"));
   assert!(!h.drawn("workspace-tab-logs"));
   h.click("workspace-tab-changes");
+  h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![field("workspace.tab", "changes".into())]);
 }
 
 #[gpui::test]
 fn workspace_leaves_the_tab_row_to_react_without_one(cx: &mut TestAppContext) {
-  let mut h = workspace_harness(cx);
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
   assert!(h.drawn("workspace-tab-row"));
   h.update(|s| match &mut s.view {
-    View::Workspace(w) => w.tab_row = None,
+    View::Workspace(route) => route.tab_row = false,
     _ => unreachable!(),
   });
   assert!(!h.drawn("workspace-tab-row"));
@@ -665,7 +922,7 @@ fn workspace_leaves_the_tab_row_to_react_without_one(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn workspace_frame_fills_the_space_below(cx: &mut TestAppContext) {
-  let mut h = workspace_harness(cx);
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
   h.cx.run_until_parked();
   let header = h.cx.debug_bounds("workspace-header").expect("header");
   let row = h.cx.debug_bounds("workspace-tab-row").expect("tab row");
@@ -677,19 +934,11 @@ fn workspace_frame_fills_the_space_below(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
-  let mut h = workspace_harness(cx);
-  h.update(|s| match &mut s.view {
-    View::Workspace(w) => {
-      w.header.home = true;
-      w.header.target = None;
-      w.header.stack = Some(workspace::Tooltip {
-        tooltip: "Create stacked workspace from main".into(),
-      });
-    }
-    _ => unreachable!(),
-  });
+  let route = serde_json::from_value(route_json(None, "main")).expect("route");
+  let (mut h, _) = workspace_harness(cx, FakeHost::default(), route);
   h.click("workspace-branch");
   h.click("workspace-stack");
+  h.cx.run_until_parked();
   assert_eq!(
     h.sent(),
     vec![press("workspace.branchSwitcher"), press("workspace.stack")]

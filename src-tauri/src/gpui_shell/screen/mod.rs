@@ -1,11 +1,14 @@
 //! Full-window screens drawn by GPUI in place of the webview.
 //!
-//! As with the sidebar, React still owns each screen's data and handlers. It
-//! pushes a [`ScreenSnapshot`] with the `gpui_screen_update` command while a
-//! ported screen is on screen, and GPUI draws it where the webview would be,
-//! leaving the webview out of the frame (hidden, with React still running in
-//! it). Clicks go back to the window's webview as `gpui-screen-action`
-//! events, which React carries out with the handlers its own UI uses.
+//! Each screen reads and changes the app's state through the backend itself
+//! (a [`Host`], faked in tests). React only routes: it pushes a
+//! [`ScreenSnapshot`] with the `gpui_screen_update` command saying which
+//! screen shows and for what (a tab, a repository, a workspace), and GPUI
+//! draws it where the webview would be, leaving the webview out of the frame
+//! (hidden, with React still running in it). What a screen leaves to React
+//! (closing it, flows not ported yet) goes back to the window's webview as
+//! `gpui-screen-action` events; what it changed itself goes as native events
+//! (`native::NativeEvent`), so React's caches follow.
 //!
 //! React keeps drawing its UI too, so pushing `null` (for a screen or dialog
 //! GPUI does not draw yet) brings the webview back with React's version.
@@ -23,6 +26,7 @@ mod onboarding;
 mod settings;
 mod settings_data;
 mod workspace;
+mod workspace_data;
 
 #[cfg(test)]
 mod tests;
@@ -51,7 +55,7 @@ pub enum View {
   Onboarding(onboarding::Route),
   Settings(settings::Route),
   /// The workspace view's header and tab row, with the webview below.
-  Workspace(Box<workspace::Workspace>),
+  Workspace(Box<workspace_data::Route>),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -84,9 +88,15 @@ pub enum ScreenAction {
 pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
-pub trait Host: onboarding::OnboardingHost + settings_data::SettingsHost {}
+pub trait Host:
+  onboarding::OnboardingHost + settings_data::SettingsHost + workspace_data::WorkspaceHost
+{
+}
 
-impl<T: onboarding::OnboardingHost + settings_data::SettingsHost> Host for T {}
+impl<T> Host for T where
+  T: onboarding::OnboardingHost + settings_data::SettingsHost + workspace_data::WorkspaceHost
+{
+}
 
 /// The GPUI view for whichever screen React pushed last.
 pub struct Screen {
@@ -193,18 +203,19 @@ impl Render for Screen {
           }
         }
       }
-      View::Workspace(screen) => {
-        let screen = (**screen).clone();
+      View::Workspace(route) => {
+        let route = (**route).clone();
         match &self.workspace {
           Some(view) => {
-            view.update(cx, |view, cx| view.set_snapshot(screen, dark, cx));
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
             view.clone().into_any_element()
           }
           None => {
-            let (sink, popups) = (self.sink.clone(), self.popups.clone());
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
             let webview = self.webview.clone();
-            let view =
-              cx.new(|_| workspace::WorkspaceView::new(screen, dark, sink, popups, webview));
+            let view = cx.new(|cx| {
+              workspace::WorkspaceView::new(route, host, sink, dark, popups, webview, cx)
+            });
             self.workspace = Some(view.clone());
             view.into_any_element()
           }

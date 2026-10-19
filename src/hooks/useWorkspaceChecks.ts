@@ -48,6 +48,18 @@ function setRunning(key: string, on: boolean) {
   });
 }
 
+/** Workflow files of workspace `workspaceId` running from this window. */
+export function useRunningCheckFiles(workspaceId: number | null): string[] {
+  const running = useRunningChecks((state) => state.running);
+  if (workspaceId === null) return [];
+  const prefix = `${workspaceId}:`;
+  const files = Object.keys(running)
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => key.slice(prefix.length).split(":")[0])
+    .filter((file) => file !== "<setup>");
+  return [...new Set(files)];
+}
+
 function runKey(workspaceId: number, filename: string, jobId?: string) {
   return jobId
     ? `${workspaceId}:${filename}:${jobId}`

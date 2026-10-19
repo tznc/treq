@@ -11,11 +11,13 @@ export type GpuiNativeEvent =
   | { kind: "repoOpened"; path: string }
   | { kind: "settingsChanged" }
   | { kind: "repoSettingsChanged"; repoPath: string }
+  /** A push, sync or rebase changed the repository at `repoPath`. */
+  | { kind: "workspaceChanged"; repoPath: string }
   | {
       kind: "toast";
       title: string;
       description: string;
-      tone: "success" | "error";
+      tone: "success" | "warning" | "error";
     };
 
 const GPUI_NATIVE_EVENT = "gpui-native-event";

@@ -30,91 +30,42 @@ interface GpuiSettingsScreen {
   currentBranch: string | null;
 }
 
-/** A count pill's colors: `commitsTabLabel.ts` and `reviewTabPill.ts` tones. */
-export type GpuiPillTone = "muted" | "conflict" | "uncommitted";
-
 export type GpuiWorkspaceTab = "overview" | "commits" | "changes" | "logs";
 
 export type GpuiPrState = "OPEN" | "CLOSED" | "MERGED";
 
-/** ShowWorkspace's header, by control; null leaves a control out. */
-export interface GpuiWorkspaceHeader {
-  /** The branch title. In the home repository it opens the branch switcher. */
-  branch: string;
-  home: boolean;
-  linear: { key: string; url: string; title: string | null } | null;
-  /** The target-branch picker of a workspace not on the default branch. */
-  target: { branch: string | null; loading: boolean; disabled: boolean } | null;
-  /** The home repository's default branch, when another branch is checked out. */
-  homeTarget: {
-    branch: string;
-    /** Rebase onto it, when it has new commits. */
-    rebase: {
-      tooltip: string;
-      rebasing: boolean;
-      /** Files a rebase would conflict in, or null without a conflict. */
-      conflicts: string[] | null;
-    } | null;
-  } | null;
-  stack: { tooltip: string } | null;
-  push: { disabled: boolean } | null;
-  viewPr: { number: number; state: GpuiPrState; draft: boolean } | null;
-  createPr: {
-    label: string;
-    creating: boolean;
-    disabled: boolean;
-    tooltip: string;
-    menuTooltip: string;
-  } | null;
-  statusLoading: boolean;
-  sync: {
-    ahead: number;
-    behind: number;
-    disabled: boolean;
-    spinning: boolean;
-  } | null;
-  checks: {
-    status: "passed" | "failed" | "running" | null;
-    /** Treq's summary beside the label, as "2/3" or "running". */
-    treq: string | null;
-    /** GitHub's "GH 4/5" and its CI state's color. */
-    github: { label: string; state: string } | null;
-  } | null;
+/**
+ * ShowWorkspace's header and tab row, which GPUI reads from the backend
+ * itself (src-tauri/src/gpui_shell/screen/workspace_data.rs). React says
+ * which workspace shows and the state of the flows it still runs, and GPUI
+ * places the webview below, where React draws only the tab's content (its
+ * "framed" layout).
+ */
+export interface GpuiWorkspaceScreen {
+  kind: "workspace";
+  repoPath: string;
+  /** null for the home repository. */
+  workspaceId: number | null;
+  /** The home repository's checked-out branch. */
+  homeBranch: string;
+  tab: GpuiWorkspaceTab;
+  /** false: React draws the tab row in the frame, as the Browser view's address bar lives there. */
+  tabRow: boolean;
+  /** The target branch is being changed. */
+  retargeting: boolean;
+  /** The Changes tab is refreshing its files. */
+  refreshing: boolean;
+  creatingPr: boolean;
+  /** Workflow files started from this window that have not reported yet. */
+  runningChecks: string[];
   mergeQueue: {
     label: string;
     secondary: boolean;
     disabled: boolean;
     tooltip: string;
   } | null;
-  merge: { passing: boolean; disabled: boolean; tooltip: string | null } | null;
-  details: boolean;
-  more: { disabled: boolean } | null;
-  /** The workspace title on a second row, when it differs from the branch. */
-  title: string | null;
-}
-
-export interface GpuiWorkspaceTabRow {
-  tab: GpuiWorkspaceTab;
-  commits:
-    | { kind: "count"; count: number; tone: GpuiPillTone }
-    | { kind: "home-conflict" }
-    | null;
-  changes: { count: number; tone: GpuiPillTone } | null;
-  logs: boolean;
-  /** "Rebasing..." or "Refreshing..." beside a spinner. */
-  busy: string | null;
-  loc: { insertions: number; deletions: number } | null;
-}
-
-/**
- * ShowWorkspace's header and tab row. GPUI places the webview below them,
- * where React draws only the tab's content (its "framed" layout).
- */
-export interface GpuiWorkspaceScreen {
-  kind: "workspace";
-  header: GpuiWorkspaceHeader;
-  /** null: React draws the tab row in the frame, as the Browser view's address bar lives there. */
-  tabRow: GpuiWorkspaceTabRow | null;
+  /** Bumped whenever React refreshes its caches, so GPUI reads again. */
+  revision: number;
 }
 
 export type GpuiScreenView =

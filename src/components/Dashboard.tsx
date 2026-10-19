@@ -1662,6 +1662,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       case "repoSettingsChanged":
         void invalidateQueries(["repo-settings", event.repoPath]);
         break;
+      case "workspaceChanged":
+        void invalidateQueries();
+        break;
       case "toast":
         addToast({
           title: event.title,
