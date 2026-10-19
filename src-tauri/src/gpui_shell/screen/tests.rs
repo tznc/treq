@@ -98,6 +98,8 @@ struct FakeHost {
   dirs: HashMap<String, Vec<crate::core::WorkspaceEntry>>,
   file_texts: HashMap<String, String>,
   browser_review: Mutex<Option<String>>,
+  /// What the GitHub view reads.
+  github: github::Fake,
   calls: Mutex<Vec<String>>,
 }
 
@@ -5502,5 +5504,6 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
 }
 
 mod file_browser;
+mod github;
 mod linear_view;
 mod workspace_dialogs;

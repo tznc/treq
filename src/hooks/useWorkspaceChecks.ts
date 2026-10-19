@@ -98,6 +98,55 @@ async function trackRun<T>(
 }
 
 /**
+ * Every run started from this window, as `runKey`s, for the GPUI GitHub
+ * view (src-tauri/src/gpui_shell/screen/github_data.rs `run_key`).
+ */
+export function useRunningCheckKeys(): string[] {
+  const running = useRunningChecks((state) => state.running);
+  return Object.keys(running).sort();
+}
+
+/** Runs workflow `filename` in `target`, tracked as running. */
+export function runWorkspaceWorkflow(target: ChecksTarget, filename: string) {
+  return trackRun(target, runKey(target.workspaceId, filename), () =>
+    runWorkflowApi(
+      target.repoPath,
+      filename,
+      target.workspaceId,
+      target.workspacePath,
+    ),
+  );
+}
+
+/** Runs job `jobId` of workflow `filename` in `target`, tracked as running. */
+export function runWorkspaceJob(
+  target: ChecksTarget,
+  filename: string,
+  jobId: string,
+) {
+  return trackRun(target, runKey(target.workspaceId, filename, jobId), () =>
+    runWorkflowJob(
+      target.repoPath,
+      filename,
+      jobId,
+      target.workspaceId,
+      target.workspacePath,
+    ),
+  );
+}
+
+/** Reruns `target`'s setup script, tracked as running. */
+export function rerunWorkspaceSetup(target: ChecksTarget) {
+  return trackRun(target, runKey(target.workspaceId, "<setup>"), () =>
+    rerunWorkspaceSetupScript(
+      target.repoPath,
+      target.workspaceId,
+      target.workspacePath,
+    ),
+  );
+}
+
+/**
  * Workflow checks for one workspace: the repo's workflows, trust state,
  * setup script status, the latest run of each workflow, and run actions.
  * Pass null to disable every fetch.
@@ -170,14 +219,7 @@ export function useWorkspaceChecks(target: ChecksTarget | null) {
 
   const runWorkflow = (wf: WorkflowInfo) => {
     if (!target) return Promise.resolve([]);
-    return trackRun(target, runKey(target.workspaceId, wf.filename), () =>
-      runWorkflowApi(
-        target.repoPath,
-        wf.filename,
-        target.workspaceId,
-        target.workspacePath,
-      ),
-    );
+    return runWorkspaceWorkflow(target, wf.filename);
   };
 
   return {
@@ -195,18 +237,7 @@ export function useWorkspaceChecks(target: ChecksTarget | null) {
     runWorkflow,
     runJob: (wf: WorkflowInfo, jobId: string) => {
       if (!target) return Promise.resolve(undefined);
-      return trackRun(
-        target,
-        runKey(target.workspaceId, wf.filename, jobId),
-        () =>
-          runWorkflowJob(
-            target.repoPath,
-            wf.filename,
-            jobId,
-            target.workspaceId,
-            target.workspacePath,
-          ),
-      );
+      return runWorkspaceJob(target, wf.filename, jobId);
     },
     runAll: () => Promise.all(workflows.map(runWorkflow)),
     trust: async () => {
@@ -217,13 +248,7 @@ export function useWorkspaceChecks(target: ChecksTarget | null) {
     rerunSetup: async () => {
       if (!target) return;
       try {
-        await trackRun(target, setupKey, () =>
-          rerunWorkspaceSetupScript(
-            target.repoPath,
-            target.workspaceId,
-            target.workspacePath,
-          ),
-        );
+        await rerunWorkspaceSetup(target);
       } finally {
         void refetchSetupStatus();
       }

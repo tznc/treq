@@ -41,6 +41,8 @@ mod commits_data;
 mod file_browser;
 mod file_browser_data;
 mod file_picker;
+mod github;
+mod github_data;
 mod highlight;
 mod linear;
 mod linear_data;
@@ -104,6 +106,8 @@ pub enum View {
   MergePreview(merge::Route),
   /// The repository's Linear issues and projects.
   Linear(linear_data::Route),
+  /// `GitHubPanel`'s issues and pull requests.
+  Github(github_data::Route),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -145,6 +149,7 @@ pub trait Host:
   + remote_data::RemoteHost
   + workspace_dialog_data::WorkspaceDialogHost
   + linear_data::LinearHost
+  + github_data::GithubHost
 {
 }
 
@@ -157,6 +162,7 @@ impl<T> Host for T where
     + remote_data::RemoteHost
     + workspace_dialog_data::WorkspaceDialogHost
     + linear_data::LinearHost
+    + github_data::GithubHost
 {
 }
 
@@ -175,6 +181,7 @@ pub struct Screen {
   workspace: Option<Entity<workspace::WorkspaceView>>,
   merge: Option<Entity<merge::MergeView>>,
   linear: Option<Entity<linear::LinearView>>,
+  github: Option<Entity<github::GithubView>>,
   /// The dialog drawn over the screen, whichever it is, and its views.
   modal: Option<Modal>,
   agent_prompt: Option<Entity<modal::agent_prompt::AgentPromptView>>,
@@ -205,6 +212,7 @@ impl Screen {
       workspace: None,
       merge: None,
       linear: None,
+      github: None,
       modal: None,
       agent_prompt: None,
       prompt_history: None,
@@ -269,6 +277,10 @@ impl Render for Screen {
     }
     if !matches!(self.snapshot.view, View::Linear(_)) {
       self.linear = None;
+    }
+    if !matches!(self.snapshot.view, View::Github(_)) && self.github.take().is_some() {
+      // A tooltip the view showed would outlive it.
+      (self.popups)(PopupRequest::HideTooltip, cx);
     }
     match &self.snapshot.modal {
       None => self.workspace_modal = None,
@@ -372,6 +384,22 @@ impl Render for Screen {
             let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
             let view = cx.new(|cx| linear::LinearView::new(route, host, sink, dark, popups, cx));
             self.linear = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Github(route) => {
+        let route = route.clone();
+        match &self.github {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let host: Arc<dyn github_data::GithubHost> = self.host.clone();
+            let (sink, popups) = (self.sink.clone(), self.popups.clone());
+            let view = cx.new(|cx| github::GithubView::new(route, host, sink, dark, popups, cx));
+            self.github = Some(view.clone());
             view.into_any_element()
           }
         }

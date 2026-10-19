@@ -26,6 +26,8 @@ declare global {
     __TREQ_REACT_REMOTE_DIALOGS__?: boolean;
     /** React draws Dashboard's workspace dialogs; tests of them set it. */
     __TREQ_REACT_WORKSPACE_DIALOGS__?: boolean;
+    /** React draws the GitHub view's Issues and Pull Requests tabs; tests of them set it. */
+    __TREQ_REACT_GITHUB__?: boolean;
   }
 }
 
