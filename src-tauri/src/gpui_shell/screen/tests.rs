@@ -16,6 +16,8 @@ struct Harness {
   popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
 }
 
+type Sink = Arc<dyn Fn(String) + Send + Sync>;
+
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
@@ -55,6 +57,11 @@ struct FakeHost {
   workflows: Vec<crate::core::checks::WorkflowInfo>,
   chats: Vec<crate::core::agent_chat::AgentChat>,
   sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
+  /// What the terminal pane reads, and the PTYs it started.
+  sessions: Vec<crate::local_db::Session>,
+  ptys: Mutex<Vec<String>>,
+  /// PTY output listeners, by PTY id.
+  sinks: Mutex<Vec<(String, Sink)>>,
   /// Whether confirmations are cancelled.
   decline: bool,
   calls: Mutex<Vec<String>>,
@@ -569,6 +576,111 @@ impl changes_data::ChangesHost for FakeHost {
   fn apply_agent_suggestion(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("apply agent suggestion {id}"));
     Ok(())
+  }
+}
+
+impl terminal_data::TerminalHost for FakeHost {
+  fn spawn_pty(&self, spawn: &terminal_data::Spawn) -> Result<(), String> {
+    self.record(format!(
+      "spawn {} in {:?} running {:?}",
+      spawn.id,
+      spawn.working_dir,
+      spawn
+        .auto_command
+        .as_deref()
+        .map(|c| c.split(' ').next().unwrap_or_default().to_string())
+    ));
+    self.ptys.lock().unwrap().push(spawn.id.clone());
+    Ok(())
+  }
+
+  fn pty_exists(&self, id: &str) -> bool {
+    self.ptys.lock().unwrap().iter().any(|p| p == id)
+  }
+
+  fn write_pty(&self, id: &str, data: &str) -> Result<(), String> {
+    self.record(format!("write {id} {data:?}"));
+    Ok(())
+  }
+
+  fn resize_pty(&self, _: &str, _: u16, _: u16) -> Result<(), String> {
+    Ok(())
+  }
+
+  fn close_pty(&self, id: &str) -> Result<(), String> {
+    self.record(format!("close {id}"));
+    self.ptys.lock().unwrap().retain(|p| p != id);
+    Ok(())
+  }
+
+  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> terminal_data::Listening {
+    self
+      .sinks
+      .lock()
+      .unwrap()
+      .push((id.to_string(), Arc::from(sink)));
+    terminal_data::Listening::new(|| {})
+  }
+
+  fn sessions(&self, _: &str) -> Result<Vec<crate::local_db::Session>, String> {
+    Ok(self.sessions.clone())
+  }
+
+  fn supporting_repos(&self, _: &str) -> Vec<String> {
+    Vec::new()
+  }
+
+  fn shell_command(&self) -> Option<String> {
+    Some("export PATH=\"/bin:$PATH\"".into())
+  }
+
+  fn prepare_agent(
+    &self,
+    start: &terminal_data::AgentStart,
+  ) -> Result<terminal_data::Prepared, String> {
+    self.record(format!(
+      "prepare {} {:?}",
+      start.agent, start.pending_prompt
+    ));
+    Ok(terminal_data::Prepared {
+      command: format!("{} --start", start.agent),
+      skill_write_warning: None,
+    })
+  }
+
+  fn register_chat(
+    &self,
+    start: &terminal_data::AgentStart,
+    pty_id: &str,
+    name: &str,
+  ) -> Result<(), String> {
+    self.record(format!(
+      "register chat {} {pty_id} {name}",
+      start.session_id
+    ));
+    Ok(())
+  }
+
+  fn record_chat_screen(&self, _: &str, session_id: i64, screen: &str) -> Result<(), String> {
+    self.record(format!("record chat {session_id} {screen:?}"));
+    Ok(())
+  }
+}
+
+impl FakeHost {
+  /// Sends `data` as the PTY's output.
+  fn output(&self, id: &str, data: &str) {
+    let sinks: Vec<_> = self
+      .sinks
+      .lock()
+      .unwrap()
+      .iter()
+      .filter(|(pty, _)| pty == id)
+      .map(|(_, sink)| sink.clone())
+      .collect();
+    for sink in sinks {
+      sink(data.to_string());
+    }
   }
 }
 
@@ -3013,4 +3125,199 @@ fn logs_tab_sends_a_result_set_to_an_agent(cx: &mut TestAppContext) {
       .contains("Result (1 row):"),
     "{sent:?}"
   );
+}
+
+fn terminal_host() -> FakeHost {
+  let mut host = code_host();
+  host.sessions = vec![crate::local_db::Session {
+    id: 3,
+    workspace_id: Some(7),
+    name: "Claude 1".into(),
+    created_at: String::new(),
+    last_accessed: String::new(),
+    model: None,
+  }];
+  host.workspaces = host.loaded.workspace.clone().into_iter().collect();
+  host
+}
+
+fn terminal_route(terminal: serde_json::Value) -> ScreenSnapshot {
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["terminal"] = terminal;
+  serde_json::from_value(route).expect("terminal route")
+}
+
+fn set_terminal(h: &mut Harness, terminal: serde_json::Value) {
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.terminal = Some(serde_json::from_value(terminal).expect("terminal"));
+    }
+  });
+  h.cx.run_until_parked();
+}
+
+fn agent_pty() -> String {
+  terminal_data::agent_pty_id("/repo", 3)
+}
+
+#[gpui::test]
+fn terminal_pane_starts_collapsed_and_expands(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  assert!(h.drawn("workspace-terminal-pane"));
+  assert!(h.drawn("terminal-expand"));
+  assert!(!h.drawn("terminal-scroll-container"));
+  h.click("terminal-expand");
+  assert!(h.drawn("terminal-scroll-container"));
+  assert!(h.drawn("terminal-collapse"));
+  // No terminal yet: nothing to maximize.
+  assert!(!h.drawn("terminal-maximize"));
+}
+
+#[gpui::test]
+fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "pending": [{ "sessionId": 3, "pendingPrompt": "fix it", "permissionMode": "plan", "agent": "codex" }],
+    }),
+  );
+  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.drawn("terminal-column-active"));
+  assert!(h.drawn("terminal-workspace-label"));
+  let pty = agent_pty();
+  let calls = host.calls();
+  assert!(
+    calls.contains(&format!("register chat 3 {pty} Claude 1")),
+    "{calls:?}"
+  );
+  assert!(
+    calls.contains(&"prepare codex Some(\"fix it\")".to_string()),
+    "{calls:?}"
+  );
+  assert!(
+    calls.contains(&format!("spawn {pty} in None running Some(\"codex\")")),
+    "{calls:?}"
+  );
+  let summaries = h.sent().into_iter().find_map(|a| match a {
+    ScreenAction::Field { field, value } if field == "terminal.summaries" => Some(value),
+    _ => None,
+  });
+  assert_eq!(
+    summaries,
+    Some(serde_json::json!([{
+      "id": "agent-3",
+      "kind": "agent",
+      "name": "Claude 1",
+      "branchName": "feature/login",
+      "repoPath": "/repo",
+      "isMainRepo": false,
+      "agent": "codex",
+      "isStreaming": false,
+    }]))
+  );
+}
+
+#[gpui::test]
+fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  host.output(&pty, "hello \x1b[32mworld\x1b[0m\r\n$ ");
+  h.cx.run_until_parked();
+  let host_dyn: terminal_data::Host = host.clone();
+  let (live, fresh) = terminal_data::attach(&host_dyn, &pty, 80, 24);
+  assert!(!fresh);
+  assert_eq!(live.screen_text(), "hello world\n$");
+  h.click("terminal-body");
+  h.cx.simulate_input("ls");
+  h.cx.simulate_keystrokes("enter ctrl-c");
+  let writes: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("write "))
+    .collect();
+  assert_eq!(
+    writes,
+    vec![
+      format!("write {pty} \"l\""),
+      format!("write {pty} \"s\""),
+      format!("write {pty} \"\\r\""),
+      format!("write {pty} \"\\u{{3}}\""),
+    ]
+  );
+}
+
+#[gpui::test]
+fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.cx.run_until_parked();
+  assert!(h.drawn("terminal-column-shell"));
+  let spawned_shell = host.calls().iter().any(|c| {
+    c.starts_with("spawn shell--repo--treq-workspaces-login-")
+      && c.contains("Some(\"/repo/.treq/workspaces/login\") running Some(\"export\")")
+  });
+  assert!(spawned_shell, "{:?}", host.calls());
+  // Cmd+W closes the active agent; the shell next to it takes focus.
+  h.cx.simulate_keystrokes("cmd-w");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-column-agent"));
+  assert!(host.calls().contains(&format!("close {}", agent_pty())));
+  assert!(h.sent().contains(&field("terminal.closeSession", 3.into())));
+  h.cx.simulate_keystrokes("cmd-w");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-column-shell"));
+  // Closing the last terminal collapses the pane.
+  assert!(h.drawn("terminal-expand"));
+}
+
+#[gpui::test]
+fn terminal_pane_asks_react_for_a_new_agent(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.cx.simulate_keystrokes("cmd-]");
+  h.cx.run_until_parked();
+  assert!(h.sent().contains(&field(
+    "terminal.newAgent",
+    "/repo/.treq/workspaces/login".into()
+  )));
+}
+
+#[gpui::test]
+fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "send", "sessionId": 3, "text": "review this" }],
+    }),
+  );
+  assert!(host
+    .calls()
+    .contains(&format!("write {} \"review this\\n\"", agent_pty())));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 2, "kind": "toggleMaximize" }],
+    }),
+  );
+  assert!(h.drawn("terminal-restore"));
+  assert!(!h.drawn("code-readme"), "the maximized pane covers the tab");
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 3, "kind": "toggleCollapse" }],
+    }),
+  );
+  assert!(h.drawn("terminal-expand"));
 }

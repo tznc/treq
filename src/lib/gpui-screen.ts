@@ -84,6 +84,41 @@ export interface GpuiWorkspaceScreen {
   logsSource: string | null;
   /** Bumped by "open in Logs" links, so GPUI's Logs tab starts over on `logsSource`. */
   logsKey: number;
+  /** GPUI draws the terminal pane below the tab; null while React does (remote). */
+  terminal: GpuiTerminalRoute | null;
+}
+
+/** A Dashboard request of the terminal pane (its imperative handle). */
+export interface GpuiTerminalCommand {
+  /** Increases per command, so GPUI runs each once. */
+  nonce: number;
+  kind:
+    | "toggleCollapse"
+    | "toggleMaximize"
+    | "newShell"
+    | "newAgent"
+    | "closeWorkspace"
+    | "send";
+  dir?: string | null;
+  sessionId?: number | null;
+  text?: string | null;
+}
+
+/** What GPUI's terminal pane (src-tauri/src/gpui_shell/screen/terminal.rs) needs from React. */
+export interface GpuiTerminalRoute {
+  /** The active agent session's pane id, while the workspace view shows. */
+  activeSessionId: number | null;
+  /** New sessions' starts (`pendingSessionData`), by pane id. */
+  pending: {
+    sessionId: number;
+    pendingPrompt?: string | null;
+    permissionMode?: string | null;
+    agent?: string | null;
+    workspacePath?: string | null;
+  }[];
+  /** Changes with the session list, so GPUI reads it again. */
+  sessionsRevision: number;
+  commands: GpuiTerminalCommand[];
 }
 
 /**

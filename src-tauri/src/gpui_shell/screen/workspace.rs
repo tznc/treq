@@ -28,6 +28,8 @@ use super::{
   commits_data::CommitsHost,
   logs::LogsView,
   logs_data::LogsHost,
+  terminal::{Place, TerminalPane},
+  terminal_data::TerminalHost,
   workspace_data::{
     workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
   },
@@ -42,6 +44,10 @@ use crate::gpui_shell::{
 
 /// React's base-ui tooltips open after 200ms (`TooltipProvider delay={200}`).
 const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
+
+/// Where the terminal pane was last placed: the repository, workspace and
+/// sessions revision.
+type TerminalPlace = (String, Option<i64>, u64);
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -281,7 +287,10 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
-  code_host: Arc<dyn LogsHost>,
+  code_host: Arc<dyn TerminalHost>,
+  /// The terminal pane, while GPUI draws it, and the workspace it was
+  /// last placed in.
+  terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
   /// The Commits tab, while GPUI draws it.
@@ -321,7 +330,7 @@ pub struct WorkspaceView {
 impl WorkspaceView {
   pub fn new(
     route: Route,
-    host: Arc<dyn LogsHost>,
+    host: Arc<dyn TerminalHost>,
     react: ActionSink,
     dark: bool,
     popups: PopupSink,
@@ -344,6 +353,7 @@ impl WorkspaceView {
     let mut this = Self {
       host: host.clone(),
       code_host: host,
+      terminal: None,
       code: None,
       commits: None,
       changes: None,
@@ -1436,6 +1446,68 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
 const FRAME_FALLBACK: f32 = 40.;
 
 impl WorkspaceView {
+  /// The terminal pane, placed in the shown workspace, while the route
+  /// asks GPUI to draw it.
+  fn sync_terminal(&mut self, cx: &mut Context<Self>) -> Option<Entity<TerminalPane>> {
+    let Some(route) = self.route.terminal.clone() else {
+      self.terminal = None;
+      return None;
+    };
+    let key = (
+      self.route.repo_path.clone(),
+      self.route.workspace_id,
+      self.route.revision,
+    );
+    let pane = match &self.terminal {
+      Some((pane, placed)) if *placed == key => pane.clone(),
+      _ => {
+        let place = self.terminal_place();
+        let pane = match &self.terminal {
+          Some((pane, _)) => {
+            pane.update(cx, |pane, cx| pane.set_place(place, cx));
+            pane.clone()
+          }
+          None => {
+            let (host, react, popups) = (
+              self.code_host.clone(),
+              self.react.clone(),
+              self.popups.clone(),
+            );
+            cx.new(|cx| TerminalPane::new(host, react, popups, place, cx))
+          }
+        };
+        self.terminal = Some((pane.clone(), key));
+        pane
+      }
+    };
+    pane.update(cx, |pane, cx| pane.set_route(route, cx));
+    Some(pane)
+  }
+
+  fn terminal_place(&self) -> Place {
+    let repo = self.route.repo_path.clone();
+    let workspaces = self.code_host.workspaces(&repo).unwrap_or_default();
+    let selected = self
+      .route
+      .workspace_id
+      .and_then(|id| workspaces.iter().find(|w| w.id == id));
+    Place {
+      working_directory: selected
+        .map(super::merge::full_path)
+        .unwrap_or_else(|| repo.clone()),
+      current_branch: self.route.home_branch.clone(),
+      branches: workspaces
+        .iter()
+        .map(|w| (super::merge::full_path(w), w.branch_name.clone()))
+        .collect(),
+      workspace_ids: workspaces
+        .iter()
+        .map(|w| (super::merge::full_path(w), w.id))
+        .collect(),
+      repo_path: repo,
+    }
+  }
+
   /// The tab GPUI draws (Code or Commits), kept in step with the header.
   fn tab_body(&mut self, cx: &mut Context<Self>) -> Option<Body> {
     let loaded = self.loaded.as_ref().filter(|_| self.route.code);
@@ -1580,9 +1652,43 @@ impl Render for WorkspaceView {
         .into_any_element(),
       None => div().size_full().into_any_element(),
     };
-    let body = match code {
+    let body = match (code, self.sync_terminal(cx)) {
+      // The tab, or React's view framed in its place, with GPUI's terminal
+      // pane below.
+      (code, Some(pane)) => {
+        let covered = pane.read(cx).covers();
+        let container = pane.read(cx).container.clone();
+        let content = match code {
+          Some(code) => code.into_any_element(),
+          None => div()
+            .size_full()
+            .debug_selector(|| "workspace-frame".into())
+            .child(frame(self.webview.as_ref()))
+            .into_any_element(),
+        };
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .flex()
+          .flex_col()
+          .child(
+            gpui::canvas(
+              move |bounds, _, _| container.set(Some(bounds)),
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+          )
+          .when(!covered, |this| {
+            this.child(div().flex_1().min_h_0().child(content))
+          })
+          .child(pane)
+      }
       // The tab, with React's terminal pane framed below it.
-      Some(code) => {
+      (Some(code), None) => {
         let covered = code.covers_window(cx);
         let sent = self.content_height.clone();
         let sink = self.sink.clone();
@@ -1622,7 +1728,7 @@ impl Render for WorkspaceView {
               .when(!covered, |this| this.child(frame(self.webview.as_ref()))),
           )
       }
-      None => div()
+      (None, None) => div()
         .flex_1()
         .min_h_0()
         .debug_selector(|| "workspace-frame".into())

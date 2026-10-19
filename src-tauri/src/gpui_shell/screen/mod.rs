@@ -38,6 +38,7 @@ mod merge;
 mod onboarding;
 mod settings;
 mod settings_data;
+mod terminal;
 mod terminal_data;
 mod terminal_emu;
 mod workspace;
@@ -106,7 +107,10 @@ pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
 
 /// Everything the screens drawn from the backend ask of it; faked in tests.
 pub trait Host:
-  onboarding::OnboardingHost + settings_data::SettingsHost + merge::MergeHost + logs_data::LogsHost
+  onboarding::OnboardingHost
+  + settings_data::SettingsHost
+  + merge::MergeHost
+  + terminal_data::TerminalHost
 {
 }
 
@@ -114,7 +118,7 @@ impl<T> Host for T where
   T: onboarding::OnboardingHost
     + settings_data::SettingsHost
     + merge::MergeHost
-    + logs_data::LogsHost
+    + terminal_data::TerminalHost
 {
 }
 

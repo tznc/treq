@@ -111,7 +111,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { WorkspaceDescription } from "./WorkspaceDescription";
 import { useGpuiWorkspaceScreen } from "./useGpuiWorkspaceScreen";
 import { GpuiPartsProvider, useGpuiPartsHost } from "../lib/gpui-parts";
-import type { GpuiWorkspaceTab } from "../lib/gpui-screen";
+import type { GpuiTerminalRoute, GpuiWorkspaceTab } from "../lib/gpui-screen";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import {
@@ -189,6 +189,13 @@ interface ShowWorkspaceProps {
    * so the pane sits in GPUI's frame; null while React draws the tab.
    */
   onGpuiContentHeight?: (height: number | null) => void;
+  /** GPUI's terminal pane: its route, and what its `terminal.*` fields do. */
+  gpuiTerminal?: {
+    route: GpuiTerminalRoute | null;
+    field: (field: string, value: unknown) => void;
+  };
+  /** Whether GPUI draws the header and tab row now. */
+  onGpuiFramedChange?: (framed: boolean) => void;
 }
 
 const StatusPip = ({ status }: { status?: string }) =>
@@ -245,6 +252,8 @@ export const ShowWorkspace = ({
   gpuiActive = false,
   gpuiFrameHeight = null,
   onGpuiContentHeight,
+  gpuiTerminal,
+  onGpuiFramedChange,
 }: ShowWorkspaceProps) => {
   const workingDirectory = workspace
     ? getFullWorkspacePath(workspace)
@@ -1178,6 +1187,7 @@ export const ShowWorkspace = ({
         reviewSubView.switcherEnabled && !reviewSubView.showBrowser,
       logsSource: activeTab === "logs" ? logsSource : null,
       logsKey,
+      terminal: gpuiTerminal?.route ?? null,
     },
     handlers: {
       setTab: setActiveTab,
@@ -1213,6 +1223,7 @@ export const ShowWorkspace = ({
       sendReview: handleCreateAgentWithReview,
       sendAgentComment: handleSendAgentReviewCommentToAgent,
       sendLogsToAgent: handleSendLogsToAgent,
+      terminal: gpuiTerminal?.field,
       reviewSubView: reviewSubView.select,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,
@@ -1224,6 +1235,10 @@ export const ShowWorkspace = ({
           : undefined,
     },
   });
+  useEffect(() => {
+    onGpuiFramedChange?.(gpuiFramed);
+  }, [gpuiFramed, onGpuiFramedChange]);
+  useEffect(() => () => onGpuiFramedChange?.(false), [onGpuiFramedChange]);
   const gpuiDrawsCode = gpuiFramed && gpuiCode;
   useEffect(() => {
     if (!gpuiDrawsCode) onGpuiContentHeight?.(null);

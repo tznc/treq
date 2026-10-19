@@ -243,6 +243,7 @@ import {
   WorkspaceTerminalPane,
   type WorkspaceTerminalPaneHandle,
 } from "./WorkspaceTerminalPane";
+import { useGpuiTerminalPane } from "./useGpuiTerminalPane";
 import {
   agentInfo,
   DEFAULT_AGENT,
@@ -278,6 +279,16 @@ type SessionOpenOptions = {
 interface DashboardProps {
   initialViewMode?: ViewMode;
 }
+/** A number that changes when the pane's agent sessions do. */
+function revisionOf(sessions: AgentSessionData[]): number {
+  const text = JSON.stringify(sessions);
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 31 + text.charCodeAt(i)) % 2_147_483_647;
+  }
+  return hash;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({
   initialViewMode = "show-workspace",
 }) => {
@@ -1597,7 +1608,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await deleteWorkspace(workspace.repo_path, workspace.id);
     },
     onSuccess: (_data, workspace) => {
-      terminalPaneRef.current?.closeTerminalsForWorkspace(
+      terminalPane()?.closeTerminalsForWorkspace(
         getFullWorkspacePath(workspace),
       );
       void invalidateQueries(["workspaces", queryRepoKey]);
@@ -1623,7 +1634,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await archiveWorkspace(workspace.repo_path, workspace.id);
     },
     onSuccess: (_data, workspace) => {
-      terminalPaneRef.current?.closeTerminalsForWorkspace(
+      terminalPane()?.closeTerminalsForWorkspace(
         getFullWorkspacePath(workspace),
       );
       void invalidateQueries(["workspaces", queryRepoKey]);
@@ -2447,9 +2458,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return;
     }
     setSelectedWorkspace(workspace);
-    terminalPaneRef.current?.createShellSession(
-      getFullWorkspacePath(workspace),
-    );
+    terminalPane()?.createShellSession(getFullWorkspacePath(workspace));
   };
 
   const handleStartHomeShellFromSidebar = () => {
@@ -2463,7 +2472,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     setSelectedWorkspace(null);
     if (dataRepoPath) {
-      terminalPaneRef.current?.createShellSession(dataRepoPath);
+      terminalPane()?.createShellSession(dataRepoPath);
     }
   };
 
@@ -2785,7 +2794,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         : [],
     );
     for (const workspace of archived) {
-      terminalPaneRef.current?.closeTerminalsForWorkspace(
+      terminalPane()?.closeTerminalsForWorkspace(
         getFullWorkspacePath(workspace),
       );
     }
@@ -2949,6 +2958,140 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
     },
   );
+
+  // GPUI draws the terminal pane with the workspace screen, for local
+  // repositories; React's pane steps in while GPUI steps aside.
+  const [gpuiFramed, setGpuiFramed] = useState(false);
+  const gpuiTerminalEnabled = gpuiFramed && !isRemoteActive;
+  const gpuiTerminalPending = useMemo(
+    () =>
+      Array.from(pendingSessionData, ([sessionId, data]) => ({
+        sessionId,
+        pendingPrompt: data.pendingPrompt ?? null,
+        permissionMode: data.permissionMode ?? null,
+        agent: data.agent ?? null,
+        workspacePath: data.workspacePath ?? null,
+      })),
+    [pendingSessionData],
+  );
+  const gpuiTerminalRevision = useMemo(
+    () => revisionOf(agentSessionsForPane),
+    [agentSessionsForPane],
+  );
+  const gpuiTerminal = useGpuiTerminalPane({
+    enabled: gpuiTerminalEnabled,
+    activeSessionId: isSessionView ? activeSessionId : null,
+    pending: gpuiTerminalPending,
+    sessionsRevision: gpuiTerminalRevision,
+    onNewAgent: () =>
+      handleCreateSessionFromSidebar(selectedWorkspace?.id ?? null),
+  });
+  const terminalPane = (): WorkspaceTerminalPaneHandle | null =>
+    gpuiTerminalEnabled ? gpuiTerminal.handle : terminalPaneRef.current;
+
+  // The terminal pane's callbacks, shared by React's pane and GPUI's.
+  const handleTerminalActiveSessionChange = (sessionId: number | null) => {
+    if (sessionId === null) {
+      setActiveSessionId(null);
+      return;
+    }
+    setActiveSessionId(sessionId);
+    // Find the session to determine view mode
+    const linked = linkedRepoSessions.find((entry) =>
+      entry.sessions.some(
+        (s) => toPaneSessionId(entry.repoPath, s.id) === sessionId,
+      ),
+    );
+    const session = linked?.sessions.find(
+      (s) => toPaneSessionId(linked.repoPath, s.id) === sessionId,
+    );
+    if (linked && session) {
+      activateRepo(linked.repoPath);
+      setViewMode(session.workspace_id ? "show-workspace" : "session");
+      if (session.workspace_id) {
+        const ws = linked.workspaces.find((w) => w.id === session.workspace_id);
+        if (ws) setSelectedWorkspace(ws);
+      }
+    }
+  };
+  const handleTerminalCloseSession = (sessionId: number) => {
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(null);
+    }
+  };
+  const handleTerminalNewSession = (activeWorkspacePath?: string | null) => {
+    if (activeWorkspacePath) {
+      const ws = linkedRepoSessions
+        .flatMap((entry) => entry.workspaces)
+        .find((w) => getFullWorkspacePath(w) === activeWorkspacePath);
+      if (ws && ws.repo_path !== repoPath) {
+        void launchAgentSession({ workspace: ws });
+        return;
+      }
+      handleCreateSessionFromSidebar(ws?.id ?? null);
+    } else {
+      handleCreateSessionFromSidebar(selectedWorkspace?.id ?? null);
+    }
+  };
+  const handleTerminalNavigate = (
+    workspaceKey: string,
+    isMainRepo: boolean,
+  ) => {
+    if (isMainRepo) {
+      // Agent terminals pass their repository path.
+      if (linkedRepoSessions.some((entry) => entry.repoPath === workspaceKey)) {
+        handleSelectRepoHome(workspaceKey);
+      } else {
+        handleSelectWorkspace(null);
+      }
+    } else {
+      const ws = linkedRepoSessions
+        .flatMap((entry) => entry.workspaces)
+        .find(
+          (w) =>
+            w.workspace_path === workspaceKey ||
+            getFullWorkspacePath(w) === workspaceKey,
+        );
+      if (ws) {
+        handleSelectWorkspace(ws);
+      }
+    }
+  };
+
+  const handleGpuiTerminalField = (field: string, value: unknown) => {
+    switch (field) {
+      case "terminal.activeSession":
+        return handleTerminalActiveSessionChange(value as number | null);
+      case "terminal.closeSession":
+        return handleTerminalCloseSession(value as number);
+      case "terminal.newAgent":
+        return handleTerminalNewSession(value as string | null);
+      case "terminal.navigate": {
+        const { key, isMainRepo } = value as {
+          key: string;
+          isMainRepo: boolean;
+        };
+        return handleTerminalNavigate(key, isMainRepo);
+      }
+      case "terminal.summaries":
+        return setTerminalSessionSummaries(value as TerminalSessionSummary[]);
+      case "terminal.shortcut": {
+        // The app's own shortcuts, pressed while GPUI's terminal has focus.
+        const mac = navigator.platform.toUpperCase().includes("MAC");
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: String(value),
+            metaKey: mac,
+            ctrlKey: !mac,
+            bubbles: true,
+          }),
+        );
+        return;
+      }
+      default:
+        return;
+    }
+  };
 
   const sessionLayerStyle: CSSProperties = {
     visibility: isSessionView ? "visible" : "hidden",
@@ -3205,7 +3348,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               !session.isStreaming,
                           )}
                           onSendToIdleAgent={(sessionId, prompt) => {
-                            terminalPaneRef.current?.sendToTerminal(
+                            terminalPane()?.sendToTerminal(
                               agentTerminalId(sessionId),
                               prompt,
                             );
@@ -3218,113 +3361,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           }
                           gpuiFrameHeight={gpuiFrameHeight}
                           onGpuiContentHeight={setGpuiContentHeight}
+                          gpuiTerminal={{
+                            route: gpuiTerminal.route,
+                            field: handleGpuiTerminalField,
+                          }}
+                          onGpuiFramedChange={setGpuiFramed}
                         />
                       </ErrorBoundary>
                     </div>
                   )}
-                  {/* Shared workspace terminal pane - always rendered to preserve state */}
-                  <WorkspaceTerminalPane
-                    ref={terminalPaneRef}
-                    // One pane for the window: it shows supporting-repository
-                    // agents too, so switching repositories keeps it mounted.
-                    key={activeSupportingRepoPath ? mainRepoPath : queryRepoKey}
-                    workingDirectory={
-                      selectedWorkspace
-                        ? getFullWorkspacePath(selectedWorkspace)
-                        : dataRepoPath
-                    }
-                    repoPath={isRemoteActive ? undefined : dataRepoPath}
-                    currentBranch={effectiveDefaultBranch}
-                    agentSessions={agentSessionsForPane}
-                    activeAgentSessionId={
-                      isSessionView ? activeSessionId : null
-                    }
-                    workspaceBranchByPath={workspaceBranchByPath}
-                    onTerminalsChange={setTerminalSessionSummaries}
-                    onMaximizedChange={setTerminalMaximized}
-                    resolveRemoteShell={
-                      isRemoteActive ? resolveRemoteShell : undefined
-                    }
-                    onActiveSessionChange={(sessionId) => {
-                      if (sessionId === null) {
-                        setActiveSessionId(null);
-                        return;
+                  {/* Shared workspace terminal pane, unless GPUI draws it; the
+                      PTYs outlive either pane. */}
+                  {!gpuiTerminalEnabled && (
+                    <WorkspaceTerminalPane
+                      ref={terminalPaneRef}
+                      // One pane for the window: it shows supporting-repository
+                      // agents too, so switching repositories keeps it mounted.
+                      key={
+                        activeSupportingRepoPath ? mainRepoPath : queryRepoKey
                       }
-                      setActiveSessionId(sessionId);
-                      // Find the session to determine view mode
-                      const linked = linkedRepoSessions.find((entry) =>
-                        entry.sessions.some(
-                          (s) =>
-                            toPaneSessionId(entry.repoPath, s.id) === sessionId,
-                        ),
-                      );
-                      const session = linked?.sessions.find(
-                        (s) =>
-                          toPaneSessionId(linked.repoPath, s.id) === sessionId,
-                      );
-                      if (linked && session) {
-                        activateRepo(linked.repoPath);
-                        setViewMode(
-                          session.workspace_id ? "show-workspace" : "session",
-                        );
-                        if (session.workspace_id) {
-                          const ws = linked.workspaces.find(
-                            (w) => w.id === session.workspace_id,
-                          );
-                          if (ws) setSelectedWorkspace(ws);
-                        }
+                      workingDirectory={
+                        selectedWorkspace
+                          ? getFullWorkspacePath(selectedWorkspace)
+                          : dataRepoPath
                       }
-                    }}
-                    onCloseSession={(sessionId) => {
-                      if (activeSessionId === sessionId) {
-                        setActiveSessionId(null);
+                      repoPath={isRemoteActive ? undefined : dataRepoPath}
+                      currentBranch={effectiveDefaultBranch}
+                      agentSessions={agentSessionsForPane}
+                      activeAgentSessionId={
+                        isSessionView ? activeSessionId : null
                       }
-                    }}
-                    onCreateNewSession={(activeWorkspacePath) => {
-                      if (activeWorkspacePath) {
-                        const ws = linkedRepoSessions
-                          .flatMap((entry) => entry.workspaces)
-                          .find(
-                            (w) =>
-                              getFullWorkspacePath(w) === activeWorkspacePath,
-                          );
-                        if (ws && ws.repo_path !== repoPath) {
-                          void launchAgentSession({ workspace: ws });
-                          return;
-                        }
-                        handleCreateSessionFromSidebar(ws?.id ?? null);
-                      } else {
-                        handleCreateSessionFromSidebar(
-                          selectedWorkspace?.id ?? null,
-                        );
+                      workspaceBranchByPath={workspaceBranchByPath}
+                      onTerminalsChange={setTerminalSessionSummaries}
+                      onMaximizedChange={setTerminalMaximized}
+                      resolveRemoteShell={
+                        isRemoteActive ? resolveRemoteShell : undefined
                       }
-                    }}
-                    onNavigateToWorkspace={(workspaceKey, isMainRepo) => {
-                      if (isMainRepo) {
-                        // Agent terminals pass their repository path.
-                        if (
-                          linkedRepoSessions.some(
-                            (entry) => entry.repoPath === workspaceKey,
-                          )
-                        ) {
-                          handleSelectRepoHome(workspaceKey);
-                        } else {
-                          handleSelectWorkspace(null);
-                        }
-                      } else {
-                        const ws = linkedRepoSessions
-                          .flatMap((entry) => entry.workspaces)
-                          .find(
-                            (w) =>
-                              w.workspace_path === workspaceKey ||
-                              getFullWorkspacePath(w) === workspaceKey,
-                          );
-                        if (ws) {
-                          handleSelectWorkspace(ws);
-                        }
-                      }
-                    }}
-                  />
+                      onActiveSessionChange={handleTerminalActiveSessionChange}
+                      onCloseSession={handleTerminalCloseSession}
+                      onCreateNewSession={handleTerminalNewSession}
+                      onNavigateToWorkspace={handleTerminalNavigate}
+                    />
+                  )}
                 </div>
 
                 {/* Content Layer - Dashboard, Settings, Merge-Review, Workspace-Edit */}
@@ -3568,12 +3646,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
                 onOpenWorkspaceDeletion={() => setShowWorkspaceDeletion(true)}
                 onCreateStackedWorkspace={handleCreateStackedWorkspace}
-                onToggleTerminal={() =>
-                  terminalPaneRef.current?.toggleCollapse()
-                }
-                onMaximizeTerminal={() =>
-                  terminalPaneRef.current?.toggleMaximize()
-                }
+                onToggleTerminal={() => terminalPane()?.toggleCollapse()}
+                onMaximizeTerminal={() => terminalPane()?.toggleMaximize()}
                 onStartAgentWithPrompt={() => setShowAgentPromptDialog(true)}
                 onStartAgentTerminal={() => void handleStartDefaultAgent()}
                 onOpenPromptHistory={() => {
@@ -3585,7 +3659,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   isRemoteActive ? undefined : () => setShowStashModal(true)
                 }
                 onCreateShellTerminal={() =>
-                  terminalPaneRef.current?.createShellSession()
+                  terminalPane()?.createShellSession()
                 }
                 hasSelectedWorkspace={!!selectedWorkspace}
                 showBranchSwitcher={showBranchSwitcher}

@@ -80,6 +80,10 @@ pub struct Route {
   /// Bumped by "open in Logs" links, so the tab starts over on `logs_source`.
   #[serde(default)]
   pub logs_key: u64,
+  /// GPUI draws the terminal pane below the tab; `None` while React does
+  /// (a remote repository's).
+  #[serde(default)]
+  pub terminal: Option<super::terminal::Route>,
 }
 
 impl Route {

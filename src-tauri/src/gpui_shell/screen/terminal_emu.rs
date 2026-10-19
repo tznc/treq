@@ -180,12 +180,6 @@ impl Emulator {
     self.term.mode().contains(TermMode::ALT_SCREEN)
   }
 
-  pub fn clear(&mut self) {
-    // xterm.js's clear(): drop scrollback and keep the prompt line.
-    self.feed(b"\x1b[H\x1b[2J");
-    self.term.grid_mut().clear_history();
-  }
-
   /// Viewport point for a cell, accounting for scrollback.
   fn point(&self, line: usize, col: usize) -> Point {
     let line = line.min(self.size.rows - 1) as i32 - self.display_offset() as i32;
@@ -691,15 +685,6 @@ mod tests {
     assert!(!emu.app_cursor());
     emu.feed(b"\x1b[?1h\x1b[?2004h\x1b[?1049h");
     assert!(emu.app_cursor() && emu.bracketed_paste() && emu.alt_screen());
-  }
-
-  #[test]
-  fn clear_drops_scrollback() {
-    let mut emu = Emulator::new(10, 2);
-    emu.feed(b"1\r\n2\r\n3\r\n4");
-    emu.clear();
-    assert_eq!(emu.history(), 0);
-    assert_eq!(emu.screen_text(), "");
   }
 
   #[test]

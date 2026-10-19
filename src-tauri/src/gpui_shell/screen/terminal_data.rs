@@ -4,7 +4,7 @@
 
 use std::{
   collections::HashMap,
-  sync::{Arc, Mutex, OnceLock},
+  sync::{Arc, Mutex},
   time::Instant,
 };
 
@@ -59,6 +59,10 @@ pub trait TerminalHost: LogsHost {
   /// Calls `sink` with each chunk of the PTY's output until dropped.
   fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening;
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String>;
+  /// The repository's supporting repositories that still exist.
+  fn supporting_repos(&self, repo_path: &str) -> Vec<String>;
+  /// A shell's start command: puts the treq CLI on its PATH.
+  fn shell_command(&self) -> Option<String>;
   fn prepare_agent(&self, start: &AgentStart) -> Result<Prepared, String>;
   fn register_chat(&self, start: &AgentStart, pty_id: &str, name: &str) -> Result<(), String>;
   fn record_chat_screen(
@@ -66,13 +70,6 @@ pub trait TerminalHost: LogsHost {
     repo_path: &str,
     session_id: i64,
     screen: &str,
-  ) -> Result<(), String>;
-  fn record_chat_message(
-    &self,
-    repo_path: &str,
-    session_id: i64,
-    screen_before: &str,
-    text: &str,
   ) -> Result<(), String>;
 }
 
@@ -197,17 +194,26 @@ impl TerminalHost for Backend {
     crate::local_db::get_sessions(repo_path)
   }
 
+  fn supporting_repos(&self, repo_path: &str) -> Vec<String> {
+    crate::core::supporting_repos::list(repo_path)
+      .unwrap_or_default()
+      .into_iter()
+      .filter(|repo| repo.exists)
+      .map(|repo| repo.path)
+      .collect()
+  }
+
+  fn shell_command(&self) -> Option<String> {
+    let dir = crate::commands::binary::get_treq_bin_dir().ok()?;
+    Some(format!("export PATH=\"{dir}:$PATH\""))
+  }
+
   fn prepare_agent(&self, start: &AgentStart) -> Result<Prepared, String> {
     let model = crate::local_db::get_session_model(&start.repo_path, start.session_id)
       .ok()
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();
-    let supporting: Vec<String> = crate::core::supporting_repos::list(&start.repo_path)
-      .unwrap_or_default()
-      .into_iter()
-      .filter(|repo| repo.exists)
-      .map(|repo| repo.path)
-      .collect();
+    let supporting = self.supporting_repos(&start.repo_path);
     let prepared = agent_command::prepare_auto_command(
       &AgentPaths {
         workspace_path: start.workspace_path.as_deref(),
@@ -248,17 +254,6 @@ impl TerminalHost for Backend {
     screen: &str,
   ) -> Result<(), String> {
     crate::core::agent_chat::record_screen(repo_path, session_id, screen).map(drop)
-  }
-
-  fn record_chat_message(
-    &self,
-    repo_path: &str,
-    session_id: i64,
-    screen_before: &str,
-    text: &str,
-  ) -> Result<(), String> {
-    crate::core::agent_chat::record_user_message(repo_path, session_id, screen_before, text)
-      .map(drop)
   }
 }
 
@@ -410,9 +405,21 @@ impl Live {
   }
 }
 
-fn registry() -> &'static Mutex<HashMap<String, Arc<Live>>> {
-  static LIVE: OnceLock<Mutex<HashMap<String, Arc<Live>>>> = OnceLock::new();
+type Registry = Mutex<HashMap<String, Arc<Live>>>;
+
+#[cfg(not(test))]
+fn registry() -> &'static Registry {
+  static LIVE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
   LIVE.get_or_init(Mutex::default)
+}
+
+/// Each test thread keeps its own terminals.
+#[cfg(test)]
+fn registry() -> &'static Registry {
+  thread_local! {
+    static LIVE: &'static Registry = Box::leak(Box::default());
+  }
+  LIVE.with(|live| *live)
 }
 
 /// The live terminal for a PTY, listening to its output from now on.
@@ -442,11 +449,6 @@ pub fn attach(host: &Host, id: &str, cols: usize, rows: usize) -> (Arc<Live>, bo
 /// Forgets a closed PTY's terminal.
 pub fn detach(id: &str) {
   registry().lock_or_recover().remove(id);
-}
-
-#[cfg(test)]
-pub fn reset() {
-  registry().lock_or_recover().clear();
 }
 
 #[cfg(test)]

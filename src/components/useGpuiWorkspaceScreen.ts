@@ -61,6 +61,8 @@ interface Handlers {
   ) => void;
   /** The Logs tab's "Send to agent": an agent works through `prompt`. */
   sendLogsToAgent?: (prompt: string) => void;
+  /** GPUI's terminal pane: a `terminal.*` field. */
+  terminal?: (field: string, value: unknown) => void;
   /** The Diff/Browser switcher. */
   reviewSubView?: (view: "diff" | "browser") => void;
   openBranchSwitcher?: () => void;
@@ -214,6 +216,13 @@ export function useGpuiWorkspaceScreen({
       }
       case "logs.sendToAgent":
         return handlers.sendLogsToAgent?.(value as string);
+      case "terminal.activeSession":
+      case "terminal.closeSession":
+      case "terminal.newAgent":
+      case "terminal.navigate":
+      case "terminal.summaries":
+      case "terminal.shortcut":
+        return handlers.terminal?.(name, value);
       case "changes.subView":
         if (value === "diff" || value === "browser") {
           handlers.reviewSubView?.(value);

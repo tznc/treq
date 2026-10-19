@@ -1,0 +1,2188 @@
+//! The workspace terminal pane (`WorkspaceTerminalPane`): a row of agent
+//! and shell terminals below the tab, each a column with its own header.
+//!
+//! The terminals run on PTYs GPUI starts itself ([`terminal_data`]) and
+//! draw through a terminal emulator ([`terminal_emu`]). React still owns
+//! which agent session is active and what a new one starts with: it says
+//! so in the route, and hears back when the pane activates, closes or
+//! starts a session (`terminal.*` fields).
+//!
+//! [`terminal_data`]: super::terminal_data
+//! [`terminal_emu`]: super::terminal_emu
+
+use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
+
+use futures::StreamExt as _;
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use serde::{Deserialize, Serialize};
+use tauri_plugin_gpui::gpui::{
+  self, div, prelude::*, px, relative, rgb, App, Bounds, ClipboardItem, Context, Div, Entity,
+  FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, ScrollWheelEvent,
+  SharedString, Stateful, Subscription, Task, Window,
+};
+
+use super::{
+  terminal_data::{self, AgentStart, Host, Live, Spawn},
+  terminal_emu::{self, encode_key, paste_bytes, Key, SelectKind},
+  ActionSink, ScreenAction,
+};
+use crate::gpui_shell::{
+  popup::{PopupSink, Side, TooltipContent},
+  theme::{self, Palette},
+  tooltips::{HasTooltips, Tooltips},
+  ui::{self, TextSize},
+};
+
+/// `useTerminalPaneHeightResize`: the pane's share of the workspace view.
+const HEIGHT_DEFAULT: f32 = 33.;
+const HEIGHT_MIN: f32 = 15.;
+const HEIGHT_MAX: f32 = 60.;
+/// `h-7`: a column's header.
+const HEADER_HEIGHT: f32 = 28.;
+/// A column never gets narrower than this share of the row (or 300px).
+const MIN_COLUMN_SHARE: f32 = 0.4;
+/// `onTerminalIdle` fires this long after the process last wrote.
+const IDLE_AFTER: Duration = Duration::from_millis(2000);
+/// The chat log snapshots the screen at most this often while it changes.
+const CHAT_THROTTLE: Duration = Duration::from_secs(1);
+/// xterm's cursor blink.
+const BLINK: Duration = Duration::from_millis(600);
+/// The scrollbar's width (`w-2`).
+const SCROLLBAR: f32 = 8.;
+/// `pt-1` above the grid.
+const TOP_PAD: f32 = 4.;
+const TERMINAL_BG: u32 = terminal_emu::BACKGROUND;
+
+/// A new agent session's start, as React keeps it (`pendingSessionData`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Pending {
+  /// The pane's id for the session.
+  pub session_id: i64,
+  pub pending_prompt: Option<String>,
+  pub permission_mode: Option<String>,
+  pub agent: Option<String>,
+  pub workspace_path: Option<String>,
+}
+
+/// Something Dashboard asks of the pane (its imperative handle).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Command {
+  /// Bumped per command, so each runs once.
+  pub nonce: u64,
+  /// `toggleCollapse`, `toggleMaximize`, `newShell`, `newAgent`, `closeWorkspace`, `send`.
+  pub kind: String,
+  pub dir: Option<String>,
+  pub session_id: Option<i64>,
+  pub text: Option<String>,
+}
+
+/// What the route says about the pane while GPUI draws it.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Route {
+  /// The active agent session, while the workspace view shows.
+  pub active_session_id: Option<i64>,
+  pub pending: Vec<Pending>,
+  /// Bumped when React's session list changes.
+  pub sessions_revision: u64,
+  /// Dashboard's latest commands; those newer than the last run go once.
+  pub commands: Vec<Command>,
+}
+
+/// `TerminalSessionSummary`, which the sidebar spins on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+  pub id: String,
+  pub kind: &'static str,
+  pub name: String,
+  pub branch_name: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub repo_path: Option<String>,
+  pub is_main_repo: bool,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub agent: Option<String>,
+  pub is_streaming: bool,
+}
+
+/// What the pane needs from the workspace around it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Place {
+  pub repo_path: String,
+  /// The selected workspace's directory, else the repository's.
+  pub working_directory: String,
+  pub current_branch: String,
+  /// Workspace directories and their branches, for column labels.
+  pub branches: Vec<(String, String)>,
+  /// Workspace ids by directory, so a new agent opens in its column's.
+  pub workspace_ids: Vec<(String, i64)>,
+}
+
+/// `resizeTerminalPair`: moves the divider between two columns, neither
+/// going below `min`.
+pub fn resize_pair(left: f32, right: f32, delta: f32, min: f32) -> (f32, f32) {
+  let next_left = (left + delta).max(min);
+  let next_right = (right - (next_left - left)).max(min);
+  (next_left, next_right)
+}
+
+/// The pane height for a drag to `y` in a view spanning `top..bottom`.
+pub fn drag_height(top: f32, bottom: f32, y: f32) -> f32 {
+  let height = bottom - top;
+  if height <= 0. {
+    return HEIGHT_DEFAULT;
+  }
+  ((bottom - y) / height * 100.).clamp(HEIGHT_MIN, HEIGHT_MAX)
+}
+
+/// The column to focus once `closed` goes: the one that takes its place,
+/// else the one before.
+pub fn neighbour(order: &[String], closed: &str) -> Option<String> {
+  let index = order.iter().position(|id| id == closed)?;
+  let rest: Vec<&String> = order.iter().filter(|id| *id != closed).collect();
+  rest.get(index).or(rest.last()).map(|id| (*id).clone())
+}
+
+pub fn agent_column_id(pane_id: i64) -> String {
+  format!("agent-{pane_id}")
+}
+
+/// A key press the pane (or the app) handles before a terminal sees it.
+/// `Cmd` is the platform key or Ctrl, as `useTerminalPaneKeyboardShortcuts`
+/// reads it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shortcut {
+  ToggleCollapse,
+  ToggleMaximize,
+  NewAgent,
+  NewShell,
+  Close,
+  /// Cmd+K, N or P: the app's, forwarded to React.
+  App(char),
+}
+
+pub fn shortcut(key: &str, ctrl: bool, platform: bool, shift: bool, alt: bool) -> Option<Shortcut> {
+  if !(ctrl || platform) || alt {
+    return None;
+  }
+  Some(match key {
+    "j" if ctrl && platform => Shortcut::ToggleMaximize,
+    "j" if !shift => Shortcut::ToggleCollapse,
+    "]" if !shift => Shortcut::NewAgent,
+    "\\" if !shift => Shortcut::NewShell,
+    "w" if !shift => Shortcut::Close,
+    "k" | "n" | "p" if !shift => Shortcut::App(key.chars().next()?),
+    _ => return None,
+  })
+}
+
+/// What a terminal starts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Start {
+  Shell {
+    dir: String,
+  },
+  Agent {
+    start: AgentStart,
+    name: String,
+    workspace_id: Option<i64>,
+    working_dir: Option<String>,
+  },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Status {
+  Preparing,
+  Ready,
+  Failed(String),
+  /// `prepareError`: the agent's command could not be built.
+  AgentFailed(String),
+}
+
+/// What a terminal tells its pane.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TermEvent {
+  Focused,
+  Output { from_process: bool },
+  Idle,
+  Close,
+  Toast { title: String, description: String },
+}
+
+/// `TerminalSearchOverlay`.
+#[derive(Default)]
+struct Search {
+  open: bool,
+  query: String,
+  input: Option<Entity<InputState>>,
+  focus: bool,
+  _subscription: Option<Subscription>,
+}
+
+/// How a terminal tells its pane what happened.
+type OnEvent = Rc<dyn Fn(TermEvent, &mut App)>;
+
+/// One terminal: the grid of a PTY's output, typed into while focused.
+pub struct TerminalView {
+  pub pty: String,
+  host: Host,
+  start: Start,
+  live: Option<Arc<Live>>,
+  status: Status,
+  focus: FocusHandle,
+  font_size: f32,
+  /// The cell size, once measured.
+  cell: Option<(f32, f32)>,
+  bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+  /// Wheel movement not yet a whole line.
+  scroll_rest: f32,
+  selecting: bool,
+  cursor_on: bool,
+  idle: u64,
+  chat_due: bool,
+  search: Search,
+  on_event: OnEvent,
+  _tasks: Vec<Task<()>>,
+}
+
+impl TerminalView {
+  pub fn new(
+    pty: String,
+    start: Start,
+    host: Host,
+    font_size: f32,
+    on_event: OnEvent,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    Self {
+      pty,
+      host,
+      start,
+      live: None,
+      status: Status::Preparing,
+      focus: cx.focus_handle(),
+      font_size,
+      cell: None,
+      bounds: Rc::default(),
+      scroll_rest: 0.,
+      selecting: false,
+      cursor_on: true,
+      idle: 0,
+      chat_due: false,
+      search: Search::default(),
+      on_event,
+      _tasks: Vec::new(),
+    }
+  }
+
+  pub fn is_agent(&self) -> bool {
+    matches!(self.start, Start::Agent { .. })
+  }
+
+  /// The grid's size for the measured bounds.
+  fn grid_size(&self) -> Option<(usize, usize)> {
+    let bounds = self.bounds.get()?;
+    let (w, h) = self.cell?;
+    let cols = ((f32::from(bounds.size.width) - SCROLLBAR) / w)
+      .floor()
+      .max(2.) as usize;
+    let rows = ((f32::from(bounds.size.height) - TOP_PAD) / h)
+      .floor()
+      .max(1.) as usize;
+    Some((cols, rows))
+  }
+
+  fn measure(&mut self, cx: &App) {
+    if self.cell.is_some() {
+      return;
+    }
+    let system = cx.text_system();
+    let font = system.resolve_font(&gpui::font(theme::MONO_FONT));
+    let size = px(self.font_size);
+    let width = system
+      .advance(font, size, 'm')
+      .map(|a| f32::from(a.width))
+      .unwrap_or(self.font_size * 0.6);
+    let height = f32::from(system.ascent(font, size)) + f32::from(system.descent(font, size)).abs();
+    self.cell = Some((width, height.ceil()));
+  }
+
+  /// Attaches to the PTY once the grid's size is known, starting it if no
+  /// PTY runs with the id; afterwards keeps the PTY's size in step.
+  fn sync(&mut self, cx: &mut Context<Self>) {
+    let Some((cols, rows)) = self.grid_size() else {
+      return;
+    };
+    match self.live.clone() {
+      Some(live) => {
+        if live
+          .emulator
+          .lock()
+          .map(|mut e| e.resize(cols, rows))
+          .unwrap_or(false)
+          && self.status == Status::Ready
+        {
+          let _ = self.host.resize_pty(&self.pty, rows as u16, cols as u16);
+        }
+      }
+      None => {
+        let (live, _) = terminal_data::attach(&self.host, &self.pty, cols, rows);
+        if let Ok(mut emulator) = live.emulator.lock() {
+          emulator.resize(cols, rows);
+        }
+        self.watch(&live, cx);
+        self.live = Some(live);
+        self.launch(cols, rows, cx);
+      }
+    }
+  }
+
+  fn watch(&mut self, live: &Arc<Live>, cx: &mut Context<Self>) {
+    let mut rx = live.watch();
+    self._tasks.push(cx.spawn(async move |this, cx| {
+      while let Some(mut from_process) = rx.next().await {
+        // A burst of output draws once.
+        while let Ok(more) = rx.try_recv() {
+          from_process |= more;
+        }
+        if this
+          .update(cx, |view, cx| view.on_output(from_process, cx))
+          .is_err()
+        {
+          break;
+        }
+      }
+    }));
+    if self._tasks.len() == 1 {
+      self._tasks.push(cx.spawn(async move |this, cx| loop {
+        cx.background_executor().timer(BLINK).await;
+        if this
+          .update(cx, |view, cx| {
+            view.cursor_on = !view.cursor_on;
+            cx.notify();
+          })
+          .is_err()
+        {
+          break;
+        }
+      }));
+    }
+  }
+
+  fn on_output(&mut self, from_process: bool, cx: &mut Context<Self>) {
+    (self.on_event)(TermEvent::Output { from_process }, cx);
+    if from_process {
+      self.idle += 1;
+      let idle = self.idle;
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(IDLE_AFTER).await;
+        let _ = this.update(cx, |view, cx| {
+          if view.idle == idle {
+            view.chat_due = false;
+            view.record_chat();
+            (view.on_event)(TermEvent::Idle, cx);
+          }
+        });
+      })
+      .detach();
+      if !self.chat_due && self.is_agent() {
+        self.chat_due = true;
+        cx.spawn(async move |this, cx| {
+          cx.background_executor().timer(CHAT_THROTTLE).await;
+          let _ = this.update(cx, |view, _| {
+            if std::mem::take(&mut view.chat_due) {
+              view.record_chat();
+            }
+          });
+        })
+        .detach();
+      }
+    }
+    cx.notify();
+  }
+
+  /// `agentChatRecorder`: snapshots the agent's screen into its chat log.
+  fn record_chat(&self) {
+    let (Start::Agent { start, .. }, Some(live)) = (&self.start, &self.live) else {
+      return;
+    };
+    let (host, repo, id, screen) = (
+      self.host.clone(),
+      start.repo_path.clone(),
+      start.session_id,
+      live.screen_text(),
+    );
+    std::thread::spawn(move || {
+      if let Err(error) = host.record_chat_screen(&repo, id, &screen) {
+        log::warn!("record agent chat failed: {error}");
+      }
+    });
+  }
+
+  /// Starts the PTY (preparing an agent's command first) unless it runs.
+  fn launch(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {
+    let (host, pty, start) = (self.host.clone(), self.pty.clone(), self.start.clone());
+    self.status = Status::Preparing;
+    let task = cx.background_executor().spawn(async move {
+      if host.pty_exists(&pty) {
+        let _ = host.resize_pty(&pty, rows as u16, cols as u16);
+        return Ok(None);
+      }
+      let (spawn, warning) = match &start {
+        Start::Shell { dir } => (
+          Spawn {
+            id: pty.clone(),
+            working_dir: Some(dir.clone()),
+            auto_command: host.shell_command(),
+            ..Spawn::default()
+          },
+          None,
+        ),
+        Start::Agent {
+          start,
+          name,
+          workspace_id,
+          working_dir,
+        } => {
+          if let Err(error) = host.register_chat(start, &pty, name) {
+            log::warn!("register agent chat failed: {error}");
+          }
+          let prepared = host.prepare_agent(start).map_err(|e| (true, e))?;
+          (
+            Spawn {
+              id: pty.clone(),
+              repo_path: Some(start.repo_path.clone()),
+              workspace_id: *workspace_id,
+              working_dir: working_dir.clone(),
+              auto_command: Some(prepared.command),
+            },
+            prepared.skill_write_warning,
+          )
+        }
+      };
+      host.spawn_pty(&spawn).map_err(|e| (false, e))?;
+      let _ = host.resize_pty(&pty, rows as u16, cols as u16);
+      Ok(warning)
+    });
+    self._tasks.push(cx.spawn(async move |this, cx| {
+      let result: Result<Option<String>, (bool, String)> = task.await;
+      let _ = this.update(cx, |view, cx| {
+        view.status = match result {
+          Ok(warning) => {
+            if let Some(description) = warning {
+              (view.on_event)(
+                TermEvent::Toast {
+                  title: "Could not write Treq skills".into(),
+                  description,
+                },
+                cx,
+              );
+            }
+            Status::Ready
+          }
+          Err((true, error)) => Status::AgentFailed(error),
+          Err((false, error)) if error.contains("Session not found") => Status::Failed(
+            "Terminal session is still initializing. Please wait a moment and try again.".into(),
+          ),
+          Err((false, error)) => Status::Failed(error),
+        };
+        cx.notify();
+      });
+    }));
+  }
+
+  /// "Try again": closes the PTY and starts over.
+  fn retry(&mut self, cx: &mut Context<Self>) {
+    let _ = self.host.close_pty(&self.pty);
+    terminal_data::detach(&self.pty);
+    self.live = None;
+    self._tasks.clear();
+    self.status = Status::Preparing;
+    cx.notify();
+  }
+
+  pub fn write(&self, data: &str) {
+    if let Some(live) = &self.live {
+      live.typed(data);
+      if let Ok(mut emulator) = live.emulator.lock() {
+        emulator.scroll_to_bottom();
+      }
+    }
+    if let Err(error) = self.host.write_pty(&self.pty, data) {
+      log::warn!("pty write failed: {error}");
+    }
+  }
+
+  fn with_emulator<T>(&self, f: impl FnOnce(&mut terminal_emu::Emulator) -> T) -> Option<T> {
+    let live = self.live.as_ref()?;
+    let mut emulator = live.emulator.lock().ok()?;
+    Some(f(&mut emulator))
+  }
+
+  fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    let k = &event.keystroke;
+    let m = &k.modifiers;
+    if shortcut(&k.key, m.control, m.platform, m.shift, m.alt).is_some() {
+      // The pane's, or the app's: let it go on.
+      cx.propagate();
+      return;
+    }
+    if self.status != Status::Ready {
+      return;
+    }
+    if k.key == "f" && (m.platform || m.control) && !m.shift && self.is_agent() {
+      self.open_search(cx);
+      return;
+    }
+    let copy = (m.platform && k.key == "c") || (m.control && m.shift && k.key == "c");
+    if copy {
+      if let Some(text) = self.with_emulator(|e| e.selection_text()).flatten() {
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        return;
+      }
+      if m.platform {
+        return;
+      }
+    }
+    let paste = (m.platform && k.key == "v") || (m.control && m.shift && k.key == "v");
+    if paste {
+      if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+        let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
+        let bytes = paste_bytes(&text, bracketed);
+        self.write(&String::from_utf8_lossy(&bytes));
+      }
+      return;
+    }
+    if m.platform && k.key == "a" {
+      self.with_emulator(|e| e.select_all());
+      cx.notify();
+      return;
+    }
+    // Shift+Enter continues the line, as React's terminal did.
+    if k.key == "enter" && m.shift && !m.control && !m.alt && !m.platform {
+      self.write("\\");
+      return;
+    }
+    let app_cursor = self.with_emulator(|e| e.app_cursor()).unwrap_or(false);
+    let bytes = encode_key(
+      Key {
+        key: &k.key,
+        key_char: k.key_char.as_deref(),
+        ctrl: m.control,
+        alt: m.alt,
+        shift: m.shift,
+        platform: m.platform,
+      },
+      app_cursor,
+    );
+    if let Some(bytes) = bytes {
+      self.with_emulator(|e| e.clear_selection());
+      self.write(&String::from_utf8_lossy(&bytes));
+      self.cursor_on = true;
+      cx.stop_propagation();
+      let _ = window;
+    }
+  }
+
+  /// The cell under a window position, and whether it is the cell's right half.
+  fn cell_at(&self, position: gpui::Point<Pixels>) -> Option<(usize, usize, bool)> {
+    let bounds = self.bounds.get()?;
+    let (w, h) = self.cell?;
+    let x = (f32::from(position.x) - f32::from(bounds.origin.x)).max(0.);
+    let y = (f32::from(position.y) - f32::from(bounds.origin.y) - TOP_PAD).max(0.);
+    let (cols, rows) = self.grid_size()?;
+    let col = ((x / w) as usize).min(cols - 1);
+    let row = ((y / h) as usize).min(rows - 1);
+    Some((row, col, x - col as f32 * w > w / 2.))
+  }
+
+  fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    window.focus(&self.focus, cx);
+    (self.on_event)(TermEvent::Focused, cx);
+    let Some((row, col, right)) = self.cell_at(event.position) else {
+      return;
+    };
+    let kind = match event.click_count {
+      2 => SelectKind::Word,
+      n if n >= 3 => SelectKind::Line,
+      _ => SelectKind::Simple,
+    };
+    self.with_emulator(|e| {
+      e.clear_find();
+      if kind == SelectKind::Simple {
+        e.clear_selection();
+      }
+      e.select_start(row, col, right, kind);
+    });
+    self.selecting = true;
+    cx.notify();
+  }
+
+  fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
+      return;
+    }
+    if let Some((row, col, right)) = self.cell_at(event.position) {
+      self.with_emulator(|e| e.select_extend(row, col, right));
+      cx.notify();
+    }
+  }
+
+  fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    let Some((_, h)) = self.cell else {
+      return;
+    };
+    let delta = event.delta.pixel_delta(px(h));
+    // Horizontal swipes scroll the row of columns instead.
+    if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
+      return;
+    }
+    self.scroll_rest += f32::from(delta.y) / h;
+    let lines = self.scroll_rest.trunc() as i32;
+    if lines == 0 {
+      cx.stop_propagation();
+      return;
+    }
+    self.scroll_rest -= lines as f32;
+    let alt = self.with_emulator(|e| e.alt_screen()).unwrap_or(false);
+    if alt {
+      // Full-screen programs scroll by arrow keys, as xterm sends them.
+      let app_cursor = self.with_emulator(|e| e.app_cursor()).unwrap_or(false);
+      let key = if lines > 0 { "up" } else { "down" };
+      let bytes = encode_key(
+        Key {
+          key,
+          ..Key::default()
+        },
+        app_cursor,
+      )
+      .unwrap_or_default();
+      let data = String::from_utf8_lossy(&bytes).repeat(lines.unsigned_abs() as usize);
+      let _ = self.host.write_pty(&self.pty, &data);
+    } else {
+      self.with_emulator(|e| e.scroll(lines));
+    }
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  pub fn open_search(&mut self, cx: &mut Context<Self>) {
+    self.search.open = true;
+    self.search.focus = true;
+    cx.notify();
+  }
+
+  fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.search.open = false;
+    self.search.query.clear();
+    if let Some(input) = &self.search.input {
+      input.update(cx, |input, cx| input.set_value("", window, cx));
+    }
+    self.with_emulator(|e| e.clear_find());
+    window.focus(&self.focus, cx);
+    cx.notify();
+  }
+
+  fn find(&mut self, forward: bool, cx: &mut Context<Self>) {
+    let query = self.search.query.clone();
+    if query.trim().is_empty() {
+      return;
+    }
+    self.with_emulator(|e| e.find(&query, forward));
+    cx.notify();
+  }
+
+  fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if !self.search.open {
+      return;
+    }
+    let input = match &self.search.input {
+      Some(input) => input.clone(),
+      None => {
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+        self.search._subscription = Some(cx.subscribe(
+          &input,
+          |view, input, event: &InputEvent, cx| match event {
+            InputEvent::Change => {
+              view.search.query = input.read(cx).value().to_string();
+              cx.notify();
+            }
+            InputEvent::PressEnter { shift, .. } => view.find(!*shift, cx),
+            _ => {}
+          },
+        ));
+        self.search.input = Some(input.clone());
+        input
+      }
+    };
+    if std::mem::take(&mut self.search.focus) {
+      input.update(cx, |input, cx| input.focus(window, cx));
+    }
+  }
+
+  fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let input = self.search.input.clone().filter(|_| self.search.open)?;
+    let blank = self.search.query.trim().is_empty();
+    let fg = p.foreground;
+    let accent = p.accent;
+    let button = |id: &'static str, icon: &'static str, disabled: bool| {
+      div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .size_6()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .when(disabled, |b| b.opacity(0.5))
+        .when(!disabled, |b| {
+          b.cursor_pointer().hover(move |s| s.bg(accent))
+        })
+        .child(ui::icon(icon, 16., fg))
+    };
+    Some(
+      div()
+        .debug_selector(|| "terminal-search".into())
+        .absolute()
+        .top_2()
+        .right_2()
+        .flex()
+        .gap(px(2.))
+        .p(px(2.))
+        .rounded(px(6.))
+        .border_1()
+        .border_color(p.border)
+        .bg(p.background)
+        .shadow_lg()
+        .capture_action(cx.listener(|view, _: &Escape, window, cx| {
+          view.close_search(window, cx);
+          cx.stop_propagation();
+        }))
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .h_6()
+            .w_48()
+            .child(Input::new(&input).appearance(false).bordered(false)),
+        )
+        .child(
+          button("terminal-find-previous", theme::ICON_CHEVRON_UP, blank).when(!blank, |b| {
+            b.on_click(cx.listener(|view, _, _, cx| view.find(false, cx)))
+          }),
+        )
+        .child(
+          button("terminal-find-next", theme::ICON_CHEVRON_DOWN, blank).when(!blank, |b| {
+            b.on_click(cx.listener(|view, _, _, cx| view.find(true, cx)))
+          }),
+        )
+        .child(
+          button("terminal-close-search", theme::ICON_X, false)
+            .on_click(cx.listener(|view, _, window, cx| view.close_search(window, cx))),
+        ),
+    )
+  }
+
+  fn grid(&self, focused: bool) -> Div {
+    let Some(((w, h), frame)) = self.cell.zip(self.with_emulator(|e| e.frame())) else {
+      return div();
+    };
+    let font = self.font_size;
+    let lines = frame.lines.into_iter().enumerate().map(move |(row, runs)| {
+      div()
+        .absolute()
+        .top(px(TOP_PAD + row as f32 * h))
+        .left_0()
+        .h(px(h))
+        .w_full()
+        .children(runs.into_iter().map(move |run| {
+          div()
+            .absolute()
+            .left(px(run.col as f32 * w))
+            .w(px(run.cells as f32 * w))
+            .h(px(h))
+            .when_some(run.bg, |d, bg| d.bg(rgb(bg)))
+            .text_color(rgb(run.fg))
+            .when(run.bold, |d| d.font_weight(gpui::FontWeight::BOLD))
+            .when(run.italic, |d| d.italic())
+            .when(run.underline, |d| d.underline())
+            .when(run.strike, |d| d.line_through())
+            .text_size(px(font))
+            .line_height(px(h))
+            .whitespace_nowrap()
+            .child(SharedString::from(run.text))
+        }))
+    });
+    let cursor = frame.cursor.map(|(row, col)| {
+      let base = div()
+        .absolute()
+        .top(px(TOP_PAD + row as f32 * h))
+        .left(px(col as f32 * w))
+        .h(px(h));
+      if focused {
+        base
+          .w(px(1.))
+          .when(self.cursor_on, |d| d.bg(rgb(terminal_emu::FOREGROUND)))
+      } else {
+        base
+          .w(px(w))
+          .border_1()
+          .border_color(rgb(terminal_emu::FOREGROUND))
+      }
+    });
+    div()
+      .absolute()
+      .inset_0()
+      .font_family(theme::MONO_FONT)
+      .children(lines)
+      .children(cursor)
+  }
+
+  fn scrollbar(&self, p: &Palette) -> Option<Div> {
+    let (history, offset, rows) =
+      self.with_emulator(|e| (e.history(), e.display_offset(), e.size().rows))?;
+    let height = f32::from(self.bounds.get()?.size.height);
+    if history == 0 {
+      return None;
+    }
+    let total = (history + rows) as f32;
+    let thumb = (rows as f32 / total * height).max(20.);
+    let top = (history - offset) as f32 / total * height;
+    Some(
+      div()
+        .absolute()
+        .right_0()
+        .top(px(top.min(height - thumb)))
+        .w(px(SCROLLBAR))
+        .h(px(thumb))
+        .rounded_full()
+        .bg(p.border),
+    )
+  }
+
+  fn overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+    match &self.status {
+      Status::Ready => None,
+      Status::Preparing => Some(
+        div()
+          .debug_selector(|| "terminal-preparing".into())
+          .absolute()
+          .inset_0()
+          .flex()
+          .items_center()
+          .justify_center()
+          .gap_2()
+          .bg(p.background.opacity(0.8))
+          .text_color(p.muted_foreground)
+          .child(ui::spinner(
+            "terminal-preparing-spinner",
+            16.,
+            p.muted_foreground,
+          ))
+          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal...")),
+      ),
+      Status::AgentFailed(error) => Some(
+        ui::text(div(), TextSize::Sm)
+          .absolute()
+          .inset_0()
+          .flex()
+          .items_center()
+          .justify_center()
+          .bg(rgb(TERMINAL_BG))
+          .text_color(p.muted_foreground)
+          .child(format!("Failed to start agent: {error}")),
+      ),
+      Status::Failed(error) => {
+        let error = error.clone();
+        Some(
+          div()
+            .debug_selector(|| "terminal-error".into())
+            .absolute()
+            .inset_0()
+            .p_6()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(p.background.opacity(0.9))
+            .child(
+              ui::card(p)
+                .max_w(px(384.))
+                .p_4()
+                .shadow_lg()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child("Unable to start terminal"),
+                )
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .text_color(p.muted_foreground)
+                    .child(error),
+                )
+                .child(
+                  div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                      ui::Button::new("terminal-retry", p)
+                        .size(ui::Size::Sm)
+                        .label("Try again")
+                        .on_click(cx.listener(|view, _, _, cx| view.retry(cx))),
+                    )
+                    .child(
+                      ui::Button::new("terminal-close-session", p)
+                        .size(ui::Size::Sm)
+                        .variant(ui::Variant::Outline)
+                        .label("Close session")
+                        .on_click(
+                          cx.listener(|view, _, _, cx| (view.on_event)(TermEvent::Close, cx)),
+                        ),
+                    ),
+                ),
+            ),
+        )
+      }
+    }
+  }
+}
+
+impl Render for TerminalView {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.measure(cx);
+    self.sync(cx);
+    self.ensure_search_input(window, cx);
+    let p = theme::palette(true);
+    let focused = self.focus.is_focused(window);
+    let bounds = self.bounds.clone();
+    let entity = cx.entity().downgrade();
+    div()
+      .id(SharedString::from(format!("terminal-{}", self.pty)))
+      .debug_selector(|| "terminal-body".into())
+      .track_focus(&self.focus)
+      .relative()
+      .size_full()
+      .overflow_hidden()
+      .bg(rgb(TERMINAL_BG))
+      .cursor_text()
+      .on_key_down(cx.listener(Self::on_key))
+      .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+      .on_mouse_move(cx.listener(Self::on_mouse_move))
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|view, _, _, _| view.selecting = false),
+      )
+      .on_mouse_up_out(
+        MouseButton::Left,
+        cx.listener(|view, _, _, _| view.selecting = false),
+      )
+      .on_scroll_wheel(cx.listener(Self::on_scroll))
+      .child(
+        gpui::canvas(
+          move |b, _, cx| {
+            if bounds.get() != Some(b) {
+              bounds.set(Some(b));
+              if let Some(view) = entity.upgrade() {
+                cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
+              }
+            }
+          },
+          |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0(),
+      )
+      .child(self.grid(focused))
+      .children(self.scrollbar(&p))
+      .children(self.search_bar(&p, cx))
+      .children(self.overlay(&p, cx))
+  }
+}
+
+/// A column of the pane.
+struct Column {
+  id: String,
+  view: Entity<TerminalView>,
+  kind: Kind,
+  /// Fixed after a divider drag; else the column shares what's left.
+  width: Option<f32>,
+  streaming: bool,
+  bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Kind {
+  Agent {
+    pane_id: i64,
+    name: String,
+    repo_path: String,
+    workspace_path: Option<String>,
+    workspace_name: Option<String>,
+    agent: String,
+  },
+  Shell {
+    dir: String,
+  },
+}
+
+/// A divider or the pane's edge being dragged.
+#[derive(Clone, Copy)]
+enum Drag {
+  Height,
+  Divider { left: usize, x: f32 },
+}
+
+pub struct TerminalPane {
+  host: Host,
+  react: ActionSink,
+  place: Place,
+  route: Route,
+  incoming: Option<Route>,
+  /// What the terminals said since the pane last drew.
+  events: Vec<(String, TermEvent)>,
+  font_size: f32,
+  pub collapsed: bool,
+  pub maximized: bool,
+  height: f32,
+  columns: Vec<Column>,
+  active: Option<String>,
+  /// The workspace view's bounds, for height drags.
+  pub container: Rc<Cell<Option<Bounds<Pixels>>>>,
+  row: Rc<Cell<Option<Bounds<Pixels>>>>,
+  drag: Option<Drag>,
+  last_command: u64,
+  summaries: Vec<Summary>,
+  tooltips: Tooltips,
+  _keys: Option<Subscription>,
+}
+
+impl HasTooltips for TerminalPane {
+  fn tooltips(&mut self) -> &mut Tooltips {
+    &mut self.tooltips
+  }
+}
+
+impl TerminalPane {
+  pub fn new(
+    host: Host,
+    react: ActionSink,
+    popups: PopupSink,
+    place: Place,
+    _: &mut Context<Self>,
+  ) -> Self {
+    let settings = host
+      .settings(&["terminal_font_size".to_string(), "ui_zoom".to_string()])
+      .unwrap_or_default();
+    let get = |key: &str| {
+      settings
+        .get(key)
+        .cloned()
+        .flatten()
+        .and_then(|v| v.parse::<f32>().ok())
+    };
+    let font_size =
+      (get("terminal_font_size").unwrap_or(14.) * get("ui_zoom").unwrap_or(100.) / 100.).round();
+    Self {
+      host,
+      react,
+      place,
+      route: Route::default(),
+      incoming: None,
+      events: Vec::new(),
+      font_size,
+      collapsed: true,
+      maximized: false,
+      height: HEIGHT_DEFAULT,
+      columns: Vec::new(),
+      active: None,
+      container: Rc::default(),
+      row: Rc::default(),
+      drag: None,
+      last_command: 0,
+      summaries: Vec::new(),
+      tooltips: Tooltips::new(popups, true),
+      _keys: None,
+    }
+  }
+
+  /// Whether the pane covers the tab (maximized and open).
+  pub fn covers(&self) -> bool {
+    self.maximized && !self.collapsed
+  }
+
+  pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
+    if self.place != place {
+      self.place = place;
+      cx.notify();
+    }
+  }
+
+  fn send(&self, field: &str, value: serde_json::Value, cx: &mut App) {
+    (self.react)(
+      ScreenAction::Field {
+        field: field.into(),
+        value,
+      },
+      cx,
+    );
+  }
+
+  /// Takes React's latest word on sessions and commands, acted on when
+  /// the pane next draws.
+  pub fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
+    if route != self.route && self.incoming.as_ref() != Some(&route) {
+      self.incoming = Some(route);
+      cx.notify();
+    }
+  }
+
+  fn apply_route(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
+    if route == self.route {
+      return;
+    }
+    let previous = std::mem::replace(&mut self.route, route.clone());
+    for command in &route.commands {
+      if command.nonce > self.last_command {
+        self.last_command = command.nonce;
+        self.run(command, window, cx);
+      }
+    }
+    if route.active_session_id != previous.active_session_id
+      || route.sessions_revision != previous.sessions_revision
+      || route.pending != previous.pending
+    {
+      if let Some(id) = route.active_session_id {
+        // `auto-mount`: the active session opens and takes focus.
+        self.open_agent(id, window, cx);
+      } else if previous.active_session_id.is_some() {
+        self.active = None;
+      }
+    }
+    cx.notify();
+  }
+
+  fn run(&mut self, command: &Command, window: &mut Window, cx: &mut Context<Self>) {
+    match command.kind.as_str() {
+      "toggleCollapse" => self.toggle_collapse(cx),
+      "toggleMaximize" => self.toggle_maximize(cx),
+      "newShell" => self.add_shell(command.dir.clone(), window, cx),
+      "newAgent" => self.new_agent(cx),
+      "closeWorkspace" => {
+        let key = command.dir.clone().unwrap_or_default();
+        let ids: Vec<String> = self
+          .columns
+          .iter()
+          .filter(|c| self.column_key(c) == key)
+          .map(|c| c.id.clone())
+          .collect();
+        for id in ids {
+          self.close(&id, window, cx);
+        }
+      }
+      "send" => {
+        if let (Some(id), Some(text)) = (command.session_id, &command.text) {
+          let column = agent_column_id(id);
+          if let Some(view) = self.view(&column) {
+            view.read(cx).write(&format!("{text}\n"));
+          }
+          self.focus_column(&column, window, cx);
+        }
+      }
+      _ => {}
+    }
+  }
+
+  fn view(&self, id: &str) -> Option<Entity<TerminalView>> {
+    self
+      .columns
+      .iter()
+      .find(|c| c.id == id)
+      .map(|c| c.view.clone())
+  }
+
+  fn column_key(&self, column: &Column) -> String {
+    match &column.kind {
+      Kind::Agent {
+        workspace_path,
+        repo_path,
+        ..
+      } => workspace_path.clone().unwrap_or_else(|| repo_path.clone()),
+      Kind::Shell { dir } => dir.clone(),
+    }
+  }
+
+  fn toggle_collapse(&mut self, cx: &mut Context<Self>) {
+    self.collapsed = !self.collapsed;
+    if self.collapsed {
+      self.maximized = false;
+    }
+    cx.notify();
+  }
+
+  fn toggle_maximize(&mut self, cx: &mut Context<Self>) {
+    if self.maximized {
+      self.maximized = false;
+    } else {
+      self.collapsed = false;
+      self.maximized = true;
+    }
+    cx.notify();
+  }
+
+  fn on_event(&self, id: String, cx: &mut Context<Self>) -> OnEvent {
+    let pane = cx.entity().downgrade();
+    Rc::new(move |event, cx| {
+      let id = id.clone();
+      if let Some(pane) = pane.upgrade() {
+        cx.defer(move |cx| {
+          pane.update(cx, |pane, cx| {
+            pane.events.push((id, event));
+            cx.notify();
+          });
+        });
+      }
+    })
+  }
+
+  fn on_term_event(
+    &mut self,
+    id: &str,
+    event: TermEvent,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    match event {
+      TermEvent::Focused => self.activate(id, cx),
+      TermEvent::Output { from_process: true } => self.set_streaming(id, true, cx),
+      TermEvent::Output { .. } => {}
+      TermEvent::Idle => self.set_streaming(id, false, cx),
+      TermEvent::Close => self.close(id, window, cx),
+      TermEvent::Toast { title, description } => {
+        super::workspace_data::WorkspaceHost::notify(
+          &*self.host,
+          crate::gpui_shell::native::NativeEvent::Toast {
+            title,
+            description,
+            tone: crate::gpui_shell::native::ToastTone::Warning,
+            action: None,
+          },
+        );
+      }
+    }
+  }
+
+  fn set_streaming(&mut self, id: &str, streaming: bool, cx: &mut Context<Self>) {
+    if let Some(column) = self.columns.iter_mut().find(|c| c.id == id) {
+      if column.streaming != streaming {
+        column.streaming = streaming;
+        self.publish(cx);
+      }
+    }
+  }
+
+  /// `onTerminalsChange`: only when the summaries changed.
+  fn publish(&mut self, cx: &mut Context<Self>) {
+    let summaries = self.build_summaries();
+    if summaries != self.summaries {
+      self.summaries = summaries.clone();
+      self.send(
+        "terminal.summaries",
+        serde_json::to_value(summaries).unwrap_or_default(),
+        cx,
+      );
+    }
+  }
+
+  fn build_summaries(&self) -> Vec<Summary> {
+    self
+      .columns
+      .iter()
+      .map(|column| match &column.kind {
+        Kind::Agent {
+          name,
+          repo_path,
+          workspace_name,
+          agent,
+          ..
+        } => Summary {
+          id: column.id.clone(),
+          kind: "agent",
+          name: name.clone(),
+          branch_name: workspace_name.clone(),
+          repo_path: Some(repo_path.clone()),
+          is_main_repo: workspace_name.is_none(),
+          agent: Some(agent.clone()),
+          is_streaming: column.streaming,
+        },
+        Kind::Shell { dir } => {
+          let (name, main) = self.label(dir);
+          Summary {
+            id: column.id.clone(),
+            kind: "shell",
+            name: "Shell".into(),
+            branch_name: Some(name),
+            repo_path: None,
+            is_main_repo: main,
+            agent: None,
+            is_streaming: column.streaming,
+          }
+        }
+      })
+      .collect()
+  }
+
+  /// `resolveTerminalWorkspace` for a shell: the workspace's branch for
+  /// its directory, else the home branch.
+  fn label(&self, dir: &str) -> (String, bool) {
+    let found = self.place.branches.iter().find(|(path, _)| path == dir);
+    match found {
+      Some((_, branch)) => (branch.clone(), false),
+      None => {
+        let agent = self.columns.iter().find_map(|c| match &c.kind {
+          Kind::Agent {
+            workspace_path: Some(path),
+            workspace_name: Some(name),
+            ..
+          } if path == dir => Some(name.clone()),
+          _ => None,
+        });
+        match agent {
+          Some(name) => (name, false),
+          None => (self.home_branch(), true),
+        }
+      }
+    }
+  }
+
+  fn home_branch(&self) -> String {
+    if self.place.current_branch.is_empty() {
+      "main".into()
+    } else {
+      self.place.current_branch.clone()
+    }
+  }
+
+  fn activate(&mut self, id: &str, cx: &mut Context<Self>) {
+    if self.active.as_deref() == Some(id) {
+      return;
+    }
+    self.active = Some(id.to_string());
+    if let Some(Kind::Agent { pane_id, .. }) =
+      self.columns.iter().find(|c| c.id == id).map(|c| &c.kind)
+    {
+      if self.route.active_session_id != Some(*pane_id) {
+        self.send("terminal.activeSession", (*pane_id).into(), cx);
+      }
+    }
+    cx.notify();
+  }
+
+  fn focus_column(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    self.collapsed = false;
+    self.activate(id, cx);
+    if let Some(view) = self.view(id) {
+      let focus = view.read(cx).focus.clone();
+      window.focus(&focus, cx);
+    }
+    cx.notify();
+  }
+
+  /// Opens (or focuses) the agent session with the pane id `pane_id`.
+  fn open_agent(&mut self, pane_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+    let id = agent_column_id(pane_id);
+    if self.columns.iter().any(|c| c.id == id) {
+      self.focus_column(&id, window, cx);
+      return;
+    }
+    let Some(kind_and_start) = self.agent_session(pane_id) else {
+      return;
+    };
+    let (kind, pty, start) = kind_and_start;
+    let on_event = self.on_event(id.clone(), cx);
+    let (host, font_size) = (self.host.clone(), self.font_size);
+    let view = cx.new(|cx| TerminalView::new(pty, start, host, font_size, on_event, cx));
+    self.columns.push(Column {
+      id: id.clone(),
+      view,
+      kind,
+      width: None,
+      streaming: false,
+      bounds: Rc::default(),
+    });
+    self.publish(cx);
+    self.focus_column(&id, window, cx);
+  }
+
+  /// The session's column and what its terminal starts, read from the
+  /// session tables of the repository and its supporting ones.
+  fn agent_session(&self, pane_id: i64) -> Option<(Kind, String, Start)> {
+    let main = self.place.repo_path.clone();
+    let mut repos = vec![main.clone()];
+    repos.extend(self.host.supporting_repos(&main));
+    for repo in repos {
+      let sessions = self.host.sessions(&repo).unwrap_or_default();
+      let Some(session) = sessions
+        .into_iter()
+        .find(|s| terminal_data::pane_session_id(&repo, &main, s.id) == pane_id)
+      else {
+        continue;
+      };
+      let pending = self.route.pending.iter().find(|p| p.session_id == pane_id);
+      let workspace = session.workspace_id.and_then(|id| {
+        self
+          .host
+          .workspaces(&repo)
+          .ok()?
+          .into_iter()
+          .find(|w| w.id == id)
+      });
+      let workspace_path = pending
+        .and_then(|p| p.workspace_path.clone())
+        .or_else(|| workspace.as_ref().map(super::merge::full_path));
+      let agent = pending
+        .and_then(|p| p.agent.clone())
+        .unwrap_or_else(|| self.default_agent(&repo));
+      let pty = terminal_data::agent_pty_id(&repo, session.id);
+      let start = AgentStart {
+        agent: agent.clone(),
+        repo_path: repo.clone(),
+        workspace_path: workspace_path.clone(),
+        session_id: session.id,
+        pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
+        permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+      };
+      let kind = Kind::Agent {
+        pane_id,
+        name: session.name.clone(),
+        repo_path: repo.clone(),
+        workspace_path,
+        workspace_name: workspace.map(|w| w.branch_name),
+        agent,
+      };
+      return Some((
+        kind,
+        pty,
+        Start::Agent {
+          start,
+          name: session.name,
+          workspace_id: session.workspace_id,
+          working_dir: pending.and_then(|p| p.workspace_path.clone()),
+        },
+      ));
+    }
+    None
+  }
+
+  fn default_agent(&self, repo: &str) -> String {
+    let key = vec!["default_agent".to_string()];
+    let repo_agent = self
+      .host
+      .repo_settings(repo, &key)
+      .ok()
+      .and_then(|v| v.get("default_agent").cloned().flatten())
+      .filter(|v| !v.is_empty());
+    repo_agent
+      .or_else(|| {
+        self
+          .host
+          .settings(&key)
+          .ok()
+          .and_then(|v| v.get("default_agent").cloned().flatten())
+          .filter(|v| !v.is_empty())
+      })
+      .unwrap_or_else(|| "claude".into())
+  }
+
+  /// The active terminal's directory, else the workspace's.
+  fn active_dir(&self) -> String {
+    self
+      .active
+      .as_ref()
+      .and_then(|id| self.columns.iter().find(|c| &c.id == id))
+      .map(|c| self.column_key(c))
+      .unwrap_or_else(|| self.place.working_directory.clone())
+  }
+
+  fn new_agent(&mut self, cx: &mut Context<Self>) {
+    let dir = self.active_dir();
+    self.send("terminal.newAgent", dir.into(), cx);
+  }
+
+  fn add_shell(&mut self, dir: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    let dir = dir.unwrap_or_else(|| self.active_dir());
+    let millis = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .map(|d| d.as_millis())
+      .unwrap_or_default();
+    let id = terminal_data::shell_pty_id(&dir, millis);
+    let on_event = self.on_event(id.clone(), cx);
+    let (host, font_size, start) = (
+      self.host.clone(),
+      self.font_size,
+      Start::Shell { dir: dir.clone() },
+    );
+    let view = cx.new(|cx| TerminalView::new(id.clone(), start, host, font_size, on_event, cx));
+    self.columns.push(Column {
+      id: id.clone(),
+      view,
+      kind: Kind::Shell { dir },
+      width: None,
+      streaming: false,
+      bounds: Rc::default(),
+    });
+    self.collapsed = false;
+    self.publish(cx);
+    let _ = window;
+    cx.notify();
+  }
+
+  fn close(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    let order: Vec<String> = self.columns.iter().map(|c| c.id.clone()).collect();
+    let Some(index) = order.iter().position(|c| c == id) else {
+      return;
+    };
+    let column = self.columns.remove(index);
+    let pty = column.view.read(cx).pty.clone();
+    if let Err(error) = self.host.close_pty(&pty) {
+      log::warn!("pty close failed: {error}");
+    }
+    terminal_data::detach(&pty);
+    if let Kind::Agent { pane_id, .. } = column.kind {
+      self.send("terminal.closeSession", pane_id.into(), cx);
+    }
+    if self.active.as_deref() == Some(id) {
+      self.active = None;
+      if let Some(next) = neighbour(&order, id) {
+        self.focus_column(&next, window, cx);
+      }
+    }
+    if self.columns.is_empty() {
+      self.collapsed = true;
+      self.maximized = false;
+    }
+    self.publish(cx);
+    cx.notify();
+  }
+
+  fn shortcut(&mut self, shortcut: Shortcut, window: &mut Window, cx: &mut Context<Self>) {
+    match shortcut {
+      Shortcut::ToggleCollapse => self.toggle_collapse(cx),
+      Shortcut::ToggleMaximize => self.toggle_maximize(cx),
+      Shortcut::NewAgent => self.new_agent(cx),
+      Shortcut::NewShell => self.add_shell(None, window, cx),
+      Shortcut::Close => {
+        if let Some(id) = self.active.clone() {
+          self.close(&id, window, cx);
+        }
+      }
+      Shortcut::App(key) => self.send("terminal.shortcut", key.to_string().into(), cx),
+    }
+  }
+
+  fn watch_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self._keys.is_some() {
+      return;
+    }
+    let handle = window.window_handle();
+    self._keys = Some(cx.observe_keystrokes(move |pane, event, window, cx| {
+      if window.window_handle() != handle {
+        return;
+      }
+      let k = &event.keystroke;
+      let m = &k.modifiers;
+      if let Some(found) = shortcut(&k.key, m.control, m.platform, m.shift, m.alt) {
+        pane.shortcut(found, window, cx);
+      }
+    }));
+  }
+
+  fn min_width(&self) -> f32 {
+    self
+      .row
+      .get()
+      .map(|b| f32::from(b.size.width) * MIN_COLUMN_SHARE)
+      .filter(|w| *w > 0.)
+      .unwrap_or(300.)
+  }
+
+  fn on_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    let Some(drag) = self.drag else {
+      return;
+    };
+    if event.pressed_button != Some(MouseButton::Left) {
+      self.drag = None;
+      return;
+    }
+    let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
+    match drag {
+      Drag::Height => {
+        if self.maximized {
+          return;
+        }
+        if let Some(b) = self.container.get() {
+          let top = f32::from(b.origin.y);
+          self.height = drag_height(top, top + f32::from(b.size.height), y);
+        }
+      }
+      Drag::Divider { left, x: from } => {
+        let min = self.min_width();
+        let width = |c: &Column| {
+          c.width
+            .or_else(|| c.bounds.get().map(|b| f32::from(b.size.width)))
+        };
+        let (Some(l), Some(r)) = (
+          self.columns.get(left).and_then(width),
+          self.columns.get(left + 1).and_then(width),
+        ) else {
+          return;
+        };
+        let (l, r) = resize_pair(l, r, x - from, min);
+        self.columns[left].width = Some(l);
+        self.columns[left + 1].width = Some(r);
+        self.drag = Some(Drag::Divider { left, x });
+      }
+    }
+    cx.notify();
+  }
+
+  fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+    let fg = p.foreground;
+    let accent = p.accent;
+    let button = |id: &'static str, icon: &'static str| {
+      div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .size_5()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .cursor_pointer()
+        .hover(move |s| s.bg(accent))
+        .child(ui::icon(icon, 12., fg))
+    };
+    let tip = |text: &str| Some(TooltipContent::Text(text.to_string().into()));
+    let mut buttons: Vec<gpui::AnyElement> = Vec::new();
+    if self.collapsed {
+      let b = button("terminal-expand", theme::ICON_CHEVRON_UP).on_click(cx.listener(
+        |pane, _, _, cx| {
+          pane.collapsed = false;
+          cx.notify();
+        },
+      ));
+      buttons.push(
+        self
+          .tooltips
+          .wrap("terminal-expand", Side::Top, tip("Expand  ⌘ + J"), b, cx)
+          .into_any_element(),
+      );
+    } else {
+      if self.maximized {
+        let b = button("terminal-restore", theme::ICON_MINIMIZE)
+          .on_click(cx.listener(|pane, _, _, cx| pane.toggle_maximize(cx)));
+        buttons.push(
+          self
+            .tooltips
+            .wrap(
+              "terminal-restore",
+              Side::Top,
+              tip("Restore  ⌘ + Ctrl + J"),
+              b,
+              cx,
+            )
+            .into_any_element(),
+        );
+      } else if !self.columns.is_empty() {
+        let b = button("terminal-maximize", theme::ICON_MAXIMIZE)
+          .on_click(cx.listener(|pane, _, _, cx| pane.toggle_maximize(cx)));
+        buttons.push(
+          self
+            .tooltips
+            .wrap(
+              "terminal-maximize",
+              Side::Top,
+              tip("Maximize  ⌘ + Ctrl + J"),
+              b,
+              cx,
+            )
+            .into_any_element(),
+        );
+      }
+      let b = button("terminal-collapse", theme::ICON_CHEVRON_DOWN).on_click(cx.listener(
+        |pane, _, _, cx| {
+          pane.collapsed = true;
+          pane.maximized = false;
+          cx.notify();
+        },
+      ));
+      buttons.push(
+        self
+          .tooltips
+          .wrap(
+            "terminal-collapse",
+            Side::Top,
+            tip("Collapse  ⌘ + J"),
+            b,
+            cx,
+          )
+          .into_any_element(),
+      );
+    }
+    div()
+      .id("terminal-pane-controls")
+      .debug_selector(|| "terminal-pane-controls".into())
+      .flex()
+      .items_center()
+      .gap_px()
+      .rounded_md()
+      .border_1()
+      .border_color(p.border.opacity(0.8))
+      .bg(p.background.opacity(0.9))
+      .p(px(2.))
+      .shadow_sm()
+      .children(buttons)
+  }
+
+  fn header(&mut self, index: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let column = &self.columns[index];
+    let active = self.active.as_deref() == Some(column.id.as_str());
+    let id = column.id.clone();
+    let fg = p.foreground;
+    let label = |name: String, main: bool, key: String, react: ActionSink| {
+      ui::text(div(), TextSize::Xs)
+        .id(SharedString::from(format!("terminal-workspace-label-{id}")))
+        .debug_selector(|| "terminal-workspace-label".into())
+        .max_w(px(200.))
+        .truncate()
+        .rounded_sm()
+        .bg(p.muted.opacity(0.6))
+        .px_1()
+        .py(px(2.))
+        .font_family(theme::MONO_FONT)
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .line_height(px(12.))
+        .text_color(p.muted_foreground)
+        .cursor_pointer()
+        .hover(|s| s.bg(p.muted))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, _, cx| {
+          react(
+            ScreenAction::Field {
+              field: "terminal.navigate".into(),
+              value: serde_json::json!({ "key": key, "isMainRepo": main }),
+            },
+            cx,
+          )
+        })
+        .child(name)
+    };
+    let close_id = column.id.clone();
+    let close = div()
+      .id(SharedString::from(format!("terminal-close-{}", column.id)))
+      .debug_selector(|| "terminal-close".into())
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded_sm()
+      .cursor_pointer()
+      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+      .on_click(cx.listener(move |pane, _, window, cx| pane.close(&close_id, window, cx)));
+    let base = ui::text(div(), TextSize::Sm)
+      .h(px(HEADER_HEIGHT))
+      .min_h(px(HEADER_HEIGHT))
+      .px_2()
+      .flex()
+      .items_center()
+      .justify_between()
+      .gap_2()
+      .border_b_1()
+      .border_r_1()
+      .border_color(p.border);
+    match &column.kind {
+      Kind::Agent {
+        name,
+        workspace_path,
+        workspace_name,
+        repo_path,
+        agent,
+        ..
+      } => {
+        let key = workspace_path.clone().unwrap_or_else(|| repo_path.clone());
+        let label_name = workspace_name.clone().unwrap_or_else(|| self.home_branch());
+        let view = column.view.clone();
+        let search = div()
+          .id(SharedString::from(format!("terminal-search-{}", column.id)))
+          .debug_selector(|| "terminal-search-button".into())
+          .h_6()
+          .px_2()
+          .flex()
+          .items_center()
+          .rounded_md()
+          .cursor_pointer()
+          .hover(|s| s.bg(p.accent))
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_click(cx.listener(move |_, _, _, cx| view.update(cx, |v, cx| v.open_search(cx))))
+          .child(ui::icon(theme::ICON_SEARCH, 16., fg));
+        let search = self.tooltips.wrap(
+          format!("terminal-search-tip-{}", column.id),
+          Side::Bottom,
+          Some(TooltipContent::Text("Search (⌘+F)".into())),
+          search,
+          cx,
+        );
+        let close = self.tooltips.wrap(
+          format!("terminal-close-tip-{}", column.id),
+          Side::Bottom,
+          Some(TooltipContent::Text("Close  ⌘ + W".into())),
+          close
+            .h_6()
+            .px_2()
+            .hover(|s| s.bg(p.accent))
+            .child(ui::icon(theme::ICON_X, 16., fg)),
+          cx,
+        );
+        base
+          .bg(if active {
+            p.primary.opacity(0.4)
+          } else {
+            rgb(0x374151).into()
+          })
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .min_w_0()
+              .child(ui::icon(agent_icon(agent), 16., fg))
+              .child(
+                div()
+                  .truncate()
+                  .font_weight(gpui::FontWeight::MEDIUM)
+                  .text_color(rgb(0xe5e7eb))
+                  .child(name.clone()),
+              )
+              .child(
+                label(
+                  label_name,
+                  workspace_name.is_none(),
+                  key,
+                  self.react.clone(),
+                )
+                .text_color(rgb(0xd1d5db)),
+              ),
+          )
+          .child(div().flex().items_center().child(search).child(close))
+      }
+      Kind::Shell { dir } => {
+        let (name, main) = self.label(dir);
+        let close = self.tooltips.wrap(
+          format!("terminal-close-tip-{}", column.id),
+          Side::Bottom,
+          Some(TooltipContent::Text("Close  ⌘ + W".into())),
+          close
+            .size_4()
+            .opacity(0.6)
+            .hover(|s| s.opacity(1.))
+            .child(ui::icon(theme::ICON_X, 12., fg)),
+          cx,
+        );
+        base
+          .bg(if active {
+            p.primary.opacity(0.2)
+          } else {
+            p.background
+          })
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .min_w_0()
+              .child(ui::icon(theme::ICON_TERMINAL, 12., p.muted_foreground))
+              .child(
+                div()
+                  .font_weight(gpui::FontWeight::MEDIUM)
+                  .text_color(p.muted_foreground)
+                  .child("Shell"),
+              )
+              .child(label(name, main, dir.clone(), self.react.clone())),
+          )
+          .child(close)
+      }
+    }
+  }
+
+  fn column(&mut self, index: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let header = self.header(index, p, cx);
+    let min = self.min_width();
+    let column = &self.columns[index];
+    let (id, view, bounds) = (
+      column.id.clone(),
+      column.view.clone(),
+      column.bounds.clone(),
+    );
+    let active = self.active.as_deref() == Some(id.as_str());
+    let focus_id = id.clone();
+    div()
+      .id(SharedString::from(format!("terminal-column-{id}")))
+      .debug_selector(move || {
+        format!(
+          "terminal-column-{}",
+          if id.starts_with("agent-") {
+            "agent"
+          } else {
+            "shell"
+          }
+        )
+      })
+      .flex()
+      .flex_col()
+      .min_h_0()
+      .overflow_hidden()
+      .flex_shrink_0()
+      .when_some(column.width, |d, w| d.w(px(w)))
+      .when(column.width.is_none(), |d| d.flex_1())
+      .min_w(px(min))
+      .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |pane, _, _, cx| pane.activate(&focus_id, cx)),
+      )
+      .child(
+        gpui::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+          .absolute()
+          .size_full(),
+      )
+      .child(header.when(active, |d| {
+        d.debug_selector(|| "terminal-column-active".into())
+      }))
+      .child(
+        div()
+          .flex_1()
+          .min_h_0()
+          .border_r_1()
+          .border_color(p.border)
+          .bg(rgb(TERMINAL_BG))
+          .child(view),
+      )
+  }
+}
+
+fn agent_icon(agent: &str) -> &'static str {
+  match agent {
+    "codex" => theme::ICON_AGENT_CODEX,
+    "cursor" => theme::ICON_AGENT_CURSOR,
+    "copilot" => theme::ICON_AGENT_COPILOT,
+    _ => theme::ICON_AGENT_CLAUDE,
+  }
+}
+
+impl Render for TerminalPane {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.watch_keys(window, cx);
+    if let Some(route) = self.incoming.take() {
+      self.apply_route(route, window, cx);
+    }
+    for (id, event) in std::mem::take(&mut self.events) {
+      self.on_term_event(&id, event, window, cx);
+    }
+    self.tooltips.sync(cx);
+    let p = theme::palette(true);
+    if self.collapsed {
+      return div()
+        .debug_selector(|| "workspace-terminal-pane".into())
+        .flex()
+        .justify_end()
+        .m(px(6.))
+        .child(self.controls(&p, cx))
+        .into_any_element();
+    }
+    let mut row: Vec<gpui::AnyElement> = Vec::new();
+    for index in 0..self.columns.len() {
+      if index > 0 {
+        let left = index - 1;
+        row.push(
+          div()
+            .id(SharedString::from(format!("terminal-divider-{index}")))
+            .relative()
+            .w_1()
+            .h_full()
+            .flex_shrink_0()
+            .bg(p.border)
+            .hover(|s| s.bg(p.primary.opacity(0.5)))
+            .child(
+              div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(-4.))
+                .w_3()
+                .cursor_ew_resize()
+                .on_mouse_down(
+                  MouseButton::Left,
+                  cx.listener(move |pane, e: &MouseDownEvent, _, cx| {
+                    pane.drag = Some(Drag::Divider {
+                      left,
+                      x: f32::from(e.position.x),
+                    });
+                    cx.stop_propagation();
+                  }),
+                ),
+            )
+            .into_any_element(),
+        );
+      }
+      row.push(self.column(index, &p, cx).into_any_element());
+    }
+    let row_bounds = self.row.clone();
+    let controls = self.controls(&p, cx);
+    let maximized = self.maximized;
+    div()
+      .flex()
+      .flex_col()
+      .flex_shrink_0()
+      .when(maximized, |d| d.size_full())
+      .when(!maximized, |d| {
+        d.h(relative(self.height / 100.))
+          .max_h(relative(HEIGHT_MAX / 100.))
+      })
+      .on_mouse_move(cx.listener(|pane, e: &MouseMoveEvent, _, cx| pane.on_drag(e, cx)))
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|pane, _, _, _| pane.drag = None),
+      )
+      .on_mouse_up_out(
+        MouseButton::Left,
+        cx.listener(|pane, _, _, _| pane.drag = None),
+      )
+      .when(!maximized, |d| {
+        d.child(
+          div()
+            .relative()
+            .h_1()
+            .flex_shrink_0()
+            .bg(if matches!(self.drag, Some(Drag::Height)) {
+              p.primary
+            } else {
+              p.border
+            })
+            .hover(|s| s.bg(p.primary.opacity(0.5)))
+            .child(
+              div()
+                .id("terminal-height-divider")
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(-4.))
+                .h_3()
+                .cursor_ns_resize()
+                .on_mouse_down(
+                  MouseButton::Left,
+                  cx.listener(|pane, _, _, cx| {
+                    pane.drag = Some(Drag::Height);
+                    cx.stop_propagation();
+                  }),
+                ),
+            ),
+        )
+      })
+      .child(
+        div()
+          .debug_selector(|| "workspace-terminal-pane".into())
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .flex()
+          .flex_col()
+          .bg(p.background)
+          .child(
+            div()
+              .id("terminal-scroll-container")
+              .debug_selector(|| "terminal-scroll-container".into())
+              .flex_1()
+              .min_h_0()
+              .flex()
+              .overflow_x_scroll()
+              .bg(rgb(TERMINAL_BG))
+              .child(
+                gpui::canvas(move |b, _, _| row_bounds.set(Some(b)), |_, _, _, _| {})
+                  .absolute()
+                  .size_full(),
+              )
+              .children(row),
+          )
+          .child(
+            div()
+              .absolute()
+              .right(px(6.))
+              .when(maximized, |d| d.bottom(px(6.)))
+              .when(!maximized, |d| d.top(px(-28.)))
+              .child(controls),
+          ),
+      )
+      .into_any_element()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn resizes_column_pairs() {
+    assert_eq!(resize_pair(400., 400., 50., 300.), (450., 350.));
+    assert_eq!(resize_pair(400., 400., 150., 300.), (550., 300.));
+    assert_eq!(resize_pair(400., 400., -200., 300.), (300., 500.));
+  }
+
+  #[test]
+  fn clamps_the_pane_height() {
+    assert!((drag_height(0., 1000., 700.) - 30.).abs() < 0.01);
+    assert_eq!(drag_height(0., 1000., 990.), HEIGHT_MIN);
+    assert_eq!(drag_height(0., 1000., 0.), HEIGHT_MAX);
+  }
+
+  #[test]
+  fn focuses_the_neighbour_of_a_closed_column() {
+    let order: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+    assert_eq!(neighbour(&order, "a").as_deref(), Some("b"));
+    assert_eq!(neighbour(&order, "b").as_deref(), Some("c"));
+    assert_eq!(neighbour(&order, "c").as_deref(), Some("b"));
+    assert_eq!(neighbour(&["a".to_string()], "a"), None);
+  }
+
+  #[test]
+  fn reads_pane_shortcuts() {
+    assert_eq!(
+      shortcut("j", false, true, false, false),
+      Some(Shortcut::ToggleCollapse)
+    );
+    assert_eq!(
+      shortcut("j", true, false, false, false),
+      Some(Shortcut::ToggleCollapse)
+    );
+    assert_eq!(
+      shortcut("j", true, true, false, false),
+      Some(Shortcut::ToggleMaximize)
+    );
+    assert_eq!(
+      shortcut("]", false, true, false, false),
+      Some(Shortcut::NewAgent)
+    );
+    assert_eq!(
+      shortcut("\\", true, false, false, false),
+      Some(Shortcut::NewShell)
+    );
+    assert_eq!(
+      shortcut("w", false, true, false, false),
+      Some(Shortcut::Close)
+    );
+    assert_eq!(
+      shortcut("k", true, false, false, false),
+      Some(Shortcut::App('k'))
+    );
+    assert_eq!(shortcut("c", true, false, false, false), None);
+    assert_eq!(shortcut("j", false, false, false, false), None);
+  }
+}
