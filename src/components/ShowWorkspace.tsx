@@ -111,7 +111,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { WorkspaceDescription } from "./WorkspaceDescription";
 import { useGpuiWorkspaceScreen } from "./useGpuiWorkspaceScreen";
 import { GpuiPartsProvider, useGpuiPartsHost } from "../lib/gpui-parts";
-import type { GpuiTerminalRoute, GpuiWorkspaceTab } from "../lib/gpui-screen";
+import {
+  type GpuiTerminalRoute,
+  type GpuiWorkspaceTab,
+  gpuiDrawsFileBrowser,
+} from "../lib/gpui-screen";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import {
@@ -315,12 +319,15 @@ export const ShowWorkspace = ({
     dismissTreqSendAsset: useTreqSendStore((s) => s.dismissAsset),
   });
   const changeFilesMove = useChangeFilesMove();
+  const [showFileBrowserInCode, setShowFileBrowserInCode] = useState(false);
+  // GPUI draws the Code tab's file browser too, reading the files itself.
+  const gpuiFileBrowser =
+    activeTab === "overview" && showFileBrowserInCode && gpuiDrawsFileBrowser();
   const changesRevision = useChangesRevision(
     workspace?.id,
-    gpuiActive && activeTab === "changes",
+    gpuiActive && (activeTab === "changes" || gpuiFileBrowser),
   );
   const [scrollToCommitId, setScrollToCommitId] = useState<string | null>(null);
-  const [showFileBrowserInCode, setShowFileBrowserInCode] = useState(false);
 
   useEffect(() => {
     if (!logsEnabled && activeTab === "logs") {
@@ -1156,7 +1163,8 @@ export const ShowWorkspace = ({
   // GPUI draws the Code, Commits, Changes and Logs tabs, with the terminal
   // pane below them.
   const gpuiCode =
-    (activeTab === "overview" && !showFileBrowserInCode) ||
+    (activeTab === "overview" &&
+      (!showFileBrowserInCode || gpuiDrawsFileBrowser())) ||
     activeTab === "commits" ||
     (activeTab === "changes" && !reviewSubView.showBrowser) ||
     activeTab === "logs";
@@ -1188,6 +1196,15 @@ export const ShowWorkspace = ({
       logsSource: activeTab === "logs" ? logsSource : null,
       logsKey,
       terminal: gpuiTerminal?.route ?? null,
+      fileBrowser:
+        activeTab === "overview" &&
+        showFileBrowserInCode &&
+        gpuiDrawsFileBrowser()
+          ? {
+              selectedFile: initialSelectedFileForBrowser,
+              expandedDir: initialExpandedDir,
+            }
+          : null,
     },
     handlers: {
       setTab: setActiveTab,
@@ -1221,6 +1238,7 @@ export const ShowWorkspace = ({
       showCommitted: committedToggle ? setShowCommittedChanges : undefined,
       startReview: handleStartAgentReview,
       sendReview: handleCreateAgentWithReview,
+      closeFileBrowser: () => setShowFileBrowserInCode(false),
       sendAgentComment: handleSendAgentReviewCommentToAgent,
       sendLogsToAgent: handleSendLogsToAgent,
       terminal: gpuiTerminal?.field,
@@ -1339,14 +1357,17 @@ export const ShowWorkspace = ({
       <div className="flex-1 overflow-auto">
         {activeTab === "overview" ? (
           showFileBrowserInCode ? (
-            <FileBrowser
-              workspace={workspace}
-              repoPath={effectiveRepoPath}
-              initialSelectedFile={initialSelectedFileForBrowser}
-              initialExpandedDir={initialExpandedDir}
-              onBack={() => setShowFileBrowserInCode(false)}
-              onCreateAgentWithReview={handleCreateAgentWithReview}
-            />
+            // GPUI draws it; React's would save a stale review behind it.
+            !gpuiDrawsCode && (
+              <FileBrowser
+                workspace={workspace}
+                repoPath={effectiveRepoPath}
+                initialSelectedFile={initialSelectedFileForBrowser}
+                initialExpandedDir={initialExpandedDir}
+                onBack={() => setShowFileBrowserInCode(false)}
+                onCreateAgentWithReview={handleCreateAgentWithReview}
+              />
+            )
           ) : (
             <div className="flex h-full">
               {/* LEFT: Files + README */}

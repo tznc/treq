@@ -1,5 +1,6 @@
 use std::{
   cell::RefCell,
+  collections::HashMap,
   rc::Rc,
   sync::{Arc, Mutex},
 };
@@ -90,7 +91,72 @@ struct FakeHost {
   failing: Vec<&'static str>,
   /// Workspaces the dialogs created.
   created: Mutex<Vec<crate::local_db::Workspace>>,
+  /// What the file browser reads: directory listings and file texts by
+  /// full path, and its kept review's comments JSON.
+  dirs: HashMap<String, Vec<crate::core::WorkspaceEntry>>,
+  file_texts: HashMap<String, String>,
+  browser_review: Mutex<Option<String>>,
   calls: Mutex<Vec<String>>,
+}
+
+impl file_browser_data::FileBrowserHost for FakeHost {
+  fn list_directory(&self, path: &str) -> Result<Vec<crate::core::WorkspaceEntry>, String> {
+    self.record(format!("read dir {path}"));
+    self
+      .dirs
+      .get(path)
+      .cloned()
+      .ok_or_else(|| format!("no dir {path}"))
+  }
+
+  fn read_file(&self, path: &str) -> Result<String, String> {
+    self.record(format!("read file {path}"));
+    self
+      .file_texts
+      .get(path)
+      .cloned()
+      .ok_or_else(|| format!("no file {path}"))
+  }
+
+  fn modified_at(&self, _: &str) -> Option<String> {
+    Some("2024-01-02T03:04:05Z".into())
+  }
+
+  fn load_browser_review(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Result<Option<crate::local_db::FileBrowserPendingReview>, String> {
+    self.record(format!("read browser review {workspace_id}"));
+    Ok(self.browser_review.lock().unwrap().clone().map(|comments| {
+      crate::local_db::FileBrowserPendingReview {
+        id: 1,
+        workspace_id,
+        comments,
+        summary_text: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+      }
+    }))
+  }
+
+  fn save_browser_review(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    comments: &str,
+    summary: Option<&str>,
+  ) -> Result<(), String> {
+    self.record(format!("save browser review {workspace_id} {summary:?}"));
+    *self.browser_review.lock().unwrap() = Some(comments.to_string());
+    Ok(())
+  }
+
+  fn clear_browser_review(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("clear browser review {workspace_id}"));
+    *self.browser_review.lock().unwrap() = None;
+    Ok(())
+  }
 }
 
 impl FakeHost {
@@ -5315,4 +5381,5 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
   }
 }
 
+mod file_browser;
 mod workspace_dialogs;

@@ -1,5 +1,4 @@
 use crate::local_db;
-use ignore::WalkBuilder;
 
 pub type DirectoryEntry = crate::core::WorkspaceEntry;
 
@@ -10,13 +9,6 @@ pub struct DirectoryBatchResult {
   pub entries: Vec<DirectoryEntry>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<String>,
-}
-
-fn modified_at_rfc3339(path: &str) -> Option<String> {
-  std::fs::metadata(path)
-    .ok()
-    .and_then(|metadata| metadata.modified().ok())
-    .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339())
 }
 
 #[cfg(test)]
@@ -87,63 +79,12 @@ pub fn write_agent_cli_files(
 
 #[tauri::command]
 pub fn get_file_modified_at(path: String) -> Result<Option<String>, String> {
-  if !std::path::Path::new(&path).exists() {
-    return Ok(None);
-  }
-
-  Ok(modified_at_rfc3339(&path))
+  Ok(crate::core::file_modified_at(&path))
 }
 
 #[tauri::command]
 pub fn list_directory(path: String) -> Result<Vec<DirectoryEntry>, String> {
-  use std::path::Path;
-
-  let base_path = Path::new(&path);
-  if !base_path.is_dir() {
-    return Err(format!("Directory does not exist: {}", path));
-  }
-  let mut files = Vec::new();
-
-  // Use ignore::WalkBuilder to respect .gitignore patterns
-  let walker = WalkBuilder::new(&path)
-    .max_depth(Some(1)) // Only immediate children
-    .hidden(false) // Show hidden files (except those in .gitignore)
-    .git_ignore(true) // Respect .gitignore patterns
-    .git_global(true) // Respect global gitignore
-    .git_exclude(true) // Respect .git/info/exclude
-    .parents(true) // Check parent directories for ignore files
-    .build();
-
-  for entry in walker.flatten() {
-    let entry_path = entry.path();
-
-    // Skip the base directory itself
-    if entry_path == base_path {
-      continue;
-    }
-
-    if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-      let is_dir = entry_path.is_dir();
-      files.push(DirectoryEntry {
-        name: name.to_string(),
-        path: entry_path.to_string_lossy().to_string(),
-        is_directory: is_dir,
-        modified_at: modified_at_rfc3339(&entry_path.to_string_lossy()),
-        submodule_pin: None,
-        submodule_synced: None,
-        status: None,
-      });
-    }
-  }
-
-  // Sort: directories first, then files
-  files.sort_by(|a, b| match (a.is_directory, b.is_directory) {
-    (true, false) => std::cmp::Ordering::Less,
-    (false, true) => std::cmp::Ordering::Greater,
-    _ => a.name.cmp(&b.name),
-  });
-
-  Ok(files)
+  crate::core::list_directory(&path)
 }
 
 #[tauri::command]

@@ -37,6 +37,8 @@ mod code;
 mod code_data;
 mod commits;
 mod commits_data;
+mod file_browser;
+mod file_browser_data;
 mod file_picker;
 mod highlight;
 mod logs;

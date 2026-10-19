@@ -73,6 +73,9 @@ beforeEach(() => {
   // React's workspace dialogs, which most tests drive;
   // gpui-workspace-dialogs.test.tsx turns GPUI's on.
   window.__TREQ_REACT_WORKSPACE_DIALOGS__ = true;
+  // React's file browser in the Code tab, which most tests drive;
+  // gpui-workspace.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_FILE_BROWSER__ = true;
   window.__TREQ_GPUI_SHELL__ = true;
 });
 afterEach(() => closeTestPtys(tauriTest.invoke));
