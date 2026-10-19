@@ -18,12 +18,15 @@ import { LinearIssuesSection } from "./LinearIssuesPanel";
 import { LinearProjectsSection } from "./LinearProjectsPanel";
 import { LinearReviewContext } from "./LinearAgentReview";
 import type { ReviewLaunch } from "../lib/agent-review-launch";
+import { type GpuiScreenAction, useGpuiScreen } from "../lib/gpui-screen";
 
 interface LinearPanelProps {
   repoPath: string;
   onStartPromptFromIssue?: (issue: LinearIssueAttachment) => void;
   /** Starts an agent session that reviews an issue, project or document. */
   onStartAgentReview?: (launch: ReviewLaunch) => Promise<void>;
+  /** GPUI draws the panel and reads Linear itself (local repositories). */
+  gpui?: boolean;
 }
 
 type MainSection = "issues" | "projects";
@@ -32,7 +35,11 @@ export const LinearPanel: React.FC<LinearPanelProps> = ({
   repoPath,
   onStartPromptFromIssue,
   onStartAgentReview,
+  gpui = false,
 }) => {
+  useGpuiScreen(gpui ? { kind: "linear", repoPath } : null, (action) =>
+    handleGpuiLinearAction(action, onStartPromptFromIssue, onStartAgentReview),
+  );
   const [section, setSection] = useState<MainSection>("issues");
   const [selectedTeam, setSelectedTeam] = useState<string | undefined>(
     undefined,
@@ -120,3 +127,21 @@ export const LinearPanel: React.FC<LinearPanelProps> = ({
     </LinearReviewContext.Provider>
   );
 };
+
+/** What GPUI's Linear view hands back: the sessions only Dashboard starts. */
+function handleGpuiLinearAction(
+  action: GpuiScreenAction,
+  onStartPromptFromIssue: LinearPanelProps["onStartPromptFromIssue"],
+  onStartAgentReview: LinearPanelProps["onStartAgentReview"],
+): void {
+  if (action.kind !== "field") return;
+  if (action.field === "linear.kickoff") {
+    onStartPromptFromIssue?.(action.value as unknown as LinearIssueAttachment);
+  } else if (action.field === "linear.startReview") {
+    const { prompt, agent } = action.value as {
+      prompt: string;
+      agent: string | null;
+    };
+    void onStartAgentReview?.({ prompt, agent: agent ?? undefined });
+  }
+}

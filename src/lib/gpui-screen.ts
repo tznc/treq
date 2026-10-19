@@ -192,12 +192,24 @@ interface GpuiMergePreviewScreen {
   workspaceId: number;
 }
 
+/**
+ * LinearPanel, which GPUI reads from the backend's Linear client
+ * (src-tauri/src/gpui_shell/screen/linear.rs). It sets "linear.kickoff" to
+ * an issue to start a session for, and "linear.startReview" to the review
+ * prompt and agent to run.
+ */
+interface GpuiLinearScreen {
+  kind: "linear";
+  repoPath: string;
+}
+
 export type GpuiScreenView =
   /** GPUI reads its data from the backend and opens repositories itself. */
   | { kind: "onboarding" }
   | GpuiSettingsScreen
   | GpuiWorkspaceScreen
-  | GpuiMergePreviewScreen;
+  | GpuiMergePreviewScreen
+  | GpuiLinearScreen;
 
 /** `CloudWorkspaceCard`'s state, which GPUI draws in the settings page and the remote setup dialog. */
 export type GpuiCloudState = NonNullable<GpuiAccountState["cloud"]>;

@@ -3723,6 +3723,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {viewMode === "linear" && linearIntegrationEnabled && (
                     <LinearPanel
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       onStartPromptFromIssue={(issue) =>
                         handleStartPromptFromIssue(issueFromLinear(issue))
                       }

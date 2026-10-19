@@ -9,7 +9,7 @@
 
 mod review;
 pub(in crate::gpui_shell::screen) mod search;
-mod threads;
+pub(super) mod threads;
 
 use std::{
   cell::RefCell,
@@ -1069,6 +1069,7 @@ impl ChangesView {
       NativeMenuItem::Submenu {
         text: "Open in...".into(),
         icon: Some(MenuIcon::FolderOpen),
+        detail: None,
         items: open,
       },
     ];
@@ -1092,6 +1093,7 @@ impl ChangesView {
       items.push(NativeMenuItem::Submenu {
         text: "Move to workspace...".into(),
         icon: Some(MenuIcon::ArrowRightLeft),
+        detail: None,
         items: targets
           .into_iter()
           .map(|target| {

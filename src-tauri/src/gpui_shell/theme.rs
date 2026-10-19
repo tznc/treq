@@ -56,6 +56,7 @@ icons! {
   ICON_FILE_DIFF => "file-diff",
   ICON_FILE_TEXT => "file-text",
   ICON_FLASK => "flask-conical",
+  ICON_FILTER => "funnel",
   ICON_FOLDER => "folder",
   ICON_FOLDER_GIT => "folder-git-2",
   ICON_FOLDER_OPEN => "folder-open",
