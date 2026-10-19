@@ -7,6 +7,7 @@
 //!
 //! [`changes_data`]: super::changes_data
 
+pub(in crate::gpui_shell::screen) mod pr;
 mod review;
 pub(in crate::gpui_shell::screen) mod search;
 pub(super) mod threads;
@@ -147,6 +148,8 @@ pub struct ChangesView {
   pub(super) search: search::Search,
   /// GitHub review threads and the review agent's comments.
   pub(super) threads: threads::Threads,
+  /// The pull request reviewed instead of a workspace (`PrReviewPage`).
+  pub(super) pr: Option<pr::PrMode>,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -166,8 +169,24 @@ impl ChangesView {
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
+    let mut this = Self::blank(parent, options, host, react, popups, dark);
+    this.hydrate_review(cx);
+    this.load(cx);
+    this.watch_threads(cx);
+    this.load_pr(cx);
+    this
+  }
+
+  fn blank(
+    parent: Parent,
+    options: Options,
+    host: Host,
+    react: ActionSink,
+    popups: PopupSink,
+    dark: bool,
+  ) -> Self {
     let editors = host.editor_apps();
-    let mut this = Self {
+    Self {
       host,
       react,
       tips: Tooltips::new(popups.clone(), dark),
@@ -206,13 +225,9 @@ impl ChangesView {
       review: review::Review::default(),
       search: search::Search::default(),
       threads: threads::Threads::default(),
+      pr: None,
       _subscriptions: Vec::new(),
-    };
-    this.hydrate_review(cx);
-    this.load(cx);
-    this.watch_threads(cx);
-    this.load_pr(cx);
-    this
+    }
   }
 
   pub fn set_parent(
@@ -262,6 +277,19 @@ impl ChangesView {
       self.load(cx);
     }
     cx.notify();
+  }
+
+  pub(super) fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
+    if self.dark != dark {
+      self.dark = dark;
+      self.tips.dark = dark;
+      cx.notify();
+    }
+  }
+
+  /// Brings `path`'s diff into view (`scrollToFile`).
+  pub(super) fn scroll_to_path(&mut self, path: &str, cx: &mut Context<Self>) {
+    self.show_file(path, cx);
   }
 
   /// A dialog covers the whole window.
@@ -369,6 +397,10 @@ impl ChangesView {
 
   /// `loadChangedFiles`: one read at a time, a request meanwhile reruns it.
   fn load(&mut self, cx: &mut Context<Self>) {
+    if self.pr.is_some() {
+      self.read_pr_diff(cx);
+      return;
+    }
     if self.loading {
       self.reload = true;
       return;
@@ -902,6 +934,15 @@ impl ChangesView {
   fn toggle_viewed(&mut self, path: &str, cx: &mut Context<Self>) {
     let workspace = self.parent.working_directory();
     let path = path.to_string();
+    // A pull request's viewed files are kept only while the screen shows.
+    if self.read_only() {
+      if self.viewed.remove(&path).is_none() {
+        self.viewed.insert(path.clone(), String::new());
+        self.collapsed_files.insert(path);
+      }
+      cx.notify();
+      return;
+    }
     if self.viewed.remove(&path).is_some() {
       self.collapsed_files.remove(&path);
       self.run(
@@ -928,6 +969,10 @@ impl ChangesView {
 
   /// `handleExpandContext`: twenty more lines above or below a hunk.
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, cx: &mut Context<Self>) {
+    // The PR's files are not checked out.
+    if self.read_only() {
+      return;
+    }
     let Some(hunk) = self.hunks.get(path).and_then(|d| d.hunks.get(h)).cloned() else {
       return;
     };
@@ -1240,6 +1285,7 @@ impl Render for ChangesView {
     self.tips.sync(cx);
     self.ensure_input(window, cx);
     self.ensure_review_inputs(window, cx);
+    self.ensure_reply_inputs(window, cx);
     self.watch_find_key(window, cx);
     self.ensure_search_input(window, cx);
     self.place_threads();
@@ -1256,7 +1302,11 @@ impl Render for ChangesView {
       .text_color(p.foreground)
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "a" && (k.modifiers.platform || k.modifiers.control) && !k.modifiers.shift {
+        if k.key == "a"
+          && (k.modifiers.platform || k.modifiers.control)
+          && !k.modifiers.shift
+          && !view.read_only()
+        {
           let files = view.files().to_vec();
           view.staging.select_all(&files);
           cx.notify();
@@ -1272,7 +1322,7 @@ impl Render for ChangesView {
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
-    let sidebar = self.sidebar(&p, cx);
+    let sidebar = (!self.read_only()).then(|| self.sidebar(&p, cx));
     let main = div()
       .flex_1()
       .flex()
@@ -1293,7 +1343,7 @@ impl Render for ChangesView {
     let finish = self.finish_popover(&p, cx);
     let review_dialog = self.review_dialog(window, &p, cx);
     root
-      .child(sidebar)
+      .children(sidebar)
       .child(main)
       .children(dialog)
       .children(finish)
@@ -2151,6 +2201,15 @@ impl ChangesView {
   /// `DiffContentArea`.
   fn content(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let area = div().flex_1().overflow_hidden().relative();
+    if let Some(err) = self.pr.as_ref().and_then(|pr| pr.error.clone()) {
+      return area.child(
+        ui::text(div(), TextSize::Sm)
+          .debug_selector(|| "pr-diff-error".into())
+          .p_6()
+          .text_color(p.destructive)
+          .child(format!("Failed to load the PR diff: {err}")),
+      );
+    }
     let Some(snapshot) = self.snapshot.clone() else {
       let card = |p: &Palette| {
         div()
@@ -2547,7 +2606,7 @@ impl ChangesView {
       );
     let accent = p.accent;
     let mut right = div().flex().items_center().gap_2();
-    if !committed {
+    if !committed && !self.read_only() {
       right = right.child(
         self.tip(
           format!("add-file-comment-tip-{path}"),
@@ -2663,7 +2722,7 @@ impl ChangesView {
           ),
       );
     }
-    if !committed {
+    if !committed && !self.read_only() {
       let key = format!("more-{path}");
       let (file, anchor) = (path.to_string(), key.clone());
       right = right.child(

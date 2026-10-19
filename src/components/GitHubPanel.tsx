@@ -9,7 +9,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useState } from "react";
-import useSWR from "swr";
 import { useLocation } from "wouter";
 import {
   useDequeueBranches,
@@ -25,23 +24,22 @@ import {
   githubNewItemPath,
   githubTabPath,
 } from "../lib/githubRoutes";
-import {
-  MERGE_QUEUE_HISTORY_PAGE_SIZE,
-  type QueueEntry,
-} from "../lib/merge-queue-stacks";
+import { MERGE_QUEUE_HISTORY_PAGE_SIZE } from "../lib/merge-queue-stacks";
 import {
   EMPTY_PR_FILTERS,
   filterPrs,
   type PrFilters,
 } from "../lib/github-pr-filters";
 import type { GitHubIssueAttachment } from "../lib/promptAttachments";
-import { supabase } from "../lib/supabase";
-import { pollMs } from "../lib/swr-cache";
 import { cn } from "../lib/utils";
 import { useAuthStore } from "../stores/authStore";
 import { isProSubscription } from "../lib/subscription";
 import { CreateIssueForm, IssueDetailPanel } from "./github-panel/IssueDetail";
 import { MergeQueueTab } from "./github-panel/MergeQueueTab";
+import {
+  useGpuiMergeQueue,
+  useQueueEntries,
+} from "./github-panel/merge-queue-panel";
 import { NewPrDialog } from "./github-panel/NewPrDialog";
 import { PrFilterMenu, PrSearchBar } from "./github-panel/PrFilterBar";
 import { PrDetailPanel } from "./github-panel/PrDetail";
@@ -70,7 +68,8 @@ interface GitHubPanelProps {
   onStartPromptFromIssue?: (issue: GitHubIssueAttachment) => void;
   /** Navigate to a workspace after creating/opening one from a PR. */
   onOpenWorkspace?: (workspaceId: number) => void;
-  /** GPUI may draw the Issues and Pull Requests tabs (a local repository). */
+  /** GPUI may draw the Issues and Pull Requests tabs (a local repository)
+   * and the Merge Queue tab (screen/merge_queue.rs). */
   gpui?: boolean;
 }
 
@@ -149,26 +148,13 @@ export const GitHubPanel: React.FC<GitHubPanelProps> = ({
     data: queueEntries = [],
     isLoading: queueLoading,
     mutate: refetchQueue,
-  } = useSWR(
+  } = useQueueEntries(
     FEATURES.mergeQueue &&
       queueEnabled === true &&
-      repoFullName &&
+      !!repoFullName &&
       activeTab === "merge-queue" &&
-      isPro
-      ? ["repo-branch-queue-statuses-panel", repoFullName]
-      : null,
-    async () => {
-      const { data, error } = await supabase.rpc(
-        "get_repo_branch_queue_statuses",
-        { p_repo_full_name: repoFullName },
-      );
-      if (error) throw error;
-      return ((data ?? []) as QueueEntry[]).slice().sort((a, b) => {
-        if (a.position !== b.position) return a.position - b.position;
-        return a.branch_name.localeCompare(b.branch_name);
-      });
-    },
-    { refreshInterval: pollMs(30_000) },
+      isPro,
+    repoFullName,
   );
 
   const isListLoading = activeTab === "issues" ? issuesLoading : prsLoading;
@@ -215,6 +201,21 @@ export const GitHubPanel: React.FC<GitHubPanelProps> = ({
     else if (activeTab === "prs") void refetchPrs();
     else void refetchQueue();
   }
+
+  useGpuiMergeQueue(gpui && activeTab === "merge-queue", {
+    repoPath,
+    isPro,
+    queueLoading,
+    queueEntries,
+    dequeueBranches,
+    showMergedHistory,
+    setShowMergedHistory,
+    historyLimit,
+    setHistoryLimit,
+    onTabChange: handleTabChange,
+    onRefresh: handleRefresh,
+    onOpenSettings,
+  });
 
   // GPUI draws the tab over the webview; a webview dialog (NewPrDialog)
   // would bring the webview back over it.

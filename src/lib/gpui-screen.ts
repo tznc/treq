@@ -5,6 +5,12 @@ import { useThemeStore } from "../stores/themeStore";
 import { gpuiModalUpdate, gpuiScreenUpdate } from "./api";
 import type { SshEndpoint } from "./api-types-remote";
 import { isGpuiShellHost } from "./gpui-shell";
+import type {
+  GpuiGithubScreen,
+  GpuiLinearScreen,
+  GpuiMergeQueueScreen,
+  GpuiPrReviewScreen,
+} from "./gpui-screen-panels";
 import { useWindowModalBackdrop } from "./window-modals";
 
 /**
@@ -205,38 +211,6 @@ interface GpuiMergePreviewScreen {
   workspaceId: number;
 }
 
-/**
- * LinearPanel, which GPUI reads from the backend's Linear client
- * (src-tauri/src/gpui_shell/screen/linear.rs). It sets "linear.kickoff" to
- * an issue to start a session for, and "linear.startReview" to the review
- * prompt and agent to run.
- */
-interface GpuiLinearScreen {
-  kind: "linear";
-  repoPath: string;
-}
-
-/**
- * GitHubPanel's Issues and Pull Requests tabs, which GPUI reads and changes
- * through the backend itself (src-tauri/src/gpui_shell/screen/github.rs).
- * React says what the URL route shows, and GPUI hands back navigation as
- * `github.*` presses (`useGpuiGithubScreen`).
- */
-interface GpuiGithubScreen {
-  kind: "github";
-  repoPath: string;
-  tab: "issues" | "prs";
-  filter: "draft" | "open" | "closed" | "all";
-  /** The issue or pull request whose detail shows. */
-  selected: number | null;
-  /** The new issue form or new pull request dialog is open. */
-  creating: boolean;
-  /** The Merge Queue tab, when the build offers it; React draws that tab. */
-  mergeQueue: { pro: boolean } | null;
-  /** Workflow runs started from this window (`useRunningCheckKeys`). */
-  runningChecks: string[];
-}
-
 export type GpuiScreenView =
   /** GPUI reads its data from the backend and opens repositories itself. */
   | { kind: "onboarding" }
@@ -244,7 +218,9 @@ export type GpuiScreenView =
   | GpuiWorkspaceScreen
   | GpuiMergePreviewScreen
   | GpuiLinearScreen
-  | GpuiGithubScreen;
+  | GpuiGithubScreen
+  | GpuiPrReviewScreen
+  | GpuiMergeQueueScreen;
 
 /** `CloudWorkspaceCard`'s state, which GPUI draws in the settings page and the remote setup dialog. */
 export type GpuiCloudState = NonNullable<GpuiAccountState["cloud"]>;
@@ -389,7 +365,7 @@ export type GpuiScreenAction =
   | {
       kind: "field";
       field: string;
-      value: string | number | boolean | Record<string, unknown>;
+      value: string | number | boolean | unknown[] | Record<string, unknown>;
     }
   /** A slider released at `value`. */
   | { kind: "commit"; field: string; value: number }

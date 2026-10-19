@@ -127,6 +127,7 @@ icons! {
   ICON_LIST_FILTER => "list-filter",
   ICON_SPARKLES => "sparkles",
   ICON_SCROLL_TEXT => "scroll-text",
+  ICON_ROCKET => "rocket",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.

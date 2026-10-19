@@ -76,18 +76,21 @@ impl ChangesView {
     self.run(
       move |host, parent| host.review_threads(&parent.repo_path, &branch),
       |view, result, _| match result {
-        Ok(threads) => {
-          for t in &threads {
-            if view.threads.seen.insert(t.id.clone()) && t.is_resolved {
-              view.threads.collapsed.insert(t.id.clone());
-            }
-          }
-          view.threads.github = threads;
-        }
+        Ok(threads) => view.set_github_threads(threads),
         Err(err) => log::warn!("Failed to read review threads: {err}"),
       },
       cx,
     );
+  }
+
+  /// Resolved threads start folded the first time they are seen.
+  pub(super) fn set_github_threads(&mut self, threads: Vec<GhReviewThread>) {
+    for t in &threads {
+      if self.threads.seen.insert(t.id.clone()) && t.is_resolved {
+        self.threads.collapsed.insert(t.id.clone());
+      }
+    }
+    self.threads.github = threads;
   }
 
   fn read_agent(&mut self, cx: &mut Context<Self>) {
@@ -401,7 +404,7 @@ impl ChangesView {
       for comment in &thread.comments {
         body = body.child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
       }
-      card = card.child(body);
+      card = card.child(body.children(self.thread_reply(thread, p, cx)));
     }
     card.into_any_element()
   }

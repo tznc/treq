@@ -877,11 +877,21 @@ pub fn diff_summary(branch: Option<&str>, files: usize) -> String {
 /// `buildReviewPrompt`: the repository's prompt when set, else the
 /// built-in one, with its placeholders filled.
 pub fn review_prompt(custom: Option<&str>, target_id: &str, summary: &str) -> String {
+  review_prompt_for(custom, REVIEW_TARGET, target_id, summary)
+}
+
+/// [`review_prompt`] for another target type, as a PR review's `github_pr`.
+pub fn review_prompt_for(
+  custom: Option<&str>,
+  target_type: &str,
+  target_id: &str,
+  summary: &str,
+) -> String {
   let template = custom
     .filter(|c| !c.trim().is_empty())
     .unwrap_or(DEFAULT_REVIEW_PROMPT);
   template
-    .replace("{target_type}", REVIEW_TARGET)
+    .replace("{target_type}", target_type)
     .replace("{target_id}", target_id)
     .replace("{workspace_id}", target_id)
     .replace("{diff_summary}", summary)

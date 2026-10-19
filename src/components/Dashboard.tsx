@@ -3671,6 +3671,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {viewMode === "github" && prReviewRoute && (
                     <PrReviewScreen
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       prNumber={prReviewRoute.number}
                       onClose={() =>
                         navigate(

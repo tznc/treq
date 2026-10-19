@@ -27,6 +27,7 @@ import {
   draftToLineComment,
   parseUnifiedDiff,
 } from "../../lib/pr-review";
+import { useGpuiScreen } from "../../lib/gpui-screen";
 import { cn, getFileName } from "../../lib/utils";
 import { pollMs } from "../../lib/swr-cache";
 import { useDiffSettingsStore } from "../../stores/diffSettingsStore";
@@ -51,6 +52,8 @@ interface PrReviewScreenProps {
   onClose: () => void;
   /** Opens an agent terminal in the home repo seeded with `prompt`. */
   onStartAgentReview?: (prompt: string, agent?: string) => Promise<void>;
+  /** GPUI draws the screen over this one (screen/pr_review.rs). */
+  gpui?: boolean;
 }
 
 interface PrReviewPageProps extends PrReviewScreenProps {
@@ -60,6 +63,33 @@ interface PrReviewPageProps extends PrReviewScreenProps {
 /** Resolves the repo's GitHub remote, then shows {@link PrReviewPage}. */
 export function PrReviewScreen(props: PrReviewScreenProps) {
   const { data: remoteInfo } = useGitRemoteInfo(props.repoPath);
+  const { addToast } = useToast();
+  const { onClose, onStartAgentReview } = props;
+  useGpuiScreen(
+    props.gpui
+      ? { kind: "prReview", repoPath: props.repoPath, prNumber: props.prNumber }
+      : null,
+    (action) => {
+      if (action.kind === "press" && action.id === "prReview.close") onClose();
+      if (
+        action.kind === "field" &&
+        action.field === "prReview.startAgentReview" &&
+        onStartAgentReview
+      ) {
+        const { prompt, agent } = action.value as {
+          prompt: string;
+          agent?: string | null;
+        };
+        onStartAgentReview(prompt, agent ?? undefined).catch((error) =>
+          addToast({
+            title: "Failed to start review",
+            description: error instanceof Error ? error.message : String(error),
+            type: "error",
+          }),
+        );
+      }
+    },
+  );
   if (!remoteInfo?.full_name) {
     return (
       <div className="h-full bg-background" data-testid="pr-review-page" />
