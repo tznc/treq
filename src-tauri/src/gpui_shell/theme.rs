@@ -238,6 +238,8 @@ pub struct Palette {
   pub ring: Hsla,
   /// Tailwind green-500, a passed check.
   pub success: Hsla,
+  /// Picks the Prism theme for highlighted code: vsc-dark-plus or vs.
+  pub dark: bool,
 }
 
 /// A CSS `hsl(h s% l%)` token.
@@ -277,6 +279,7 @@ pub fn palette(dark: bool) -> Palette {
       input: token(0., 0., 25.),
       ring: token(211., 100., 55.),
       success: rgb(0x22c55e).into(),
+      dark: true,
     }
   } else {
     Palette {
@@ -309,6 +312,7 @@ pub fn palette(dark: bool) -> Palette {
       input: token(220., 13., 91.),
       ring: token(211., 100., 50.),
       success: rgb(0x22c55e).into(),
+      dark: false,
     }
   }
 }

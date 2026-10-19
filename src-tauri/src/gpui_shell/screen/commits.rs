@@ -32,7 +32,7 @@ use super::{
     line_kind, line_label, line_numbers, resolve_session_name, revisions, selection, CommentTarget,
     CommitsHost, History, Host, LineKind, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
   },
-  ActionSink, ScreenAction,
+  highlight, ActionSink, ScreenAction,
 };
 use crate::{
   gpui_shell::{
@@ -2298,6 +2298,7 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> Div {
     let numbers = line_numbers(hunk);
+    let language = highlight::language(path);
     let selected: HashSet<LineRef> = self
       .selection
       .as_ref()
@@ -2413,7 +2414,11 @@ impl CommitsView {
               .min_w_0()
               .overflow_hidden()
               .whitespace_nowrap()
-              .child(line.get(1..).unwrap_or("").to_string()),
+              .child(highlight::styled(
+                line.get(1..).unwrap_or(""),
+                language,
+                p.dark,
+              )),
           ),
       );
       if comment_at == Some(at) {

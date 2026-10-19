@@ -27,6 +27,7 @@ mod code_data;
 mod commits;
 mod commits_data;
 mod file_picker;
+mod highlight;
 mod merge;
 mod onboarding;
 mod settings;
