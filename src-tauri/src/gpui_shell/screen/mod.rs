@@ -39,6 +39,8 @@ mod commits;
 mod commits_data;
 mod file_picker;
 mod highlight;
+mod linear;
+mod linear_data;
 mod logs;
 mod logs_data;
 mod merge;
@@ -97,6 +99,8 @@ pub enum View {
   Workspace(Box<workspace_data::Route>),
   /// The commits and files a workspace merges, and the merge.
   MergePreview(merge::Route),
+  /// The repository's Linear issues and projects.
+  Linear(linear_data::Route),
 }
 
 /// What a click on a screen asks React to do, tagged by `kind`.
@@ -137,6 +141,7 @@ pub trait Host:
   + modal::ModalsHost
   + remote_data::RemoteHost
   + workspace_dialog_data::WorkspaceDialogHost
+  + linear_data::LinearHost
 {
 }
 
@@ -148,6 +153,7 @@ impl<T> Host for T where
     + modal::ModalsHost
     + remote_data::RemoteHost
     + workspace_dialog_data::WorkspaceDialogHost
+    + linear_data::LinearHost
 {
 }
 
@@ -165,6 +171,7 @@ pub struct Screen {
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
   merge: Option<Entity<merge::MergeView>>,
+  linear: Option<Entity<linear::LinearView>>,
   /// The dialog drawn over the screen, whichever it is, and its views.
   modal: Option<Modal>,
   agent_prompt: Option<Entity<modal::agent_prompt::AgentPromptView>>,
@@ -194,6 +201,7 @@ impl Screen {
       settings: None,
       workspace: None,
       merge: None,
+      linear: None,
       modal: None,
       agent_prompt: None,
       prompt_history: None,
@@ -255,6 +263,9 @@ impl Render for Screen {
     }
     if !matches!(self.snapshot.view, View::MergePreview(_)) {
       self.merge = None;
+    }
+    if !matches!(self.snapshot.view, View::Linear(_)) {
+      self.linear = None;
     }
     match &self.snapshot.modal {
       None => self.workspace_modal = None,
@@ -343,6 +354,21 @@ impl Render for Screen {
             let (host, sink) = (self.host.clone(), self.sink.clone());
             let view = cx.new(|cx| merge::MergeView::new(route, host, sink, dark, cx));
             self.merge = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Linear(route) => {
+        let route = route.clone();
+        match &self.linear {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view = cx.new(|cx| linear::LinearView::new(route, host, sink, dark, popups, cx));
+            self.linear = Some(view.clone());
             view.into_any_element()
           }
         }

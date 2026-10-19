@@ -53,6 +53,10 @@ const ITEM_ICON: f32 = 16.;
 const ITEM_ICON_GAP: f32 = 8.;
 /// `my-1 h-px`.
 const SEPARATOR_HEIGHT: f32 = 9.;
+/// A radio item's `pl-8`, with its dot in a `left-2 h-4 w-4` box.
+const RADIO_INSET: f32 = 32.;
+/// `ml-2` before a submenu row's detail.
+const DETAIL_GAP: f32 = 8.;
 /// The menu box: `p-1 border min-w-[8rem]`.
 const MENU_PADDING: f32 = 4.;
 const MENU_MIN_WIDTH: f32 = 128.;
@@ -155,14 +159,20 @@ pub enum NativeMenuItem {
     text: String,
     icon: Option<MenuIcon>,
     destructive: bool,
+    /// A `DropdownMenuRadioItem`, picked or not.
+    radio: Option<bool>,
     on_select: Pick,
   },
   Separator,
   Submenu {
     text: String,
     icon: Option<MenuIcon>,
+    /// Muted text after `text`, such as the value a filter is set to.
+    detail: Option<String>,
     items: Vec<NativeMenuItem>,
   },
+  /// `DropdownMenuLabel`: a heading row nothing picks.
+  Label(String),
 }
 
 impl NativeMenuItem {
@@ -171,8 +181,32 @@ impl NativeMenuItem {
       text: text.into(),
       icon: None,
       destructive: false,
+      radio: None,
       on_select: Rc::new(on_select),
     }
+  }
+
+  /// A `DropdownMenuSub`: `items` open beside a row reading `text`, then
+  /// `detail` muted.
+  pub fn submenu(
+    text: impl Into<String>,
+    detail: Option<String>,
+    items: Vec<NativeMenuItem>,
+  ) -> Self {
+    NativeMenuItem::Submenu {
+      text: text.into(),
+      icon: None,
+      detail,
+      items,
+    }
+  }
+
+  /// Draws the item as a radio item, with its dot when `checked`.
+  pub fn radio(mut self, checked: bool) -> Self {
+    if let NativeMenuItem::Item { radio, .. } = &mut self {
+      *radio = Some(checked);
+    }
+    self
   }
 
   pub fn icon(mut self, value: MenuIcon) -> Self {
@@ -180,7 +214,7 @@ impl NativeMenuItem {
       NativeMenuItem::Item { icon, .. } | NativeMenuItem::Submenu { icon, .. } => {
         *icon = Some(value)
       }
-      NativeMenuItem::Separator => {}
+      NativeMenuItem::Separator | NativeMenuItem::Label(_) => {}
     }
     self
   }
@@ -206,6 +240,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
           text,
           icon,
           destructive,
+          radio,
           on_select,
         } => {
           let id = *next;
@@ -216,12 +251,20 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
             text,
             icon,
             destructive,
+            radio,
           }
         }
         NativeMenuItem::Separator => MenuEntry::Separator,
-        NativeMenuItem::Submenu { text, icon, items } => MenuEntry::Submenu {
+        NativeMenuItem::Label(text) => MenuEntry::Label { text },
+        NativeMenuItem::Submenu {
           text,
           icon,
+          detail,
+          items,
+        } => MenuEntry::Submenu {
+          text,
+          icon,
+          detail,
           items: build(items, next),
         },
       })
@@ -302,13 +345,23 @@ pub enum MenuEntry {
     icon: Option<MenuIcon>,
     #[serde(default)]
     destructive: bool,
+    /// A radio item (`pl-8`, its dot drawn when `true`).
+    #[serde(default)]
+    radio: Option<bool>,
   },
   Separator,
   Submenu {
     text: String,
     #[serde(default)]
     icon: Option<MenuIcon>,
+    /// Muted `text-xs` after the text (`ml-2`).
+    #[serde(default)]
+    detail: Option<String>,
     items: Vec<MenuEntry>,
+  },
+  /// `DropdownMenuLabel`: `px-2 py-1.5 text-sm font-semibold`.
+  Label {
+    text: String,
   },
 }
 
@@ -453,12 +506,25 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
 fn entry_width(cx: &App, entry: &MenuEntry) -> f32 {
   let (text, icon, submenu) = match entry {
     MenuEntry::Separator => return 0.,
+    MenuEntry::Label { text } => {
+      return ITEM_PADDING_X * 2. + weighted_text_width(cx, text, gpui::FontWeight::SEMIBOLD)
+    }
     MenuEntry::Item { text, icon, .. } => (text, icon, false),
     MenuEntry::Submenu { text, icon, .. } => (text, icon, true),
   };
   let mut width = ITEM_PADDING_X * 2. + text_width(cx, text, theme::SANS_FONT);
   if icon.is_some() {
     width += ITEM_ICON + ITEM_ICON_GAP;
+  }
+  if let MenuEntry::Item { radio: Some(_), .. } = entry {
+    width += RADIO_INSET - ITEM_PADDING_X;
+  }
+  if let MenuEntry::Submenu {
+    detail: Some(detail),
+    ..
+  } = entry
+  {
+    width += DETAIL_GAP + text_width_at(cx, detail, theme::SANS_FONT, LIST_ITEM_SIZE);
   }
   if submenu {
     width += text_width(cx, "›", theme::SANS_FONT);
@@ -757,11 +823,22 @@ impl PopupView {
           .h_px()
           .bg(palette.muted)
           .into_any_element(),
+        MenuEntry::Label { text } => div()
+          .flex()
+          .flex_none()
+          .items_center()
+          .h(px(ITEM_HEIGHT))
+          .px(px(ITEM_PADDING_X))
+          .font_weight(gpui::FontWeight::SEMIBOLD)
+          .whitespace_nowrap()
+          .child(SharedString::from(text.clone()))
+          .into_any_element(),
         MenuEntry::Item {
           id,
           text,
           icon,
           destructive,
+          radio,
         } => {
           let id = *id;
           let color = if *destructive {
@@ -771,6 +848,20 @@ impl PopupView {
           };
           menu_row(("item", index), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
+            .when_some(*radio, |row, checked| {
+              row.relative().pl(px(RADIO_INSET)).child(
+                div()
+                  .absolute()
+                  .left(px(ITEM_PADDING_X))
+                  .size_4()
+                  .flex()
+                  .items_center()
+                  .justify_center()
+                  .when(checked, |this| {
+                    this.child(div().size_2().rounded_full().bg(color))
+                  }),
+              )
+            })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
               if *hovered {
                 this.set_open_submenu(None, cx);
@@ -785,7 +876,12 @@ impl PopupView {
             }))
             .into_any_element()
         }
-        MenuEntry::Submenu { text, icon, items } => {
+        MenuEntry::Submenu {
+          text,
+          icon,
+          detail,
+          items,
+        } => {
           let items = items.clone();
           menu_row(
             ("submenu", index),
@@ -796,6 +892,16 @@ impl PopupView {
             open_submenu == Some(index),
           )
           .debug_selector(move || format!("menu-submenu-{index}"))
+          .when_some(detail.clone(), |row, detail| {
+            row.child(
+              div()
+                .ml(px(DETAIL_GAP))
+                .text_size(px(LIST_ITEM_SIZE))
+                .text_color(palette.muted_foreground)
+                .whitespace_nowrap()
+                .child(detail),
+            )
+          })
           .child(div().ml_auto().child("›"))
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             if *hovered && this.content_open_submenu() != Some(index) {
@@ -1755,14 +1861,51 @@ mod tests {
       MenuEntry::Submenu {
         text: "Open in...".into(),
         icon: Some(MenuIcon::FolderOpen),
+        detail: None,
         items: vec![MenuEntry::Item {
           id: 2,
           text: "Open in Zed".into(),
           icon: None,
           destructive: false,
+          radio: None,
         }],
       }
     );
+    assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
+  }
+
+  #[test]
+  fn builds_labels_radio_items_and_submenu_details() {
+    let entries = native_entries(vec![
+      NativeMenuItem::Label("Filter by".into()),
+      NativeMenuItem::Separator,
+      NativeMenuItem::submenu(
+        "Assignee",
+        Some("Ada".into()),
+        vec![
+          NativeMenuItem::item("Any", |_| {}).radio(false),
+          NativeMenuItem::item("Ada", |_| {}).radio(true),
+        ],
+      ),
+    ]);
+    assert_eq!(
+      entries[0],
+      MenuEntry::Label {
+        text: "Filter by".into()
+      }
+    );
+    let MenuEntry::Submenu { detail, items, .. } = &entries[2] else {
+      panic!("a submenu");
+    };
+    assert_eq!(detail.as_deref(), Some("Ada"));
+    let radios: Vec<_> = items
+      .iter()
+      .map(|item| match item {
+        MenuEntry::Item { radio, .. } => *radio,
+        _ => None,
+      })
+      .collect();
+    assert_eq!(radios, [Some(false), Some(true)]);
     assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
   }
 }

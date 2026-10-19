@@ -652,7 +652,11 @@ fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl
 }
 
 /// "Suggested change", as a diff against the lines it replaces.
-fn suggestion_box(original: Option<&str>, suggested: &str, p: &Palette) -> impl IntoElement {
+pub(in crate::gpui_shell::screen) fn suggestion_box(
+  original: Option<&str>,
+  suggested: &str,
+  p: &Palette,
+) -> impl IntoElement {
   let header = ui::text(div(), TextSize::Xs)
     .px_2()
     .py_1()
