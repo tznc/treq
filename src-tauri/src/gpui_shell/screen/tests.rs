@@ -2678,6 +2678,17 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("agent-review-comment-count"));
+  h.click("agent-resolve-ag");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("agent-review-comment-count"));
+}
+
+#[gpui::test]
 fn changes_tab_applies_an_agent_suggestion_and_reads_again(cx: &mut TestAppContext) {
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(Some("b and c"))];

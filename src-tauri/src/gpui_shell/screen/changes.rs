@@ -2133,6 +2133,7 @@ impl ChangesView {
         .bg(p.muted.opacity(0.8))
         .border_b_1()
         .border_color(p.border)
+        .children(self.agent_count())
         .child(self.start_review_button(p, cx))
         .into_any_element()
     };

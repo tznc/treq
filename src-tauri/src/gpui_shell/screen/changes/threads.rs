@@ -10,7 +10,7 @@ use super::*;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{line_at, Pending, Quote, Side},
+    changes_review::{count_label, line_at, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, original_text, place_threads, preview, suggestion_diff, Placed,
       RowKind,
@@ -204,6 +204,26 @@ impl ChangesView {
   // Drawing.
 
   /// What a diff line carries from others: agent comments, then threads.
+  /// `ReviewActionBar`'s count of the open local agent comments.
+  pub(super) fn agent_count(&self) -> Option<Div> {
+    let open = self
+      .threads
+      .agent
+      .iter()
+      .filter(|c| c.status != "resolved")
+      .count();
+    (open > 0).then(|| {
+      ui::text(div(), TextSize::Xs)
+        .debug_selector(|| "agent-review-comment-count".into())
+        .text_color(tw::color(if self.dark {
+          tw::VIOLET_400
+        } else {
+          tw::VIOLET_600
+        }))
+        .child(count_label(open, "local review comment"))
+    })
+  }
+
   pub(super) fn line_threads(
     &self,
     path: &str,
@@ -481,6 +501,7 @@ impl ChangesView {
     };
     let mut card = div()
       .debug_selector(|| "agent-review-comment-card".into())
+      .font_family(theme::MONO_FONT)
       .rounded(px(6.))
       .border_1()
       .border_color(violet(0.4))

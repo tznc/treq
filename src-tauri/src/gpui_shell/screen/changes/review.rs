@@ -1436,7 +1436,8 @@ impl ChangesView {
             div()
               .text_color(p.muted_foreground)
               .child(format!("{} pending", count_label(total, "comment"))),
-          ),
+          )
+          .children(self.agent_count()),
       )
       .child(
         div()
