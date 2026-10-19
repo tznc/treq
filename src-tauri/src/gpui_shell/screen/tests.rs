@@ -64,6 +64,12 @@ struct FakeHost {
   sinks: Mutex<Vec<(String, Sink)>>,
   /// Whether confirmations are cancelled.
   decline: bool,
+  /// What the dialogs read: the prompt history, and the stashes and their diff.
+  prompts: Vec<crate::local_db::PromptHistoryEntry>,
+  stash_list: Mutex<Vec<crate::local_db::StashEntry>>,
+  stash_diff: Option<crate::jj::JjRevisionDiff>,
+  /// Whether applying a stash fails.
+  apply_error: Option<String>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -914,6 +920,39 @@ impl commits_data::CommitsHost for FakeHost {
   fn confirm(&self, title: &str, _: &str) -> bool {
     self.record(format!("confirm {title}"));
     !self.decline
+  }
+}
+
+impl modal::ModalsHost for FakeHost {
+  fn prompt_history(&self, _: &str) -> Result<Vec<crate::local_db::PromptHistoryEntry>, String> {
+    self.record("read prompt history".into());
+    Ok(self.prompts.clone())
+  }
+
+  fn stashes(&self, _: &str) -> Result<Vec<crate::local_db::StashEntry>, String> {
+    self.record("read stashes".into());
+    Ok(self.stash_list.lock().unwrap().clone())
+  }
+
+  fn stash_diff(&self, _: &str, id: i64) -> Result<crate::jj::JjRevisionDiff, String> {
+    self.record(format!("read stash diff {id}"));
+    self.stash_diff.clone().ok_or_else(|| "no diff".into())
+  }
+
+  fn apply_stash(&self, _: &str, id: i64, target: &str) -> Result<(), String> {
+    self.record(format!("apply stash {id} {target}"));
+    self.apply_error.clone().map_or(Ok(()), Err)
+  }
+
+  fn delete_stash(&self, _: &str, id: i64) -> Result<(), String> {
+    self.record(format!("delete stash {id}"));
+    self.stash_list.lock().unwrap().retain(|s| s.id != id);
+    Ok(())
+  }
+
+  fn stash_patch(&self, _: &str, id: i64) -> Result<String, String> {
+    self.record(format!("export stash {id}"));
+    Ok(format!("patch of stash {id}"))
   }
 }
 
@@ -3802,4 +3841,573 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!h.drawn("terminal-column-shell"));
   assert!(h.drawn("terminal-column-agent"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
+}
+
+// The dialogs drawn over a screen: agent prompt, prompt history and stashes.
+
+fn prompt_entry(
+  id: i64,
+  workspace_id: Option<i64>,
+  label: Option<&str>,
+  text: &str,
+  agent: Option<&str>,
+) -> crate::local_db::PromptHistoryEntry {
+  crate::local_db::PromptHistoryEntry {
+    id,
+    workspace_id,
+    session_id: None,
+    prompt_text: text.into(),
+    agent: agent.map(Into::into),
+    created_at: format!("2026-10-19T1{id}:05:09Z"),
+    workspace_label: label.map(Into::into),
+  }
+}
+
+fn stash_entry(id: i64, label: &str, files: &[&str]) -> crate::local_db::StashEntry {
+  crate::local_db::StashEntry {
+    id,
+    workspace_id: Some(7),
+    workspace_label: label.into(),
+    commit_id: format!("commit{id}"),
+    change_id: format!("change{id}"),
+    short_commit_id: format!("abc{id}"),
+    bookmark_name: format!("treq/stash-{id}"),
+    created_at: "2026-10-19T13:05:09Z".into(),
+    additions: 4,
+    deletions: 1,
+    files_changed: files.iter().map(|f| f.to_string()).collect(),
+  }
+}
+
+fn stash_diff() -> crate::jj::JjRevisionDiff {
+  serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "hunks_by_file": [{
+      "path": "src/login.rs",
+      "hunks": [{
+        "id": "h1",
+        "header": "@@ -1,2 +1,2 @@",
+        "lines": [" fn login() {", "-  old();", "+  new();"],
+        "patch": "",
+      }],
+    }],
+    "too_large_to_render": false,
+  }))
+  .expect("diff")
+}
+
+/// A screen with `modal` drawn over it.
+fn modal_harness(
+  cx: &mut TestAppContext,
+  host: FakeHost,
+  modal: serde_json::Value,
+) -> (Harness, Arc<FakeHost>) {
+  let (mut h, host) = workspace_harness(cx, host, onboarding());
+  h.set_modal(Some(modal));
+  (h, host)
+}
+
+impl Harness {
+  fn set_modal(&mut self, modal: Option<serde_json::Value>) {
+    let modal = modal.map(|m| serde_json::from_value(m).expect("modal"));
+    self
+      .screen
+      .update(&mut self.cx, |screen, cx| screen.set_modal(modal, cx));
+    self.cx.run_until_parked();
+  }
+
+  fn clipboard(&mut self) -> Option<String> {
+    self
+      .cx
+      .update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+  }
+
+  /// A click on the backdrop, outside the dialog.
+  fn click_backdrop(&mut self) {
+    self.cx.run_until_parked();
+    self
+      .cx
+      .simulate_click(gpui::point(gpui::px(3.), gpui::px(3.)), Modifiers::none());
+    self.cx.run_until_parked();
+  }
+}
+
+fn history_modal() -> serde_json::Value {
+  serde_json::json!({ "kind": "promptHistory", "repoPath": "/repo" })
+}
+
+fn history_host() -> FakeHost {
+  FakeHost {
+    prompts: vec![
+      prompt_entry(
+        3,
+        Some(7),
+        Some("login fixes"),
+        "Fix the login button",
+        Some("claude"),
+      ),
+      prompt_entry(2, None, None, "Refactor the\nrouter", None),
+      prompt_entry(1, Some(9), None, "Gone", Some("codex")),
+    ],
+    ..FakeHost::default()
+  }
+}
+
+#[test]
+fn prompt_history_names_workspaces_as_react_does() {
+  use modal::prompt_history::{format_for_copy, workspace_label};
+  let entries = [
+    prompt_entry(1, Some(7), Some("login"), "a", None),
+    prompt_entry(2, None, None, "b", None),
+    prompt_entry(3, Some(9), None, "c", None),
+  ];
+  assert_eq!(workspace_label(&entries[0]), "login");
+  assert_eq!(workspace_label(&entries[1]), "Home repo");
+  assert_eq!(workspace_label(&entries[2]), "Deleted workspace");
+  let copied = format_for_copy(&entries[..2]);
+  assert!(copied.starts_with("[login] 10/19/20"), "{copied}");
+  assert!(copied.contains("\na\n\n---\n\n[Home repo] "), "{copied}");
+  assert!(copied.ends_with("\nb"), "{copied}");
+}
+
+#[gpui::test]
+fn prompt_history_shows_the_newest_prompt_first(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, history_host(), history_modal());
+  for selector in [
+    "prompt-history-modal",
+    "prompt-history-list",
+    "prompt-history-item-0",
+    "prompt-history-item-2",
+    "prompt-history-detail-text",
+    "prompt-history-copy-all",
+    "prompt-history-run",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(host.calls().contains(&"read prompt history".to_string()));
+  let selected = h.screen.read_with(&h.cx, |s, cx| {
+    s.prompt_history.as_ref().map(|v| v.read(cx).selected)
+  });
+  assert_eq!(selected, Some(Some(3)));
+  h.click("prompt-history-item-1");
+  let selected = h.screen.read_with(&h.cx, |s, cx| {
+    s.prompt_history.as_ref().map(|v| v.read(cx).selected)
+  });
+  assert_eq!(selected, Some(Some(2)));
+}
+
+#[gpui::test]
+fn prompt_history_opens_on_the_requested_prompt(cx: &mut TestAppContext) {
+  let (h, _) = modal_harness(
+    cx,
+    history_host(),
+    serde_json::json!({ "kind": "promptHistory", "repoPath": "/repo", "initialSelectedId": 1 }),
+  );
+  let selected = h.screen.read_with(&h.cx, |s, cx| {
+    s.prompt_history.as_ref().map(|v| v.read(cx).selected)
+  });
+  assert_eq!(selected, Some(Some(1)));
+}
+
+#[gpui::test]
+fn prompt_history_copies_and_runs_prompts(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, history_host(), history_modal());
+  h.click("prompt-history-copy");
+  assert_eq!(h.clipboard().as_deref(), Some("Fix the login button"));
+  h.click("prompt-history-copy-all");
+  let all = h.clipboard().expect("clipboard");
+  assert!(all.starts_with("[login fixes] 10/19/2026, "), "{all}");
+  assert!(all.contains("\n\n---\n\n[Home repo] "), "{all}");
+  assert_eq!(
+    host.writes(),
+    ["notify toast Copied", "notify toast Copied"]
+  );
+  h.click("prompt-history-item-2");
+  h.click("prompt-history-run");
+  assert_eq!(
+    fields(&h, "promptHistory.run"),
+    vec![serde_json::json!({ "prompt": "Gone", "workspaceId": 9 })]
+  );
+}
+
+#[gpui::test]
+fn prompt_history_closes_through_react(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, history_host(), history_modal());
+  h.click_backdrop();
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent(),
+    vec![press("promptHistory.close"), press("promptHistory.close")]
+  );
+}
+
+#[gpui::test]
+fn prompt_history_says_when_there_is_nothing(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), history_modal());
+  assert!(h.drawn("prompt-history-empty"));
+  assert!(!h.drawn("prompt-history-copy-all"));
+}
+
+fn stash_modal() -> serde_json::Value {
+  serde_json::json!({
+    "kind": "stash",
+    "repoPath": "/repo",
+    "workspaces": [
+      { "branch": "treq/login", "label": "Login fixes" },
+      { "branch": "treq/docs", "label": "treq/docs" },
+    ],
+  })
+}
+
+fn stash_host() -> FakeHost {
+  FakeHost {
+    stash_list: Mutex::new(vec![
+      stash_entry(1, "login", &["src/login.rs"]),
+      stash_entry(2, "docs", &["a.md", "b.md"]),
+    ]),
+    stash_diff: Some(stash_diff()),
+    ..FakeHost::default()
+  }
+}
+
+#[gpui::test]
+fn stash_modal_lists_stashes_with_the_first_diff(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, stash_host(), stash_modal());
+  for selector in [
+    "stash-modal",
+    "stash-list-item-0",
+    "stash-list-item-1",
+    "stash-detail",
+    "stash-diff-pane",
+    "stash-diff-file-0",
+    "stash-apply-button",
+    "stash-more-menu",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(host.calls().contains(&"read stashes".to_string()));
+  assert!(host.calls().contains(&"read stash diff 1".to_string()));
+  h.click("stash-list-item-1");
+  assert!(host.calls().contains(&"read stash diff 2".to_string()));
+}
+
+#[gpui::test]
+fn stash_modal_applies_a_stash_to_a_workspace(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, stash_host(), stash_modal());
+  h.click("stash-apply-button");
+  for selector in [
+    "stash-apply-popover",
+    "stash-apply-workspace-select",
+    "stash-apply-option-.",
+    "stash-apply-option-treq/login",
+    "stash-apply-option-treq/docs",
+    "stash-apply-new-workspace",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  h.click("stash-apply-option-treq/login");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("stash-apply-popover"));
+  assert_eq!(
+    host.writes(),
+    [
+      "apply stash 1 treq/login",
+      "notify workspaceChanged",
+      "notify toast Stash applied"
+    ]
+  );
+}
+
+#[gpui::test]
+fn stash_modal_applies_to_the_home_repo(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, stash_host(), stash_modal());
+  h.click("stash-apply-button");
+  h.click("stash-apply-option-.");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"apply stash 1 .".to_string()));
+}
+
+#[gpui::test]
+fn stash_modal_reports_a_failed_apply(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    apply_error: Some("conflict".into()),
+    ..stash_host()
+  };
+  let (mut h, host) = modal_harness(cx, host, stash_modal());
+  h.click("stash-apply-button");
+  h.click("stash-apply-option-treq/docs");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "apply stash 1 treq/docs",
+      "notify toast Failed to apply stash"
+    ]
+  );
+}
+
+#[gpui::test]
+fn stash_modal_applies_to_a_new_workspace_in_react(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, stash_host(), stash_modal());
+  h.click("stash-apply-button");
+  h.click("stash-apply-new-workspace");
+  h.cx.run_until_parked();
+  let sent = fields(&h, "stash.applyToNew");
+  assert_eq!(sent.len(), 1);
+  assert_eq!(sent[0]["id"], 1);
+  assert_eq!(sent[0]["short_commit_id"], "abc1");
+  assert!(!h.drawn("stash-apply-popover"));
+}
+
+#[gpui::test]
+fn stash_modal_copies_a_patch_and_deletes_a_stash(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, stash_host(), stash_modal());
+  h.click("stash-more-menu");
+  h.click("stash-copy-patch");
+  h.cx.run_until_parked();
+  assert_eq!(h.clipboard().as_deref(), Some("patch of stash 1"));
+  h.click("stash-more-menu");
+  h.click("stash-delete");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"delete stash 1".to_string()));
+  assert!(host
+    .writes()
+    .contains(&"notify toast Stash deleted".to_string()));
+  // The list reloads and the next stash is selected.
+  assert!(h.drawn("stash-list-item-0"));
+  assert!(!h.drawn("stash-list-item-1"));
+  let selected = h
+    .screen
+    .read_with(&h.cx, |s, cx| s.stash.as_ref().map(|v| v.read(cx).selected));
+  assert_eq!(selected, Some(Some(2)));
+}
+
+#[gpui::test]
+fn stash_modal_explains_an_empty_list(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), stash_modal());
+  assert!(h.drawn("stash-empty"));
+  assert!(!h.drawn("stash-list"));
+}
+
+fn agent_modal() -> serde_json::Value {
+  serde_json::json!({
+    "kind": "agentPrompt",
+    "repoPath": "/repo",
+    "defaultBranch": "main",
+    "workspaces": [
+      { "id": 7, "branchName": "treq/login", "path": "/repo/.treq/workspaces/login" },
+      { "id": 8, "branchName": "main", "path": "/repo" },
+    ],
+    "initialPrompt": "fix it",
+    "initialWorkspaceId": 7,
+  })
+}
+
+fn agent_view<T>(h: &Harness, f: impl FnOnce(&modal::agent_prompt::AgentPromptView) -> T) -> T {
+  h.screen.read_with(&h.cx, |s, cx| {
+    f(s.agent_prompt.as_ref().expect("agent prompt").read(cx))
+  })
+}
+
+use code_data::Agent;
+
+#[gpui::test]
+fn agent_prompt_starts_with_what_react_sent(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  for selector in [
+    "agent-prompt-dialog",
+    "agent-prompt-workspace",
+    "agent-task-input",
+    "task-input",
+    "task-add",
+    "task-agent",
+    "task-submit",
+    "task-submit-menu",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert_eq!(agent_view(&h, |v| v.selected), Some(7));
+  assert_eq!(agent_view(&h, |v| v.task_text.clone()), "fix it");
+  assert_eq!(
+    agent_view(&h, |v| v.agents()),
+    (Agent::Claude, Agent::Claude)
+  );
+}
+
+#[gpui::test]
+fn agent_prompt_hands_the_prompt_to_react(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.click("task-submit");
+  assert_eq!(
+    fields(&h, "agentPrompt.start"),
+    vec![serde_json::json!({
+      "prompt": "fix it",
+      "agent": "claude",
+      "mode": "acceptEdits",
+      "workspaceId": 7,
+      "saveAsRepoDefault": false,
+      "issue": false,
+    })]
+  );
+  // Until React reports back, the prompt is not sent twice.
+  h.click("task-submit");
+  assert_eq!(fields(&h, "agentPrompt.start").len(), 1);
+}
+
+#[gpui::test]
+fn agent_prompt_plans_instead_of_editing(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.click("task-submit-menu");
+  h.click("task-plan");
+  assert_eq!(fields(&h, "agentPrompt.start")[0]["mode"], "plan");
+}
+
+#[gpui::test]
+fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
+  let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
+  let (mut h, _) = modal_harness(cx, host, agent_modal());
+  assert_eq!(agent_view(&h, |v| v.agents()), (Agent::Codex, Agent::Codex));
+  // Codex has no plan mode.
+  assert!(!h.drawn("task-submit-menu"));
+  h.click("task-agent");
+  assert!(h.drawn("task-agent-menu"));
+  h.click("task-agent-cursor");
+  assert_eq!(
+    agent_view(&h, |v| v.agents()),
+    (Agent::Codex, Agent::Cursor)
+  );
+  assert!(h.drawn("task-save-default-box"));
+  assert!(h.drawn("task-submit-menu"));
+  h.click("task-save-default-box");
+  h.click("task-submit");
+  let start = &fields(&h, "agentPrompt.start")[0];
+  assert_eq!(start["agent"], "cursor");
+  assert_eq!(start["saveAsRepoDefault"], true);
+}
+
+#[gpui::test]
+fn agent_prompt_picks_a_workspace(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.click("agent-prompt-workspace");
+  assert!(h.drawn("agent-prompt-workspace-popover"));
+  assert!(h.drawn("agent-prompt-workspace-main"));
+  assert!(h.drawn("agent-prompt-workspace-treq/login"));
+  h.click("agent-prompt-workspace-main");
+  assert_eq!(agent_view(&h, |v| v.selected), None);
+  assert!(!h.drawn("agent-prompt-workspace-popover"));
+  h.click("task-submit");
+  assert_eq!(
+    fields(&h, "agentPrompt.start")[0]["workspaceId"],
+    serde_json::Value::Null
+  );
+}
+
+#[gpui::test]
+fn agent_prompt_runs_an_attached_issue_in_its_own_workspace(cx: &mut TestAppContext) {
+  let mut modal = agent_modal();
+  modal["initialPrompt"] = serde_json::Value::Null;
+  modal["initialWorkspaceId"] = serde_json::Value::Null;
+  modal["issue"] = serde_json::json!({
+    "source": "linear",
+    "key": "ENG-101",
+    "title": "Login is slow",
+    "includeSubItems": true,
+  });
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  assert!(h.drawn("agent-prompt-issue-note"));
+  assert!(h.drawn("issue-chip"));
+  assert!(!h.drawn("agent-prompt-workspace"));
+  // An issue alone is enough to start.
+  h.click("task-submit");
+  let start = &fields(&h, "agentPrompt.start")[0];
+  assert_eq!(start["issue"], true);
+  assert_eq!(start["prompt"], "");
+}
+
+#[gpui::test]
+fn agent_prompt_detaches_an_issue(cx: &mut TestAppContext) {
+  let mut modal = agent_modal();
+  modal["issue"] = serde_json::json!({
+    "source": "github",
+    "key": "#42",
+    "title": "Bug",
+    "includeSubItems": false,
+  });
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  h.click("issue-chip-remove");
+  assert!(!h.drawn("issue-chip"));
+  assert!(h.drawn("agent-prompt-workspace"));
+  h.click("task-submit");
+  assert_eq!(fields(&h, "agentPrompt.start")[0]["issue"], false);
+}
+
+#[gpui::test]
+fn agent_prompt_suggests_files_for_mentions(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    files: vec!["src/login.rs".into(), "src/logout.rs".into()],
+    ..FakeHost::default()
+  };
+  let mut modal = agent_modal();
+  modal["initialPrompt"] = serde_json::Value::Null;
+  let (mut h, _) = modal_harness(cx, host, modal);
+  h.click("agent-task-input");
+  h.cx.simulate_input("look at @log");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  assert!(h.drawn("task-mention-0"));
+  h.click("task-mention-1");
+  assert_eq!(
+    agent_view(&h, |v| v.task_text.clone()),
+    "look at @src/logout.rs "
+  );
+}
+
+#[gpui::test]
+fn agent_prompt_waits_while_react_starts_the_session(cx: &mut TestAppContext) {
+  let mut modal = agent_modal();
+  modal["starting"] = true.into();
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  h.click("task-submit");
+  assert!(fields(&h, "agentPrompt.start").is_empty());
+  assert!(agent_view(&h, |v| v.submitting()));
+}
+
+#[gpui::test]
+fn agent_prompt_keeps_its_text_while_react_refreshes(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.click("agent-task-input");
+  h.cx.simulate_input(" now");
+  let mut refreshed = agent_modal();
+  refreshed["workspaces"] = serde_json::json!([]);
+  h.set_modal(Some(refreshed));
+  // The workspace went away; the text stays.
+  assert_eq!(agent_view(&h, |v| v.selected), None);
+  assert!(agent_view(&h, |v| v.task_text.contains("now")));
+}
+
+#[gpui::test]
+fn agent_prompt_closes_through_react(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.click_backdrop();
+  assert_eq!(h.sent(), vec![press("agentPrompt.close")]);
+}
+
+#[gpui::test]
+fn dialogs_cover_the_screen_until_closed(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), history_modal());
+  let open = |h: &mut Harness| {
+    h.cx
+      .update(|_, cx| cx.try_global::<modal::ModalOpen>().is_some_and(|m| m.0))
+  };
+  assert!(open(&mut h));
+  assert!(h.drawn("onboarding-open-repo"));
+  h.set_modal(None);
+  assert!(!open(&mut h));
+  assert!(!h.drawn("prompt-history-modal"));
+  // Another kind replaces the first.
+  h.set_modal(Some(stash_modal()));
+  assert!(open(&mut h));
+  assert!(h.drawn("stash-modal"));
 }

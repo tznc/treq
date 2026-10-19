@@ -1646,11 +1646,16 @@ impl Render for WorkspaceView {
       .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_row(&row, &p));
     let code = self.tab_body(cx);
+    // A dialog drawn over the screen cannot cover the webview, so the
+    // frame steps aside while one is open.
+    let dialog_open = cx
+      .try_global::<super::modal::ModalOpen>()
+      .is_some_and(|m| m.0);
     let frame = |webview: Option<&Webview<Wry>>| match webview {
-      Some(webview) => tauri_plugin_gpui::webview_frame(webview)
+      Some(webview) if !dialog_open => tauri_plugin_gpui::webview_frame(webview)
         .size_full()
         .into_any_element(),
-      None => div().size_full().into_any_element(),
+      _ => div().size_full().into_any_element(),
     };
     let body = match (code, self.sync_terminal(cx)) {
       // The tab, or React's view framed in its place, with GPUI's terminal

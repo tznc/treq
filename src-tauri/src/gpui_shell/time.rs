@@ -112,6 +112,24 @@ pub fn full(timestamp: &str) -> String {
   full_in(timestamp, &Local)
 }
 
+/// `new Date(timestamp).toLocaleString()` in en-US: `10/19/2026, 1:05:09 PM`.
+pub fn locale_in<Tz: TimeZone>(timestamp: &str, zone: &Tz) -> String
+where
+  Tz::Offset: std::fmt::Display,
+{
+  match parse(timestamp) {
+    Some(date) => date
+      .with_timezone(zone)
+      .format("%-m/%-d/%Y, %-I:%M:%S %p")
+      .to_string(),
+    None => timestamp.to_string(),
+  }
+}
+
+pub fn locale(timestamp: &str) -> String {
+  locale_in(timestamp, &Local)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -174,5 +192,19 @@ mod tests {
       full_in("2026-10-19T13:05:09Z", &plus2),
       "October 19, 2026 at 03:05:09 PM GMT+2"
     );
+  }
+
+  #[test]
+  fn locale_timestamps_read_like_to_locale_string() {
+    let utc = chrono::Utc;
+    assert_eq!(
+      locale_in("2026-10-19T13:05:09Z", &utc),
+      "10/19/2026, 1:05:09 PM"
+    );
+    assert_eq!(
+      locale_in("2026-01-03T00:00:00Z", &utc),
+      "1/3/2026, 12:00:00 AM"
+    );
+    assert_eq!(locale_in("bogus", &utc), "bogus");
   }
 }

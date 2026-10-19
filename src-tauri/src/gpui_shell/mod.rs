@@ -40,7 +40,7 @@ mod tooltips;
 mod ui;
 
 pub use popup::{MenuEntry, Toast};
-pub use screen::ScreenSnapshot;
+pub use screen::{Modal, ScreenSnapshot};
 use screen::{Screen, ScreenAction};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
@@ -103,6 +103,8 @@ struct Shell {
   sidebar: Option<gpui::Entity<Sidebar>>,
   /// The screen GPUI draws instead of the webview, while React sends one.
   screen: Option<gpui::Entity<Screen>>,
+  /// The dialog React asked for, drawn over the screen once there is one.
+  modal: Option<Modal>,
 }
 
 impl Render for Shell {
@@ -177,6 +179,7 @@ pub fn open_window(
       webview: None,
       sidebar: None,
       screen: None,
+      modal: None,
     });
     cx.default_global::<Shells>()
       .0
@@ -263,6 +266,7 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
       None => {
         // A tooltip the screen showed would outlive it.
         if shell.screen.take().is_some() {
+          cx.set_global(screen::ModalOpen::default());
           defer_main(&shell.app, |_| popup::hide_tooltip());
         }
       }
@@ -278,13 +282,34 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
               shell.app.clone(),
               shell.label.to_string(),
             ));
-            shell.screen = Some(cx.new(|_| Screen::new(snapshot, sink, popups, webview, host)));
+            let modal = shell.modal.clone();
+            let screen = cx.new(|_| Screen::new(snapshot, sink, popups, webview, host));
+            screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
+            shell.screen = Some(screen);
           }
         }
       }
     });
     if let Err(err) = result {
       log::warn!("failed to update the GPUI screen: {err}");
+    }
+  });
+}
+
+/// Draws `modal` over window `label`'s screen, or closes the open dialog for
+/// `None`. A dialog React asks for while no screen is drawn waits for one.
+pub fn update_modal(app: &AppHandle, label: &str, modal: Option<Modal>) {
+  let modal = modal.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
+  let label = label.to_string();
+  let _ = app.run_on_main_thread(move || {
+    let result = update_shell(&label, move |shell, cx| {
+      shell.modal = modal.clone();
+      if let Some(screen) = &shell.screen {
+        screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
+      }
+    });
+    if let Err(err) = result {
+      log::warn!("failed to update the GPUI modal: {err}");
     }
   });
 }

@@ -1,7 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useThemeStore } from "../stores/themeStore";
-import { gpuiScreenUpdate } from "./api";
+import { gpuiModalUpdate, gpuiScreenUpdate } from "./api";
 import { isGpuiShellHost } from "./gpui-shell";
 import { useWindowModalBackdrop } from "./window-modals";
 
@@ -203,7 +203,85 @@ export type GpuiScreenAction =
   /** A button; `id` names it, e.g. "settings.save". */
   | { kind: "press"; id: string };
 
+/**
+ * Dialogs GPUI draws over its screen (src-tauri/src/gpui_shell/screen/modal.rs).
+ * React still owns whether one is open and what it starts with; GPUI reads
+ * the prompt history and stashes itself, and hands back what only React can
+ * do as `press` and `field` actions named after the dialog.
+ */
+interface GpuiAgentPromptModal {
+  kind: "agentPrompt";
+  repoPath: string;
+  defaultBranch: string;
+  workspaces: { id: number; branchName: string; path: string }[];
+  initialPrompt: string | null;
+  initialWorkspaceId: number | null;
+  /** While attached, the session runs in the issue's own workspace. */
+  issue: {
+    source: "github" | "linear";
+    key: string;
+    title: string;
+    includeSubItems: boolean;
+  } | null;
+  /** React is starting the session. */
+  starting: boolean;
+}
+
+interface GpuiPromptHistoryModal {
+  kind: "promptHistory";
+  repoPath: string;
+  initialSelectedId: number | null;
+}
+
+interface GpuiStashModal {
+  kind: "stash";
+  repoPath: string;
+  /** Where a stash applies to besides the home repo, most active first. */
+  workspaces: { branch: string; label: string }[];
+}
+
+export type GpuiModal =
+  | GpuiAgentPromptModal
+  | GpuiPromptHistoryModal
+  | GpuiStashModal;
+
+/** What the agent prompt dialog hands React when "Edit" or "Plan" is pressed. */
+export interface GpuiAgentPromptStart {
+  prompt: string;
+  agent: string;
+  mode: "plan" | "acceptEdits";
+  workspaceId: number | null;
+  saveAsRepoDefault: boolean;
+  /** The attached issue is still attached. */
+  issue: boolean;
+}
+
 const GPUI_SCREEN_ACTION_EVENT = "gpui-screen-action";
+
+/** The mounted `useGpuiScreen`s that draw a screen now. */
+const drawnScreens = new Set<object>();
+const drawnScreenListeners = new Set<() => void>();
+
+function setScreenDrawn(token: object, drawn: boolean): void {
+  if (drawn === drawnScreens.has(token)) return;
+  if (drawn) drawnScreens.add(token);
+  else drawnScreens.delete(token);
+  drawnScreenListeners.forEach((listener) => listener());
+}
+
+function subscribeDrawnScreens(listener: () => void): () => void {
+  drawnScreenListeners.add(listener);
+  return () => void drawnScreenListeners.delete(listener);
+}
+
+/** Pushes a dialog to GPUI; null closes it. Failures are logged, not thrown. */
+async function updateGpuiModal(modal: GpuiModal | null): Promise<void> {
+  try {
+    await gpuiModalUpdate(modal);
+  } catch (error) {
+    console.error("gpui_modal_update failed:", error);
+  }
+}
 
 /** Push a screen to GPUI; null shows the webview. Failures are logged, not thrown. */
 async function updateGpuiScreen(
@@ -270,7 +348,79 @@ export function useGpuiScreen(
       void unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [host]);
-  return json !== null;
+
+  // Lets dialogs know GPUI has a screen to draw them over.
+  const token = useRef({});
+  const drawn = json !== null;
+  useEffect(() => {
+    const { current } = token;
+    setScreenDrawn(current, drawn);
+    return () => setScreenDrawn(current, false);
+  }, [drawn]);
+  return drawn;
+}
+
+/** Whether GPUI is drawing a screen, which dialogs can then open over. */
+function useGpuiScreenDrawn(): boolean {
+  return useSyncExternalStore(
+    subscribeDrawnScreens,
+    () => drawnScreens.size > 0,
+    () => false,
+  );
+}
+
+/**
+ * Whether GPUI draws the agent prompt, prompt history and stash dialogs:
+ * inside the shell, over a GPUI screen (the webview cannot be covered, so
+ * React's own dialog stays where React draws the window). React skips its
+ * dialog while this is true.
+ */
+export function useGpuiModalsAvailable(): boolean {
+  const drawn = useGpuiScreenDrawn();
+  return (
+    isGpuiShellHost() &&
+    window.__TREQ_WEB_UI__ !== true &&
+    window.__TREQ_REACT_MODALS__ !== true &&
+    drawn
+  );
+}
+
+/**
+ * Draws `modal` in GPUI while the caller is mounted (null closes it), and
+ * runs `onAction` for its `press` and `field` actions.
+ */
+export function useGpuiModal(
+  modal: GpuiModal | null,
+  onAction: (action: GpuiScreenAction) => void,
+): void {
+  const host = isGpuiShellHost();
+  const json = host && modal ? JSON.stringify(modal) : null;
+  const lastSent = useRef<string | null>(null);
+  useEffect(() => {
+    if (!host || json === lastSent.current) return;
+    lastSent.current = json;
+    void updateGpuiModal(json === null ? null : JSON.parse(json));
+  }, [host, json]);
+  useEffect(() => {
+    if (!host) return;
+    return () => {
+      if (lastSent.current === null) return;
+      lastSent.current = null;
+      void updateGpuiModal(null);
+    };
+  }, [host]);
+
+  const latest = useRef(onAction);
+  latest.current = onAction;
+  useEffect(() => {
+    if (!host) return;
+    const unlisten = listenGpuiScreenActions((action) =>
+      latest.current(action),
+    );
+    return () => {
+      void unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, [host]);
 }
 
 /** Whether GPUI may draw the terminal pane. */

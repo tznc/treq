@@ -37,6 +37,7 @@ icons! {
   // is thinner.
   ICON_BRANCH_BOLD => "git-branch-bold",
   ICON_CHEVRON_DOWN => "chevron-down",
+  ICON_CHEVRONS_UP_DOWN => "chevrons-up-down",
   ICON_CHEVRON_RIGHT => "chevron-right",
   ICON_CIRCLE => "circle",
   ICON_CIRCLE_ALERT => "circle-alert",
@@ -61,6 +62,7 @@ icons! {
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
+  ICON_HISTORY => "history",
   ICON_HOUSE => "house",
   ICON_INFO => "info",
   ICON_LAPTOP => "laptop",

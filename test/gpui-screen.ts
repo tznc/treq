@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { act, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import type {
+  GpuiModal,
   GpuiScreenAction,
   GpuiScreenSnapshot,
 } from "../src/lib/gpui-screen";
@@ -36,6 +37,27 @@ export async function findGpuiScreen<K extends GpuiScreenSnapshot["kind"]>(
     const typed = screen as Extract<GpuiScreenSnapshot, { kind: K }>;
     check?.(typed);
     return typed;
+  });
+}
+
+/** The dialog GPUI draws over its screen now; null once closed. */
+export function gpuiModal(): GpuiModal | null | undefined {
+  const calls = vi
+    .mocked(invoke)
+    .mock.calls.filter(([cmd]) => cmd === "gpui_modal_update");
+  return (calls.at(-1)?.[1] as { modal: GpuiModal | null })?.modal;
+}
+
+/** Waits for GPUI to draw a dialog of `kind`, and returns it. */
+export async function findGpuiModal<K extends GpuiModal["kind"]>(
+  kind: K,
+): Promise<Extract<GpuiModal, { kind: K }>> {
+  return waitFor(() => {
+    const modal = gpuiModal();
+    if (modal?.kind !== kind) {
+      throw new Error(`GPUI dialog is ${modal ? `"${modal.kind}"` : "closed"}`);
+    }
+    return modal as Extract<GpuiModal, { kind: K }>;
   });
 }
 

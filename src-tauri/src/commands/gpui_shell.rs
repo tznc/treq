@@ -100,6 +100,29 @@ pub fn gpui_screen_update(
   let _ = (app, window_label, snapshot);
 }
 
+/// Draws React's dialog in GPUI over the screen of window `window_label`
+/// (the agent prompt, prompt history or stash list), or closes it for `null`.
+/// A no-op outside the GPUI shell.
+#[tauri::command]
+pub fn gpui_modal_update(app: AppHandle, window_label: String, modal: Option<serde_json::Value>) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    if !crate::gpui_shell::is_enabled(&app) {
+      return;
+    }
+    let modal = match modal.map(serde_json::from_value).transpose() {
+      Ok(modal) => modal,
+      Err(err) => {
+        log::warn!("invalid GPUI modal: {err}");
+        return;
+      }
+    };
+    crate::gpui_shell::update_modal(&app, &window_label, modal);
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = (app, window_label, modal);
+}
+
 /// Runs the action of a GPUI screen's toast button (`NativeEvent::Toast`'s
 /// `action`), once. A no-op for an unknown or used id.
 #[tauri::command]
