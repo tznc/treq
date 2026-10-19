@@ -4,6 +4,7 @@ import { act, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { createWorkspace } from "../../src/lib/api";
+import { dispatchRefreshWorkspaceChanges } from "../../src/lib/change-file-drag";
 import type { GpuiNativeEvent } from "../../src/lib/gpui-native";
 import { popupNativeMenu } from "../../src/lib/native-context-menu";
 import {
@@ -84,7 +85,7 @@ describe("GPUI workspace header", () => {
     });
   });
 
-  it("draws the Code tab in GPUI on the overview only", async () => {
+  it("draws the Changes tab in GPUI", async () => {
     render(<Dashboard />);
     const home = await findGpuiScreen("workspace");
     expect(home.code).toBe(true);
@@ -94,9 +95,64 @@ describe("GPUI workspace header", () => {
       field: "workspace.tab",
       value: "changes",
     });
+    const changes = await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("changes");
+      expect(s.code).toBe(true);
+    });
+    // The home repository has no committed files to show.
+    expect(changes.showCommitted).toBeNull();
+    expect(changes.moveTargets).toEqual([]);
+    expect(changes.reviewSwitcher).toBe(false);
+    expect(screen.queryByTestId("changes-diff-viewer")).toBeNull();
+  });
+
+  it("asks GPUI's Changes tab to read again when files change", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "workspace.tab",
+      value: "changes",
+    });
+    const { changesRevision } = await findGpuiScreen("workspace", (s) => {
+      expect(s.tab).toBe("changes");
+    });
+
+    act(() => {
+      dispatchRefreshWorkspaceChanges();
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.changesRevision).toBeGreaterThan(changesRevision);
+    });
+  });
+
+  it("shows the refresh GPUI's Changes tab reports", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "workspace.tab",
+      value: "changes",
+    });
     await findGpuiScreen("workspace", (s) => {
       expect(s.tab).toBe("changes");
-      expect(s.code).toBe(false);
+    });
+
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "changes.refreshing",
+      value: true,
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.refreshing).toBe(true);
+    });
+    sendGpuiScreenAction({
+      kind: "field",
+      field: "changes.refreshing",
+      value: false,
+    });
+    await findGpuiScreen("workspace", (s) => {
+      expect(s.refreshing).toBe(false);
     });
   });
 
@@ -145,7 +201,7 @@ describe("GPUI workspace header", () => {
     });
     await findGpuiScreen("workspace", (s) => {
       expect(s.tab).toBe("changes");
-      expect(s.code).toBe(false);
+      expect(s.code).toBe(true);
     });
   });
 

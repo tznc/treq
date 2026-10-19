@@ -1,5 +1,7 @@
 import { useRunningCheckFiles } from "../hooks/useWorkspaceChecks";
 import type { JjLogCommit, Workspace } from "../lib/api";
+import type { ChangeFilesMoveRequest } from "../lib/change-file-drag";
+import type { ParsedFileChange } from "../lib/git-utils";
 import type { SessionCreationInfo } from "../types/sessions";
 import type { useGpuiPartsHost } from "../lib/gpui-parts";
 import {
@@ -39,6 +41,17 @@ interface Handlers {
   moveCommitToExisting?: (commit: JjLogCommit) => void;
   /** The Commits tab stashed a commit. */
   commitStashed?: () => void;
+  /** The Changes tab read its files, or started or finished reading them. */
+  changedFiles?: (files: ParsedFileChange[]) => void;
+  changesRefreshing?: (refreshing: boolean) => void;
+  /** The Changes tab: confirm moving files, or move them to a new workspace. */
+  moveFiles?: (request: ChangeFilesMoveRequest) => void;
+  moveFilesToNew?: (files: string[]) => void;
+  showCommitted?: (show: boolean) => void;
+  /** The Changes tab's Start Review: a review agent with `prompt`. */
+  startReview?: (prompt: string, agent?: string) => void;
+  /** The Diff/Browser switcher. */
+  reviewSubView?: (view: "diff" | "browser") => void;
   openBranchSwitcher?: () => void;
   stack?: () => void;
   merge?: () => void;
@@ -164,6 +177,25 @@ export function useGpuiWorkspaceScreen({
         return handlers.moveCommitToExisting?.(value as JjLogCommit);
       case "commits.stashed":
         return handlers.commitStashed?.();
+      case "changes.files":
+        return handlers.changedFiles?.(value as ParsedFileChange[]);
+      case "changes.refreshing":
+        return handlers.changesRefreshing?.(value as boolean);
+      case "changes.moveFiles":
+        return handlers.moveFiles?.(value as ChangeFilesMoveRequest);
+      case "changes.moveToNew":
+        return handlers.moveFilesToNew?.(value as string[]);
+      case "changes.showCommitted":
+        return handlers.showCommitted?.(value as boolean);
+      case "changes.startReview": {
+        const { prompt, agent } = value as { prompt: string; agent?: string };
+        return handlers.startReview?.(prompt, agent ?? undefined);
+      }
+      case "changes.subView":
+        if (value === "diff" || value === "browser") {
+          handlers.reviewSubView?.(value);
+        }
+        return;
       default:
     }
   };

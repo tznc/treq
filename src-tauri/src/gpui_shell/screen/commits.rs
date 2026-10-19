@@ -1857,6 +1857,8 @@ impl CommitsView {
           |_, _, _, _| {},
         )
         .absolute()
+        .top_0()
+        .left_0()
         .size_full(),
       )
       .on_click({

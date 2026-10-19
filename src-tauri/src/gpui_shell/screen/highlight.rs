@@ -8,7 +8,9 @@
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, sync::LazyLock};
 
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
-use tauri_plugin_gpui::gpui::{rgb, FontStyle, HighlightStyle, Hsla, SharedString, StyledText};
+use tauri_plugin_gpui::gpui::{
+  rgb, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, StyledText,
+};
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
 
@@ -34,6 +36,15 @@ pub(super) enum Token {
   AttrName,
   Regex,
   Escape,
+  /// A Markdown heading's text: Prism's `title important`.
+  Title,
+  /// Markdown inline code, which Prism aliases to `keyword`.
+  Code,
+  Bold,
+  Italic,
+  /// Text an enclosing scope would color, which Prism leaves plain (a
+  /// heading's `#`).
+  Plain,
 }
 
 pub(super) type Spans = Rc<Vec<(Range<usize>, Token)>>;
@@ -141,7 +152,9 @@ fn token(scope: Scope, js: bool) -> Option<Token> {
         .strip_prefix(prefix)
         .is_some_and(|rest| rest.starts_with('.'))
   };
-  Some(if is("comment") || is("punctuation.definition.comment") {
+  Some(if is("punctuation.definition.heading") {
+    Token::Plain
+  } else if is("comment") || is("punctuation.definition.comment") {
     Token::Comment
   } else if is("constant.character.escape") {
     Token::Escape
@@ -158,6 +171,14 @@ fn token(scope: Scope, js: bool) -> Option<Token> {
     Token::Keyword
   } else if is("constant.other") || is("entity.name.constant") || is("support.constant") {
     Token::Constant
+  } else if is("markup.heading") || is("entity.name.section") {
+    Token::Title
+  } else if is("markup.raw.inline") {
+    Token::Code
+  } else if is("markup.bold") {
+    Token::Bold
+  } else if is("markup.italic") {
+    Token::Italic
   } else if is("keyword.operator") || is("punctuation") {
     return None;
   } else if js && (is("keyword.control") || is("keyword.import") || is("keyword.export")) {
@@ -202,6 +223,8 @@ pub(super) fn color(token: Token, dark: bool) -> Option<Hsla> {
       Token::Constant | Token::Property | Token::AttrName => 0x9cdcfe,
       Token::Regex => 0xd16969,
       Token::Escape => 0xd7ba7d,
+      Token::Title | Token::Code => 0x569cd6,
+      Token::Bold | Token::Italic | Token::Plain => return None,
     }
   } else {
     match token {
@@ -213,6 +236,9 @@ pub(super) fn color(token: Token, dark: bool) -> Option<Hsla> {
       Token::ClassName => 0x2b91af,
       Token::Tag => 0x800000,
       Token::Property | Token::AttrName | Token::Regex => 0xff0000,
+      Token::Title => 0xee9900,
+      Token::Code => 0x0000ff,
+      Token::Bold | Token::Italic | Token::Plain => return None,
     }
   };
   Some(rgb(hex).into())
@@ -227,14 +253,17 @@ pub(super) fn styled(line: &str, language: Option<&'static str>, dark: bool) -> 
   let highlights: Vec<(Range<usize>, HighlightStyle)> = spans(language, line)
     .iter()
     .filter_map(|(range, token)| {
-      let italic = *token == Token::Comment && !dark;
+      let italic = *token == Token::Italic || *token == Token::Comment && !dark;
+      // Only prism-vs makes these bold.
+      let bold = matches!(token, Token::Title | Token::Bold) && !dark;
       let color = color(*token, dark);
-      (color.is_some() || italic).then(|| {
+      (color.is_some() || italic || bold).then(|| {
         (
           range.clone(),
           HighlightStyle {
             color,
             font_style: italic.then_some(FontStyle::Italic),
+            font_weight: bold.then_some(FontWeight::BOLD),
             ..Default::default()
           },
         )
@@ -288,6 +317,18 @@ mod tests {
     let t = tokens("ts", "return 42;");
     assert!(t.contains(&("return", Token::ControlFlow)), "{t:?}");
     assert!(t.contains(&("42", Token::Number)), "{t:?}");
+  }
+
+  #[test]
+  fn markdown_headings_and_inline_code() {
+    let t = tokens("md", "# Logout");
+    assert!(t.contains(&(" Logout", Token::Title)), "{t:?}");
+    assert!(
+      !t.iter().any(|(s, k)| s.contains('#') && *k == Token::Title),
+      "{t:?}"
+    );
+    let t = tokens("md", "Call `logout()` now");
+    assert!(t.contains(&("`logout()`", Token::Code)), "{t:?}");
   }
 
   #[test]

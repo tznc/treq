@@ -42,6 +42,8 @@ struct FakeHost {
   /// What the Commits tab reads.
   diff: Option<crate::jj::JjRevisionDiff>,
   description: String,
+  /// What the Changes tab reads.
+  working: Option<crate::jj::JjRevisionDiff>,
   /// Whether confirmations are cancelled.
   decline: bool,
   calls: Mutex<Vec<String>>,
@@ -352,6 +354,129 @@ impl code_data::CodeHost for FakeHost {
 
   fn pick_files(&self) -> Option<Vec<String>> {
     None
+  }
+}
+
+impl changes_data::ChangesHost for FakeHost {
+  fn changed_files(
+    &self,
+    _: &str,
+    workspace_id: Option<i64>,
+  ) -> Result<Vec<crate::jj::JjFileChange>, String> {
+    self.record(format!("read changed files {workspace_id:?}"));
+    let working = self.working.as_ref().ok_or("no changes")?;
+    Ok(working.uncommitted_files.clone())
+  }
+
+  fn workspace_diff(
+    &self,
+    _: &str,
+    workspace_id: i64,
+  ) -> Result<crate::jj::JjRevisionDiff, String> {
+    self.record(format!("read workspace diff {workspace_id}"));
+    self.working.clone().ok_or_else(|| "no changes".into())
+  }
+
+  fn file_hunks(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    paths: Vec<String>,
+  ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
+    self.record(format!("read hunks {paths:?}"));
+    let working = self.working.as_ref().ok_or("no changes")?;
+    Ok(crate::core::WorkspaceFileHunksBatch {
+      snapshot_token: "t".into(),
+      files: paths
+        .iter()
+        .map(|path| crate::core::WorkspaceFileHunksBatchFile {
+          path: path.clone(),
+          content_hash: format!("h-{path}"),
+          hunks: working
+            .hunks_by_file
+            .iter()
+            .find(|f| &f.path == path)
+            .map(|f| f.hunks.clone())
+            .unwrap_or_default(),
+          error: None,
+        })
+        .collect(),
+    })
+  }
+
+  fn file_lines(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    path: &str,
+    start: usize,
+    end: usize,
+  ) -> Result<Vec<String>, String> {
+    self.record(format!("read lines {path} {start}..{end}"));
+    Ok((start..=end).map(|n| format!("line {n}")).collect())
+  }
+
+  fn discard_file(&self, _: &str, path: &str) -> Result<(), String> {
+    self.record(format!("discard {path}"));
+    Ok(())
+  }
+
+  fn commit(&self, _: &str, workspace_id: Option<i64>, message: &str) -> Result<String, String> {
+    self.record(format!("commit {workspace_id:?} {message:?}"));
+    Ok("c1".into())
+  }
+
+  fn split(&self, _: &str, message: &str, paths: Vec<String>) -> Result<String, String> {
+    self.record(format!("split {message:?} {paths:?}"));
+    Ok("c2".into())
+  }
+
+  fn push_remote(&self, _: &str, workspace_id: Option<i64>) -> Result<String, String> {
+    self.record(format!("push {workspace_id:?}"));
+    Ok(String::new())
+  }
+
+  fn stash_all(
+    &self,
+    _: &str,
+    workspace_id: Option<i64>,
+  ) -> Result<crate::local_db::StashEntry, String> {
+    self.record(format!("stash all {workspace_id:?}"));
+    Ok(crate::local_db::StashEntry {
+      id: 1,
+      workspace_id,
+      workspace_label: "login".into(),
+      commit_id: "abc".into(),
+      change_id: "xyz".into(),
+      short_commit_id: "abc".into(),
+      bookmark_name: "treq/stash".into(),
+      created_at: String::new(),
+      additions: 1,
+      deletions: 0,
+      files_changed: vec![],
+    })
+  }
+
+  fn mark_viewed(&self, _: &str, path: &str, hash: &str) -> Result<(), String> {
+    self.record(format!("mark viewed {path} {hash}"));
+    Ok(())
+  }
+
+  fn unmark_viewed(&self, _: &str, path: &str) -> Result<(), String> {
+    self.record(format!("unmark viewed {path}"));
+    Ok(())
+  }
+
+  fn github_remote(&self, _: &str) -> bool {
+    false
+  }
+
+  fn editor_apps(&self) -> changes_data::EditorApps {
+    changes_data::EditorApps::default()
+  }
+
+  fn reveal(&self, path: &str) {
+    self.record(format!("reveal {path}"));
   }
 }
 
@@ -2028,4 +2153,179 @@ fn commits_tab_hands_moves_to_react(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(fields(&h, "commits.moveToExisting")[0]["change_id"], "a");
   assert!(!h.drawn("move-commit-menu"));
+}
+
+fn changes_host() -> FakeHost {
+  let mut host = code_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false},
+      {"path": "b.rs", "status": "A", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1,2 +1,3 @@", "lines": [" a", "+b", "+c"], "patch": ""}]},
+      {"path": "b.rs", "hunks": [{"id": "h", "header": "@@ -0,0 +1,1 @@", "lines": ["+d"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+fn changes_route() -> ScreenSnapshot {
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["tab"] = "changes".into();
+  serde_json::from_value(route).expect("changes route")
+}
+
+#[gpui::test]
+fn changes_tab_lists_files_and_their_diffs(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  for selector in [
+    "changes-diff-viewer",
+    "file-row-a.rs",
+    "file-row-b.rs",
+    "file-card-a.rs",
+    "file-card-b.rs",
+    "commit-button",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(!h.drawn("workspace-code"));
+  assert!(host.calls().contains(&"read workspace diff 7".to_string()));
+  assert!(
+    host.calls().iter().any(|c| c.starts_with("read hunks")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("commit-button");
+  h.cx.run_until_parked();
+  assert!(h.drawn("commit-message-error"));
+  assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
+}
+
+#[gpui::test]
+fn changes_tab_commits_the_working_copy(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("commit-message");
+  h.cx.simulate_input("Fix");
+  h.click("commit-button");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"commit Some(7) \"Fix\"".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+#[gpui::test]
+fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.click("stage-a.rs");
+  h.cx.run_until_parked();
+  assert!(h.drawn("unstage-a.rs"));
+  h.click("commit-message");
+  h.cx.simulate_input("Part");
+  h.click("commit-button");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"split \"Part\" [\"a.rs\"]".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+#[gpui::test]
+fn changes_tab_marks_files_viewed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("viewed-a.rs");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|w| w.starts_with("mark viewed a.rs ")),
+    "{:?}",
+    host.writes()
+  );
+  h.click("viewed-a.rs");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"unmark viewed a.rs".to_string()));
+}
+
+#[gpui::test]
+fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("discard-all-changes");
+  assert!(h.drawn("discard-all-dialog"));
+  h.click("discard-all-confirm");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  // Snapshotted first, so the toast can undo it.
+  assert_eq!(
+    writes[..2],
+    [
+      "snapshot /repo/.treq/workspaces/login".to_string(),
+      "discard /repo/.treq/workspaces/login".to_string()
+    ],
+    "{writes:?}"
+  );
+  assert!(!h.drawn("discard-all-dialog"));
+}
+
+#[gpui::test]
+fn changes_tab_offers_the_browser_view(cx: &mut TestAppContext) {
+  let mut route = changes_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.review_switcher = true;
+  }
+  let (mut h, _) = workspace_harness(cx, changes_host(), route);
+  assert!(h.drawn("review-switcher"));
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.review_switcher = false;
+    }
+  });
+  assert!(!h.drawn("review-switcher"));
+}
+
+#[gpui::test]
+fn changes_tab_reads_again_only_when_files_change(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  let reads = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read workspace diff"))
+      .count()
+  };
+  h.drawn("changes-diff-viewer");
+  assert_eq!(reads(&host), 1);
+  // React bumps this after each read the tab reports.
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.revision += 1;
+    }
+  });
+  h.drawn("changes-diff-viewer");
+  assert_eq!(reads(&host), 1);
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.drawn("changes-diff-viewer");
+  assert_eq!(reads(&host), 2);
 }

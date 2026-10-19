@@ -107,6 +107,116 @@ pub enum PopupRequest {
     dark: bool,
   },
   HideTooltip,
+  /// A menu of `entries` with its corner at `at`, for a right-click.
+  ShowMenu {
+    entries: Vec<MenuEntry>,
+    at: Point<Pixels>,
+    dark: bool,
+  },
+  /// A menu of `entries` below the button at `anchor`.
+  ShowDropdown {
+    entries: Vec<MenuEntry>,
+    anchor: Bounds<Pixels>,
+    dark: bool,
+  },
+}
+
+/// Item ids at and above this run a GPUI screen's own handler instead of
+/// going to React.
+const NATIVE_ID_BASE: u32 = 1 << 30;
+
+type Pick = Rc<dyn Fn(&mut App)>;
+
+thread_local! {
+  /// The handlers of the native menu last built.
+  static NATIVE_PICKS: RefCell<HashMap<u32, Pick>> = RefCell::new(HashMap::new());
+}
+
+/// A menu entry whose pick runs a handler on the main thread.
+pub enum NativeMenuItem {
+  Item {
+    text: String,
+    icon: Option<MenuIcon>,
+    destructive: bool,
+    on_select: Pick,
+  },
+  Separator,
+  Submenu {
+    text: String,
+    icon: Option<MenuIcon>,
+    items: Vec<NativeMenuItem>,
+  },
+}
+
+impl NativeMenuItem {
+  pub fn item(text: impl Into<String>, on_select: impl Fn(&mut App) + 'static) -> Self {
+    NativeMenuItem::Item {
+      text: text.into(),
+      icon: None,
+      destructive: false,
+      on_select: Rc::new(on_select),
+    }
+  }
+
+  pub fn icon(mut self, value: MenuIcon) -> Self {
+    match &mut self {
+      NativeMenuItem::Item { icon, .. } | NativeMenuItem::Submenu { icon, .. } => {
+        *icon = Some(value)
+      }
+      NativeMenuItem::Separator => {}
+    }
+    self
+  }
+
+  pub fn destructive(mut self) -> Self {
+    if let NativeMenuItem::Item { destructive, .. } = &mut self {
+      *destructive = true;
+    }
+    self
+  }
+}
+
+/// `items` as menu entries, their handlers kept for the pick. Building a
+/// menu drops the previous one's handlers.
+pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
+  NATIVE_PICKS.with(|picks| picks.borrow_mut().clear());
+  let mut next = NATIVE_ID_BASE;
+  fn build(items: Vec<NativeMenuItem>, next: &mut u32) -> Vec<MenuEntry> {
+    items
+      .into_iter()
+      .map(|item| match item {
+        NativeMenuItem::Item {
+          text,
+          icon,
+          destructive,
+          on_select,
+        } => {
+          let id = *next;
+          *next += 1;
+          NATIVE_PICKS.with(|picks| picks.borrow_mut().insert(id, on_select));
+          MenuEntry::Item {
+            id,
+            text,
+            icon,
+            destructive,
+          }
+        }
+        NativeMenuItem::Separator => MenuEntry::Separator,
+        NativeMenuItem::Submenu { text, icon, items } => MenuEntry::Submenu {
+          text,
+          icon,
+          items: build(items, next),
+        },
+      })
+      .collect()
+  }
+  build(items, &mut next)
+}
+
+fn native_pick(id: u32) -> Option<Pick> {
+  (id >= NATIVE_ID_BASE)
+    .then(|| NATIVE_PICKS.with(|picks| picks.borrow().get(&id).cloned()))
+    .flatten()
 }
 
 /// Where a sidebar's popup requests go: popup windows in the app, a list in
@@ -118,7 +228,11 @@ pub type PopupSink = Rc<dyn Fn(PopupRequest, &mut App)>;
 #[serde(rename_all = "kebab-case")]
 pub enum MenuIcon {
   Archive,
+  ArrowRightLeft,
   Copy,
+  FileDiff,
+  Globe,
+  MessageSquare,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -138,6 +252,10 @@ impl MenuIcon {
       MenuIcon::FolderOpen => theme::ICON_FOLDER_OPEN,
       MenuIcon::FolderPlus => theme::ICON_FOLDER_PLUS,
       MenuIcon::FolderSearch => theme::ICON_FOLDER_SEARCH,
+      MenuIcon::ArrowRightLeft => theme::ICON_ARROW_RIGHT_LEFT,
+      MenuIcon::FileDiff => theme::ICON_FILE_DIFF,
+      MenuIcon::Globe => theme::ICON_GLOBE,
+      MenuIcon::MessageSquare => theme::ICON_MESSAGE,
       MenuIcon::GitBranch => theme::ICON_BRANCH,
       MenuIcon::Link => theme::ICON_LINK,
       MenuIcon::Pencil => theme::ICON_PENCIL,
@@ -602,7 +720,13 @@ impl PopupView {
                 this.set_open_submenu(None, cx);
               }
             }))
-            .on_click(cx.listener(move |this, _, _, _| this.pick(id)))
+            .on_click(cx.listener(move |this, _, _, cx| match native_pick(id) {
+              Some(pick) => {
+                this.close();
+                pick(cx);
+              }
+              None => this.pick(id),
+            }))
             .into_any_element()
         }
         MenuEntry::Submenu { text, icon, items } => {
@@ -673,6 +797,14 @@ impl PopupView {
         palette,
         move |size, screen| place_submenu(trigger, size, screen),
       );
+    });
+  }
+
+  /// Closes the menus.
+  fn close(&self) {
+    defer_main(&self.app, |_| {
+      hide(Slot::Submenu);
+      hide(Slot::Menu);
     });
   }
 
@@ -1214,6 +1346,12 @@ fn screen_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
 pub fn handle(app: &AppHandle, owner: &str, request: PopupRequest) {
   match request {
     PopupRequest::HideTooltip => hide(Slot::Tooltip),
+    PopupRequest::ShowMenu { entries, at, dark } => show_menu(app, owner, entries, at, dark),
+    PopupRequest::ShowDropdown {
+      entries,
+      anchor,
+      dark,
+    } => show_dropdown(app, owner, entries, anchor, dark),
     PopupRequest::ShowTooltip {
       anchor,
       side,

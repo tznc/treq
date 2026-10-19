@@ -61,6 +61,19 @@ pub struct Route {
   /// The commit the Commits tab should scroll to and open.
   #[serde(default)]
   pub scroll_to_commit: Option<String>,
+  /// `showCommittedChanges`, when the Changes tab offers the toggle.
+  #[serde(default)]
+  pub show_committed: Option<bool>,
+  /// Where the Changes tab can move files (`useChangeFilesMove`).
+  #[serde(default)]
+  pub move_targets: Vec<super::changes::MoveTarget>,
+  /// Bumped when the workspace's files change or the window gains focus.
+  #[serde(default)]
+  pub changes_revision: u64,
+  /// The browser preview is on and the Changes tab shows its Diff view, so
+  /// the tab row offers the Diff/Browser switcher.
+  #[serde(default)]
+  pub review_switcher: bool,
 }
 
 impl Route {

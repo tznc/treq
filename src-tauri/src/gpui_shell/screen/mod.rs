@@ -21,6 +21,8 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 
 use super::{popup::PopupSink, theme};
 
+mod changes;
+mod changes_data;
 pub(super) mod checklist;
 mod code;
 mod code_data;
@@ -101,7 +103,7 @@ pub trait Host:
   onboarding::OnboardingHost
   + settings_data::SettingsHost
   + merge::MergeHost
-  + commits_data::CommitsHost
+  + changes_data::ChangesHost
 {
 }
 
@@ -109,7 +111,7 @@ impl<T> Host for T where
   T: onboarding::OnboardingHost
     + settings_data::SettingsHost
     + merge::MergeHost
-    + commits_data::CommitsHost
+    + changes_data::ChangesHost
 {
 }
 

@@ -91,6 +91,17 @@ icons! {
   ICON_USER => "user",
   ICON_X => "x",
   ICON_ZAP => "zap",
+  ICON_MINUS => "minus",
+  ICON_EYE => "eye",
+  ICON_EYE_OFF => "eye-off",
+  ICON_CHEVRON_UP => "chevron-up",
+  ICON_SQUARE => "square",
+  ICON_MESSAGE => "message-square",
+  ICON_MESSAGE_PLUS => "message-square-plus",
+  ICON_SEND => "send",
+  ICON_WAND => "wand-sparkles",
+  ICON_QUOTE => "quote",
+  ICON_GLOBE => "globe",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
@@ -366,6 +377,23 @@ pub mod tw {
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;
+  pub const AMBER_300: u32 = 0xfcd34d;
+  pub const AMBER_500: u32 = 0xf59e0b;
+  pub const AMBER_700: u32 = 0xb45309;
+  pub const BLUE_300: u32 = 0x93c5fd;
+  pub const BLUE_400: u32 = 0x60a5fa;
+  pub const BLUE_700: u32 = 0x1d4ed8;
+  pub const EMERALD_300: u32 = 0x6ee7b7;
+  pub const EMERALD_700: u32 = 0x047857;
+  pub const RED_300: u32 = 0xfca5a5;
+  pub const RED_400: u32 = 0xf87171;
+  pub const RED_700: u32 = 0xb91c1c;
+  pub const SKY_300: u32 = 0x7dd3fc;
+  pub const SKY_500: u32 = 0x0ea5e9;
+  pub const SKY_700: u32 = 0x0369a1;
+  pub const ZINC_300: u32 = 0xd4d4d8;
+  pub const ZINC_500: u32 = 0x71717a;
+  pub const ZINC_700: u32 = 0x3f3f46;
   pub const GREEN_500: u32 = 0x22c55e;
   pub const GREEN_600: u32 = 0x16a34a;
   pub const RED_500: u32 = 0xef4444;

@@ -96,6 +96,9 @@ export function useReviewSubView({
 
   return {
     showBrowser: enabled && subView === "browser",
+    /** The switcher is offered, for GPUI to draw while Diff shows. */
+    switcherEnabled: enabled && activeTab === "changes",
+    select,
     openRequest,
     toolbarSlot,
     setToolbarSlot,

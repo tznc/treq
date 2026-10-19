@@ -63,9 +63,12 @@ import {
 } from "../lib/git-utils";
 import { reviewChangeCountQueryKey } from "../lib/review-change-count";
 import {
+  HOME_MOVE_ENDPOINT,
   REFRESH_WORKSPACE_CHANGES_EVENT,
   scheduleRefreshWorkspaceChanges,
 } from "../lib/change-file-drag";
+import { useChangeFilesMove } from "./ChangeFilesMoveContext";
+import { useChangesRevision } from "./useChangesRevision";
 import {
   type WorkspaceChangesRefreshDetail,
   visibleWorkspaceRefreshTarget,
@@ -302,6 +305,11 @@ export const ShowWorkspace = ({
     treqSendAssets: useTreqSendStore((s) => s.assets),
     dismissTreqSendAsset: useTreqSendStore((s) => s.dismissAsset),
   });
+  const changeFilesMove = useChangeFilesMove();
+  const changesRevision = useChangesRevision(
+    workspace?.id,
+    gpuiActive && activeTab === "changes",
+  );
   const [scrollToCommitId, setScrollToCommitId] = useState<string | null>(null);
   const [showFileBrowserInCode, setShowFileBrowserInCode] = useState(false);
 
@@ -1140,7 +1148,11 @@ export const ShowWorkspace = ({
   // below them.
   const gpuiCode =
     (activeTab === "overview" && !showFileBrowserInCode) ||
-    activeTab === "commits";
+    activeTab === "commits" ||
+    (activeTab === "changes" && !reviewSubView.showBrowser);
+  const committedToggle =
+    !!workspace && workspace.branch_name !== defaultTargetBranch;
+  const sourceBranch = workspace?.branch_name ?? HOME_MOVE_ENDPOINT;
   const gpuiFramed = useGpuiWorkspaceScreen({
     active: gpuiActive && !!workingDirectory && !!effectiveRepoPath,
     parts: gpuiParts,
@@ -1151,12 +1163,18 @@ export const ShowWorkspace = ({
       homeBranch: mainRepoBranch ?? "",
       tab: activeTab as GpuiWorkspaceTab,
       // The Browser view's switcher and address bar live in the tab row.
-      tabRow: !(reviewSubView.switcher || reviewSubView.showBrowser),
+      tabRow: !reviewSubView.showBrowser,
       retargeting: rebasing,
       refreshing: refreshingFiles,
       code: gpuiCode,
       scrollToCommit: activeTab === "commits" ? scrollToCommitId : null,
       frameHeight: gpuiFrameHeight,
+      showCommitted: committedToggle ? showCommittedChanges : null,
+      moveTargets:
+        changeFilesMove?.targets.filter((t) => t.branch !== sourceBranch) ?? [],
+      changesRevision,
+      reviewSwitcher:
+        reviewSubView.switcherEnabled && !reviewSubView.showBrowser,
     },
     handlers: {
       setTab: setActiveTab,
@@ -1181,6 +1199,15 @@ export const ShowWorkspace = ({
         ? (commit) => onMoveCommitToExistingWorkspace(commit, workspace)
         : undefined,
       commitStashed: onCommitStashed,
+      changedFiles: handleChangedFilesUpdate,
+      changesRefreshing: handleRefreshingChange,
+      moveFiles: changeFilesMove?.requestMove,
+      moveFilesToNew: onMoveFilesToNewWorkspace
+        ? (files) => onMoveFilesToNewWorkspace(files, workspace)
+        : undefined,
+      showCommitted: committedToggle ? setShowCommittedChanges : undefined,
+      startReview: handleStartAgentReview,
+      reviewSubView: reviewSubView.select,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,
       merge: onOpenMergePreview,
@@ -1197,8 +1224,7 @@ export const ShowWorkspace = ({
   }, [gpuiDrawsCode, onGpuiContentHeight]);
   // GPUI draws the header and tab row; React keeps them mounted but hidden,
   // so the parts they publish stay current.
-  const gpuiTabRow =
-    gpuiFramed && !(reviewSubView.switcher || reviewSubView.showBrowser);
+  const gpuiTabRow = gpuiFramed && !reviewSubView.showBrowser;
 
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">
@@ -1547,7 +1573,7 @@ export const ShowWorkspace = ({
             openRequest={reviewSubView.openRequest}
             toolbarSlot={reviewSubView.toolbarSlot}
           />
-        ) : (
+        ) : gpuiDrawsCode ? null : (
           <ChangesDiffViewer
             key={`changes-${workingDirectory}`}
             workspacePath={workingDirectory}

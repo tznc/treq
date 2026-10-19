@@ -22,6 +22,8 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  changes::{self, ChangesView},
+  changes_data::ChangesHost,
   code::{CodeView, Parent},
   commits::CommitsView,
   commits_data::CommitsHost,
@@ -278,11 +280,13 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
-  code_host: Arc<dyn CommitsHost>,
+  code_host: Arc<dyn ChangesHost>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
   /// The Commits tab, while GPUI draws it.
   pub(super) commits: Option<Entity<CommitsView>>,
+  /// The Changes tab, while GPUI draws it.
+  pub(super) changes: Option<Entity<ChangesView>>,
   /// The tab's height last sent to React (`workspace.contentHeight`).
   content_height: Rc<std::cell::Cell<f32>>,
   /// React, for what the header does not do itself.
@@ -314,7 +318,7 @@ pub struct WorkspaceView {
 impl WorkspaceView {
   pub fn new(
     route: Route,
-    host: Arc<dyn CommitsHost>,
+    host: Arc<dyn ChangesHost>,
     react: ActionSink,
     dark: bool,
     popups: PopupSink,
@@ -339,6 +343,7 @@ impl WorkspaceView {
       code_host: host,
       code: None,
       commits: None,
+      changes: None,
       content_height: Rc::default(),
       react,
       sink,
@@ -545,6 +550,8 @@ impl WorkspaceView {
       |_, _, _, _| {},
     )
     .absolute()
+    .top_0()
+    .left_0()
     .size_full()
   }
 
@@ -626,6 +633,8 @@ impl WorkspaceView {
             |_, _, _, _| {},
           )
           .absolute()
+          .top_0()
+          .left_0()
           .size_full(),
         )
       })
@@ -1287,9 +1296,74 @@ impl WorkspaceView {
       .border_b_1()
       .border_color(p.border)
       .debug_selector(|| "workspace-tab-row".into())
-      .child(div().flex().flex_none().items_center().gap_2().child(list))
+      .child(
+        div()
+          .flex()
+          .flex_none()
+          .items_center()
+          .gap_2()
+          .child(list)
+          .when(
+            row.tab == Tab::Changes && self.route.review_switcher,
+            |this| this.child(self.review_switcher(p)),
+          ),
+      )
       .child(div().flex_1().min_w_0())
       .child(status)
+  }
+
+  /// `useReviewSubView`'s Diff/Browser switcher, while the Diff view shows:
+  /// picking Browser hands the tab back to React.
+  fn review_switcher(&self, p: &Palette) -> impl IntoElement {
+    let (bounds, popups, sink, dark) = (
+      self.bounds.clone(),
+      self.popups.clone(),
+      self.sink.clone(),
+      self.dark,
+    );
+    let pick = move |view: &'static str| {
+      let sink = sink.clone();
+      move |cx: &mut App| {
+        sink(
+          ScreenAction::Field {
+            field: "changes.subView".into(),
+            value: view.into(),
+          },
+          cx,
+        )
+      }
+    };
+    let items = move || {
+      vec![
+        popup::NativeMenuItem::item("Diff", pick("diff")).icon(popup::MenuIcon::FileDiff),
+        popup::NativeMenuItem::item("Browser", pick("browser")).icon(popup::MenuIcon::Globe),
+      ]
+    };
+    div()
+      .relative()
+      .flex_none()
+      .child(
+        Button::new("review-switcher", p)
+          .variant(Variant::Ghost)
+          .size(Size::Sm)
+          .gap(px(6.))
+          .icon(theme::ICON_FILE_DIFF, 16.)
+          .label("Diff")
+          .child(ui::icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground))
+          .on_click(move |_, _, cx| {
+            let Some(anchor) = bounds.borrow().get("review-switcher").copied() else {
+              return;
+            };
+            let request = PopupRequest::ShowDropdown {
+              entries: popup::native_entries(items()),
+              anchor,
+              dark,
+            };
+            let popups = popups.clone();
+            cx.defer(move |cx| popups(request, cx));
+          }),
+      )
+      .child(self.record_bounds("review-switcher"))
   }
 }
 
@@ -1362,9 +1436,12 @@ impl WorkspaceView {
   fn tab_body(&mut self, cx: &mut Context<Self>) -> Option<Body> {
     let loaded = self.loaded.as_ref().filter(|_| self.route.code);
     let tab = self.route.tab;
-    let Some(loaded) = loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits)) else {
+    let Some(loaded) =
+      loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes))
+    else {
       self.code = None;
       self.commits = None;
+      self.changes = None;
       self.content_height.set(0.);
       return None;
     };
@@ -1385,6 +1462,24 @@ impl WorkspaceView {
       self.react.clone(),
       self.popups.clone(),
     );
+    if tab == Tab::Changes {
+      self.code = None;
+      self.commits = None;
+      let options = changes::Options {
+        show_committed: self.route.show_committed,
+        move_targets: self.route.move_targets.clone(),
+        revision: self.route.changes_revision,
+      };
+      if let Some(changes) = &self.changes {
+        changes.update(cx, |view, cx| view.set_parent(parent, options, dark, cx));
+        return Some(Body::Changes(changes.clone()));
+      }
+      let changes = cx.new(|cx| ChangesView::new(parent, options, host, react, popups, dark, cx));
+      self.changes = Some(changes.clone());
+      return Some(Body::Changes(changes));
+    }
+    self.changes = None;
+    let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
       self.code = None;
       let scroll_to = self.route.scroll_to_commit.clone();
@@ -1411,6 +1506,7 @@ impl WorkspaceView {
 enum Body {
   Code(Entity<CodeView>),
   Commits(Entity<CommitsView>),
+  Changes(Entity<ChangesView>),
 }
 
 impl Body {
@@ -1419,6 +1515,7 @@ impl Body {
     match self {
       Body::Code(code) => code.read(cx).covers_window(),
       Body::Commits(commits) => commits.read(cx).covers_window(),
+      Body::Changes(changes) => changes.read(cx).covers_window(),
     }
   }
 
@@ -1426,6 +1523,7 @@ impl Body {
     match self {
       Body::Code(code) => code.into_any_element(),
       Body::Commits(commits) => commits.into_any_element(),
+      Body::Changes(changes) => changes.into_any_element(),
     }
   }
 }
@@ -1484,6 +1582,8 @@ impl Render for WorkspaceView {
               |_, _, _, _| {},
             )
             .absolute()
+            .top_0()
+            .left_0()
             .size_full(),
           )
           .child(div().flex_1().min_h_0().child(code.into_any_element()))

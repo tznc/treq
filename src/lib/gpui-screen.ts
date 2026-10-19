@@ -72,6 +72,14 @@ export interface GpuiWorkspaceScreen {
   scrollToCommit: string | null;
   /** How tall the terminal pane GPUI frames below the Code tab is, once measured. */
   frameHeight: number | null;
+  /** The Changes tab's "Show" toggle for committed files, null when not offered. */
+  showCommitted: boolean | null;
+  /** Where the Changes tab can move files (`useChangeFilesMove`). */
+  moveTargets: { branch: string; label: string }[];
+  /** Bumped when the workspace's files change or the window gains focus. */
+  changesRevision: number;
+  /** The tab row offers the Diff/Browser switcher (browser preview, Diff shown). */
+  reviewSwitcher: boolean;
 }
 
 /**
