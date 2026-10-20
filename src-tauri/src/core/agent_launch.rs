@@ -1292,6 +1292,26 @@ mod tests {
   }
 
   #[test]
+  fn deep_links_find_their_workspace_by_exact_branch_only() {
+    let workspace = |id: i64, branch: &str| -> crate::local_db::Workspace {
+      serde_json::from_value(serde_json::json!({
+        "id": id, "repo_path": "/repo", "workspace_name": branch, "workspace_path": branch,
+        "branch_name": branch, "created_at": "", "refreshed_at": null, "metadata": null,
+        "target_branch": null, "title": branch, "description": null, "moved_files": null,
+        "not_on_remote": false, "sparse_patterns": null,
+      }))
+      .unwrap()
+    };
+    let workspaces = vec![workspace(1, "feat/agent-link"), workspace(2, "feat/other")];
+    assert_eq!(
+      find_workspace_by_branch(&workspaces, "feat/agent-link").map(|w| w.id),
+      Some(1)
+    );
+    assert!(find_workspace_by_branch(&workspaces, "missing").is_none());
+    assert!(find_workspace_by_branch(&workspaces, "feat").is_none());
+  }
+
+  #[test]
   fn deep_links_track_processed_ids_and_first_claims() {
     let mut links = DeepLinks::default();
     assert!(!links.is_processed("p"));

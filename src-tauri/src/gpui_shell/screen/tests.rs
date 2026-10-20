@@ -3380,6 +3380,141 @@ fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
   assert_eq!(host.started_sessions()[0]["workspaceId"], 9);
 }
 
+fn home_code_route() -> ScreenSnapshot {
+  let mut route = route_json(None, "main");
+  route["code"] = true.into();
+  serde_json::from_value(route).expect("home route")
+}
+
+#[gpui::test]
+fn code_tab_turning_the_new_workspace_toggle_off_runs_home_tasks_at_home(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.loaded.workspace = None;
+  let (mut h, host) = workspace_harness(cx, host, home_code_route());
+  h.click("task-new-workspace");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"set repo /repo home_task_new_workspace=false".to_string()),
+    "{:?}",
+    host.writes()
+  );
+  h.click("agent-task-input");
+  h.cx.simulate_input("fix login");
+  h.click("task-submit");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    !writes.iter().any(|c| c.starts_with("create workspace ")),
+    "{writes:?}"
+  );
+  assert!(
+    writes.contains(&r#"create session None "fix login""#.to_string()),
+    "{writes:?}"
+  );
+}
+
+#[gpui::test]
+fn code_tab_remembers_running_home_tasks_at_home(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.loaded.workspace = None;
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("/repo:home_task_new_workspace".into(), Some("false".into()));
+  let (mut h, host) = workspace_harness(cx, host, home_code_route());
+  assert!(h.drawn("task-new-workspace"));
+  h.click("agent-task-input");
+  h.cx.simulate_input("fix login");
+  h.click("task-submit");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    !writes.iter().any(|c| c.starts_with("create workspace ")),
+    "{writes:?}"
+  );
+  assert!(
+    writes.contains(&r#"create session None "fix login""#.to_string()),
+    "{writes:?}"
+  );
+}
+
+#[gpui::test]
+fn code_tab_lists_submodules_with_their_pin_and_syncs_them_on_request(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.loaded.workspace = None;
+  host.overview.entries.push(crate::core::WorkspaceEntry {
+    name: "vendor/lib".into(),
+    path: "/repo/vendor/lib".into(),
+    is_directory: true,
+    modified_at: None,
+    submodule_pin: Some("abcdef0123456789".into()),
+    submodule_synced: Some(false),
+    status: None,
+  });
+  let (mut h, host) = workspace_harness(cx, host, home_code_route());
+  assert!(h.drawn("submodule-row-vendor/lib"));
+  h.click("submodule-sync-box-vendor/lib");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"sync submodule vendor/lib true".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+fn task_text(h: &mut Harness) -> Option<String> {
+  h.cx.run_until_parked();
+  h.screen.read_with(&h.cx, |s, cx| {
+    let code = s.workspace.as_ref()?.read(cx).code.clone()?;
+    Some(code.read(cx).task_text.clone())
+  })
+}
+
+#[gpui::test]
+fn file_picker_searches_the_workspace_and_inserts_the_picked_file(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("task-add");
+  h.click("task-add-file");
+  assert!(h.drawn("file-picker"));
+  h.cx.simulate_input("log");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  assert!(host.calls().contains(&r#"read files "log""#.to_string()));
+  assert!(h.drawn("file-picker-item-0") && h.drawn("file-picker-item-1"));
+  h.click("file-picker-item-1");
+  assert!(!h.drawn("file-picker"));
+  assert_eq!(task_text(&mut h).as_deref(), Some("@src/logout.rs "));
+}
+
+#[gpui::test]
+fn file_picker_lists_nothing_for_an_unknown_name_and_closes_on_escape(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.click("task-add");
+  h.click("task-add-file");
+  h.cx.simulate_input("nothing-here");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  assert!(h.drawn("file-picker"));
+  assert!(!h.drawn("file-picker-item-0"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("file-picker"));
+  assert_eq!(task_text(&mut h).as_deref(), Some(""));
+}
+
+#[gpui::test]
+fn code_tab_offers_no_new_workspace_toggle_inside_a_workspace(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  assert!(h.drawn("agent-task-input"));
+  assert!(!h.drawn("task-new-workspace"));
+}
+
 #[gpui::test]
 fn code_tab_suggests_files_for_mentions(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
