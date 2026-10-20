@@ -52,14 +52,13 @@ src-tauri/gen/
 
 !/certs/.env
 
-# Working copies of marketing recaptures. Committed: the README hero
-# (assets/screenshots/code.png) and the site crops (assets/screenshots/landing/),
-# which web/scripts/stage-landing-screenshots.mjs copies into web/static/img.
+# Working copies of marketing recaptures. Only the README hero
+# (assets/screenshots/code.png) is committed. The landing images are generated
+# by e2e/desktop/landing (`npm run landing`) and never committed.
 assets/screenshots/*
 !assets/screenshots/code.png
-!assets/screenshots/landing/
 web/static/img/code.png
-web/static/img/landing/*.png
+web/static/img/landing/
 
 # service-qa harness output (outcome manifests)
 scripts/service-qa/.generated/
