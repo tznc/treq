@@ -984,7 +984,14 @@ impl GithubView {
       .when(show_detail, |d| d.w(px(380.)).flex_none())
       .when(!show_detail, |d| d.flex_1().min_w_0())
       .child(header)
-      .child(div().flex_none().px_4().pb_2().child(self.tabs(p, cx)))
+      .child(
+        div()
+          .flex()
+          .flex_none()
+          .px_4()
+          .pb_2()
+          .child(self.tabs(p, cx)),
+      )
       .child(self.toolbar(has_remote, p, window, cx))
       .when(
         has_remote && self.route.creating && self.route.tab == Tab::Issues,
@@ -1006,7 +1013,7 @@ impl GithubView {
         .on_click(cx.listener(move |view, _, _, cx| view.press(press, cx)))
         .child(label)
     };
-    tabs_list(p)
+    named(tabs_list(p), "github-tabs")
       .child(tab(
         "github-tab-issues",
         "Issues",
