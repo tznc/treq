@@ -30,6 +30,7 @@ use tauri_plugin_gpui::{
 };
 
 mod form;
+pub mod launch;
 mod modal;
 pub mod native;
 mod overlay;
@@ -301,6 +302,10 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
   let snapshot = snapshot.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
   if let Some(snapshot) = &snapshot {
     remote_repo::set_window(label, snapshot.repository.clone());
+    // Agent links queued for this window's repository start once it shows.
+    if let screen::View::Workspace(route) = &snapshot.view {
+      launch::window_shows_repo(app, label, &route.repo_path);
+    }
   }
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {

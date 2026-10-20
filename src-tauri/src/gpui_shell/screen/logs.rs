@@ -3,8 +3,8 @@
 //! script and system logs, each as a feed whose lines go to an agent.
 //!
 //! Read from the backend directly ([`logs_data`]). The prompt for the
-//! picked lines goes back to React (`logs.sendToAgent`), which starts the
-//! agent terminal.
+//! picked lines goes to the workspace view (`logs.sendToAgent`), which has
+//! the backend start an agent on it.
 //!
 //! [`logs_data`]: super::logs_data
 

@@ -170,7 +170,7 @@ pub struct Outcome {
 
 /// What the workspace header asks of the backend; faked in tests. All but
 /// `notify` and `open_url` block, so they are called off the main thread.
-pub trait WorkspaceHost: ToolsHost {
+pub trait WorkspaceHost: ToolsHost + super::launch_data::LaunchHost {
   fn load(&self, route: &Route) -> Loaded;
   /// Also starts polling the repository's pull requests.
   fn pr_cache(&self, repo_path: &str, branch: &str) -> PrCache;

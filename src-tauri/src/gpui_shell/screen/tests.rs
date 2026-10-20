@@ -118,6 +118,15 @@ struct FakeHost {
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
   /// `None` fails the read, as when it never answers.
   queue: Mutex<Option<(bool, Vec<merge_queue_data::QueueEntry>)>>,
+  /// What the agent launches read and did: each new session's start data
+  /// by pane id, the `treq send` attachments, the prompt dialog's tasks
+  /// (and whether starting fails), and the sessions started.
+  pending: Mutex<HashMap<i64, launch_data::PendingSession>>,
+  send: Mutex<Vec<launch_data::SendAsset>>,
+  tasks: Mutex<Vec<launch_data::TaskRequest>>,
+  task_error: Option<String>,
+  launches: Mutex<Vec<(launch_data::LaunchRequest, bool)>>,
+  started: Mutex<Vec<(launch_data::SessionStart, bool)>>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -378,6 +387,74 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {
     settings_data::SettingsHost::notify(self, event);
+  }
+}
+
+impl launch_data::LaunchHost for FakeHost {
+  fn start_agent_task(&self, task: &launch_data::TaskRequest) -> Result<bool, String> {
+    self.record("start task".into());
+    self.tasks.lock().unwrap().push(task.clone());
+    if let Some(err) = &self.task_error {
+      return Err(err.clone());
+    }
+    Ok(!task.text.trim().is_empty() || task.issue.is_some())
+  }
+
+  fn launch_session(
+    &self,
+    request: &launch_data::LaunchRequest,
+    select: bool,
+  ) -> Result<launch_data::SessionStart, String> {
+    self.record(format!(
+      "launch {:?} {:?} {:?}",
+      request.session_name, request.mode, request.agent
+    ));
+    self
+      .launches
+      .lock()
+      .unwrap()
+      .push((request.clone(), select));
+    Ok(launch_data::SessionStart {
+      session_id: 41,
+      repo_path: request.repo_path.clone(),
+      workspace_id: request.workspace_id,
+      pending_prompt: request.prompt.clone(),
+      ..Default::default()
+    })
+  }
+
+  fn session_started(&self, start: &launch_data::SessionStart, select: bool) {
+    self.started.lock().unwrap().push((start.clone(), select));
+  }
+
+  fn resolve_agent(&self, _: &str, agent: Option<&str>) -> Option<String> {
+    agent.map(str::to_string)
+  }
+
+  fn pending_session(&self, pane_id: i64) -> Option<launch_data::PendingSession> {
+    self.pending.lock().unwrap().get(&pane_id).cloned()
+  }
+
+  fn send_assets(&self) -> Vec<launch_data::SendAsset> {
+    self.send.lock().unwrap().clone()
+  }
+
+  fn dismiss_send_asset(&self, id: &str) {
+    self.record(format!("dismiss asset {id}"));
+    self.send.lock().unwrap().retain(|a| a.id != id);
+  }
+}
+
+impl FakeHost {
+  /// The sessions the screens started, as `SessionCreationInfo` JSON.
+  fn started_sessions(&self) -> Vec<serde_json::Value> {
+    self
+      .started
+      .lock()
+      .unwrap()
+      .iter()
+      .map(|(s, _)| serde_json::to_value(s).unwrap())
+      .collect()
   }
 }
 
@@ -3217,7 +3294,7 @@ fn code_tab_starts_a_task_in_the_workspace(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  let created = fields(&h, "code.sessionCreated");
+  let created = host.started_sessions();
   assert_eq!(created.len(), 1, "{:?}", h.sent());
   assert_eq!(created[0]["sessionId"], 31);
   assert_eq!(created[0]["workspaceId"], 7);
@@ -3253,7 +3330,7 @@ fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
     writes.contains(&r#"create session Some(9) "fix login""#.to_string()),
     "{writes:?}"
   );
-  assert_eq!(fields(&h, "code.sessionCreated")[0]["workspaceId"], 9);
+  assert_eq!(host.started_sessions()[0]["workspaceId"], 9);
 }
 
 #[gpui::test]
@@ -3411,7 +3488,7 @@ fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  let created = fields(&h, "code.sessionCreated");
+  let created = host.started_sessions();
   assert_eq!(
     created[0]["pendingPrompt"],
     "src/a.rs:2 (commit a)\n```\n+b\n```\n> why?\n"
@@ -3479,7 +3556,7 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  let created = fields(&h, "code.sessionCreated");
+  let created = host.started_sessions();
   assert_eq!(created[0]["workspacePath"], "/r/cwd");
   assert_eq!(created[0]["pendingPrompt"], "resolve: ");
   assert!(!h.drawn("resolve-conflicts-dialog"));
@@ -3858,11 +3935,15 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert!(h.drawn("finish-review-popover"));
   h.click("review-plan");
   h.cx.run_until_parked();
-  let sent = fields(&h, "changes.review");
-  assert_eq!(sent.len(), 1);
-  assert_eq!(sent[0]["mode"], "plan");
-  assert_eq!(sent[0]["useIdleAgent"], false);
-  let markdown = sent[0]["markdown"].as_str().unwrap_or_default();
+  assert!(fields(&h, "changes.review").is_empty());
+  let launches = host.launches.lock().unwrap().clone();
+  assert_eq!(launches.len(), 1);
+  let (request, select) = &launches[0];
+  assert_eq!(request.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(request.mode.as_deref(), Some("plan"));
+  assert_eq!(request.workspace_id, Some(7));
+  assert!(!select);
+  let markdown = request.prompt.clone().unwrap_or_default();
   assert!(
     markdown.contains("Nit") && markdown.contains("a.rs"),
     "{markdown}"
@@ -3870,6 +3951,24 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert!(!h.drawn("review-action-bar"));
   assert!(!h.drawn("finish-review-popover"));
   assert!(host.writes().contains(&"clear review 7".to_string()));
+}
+
+#[gpui::test]
+fn changes_tab_starts_an_ai_review_in_a_new_terminal(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("start-agent-review");
+  h.cx.run_until_parked();
+  assert!(fields(&h, "changes.startReview").is_empty());
+  let launches = host.launches.lock().unwrap().clone();
+  assert_eq!(launches.len(), 1, "{:?}", host.calls());
+  let (request, select) = &launches[0];
+  assert_eq!(request.session_name.as_deref(), Some("AI Review"));
+  assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
+  assert_eq!(request.workspace_id, Some(7));
+  assert!(!select);
+  let prompt = request.prompt.clone().unwrap_or_default();
+  assert!(prompt.contains("--target-type workspace_diff"), "{prompt}");
+  assert!(prompt.contains("--target-id 7"), "{prompt}");
 }
 
 #[gpui::test]
@@ -4066,6 +4165,68 @@ fn changes_tab_applies_an_agent_suggestion_and_reads_again(cx: &mut TestAppConte
   assert_eq!(reads(&host), 2);
 }
 
+/// The Changes tab with GPUI's terminal pane below, its agent session 3
+/// open on `feature/login`.
+fn changes_with_terminal(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  let mut host = changes_host();
+  host.sessions = terminal_host().sessions;
+  host.workspaces = host.loaded.workspace.clone().into_iter().collect();
+  *host.agent.lock().unwrap() = vec![agent_comment(Some("one()"))];
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["tab"] = "changes".into();
+  route["terminal"] = serde_json::json!({ "activeSessionId": 3 });
+  let route = serde_json::from_value(route).expect("changes route");
+  workspace_harness(cx, host, route)
+}
+
+#[gpui::test]
+fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext) {
+  let (mut h, host) = changes_with_terminal(cx);
+  assert!(h.drawn("terminal-column-agent"));
+  h.click("agent-send-ag");
+  h.cx.run_until_parked();
+  assert!(fields(&h, "changes.agentComment").is_empty());
+  let prompt = "Please address this review comment.\n\na.rs:2\n> Use one line\n\nSuggested change:\n```\none()\n```\n";
+  let sent = format!("write {} {:?}", agent_pty(), format!("{prompt}\n"));
+  assert!(pty_writes(&host).contains(&sent), "{:?}", pty_writes(&host));
+  assert!(host.launches.lock().unwrap().is_empty());
+  assert!(host
+    .calls()
+    .contains(&"notify toast Comment sent to agent".to_string()));
+}
+
+#[gpui::test]
+fn changes_tab_starts_an_agent_for_a_comment_without_an_idle_one(cx: &mut TestAppContext) {
+  // The open agent runs in another workspace, so it is not this one's.
+  let mut sessions = terminal_host().sessions;
+  sessions[0].workspace_id = Some(99);
+  let mut changes = changes_host();
+  changes.sessions = sessions;
+  changes.workspaces = changes.loaded.workspace.clone().into_iter().collect();
+  *changes.agent.lock().unwrap() = vec![agent_comment(None)];
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["tab"] = "changes".into();
+  route["terminal"] = serde_json::json!({ "activeSessionId": 3 });
+  let (mut h, host) = workspace_harness(cx, changes, serde_json::from_value(route).expect("route"));
+  assert!(h.drawn("terminal-column-agent"));
+  h.click("agent-send-ag");
+  h.cx.run_until_parked();
+  let launches = host.launches.lock().unwrap().clone();
+  assert_eq!(launches.len(), 1, "{:?}", host.calls());
+  let request = &launches[0].0;
+  assert_eq!(request.session_name.as_deref(), Some("Review Comment"));
+  assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
+  assert_eq!(
+    request.prompt.as_deref(),
+    Some("Please address this review comment.\n\na.rs:2\n> Use one line\n")
+  );
+  assert!(host
+    .calls()
+    .contains(&"notify toast Comment sent to agent".to_string()));
+}
+
 #[gpui::test]
 fn changes_tab_sends_an_agent_comment_to_react(cx: &mut TestAppContext) {
   let host = changes_host();
@@ -4135,16 +4296,18 @@ fn logs_tab_lists_the_check_logs(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn logs_tab_sends_a_picked_line_to_an_agent(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, logs_host(), logs_route(None));
+  let (mut h, host) = workspace_harness(cx, logs_host(), logs_route(None));
   assert!(!h.drawn("log-inspect-panel"));
   h.click("repo-log-line");
   assert!(h.drawn("log-inspect-panel"));
   assert!(h.drawn("selection-count"));
   h.click("send-to-agent");
   h.cx.run_until_parked();
-  let sent = fields(&h, "logs.sendToAgent");
-  assert_eq!(sent.len(), 1);
-  let prompt = sent[0].as_str().unwrap_or_default();
+  let launches = host.launches.lock().unwrap().clone();
+  assert_eq!(launches.len(), 1);
+  assert_eq!(launches[0].0.session_name.as_deref(), Some("Logs"));
+  assert_eq!(launches[0].0.mode.as_deref(), Some("plan"));
+  let prompt = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(
     prompt.starts_with("Here are 1 log line from my check logs."),
     "{prompt}"
@@ -4224,22 +4387,17 @@ fn logs_tab_sends_a_result_set_to_an_agent(cx: &mut TestAppContext) {
     rows: vec![vec![Some("build".into())]],
     row_count: 1,
   }));
-  let (mut h, _) = workspace_harness(cx, host, logs_route(None));
+  let (mut h, host) = workspace_harness(cx, host, logs_route(None));
   h.click("logs-explorer-view");
   h.click("run-query");
   h.cx.run_until_parked();
   assert!(h.drawn("sql-results"));
   h.click("send-resultset-to-agent");
   h.cx.run_until_parked();
-  let sent = fields(&h, "logs.sendToAgent");
-  assert_eq!(sent.len(), 1);
-  assert!(
-    sent[0]
-      .as_str()
-      .unwrap_or_default()
-      .contains("Result (1 row):"),
-    "{sent:?}"
-  );
+  let launches = host.launches.lock().unwrap().clone();
+  assert_eq!(launches.len(), 1);
+  let prompt = launches[0].0.prompt.clone().unwrap_or_default();
+  assert!(prompt.contains("Result (1 row):"), "{prompt}");
 }
 
 fn terminal_host() -> FakeHost {
@@ -4292,13 +4450,17 @@ fn terminal_pane_starts_collapsed_and_expands(cx: &mut TestAppContext) {
 #[gpui::test]
 fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
-  set_terminal(
-    &mut h,
-    serde_json::json!({
-      "activeSessionId": 3,
-      "pending": [{ "sessionId": 3, "pendingPrompt": "fix it", "permissionMode": "plan", "agent": "codex" }],
-    }),
+  // The backend kept what the session starts with.
+  host.pending.lock().unwrap().insert(
+    3,
+    launch_data::PendingSession {
+      pending_prompt: Some("fix it".into()),
+      permission_mode: Some("plan".into()),
+      agent: Some("codex".into()),
+      workspace_path: None,
+    },
   );
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   assert!(h.drawn("terminal-column-agent"));
   assert!(h.drawn("terminal-column-active"));
   assert!(h.drawn("terminal-workspace-label"));
@@ -4814,10 +4976,8 @@ fn send_assets() -> serde_json::Value {
 
 fn send_harness(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
-  set_terminal(
-    &mut h,
-    serde_json::json!({ "activeSessionId": 3, "sendAssets": send_assets() }),
-  );
+  *host.send.lock().unwrap() = serde_json::from_value(send_assets()).expect("assets");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   (h, host)
 }
 
@@ -4838,7 +4998,7 @@ fn pty_writes(host: &FakeHost) -> Vec<String> {
 
 #[gpui::test]
 fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContext) {
-  let (mut h, _) = send_harness(cx);
+  let (mut h, host) = send_harness(cx);
   assert!(h.drawn("terminal-send-previews"));
   assert!(h.drawn("terminal-send-preview-t1"));
   assert!(h.drawn("terminal-send-preview-i1"));
@@ -4860,6 +5020,8 @@ fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContex
     field: "terminal.dismissAsset".into(),
     value: "t1".into(),
   }));
+  assert!(host.calls().contains(&"dismiss asset t1".to_string()));
+  assert!(!h.drawn("terminal-send-preview-t1"));
   assert!(!h.drawn("treq-send-preview-lightbox"));
 }
 
@@ -5391,38 +5553,63 @@ fn agent_prompt_starts_with_what_react_sent(cx: &mut TestAppContext) {
   );
 }
 
+/// The prompt dialog's starts the backend was asked for.
+fn tasks(h: &mut Harness, host: &FakeHost) -> Vec<launch_data::TaskRequest> {
+  h.cx.run_until_parked();
+  host.tasks.lock().unwrap().clone()
+}
+
 #[gpui::test]
-fn agent_prompt_hands_the_prompt_to_react(cx: &mut TestAppContext) {
-  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+fn agent_prompt_starts_the_session_in_the_backend(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.click("task-submit");
+  // Until the dialog closes, the prompt is not sent twice.
   h.click("task-submit");
   assert_eq!(
-    fields(&h, "agentPrompt.start"),
-    vec![serde_json::json!({
-      "prompt": "fix it",
-      "agent": "claude",
-      "mode": "acceptEdits",
-      "workspaceId": 7,
-      "saveAsRepoDefault": false,
-      "issue": false,
-    })]
+    tasks(&mut h, &host),
+    vec![launch_data::TaskRequest {
+      repo_path: "/repo".into(),
+      workspace_id: Some(7),
+      text: "fix it".into(),
+      issue: None,
+      agent: "claude".into(),
+      mode: "acceptEdits".into(),
+      save_as_repo_default: false,
+    }]
   );
-  // Until React reports back, the prompt is not sent twice.
+  // Started: React closes the dialog; nothing else goes to React.
+  assert_eq!(h.sent(), vec![press("agentPrompt.close")]);
+  assert!(agent_view(&h, |v| v.submitting()));
+}
+
+#[gpui::test]
+fn agent_prompt_toasts_a_failed_start_and_allows_another(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    task_error: Some("jj failed".into()),
+    ..FakeHost::default()
+  };
+  let (mut h, host) = modal_harness(cx, host, agent_modal());
   h.click("task-submit");
-  assert_eq!(fields(&h, "agentPrompt.start").len(), 1);
+  assert_eq!(tasks(&mut h, &host).len(), 1);
+  assert!(host
+    .calls()
+    .contains(&"notify toast Failed to create task".to_string()));
+  assert!(h.sent().is_empty());
+  assert!(!agent_view(&h, |v| v.submitting()));
 }
 
 #[gpui::test]
 fn agent_prompt_plans_instead_of_editing(cx: &mut TestAppContext) {
-  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   h.click("task-submit-menu");
   h.click("task-plan");
-  assert_eq!(fields(&h, "agentPrompt.start")[0]["mode"], "plan");
+  assert_eq!(tasks(&mut h, &host)[0].mode, "plan");
 }
 
 #[gpui::test]
 fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
-  let (mut h, _) = modal_harness(cx, host, agent_modal());
+  let (mut h, host) = modal_harness(cx, host, agent_modal());
   assert_eq!(agent_view(&h, |v| v.agents()), (Agent::Codex, Agent::Codex));
   // Codex has no plan mode.
   assert!(!h.drawn("task-submit-menu"));
@@ -5437,14 +5624,14 @@ fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
   assert!(h.drawn("task-submit-menu"));
   h.click("task-save-default-box");
   h.click("task-submit");
-  let start = &fields(&h, "agentPrompt.start")[0];
-  assert_eq!(start["agent"], "cursor");
-  assert_eq!(start["saveAsRepoDefault"], true);
+  let start = &tasks(&mut h, &host)[0];
+  assert_eq!(start.agent, "cursor");
+  assert!(start.save_as_repo_default);
 }
 
 #[gpui::test]
 fn agent_prompt_picks_a_workspace(cx: &mut TestAppContext) {
-  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   h.click("agent-prompt-workspace");
   assert!(h.drawn("agent-prompt-workspace-popover"));
   assert!(h.drawn("agent-prompt-workspace-main"));
@@ -5453,10 +5640,7 @@ fn agent_prompt_picks_a_workspace(cx: &mut TestAppContext) {
   assert_eq!(agent_view(&h, |v| v.selected), None);
   assert!(!h.drawn("agent-prompt-workspace-popover"));
   h.click("task-submit");
-  assert_eq!(
-    fields(&h, "agentPrompt.start")[0]["workspaceId"],
-    serde_json::Value::Null
-  );
+  assert_eq!(tasks(&mut h, &host)[0].workspace_id, None);
 }
 
 #[gpui::test]
@@ -5469,16 +5653,30 @@ fn agent_prompt_runs_an_attached_issue_in_its_own_workspace(cx: &mut TestAppCont
     "key": "ENG-101",
     "title": "Login is slow",
     "includeSubItems": true,
+    "id": "issue-1",
+    "url": "https://linear.app/t/ENG-101",
+    "subItemIds": ["child-1"],
   });
-  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), modal);
   assert!(h.drawn("agent-prompt-issue-note"));
   assert!(h.drawn("issue-chip"));
   assert!(!h.drawn("agent-prompt-workspace"));
   // An issue alone is enough to start.
   h.click("task-submit");
-  let start = &fields(&h, "agentPrompt.start")[0];
-  assert_eq!(start["issue"], true);
-  assert_eq!(start["prompt"], "");
+  let start = &tasks(&mut h, &host)[0];
+  assert_eq!(start.text, "");
+  assert_eq!(
+    start.issue,
+    Some(crate::core::agent_launch::IssueAttachment {
+      source: crate::core::agent_launch::IssueSource::Linear,
+      id: "issue-1".into(),
+      key: "ENG-101".into(),
+      url: "https://linear.app/t/ENG-101".into(),
+      title: "Login is slow".into(),
+      include_sub_items: true,
+      sub_item_ids: vec!["child-1".into()],
+    })
+  );
 }
 
 #[gpui::test]
@@ -5490,12 +5688,12 @@ fn agent_prompt_detaches_an_issue(cx: &mut TestAppContext) {
     "title": "Bug",
     "includeSubItems": false,
   });
-  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), modal);
   h.click("issue-chip-remove");
   assert!(!h.drawn("issue-chip"));
   assert!(h.drawn("agent-prompt-workspace"));
   h.click("task-submit");
-  assert_eq!(fields(&h, "agentPrompt.start")[0]["issue"], false);
+  assert_eq!(tasks(&mut h, &host)[0].issue, None);
 }
 
 #[gpui::test]
@@ -5524,9 +5722,9 @@ fn agent_prompt_suggests_files_for_mentions(cx: &mut TestAppContext) {
 fn agent_prompt_waits_while_react_starts_the_session(cx: &mut TestAppContext) {
   let mut modal = agent_modal();
   modal["starting"] = true.into();
-  let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), modal);
   h.click("task-submit");
-  assert!(fields(&h, "agentPrompt.start").is_empty());
+  assert!(tasks(&mut h, &host).is_empty());
   assert!(agent_view(&h, |v| v.submitting()));
 }
 

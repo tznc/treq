@@ -2,6 +2,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef } from "react";
 import { isGpuiShellHost } from "./gpui-shell";
 import type { CutoffReason } from "./remote-cert-lifecycle";
+import type { SessionCreationInfo } from "../types/sessions";
 
 /**
  * What a GPUI screen did through the backend itself
@@ -29,7 +30,19 @@ export type GpuiNativeEvent =
       reason?: string;
     }
   /** A remote command found the endpoint's credential cut off. */
-  | { kind: "remoteCutoff"; endpointId: string; reason: CutoffReason };
+  | { kind: "remoteCutoff"; endpointId: string; reason: CutoffReason }
+  /**
+   * The backend started an agent session (src-tauri/src/gpui_shell/launch.rs):
+   * it already created the session, recorded its prompt and keeps its start
+   * for GPUI's terminal pane. React makes it the active session, and with
+   * `select` shows its workspace.
+   */
+  | {
+      kind: "agentSessionStarted";
+      session: SessionCreationInfo;
+      paneSessionId: number;
+      select: boolean;
+    };
 
 const GPUI_NATIVE_EVENT = "gpui-native-event";
 

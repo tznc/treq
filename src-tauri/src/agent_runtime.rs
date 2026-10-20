@@ -74,9 +74,43 @@ fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> Option<Stri
   pick(supporting_labels)
 }
 
+/// Whether GPUI shell windows start agents themselves
+/// (`gpui_shell::launch`) instead of their React apps.
+fn shell_launches(app: &AppHandle) -> bool {
+  #[cfg(feature = "gpui-shell")]
+  #[cfg(desktop)]
+  if crate::gpui_shell::is_enabled(app) {
+    return true;
+  }
+  let _ = app;
+  false
+}
+
+/// Starts the agent link `url` for window `label` from Rust, when the
+/// shell does. Returns false to leave it to the window's React app.
+fn shell_deep_link(app: &AppHandle, label: Option<&str>, url: &str) -> bool {
+  if !shell_launches(app) {
+    return false;
+  }
+  #[cfg(feature = "gpui-shell")]
+  #[cfg(desktop)]
+  crate::gpui_shell::launch::agent_deep_link(app, label.map(str::to_string), url);
+  let _ = (label, url);
+  true
+}
+
+/// An agent link no window can take: the shell opens a window for its
+/// repository. Returns whether it did.
+pub(crate) fn open_window_for_agent_link(app: &AppHandle, url: &str) -> bool {
+  shell_deep_link(app, None, url)
+}
+
 pub(crate) fn route_agent_deep_link(app: &AppHandle, url: String) -> bool {
   if let Some(repo) = extract_repo_from_agent_deep_link(&url) {
     if let Some(label) = find_target_window_label_for_repo(app, &repo) {
+      if shell_deep_link(app, Some(&label), &url) {
+        return true;
+      }
       let _ = app.emit_to(
         EventTarget::webview_window(&label),
         "deep-link-received",
@@ -129,6 +163,9 @@ pub(crate) fn route_agent_dispatch_request(
 ) -> agent_dispatch::AgentDispatchResponse {
   let url = build_agent_deep_link_url(request);
   if let Some(label) = find_target_window_label_for_repo(app, &request.repo) {
+    if shell_deep_link(app, Some(&label), &url) {
+      return agent_dispatch::AgentDispatchResponse::handled();
+    }
     let _ = app.emit_to(
       EventTarget::webview_window(&label),
       "deep-link-received",
@@ -147,6 +184,13 @@ pub(crate) fn route_send_dispatch_request(
   request: &crate::send_dispatch::SendDispatchRequest,
 ) -> agent_dispatch::AgentDispatchResponse {
   if let Some(label) = find_target_window_label_for_repo(app, &request.repo) {
+    // GPUI's terminal panes read the attachment from Rust; React keeps its
+    // own copy for the views it still draws.
+    #[cfg(feature = "gpui-shell")]
+    #[cfg(desktop)]
+    if shell_launches(app) {
+      crate::gpui_shell::launch::treq_send(app, request);
+    }
     let _ = app.emit_to(
       EventTarget::webview_window(&label),
       "treq-send-received",

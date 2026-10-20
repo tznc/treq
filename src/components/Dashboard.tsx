@@ -113,6 +113,7 @@ import {
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
 import { useGpuiNativeEvents } from "../lib/gpui-native";
+import type { SessionCreationInfo } from "../types/sessions";
 import {
   openRepositoryAtPath as openRepositoryAtPathShared,
   showOpenedRepository,
@@ -1827,6 +1828,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           .getState()
           .recordCutoff(event.endpointId, event.reason);
         break;
+      case "agentSessionStarted":
+        void showBackendSession(
+          event.session,
+          event.paneSessionId,
+          event.select,
+        );
+        break;
       default:
     }
   });
@@ -2755,6 +2763,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
     }
     return sessionId;
+  };
+
+  /**
+   * A session the backend started for GPUI (the prompt dialog, a review,
+   * a deep link): it created the session and recorded its prompt, so React
+   * only shows it, as `handleSessionCreated` and `launchAgentSession` do.
+   */
+  const showBackendSession = async (
+    session: SessionCreationInfo,
+    paneSessionId: number,
+    select: boolean,
+  ) => {
+    void invalidateQueries(["sessions"]);
+    void invalidateQueries(["prompt-history"]);
+    invalidateQueries(["workspace-starting-prompt"]);
+    const known =
+      session.workspaceId == null ||
+      workspaces.some((ws) => ws.id === session.workspaceId);
+    if (!known) {
+      void invalidateQueries(["workspaces", queryRepoKey]);
+      invalidateQueries(["workspace-statuses", queryRepoKey]);
+    }
+    setActiveSessionId(paneSessionId);
+    if (!select) return;
+    const sessionWorkspaces =
+      session.repoPath === repoPath
+        ? workspaces
+        : await getWorkspaces(session.repoPath).catch(() => []);
+    activateRepo(session.repoPath);
+    setSelectedWorkspace(
+      sessionWorkspaces.find((ws) => ws.id === session.workspaceId) ?? null,
+    );
+    setViewMode("show-workspace");
   };
 
   const handleStartAgentRequest = async (request: AgentDeepLinkRequest) => {

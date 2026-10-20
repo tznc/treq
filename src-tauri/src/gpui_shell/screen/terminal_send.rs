@@ -1,26 +1,13 @@
 //! `treq send` attachments over a terminal (`TerminalSendPreviews`), and
 //! the review an agent gets of one (`sendAssetReview.ts`).
 //!
-//! React keeps the attachments (`treqSendStore`, which the browser panel
-//! reads too) and says which there are in the route; GPUI draws them, and
-//! asks React to drop one when it is dismissed.
+//! The backend keeps the attachments (`core::agent_launch::send_assets`);
+//! GPUI draws them, and drops one when it is dismissed. React keeps its own
+//! copy (`treqSendStore`) for the browser panel.
 
 use std::path::Path;
 
-use serde::Deserialize;
-
-/// `TreqSendAsset`, as the route carries it.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct SendAsset {
-  pub id: String,
-  pub repo: String,
-  pub pty_session_id: Option<String>,
-  /// `image`, `text` or `browser`.
-  pub media_type: String,
-  pub path: String,
-  pub title: String,
-}
+pub use crate::core::agent_launch::SendAsset;
 
 impl SendAsset {
   pub fn is_image(&self) -> bool {

@@ -71,12 +71,7 @@ export function useGpuiAgentModals({
       )
         ? agentPrompt.initialWorkspaceId
         : null,
-      issue: agentPrompt.issue && {
-        source: agentPrompt.issue.source,
-        key: agentPrompt.issue.key,
-        title: agentPrompt.issue.title,
-        includeSubItems: agentPrompt.issue.includeSubItems,
-      },
+      issue: agentPrompt.issue,
       starting: agentPrompt.starting,
     };
   } else if (stash.open) {

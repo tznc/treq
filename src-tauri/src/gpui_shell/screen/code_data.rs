@@ -471,14 +471,7 @@ pub fn task_branch_name(prompt: &str, taken: &HashSet<String>, pattern: &str) ->
   name
 }
 
-/// A session's name from its prompt: cut to 47 characters and "...".
-pub fn session_name(prompt: &str) -> String {
-  if prompt.chars().count() > 50 {
-    format!("{}...", prompt.chars().take(47).collect::<String>())
-  } else {
-    prompt.to_string()
-  }
-}
+pub use crate::core::agent_launch::session_name;
 
 /// The `@` being typed before `cursor` (a byte offset): its offset and the
 /// query after it, if it starts the text or follows whitespace.

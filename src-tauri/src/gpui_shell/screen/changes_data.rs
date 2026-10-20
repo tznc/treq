@@ -902,42 +902,7 @@ pub fn stashed(entry: &StashEntry) -> String {
   )
 }
 
-/// `AGENT_REVIEW_TARGET_WORKSPACE_DIFF`.
-pub const REVIEW_TARGET: &str = "workspace_diff";
-/// `DEFAULT_REVIEW_PROMPT`, as `lib/agent-review-prompt.ts` writes it.
-const DEFAULT_REVIEW_PROMPT: &str = include_str!("review_prompt.txt");
-
-/// `workspaceDiffSummary`.
-pub fn diff_summary(branch: Option<&str>, files: usize) -> String {
-  let files = format!("{files} changed file{}", if files == 1 { "" } else { "s" });
-  match branch {
-    Some(branch) => format!("the {branch} workspace diff ({files})"),
-    None => format!("the current workspace diff ({files})"),
-  }
-}
-
-/// `buildReviewPrompt`: the repository's prompt when set, else the
-/// built-in one, with its placeholders filled.
-pub fn review_prompt(custom: Option<&str>, target_id: &str, summary: &str) -> String {
-  review_prompt_for(custom, REVIEW_TARGET, target_id, summary)
-}
-
-/// [`review_prompt`] for another target type, as a PR review's `github_pr`.
-pub fn review_prompt_for(
-  custom: Option<&str>,
-  target_type: &str,
-  target_id: &str,
-  summary: &str,
-) -> String {
-  let template = custom
-    .filter(|c| !c.trim().is_empty())
-    .unwrap_or(DEFAULT_REVIEW_PROMPT);
-  template
-    .replace("{target_type}", target_type)
-    .replace("{target_id}", target_id)
-    .replace("{workspace_id}", target_id)
-    .replace("{diff_summary}", summary)
-}
+pub use crate::core::agent_launch::{diff_summary, review_prompt, review_prompt_for};
 
 #[cfg(test)]
 mod tests {

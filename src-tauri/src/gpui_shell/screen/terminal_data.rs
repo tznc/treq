@@ -531,42 +531,7 @@ fn remote_channel(backend: &Backend, id: &str, op: RemoteOp) {
   }
 }
 
-/// `repoHash` in `agent-pty-id.ts`.
-pub fn repo_hash(repo_path: &str) -> u64 {
-  repo_path
-    .chars()
-    .fold(0u64, |hash, c| (hash * 31 + u64::from(c)) % 2_147_483_647)
-}
-
-fn base36(mut n: u64) -> String {
-  let digits = b"0123456789abcdefghijklmnopqrstuvwxyz";
-  let mut out = Vec::new();
-  loop {
-    out.push(digits[(n % 36) as usize]);
-    n /= 36;
-    if n == 0 {
-      break;
-    }
-  }
-  out.reverse();
-  String::from_utf8(out).unwrap_or_default()
-}
-
-/// `agentPtySessionId`: PTYs are shared by every window, so the id carries
-/// a hash of the repository path.
-pub fn agent_pty_id(repo_path: &str, session_id: i64) -> String {
-  format!("session-{}-{session_id}", base36(repo_hash(repo_path)))
-}
-
-/// `paneSessionId`: supporting repositories' ids are offset so they don't
-/// clash with the main repository's.
-pub fn pane_session_id(repo_path: &str, main_repo_path: &str, session_id: i64) -> i64 {
-  if repo_path == main_repo_path {
-    session_id
-  } else {
-    (repo_hash(repo_path) as i64 + 1) * 1_000_000 + session_id
-  }
-}
+pub use crate::core::agent_launch::{agent_pty_id, pane_session_id};
 
 /// A shell's PTY id: its directory with anything but letters and digits
 /// dashed, and a timestamp.
@@ -731,25 +696,7 @@ mod tests {
 
   #[test]
   fn names_ptys_like_react() {
-    assert_eq!(repo_hash("/repo"), {
-      let mut hash = 0u64;
-      for c in "/repo".chars() {
-        hash = (hash * 31 + c as u64) % 2_147_483_647;
-      }
-      hash
-    });
-    assert_eq!(
-      agent_pty_id("/repo", 7),
-      format!("session-{}-7", base36(repo_hash("/repo")))
-    );
-    assert_eq!(base36(0), "0");
-    assert_eq!(base36(35), "z");
-    assert_eq!(base36(36), "10");
     assert_eq!(pane_session_id("/repo", "/repo", 3), 3);
-    assert_eq!(
-      pane_session_id("/api", "/repo", 3),
-      (repo_hash("/api") as i64 + 1) * 1_000_000 + 3
-    );
     assert_eq!(shell_pty_id("/a/b c", 5), "shell--a-b-c-5");
   }
 

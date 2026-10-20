@@ -408,13 +408,17 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
     "{:?}",
     host.calls()
   );
-  let sent = h.sent();
-  let [ScreenAction::Field { field, value }] = &sent[..] else {
-    panic!("one field: {sent:?}");
+  // The review starts in the home repository; React only shows it.
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
+  let launches = host.launches.lock().unwrap().clone();
+  let [(request, true)] = &launches[..] else {
+    panic!("one selected launch: {launches:?}");
   };
-  assert_eq!(field, "linear.startReview");
-  assert_eq!(value["agent"], "codex");
-  let prompt = value["prompt"].as_str().expect("prompt");
+  assert_eq!(request.workspace_id, None);
+  assert_eq!(request.agent.as_deref(), Some("codex"));
+  assert_eq!(request.session_name.as_deref(), Some("AI Review"));
+  assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
+  let prompt = request.prompt.as_deref().expect("prompt");
   assert!(prompt.contains("the Linear issue \"ENG-1 Issue 1\" and its 1 comment."));
   assert!(prompt.contains("/repo/.treq/linear-review/1"));
   assert!(!view(&mut h, |v| v

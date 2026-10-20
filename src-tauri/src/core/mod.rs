@@ -2,6 +2,7 @@ pub mod account;
 pub mod agent_chat;
 pub mod agent_cli;
 pub mod agent_command;
+pub mod agent_launch;
 pub mod agent_supervisor;
 pub mod app;
 pub mod app_setup_script;

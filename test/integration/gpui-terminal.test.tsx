@@ -2,7 +2,10 @@
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
+import { act } from "@testing-library/react";
+import type { GpuiNativeEvent } from "../../src/lib/gpui-native";
 import { type GpuiTerminalRoute } from "../../src/lib/gpui-screen";
+import { emitOnTestBus } from "../test-event-bus";
 import { useTreqSendStore } from "../../src/stores/treqSendStore";
 import { findGpuiScreen, sendGpuiScreenAction } from "../gpui-screen";
 import { render, screen, within } from "../test-utils";
@@ -27,9 +30,11 @@ const terminalField = (field: string, value: unknown) =>
 
 describe("GPUI terminal pane", () => {
   let user: ReturnType<typeof userEvent.setup>;
+  let repoPath: string;
   beforeEach(() => {
     window.__TREQ_REACT_TERMINAL__ = false;
-    openRepo(createTestRepo(false).repoPath);
+    ({ repoPath } = createTestRepo(false));
+    openRepo(repoPath);
     user = userEvent.setup();
   });
 
@@ -136,5 +141,31 @@ describe("GPUI terminal pane", () => {
     await findTerminal();
     terminalField("newAgent", null);
     await findTerminal((t) => expect(t.activeSessionId).not.toBeNull());
+  }, 30000);
+
+  it("shows the session the backend started", async () => {
+    render(<Dashboard />);
+    await findTerminal();
+    const event: GpuiNativeEvent = {
+      kind: "agentSessionStarted",
+      session: {
+        sessionId: 42,
+        sessionName: "AI Review",
+        workspaceId: null,
+        workspacePath: null,
+        repoPath,
+        pendingPrompt: "Review it",
+        permissionMode: "acceptEdits",
+      },
+      paneSessionId: 42,
+      select: true,
+    };
+    act(() => {
+      emitOnTestBus("gpui-native-event", event);
+    });
+    const terminal = await findTerminal((t) =>
+      expect(t.activeSessionId).toBe(42),
+    );
+    expect(terminal.pending.some((p) => p.sessionId === 42)).toBe(false);
   }, 30000);
 });

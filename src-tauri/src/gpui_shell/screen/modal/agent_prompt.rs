@@ -1,8 +1,8 @@
 //! `AgentPromptDialog`: starts an agent session on a prompt. The workspace
 //! to run in, the prompt (with `@` file mentions and attachments), the agent
-//! and the permission mode are chosen here; React starts the session
-//! (`agentPrompt.start`), since it opens issue workspaces, records the
-//! prompt and owns the session list.
+//! and the permission mode are chosen here, and the backend starts the
+//! session (`startAgentTask`, in `core::agent_launch`): it opens the issue's
+//! workspaces, records the prompt and tells React which session to show.
 
 use std::time::Duration;
 
@@ -14,13 +14,13 @@ use gpui_kit::component::{
   Sizable,
 };
 use serde::Deserialize;
-use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, px, Context, Entity, FontWeight, SharedString, Stateful,
   Subscription, Task, Window,
 };
 
 use super::{dialog, fuzzy_matches, overlay, title, Env};
+use crate::core::agent_launch::{self as launch, IssueAttachment, TaskRequest};
 use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
   popup::{Side, TooltipContent},
@@ -76,6 +76,30 @@ pub struct Issue {
   pub key: String,
   pub title: String,
   pub include_sub_items: bool,
+  /// What the source's backend needs to open the issue's workspace.
+  #[serde(default)]
+  pub id: String,
+  #[serde(default)]
+  pub url: String,
+  #[serde(default)]
+  pub sub_item_ids: Vec<String>,
+}
+
+impl Issue {
+  fn attachment(&self) -> IssueAttachment {
+    IssueAttachment {
+      source: match self.source {
+        IssueSource::Github => launch::IssueSource::Github,
+        IssueSource::Linear => launch::IssueSource::Linear,
+      },
+      id: self.id.clone(),
+      key: self.key.clone(),
+      url: self.url.clone(),
+      title: self.title.clone(),
+      include_sub_items: self.include_sub_items,
+      sub_item_ids: self.sub_item_ids.clone(),
+    }
+  }
 }
 
 /// What React sends: where the prompt can run, and what it starts with.
@@ -94,7 +118,7 @@ pub struct Route {
   /// While one is attached the session runs in the issue's workspace.
   #[serde(default)]
   pub issue: Option<Issue>,
-  /// React is starting the session.
+  /// React is starting the session (React's own dialog flow).
   #[serde(default)]
   pub starting: bool,
 }
@@ -662,7 +686,8 @@ impl AgentPromptView {
     );
   }
 
-  /// `submitTask`: hands the prompt to React, which starts the session.
+  /// `submitTask`: the backend starts the session, and the dialog closes
+  /// once it has.
   pub(in crate::gpui_shell::screen) fn submit(&mut self, plan: bool, cx: &mut Context<Self>) {
     if self.submitting() || (self.task_text.trim().is_empty() && self.issue.is_none()) {
       return;
@@ -671,17 +696,29 @@ impl AgentPromptView {
     self.menu = None;
     cx.notify();
     let (configured, agent) = self.agents();
-    self.env.field(
-      "agentPrompt.start",
-      json!({
-        "prompt": self.task_text,
-        "agent": agent.id(),
-        "mode": if plan { "plan" } else { "acceptEdits" },
-        "workspaceId": self.selected,
-        "saveAsRepoDefault": self.save_default && agent != configured,
-        "issue": self.issue.is_some(),
-      }),
+    let task = TaskRequest {
+      repo_path: self.route.repo_path.clone(),
+      workspace_id: self.selected,
+      text: self.task_text.clone(),
+      issue: self.issue.as_ref().map(Issue::attachment),
+      agent: agent.id().into(),
+      mode: if plan { "plan" } else { "acceptEdits" }.into(),
+      save_as_repo_default: self.save_default && agent != configured,
+    };
+    read!(
+      self,
       cx,
+      |host, _route| host.start_agent_task(&task),
+      |view, result, cx| match result {
+        Ok(true) => view.env.press("agentPrompt.close", cx),
+        Ok(false) => view.submitted = false,
+        Err(err) => {
+          view.submitted = false;
+          view
+            .env
+            .toast(ToastTone::Error, "Failed to create task", err);
+        }
+      }
     );
   }
 }
