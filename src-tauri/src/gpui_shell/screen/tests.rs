@@ -6679,6 +6679,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
   assert_eq!(shown, [path]);
 }
 
+mod conflicts;
 mod file_browser;
 mod github;
 mod linear_view;
