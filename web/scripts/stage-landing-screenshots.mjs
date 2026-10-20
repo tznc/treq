@@ -51,7 +51,9 @@ if (srcRoot) {
     fs.copyFileSync(found, path.join(destLanding, name));
     copied += 1;
   }
-  console.log(`Copied ${copied} of ${names.length} landing PNG(s) from ${srcRoot}`);
+  console.log(
+    `Copied ${copied} of ${names.length} landing PNG(s) from ${srcRoot}`,
+  );
 }
 
 if (!fs.existsSync(destHero)) {

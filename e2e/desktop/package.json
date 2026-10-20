@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "landing": "playwright test -c landing/landing.config.ts",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {

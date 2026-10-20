@@ -1,0 +1,279 @@
+#!/usr/bin/env node
+// A stand-in `gh` for the landing capture: answers the calls the app makes
+// (PR status, checks, the GitHub panel's lists, review threads) with fixture
+// data for lorem-ipsum/event-bus. No network, no token.
+import { appendFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+if (process.env.TREQ_FAKE_GH_LOG) {
+  appendFileSync(process.env.TREQ_FAKE_GH_LOG, `${JSON.stringify(args)}\n`);
+}
+const has = (flag) => args.includes(flag);
+const after = (flag) => args[args.indexOf(flag) + 1];
+const field = (prefix) =>
+  args.find((arg) => arg.startsWith(`${prefix}=`))?.slice(prefix.length + 1);
+
+const REPO = "https://github.com/lorem-ipsum/event-bus";
+const author = (login) => ({ login, avatarUrl: null });
+
+const prs = [
+  {
+    number: 418,
+    title: "feat: handle empty event messages",
+    headRefName: "feat/empty-event-message",
+    baseRefName: "feat/event-ingest",
+    mergeStateStatus: "UNSTABLE",
+  },
+  {
+    number: 421,
+    title: "fix: retry Slack webhooks on 429",
+    headRefName: "fix/slack-retry",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+    author: author("alice"),
+    createdAt: "2026-08-12T09:00:00Z",
+  },
+  {
+    number: 412,
+    title: "feat: ingest Discord and Slack events",
+    headRefName: "feat/event-ingest",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+  },
+  {
+    number: 409,
+    title: "docs: add the ingest runbook",
+    headRefName: "docs/ingest-runbook",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+    author: author("bob"),
+    createdAt: "2026-07-29T09:00:00Z",
+  },
+  {
+    number: 401,
+    title: "feat: keyvalues cache",
+    headRefName: "feat/keyvalues-cache",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+  },
+  {
+    number: 388,
+    title: "feat: alerting logs",
+    headRefName: "feat/alerting-logs",
+    baseRefName: "main",
+    mergeStateStatus: "CLEAN",
+    state: "MERGED",
+  },
+].map((pr) => ({
+  state: "OPEN",
+  url: `${REPO}/pull/${pr.number}`,
+  author: author("octocat"),
+  labels: [],
+  createdAt: "2026-08-01T10:00:00Z",
+  updatedAt: "2026-08-12T10:00:00Z",
+  isDraft: false,
+  body: "",
+  comments: [],
+  ...pr,
+}));
+
+const issues = [
+  {
+    number: 77,
+    title: "Empty event payloads drop the Discord body",
+    author: author("alice"),
+    createdAt: "2026-08-10T10:00:00Z",
+  },
+  {
+    number: 81,
+    title: "Document retry/backoff for ingest",
+    author: author("bob"),
+    createdAt: "2026-08-11T10:00:00Z",
+  },
+  {
+    number: 74,
+    title: "Slack thread replies arrive out of order",
+    author: author("carol"),
+    createdAt: "2026-08-06T10:00:00Z",
+  },
+  {
+    number: 69,
+    title: "Alerting logs miss the provider name",
+    author: author("dave"),
+    createdAt: "2026-08-02T10:00:00Z",
+  },
+  {
+    number: 66,
+    title: "Web feed shows raw JSON for bot messages",
+    author: author("erin"),
+    createdAt: "2026-07-30T10:00:00Z",
+  },
+  {
+    number: 61,
+    title: "Cache keys collide across workspaces",
+    author: author("frank"),
+    createdAt: "2026-07-27T10:00:00Z",
+  },
+  {
+    number: 58,
+    title: "Add a dead-letter queue for failed deliveries",
+    author: author("alice"),
+    createdAt: "2026-07-24T10:00:00Z",
+  },
+].map((issue) => ({
+  state: "OPEN",
+  url: `${REPO}/issues/${issue.number}`,
+  updatedAt: issue.createdAt,
+  labels: { nodes: [] },
+  ...issue,
+}));
+
+function check(name, bucket, minutes) {
+  const started = new Date(Date.parse("2026-08-12T10:00:00Z"));
+  const completed = new Date(started.getTime() + minutes * 60_000);
+  return {
+    name,
+    bucket,
+    link: `${REPO}/actions/runs/${name}`,
+    startedAt: started.toISOString(),
+    completedAt: bucket === "pending" ? null : completed.toISOString(),
+  };
+}
+
+const checks = {
+  "feat/empty-event-message": [
+    check("build", "pass", 4),
+    check("test", "fail", 2),
+    check("lint", "pass", 1),
+    check("typecheck", "pending", 1),
+  ],
+  "feat/event-ingest": [
+    check("build", "pass", 3),
+    check("test", "pass", 9),
+    check("lint", "pass", 1),
+    check("typecheck", "pass", 2),
+  ],
+  "feat/keyvalues-cache": [
+    check("build", "pass", 2),
+    check("test", "pass", 5),
+    check("lint", "pass", 1),
+  ],
+  "feat/alerting-logs": [check("build", "pass", 3), check("test", "pass", 8)],
+};
+
+const reviewThreads = {
+  418: [
+    {
+      id: "PRRT_client_stringify",
+      isResolved: true,
+      isOutdated: false,
+      path: "packages/web/src/lib/client.ts",
+      line: 7,
+      diffSide: "RIGHT",
+      comments: {
+        nodes: [
+          {
+            id: "PRRC_client_stringify",
+            body: "JSON.stringify is the right fallback when event_message is empty.",
+            createdAt: "2026-08-12T14:22:00Z",
+            url: `${REPO}/pull/418#discussion_r1`,
+            diffHunk:
+              '@@ -0,0 +1,7 @@\n+import type { EventBody } from "../../../api/src/schema";\n+\n+export async function postEvent(body: EventBody): Promise<Response> {\n+  const message =\n+    typeof body.event_message === "string" && body.event_message.length > 0\n+      ? body.event_message\n+      : JSON.stringify(body);',
+            author: author("octocat"),
+          },
+        ],
+      },
+    },
+  ],
+};
+
+function pick(item, fields) {
+  return Object.fromEntries(fields.split(",").map((key) => [key, item[key]]));
+}
+
+function out(value) {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+  process.exit(0);
+}
+
+function fail(message) {
+  process.stderr.write(`${message}\n`);
+  process.exit(1);
+}
+
+const [group, command] = args;
+const branch = args[args.indexOf("--") + 1];
+
+if (group === "--version") out("gh version 2.60.0 (fake)");
+if (group === "auth") {
+  process.stdout.write(
+    "github.com\n  ✓ Logged in to github.com account octocat\n",
+  );
+  process.exit(0);
+}
+if (group === "pr" && command === "list") {
+  const state = after("--state");
+  let list = prs.filter((pr) =>
+    state === "all"
+      ? true
+      : state === "merged"
+        ? pr.state === "MERGED"
+        : pr.state === state.toUpperCase(),
+  );
+  if (has("--draft")) list = list.filter((pr) => pr.isDraft);
+  out(list.map((pr) => pick(pr, after("--json"))));
+}
+if (group === "pr" && command === "view") {
+  const key = has("--") ? branch : args[2];
+  const pr = prs.find((p) => p.headRefName === key || String(p.number) === key);
+  if (!pr) fail(`no pull requests found for branch "${key}"`);
+  out(pick(pr, after("--json")));
+}
+if (group === "pr" && command === "checks") {
+  const key = has("--")
+    ? branch
+    : prs.find((p) => String(p.number) === args[2])?.headRefName;
+  const list = checks[key];
+  if (!list) fail(`no pull requests found for branch "${key}"`);
+  out(list);
+}
+if (group === "pr" && command === "diff") {
+  process.exit(0);
+}
+if (group === "api" && command === "graphql") {
+  const query = field("query") ?? "";
+  if (query.includes("reviewThreads")) {
+    out({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: reviewThreads[field("number")] ?? [],
+            },
+          },
+        },
+      },
+    });
+  }
+  if (query.includes("issues(")) {
+    out({
+      data: {
+        repository: {
+          issues: {
+            nodes: query.includes("CLOSED") ? [] : issues,
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    });
+  }
+  out({ data: {} });
+}
+if (group === "api" && command === "user") out({ login: "octocat" });
+if (group === "issue" && command === "view") {
+  const issue = issues.find((i) => String(i.number) === args[2]);
+  if (!issue) fail("issue not found");
+  out({ ...issue, body: "", labels: [], comments: [] });
+}
+fail(`fake gh: unsupported call: gh ${args.join(" ")}`);
