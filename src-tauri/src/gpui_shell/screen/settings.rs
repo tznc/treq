@@ -2035,6 +2035,7 @@ impl SettingsView {
                   ui::text(div().mt_1(), TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .line_clamp(2)
+                    .text_ellipsis()
                     .child(description),
                 )
               }),

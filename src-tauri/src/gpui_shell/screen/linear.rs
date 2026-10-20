@@ -1466,6 +1466,7 @@ impl LinearView {
           .font_weight(FontWeight::MEDIUM)
           .mt_1()
           .line_clamp(2)
+          .text_ellipsis()
           .child(issue.title.clone()),
       )
       .when_some(parent, |this, parent| {
