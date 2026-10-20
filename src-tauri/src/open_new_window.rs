@@ -39,6 +39,11 @@ pub fn new_repo_window_url(repo_path: &str) -> String {
   format!("index.html?repo={}", urlencoding::encode(repo_path))
 }
 
+/// The React app's page for a window on `repo` (`None`: the start screen).
+pub fn window_url(repo: Option<&str>) -> String {
+  repo.map_or_else(|| "index.html".to_string(), new_repo_window_url)
+}
+
 pub fn new_repo_window_title(repo_path: &str) -> String {
   let name = Path::new(repo_path)
     .file_name()

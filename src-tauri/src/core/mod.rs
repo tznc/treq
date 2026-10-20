@@ -16,6 +16,7 @@ pub mod commits;
 pub mod context_menu;
 pub mod control_plane;
 pub mod devcontainer;
+pub mod editor_apps;
 pub mod feature_preview;
 pub mod files;
 pub mod github_issues;

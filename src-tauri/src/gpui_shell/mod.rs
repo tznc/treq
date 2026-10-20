@@ -48,6 +48,7 @@ mod time;
 mod toasts;
 mod tooltips;
 mod ui;
+mod window;
 
 pub use overlay::OverlaySnapshot;
 pub use popup::{MenuEntry, Toast};
@@ -93,6 +94,7 @@ pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiErro
       }),
   )?;
   app.manage(ShellEnabled);
+  window::listen(app.handle());
   Ok(())
 }
 
@@ -116,6 +118,16 @@ struct Shell {
   screen: Option<gpui::Entity<Screen>>,
   /// The dialog React asked for, drawn over the screen once there is one.
   modal: Option<Modal>,
+  /// The window model, which draws the window unless `TREQ_WEB_UI` is set
+  /// (see `window`).
+  window: Option<gpui::Entity<window::WindowController>>,
+  /// What the model last presented, and what React last pushed.
+  presented: Option<window::Presentation>,
+  react: ReactPushes,
+  /// `ui_zoom`, in percent.
+  zoom: u32,
+  /// The OS appearance last rendered under.
+  os_dark: Option<bool>,
   /// Sends Dashboard's shortcuts pressed in this window to React.
   shortcuts: Option<gpui::Subscription>,
 }
@@ -129,6 +141,7 @@ impl Shell {
       return;
     }
     let sink = overlay_sink(self.app.clone(), self.label.to_string());
+    let label = self.label.to_string();
     let handle = window.window_handle();
     self.shortcuts = Some(cx.intercept_keystrokes(move |event, window, cx| {
       if window.window_handle() != handle {
@@ -146,6 +159,21 @@ impl Shell {
         within("Input"),
         within(screen::TERMINAL_CONTEXT),
       );
+      // The window model answers them itself, with the terminal pane's
+      // and the zoom keys.
+      if window::drives(&label) {
+        let shortcut = found
+          .map(window::from_app)
+          .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
+        if let Some(shortcut) = shortcut {
+          // An open dialog still takes its Escape.
+          if shortcut != window::Shortcut::Escape {
+            cx.stop_propagation();
+          }
+          window::shortcut(&label, shortcut, cx);
+        }
+        return;
+      }
       let action = match found {
         Some(shortcuts::AppShortcut::Palette) => ScreenAction::Press {
           id: "overlay.commandPalette".into(),
@@ -169,17 +197,20 @@ impl Render for Shell {
     window: &mut gpui::Window,
     cx: &mut gpui::Context<Self>,
   ) -> impl IntoElement {
+    let os_dark = matches!(
+      window.appearance(),
+      gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
+    );
+    window::follow_appearance(self, os_dark, cx);
     // Until React sends its theme, follow the OS.
     let dark = self
       .sidebar
       .as_ref()
       .map(|sidebar| sidebar.read(cx).snapshot().dark)
       .or_else(|| self.screen.as_ref().map(|s| s.read(cx).snapshot().dark))
-      .unwrap_or(matches!(
-        window.appearance(),
-        gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
-      ));
+      .unwrap_or(os_dark);
     let app = self.app.clone();
+    window.set_rem_size(gpui::px(16. * self.zoom as f32 / 100.));
     self.watch_shortcuts(window, cx);
     gpui::div()
       .size_full()
@@ -239,12 +270,14 @@ struct Shells(HashMap<String, WeakEntity<Shell>>);
 impl Global for Shells {}
 
 /// Opens a repo window in the GPUI shell. Must run on the main thread.
+/// `repo` is the repository it opens on (`None`: the start screen).
 pub fn open_window(
   app: &AppHandle,
   label: &str,
-  url: String,
+  repo: Option<String>,
   title: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+  let url = crate::open_new_window::window_url(repo.as_deref());
   let window = tauri::WindowBuilder::new(app, label)
     .title(title)
     .inner_size(1400.0, 900.0)
@@ -262,6 +295,11 @@ pub fn open_window(
       sidebar: None,
       screen: None,
       modal: None,
+      window: None,
+      presented: None,
+      react: ReactPushes::default(),
+      zoom: window::DEFAULT_ZOOM,
+      os_dark: None,
       shortcuts: None,
     });
     cx.default_global::<Shells>()
@@ -286,6 +324,9 @@ pub fn open_window(
   webview.hide()?;
 
   update_shell(label, move |shell, _| shell.webview = Some(webview))?;
+  if std::env::var_os(screen::WEB_UI_ENV).is_none() {
+    window::start(app, label, repo)?;
+  }
   Ok(())
 }
 
@@ -361,24 +402,15 @@ fn update_shell(
 }
 
 /// Shows `snapshot` in the GPUI sidebar of window `label`, or removes the
-/// sidebar for `None`.
+/// sidebar for `None`. A window the model drives draws React's only while
+/// React owns it (a remote repository).
 pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnapshot>) {
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| {
-      let Some(snapshot) = snapshot else {
-        shell.sidebar = None;
-        defer_main(&shell.app, |_| popup::hide_all());
-        return;
-      };
-      match &shell.sidebar {
-        Some(sidebar) => sidebar.update(cx, |sidebar, cx| sidebar.set_snapshot(snapshot, cx)),
-        None => {
-          let label = shell.label.to_string();
-          let sink = action_sink(shell.app.clone(), label.clone());
-          let popups = popup_sink(shell.app.clone(), label);
-          shell.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink, popups)));
-        }
+      shell.react.sidebar = snapshot.clone();
+      if shell.react_draws() {
+        shell.show_sidebar(snapshot, cx);
       }
     });
     if let Err(err) = result {
@@ -392,41 +424,18 @@ pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnap
 /// screens can be compared with GPUI's.
 pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapshot>) {
   let snapshot = snapshot.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
-  if let Some(snapshot) = &snapshot {
-    remote_repo::set_window(label, snapshot.repository.clone());
-    // Agent links queued for this window's repository start once it shows.
-    if let screen::View::Workspace(route) = &snapshot.view {
-      launch::window_shows_repo(app, label, &route.repo_path);
-    }
-  }
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
-    let result = update_shell(&label, move |shell, cx| match snapshot {
-      None => {
-        // A tooltip the screen showed would outlive it.
-        if shell.screen.take().is_some() {
-          cx.set_global(screen::ModalOpen::default());
-          defer_main(&shell.app, |_| popup::hide_tooltip());
-        }
+    let result = update_shell(&label, move |shell, cx| {
+      let owns = snapshot.as_ref().is_some_and(window::react_owns);
+      shell.react.screen = snapshot.clone();
+      if shell.window.is_some() && owns != shell.react.owns {
+        shell.react.owns = owns;
+        window::set_react_owns(&shell.label, owns);
+        return shell.redraw(cx);
       }
-      Some(snapshot) => {
-        theme::set_kit_dark(snapshot.dark, cx);
-        match &shell.screen {
-          Some(screen) => screen.update(cx, |screen, cx| screen.set_snapshot(snapshot, cx)),
-          None => {
-            let sink = screen_sink(shell.app.clone(), shell.label.to_string());
-            let popups = popup_sink(shell.app.clone(), shell.label.to_string());
-            let webview = shell.webview.clone();
-            let host = std::sync::Arc::new(native::Backend::new(
-              shell.app.clone(),
-              shell.label.to_string(),
-            ));
-            let modal = shell.modal.clone();
-            let screen = cx.new(|cx| Screen::new(snapshot, sink, popups, webview, host, cx));
-            screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
-            shell.screen = Some(screen);
-          }
-        }
+      if shell.react_draws() {
+        shell.show_screen(snapshot, cx);
       }
     });
     if let Err(err) = result {
@@ -442,9 +451,9 @@ pub fn update_modal(app: &AppHandle, label: &str, modal: Option<Modal>) {
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| {
-      shell.modal = modal.clone();
-      if let Some(screen) = &shell.screen {
-        screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
+      shell.react.modal = modal.clone();
+      if shell.react_draws() {
+        shell.show_modal(modal, cx);
       }
     });
     if let Err(err) = result {
@@ -453,18 +462,157 @@ pub fn update_modal(app: &AppHandle, label: &str, modal: Option<Modal>) {
   });
 }
 
+/// What React last pushed to a window the model drives, drawn while React
+/// owns it.
+#[derive(Default)]
+struct ReactPushes {
+  sidebar: Option<SidebarSnapshot>,
+  screen: Option<ScreenSnapshot>,
+  modal: Option<Modal>,
+  overlay: Option<OverlaySnapshot>,
+  /// React shows a remote repository or its dialogs.
+  owns: bool,
+}
+
+impl Shell {
+  /// Whether React's pushes are drawn: always without the window model,
+  /// else while React owns the window.
+  fn react_draws(&self) -> bool {
+    self.window.is_none() || self.react.owns
+  }
+
+  /// Draws whichever of React and the model owns the window now.
+  fn redraw(&mut self, cx: &mut gpui::Context<Self>) {
+    if self.react_draws() {
+      let react = &self.react;
+      let (sidebar, screen, modal, overlay) = (
+        react.sidebar.clone(),
+        react.screen.clone(),
+        react.modal.clone(),
+        react.overlay.clone(),
+      );
+      self.show_sidebar(sidebar, cx);
+      self.show_screen(screen, cx);
+      self.show_modal(modal, cx);
+      self.show_overlay(overlay);
+      self.show_file_picker(None, cx);
+    } else if let Some(presented) = self.presented.take() {
+      self.present(presented, cx);
+    }
+  }
+
+  /// Draws what the window model presents, unless React owns the window.
+  fn present(&mut self, next: window::Presentation, cx: &mut gpui::Context<Self>) {
+    if self.react.owns {
+      self.presented = Some(next);
+      return;
+    }
+    let before = self.presented.take();
+    if before.as_ref().is_none_or(|b| b.sidebar != next.sidebar) {
+      self.show_sidebar(next.sidebar.clone(), cx);
+    }
+    if before.as_ref().is_none_or(|b| b.screen != next.screen) {
+      self.show_screen(next.screen.clone(), cx);
+    }
+    if before.as_ref().is_none_or(|b| b.modal != next.modal) {
+      self.show_modal(next.modal.clone(), cx);
+    }
+    if before.as_ref().is_none_or(|b| b.overlay != next.overlay) {
+      self.show_overlay(next.overlay.clone());
+    }
+    self.show_file_picker(next.file_picker.clone(), cx);
+    self.zoom = next.zoom;
+    self.presented = Some(next);
+    cx.notify();
+  }
+
+  fn show_sidebar(&mut self, snapshot: Option<SidebarSnapshot>, cx: &mut gpui::Context<Self>) {
+    let Some(snapshot) = snapshot else {
+      if self.sidebar.take().is_some() {
+        defer_main(&self.app, |_| popup::hide_all());
+      }
+      return;
+    };
+    match &self.sidebar {
+      Some(sidebar) => sidebar.update(cx, |sidebar, cx| sidebar.set_snapshot(snapshot, cx)),
+      None => {
+        let label = self.label.to_string();
+        let sink = action_sink(self.app.clone(), label.clone());
+        let popups = popup_sink(self.app.clone(), label);
+        self.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink, popups)));
+      }
+    }
+  }
+
+  fn show_screen(&mut self, snapshot: Option<ScreenSnapshot>, cx: &mut gpui::Context<Self>) {
+    if let Some(snapshot) = &snapshot {
+      remote_repo::set_window(&self.label, snapshot.repository.clone());
+      // Agent links queued for this window's repository start once it shows.
+      if let screen::View::Workspace(route) = &snapshot.view {
+        launch::window_shows_repo(&self.app, &self.label, &route.repo_path);
+      }
+    }
+    match snapshot {
+      None => {
+        // A tooltip the screen showed would outlive it.
+        if self.screen.take().is_some() {
+          cx.set_global(screen::ModalOpen::default());
+          defer_main(&self.app, |_| popup::hide_tooltip());
+        }
+      }
+      Some(snapshot) => {
+        theme::set_kit_dark(snapshot.dark, cx);
+        match &self.screen {
+          Some(screen) => screen.update(cx, |screen, cx| screen.set_snapshot(snapshot, cx)),
+          None => {
+            let sink = screen_sink(self.app.clone(), self.label.to_string());
+            let popups = popup_sink(self.app.clone(), self.label.to_string());
+            let webview = self.webview.clone();
+            let host = std::sync::Arc::new(native::Backend::new(
+              self.app.clone(),
+              self.label.to_string(),
+            ));
+            let modal = self.modal.clone();
+            let screen = cx.new(|cx| Screen::new(snapshot, sink, popups, webview, host, cx));
+            screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
+            self.screen = Some(screen);
+          }
+        }
+      }
+    }
+  }
+
+  fn show_modal(&mut self, modal: Option<Modal>, cx: &mut gpui::Context<Self>) {
+    self.modal = modal.clone();
+    if let Some(screen) = &self.screen {
+      screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
+    }
+  }
+
+  fn show_overlay(&self, snapshot: Option<OverlaySnapshot>) {
+    let label = self.label.to_string();
+    defer_main(&self.app, move |app| {
+      let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
+      let sink = overlay_sink(app.clone(), label.clone());
+      modal::update(app, &label, snapshot, host, sink);
+    });
+  }
+
+  fn show_file_picker(
+    &mut self,
+    scope: Option<screen::file_picker::Scope>,
+    cx: &mut gpui::Context<Self>,
+  ) {
+    if let Some(screen) = &self.screen {
+      screen.update(cx, |screen, cx| screen.set_file_picker(scope, cx));
+    }
+  }
+}
+
 /// Sends screen actions to the webview of window `label`, as
 /// [`action_sink`] does for the sidebar.
 fn screen_sink(app: AppHandle, label: String) -> screen::ActionSink {
-  std::rc::Rc::new(move |action: ScreenAction, _| {
-    let (app, label) = (app.clone(), label.clone());
-    tauri::async_runtime::spawn(async move {
-      let target = tauri::EventTarget::webview_window(&label);
-      if let Err(err) = tauri::Emitter::emit_to(&app, target, screen::ACTION_EVENT, action) {
-        log::warn!("failed to send GPUI screen action: {err}");
-      }
-    });
-  })
+  window::routed(app, label, screen::ACTION_EVENT, window::screen_action)
 }
 
 /// Shows `snapshot`'s dialog over the whole of window `label` (see
@@ -472,6 +620,9 @@ fn screen_sink(app: AppHandle, label: String) -> screen::ActionSink {
 pub fn update_overlay(app: &AppHandle, label: &str, snapshot: Option<OverlaySnapshot>) {
   let label = label.to_string();
   defer_main(app, move |app| {
+    if !window::react_overlay(&label, snapshot.clone()) {
+      return;
+    }
     let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
     let sink = overlay_sink(app.clone(), label.clone());
     modal::update(app, &label, snapshot, host, sink);
@@ -481,15 +632,24 @@ pub fn update_overlay(app: &AppHandle, label: &str, snapshot: Option<OverlaySnap
 /// Sends overlay actions to the webview of window `label`, as
 /// [`screen_sink`] does for screens.
 fn overlay_sink(app: AppHandle, label: String) -> screen::ActionSink {
-  std::rc::Rc::new(move |action: ScreenAction, _| {
-    let (app, label) = (app.clone(), label.clone());
-    tauri::async_runtime::spawn(async move {
-      let target = tauri::EventTarget::webview_window(&label);
-      if let Err(err) = tauri::Emitter::emit_to(&app, target, overlay::ACTION_EVENT, action) {
-        log::warn!("failed to send GPUI overlay action: {err}");
-      }
-    });
-  })
+  window::routed(app, label, overlay::ACTION_EVENT, window::overlay_action)
+}
+
+/// Sends `payload` as event `event` to the webview of window `label`.
+/// Callable inside a GPUI update.
+fn emit_to_webview<S: serde::Serialize + Clone + Send + 'static>(
+  app: &AppHandle,
+  label: &str,
+  event: &'static str,
+  payload: S,
+) {
+  let (app, label) = (app.clone(), label.to_string());
+  tauri::async_runtime::spawn(async move {
+    let target = tauri::EventTarget::webview_window(&label);
+    if let Err(err) = tauri::Emitter::emit_to(&app, target, event, payload) {
+      log::warn!("failed to send {event}: {err}");
+    }
+  });
 }
 
 /// Runs the sidebar actions GPUI handles itself ([`sidebar_actions`]) and
@@ -506,11 +666,18 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
   }
   std::rc::Rc::new(move |action: SidebarAction, cx| {
     let (app, label) = (app.clone(), label.clone());
-    if !sidebar_actions::handles(&action) {
+    let driven = window::drives(&label);
+    if !driven && !sidebar_actions::handles(&action) {
       return send(app, label, action);
     }
     // The sidebar is mid-update while it sends; read it once it is done.
     cx.defer(move |cx| {
+      if driven && window::sidebar_action(&label, &action, cx) {
+        return;
+      }
+      if !sidebar_actions::handles(&action) {
+        return send(app, label, action);
+      }
       let snapshot = cx
         .try_global::<Shells>()
         .and_then(|shells| shells.0.get(&label))
@@ -680,12 +847,24 @@ pub fn place_toasts(app: &AppHandle, label: &str) {
   });
 }
 
+/// A menu bar item for window `label`, sent to React as `event` with
+/// `payload`. True when the window model handles it instead.
+pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<String>) -> bool {
+  window::menu_event(app, label, event, payload)
+}
+
+/// Window `label` gained focus.
+pub fn window_focused(app: &AppHandle, label: &str) {
+  window::window_focused(app, label);
+}
+
 /// Forgets a destroyed window's shell.
 pub fn forget_window(label: &str) {
   popup::forget_owner(label);
   toasts::forget(label);
   remote_repo::set_window(label, None);
   modal::forget(label);
+  window::forget(label);
   let label = label.to_string();
   let _ = tauri_plugin_gpui::with_app(move |cx| {
     if let Some(shells) = cx.try_global::<Shells>() {
