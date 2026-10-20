@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
   relative, rgb, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths, FocusHandle,
-  KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, ScrollWheelEvent,
-  SharedString, Stateful, Subscription, Task, Window,
+  KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, ScrollHandle,
+  ScrollWheelEvent, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -144,6 +144,19 @@ pub struct Place {
   pub branches: Vec<(String, String)>,
   /// Workspace ids by directory, so a new agent opens in its column's.
   pub workspace_ids: Vec<(String, i64)>,
+}
+
+/// `scrollTerminalFullyIntoView`: how far the row scrolls right (negative:
+/// left) for the column to be fully visible; a column wider than the row
+/// lines its left edge up.
+pub fn scroll_delta(row: (f32, f32), column: (f32, f32)) -> f32 {
+  if column.1 - column.0 > row.1 - row.0 || column.0 < row.0 {
+    column.0 - row.0
+  } else if column.1 > row.1 {
+    column.1 - row.1
+  } else {
+    0.
+  }
 }
 
 /// `resizeTerminalPair`: moves the divider between two columns, neither
@@ -703,13 +716,14 @@ impl TerminalView {
   }
 
   /// Text dropped on the terminal (`handleTerminalDrop`), once it runs.
-  fn insert(&self, text: &str) {
-    if self.status == Status::Ready {
-      self.write(text);
+  fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
+    // React's remote panel takes no drops.
+    if self.status == Status::Ready && self.remote_target().is_none() {
+      self.write(text, cx);
     }
   }
 
-  pub fn write(&self, data: &str) {
+  pub fn write(&mut self, data: &str, cx: &mut Context<Self>) {
     // A remote channel takes nothing until it is attached (`isReadyRef`).
     if self.remote_target().is_some() && (self.status != Status::Ready || self.remote.closed) {
       return;
@@ -722,6 +736,11 @@ impl TerminalView {
     }
     if let Err(error) = self.host.write_pty(&self.pty, data) {
       log::warn!("pty write failed: {error}");
+      // A remote panel shows the failure (`remotePtyWrite(...).catch(handleError)`).
+      if self.remote_target().is_some() {
+        self.status = Status::Failed(error);
+        cx.notify();
+      }
     }
   }
 
@@ -761,7 +780,7 @@ impl TerminalView {
       if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
         let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
         let bytes = paste_bytes(&text, bracketed);
-        self.write(&String::from_utf8_lossy(&bytes));
+        self.write(&String::from_utf8_lossy(&bytes), cx);
       }
       return;
     }
@@ -772,7 +791,7 @@ impl TerminalView {
     }
     // Shift+Enter continues the line, as React's terminal did.
     if k.key == "enter" && m.shift && !m.control && !m.alt && !m.platform {
-      self.write("\\");
+      self.write("\\", cx);
       return;
     }
     let app_cursor = self.with_emulator(|e| e.app_cursor()).unwrap_or(false);
@@ -789,7 +808,7 @@ impl TerminalView {
     );
     if let Some(bytes) = bytes {
       self.with_emulator(|e| e.clear_selection());
-      self.write(&String::from_utf8_lossy(&bytes));
+      self.write(&String::from_utf8_lossy(&bytes), cx);
       self.cursor_on = true;
       cx.stop_propagation();
       let _ = window;
@@ -1436,6 +1455,7 @@ pub struct TerminalPane {
   /// The workspace view's bounds, for height drags.
   pub container: Rc<Cell<Option<Bounds<Pixels>>>>,
   row: Rc<Cell<Option<Bounds<Pixels>>>>,
+  row_scroll: ScrollHandle,
   drag: Option<Drag>,
   last_command: u64,
   summaries: Vec<Summary>,
@@ -1488,6 +1508,7 @@ impl TerminalPane {
       active: None,
       container: Rc::default(),
       row: Rc::default(),
+      row_scroll: ScrollHandle::new(),
       drag: None,
       last_command: 0,
       summaries: Vec::new(),
@@ -1600,7 +1621,7 @@ impl TerminalPane {
         if let (Some(id), Some(text)) = (command.session_id, &command.text) {
           let column = agent_column_id(id);
           if let Some(view) = self.view(&column) {
-            view.read(cx).write(&format!("{text}\n"));
+            view.update(cx, |view, cx| view.write(&format!("{text}\n"), cx));
           }
           self.focus_column(&column, window, cx);
         }
@@ -1778,6 +1799,23 @@ impl TerminalPane {
       "main".into()
     } else {
       self.place.current_branch.clone()
+    }
+  }
+
+  /// `handleTerminalDoubleClick`.
+  fn scroll_fully_into_view(&mut self, id: &str, cx: &mut Context<Self>) {
+    let column = self.columns.iter().find(|c| c.id == id);
+    let (Some(row), Some(column)) = (self.row.get(), column.and_then(|c| c.bounds.get())) else {
+      return;
+    };
+    let span = |b: Bounds<Pixels>| (f32::from(b.left()), f32::from(b.right()));
+    let delta = scroll_delta(span(row), span(column));
+    if delta != 0. {
+      let mut offset = self.row_scroll.offset();
+      let max = self.row_scroll.max_offset().x;
+      offset.x = (offset.x - px(delta)).clamp(-max, px(0.));
+      self.row_scroll.set_offset(offset);
+      cx.notify();
     }
   }
 
@@ -2719,6 +2757,7 @@ impl TerminalPane {
     );
     let active = self.active.as_deref() == Some(id.as_str());
     let focus_id = id.clone();
+    let double_id = id.clone();
     div()
       .id(SharedString::from(format!("terminal-column-{id}")))
       .debug_selector(move || {
@@ -2741,7 +2780,12 @@ impl TerminalPane {
       .min_w(px(min))
       .on_mouse_down(
         MouseButton::Left,
-        cx.listener(move |pane, _, _, cx| pane.activate(&focus_id, cx)),
+        cx.listener(move |pane, e: &MouseDownEvent, _, cx| {
+          pane.activate(&focus_id, cx);
+          if e.click_count == 2 {
+            pane.scroll_fully_into_view(&double_id, cx);
+          }
+        }),
       )
       .child(
         gpui::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
@@ -2761,7 +2805,7 @@ impl TerminalPane {
           .border_color(p.border)
           .bg(rgb(TERMINAL_BG))
           .on_drop(move |drag: &SendAssetDrag, _, cx| {
-            on_asset.read(cx).insert(&shell_quote(&drag.path));
+            on_asset.update(cx, |view, cx| view.insert(&shell_quote(&drag.path), cx));
           })
           .on_drop(move |paths: &ExternalPaths, _, cx| {
             let text: Vec<String> = paths
@@ -2770,7 +2814,7 @@ impl TerminalPane {
               .map(|p| shell_quote(&p.to_string_lossy()))
               .collect();
             if !text.is_empty() {
-              on_files.read(cx).insert(&text.join(" "));
+              on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
           })
           .child(view)
@@ -2958,6 +3002,7 @@ impl Render for TerminalPane {
               .min_h_0()
               .flex()
               .overflow_x_scroll()
+              .track_scroll(&self.row_scroll)
               .bg(rgb(TERMINAL_BG))
               .child(
                 gpui::canvas(move |b, _, _| row_bounds.set(Some(b)), |_, _, _, _| {})
@@ -2991,6 +3036,16 @@ impl Render for TerminalPane {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn scrolls_a_column_the_least_to_show_it() {
+    let row = (0., 1000.);
+    assert_eq!(scroll_delta(row, (100., 500.)), 0.);
+    assert_eq!(scroll_delta(row, (800., 1200.)), 200.);
+    assert_eq!(scroll_delta(row, (-150., 250.)), -150.);
+    // Wider than the row: left edges line up.
+    assert_eq!(scroll_delta(row, (300., 1500.)), 300.);
+  }
 
   #[test]
   fn resizes_column_pairs() {
