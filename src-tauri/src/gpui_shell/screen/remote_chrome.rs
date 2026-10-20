@@ -4,8 +4,9 @@
 //! (`RemoteCapabilityNotice`) and, while access is cut off, the overlay
 //! that dims the window (`remote-cutoff-overlay`).
 
+use crate::gpui_shell::ui::zpx;
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, px, App, ClickEvent, Div, Hsla, Window};
+use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, ClickEvent, Div, Hsla, Window};
 
 use crate::gpui_shell::{
   theme::{tw, Palette},
@@ -156,7 +157,7 @@ pub fn strip(chrome: &RemoteChrome, dark: bool, p: &Palette, press: &Press) -> D
       .bg(bg)
       .text_color(fg)
       .px_3()
-      .py(px(6.))
+      .py(zpx(6.))
       .child(
         div()
           .flex()
@@ -190,7 +191,7 @@ pub fn strip(chrome: &RemoteChrome, dark: bool, p: &Palette, press: &Press) -> D
       .border_b_1()
       .border_color(p.border)
       .px_4()
-      .py(px(6.))
+      .py(zpx(6.))
       .text_color(p.muted_foreground)
       .children(chrome.notices.iter().map(|n| div().child(n.clone())))
   });
@@ -201,7 +202,7 @@ pub fn strip(chrome: &RemoteChrome, dark: bool, p: &Palette, press: &Press) -> D
     .border_color(p.border)
     .bg(p.background)
     .child(top)
-    .child(div().px_4().pb(px(6.)).children(banner))
+    .child(div().px_4().pb(zpx(6.)).children(banner))
     .children(notice)
 }
 

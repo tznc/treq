@@ -6,10 +6,11 @@
 //! draws what the route says and sends what is typed and pressed
 //! (`remoteRepo.*`).
 
+use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, App, ClickEvent, Context, Div, Entity, FontWeight, SharedString,
+  self, div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, SharedString,
   Subscription, Window,
 };
 
@@ -186,11 +187,11 @@ fn input(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl Into
     .id(id)
     .debug_selector(|| id.into())
     .w_full()
-    .h(px(34.))
+    .h(zpx(34.))
     .px_2()
     .flex()
     .items_center()
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
@@ -238,10 +239,10 @@ fn selector(
               .id(SharedString::from(format!("remote-saved-repo-{}", repo.id)))
               .debug_selector(|| "remote-saved-repo".into())
               .w_full()
-              .rounded(px(8.))
+              .rounded(zpx(8.))
               .border_1()
               .px_2()
-              .py(px(6.))
+              .py(zpx(6.))
               .cursor_pointer()
               .map(|d| {
                 if selected {
@@ -304,7 +305,7 @@ fn selector(
         .flex()
         .flex_col()
         .gap_2()
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_3()
@@ -380,7 +381,7 @@ fn selector(
         .flex()
         .flex_col()
         .gap_1()
-        .max_w(px(448.))
+        .max_w(zpx(448.))
         .child(caption("Remote repository path"))
         .children(path_input),
     )
@@ -402,7 +403,7 @@ pub fn render(
     let red: gpui::Hsla = tw::color(tw::RED_500);
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "remote-repo-cutoff".into())
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .border_1()
       .border_color(red.opacity(0.4))
       .bg(red.opacity(0.1))

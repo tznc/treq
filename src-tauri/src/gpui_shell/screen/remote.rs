@@ -12,6 +12,7 @@
 //! does. While one is open the screen under it does not frame the webview,
 //! which would paint over them.
 
+use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::component::{
@@ -189,7 +190,7 @@ fn header(title: impl IntoElement, description: impl Into<SharedString>, p: &Pal
   div()
     .flex()
     .flex_col()
-    .gap(px(6.))
+    .gap(zpx(6.))
     .child(dialog_title(title))
     .child(dialog_description(description, p))
 }
@@ -201,11 +202,11 @@ fn text_field(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl
     .id(id)
     .debug_selector(|| id.into())
     .w_full()
-    .h(px(34.))
+    .h(zpx(34.))
     .px_2()
     .flex()
     .items_center()
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
@@ -267,12 +268,12 @@ fn checkbox(id: &'static str, checked: bool, p: &Palette) -> impl IntoElement {
   div()
     .id(id)
     .debug_selector(|| id.into())
-    .size(px(13.))
+    .size(zpx(13.))
     .flex_none()
     .flex()
     .items_center()
     .justify_center()
-    .rounded(px(3.))
+    .rounded(zpx(3.))
     .when(checked, |this| {
       this
         .bg(tw::color(tw::BLUE_500))
@@ -292,7 +293,7 @@ fn words(parts: &[(&str, bool)], p: &Palette) -> Div {
   let mut paragraph = div()
     .flex()
     .flex_wrap()
-    .gap_x(px(3.5))
+    .gap_x(zpx(3.5))
     .text_color(p.muted_foreground);
   for (text, mono) in parts {
     for word in text.split_whitespace() {
@@ -781,7 +782,7 @@ impl RemoteView {
         .flex_1()
         .min_w_0()
         .cursor_pointer()
-        .rounded(px(12.))
+        .rounded(zpx(12.))
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_4()
@@ -795,7 +796,7 @@ impl RemoteView {
         )
         .on_click(cx.listener(move |view, _, window, cx| view.set_mode(mode, window, cx)))
     };
-    let wide = window.viewport_size().width >= px(640.);
+    let wide = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
     div()
       .child(header(
         "Connect a remote repository",
@@ -890,7 +891,7 @@ impl RemoteView {
           .debug_selector(move || format!("{id}-suggestion-{i}"))
           .px_2()
           .py_1()
-          .rounded(px(4.))
+          .rounded(zpx(4.))
           .cursor_pointer()
           .hover(move |s| s.bg(menu_accent))
           .child(alias)
@@ -909,7 +910,7 @@ impl RemoteView {
             div()
               .w(anchor.size.width)
               .p_1()
-              .rounded(px(8.))
+              .rounded(zpx(8.))
               .border_1()
               .border_color(p.border)
               .bg(p.popover)
@@ -946,7 +947,7 @@ impl RemoteView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let two_columns = window.viewport_size().width >= px(640.);
+    let two_columns = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
     let Some(form) = self.setup.as_ref().and_then(|s| s.form.as_ref()) else {
       return div();
     };
@@ -969,7 +970,7 @@ impl RemoteView {
         Select::new(&form.key)
           .id("remote-ssh-key")
           .placeholder("Select a key")
-          .h(px(34.)),
+          .h(zpx(34.)),
       )
       .into_any_element();
     let key_cell = div()
@@ -1094,7 +1095,7 @@ impl RemoteView {
         .id("remote-trust-confirmation")
         .debug_selector(|| "remote-trust-confirmation".into())
         .mt_4()
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(yellow.opacity(0.4))
         .bg(yellow.opacity(0.1))
@@ -1217,7 +1218,7 @@ impl RemoteView {
             .items_center()
             .justify_between()
             .gap_2()
-            .rounded(px(8.))
+            .rounded(zpx(8.))
             .border_1()
             .border_color(p.border)
             .px_3()
@@ -1259,7 +1260,7 @@ impl RemoteView {
         div()
           .flex()
           .flex_col()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .child(dialog_title(
             div()
               .flex()
