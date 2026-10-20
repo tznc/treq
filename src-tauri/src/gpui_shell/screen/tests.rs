@@ -3406,7 +3406,7 @@ fn code_tab_turning_the_new_workspace_toggle_off_runs_home_tasks_at_home(cx: &mu
     "{:?}",
     host.writes()
   );
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("fix login");
   h.click("task-submit");
   h.cx.run_until_parked();
@@ -3432,7 +3432,7 @@ fn code_tab_remembers_running_home_tasks_at_home(cx: &mut TestAppContext) {
     .insert("/repo:home_task_new_workspace".into(), Some("false".into()));
   let (mut h, host) = workspace_harness(cx, host, home_code_route());
   assert!(h.drawn("task-new-workspace"));
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("fix login");
   h.click("task-submit");
   h.cx.run_until_parked();
