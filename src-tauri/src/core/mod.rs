@@ -40,6 +40,7 @@ pub mod remote_ssh_transport;
 pub mod remote_ssh_ws_stream;
 pub mod repo;
 pub mod resolve;
+pub mod review_drafts;
 pub mod running_checks;
 pub mod sessions;
 pub mod shell_step;
