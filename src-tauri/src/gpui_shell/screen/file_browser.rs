@@ -10,6 +10,7 @@
 
 mod review;
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1310,7 +1311,7 @@ impl FileBrowserView {
                 .debug_selector(|| "file-browser-pending".into())
                 .flex()
                 .items_center()
-                .gap(px(6.))
+                .gap(zpx(6.))
                 .text_color(muted)
                 .child(ui::icon(theme::ICON_MESSAGE, 16., p.primary))
                 .child(format!("{} pending", count_label(n, "comment"))),
@@ -1412,8 +1413,8 @@ impl FileBrowserView {
       .gap_2()
       .px_2()
       .py_1()
-      .pl(px(depth as f32 * 16. + 8.))
-      .rounded(px(6.))
+      .pl(zpx(depth as f32 * 16. + 8.))
+      .rounded(zpx(6.))
       .cursor_pointer()
       .hover(move |s| s.bg(hover))
       .on_mouse_down(
@@ -1479,7 +1480,7 @@ impl FileBrowserView {
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
-                .gap(px(2.))
+                .gap(zpx(2.))
                 .text_color(primary)
                 .child(ui::icon(theme::ICON_MESSAGE, 12., primary))
                 .child(count.to_string()),
@@ -1608,7 +1609,7 @@ impl FileBrowserView {
         .id(id)
         .debug_selector(move || id.into())
         .p_1()
-        .rounded(px(4.))
+        .rounded(zpx(4.))
         .cursor_pointer()
         .text_color(muted)
         .hover(move |s| s.bg(hover).text_color(fg))
@@ -1669,8 +1670,8 @@ impl FileBrowserView {
           .items_center()
           .gap_1()
           .px_2()
-          .py(px(2.))
-          .rounded(px(6.))
+          .py(zpx(2.))
+          .rounded(zpx(6.))
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1682,9 +1683,9 @@ impl FileBrowserView {
       right = right.child(
         div()
           .flex()
-          .gap(px(2.))
-          .p(px(2.))
-          .rounded(px(8.))
+          .gap(zpx(2.))
+          .p(zpx(2.))
+          .rounded(zpx(8.))
           .bg(p.muted)
           .child(
             tab("markdown-code", theme::ICON_CODE, "Code", !previewing).on_click(cx.listener(
@@ -1769,9 +1770,9 @@ impl FileBrowserView {
       .flex()
       .items_start()
       .overflow_hidden()
-      .min_h(px(18.))
-      .line_height(px(LINE_HEIGHT))
-      .text_size(px(CODE_FONT))
+      .min_h(zpx(18.))
+      .line_height(zpx(LINE_HEIGHT))
+      .text_size(zpx(CODE_FONT))
       .when_some(bg, |this, bg| this.bg(bg))
       .when(bg.is_none(), |this| this.hover(move |s| s.bg(hover)))
       .on_mouse_move(cx.listener(move |view, _, _, cx| view.drag_line(n, cx)))
@@ -1792,9 +1793,9 @@ impl FileBrowserView {
             .debug_selector(move || format!("deletion-marker-{n}"))
             .absolute()
             .left_0()
-            .bottom(px(-1.5))
+            .bottom(zpx(-1.5))
             .w_2()
-            .h(px(3.))
+            .h(zpx(3.))
             .bg(tw::color(tw::RED_500)),
         )
       })
@@ -1816,7 +1817,7 @@ impl FileBrowserView {
             this.child(
               div()
                 .ml_1()
-                .h(px(LINE_HEIGHT))
+                .h(zpx(LINE_HEIGHT))
                 .flex()
                 .items_center()
                 .child(ui::icon(theme::ICON_MESSAGE, 12., p.primary)),
@@ -1824,9 +1825,9 @@ impl FileBrowserView {
           })
           .child(
             div()
-              .min_w(px(width as f32 * CH))
+              .min_w(zpx(width as f32 * CH))
               .pr_2()
-              .pl(px(if added { 4. } else { 2. }))
+              .pl(zpx(if added { 4. } else { 2. }))
               .flex()
               .justify_end()
               .text_color(p.muted_foreground.opacity(0.5))
@@ -1855,7 +1856,7 @@ impl FileBrowserView {
                       .flex()
                       .items_center()
                       .justify_center()
-                      .rounded(px(4.))
+                      .rounded(zpx(4.))
                       .bg(blue)
                       .cursor_pointer()
                       .opacity(0.)

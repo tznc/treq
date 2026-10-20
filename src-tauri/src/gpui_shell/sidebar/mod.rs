@@ -6,6 +6,7 @@
 //! to the window's webview as a `gpui-sidebar-action` event, which React
 //! carries out with the app's own handlers.
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
@@ -14,8 +15,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, rgb, svg, Animation, AnimationExt as _, App, ClickEvent, Context,
-  Hsla, MouseButton, MouseDownEvent, Pixels, Point, SharedString, Transformation, Window,
+  self, div, prelude::*, rgb, svg, Animation, AnimationExt as _, App, ClickEvent, Context, Hsla,
+  MouseButton, MouseDownEvent, Pixels, Point, SharedString, Transformation, Window,
 };
 
 use super::{
@@ -251,7 +252,7 @@ impl Render for DraggedWorkspace {
       .border_1()
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
-      .text_size(px(13.))
+      .text_size(zpx(13.))
       .text_color(self.palette.sidebar_foreground)
       .font_family(theme::MONO_FONT)
       .shadow_md()
@@ -497,10 +498,10 @@ impl Sidebar {
       |_, _, _, _| {},
     )
     .absolute()
-    .top(px(-border))
-    .left(px(-border))
-    .right(px(-border))
-    .bottom(px(-border))
+    .top(zpx(-border))
+    .left(zpx(-border))
+    .right(zpx(-border))
+    .bottom(zpx(-border))
   }
 
   /// Closes the tooltip popup once no tooltip shows.
@@ -560,7 +561,7 @@ fn queue_dot(status: &str, palette: &Palette) -> (Hsla, bool, String) {
 fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
     .path(path)
-    .size(px(size))
+    .size(zpx(size))
     .flex_none()
     .text_color(color)
 }
@@ -595,7 +596,7 @@ impl Render for Sidebar {
           .items_center()
           .gap_2()
           .px_3()
-          .h(px(32.))
+          .h(zpx(32.))
           .rounded_lg()
           .border_1()
           .border_color(palette.border)
@@ -615,7 +616,7 @@ impl Render for Sidebar {
               .flex_none()
               .px_1()
               .rounded_sm()
-              .text_size(px(11.))
+              .text_size(zpx(11.))
               .bg(palette.muted)
               // Same label as the React app shows on every platform.
               .child("⌘ + K"),
@@ -640,14 +641,14 @@ impl Render for Sidebar {
       .flex()
       .flex_col()
       .flex_none()
-      .w(px(width))
+      .w(zpx(width))
       .h_full()
       .bg(palette.sidebar)
       .text_color(palette.sidebar_foreground)
-      .text_size(px(13.))
+      .text_size(zpx(13.))
       // Room for the right edge line, drawn as a child below so the modal
       // backdrop covers it (GPUI paints a border above the children).
-      .pr(px(1.))
+      .pr(zpx(1.))
       .child(header);
 
     for repo in &snapshot.repos {
@@ -683,7 +684,7 @@ impl Render for Sidebar {
       .overflow_y_scroll()
       .px_2()
       .pb_2()
-      .gap(px(2.))
+      .gap(zpx(2.))
       .on_click(self.on_action(SidebarAction::ClearSelection))
       .on_drop(self.on_workspace_drop(None));
     let mut any_rows = false;
@@ -695,7 +696,7 @@ impl Render for Sidebar {
         .id(("repo-section", index))
         .flex()
         .flex_col()
-        .gap(px(4.));
+        .gap(zpx(4.));
       if let Some(name) = &repo.label {
         section = section.child(self.group_label(repo, name, &palette));
       }
@@ -729,7 +730,7 @@ impl Render for Sidebar {
           .px_4()
           .pt_3()
           .pb_1()
-          .text_size(px(12.))
+          .text_size(zpx(12.))
           .font_weight(gpui::FontWeight::MEDIUM)
           .text_color(palette.sidebar_foreground.opacity(0.7))
           .child("WORKSPACES"),
@@ -741,7 +742,7 @@ impl Render for Sidebar {
           .top_0()
           .bottom_0()
           .right_0()
-          .w(px(1.))
+          .w(zpx(1.))
           .bg(palette.border),
       )
       .child(self.resize_handle(&palette, cx))
@@ -807,7 +808,7 @@ impl Sidebar {
       .flex_none()
       .items_center()
       .justify_center()
-      .size(px(32.))
+      .size(zpx(32.))
       .rounded_lg()
       .border_1()
       .border_color(palette.border)
@@ -865,7 +866,7 @@ impl Sidebar {
       .flex_none()
       .items_center()
       .justify_center()
-      .size(px(20.))
+      .size(zpx(20.))
       .rounded_sm()
       .when(!disabled, |this| {
         this.hover(|style| style.bg(palette.accent))
@@ -907,7 +908,7 @@ impl Sidebar {
       .flex()
       .flex_none()
       .items_center()
-      .gap(px(2.))
+      .gap(zpx(2.))
       .child(self.row_button(
         format!("{prefix}-start-agent").into(),
         theme::ICON_BOT,
@@ -954,7 +955,7 @@ impl Sidebar {
         .flex_1()
         .min_w_0()
         .items_baseline()
-        .gap(px(6.))
+        .gap(zpx(6.))
         .child(
           div()
             .flex_none()
@@ -1002,10 +1003,10 @@ impl Sidebar {
       .relative()
       .flex()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .mx_2()
       .px_2()
-      .h(px(32.))
+      .h(zpx(32.))
       .rounded_md()
       .when(repo.home_selected, |this| {
         this.bg(palette.primary.opacity(0.2))
@@ -1020,7 +1021,7 @@ impl Sidebar {
         this.child(
           div()
             .flex_none()
-            .text_size(px(12.))
+            .text_size(zpx(12.))
             .text_color(palette.muted_foreground)
             .child("missing"),
         )
@@ -1064,10 +1065,10 @@ impl Sidebar {
       .debug_selector(move || id.into())
       .flex()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .mx_2()
       .px_2()
-      .h(px(32.))
+      .h(zpx(32.))
       .rounded_md()
       .when(active, |this| this.bg(palette.primary.opacity(0.2)))
       .when(!active, |this| this.hover(|style| style.bg(palette.accent)))
@@ -1090,7 +1091,7 @@ impl Sidebar {
       .bottom_0()
       // Inside the sidebar: the webview takes every click right of it.
       .right_0()
-      .w(px(4.))
+      .w(zpx(4.))
       .cursor_ew_resize()
       .when(dragging, |this| this.bg(primary))
       .hover(move |style| style.bg(primary.opacity(0.5)))
@@ -1119,9 +1120,9 @@ impl Sidebar {
       .items_center()
       .gap_1()
       .px_2()
-      .h(px(32.))
+      .h(zpx(32.))
       .rounded_md()
-      .text_size(px(12.))
+      .text_size(zpx(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .hover(|style| style.bg(palette.accent))
       .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
@@ -1193,7 +1194,7 @@ impl Sidebar {
           .id(("queue", id as u64))
           .debug_selector(move || format!("queue-{id}"))
           .flex_none()
-          .size(px(8.))
+          .size(zpx(8.))
           .rounded_full()
           .bg(color);
         if pulse {
@@ -1215,7 +1216,7 @@ impl Sidebar {
             div()
               .debug_selector(move || format!("status-{id}"))
               .flex_none()
-              .size(px(8.))
+              .size(zpx(8.))
               .rounded_full()
               .bg(color),
           )
@@ -1230,9 +1231,9 @@ impl Sidebar {
       .relative()
       .flex()
       .items_center()
-      .gap(px(6.))
-      .h(px(32.))
-      .pl(px(row_indent(row.depth)))
+      .gap(zpx(6.))
+      .h(zpx(32.))
+      .pl(zpx(row_indent(row.depth)))
       .pr_2()
       .rounded_md()
       .when(row.selected, |this| this.bg(palette.primary.opacity(0.2)))
@@ -1246,8 +1247,8 @@ impl Sidebar {
             .absolute()
             .top_0()
             .bottom_0()
-            .left(px(guide_left(row.depth)))
-            .w(px(2.))
+            .left(zpx(guide_left(row.depth)))
+            .w(zpx(2.))
             .bg(palette.stack_guide),
         )
       })
@@ -1345,7 +1346,7 @@ impl Sidebar {
         .with_animation(
           ("exiting", id as u64),
           Animation::new(Duration::from_millis(200)),
-          |row, delta| row.h(px(32. * (1. - delta))).opacity(1. - delta),
+          |row, delta| row.h(zpx(32. * (1. - delta))).opacity(1. - delta),
         )
         .into_any_element()
     } else {
@@ -1363,12 +1364,12 @@ fn skeleton_row(index: usize, palette: &Palette) -> impl IntoElement {
     .flex()
     .items_center()
     .gap_2()
-    .h(px(32.))
+    .h(zpx(32.))
     .px_2()
-    .child(div().size(px(16.)).rounded_md().bg(palette.muted))
+    .child(div().size(zpx(16.)).rounded_md().bg(palette.muted))
     .child(
       div()
-        .h(px(16.))
+        .h(zpx(16.))
         .w(gpui::relative(width / 100.))
         .rounded_md()
         .bg(palette.muted),
@@ -1390,7 +1391,7 @@ fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Di
     .justify_center()
     .gap_2()
     .mt_2()
-    .h(px(32.))
+    .h(zpx(32.))
     .rounded_md()
     .bg(palette.destructive)
     .text_color(gpui::white())

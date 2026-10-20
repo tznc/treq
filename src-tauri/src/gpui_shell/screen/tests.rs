@@ -1545,6 +1545,29 @@ fn the_window_models_file_picker_reports_a_dismissal(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_ui_zoom_scales_pixel_lengths_as_css_zoom_does(cx: &mut TestAppContext) {
+  use crate::gpui_shell::ui::{apply_zoom, UiZoom};
+  let mut card = |zoom: u32| {
+    let mut h = Harness::new(cx, onboarding());
+    h.cx.update(|window, cx| {
+      cx.set_global(UiZoom(zoom));
+      apply_zoom(window, cx);
+      window.refresh();
+    });
+    h.cx.run_until_parked();
+    h.cx
+      .debug_bounds("onboarding-open-repo")
+      .expect("card")
+      .size
+  };
+  let (normal, zoomed) = (card(100), card(150));
+  assert!(
+    (f32::from(zoomed.height) - f32::from(normal.height) * 1.5).abs() < 1.,
+    "{normal:?} {zoomed:?}"
+  );
+}
+
+#[gpui::test]
 fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     installed: vec![("git", false), ("gh", true)],

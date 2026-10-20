@@ -7,6 +7,7 @@
 //! window per [`Slot`] (per shell window, for toasts) is built on first use,
 //! then moved and resized.
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -732,22 +733,22 @@ impl PopupView {
       TooltipContent::Shortcut { text, keys } => div()
         .flex()
         .items_center()
-        .gap(px(KBD_GAP))
+        .gap(zpx(KBD_GAP))
         .child(text.clone())
         .child(
           div()
             .debug_selector(|| "tooltip-kbd".into())
-            .h(px(KBD_HEIGHT))
-            .min_w(px(KBD_HEIGHT))
-            .px(px(KBD_PADDING_X))
+            .h(zpx(KBD_HEIGHT))
+            .min_w(zpx(KBD_HEIGHT))
+            .px(zpx(KBD_PADDING_X))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(6.))
+            .rounded(zpx(6.))
             .bg(palette.muted)
             .text_color(palette.muted_foreground)
-            .text_size(px(LIST_ITEM_SIZE))
-            .line_height(px(LIST_ITEM_LINE))
+            .text_size(zpx(LIST_ITEM_SIZE))
+            .line_height(zpx(LIST_ITEM_LINE))
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(keys.clone()),
         )
@@ -764,12 +765,12 @@ impl PopupView {
           div()
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(zpx(6.))
             .font_family(theme::MONO_FONT)
             .child(
               svg()
                 .path(theme::ICON_BRANCH)
-                .size(px(12.))
+                .size(zpx(12.))
                 .flex_none()
                 .text_color(palette.popover_foreground),
             )
@@ -803,10 +804,10 @@ impl PopupView {
           div()
             .flex()
             .flex_col()
-            .gap(px(2.))
+            .gap(zpx(2.))
             .font_family(theme::MONO_FONT)
-            .text_size(px(LIST_ITEM_SIZE))
-            .line_height(px(LIST_ITEM_LINE))
+            .text_size(zpx(LIST_ITEM_SIZE))
+            .line_height(zpx(LIST_ITEM_LINE))
             .children(items.iter().cloned()),
         )
         .into_any_element(),
@@ -825,7 +826,7 @@ impl PopupView {
       let row = match entry {
         MenuEntry::Separator => div()
           // `-mx-1` cancels the box's padding.
-          .mx(px(-MENU_PADDING))
+          .mx(zpx(-MENU_PADDING))
           .my_1()
           .h_px()
           .bg(palette.muted)
@@ -834,8 +835,8 @@ impl PopupView {
           .flex()
           .flex_none()
           .items_center()
-          .h(px(ITEM_HEIGHT))
-          .px(px(ITEM_PADDING_X))
+          .h(zpx(ITEM_HEIGHT))
+          .px(zpx(ITEM_PADDING_X))
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .whitespace_nowrap()
           .child(SharedString::from(text.clone()))
@@ -856,10 +857,10 @@ impl PopupView {
           menu_row(("item", index), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
             .when_some(*radio, |row, checked| {
-              row.relative().pl(px(RADIO_INSET)).child(
+              row.relative().pl(zpx(RADIO_INSET)).child(
                 div()
                   .absolute()
-                  .left(px(ITEM_PADDING_X))
+                  .left(zpx(ITEM_PADDING_X))
                   .size_4()
                   .flex()
                   .items_center()
@@ -902,8 +903,8 @@ impl PopupView {
           .when_some(detail.clone(), |row, detail| {
             row.child(
               div()
-                .ml(px(DETAIL_GAP))
-                .text_size(px(LIST_ITEM_SIZE))
+                .ml(zpx(DETAIL_GAP))
+                .text_size(zpx(LIST_ITEM_SIZE))
                 .text_color(palette.muted_foreground)
                 .whitespace_nowrap()
                 .child(detail),
@@ -913,7 +914,7 @@ impl PopupView {
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             if *hovered && this.content_open_submenu() != Some(index) {
               this.set_open_submenu(Some(index), cx);
-              this.open_submenu_window(index, items.clone());
+              this.open_submenu_window(index, items.clone(), super::ui::zoom_factor(cx));
             }
           }))
           .into_any_element()
@@ -945,16 +946,16 @@ impl PopupView {
   }
 
   /// Opens the submenu of row `index` beside it.
-  fn open_submenu_window(&self, index: usize, items: Vec<MenuEntry>) {
+  fn open_submenu_window(&self, index: usize, items: Vec<MenuEntry>, zoom: f32) {
     let Content::Menu { entries, .. } = &self.content else {
       return;
     };
     // The trigger row, inside the box's border and padding.
-    let inset = px(1. + MENU_PADDING);
-    let top = self.frame.origin.y + px(entry_top(entries, index));
+    let inset = px((1. + MENU_PADDING) * zoom);
+    let top = self.frame.origin.y + px(entry_top(entries, index) * zoom);
     let trigger = Bounds::new(
       gpui::point(self.frame.origin.x + inset, top),
-      gpui::size(self.frame.size.width - inset * 2., px(ITEM_HEIGHT)),
+      gpui::size(self.frame.size.width - inset * 2., px(ITEM_HEIGHT * zoom)),
     );
     let (palette, owner) = (self.palette, self.owner.clone());
     defer_main(&self.app, move |app| {
@@ -1008,7 +1009,7 @@ impl PopupView {
   fn render_toasts(&self, toasts: &[Toast], cx: &mut Context<Self>) -> gpui::AnyElement {
     let palette = self.palette;
     let composited = composited();
-    let mut stack = div().flex().flex_col().gap(px(TOAST_GAP));
+    let mut stack = div().flex().flex_col().gap(zpx(TOAST_GAP));
     for toast in toasts {
       let (icon, icon_color) = match toast.kind {
         ToastKind::Error => (theme::ICON_CIRCLE_ALERT, palette.destructive),
@@ -1033,8 +1034,8 @@ impl PopupView {
         .child(
           svg()
             .path(icon)
-            .size(px(16.))
-            .mt(px(2.))
+            .size(zpx(16.))
+            .mt(zpx(2.))
             .flex_none()
             .text_color(icon_color),
         )
@@ -1048,7 +1049,7 @@ impl PopupView {
             .child(
               div()
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .line_height(px(TEXT_SIZE))
+                .line_height(zpx(TEXT_SIZE))
                 .child(SharedString::from(toast.title.clone())),
             )
             .when_some(toast.description.clone(), |this, description| {
@@ -1088,7 +1089,7 @@ impl PopupView {
             .child(
               svg()
                 .path(theme::ICON_X)
-                .size(px(16.))
+                .size(zpx(16.))
                 .text_color(palette.muted_foreground.opacity(0.7))
                 .group_hover("close", |style| style.text_color(palette.foreground)),
             )
@@ -1133,8 +1134,8 @@ fn menu_row(
     .flex()
     .flex_none()
     .items_center()
-    .h(px(ITEM_HEIGHT))
-    .px(px(ITEM_PADDING_X))
+    .h(zpx(ITEM_HEIGHT))
+    .px(zpx(ITEM_PADDING_X))
     .rounded_sm()
     .text_color(color)
     .when(highlighted, |this| this.bg(hover_bg))
@@ -1143,9 +1144,9 @@ fn menu_row(
       this.child(
         svg()
           .path(icon.path())
-          .size(px(ITEM_ICON))
+          .size(zpx(ITEM_ICON))
           .flex_none()
-          .mr(px(ITEM_ICON_GAP))
+          .mr(zpx(ITEM_ICON_GAP))
           .text_color(color),
       )
     })
@@ -1157,24 +1158,25 @@ fn menu_row(
 }
 
 impl Render for PopupView {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    super::ui::apply_zoom(window, cx);
     let palette = self.palette;
     let body = match self.content.clone() {
       Content::Empty => None,
       Content::Toasts(toasts) => {
         return div()
           .size_full()
-          .p(px(shadow_margin()))
+          .p(zpx(shadow_margin()))
           .font_family(theme::SANS_FONT)
-          .text_size(px(TEXT_SIZE))
-          .line_height(px(LINE_HEIGHT))
+          .text_size(zpx(TEXT_SIZE))
+          .line_height(zpx(LINE_HEIGHT))
           .child(self.render_toasts(&toasts, cx));
       }
       // `px-3 py-1.5 shadow-md`
       Content::Tooltip(content) => Some(
         div()
           .px_3()
-          .py(px(6.))
+          .py(zpx(6.))
           .shadow_md()
           .child(self.render_tooltip(&content)),
       ),
@@ -1184,7 +1186,7 @@ impl Render for PopupView {
         open_submenu,
       } => Some(
         div()
-          .p(px(MENU_PADDING))
+          .p(zpx(MENU_PADDING))
           .when(self.slot == Slot::Menu, |this| this.shadow_md())
           .when(self.slot == Slot::Submenu, |this| this.shadow_lg())
           .child(self.render_menu(&entries, open_submenu, cx)),
@@ -1194,10 +1196,10 @@ impl Render for PopupView {
     let body = body.map(|body| if composited { body } else { body.shadow_none() });
     div()
       .size_full()
-      .p(px(shadow_margin()))
+      .p(zpx(shadow_margin()))
       .font_family(theme::SANS_FONT)
-      .text_size(px(TEXT_SIZE))
-      .line_height(px(LINE_HEIGHT))
+      .text_size(zpx(TEXT_SIZE))
+      .line_height(zpx(LINE_HEIGHT))
       .when_some(body, |this, body| {
         // `rounded-md border bg-popover text-popover-foreground`
         this.child(
@@ -1393,6 +1395,9 @@ fn popup_window(
   Some((window, view))
 }
 
+/// A popup's box on screen, and the zoom it was measured at.
+type Placed = (Bounds<Pixels>, f32);
+
 /// Shows `content` in the popup for `slot`, sized by `measure` and placed
 /// by `place` (screen coordinates, logical pixels). Main thread only.
 fn show(
@@ -1407,16 +1412,19 @@ fn show(
   let Some((window, view)) = popup_window(app, slot, owner) else {
     return;
   };
-  let frame: Rc<RefCell<Option<Bounds<Pixels>>>> = Rc::default();
+  let frame: Rc<RefCell<Option<Placed>>> = Rc::default();
   let placed = frame.clone();
   let owner = owner.to_string();
   let updated = tauri_plugin_gpui::with_app(move |cx| {
+    // Measured at 100%; the view draws at the app's zoom.
+    let zoom = super::ui::zoom_factor(cx);
     let size = measure(cx, &content);
+    let size = (size.0 * zoom, size.1 * zoom);
     let Some(origin) = place(size) else {
       return;
     };
     let bounds = Bounds::new(origin, gpui::size(px(size.0), px(size.1)));
-    *placed.borrow_mut() = Some(bounds);
+    *placed.borrow_mut() = Some((bounds, zoom));
     let _ = view.update(cx, |view, cx| {
       view.content = content;
       view.palette = palette;
@@ -1425,10 +1433,10 @@ fn show(
       cx.notify();
     });
   });
-  let Some(bounds) = frame.borrow_mut().take().filter(|_| updated.is_ok()) else {
+  let Some((bounds, zoom)) = frame.borrow_mut().take().filter(|_| updated.is_ok()) else {
     return;
   };
-  let margin = px(shadow_margin());
+  let margin = px(shadow_margin() * zoom);
   let size = LogicalSize::new(
     f32::from(bounds.size.width + margin * 2.),
     f32::from(bounds.size.height + margin * 2.),
@@ -1701,11 +1709,14 @@ pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
   else {
     return;
   };
-  let frame = tauri_plugin_gpui::with_app(move |cx| view.read_with(cx, |view, _| view.frame).ok());
-  if let Ok(Some(frame)) = frame {
+  let frame = tauri_plugin_gpui::with_app(move |cx| {
+    let zoom = super::ui::zoom_factor(cx);
+    view.read_with(cx, |view, _| (view.frame, zoom)).ok()
+  });
+  if let Ok(Some((frame, zoom))) = frame {
     let size = (f32::from(frame.size.width), f32::from(frame.size.height));
     let origin = place_toasts(size, client);
-    let margin = px(shadow_margin());
+    let margin = px(shadow_margin() * zoom);
     let _ = window.set_position(LogicalPosition::new(
       f32::from(origin.x - margin),
       f32::from(origin.y - margin),

@@ -1,10 +1,11 @@
 //! `StashModal`: the repository's stashed changes, each one's diff, and
 //! applying, copying and deleting them.
 
+use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, prelude::*, px, ClipboardItem, Context, Entity, FontWeight, SharedString,
+  self, deferred, div, prelude::*, ClipboardItem, Context, Entity, FontWeight, SharedString,
   Subscription, Window,
 };
 
@@ -424,7 +425,7 @@ impl StashView {
     let (accent, muted) = (p.menu_accent, p.muted_foreground);
     div()
       .debug_selector(|| "stash-list".into())
-      .w(px(288.))
+      .w(zpx(288.))
       .flex_none()
       .h_full()
       .child(
@@ -449,7 +450,7 @@ impl StashView {
               .flex_none()
               .px_2()
               .py_2()
-              .rounded(px(8.))
+              .rounded(zpx(8.))
               .cursor_pointer()
               .when(selected, |this| this.bg(accent))
               .when(!selected, |this| {
@@ -464,7 +465,7 @@ impl StashView {
               )
               .child(
                 div()
-                  .mt(px(2.))
+                  .mt(zpx(2.))
                   .flex()
                   .items_center()
                   .gap_2()
@@ -547,7 +548,7 @@ impl StashView {
           .flex()
           .flex_wrap()
           .gap_x_3()
-          .gap_y(px(2.))
+          .gap_y(zpx(2.))
           .text_color(p.muted_foreground)
           .child(
             div()
@@ -558,7 +559,7 @@ impl StashView {
           .child(
             div()
               .flex()
-              .gap(px(4.))
+              .gap(zpx(4.))
               .child(
                 div()
                   .text_color(green)
@@ -571,7 +572,7 @@ impl StashView {
 
     let apply = Button::new("stash-apply-button", p)
       .size(Size::Sm)
-      .h(px(28.))
+      .h(zpx(28.))
       .px_2()
       .disabled(busy)
       .child(if applying {
@@ -595,7 +596,7 @@ impl StashView {
     let more = Button::new("stash-more-menu", p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .h(px(28.))
+      .h(zpx(28.))
       .px_2()
       .disabled(busy)
       .child(if other {
@@ -609,7 +610,7 @@ impl StashView {
       .flex_none()
       .flex()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .child(
         div()
           .relative()
@@ -655,9 +656,9 @@ impl StashView {
   fn more_menu(&self, entry: &StashEntry, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let (patch, delete) = (entry.clone(), entry.clone());
     let panel = menu_panel("stash-more-popup", p)
-      .top(px(32.))
+      .top(zpx(32.))
       .right_0()
-      .min_w(px(128.))
+      .min_w(zpx(128.))
       .child(
         menu_item("stash-copy-patch", p, false)
           .child(ui::icon(theme::ICON_COPY, 14., p.popover_foreground))
@@ -700,8 +701,8 @@ impl StashView {
         .items_center()
         .gap_2()
         .px_2()
-        .py(px(6.))
-        .rounded(px(6.))
+        .py(zpx(6.))
+        .rounded(zpx(6.))
         .cursor_pointer()
         .when(active, |this| this.bg(accent))
     };
@@ -718,7 +719,7 @@ impl StashView {
         .child(
           ui::text(div(), TextSize::Xs)
             .px_2()
-            .py(px(6.))
+            .py(zpx(6.))
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
             .child("Apply to"),
@@ -740,10 +741,10 @@ impl StashView {
       .id("stash-apply-popover")
       .debug_selector(|| "stash-apply-popover".into())
       .absolute()
-      .top(px(32.))
+      .top(zpx(32.))
       .right_0()
-      .w(px(288.))
-      .rounded(px(8.))
+      .w(zpx(288.))
+      .rounded(zpx(8.))
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -767,7 +768,7 @@ impl StashView {
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
-          .h(px(36.))
+          .h(zpx(36.))
           .px_3()
           .border_b_1()
           .border_color(p.border)
@@ -781,7 +782,7 @@ impl StashView {
       .child(
         div()
           .id("stash-apply-list")
-          .max_h(px(224.))
+          .max_h(zpx(224.))
           .overflow_y_scroll()
           .p_1()
           .child(list)
@@ -835,7 +836,7 @@ fn diff_pane(diff: &JjRevisionDiff, p: &Palette) -> gpui::AnyElement {
         .child(
           ui::text(div(), TextSize::Xs)
             .px_2()
-            .py(px(6.))
+            .py(zpx(6.))
             .border_b_1()
             .border_color(p.border)
             .bg(p.background.opacity(0.95))
@@ -854,7 +855,7 @@ fn diff_pane(diff: &JjRevisionDiff, p: &Palette) -> gpui::AnyElement {
                 .child(
                   div()
                     .px_2()
-                    .py(px(2.))
+                    .py(zpx(2.))
                     .text_color(p.muted_foreground)
                     .bg(p.muted.opacity(0.4))
                     .child(hunk.header.clone()),

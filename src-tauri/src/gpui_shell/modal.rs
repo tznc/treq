@@ -31,7 +31,8 @@ struct ModalRoot {
 }
 
 impl Render for ModalRoot {
-  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    super::ui::apply_zoom(window, cx);
     div()
       .size_full()
       .children(self.overlay.clone())

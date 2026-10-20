@@ -7,8 +7,9 @@
 //! popover reads the workflows and their latest runs from the route, and
 //! asks React to trust, run and re-run.
 
+use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
+  self, div, prelude::*, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
 };
 
 use super::{data::ChecksData, Popover};
@@ -338,9 +339,9 @@ impl Popover {
         .flex()
         .items_center()
         .gap_2()
-        .py(px(6.))
+        .py(zpx(6.))
         .px_2()
-        .rounded(px(4.))
+        .rounded(zpx(4.))
         .child(icon)
         .child(
           div()
@@ -378,7 +379,7 @@ impl Popover {
       .child(
         div()
           .id("checks-github-list")
-          .max_h(px(320.))
+          .max_h(zpx(320.))
           .overflow_y_scroll()
           .children(rows),
       )

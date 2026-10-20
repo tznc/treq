@@ -1,6 +1,7 @@
 //! `PrDetailPanel`, `IssueDetailPanel` and their actions, and the PR's
 //! workspace checks (`PrWorkspaceChecks`).
 
+use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
   MouseButton, SharedString, Window,
@@ -258,8 +259,8 @@ impl GithubView {
         Button::new("github-detail-close", p)
           .variant(Variant::Ghost)
           .size(Size::Icon)
-          .w(px(28.))
-          .h(px(28.))
+          .w(zpx(28.))
+          .h(zpx(28.))
           .icon(theme::ICON_X, 16.)
           .on_click(cx.listener(|view, _, _, cx| view.press("github.close", cx))),
       );
@@ -321,8 +322,8 @@ impl GithubView {
     div()
       .flex_1()
       .min_w_0()
-      .text_size(px(20.))
-      .line_height(px(28.))
+      .text_size(zpx(20.))
+      .line_height(zpx(28.))
       .font_weight(FontWeight::SEMIBOLD)
       .child(title.to_string())
   }
@@ -332,7 +333,7 @@ impl GithubView {
     Some(
       div()
         .bg(p.muted.opacity(0.3))
-        .rounded(px(6.))
+        .rounded(zpx(6.))
         .p_3()
         .child(markdown(
           SharedString::from(id.to_string()),
@@ -476,8 +477,8 @@ impl GithubView {
             Button::new("github-edit", p)
               .variant(Variant::Ghost)
               .size(Size::Icon)
-              .w(px(32.))
-              .h(px(32.))
+              .w(zpx(32.))
+              .h(zpx(32.))
               .icon(theme::ICON_PENCIL, 16.)
               .on_click(cx.listener({
                 let (title, body) = (issue.title.clone(), issue.body.clone().unwrap_or_default());
@@ -493,8 +494,8 @@ impl GithubView {
             Button::new("github-delete", p)
               .variant(Variant::Ghost)
               .size(Size::Icon)
-              .w(px(32.))
-              .h(px(32.))
+              .w(zpx(32.))
+              .h(zpx(32.))
               .text_color(p.muted_foreground)
               .hover_bg(destructive.opacity(0.1))
               .child(ui::icon(theme::ICON_TRASH, 16., p.muted_foreground))
@@ -506,7 +507,7 @@ impl GithubView {
           .child(
             Button::new("github-agent", p)
               .size(Size::Sm)
-              .gap(px(6.))
+              .gap(zpx(6.))
               .icon(theme::ICON_SPARKLES, 16.)
               .label("Agent...")
               .on_click(cx.listener(move |view, _, _, cx| {
@@ -585,7 +586,7 @@ impl GithubView {
             .size(Size::Sm)
             .rounded_l_none()
             .border_l_0()
-            .px(px(6.))
+            .px(zpx(6.))
             .disabled(closing)
             .icon(theme::ICON_CHEVRON_DOWN, 16.)
             .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::CloseIssue, cx))),
@@ -595,9 +596,9 @@ impl GithubView {
             deferred(
               parts::menu_panel("github-close-menu", p)
                 .absolute()
-                .top(px(36.))
+                .top(zpx(36.))
                 .left_0()
-                .min_w(px(128.))
+                .min_w(zpx(128.))
                 .on_mouse_down_out(
                   cx.listener(|view, _, _, cx| view.close_popover(Popover::CloseIssue, cx)),
                 )
@@ -822,14 +823,14 @@ impl GithubView {
       // The branch with a small plus at its bottom right.
       div()
         .relative()
-        .size(px(16.))
+        .size(zpx(16.))
         .flex_none()
         .child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.foreground))
         .child(
           div()
             .absolute()
-            .bottom(px(-2.))
-            .right(px(-2.))
+            .bottom(zpx(-2.))
+            .right(zpx(-2.))
             .child(ui::icon(theme::ICON_PLUS, 10., p.foreground)),
         )
         .into_any_element()
@@ -842,7 +843,7 @@ impl GithubView {
       .child(
         Button::new("github-review", p)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .icon(theme::ICON_FILE_DIFF, 16.)
           .label("Review changes")
           .on_click(
@@ -853,7 +854,7 @@ impl GithubView {
         Button::new("github-workspace", p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .disabled(opening)
           .child(workspace_icon)
           .label(if existing.is_some() {
@@ -920,7 +921,7 @@ impl GithubView {
           div()
             .border_1()
             .border_color(p.border)
-            .rounded(px(6.))
+            .rounded(zpx(6.))
             .overflow_hidden()
             .children(
               data::by_severity(&c.checks)
@@ -1089,11 +1090,11 @@ impl GithubView {
         deferred(
           named(div(), "github-ci-popover")
             .absolute()
-            .top(px(36.))
+            .top(zpx(36.))
             .right_0()
-            .w(px(320.))
+            .w(zpx(320.))
             .p_2()
-            .rounded(px(8.))
+            .rounded(zpx(8.))
             .border_1()
             .border_color(p.border)
             .bg(p.popover)
@@ -1114,7 +1115,7 @@ impl GithubView {
             .child(
               div()
                 .id("github-ci-checks")
-                .max_h(px(320.))
+                .max_h(zpx(320.))
                 .overflow_y_scroll()
                 .children(data::by_severity(&ci.checks).into_iter().enumerate().map(
                   |(i, check)| {
@@ -1173,7 +1174,7 @@ impl GithubView {
         div()
           .border_1()
           .border_color(p.border)
-          .rounded(px(6.))
+          .rounded(zpx(6.))
           .overflow_hidden()
           .child(self.checks_panel(ws, p, cx)),
       )
@@ -1232,7 +1233,7 @@ impl GithubView {
           .flex()
           .items_center()
           .justify_between()
-          .rounded(px(6.))
+          .rounded(zpx(6.))
           .border_1()
           .border_color(tw::color(border))
           .bg(bg)
@@ -1283,7 +1284,7 @@ impl GithubView {
           .items_center()
           .justify_between()
           .gap_2()
-          .rounded(px(6.))
+          .rounded(zpx(6.))
           .border_1()
           .border_color(p.border)
           .px_4()
@@ -1444,7 +1445,7 @@ impl GithubView {
       let history = latest.map(|_| self.run_history(w, &wf.filename, p, cx));
       panel = panel.child(
         named(div(), format!("workflow-card-{w}"))
-          .rounded(px(6.))
+          .rounded(zpx(6.))
           .border_1()
           .border_color(p.border)
           .bg(p.card)
@@ -1521,7 +1522,7 @@ impl GithubView {
               .items_center()
               .gap_2()
               .px_6()
-              .py(px(6.))
+              .py(zpx(6.))
               .cursor_pointer()
               .hover(move |s| s.bg(muted.opacity(0.5)))
               .child(chevron(open, p))
@@ -1623,9 +1624,9 @@ impl GithubView {
             ))),
             TextSize::Xs,
           )
-          .max_h(px(256.))
+          .max_h(zpx(256.))
           .overflow_y_scroll()
-          .rounded(px(4.))
+          .rounded(zpx(4.))
           .bg(p.muted)
           .p_2()
           .font_family(theme::MONO_FONT)

@@ -2,8 +2,9 @@
 //! and the prompt it started with (`ShowWorkspace`'s `PopoverContent`
 //! `w-96`).
 
+use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, ClipboardItem, Context, Div, FontWeight, SharedString,
+  self, div, prelude::*, ClipboardItem, Context, Div, FontWeight, SharedString,
 };
 
 use super::{data::StartingPrompt, Popover};
@@ -150,7 +151,7 @@ impl Popover {
         Button::new("details-copy", &p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .h(px(24.))
+          .h(zpx(24.))
           .px_2()
           .gap_1()
           .icon(theme::ICON_COPY, 12.)
@@ -166,7 +167,7 @@ impl Popover {
             .id("details-prompt")
             .debug_selector(|| "details-prompt".into())
             .mt_1()
-            .max_h(px(160.))
+            .max_h(zpx(160.))
             .overflow_y_scroll()
             .text_color(p.muted_foreground)
             .child(SharedString::from(prompt.text.clone())),
@@ -214,7 +215,7 @@ impl Popover {
       .panel("workspace-details-popover", WIDTH, 16., &p)
       .flex()
       .flex_col()
-      .gap(px(12.))
+      .gap(zpx(12.))
       .child(details)
       .child(starting)
   }

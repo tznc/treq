@@ -125,8 +125,6 @@ struct Shell {
   /// What the model last presented, and what React last pushed.
   presented: Option<window::Presentation>,
   react: ReactPushes,
-  /// `ui_zoom`, in percent.
-  zoom: u32,
   /// The OS appearance last rendered under.
   os_dark: Option<bool>,
   /// Sends Dashboard's shortcuts pressed in this window to React.
@@ -211,7 +209,7 @@ impl Render for Shell {
       .or_else(|| self.screen.as_ref().map(|s| s.read(cx).snapshot().dark))
       .unwrap_or(os_dark);
     let app = self.app.clone();
-    window.set_rem_size(gpui::px(16. * self.zoom as f32 / 100.));
+    ui::apply_zoom(window, cx);
     self.watch_shortcuts(window, cx);
     gpui::div()
       .size_full()
@@ -303,7 +301,6 @@ pub fn open_window(
       window: None,
       presented: None,
       react: ReactPushes::default(),
-      zoom: window::DEFAULT_ZOOM,
       os_dark: None,
       shortcuts: None,
     });
@@ -511,7 +508,11 @@ impl Shell {
       self.show_overlay(next.overlay.clone());
     }
     self.show_file_picker(next.file_picker.clone(), cx);
-    self.zoom = next.zoom;
+    // Every GPUI window draws at the app's zoom.
+    if cx.try_global::<ui::UiZoom>() != Some(&ui::UiZoom(next.zoom)) {
+      cx.set_global(ui::UiZoom(next.zoom));
+      cx.refresh_windows();
+    }
     self.presented = Some(next);
     cx.notify();
   }

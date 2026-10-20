@@ -10,6 +10,7 @@
 //! React's `Dialog` does. GPUI cannot paint over the webview, so a screen
 //! that frames it leaves it out of the frame while a dialog is open.
 
+use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -176,7 +177,7 @@ pub fn dialog(
     .flex()
     .flex_col()
     .gap_4()
-    .rounded(px(16.))
+    .rounded(zpx(16.))
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -198,7 +199,7 @@ pub fn overlay(backdrop: Stateful<Div>, panel: impl IntoElement) -> impl IntoEle
 /// `DialogTitle`: `text-lg font-semibold leading-none`.
 pub fn title(text: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(px(15.))
+    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(text)
 }

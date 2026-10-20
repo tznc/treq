@@ -1,6 +1,7 @@
 //! The Changes tab's find bar (`useDiffSearch`, `SearchOverlay`): Cmd+F
 //! opens it, matches are marked in the diff and Enter steps through them.
 
+use crate::gpui_shell::ui::zpx;
 use std::ops::Range;
 use std::time::Duration;
 
@@ -388,7 +389,7 @@ impl ChangesView {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(2.))
+        .rounded(zpx(2.))
         .text_color(muted)
         .when(disabled, |this| this.opacity(0.5))
         .when(!disabled, |this| {
@@ -408,12 +409,12 @@ impl ChangesView {
         .bg(p.background)
         .border_1()
         .border_color(p.border)
-        .rounded(px(6.))
+        .rounded(zpx(6.))
         .shadow_lg()
-        .p(px(2.))
+        .p(zpx(2.))
         .flex()
         .items_center()
-        .gap(px(2.))
+        .gap(zpx(2.))
         .capture_action(cx.listener(|view, _: &Escape, _, cx| {
           view.close_search(cx);
           cx.stop_propagation();
@@ -426,7 +427,7 @@ impl ChangesView {
             .px_2()
             .flex()
             .items_center()
-            .rounded(px(6.))
+            .rounded(zpx(6.))
             .border_1()
             .border_color(p.input)
             .child(ui::input(&input).appearance(false).bordered(false)),

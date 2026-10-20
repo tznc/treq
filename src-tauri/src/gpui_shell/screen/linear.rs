@@ -8,6 +8,7 @@
 //! agent itself. React still owns the prompt dialog, so GPUI hands back an
 //! issue to kick off (`linear.kickoff`) for React to open it with.
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -648,8 +649,8 @@ enum Action {
 fn badge(text: impl Into<SharedString>, p: &Palette) -> Div {
   ui::text(div(), TextSize::Xs)
     .font_weight(FontWeight::MEDIUM)
-    .px(px(6.))
-    .py(px(2.))
+    .px(zpx(6.))
+    .py(zpx(2.))
     .rounded_full()
     .bg(p.muted)
     .text_color(p.muted_foreground)
@@ -687,7 +688,7 @@ fn tabs<V: Copy + PartialEq + 'static>(
     .gap_1()
     .bg(p.muted)
     .p_1()
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .children(items.into_iter().map(|(value, key, label)| {
       let id = format!("{prefix}-{key}");
       let selector = id.clone();
@@ -698,7 +699,7 @@ fn tabs<V: Copy + PartialEq + 'static>(
         .debug_selector(move || selector)
         .px_3()
         .py_1()
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .when(on, |this| this.bg(p.background).text_color(fg).shadow_sm())
@@ -783,8 +784,8 @@ impl LinearView {
     Button::new(id, p)
       .variant(Variant::Ghost)
       .size(Size::Icon)
-      .w(px(28.))
-      .h(px(28.))
+      .w(zpx(28.))
+      .h(zpx(28.))
       .disabled(loading)
       .child(if loading {
         ui::spin(format!("{id}-spin"), icon).into_any_element()
@@ -850,7 +851,7 @@ impl LinearView {
     let trigger = Button::new(test_id, p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .gap(px(6.))
+      .gap(zpx(6.))
       .icon(theme::ICON_FILTER, 14.)
       .label("Filter")
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground))
@@ -919,7 +920,7 @@ impl LinearView {
     div()
       .flex()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .flex_wrap()
       .child(div().relative().child(trigger).child(self.anchor(test_id)))
       .children(chips)
@@ -999,7 +1000,7 @@ impl Render for LinearView {
           .child(ui::icon(theme::ICON_ZAP, 20., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Sm)
-              .line_height(px(16.25))
+              .line_height(zpx(16.25))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Linear"),
           ),
@@ -1251,8 +1252,8 @@ impl LinearView {
         .flex_wrap()
         .children(issue.labels.iter().map(|label| {
           ui::text(div(), TextSize::Xs)
-            .px(px(6.))
-            .py(px(2.))
+            .px(zpx(6.))
+            .py(zpx(2.))
             .rounded_full()
             .bg(p.primary.opacity(0.1))
             .text_color(p.primary.opacity(0.8))
@@ -1295,9 +1296,9 @@ impl LinearView {
         .variant(Variant::Outline)
         .size(Size::Sm)
         .mt_3()
-        .h(px(28.))
-        .text_size(px(11.))
-        .line_height(px(16.))
+        .h(zpx(28.))
+        .text_size(zpx(11.))
+        .line_height(zpx(16.))
         .label("Kick off")
         .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.kickoff(&id, cx)))
     };
@@ -1319,7 +1320,7 @@ impl LinearView {
         .debug_selector(move || selector)
         .px_4()
         .pb_4()
-        .pl(px(44.))
+        .pl(zpx(44.))
         .child(self.commented(target, p, cx))
     });
     div()
@@ -1368,9 +1369,9 @@ impl LinearView {
         div()
           .debug_selector(move || selector)
           .flex_none()
-          .w(px(320.))
+          .w(zpx(320.))
           .bg(p.muted.opacity(0.3))
-          .rounded(px(12.))
+          .rounded(zpx(12.))
           .border_1()
           .border_color(p.border)
           .p_3()
@@ -1418,13 +1419,13 @@ impl LinearView {
       div()
         .flex()
         .gap_1()
-        .mt(px(6.))
+        .mt(zpx(6.))
         .flex_wrap()
         .children(issue.labels.iter().take(2).map(|label| {
           ui::text(div(), TextSize::Xs)
             .px_1()
-            .py(px(2.))
-            .rounded(px(4.))
+            .py(zpx(2.))
+            .rounded(zpx(4.))
             .bg(p.primary.opacity(0.1))
             .text_color(p.primary.opacity(0.7))
             .child(label.clone())
@@ -1433,7 +1434,7 @@ impl LinearView {
           this.child(
             ui::text(div(), TextSize::Xs)
               .px_1()
-              .py(px(2.))
+              .py(zpx(2.))
               .text_color(p.muted_foreground)
               .child(format!("+{}", issue.labels.len() - 2)),
           )
@@ -1443,8 +1444,8 @@ impl LinearView {
       .bg(p.background)
       .border_1()
       .border_color(p.border)
-      .rounded(px(8.))
-      .p(px(10.))
+      .rounded(zpx(8.))
+      .p(zpx(10.))
       .child(
         ui::text(
           self.link(
@@ -1482,9 +1483,9 @@ impl LinearView {
           .size(Size::Sm)
           .w_full()
           .mt_2()
-          .h(px(28.))
-          .text_size(px(11.))
-          .line_height(px(16.))
+          .h(zpx(28.))
+          .text_size(zpx(11.))
+          .line_height(zpx(16.))
           .label("Kick off")
           .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.kickoff(&id, cx))),
       )
@@ -1619,8 +1620,8 @@ impl LinearView {
                   .mt_1()
                   .child(
                     ui::text(div(), TextSize::Xs)
-                      .px(px(6.))
-                      .py(px(2.))
+                      .px(zpx(6.))
+                      .py(zpx(2.))
                       .rounded_full()
                       .bg(p.muted)
                       .text_color(p.muted_foreground)
@@ -1635,7 +1636,7 @@ impl LinearView {
           })),
       );
     let left = div()
-      .w(px(288.))
+      .w(zpx(288.))
       .flex_none()
       .border_r_1()
       .border_color(p.border)
@@ -1687,8 +1688,8 @@ impl LinearView {
       .flex_wrap()
       .child(
         div()
-          .px(px(6.))
-          .py(px(2.))
+          .px(zpx(6.))
+          .py(zpx(2.))
           .rounded_full()
           .bg(p.muted)
           .child(capitalize(&project.state)),
@@ -1821,7 +1822,13 @@ impl LinearView {
       window.focus(&self.focus, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog("linear-document-dialog", px(896.), None, viewport, p);
+    let (backdrop, panel) = dialog(
+      "linear-document-dialog",
+      crate::gpui_shell::ui::zoomed(896., window),
+      None,
+      viewport,
+      p,
+    );
     let target = Target {
       of: Commented::Document(doc.id.clone()),
       title: doc.title.clone(),
@@ -1849,7 +1856,7 @@ impl LinearView {
           .id("linear-document-panel")
           .max_h(viewport.height * 0.8)
           .overflow_y_scroll()
-          .gap(px(0.))
+          .gap(zpx(0.))
           .track_focus(&self.focus)
           .capture_key_down(keys)
           .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1911,10 +1918,10 @@ impl LinearView {
       Button::new(SharedString::from(format!("linear-start-review-{key}")), p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .h(px(28.))
-        .gap(px(6.))
-        .text_size(px(11.))
-        .line_height(px(16.))
+        .h(zpx(28.))
+        .gap(zpx(6.))
+        .text_size(zpx(11.))
+        .line_height(zpx(16.))
         .disabled(starting)
         .child(if starting {
           ui::spinner(format!("linear-review-spin-{key}"), 12., fg).into_any_element()
@@ -1962,7 +1969,7 @@ impl LinearView {
     let mut column = div()
       .debug_selector(|| "linear-comments-column".into())
       .flex_none()
-      .w(px(320.))
+      .w(zpx(320.))
       .flex()
       .flex_col()
       .gap_4()
@@ -2027,7 +2034,7 @@ impl LinearView {
           .debug_selector(move || selector)
           .flex()
           .flex_col()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .when_some(comment.quoted_text.clone(), |this, quote| {
             this.child(
               ui::text(div(), TextSize::Xs)
@@ -2099,7 +2106,7 @@ impl LinearView {
       actions = actions.child(
         Button::new(SharedString::from(format!("linear-agent-apply-{id}")), p)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .disabled(busy)
           .icon(theme::ICON_WAND, 12.)
           .label("Apply to Linear")
@@ -2111,7 +2118,7 @@ impl LinearView {
         Button::new(SharedString::from(format!("linear-agent-resolve-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .disabled(busy)
           .icon(theme::ICON_CHECK, 12.)
           .label("Resolve")
@@ -2121,7 +2128,7 @@ impl LinearView {
         Button::new(SharedString::from(format!("linear-agent-delete-{id}")), p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .text_color(p.muted_foreground)
           .disabled(busy)
           .icon(theme::ICON_TRASH, 12.)
@@ -2130,7 +2137,7 @@ impl LinearView {
       );
     div()
       .debug_selector(|| "agent-review-comment-card".into())
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .border_1()
       .border_color(violet(0.4))
       .bg(violet(0.05))

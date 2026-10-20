@@ -1,6 +1,7 @@
 //! `RenameWorkspaceDialog`: renames a workspace's branch, checking each
 //! typed name with a dry run first.
 
+use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -309,7 +310,7 @@ impl Render for RenameDialog {
               .gap_2()
               .child(
                 ui::text(div(), TextSize::Sm)
-                  .line_height(px(13.))
+                  .line_height(zpx(13.))
                   .font_weight(FontWeight::MEDIUM)
                   .child("Branch Name"),
               )
@@ -319,9 +320,9 @@ impl Render for RenameDialog {
                   .debug_selector(|| "rename-branch-name".into())
                   .w_full()
                   .child(
-                    Styled::h(ui::input(&input).disabled(pending), px(40.))
+                    Styled::h(ui::input(&input).disabled(pending), zpx(40.))
                       .when_some(status, |this, icon| {
-                        this.suffix(div().pr(px(4.)).child(icon))
+                        this.suffix(div().pr(zpx(4.)).child(icon))
                       }),
                   ),
               )

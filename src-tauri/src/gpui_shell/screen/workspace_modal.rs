@@ -7,11 +7,12 @@
 //! through the backend; it hands back only what React still owns: closing
 //! the dialog, opening the workspace it made, and deleting a workspace.
 
+use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, Context, Div, Entity, FontWeight, Hsla, Pixels, SharedString, Stateful,
+  self, div, prelude::*, Context, Div, Entity, FontWeight, Hsla, Pixels, SharedString, Stateful,
 };
 
 use super::{
@@ -167,9 +168,9 @@ pub fn dialog_panel(
   let panel = div()
     .debug_selector(move || id.into())
     .w_full()
-    .max_w(px(max_width))
+    .max_w(zpx(max_width))
     .p_6()
-    .rounded(px(16.))
+    .rounded(zpx(16.))
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -182,7 +183,7 @@ pub fn dialog_panel(
 /// `DialogTitle`: `text-lg font-semibold leading-none`.
 pub fn dialog_title(title: impl Into<SharedString>) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(px(15.))
+    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(title.into())
 }
@@ -199,7 +200,7 @@ pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
   div()
     .flex()
     .flex_col()
-    .gap(px(6.))
+    .gap(zpx(6.))
     .child(dialog_title(title))
     .child(description)
 }
@@ -207,7 +208,7 @@ pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
 /// `<Label className="text-xs">`: `font-medium leading-none`.
 pub fn label_xs(text: impl Into<SharedString>) -> Div {
   ui::text(div(), TextSize::Xs)
-    .line_height(px(11.))
+    .line_height(zpx(11.))
     .font_weight(FontWeight::MEDIUM)
     .child(text.into())
 }
@@ -234,12 +235,12 @@ pub fn checkbox(
   div()
     .id(id)
     .debug_selector(move || selector)
-    .size(px(13.))
+    .size(zpx(13.))
     .flex_none()
     .flex()
     .items_center()
     .justify_center()
-    .rounded(px(3.))
+    .rounded(zpx(3.))
     .when(disabled, |this| this.opacity(0.5))
     .map(|this| match state {
       Check::On => this

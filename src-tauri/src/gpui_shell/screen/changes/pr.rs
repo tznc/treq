@@ -3,6 +3,7 @@
 //! the PR's, the comments are review drafts kept in the local database
 //! (`github_pr`), and the review threads take replies.
 
+use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
 use gpui::{AnyElement, Task};
@@ -499,7 +500,7 @@ impl ChangesView {
         .debug_selector(|| "github-thread-reply-box".into())
         .flex()
         .flex_col()
-        .gap(px(6.))
+        .gap(zpx(6.))
         .font_family(theme::SANS_FONT)
         .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
           let k = &e.keystroke;
@@ -518,7 +519,7 @@ impl ChangesView {
           reply
             .input
             .as_ref()
-            .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Xs).min_h(px(60.))),
+            .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Xs).min_h(zpx(60.))),
         )
         .children(reply.error.clone().map(|err| {
           ui::text(div(), TextSize::Xs)
@@ -544,7 +545,7 @@ impl ChangesView {
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-send-{id}")))
                 .debug_selector(|| "github-thread-reply-send".into())
-                .rounded(px(4.))
+                .rounded(zpx(4.))
                 .bg(p.primary)
                 .text_color(p.primary_foreground)
                 .px_2()
