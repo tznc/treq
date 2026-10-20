@@ -12,6 +12,7 @@ import type {
 import { useActiveRepository } from "./active-repository-context";
 import { repositoryCacheKey } from "./active-repository";
 import { isGpuiShellHost } from "./gpui-shell";
+import type { IssueAttachment } from "./promptAttachments";
 import type {
   GpuiGithubScreen,
   GpuiLinearScreen,
@@ -397,12 +398,7 @@ interface GpuiAgentPromptModal {
   initialPrompt: string | null;
   initialWorkspaceId: number | null;
   /** While attached, the session runs in the issue's own workspace. */
-  issue: {
-    source: "github" | "linear";
-    key: string;
-    title: string;
-    includeSubItems: boolean;
-  } | null;
+  issue: IssueAttachment | null;
   /** React is starting the session. */
   starting: boolean;
 }

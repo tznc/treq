@@ -4,9 +4,9 @@
 //!
 //! Drawn from the backend directly (`linear_data::LinearHost`): GPUI reads
 //! Linear through the backend's client, writes review snapshots, and
-//! resolves, deletes and applies review comments. React still owns starting
-//! sessions, so GPUI hands back an issue to kick off (`linear.kickoff`) and
-//! a review prompt to run (`linear.startReview`).
+//! resolves, deletes and applies review comments, and starts the review
+//! agent itself. React still owns the prompt dialog, so GPUI hands back an
+//! issue to kick off (`linear.kickoff`) for React to open it with.
 
 use std::{
   cell::RefCell,
@@ -520,7 +520,9 @@ impl LinearView {
     cx.notify();
   }
 
-  /// "Review with agent": writes the snapshot, then hands React the prompt.
+  /// "Review with agent": writes the snapshot, then starts the review in
+  /// the home repository, where the agent can still check the text against
+  /// the code.
   fn start_review(&mut self, target: Target, cx: &mut Context<Self>) {
     if !self.starting.insert(target.of.clone()) {
       return;
@@ -541,17 +543,13 @@ impl LinearView {
           .and_then(|s| s.get("review_agent").cloned().flatten())
           .filter(|a| !a.is_empty());
         let prompt = data::review_prompt(&target.of, &target.title, comments.len(), &dir);
-        Ok::<_, String>((prompt, agent))
+        host.launch_session(&review_launch(repo, prompt, agent), true)?;
+        Ok::<_, String>(())
       },
-      move |view, result, cx| {
+      move |view, result, _cx| {
         view.starting.remove(&of);
-        match result {
-          Ok((prompt, agent)) => view.field(
-            "linear.startReview",
-            json!({ "prompt": prompt, "agent": agent }),
-            cx,
-          ),
-          Err(err) => view.toast("Failed to start review", err),
+        if let Err(err) = result {
+          view.toast("Failed to start review", err);
         }
       },
       cx,
@@ -2170,5 +2168,21 @@ impl LinearView {
         ))
       })
       .child(actions)
+  }
+}
+/// A review agent's session in the home repository of `repo`, named
+/// "AI Review" (`launchAgentSession`).
+pub(super) fn review_launch(
+  repo: &str,
+  prompt: String,
+  agent: Option<String>,
+) -> super::launch_data::LaunchRequest {
+  super::launch_data::LaunchRequest {
+    repo_path: repo.to_string(),
+    workspace_id: None,
+    prompt: Some(prompt),
+    mode: Some("acceptEdits".into()),
+    agent: crate::core::agent_launch::agent_kind(agent.as_deref()),
+    session_name: Some("AI Review".into()),
   }
 }

@@ -732,7 +732,7 @@ impl CodeView {
             );
           }
           let session_id = host.create_session(repo, workspace_id, &name)?;
-          Ok::<_, String>(json!({
+          Ok::<_, String>(super::launch_data::started(host.as_ref(), json!({
             "sessionId": session_id,
             "sessionName": name,
             "workspaceId": workspace_id,
@@ -741,7 +741,7 @@ impl CodeView {
             "pendingPrompt": prompt,
             "permissionMode": mode,
             "agent": agent.id(),
-          }))
+          })))
         })
         .await;
       let _ = this.update_in(cx, |view, window, cx| {
@@ -755,7 +755,7 @@ impl CodeView {
                 settings.from_repo = true;
               }
             }
-            view.field("code.sessionCreated", session, cx);
+            let _ = session;
             if view.parent.key() == key {
               view.show_save_default = false;
               view.set_task_text(String::new(), 0, window, cx);

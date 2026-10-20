@@ -53,6 +53,44 @@ impl ToolsHost for FakeHost {
   }
 }
 
+impl crate::gpui_shell::screen::launch_data::LaunchHost for FakeHost {
+  fn start_agent_task(
+    &self,
+    _: &crate::gpui_shell::screen::launch_data::TaskRequest,
+  ) -> Result<bool, String> {
+    unreachable!()
+  }
+
+  fn launch_session(
+    &self,
+    _: &crate::gpui_shell::screen::launch_data::LaunchRequest,
+    _: bool,
+  ) -> Result<crate::gpui_shell::screen::launch_data::SessionStart, String> {
+    unreachable!()
+  }
+
+  fn session_started(&self, _: &crate::gpui_shell::screen::launch_data::SessionStart, _: bool) {
+    unreachable!()
+  }
+
+  fn resolve_agent(&self, _: &str, _: Option<&str>) -> Option<String> {
+    None
+  }
+
+  fn pending_session(
+    &self,
+    _: i64,
+  ) -> Option<crate::gpui_shell::screen::launch_data::PendingSession> {
+    None
+  }
+
+  fn send_assets(&self) -> Vec<crate::gpui_shell::screen::launch_data::SendAsset> {
+    Vec::new()
+  }
+
+  fn dismiss_send_asset(&self, _: &str) {}
+}
+
 impl crate::gpui_shell::screen::WorkspaceHost for FakeHost {
   fn load(&self, _: &Route) -> Loaded {
     Loaded::default()

@@ -23,6 +23,7 @@ use tauri_plugin_gpui::gpui::{
   FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Window,
 };
 
+use super::launch_data::LaunchRequest;
 use super::{
   changes::{self, ChangesView},
   code::{CodeView, Parent},
@@ -328,6 +329,9 @@ pub struct WorkspaceView {
   content_height: Rc<std::cell::Cell<f32>>,
   /// React, for what the header does not do itself.
   react: ActionSink,
+  /// Where the tabs and the terminal pane send their actions: React, but
+  /// for the agent sessions this view starts itself.
+  children: ActionSink,
   /// This view's own handler, which defers to after the current update.
   sink: ActionSink,
   route: Route,
@@ -384,6 +388,18 @@ impl WorkspaceView {
         let _ = view.update(cx, |view, cx| view.handle(action, cx));
       });
     });
+    let children: ActionSink = {
+      let (view, react) = (cx.weak_entity(), react.clone());
+      Rc::new(move |action, cx| {
+        if !launches(&action) {
+          return react(action, cx);
+        }
+        let view = view.clone();
+        cx.defer(move |cx| {
+          let _ = view.update(cx, |view, cx| view.launch(action, cx));
+        });
+      })
+    };
     let poll = cx.spawn(async move |this, cx| loop {
       cx.background_executor().timer(PR_POLL).await;
       if this.update(cx, |view, cx| view.read_pr(cx)).is_err() {
@@ -404,6 +420,7 @@ impl WorkspaceView {
       logs: None,
       content_height: Rc::default(),
       react,
+      children,
       sink,
       route,
       loaded: None,
@@ -1713,6 +1730,168 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
     .child(count(format!("-{}", loc.deletions), red))
 }
 
+/// The tabs' actions that start an agent session, which the view handles
+/// itself ([`WorkspaceView::launch`]).
+fn launches(action: &ScreenAction) -> bool {
+  matches!(action, ScreenAction::Field { field, .. } if matches!(
+    field.as_str(),
+    "changes.startReview"
+      | "changes.review"
+      | "fileBrowser.review"
+      | "changes.agentComment"
+      | "logs.sendToAgent"
+  ))
+}
+
+impl WorkspaceView {
+  /// `ShowWorkspace`'s agent starts: a review, a finished review or a
+  /// review comment sent to an agent, and log lines. A review or comment
+  /// goes to the workspace's idle agent when asked and there is one.
+  fn launch(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
+    let ScreenAction::Field { field, value } = action else {
+      return;
+    };
+    let repo = self.route.repo_path.clone();
+    let workspace_id = self.route.workspace_id;
+    let request = {
+      let repo = repo.clone();
+      move |name: &str, prompt: String, mode: &str, agent: Option<String>| LaunchRequest {
+        repo_path: repo,
+        workspace_id,
+        prompt: Some(prompt),
+        mode: Some(mode.into()),
+        agent,
+        session_name: Some(name.into()),
+      }
+    };
+    let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
+    match field.as_str() {
+      // A reviewer that inherits an idle agent's context would review its
+      // own work, so a review always starts a new terminal.
+      "changes.startReview" => {
+        let agent = value["agent"].as_str().map(str::to_string);
+        let prompt = text("prompt");
+        self.start(cx, None, "Failed to create agent", move |host| {
+          let agent = host.resolve_agent(&repo, agent.as_deref());
+          request("AI Review", prompt, "acceptEdits", agent)
+        });
+      }
+      "changes.review" | "fileBrowser.review" => {
+        let (markdown, mode) = (text("markdown"), text("mode"));
+        if value["useIdleAgent"].as_bool() == Some(true) {
+          match self.send_to_idle(&markdown, cx) {
+            None => return (self.react)(ScreenAction::Field { field, value }, cx),
+            Some(true) => {
+              return self.toast(
+                ToastTone::Success,
+                "Review sent to agent",
+                "Sent review to the idle agent",
+              )
+            }
+            Some(false) => {}
+          }
+        }
+        self.start(cx, None, "Failed to create agent", move |host| {
+          let agent = host.resolve_agent(&repo, None);
+          request("Code Review", markdown, &mode, agent)
+        });
+      }
+      "changes.agentComment" => {
+        let Ok(comment) = serde_json::from_value(value.clone()) else {
+          return;
+        };
+        let dir = self.terminal_place().working_directory;
+        let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
+        match self.send_to_idle(&prompt, cx) {
+          None => return (self.react)(ScreenAction::Field { field, value }, cx),
+          Some(true) => {
+            return self.toast(
+              ToastTone::Success,
+              "Comment sent to agent",
+              "Sent review comment to the idle agent",
+            )
+          }
+          Some(false) => {}
+        }
+        let done = (
+          "Comment sent to agent",
+          "Created new agent session and sent review comment",
+        );
+        self.start(cx, Some(done), "Failed to create agent", move |_| {
+          request("Review Comment", prompt, "acceptEdits", None)
+        });
+      }
+      "logs.sendToAgent" => {
+        let prompt = value.as_str().unwrap_or_default().to_string();
+        self.start(cx, None, "Failed to send logs to agent", move |_| {
+          request("Logs", prompt, "plan", None)
+        });
+      }
+      _ => (self.react)(ScreenAction::Field { field, value }, cx),
+    }
+  }
+
+  /// Sends `text` to the shown workspace's idle agent: `None` while React
+  /// draws the terminal pane, which knows its own agents.
+  fn send_to_idle(&mut self, text: &str, cx: &mut Context<Self>) -> Option<bool> {
+    let (pane, _) = self.terminal.as_ref()?;
+    let branch = self.snapshot_branch();
+    let repo = self.route.repo_path.clone();
+    Some(branch.is_some_and(|branch| {
+      pane.update(cx, |pane, cx| {
+        pane.send_to_idle_agent(&repo, &branch, text, cx)
+      })
+    }))
+  }
+
+  /// The shown workspace's branch; `None` for the home repository.
+  fn snapshot_branch(&self) -> Option<String> {
+    let id = self.route.workspace_id?;
+    self
+      .code_host
+      .workspaces(&self.route.repo_path)
+      .ok()?
+      .into_iter()
+      .find(|w| w.id == id)
+      .map(|w| w.branch_name)
+  }
+
+  /// Starts the session `request` builds, off the main thread; toasts
+  /// `done` once it starts, or `failed` with the error.
+  fn start(
+    &self,
+    cx: &mut Context<Self>,
+    done: Option<(&'static str, &'static str)>,
+    failed: &'static str,
+    request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
+  ) {
+    let host = self.code_host.clone();
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move {
+          let request = request(host.as_ref());
+          host.launch_session(&request, false)
+        })
+        .await;
+      let _ = this.update(cx, |view, _| match (result, done) {
+        (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
+        (Ok(_), None) => {}
+        (Err(err), _) => view.toast(ToastTone::Error, failed, err),
+      });
+    })
+    .detach();
+  }
+
+  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
+    self.host.notify(NativeEvent::Toast {
+      title: title.into(),
+      description: description.into(),
+      tone,
+      action: None,
+    });
+  }
+}
+
 /// The frame's height before React measured its terminal pane: the
 /// collapsed pane's bar.
 const FRAME_FALLBACK: f32 = 40.;
@@ -1742,7 +1921,7 @@ impl WorkspaceView {
           None => {
             let (host, react, popups) = (
               self.code_host.clone(),
-              self.react.clone(),
+              self.children.clone(),
               self.popups.clone(),
             );
             cx.new(|cx| TerminalPane::new(host, react, popups, place, cx))
@@ -1810,7 +1989,7 @@ impl WorkspaceView {
     let dark = self.dark;
     let (host, react, popups) = (
       self.code_host.clone(),
-      self.react.clone(),
+      self.children.clone(),
       self.popups.clone(),
     );
     if tab == Tab::Logs {

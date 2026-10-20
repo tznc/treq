@@ -4,9 +4,9 @@
 //! the changed files list on the left; the diff is the Changes tab's
 //! ([`ChangesView`] in its pull request mode).
 //!
-//! Drawn from the backend directly ([`pr_review_data`]). React still owns
-//! leaving the screen (`prReview.close`) and the agent terminal an AI
-//! review starts in (`prReview.startAgentReview`).
+//! Drawn from the backend directly ([`pr_review_data`]), which also starts
+//! an AI review's agent. React still owns leaving the screen
+//! (`prReview.close`).
 //!
 //! [`pr_review_data`]: super::pr_review_data
 
@@ -19,7 +19,6 @@ use std::{
 
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
-use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, Context, Entity, FontWeight,
   KeyDownEvent, MouseButton, Pixels, SharedString, Subscription, Window,
@@ -278,17 +277,17 @@ impl PrReviewView {
           .filter(|a| !a.is_empty());
         let summary = review_summary(&full_name, number, &title, files);
         let prompt = review_prompt_for(custom.as_deref(), TARGET, &number.to_string(), &summary);
-        (prompt, agent)
+        // A PR is usually not checked out, so its review runs in the home
+        // repository and reads the diff through gh.
+        host
+          .launch_session(&super::linear::review_launch(&repo, prompt, agent), true)
+          .map(|_| ())
       },
-      |view, (prompt, agent), cx| {
+      |view, result, _cx| {
         view.starting = false;
-        view.send(
-          ScreenAction::Field {
-            field: "prReview.startAgentReview".into(),
-            value: json!({ "prompt": prompt, "agent": agent }),
-          },
-          cx,
-        );
+        if let Err(err) = result {
+          view.toast(ToastTone::Error, "Failed to start review", err);
+        }
       },
       cx,
     );

@@ -79,7 +79,9 @@ const AUTO_REATTACH_COOLDOWN: Duration = Duration::from_secs(30);
 const AMBER_500: u32 = 0xf59e0b;
 const RED_500: u32 = 0xef4444;
 
-/// A new agent session's start, as React keeps it (`pendingSessionData`).
+/// A new session's start that React keeps (`pendingSessionData`), for the
+/// sessions React still creates itself. Sessions the backend starts keep
+/// theirs in `core::agent_launch` instead.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Pending {
@@ -89,6 +91,17 @@ pub struct Pending {
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
   pub workspace_path: Option<String>,
+}
+
+impl Pending {
+  fn start(&self) -> super::launch_data::PendingSession {
+    super::launch_data::PendingSession {
+      pending_prompt: self.pending_prompt.clone(),
+      permission_mode: self.permission_mode.clone(),
+      agent: self.agent.clone(),
+      workspace_path: self.workspace_path.clone(),
+    }
+  }
 }
 
 /// Something Dashboard asks of the pane (its imperative handle).
@@ -118,8 +131,6 @@ pub struct Route {
   pub sessions_revision: u64,
   /// Dashboard's latest commands; those newer than the last run go once.
   pub commands: Vec<Command>,
-  /// `treq send` attachments not yet dismissed (`treqSendStore`).
-  pub send_assets: Vec<SendAsset>,
   /// A remote repository is active: a new shell runs on the host, in the
   /// session React resolves (`resolveRemoteShell`).
   pub remote_shell: bool,
@@ -1526,6 +1537,8 @@ pub struct TerminalPane {
   place: Place,
   route: Route,
   incoming: Option<Route>,
+  /// A column to focus when the pane next draws.
+  focus_next: Option<String>,
   /// What the terminals said since the pane last drew.
   events: Vec<(String, TermEvent)>,
   font_size: f32,
@@ -1591,6 +1604,7 @@ impl TerminalPane {
       place,
       route: Route::default(),
       incoming: None,
+      focus_next: None,
       events: Vec::new(),
       font_size,
       collapsed: true,
@@ -1837,6 +1851,32 @@ impl TerminalPane {
       }
       _ => {}
     }
+  }
+
+  /// `sendToIdleAgent`: sends `text` to an agent of `repo` that runs in
+  /// the workspace on `branch` and is not writing, and focuses it. False
+  /// when there is none.
+  pub fn send_to_idle_agent(
+    &mut self,
+    repo: &str,
+    branch: &str,
+    text: &str,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let idle = self.columns.iter().find(|c| {
+      !c.streaming
+        && matches!(&c.kind, Kind::Agent { repo_path, workspace_name: Some(name), .. }
+          if repo_path == repo && name == branch)
+    });
+    let Some(column) = idle.map(|c| c.id.clone()) else {
+      return false;
+    };
+    if let Some(view) = self.view(&column) {
+      view.update(cx, |view, cx| view.write(&format!("{text}\n"), cx));
+    }
+    self.focus_next = Some(column);
+    cx.notify();
+    true
   }
 
   fn view(&self, id: &str) -> Option<Entity<TerminalView>> {
@@ -2098,7 +2138,17 @@ impl TerminalPane {
       else {
         continue;
       };
-      let pending = self.route.pending.iter().find(|p| p.session_id == pane_id);
+      // What the session starts with: the backend's, for a session it
+      // started, else React's.
+      let pending = self.host.pending_session(pane_id).or_else(|| {
+        self
+          .route
+          .pending
+          .iter()
+          .find(|p| p.session_id == pane_id)
+          .map(Pending::start)
+      });
+      let pending = pending.as_ref();
       let workspace = session.workspace_id.and_then(|id| {
         self
           .host
@@ -2307,7 +2357,7 @@ impl TerminalPane {
   fn column_assets(&self, column: &Column, cx: &App) -> Vec<SendAsset> {
     let pty = column.view.read(cx).pty.clone();
     let active = self.active.as_deref() == Some(column.id.as_str());
-    assets_for(&self.route.send_assets, &pty, active)
+    assets_for(&self.host.send_assets(), &pty, active)
   }
 
   fn open_lightbox(&mut self, column_id: &str, asset_id: &str, cx: &mut Context<Self>) {
@@ -2480,6 +2530,8 @@ impl TerminalPane {
               .on_click(cx.listener(move |pane, _, _, cx| {
                 cx.stop_propagation();
                 pane.hovered_asset = None;
+                pane.host.dismiss_send_asset(&dismiss_id);
+                // React drops its own copy, which its views draw.
                 pane.send("terminal.dismissAsset", dismiss_id.clone().into(), cx);
                 cx.notify();
               }))
@@ -3322,6 +3374,9 @@ impl Render for TerminalPane {
     self.watch_keys(window, cx);
     if let Some(route) = self.incoming.take() {
       self.apply_route(route, window, cx);
+    }
+    if let Some(column) = self.focus_next.take() {
+      self.focus_column(&column, window, cx);
     }
     for (id, event) in std::mem::take(&mut self.events) {
       self.on_term_event(&id, event, window, cx);

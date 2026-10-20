@@ -28,7 +28,7 @@ pub mod local_db;
 pub mod lock_ext;
 pub mod notify_dispatch;
 #[cfg(feature = "gui")]
-mod open_new_window;
+pub(crate) mod open_new_window;
 #[cfg(feature = "gui")]
 pub mod pr_status;
 pub mod pty;
@@ -550,6 +550,13 @@ pub fn run() {
         use tauri::Emitter;
         let review_app = app.handle().clone();
         crate::auto_review::set_emitter(Box::new(move |event| {
+          // Shell windows start the review from Rust.
+          #[cfg(feature = "gpui-shell")]
+          #[cfg(desktop)]
+          if gpui_shell::is_enabled(&review_app) {
+            gpui_shell::launch::auto_review(&review_app, event);
+            return;
+          }
           let _ = review_app.emit("auto-review-triggered", event);
         }));
       }
@@ -620,7 +627,9 @@ pub fn run() {
               DeepLinkKind::Agent => {
                 if let Some(request) = parse_agent_request_from_url(&url) {
                   let response = route_agent_dispatch_request(&handle, &request);
-                  if response.status != "handled" {
+                  if response.status != "handled"
+                    && !agent_runtime::open_window_for_agent_link(&handle, &url)
+                  {
                     log::info!(
                       "agent deep link unmatched repo={} request_id={}",
                       request.repo,

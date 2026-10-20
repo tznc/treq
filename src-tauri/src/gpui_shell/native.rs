@@ -58,6 +58,14 @@ pub enum NativeEvent {
   /// A remote command found the endpoint cut off (`noteCutoffFromError`).
   #[serde(rename_all = "camelCase")]
   RemoteCutoff { endpoint_id: String, reason: String },
+  /// The backend started an agent session (`gpui_shell::launch`). React
+  /// makes it the active session, and with `select` shows its workspace.
+  #[serde(rename_all = "camelCase")]
+  AgentSessionStarted {
+    session: crate::core::agent_launch::SessionStart,
+    pane_session_id: i64,
+    select: bool,
+  },
 }
 
 /// A toast's button: `label`, running the action registered as `id`.

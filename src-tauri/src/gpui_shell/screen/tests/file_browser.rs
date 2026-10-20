@@ -214,11 +214,12 @@ fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) 
   assert!(h.drawn("finish-review-popover"));
   h.click("review-plan");
   h.cx.run_until_parked();
-  let sent = fields(&h, "fileBrowser.review");
-  assert_eq!(sent.len(), 1);
-  assert_eq!(sent[0]["mode"], "plan");
-  assert_eq!(sent[0]["useIdleAgent"], false);
-  let markdown = sent[0]["markdown"].as_str().unwrap_or_default();
+  assert!(fields(&h, "fileBrowser.review").is_empty());
+  let launches = host.launches.lock().unwrap().clone();
+  assert_eq!(launches.len(), 1);
+  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(launches[0].0.mode.as_deref(), Some("plan"));
+  let markdown = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(markdown.contains("README.md"), "{markdown}");
   assert!(markdown.contains("Say who"), "{markdown}");
   assert!(!h.drawn("file-browser-pending"));

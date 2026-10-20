@@ -904,19 +904,21 @@ impl CommitsView {
         } else {
           parent.repo_path.clone()
         };
-        Ok::<_, String>(json!({
-          "sessionId": id,
-          "sessionName": name,
-          "workspaceId": parent.workspace_id(),
-          "workspacePath": null,
-          "repoPath": repo,
-          "pendingPrompt": prompt,
-          "permissionMode": mode,
-        }))
+        Ok::<_, String>(super::launch_data::started(
+          host,
+          json!({
+            "sessionId": id,
+            "sessionName": name,
+            "workspaceId": parent.workspace_id(),
+            "workspacePath": null,
+            "repoPath": repo,
+            "pendingPrompt": prompt,
+            "permissionMode": mode,
+          }),
+        ))
       },
-      |view, result, cx| match result {
-        Ok(session) => {
-          view.field("code.sessionCreated", session, cx);
+      |view, result, _cx| match result {
+        Ok(_) => {
           view.toast(
             ToastTone::Success,
             "Comment sent to agent",
@@ -1141,23 +1143,25 @@ impl CommitsView {
         let id = host.create_session(&parent.repo_path, Some(workspace_id), &name)?;
         let count = session.targets.len();
         Ok::<_, String>((
-          json!({
-            "sessionId": id,
-            "sessionName": name,
-            "workspaceId": workspace_id,
-            "workspacePath": session.agent_cwd,
-            "repoPath": parent.repo_path,
-            "pendingPrompt": full,
-            "permissionMode": "acceptEdits",
-            "agent": agent.id(),
-          }),
+          super::launch_data::started(
+            host,
+            json!({
+              "sessionId": id,
+              "sessionName": name,
+              "workspaceId": workspace_id,
+              "workspacePath": session.agent_cwd,
+              "repoPath": parent.repo_path,
+              "pendingPrompt": full,
+              "permissionMode": "acceptEdits",
+              "agent": agent.id(),
+            }),
+          ),
           count,
         ))
       },
-      |view, result, cx| match result {
-        Ok((session, count)) => {
+      |view, result, _cx| match result {
+        Ok((_, count)) => {
           view.dialog = None;
-          view.field("code.sessionCreated", session, cx);
           view.toast(
             ToastTone::Success,
             "Resolve session started",
