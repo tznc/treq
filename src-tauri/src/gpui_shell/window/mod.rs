@@ -22,6 +22,7 @@ mod tree;
 
 pub(super) use actions::Shortcut;
 pub(super) use controller::{Presentation, WindowController};
+pub(super) use host::WindowHost;
 pub(super) use keys::{from_app, window_shortcut};
 pub(super) use model::DEFAULT_ZOOM;
 pub(super) use shell::{

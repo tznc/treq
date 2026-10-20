@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager};
 
 use super::native::{Backend, NativeEvent, ToastTone};
 use super::screen::launch_data::LaunchHost;
+use super::window::WindowHost;
 use crate::{
   core::agent_launch::{
     self as launch, AgentDeepLinkRequest, DeepLinkRoute, IssueSource, LaunchRequest, LaunchStore,
@@ -263,34 +264,38 @@ pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) 
 /// workspace in window `label`.
 fn start_request(app: &AppHandle, label: String, request: AgentDeepLinkRequest) {
   let backend = Backend::new(app.clone(), label);
-  std::thread::spawn(move || {
-    let workspaces = crate::local_db::get_workspaces(&request.repo).unwrap_or_default();
-    let Some(workspace) = launch::find_workspace_by_branch(&workspaces, &request.branch) else {
-      backend.toast(
-        ToastTone::Error,
-        "Workspace not found",
-        format!(
-          "Branch '{}' is not available in this window.",
-          request.branch
-        ),
-      );
-      return;
-    };
-    let launched = LaunchRequest {
-      repo_path: request.repo.clone(),
-      workspace_id: Some(workspace.id),
-      prompt: Some(request.prompt.clone()),
-      mode: Some(request.mode.clone()),
-      agent: Some(request.agent.clone()),
-      session_name: None,
-    };
-    match backend.launch_session(&launched, true) {
-      Ok(_) => launch::deep_links()
-        .lock_or_recover()
-        .mark_processed(&request.request_id),
-      Err(err) => backend.toast(ToastTone::Error, "Failed to start agent", err),
-    }
-  });
+  std::thread::spawn(move || start_deep_link(&backend, &request));
+}
+
+/// `handleStartAgentRequest` through `host`: the agent on the workspace of
+/// the request's branch, shown once it starts. Blocks.
+pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequest) {
+  let workspaces = host.workspaces(&request.repo).unwrap_or_default();
+  let Some(workspace) = launch::find_workspace_by_branch(&workspaces, &request.branch) else {
+    host.toast(
+      ToastTone::Error,
+      "Workspace not found",
+      &format!(
+        "Branch '{}' is not available in this window.",
+        request.branch
+      ),
+    );
+    return;
+  };
+  let launched = LaunchRequest {
+    repo_path: request.repo.clone(),
+    workspace_id: Some(workspace.id),
+    prompt: Some(request.prompt.clone()),
+    mode: Some(request.mode.clone()),
+    agent: Some(request.agent.clone()),
+    session_name: None,
+  };
+  match host.launch(&launched, true) {
+    Ok(()) => launch::deep_links()
+      .lock_or_recover()
+      .mark_processed(&request.request_id),
+    Err(err) => host.toast(ToastTone::Error, "Failed to start agent", &err),
+  }
 }
 
 /// `processAgentDeepLinkRequests` for a `treq://agent/start` link meant for

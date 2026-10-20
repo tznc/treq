@@ -220,26 +220,46 @@ fn pick_repo(backend: Backend) {
 /// Opens the repository at `path` in this window, as React's
 /// `openRepositoryAtPath` does, and tells React it is open. Blocks.
 pub fn open_repo_at(backend: &Backend, path: &str) {
+  open_repo(backend, path, |path| backend.set_window_repo_path(path));
+}
+
+/// `openRepositoryAtPath` through `host`; `shown` records the path as the
+/// window's (`setWindowRepoPath`). A folder that fails to open is not
+/// remembered as the last one.
+pub(super) fn open_repo(
+  host: &dyn super::settings_data::SettingsHost,
+  path: &str,
+  shown: impl FnOnce(&str),
+) {
+  let toast = |tone, title: &str, description: String| {
+    host.notify(NativeEvent::Toast {
+      title: title.into(),
+      description,
+      tone,
+      action: None,
+    })
+  };
   if let Err(err) = core::init(path) {
-    backend.toast(
+    toast(
       ToastTone::Error,
       "Failed to open repository",
       err.to_string(),
     );
     return;
   }
-  if let Err(err) = backend.with_db(|db| db.set_setting("last_opened_repo_path", path)) {
+  let last = [("last_opened_repo_path".to_string(), path.to_string())];
+  if let Err(err) = host.set_settings(&last) {
     log::warn!("failed to remember the last opened repository: {err}");
   }
-  backend.set_window_repo_path(path);
-  backend.notify(NativeEvent::RepoOpened {
+  shown(path);
+  host.notify(NativeEvent::RepoOpened {
     path: path.to_string(),
   });
   let name = path
     .rsplit('/')
     .find(|part| !part.is_empty())
     .unwrap_or(path);
-  backend.toast(
+  toast(
     ToastTone::Success,
     "Repository Opened",
     format!("Now viewing {name}"),

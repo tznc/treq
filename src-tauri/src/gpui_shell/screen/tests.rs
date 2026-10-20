@@ -6642,6 +6642,43 @@ impl workspace_ops::WorkspaceActionsHost for FakeHost {
   }
 }
 
+/// `open-non-git-folder.test.tsx`: `openRepositoryAtPath` on a folder
+/// without `.git` toasts, creates no `.treq` and remembers nothing.
+#[test]
+fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
+  let dir = tempfile::TempDir::new().unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost::default();
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(host.calls(), ["notify toast Failed to open repository"]);
+  assert!(shown.is_empty(), "not the window's repository");
+  assert!(!dir.path().join(".treq").exists());
+}
+
+#[test]
+fn opening_a_repository_remembers_it_and_reports_it_open() {
+  let dir = tempfile::TempDir::new().unwrap();
+  std::fs::create_dir(dir.path().join(".git")).unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost::default();
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(
+    host.calls(),
+    [
+      format!("set last_opened_repo_path={path}"),
+      "notify repoOpened".into(),
+      "notify toast Repository Opened".into(),
+    ]
+  );
+  assert_eq!(shown, [path]);
+}
+
 mod file_browser;
 mod github;
 mod linear_view;

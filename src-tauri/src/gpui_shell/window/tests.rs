@@ -614,6 +614,42 @@ fn leaves_what_only_react_runs_to_it(cx: &mut TestAppContext) {
   );
 }
 
+fn deep_link(branch: &str, request_id: &str) -> crate::core::agent_launch::AgentDeepLinkRequest {
+  crate::core::agent_launch::AgentDeepLinkRequest {
+    repo: "/repo".into(),
+    branch: branch.into(),
+    prompt: "Fix it".into(),
+    mode: "acceptEdits".into(),
+    agent: "claude".into(),
+    request_id: request_id.into(),
+  }
+}
+
+/// `agent-deeplink.test.tsx` (`handleStartAgentRequest`): a branch with no
+/// workspace toasts; one with a workspace starts there and is processed.
+#[test]
+fn deep_links_start_on_their_branch_or_toast_that_it_is_missing() {
+  use crate::{core::agent_launch::deep_links, gpui_shell::launch::start_deep_link};
+  let host = repo_host();
+
+  start_deep_link(&*host, &deep_link("feat/gone", "window-test-missing"));
+  assert_eq!(
+    host.calls(),
+    ["workspaces /repo", "toast Workspace not found"]
+  );
+  assert!(!deep_links()
+    .lock()
+    .unwrap()
+    .is_processed("window-test-missing"));
+
+  start_deep_link(&*host, &deep_link("b", "window-test-found"));
+  assert_eq!(host.calls().last().unwrap(), "launch /repo Some(2) true");
+  assert!(deep_links()
+    .lock()
+    .unwrap()
+    .is_processed("window-test-found"));
+}
+
 fn session_started(workspace_id: Option<i64>, select: bool) -> NativeEvent {
   NativeEvent::AgentSessionStarted {
     session: crate::core::agent_launch::SessionStart {
