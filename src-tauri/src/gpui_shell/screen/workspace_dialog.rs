@@ -1468,7 +1468,9 @@ impl WorkspaceDialog {
         .px_2()
         .mx(px(-8.))
         .rounded(px(6.))
-        .bg(p.primary.opacity(0.1))
+        // Opaque: GPUI draws the shadow under the whole box, where a
+        // browser leaves it out, so a see-through tint would darken.
+        .bg(p.popover.blend(p.primary.opacity(0.1)))
         .border_1()
         .border_color(p.primary.opacity(0.4))
         .shadow_sm()
@@ -2104,7 +2106,10 @@ impl Render for WorkspaceDialog {
         view.close_unless_creating(cx);
       }
     });
+    // `md:min-w-[560px] md:max-w-[640px]` on a panel as wide as its
+    // content, as the browser sizes it.
     let panel = panel
+      .w_auto()
       .min_w(px(560.))
       .overflow_hidden()
       .child(dialog_header(

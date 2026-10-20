@@ -59,6 +59,8 @@ struct FakeHost {
   sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
   /// What the terminal pane reads, and the PTYs it started.
   sessions: Vec<crate::local_db::Session>,
+  /// The devcontainers preview.
+  devcontainers: bool,
   ptys: Mutex<Vec<String>>,
   /// PTY output listeners, by PTY id.
   sinks: Mutex<Vec<(String, Sink)>>,
@@ -366,7 +368,7 @@ impl code_data::CodeHost for FakeHost {
   }
 
   fn devcontainers_enabled(&self) -> bool {
-    false
+    self.devcontainers
   }
 
   fn devcontainer_status(&self, _: &str) -> crate::core::devcontainer::DevcontainerStatus {
@@ -3827,6 +3829,56 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
       format!("write {pty} \"\\r\""),
       format!("write {pty} \"\\u{{3}}\""),
     ]
+  );
+}
+
+#[gpui::test]
+fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.click("terminal-search-button");
+  assert!(h.drawn("terminal-search"));
+  h.cx.simulate_input("dark");
+  h.cx.run_until_parked();
+  let writes: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("write "))
+    .collect();
+  assert_eq!(writes, Vec::<String>::new());
+}
+
+#[gpui::test]
+fn terminal_pane_drops_the_active_column_on_a_click_outside(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-column-active"));
+  h.click("terminal-maximize");
+  // The controls above the pane are part of it.
+  assert!(h.drawn("terminal-column-active"));
+  h.click("terminal-restore");
+  h.click("workspace-header");
+  assert!(!h.drawn("terminal-column-active"));
+}
+
+#[gpui::test]
+fn terminal_pane_picks_the_environment_new_terminals_run_in(cx: &mut TestAppContext) {
+  let mut host = terminal_host();
+  host.devcontainers = true;
+  let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  assert!(!h.drawn("terminal-environment"));
+  h.click("terminal-expand");
+  h.click("terminal-environment");
+  assert!(h.drawn("terminal-environment-menu"));
+  h.click("environment-local");
+  assert!(!h.drawn("terminal-environment-menu"));
+  assert!(
+    host
+      .calls()
+      .contains(&"set repo /repo environment=local".to_string()),
+    "{:?}",
+    host.calls()
   );
 }
 

@@ -1676,8 +1676,10 @@ impl Render for WorkspaceView {
     };
     let body = match (code, self.sync_terminal(cx)) {
       // The tab, or React's view framed in its place, with GPUI's terminal
-      // pane below.
+      // pane below: a share of the whole view, header and tabs included,
+      // which a maximized pane covers, as React lays it out.
       (code, Some(pane)) => {
+        pane.update(cx, |pane, cx| pane.set_dark(self.dark, cx));
         let covered = pane.read(cx).covers();
         // The webview would stay on top of the pane's lightbox.
         let lightbox = pane.read(cx).covers_window();
@@ -1690,12 +1692,13 @@ impl Render for WorkspaceView {
             .when(!lightbox, |this| this.child(frame(self.webview.as_ref())))
             .into_any_element(),
         };
-        div()
+        return div()
           .relative()
-          .flex_1()
-          .min_h_0()
+          .size_full()
           .flex()
           .flex_col()
+          .bg(p.background)
+          .text_color(p.foreground)
           .child(
             gpui::canvas(
               move |bounds, _, _| container.set(Some(bounds)),
@@ -1707,9 +1710,20 @@ impl Render for WorkspaceView {
             .size_full(),
           )
           .when(!covered, |this| {
-            this.child(div().flex_1().min_h_0().child(content))
+            this.child(
+              div()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .child(header)
+                .children(tab_row)
+                .child(div().flex_1().min_h_0().child(content)),
+            )
           })
           .child(pane)
+          .into_any_element();
       }
       // The tab, with React's terminal pane framed below it.
       (Some(code), None) => {
@@ -1767,5 +1781,6 @@ impl Render for WorkspaceView {
       .child(header)
       .children(tab_row)
       .child(body)
+      .into_any_element()
   }
 }
