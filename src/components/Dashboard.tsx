@@ -3359,19 +3359,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         return setTerminalSessionSummaries(value as TerminalSessionSummary[]);
       case "terminal.dismissAsset":
         return useTreqSendStore.getState().dismissAsset(value as string);
-      case "terminal.shortcut": {
-        // The app's own shortcuts, pressed while GPUI's terminal has focus.
-        const mac = navigator.platform.toUpperCase().includes("MAC");
-        window.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: String(value),
-            metaKey: mac,
-            ctrlKey: !mac,
-            bubbles: true,
-          }),
-        );
-        return;
-      }
       default:
         return;
     }

@@ -212,6 +212,9 @@ pub fn cell_x(x: f32, advance: f32, cell: f32) -> f32 {
   (x / advance + 1e-3).floor() * cell
 }
 
+/// The key context of a focused terminal, which the shell's shortcuts read.
+pub const TERMINAL_CONTEXT: &str = "Terminal";
+
 /// A key press the pane (or the app) handles before a terminal sees it.
 /// `Cmd` is the platform key or Ctrl, as `useTerminalPaneKeyboardShortcuts`
 /// reads it.
@@ -222,7 +225,8 @@ pub enum Shortcut {
   NewAgent,
   NewShell,
   Close,
-  /// Cmd+K, N or P: the app's, forwarded to React.
+  /// Cmd+K, N, Shift+N or P: the app's, which the shell window forwards
+  /// to React (`gpui_shell::shortcuts`), so the terminal leaves it.
   App(char),
 }
 
@@ -237,6 +241,7 @@ pub fn shortcut(key: &str, ctrl: bool, platform: bool, shift: bool, alt: bool) -
     "\\" if !shift => Shortcut::NewShell,
     "w" if !shift => Shortcut::Close,
     "k" | "n" | "p" if !shift => Shortcut::App(key.chars().next()?),
+    "n" => Shortcut::App('N'),
     _ => return None,
   })
 }
@@ -1435,6 +1440,7 @@ impl Render for TerminalView {
     div()
       .id(SharedString::from(format!("terminal-{}", self.pty)))
       .debug_selector(|| "terminal-body".into())
+      .key_context(TERMINAL_CONTEXT)
       .track_focus(&self.focus)
       .relative()
       .size_full()
@@ -2277,7 +2283,7 @@ impl TerminalPane {
           self.close(&id, window, cx);
         }
       }
-      Shortcut::App(key) => self.send("terminal.shortcut", key.to_string().into(), cx),
+      Shortcut::App(_) => {}
     }
   }
 
@@ -3617,6 +3623,10 @@ mod tests {
     assert_eq!(
       shortcut("k", true, false, false, false),
       Some(Shortcut::App('k'))
+    );
+    assert_eq!(
+      shortcut("n", true, false, true, false),
+      Some(Shortcut::App('N'))
     );
     assert_eq!(shortcut("c", true, false, false, false), None);
     assert_eq!(shortcut("j", false, false, false, false), None);

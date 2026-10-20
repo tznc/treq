@@ -37,6 +37,7 @@ mod popover;
 mod popup;
 pub mod remote_repo;
 mod screen;
+mod shortcuts;
 mod sidebar;
 mod theme;
 mod time;
@@ -134,14 +135,35 @@ impl Render for Shell {
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
-      // Cmd+K pressed in GPUI (the webview's keys reach React directly)
-      // opens the command palette, as Dashboard's shortcut does.
-      .capture_key_down(move |event, _, cx| {
+      // Dashboard's shortcuts pressed in GPUI (the webview's keys reach
+      // React directly) go back to it, as `shortcuts` says.
+      .capture_key_down(move |event, window, cx| {
         let keystroke = &event.keystroke;
         let m = keystroke.modifiers;
-        if keystroke.key == "k" && m.secondary() && !m.shift && !m.alt {
-          let id = "overlay.commandPalette".to_string();
-          palette_sink(ScreenAction::Press { id }, cx);
+        let contexts = window.context_stack();
+        let within = |name: &str| contexts.iter().any(|c| c.contains(name));
+        let found = shortcuts::app_shortcut(
+          &keystroke.key,
+          keystroke.key_char.as_deref(),
+          m.secondary(),
+          m.shift,
+          m.alt,
+          within("Input"),
+          within(screen::TERMINAL_CONTEXT),
+        );
+        match found {
+          Some(shortcuts::AppShortcut::Palette) => {
+            let id = "overlay.commandPalette".to_string();
+            palette_sink(ScreenAction::Press { id }, cx);
+          }
+          Some(shortcuts::AppShortcut::Key(key)) => palette_sink(
+            ScreenAction::Field {
+              field: "overlay.shortcut".into(),
+              value: key.into(),
+            },
+            cx,
+          ),
+          None => {}
         }
       })
       // A click anywhere in the window closes an open menu, as one outside
@@ -208,6 +230,11 @@ pub fn open_window(
     .title(title)
     .inner_size(1400.0, 900.0)
     .build()?;
+  // GPUI paints over GTK's menu bar, which still took the clicks on the top
+  // ~25px (the header's Stack and branch buttons, the sidebar's settings).
+  // Its accelerators stay with the window.
+  #[cfg(target_os = "linux")]
+  window.hide_menu()?;
 
   let shell_label = label.to_string();
   let shell_app = app.clone();

@@ -20,6 +20,7 @@ use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
 
 pub use modal::Modal;
+pub use terminal::TERMINAL_CONTEXT;
 pub(super) use modal::ModalOpen;
 pub(super) use workspace_data::WorkspaceHost;
 

@@ -5,6 +5,7 @@ import {
   useGpuiOverlay,
 } from "../lib/gpui-overlay";
 import type { GpuiScreenAction } from "../lib/gpui-screen";
+import { dispatchGpuiAppShortcut } from "../lib/gpui-app-shortcut";
 import { useChecksCommands } from "./checks/useChecksCommands";
 
 /** Which of Dashboard's window-wide dialogs are open, and their setters. */
@@ -94,6 +95,10 @@ export function useGpuiOverlays(p: Params): boolean {
 
   const field = (name: string, value: unknown) => {
     switch (name) {
+      case "overlay.shortcut":
+        // Dashboard's shortcuts pressed while GPUI has focus.
+        if (typeof value === "string") dispatchGpuiAppShortcut(value);
+        return;
       case "palette.navigate":
         if (typeof value === "string" && value) window.location.href = value;
         closePalette();
