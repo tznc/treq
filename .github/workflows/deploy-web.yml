@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - "web/**"
+      - "e2e/desktop/landing/**"
       - ".github/workflows/deploy-web.yml"
   # Rebuild so /version and the download links pick up the new release.
   release:
@@ -35,11 +36,99 @@ permissions:
   pull-requests: write
 
 jobs:
-  # The landing screenshots are committed (assets/screenshots/), not
-  # captured here: the browser capture drove the React UI, which is gone.
+  # Captures the landing screenshots from the real app (e2e/desktop/landing,
+  # gpui-playwright). Production builds only: PR previews reuse main's latest
+  # artifact (see the build job), which saves the app build and capture on
+  # every PR.
+  landing-screenshots:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # A release event checks out the tag; deploy main instead so an older
+          # tag never rolls the site back.
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
+
+      - name: Use mold linker
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+
+      # The same packages and cache entry as ci.yml's test-desktop-e2e: the
+      # app's build dependencies, Xvfb, and Mesa's software Vulkan.
+      - name: Install system packages
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers
+          version: webkit-4.1-gpui-e2e-1
+          execute_install_scripts: true
+
+      # Reads test-rust's cache (warm-caches.yml saves it on main).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: test
+          save-if: false
+          workspaces: |
+            . -> target
+
+      - name: Build the app with the e2e feature
+        working-directory: src-tauri
+        run: cargo build --locked --features e2e --bin treq
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/desktop/package-lock.json
+
+      - name: Install the capture suite
+        working-directory: e2e/desktop
+        run: npm ci
+
+      # The window renders at GDK_SCALE=2 (2800x1800), so the screen is larger
+      # than the e2e job's.
+      - name: Capture landing screenshots
+        working-directory: e2e/desktop
+        env:
+          TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
+        run: xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run landing
+
+      - name: Stage landing screenshots
+        run: node web/scripts/stage-landing-screenshots.mjs
+
+      - name: Assert landing screenshots
+        run: node web/scripts/assert-landing-screenshots.mjs
+
+      - name: Upload landing screenshots
+        uses: actions/upload-artifact@v6
+        with:
+          name: landing-screenshots
+          path: |
+            web/static/img/code.png
+            web/static/img/landing
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload the capture report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: landing-screenshots-report
+          path: e2e/desktop/test-results
+          retention-days: 7
+
   build:
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    needs: landing-screenshots
+    if: always() && needs.landing-screenshots.result != 'failure' && needs.landing-screenshots.result != 'cancelled'
     defaults:
       run:
         shell: bash
@@ -86,13 +175,34 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}
         run: uv run .github/scripts/check_readability.py
+      - name: Find main's latest landing screenshots
+        id: main-shots
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The nightly run keeps a fresh artifact on main (3-day retention).
+        run: |
+          run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow deploy-web.yml \
+            --branch main --status success --limit 1 --json databaseId -q '.[0].databaseId')
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+      # A missing artifact leaves the PNGs absent, and the build below fails
+      # in assert-landing-screenshots.
+      - name: Download landing screenshots
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: landing-screenshots
+          path: /tmp/landing-screenshots
+          run-id: ${{ steps.main-shots.outputs.run-id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Build docs
         env:
           DOCUSAURUS_ENABLE_GTAG: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
           # Authenticated GitHub API calls for the latest-release plugin.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SKIP_LANDING_SCREENSHOTS: "1"
-        run: bash scripts/ci-deploy-web-build.sh
+        run: bash scripts/ci-deploy-web-build.sh /tmp/landing-screenshots
       - name: Publish to Production
         if: github.event_name == 'release' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
