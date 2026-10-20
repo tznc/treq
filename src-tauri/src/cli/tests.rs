@@ -1195,10 +1195,9 @@ fn symlink_report_separates_created_links_from_missing_sources() {
   assert_eq!(missing, vec!["target".to_string()]);
 }
 
-#[cfg(feature = "tauri-test")]
 mod commit_outcomes {
   use super::super::workspace_handlers::commit_workspace_for_cli;
-  use crate::e2e_test_helpers::TestRepo;
+  use crate::test_repo::TestRepo;
 
   #[test]
   fn refuses_when_there_is_nothing_to_commit() {

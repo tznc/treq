@@ -9,9 +9,8 @@ use crate::core::remote_control_plane::SshEndpoint;
 use crate::core::remote_pty::{PtyLaunchSpec, RemotePtyBinding, RemotePtyError, RemotePtyManager};
 use crate::core::remote_ssh_transport::{CancellationToken, ExecLimits};
 use crate::pty::Utf8StreamDecoder;
-use crate::AppState;
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::Emitter;
 
 /// Shared remote PTY session manager, keyed by the same `RemoteExecState`
 /// connection pool used by structured exec dispatch, so shell/agent PTYs
@@ -21,21 +20,6 @@ pub struct RemotePtyState(pub RemotePtyManager);
 impl RemotePtyState {
   pub fn new(exec_state: &crate::commands::remote_control::RemoteExecState) -> Self {
     Self(RemotePtyManager::new(exec_state.0.clone()))
-  }
-}
-
-/// Default construction (a fresh, unshared connection pool) so the
-/// `tauri_test`/NAPI bridge — which manages `State<T>` for any `T: Default`
-/// it discovers via the registered command list — can stand this state up
-/// without duplicating `lib.rs`'s real wiring. Production startup always
-/// uses [`RemotePtyState::new`] against the same pool `RemoteExecState`
-/// already manages, so PTYs and structured exec commands share one
-/// connection per endpoint.
-impl Default for RemotePtyState {
-  fn default() -> Self {
-    Self(RemotePtyManager::new(std::sync::Arc::new(
-      crate::core::remote_ssh_transport::SshConnectionPool::new(),
-    )))
   }
 }
 
@@ -59,47 +43,6 @@ pub struct RemotePtyExitPayload {
 
 fn remote_pty_error_to_string(error: RemotePtyError) -> String {
   error.to_string()
-}
-
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn remote_pty_create(
-  app: tauri::AppHandle,
-  session_id: String,
-  window_label: Option<String>,
-  endpoint: SshEndpoint,
-  repository_id: String,
-  workspace_id: String,
-  remote_working_directory: String,
-  launch: PtyLaunchSpec,
-  cols: u16,
-  rows: u16,
-  state: State<'_, RemotePtyState>,
-  app_state: State<'_, AppState>,
-) -> Result<(), String> {
-  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
-  log::debug!(
-    "remote_pty_create: session_id={}, endpoint_id={}, repository_id={}, workspace_id={}",
-    session_id,
-    endpoint.id,
-    repository_id,
-    workspace_id
-  );
-  let manager = state.0.clone();
-  let binding = RemotePtyBinding {
-    endpoint_id: endpoint.id.clone(),
-    repository_id,
-    workspace_id,
-    remote_working_directory,
-    local_session_id: session_id.clone(),
-    window_label,
-  };
-
-  let (on_output, on_exit) = tauri_event_handlers(app, session_id);
-  manager
-    .create(binding, &endpoint, launch, cols, rows, on_output, on_exit)
-    .await
-    .map_err(remote_pty_error_to_string)
 }
 
 /// Wraps a pair of text/exit sinks in the byte-level callbacks
@@ -186,53 +129,6 @@ fn tauri_event_handlers(
   )
 }
 
-#[tauri::command]
-pub async fn remote_pty_write(
-  session_id: String,
-  data: String,
-  state: State<'_, RemotePtyState>,
-) -> Result<(), String> {
-  state
-    .0
-    .write(&session_id, data.as_bytes())
-    .await
-    .map_err(remote_pty_error_to_string)
-}
-
-#[tauri::command]
-pub async fn remote_pty_resize(
-  session_id: String,
-  cols: u16,
-  rows: u16,
-  state: State<'_, RemotePtyState>,
-) -> Result<(), String> {
-  state
-    .0
-    .resize(&session_id, cols, rows)
-    .await
-    .map_err(remote_pty_error_to_string)
-}
-
-#[tauri::command]
-pub async fn remote_pty_close(
-  session_id: String,
-  state: State<'_, RemotePtyState>,
-) -> Result<(), String> {
-  state
-    .0
-    .close(&session_id)
-    .await
-    .map_err(remote_pty_error_to_string)
-}
-
-#[tauri::command]
-pub fn remote_pty_session_exists(
-  session_id: String,
-  state: State<'_, RemotePtyState>,
-) -> Result<bool, String> {
-  Ok(state.0.session_exists(&session_id))
-}
-
 // -- Phase 8: desktop parity with mobile's persistent-session reattach ------
 //
 // Desktop already had a working single-session remote PTY (the commands
@@ -246,81 +142,6 @@ pub fn remote_pty_session_exists(
 // is the one operation that is not just "run a typed request and return
 // JSON": it must also open a live PTY channel with the command that
 // request returns, so it gets its own command here.
-
-/// Lists persistent `pty-remote` sessions on `endpoint`, optionally scoped
-/// to `workspace_id`. A thin convenience wrapper over `remote_dispatch_over_ssh`
-/// with `TreqCommandRequest::PtyList` — kept here (rather than requiring
-/// every caller to build that request by hand) because "what sessions can
-/// I reattach to" is this module's concern.
-#[tauri::command]
-pub async fn remote_pty_list_persistent_sessions(
-  endpoint: SshEndpoint,
-  repo: String,
-  workspace_id: Option<String>,
-  exec_state: State<'_, crate::commands::remote_control::RemoteExecState>,
-  app_state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
-  let cancellation = CancellationToken::new();
-  crate::core::remote::execute_remote_command::<serde_json::Value>(
-    &exec_state.0,
-    &endpoint,
-    TreqCommandRequest::PtyList {
-      repo,
-      workspace: workspace_id,
-    },
-    ExecLimits::default(),
-    &cancellation,
-  )
-  .await
-  .map_err(|e| e.to_string())
-}
-
-/// Reattaches to (creating first if necessary) a persistent `pty-remote`
-/// session identified by `label`: fetches the literal attach command from
-/// the VM (`TreqCommandRequest::PtyAttachCommand`) and opens a live PTY
-/// channel with it, emitting the same `remote-pty-data-<session_id>` /
-/// `remote-pty-exit-<session_id>` events `remote_pty_create` does — a
-/// caller (the remote-review terminal UI) does not need a separate code
-/// path for "reattach" vs. "fresh session".
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn remote_pty_reattach(
-  app: tauri::AppHandle,
-  session_id: String,
-  window_label: Option<String>,
-  endpoint: SshEndpoint,
-  repository_id: String,
-  workspace_id: String,
-  label: String,
-  remote_working_directory: String,
-  launch: PtyLaunchSpec,
-  cols: u16,
-  rows: u16,
-  pty_state: State<'_, RemotePtyState>,
-  exec_state: State<'_, crate::commands::remote_control::RemoteExecState>,
-  app_state: State<'_, AppState>,
-) -> Result<(), String> {
-  crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
-  reattach(
-    app,
-    &pty_state.0,
-    &exec_state.0,
-    Reattach {
-      session_id,
-      window_label,
-      endpoint,
-      repository_id,
-      workspace_id,
-      label,
-      remote_working_directory,
-      launch,
-      cols,
-      rows,
-    },
-  )
-  .await
-}
 
 /// A persistent session to attach a local session id to.
 pub struct Reattach {

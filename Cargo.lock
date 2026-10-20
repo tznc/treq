@@ -1615,15 +1615,6 @@ dependencies = [
 
 [[package]]
 name = "convert_case"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
-name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
@@ -1987,16 +1978,6 @@ checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
  "syn 3.0.5",
-]
-
-[[package]]
-name = "ctor"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
-dependencies = [
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -2856,15 +2837,6 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset",
  "rustc_version",
-]
-
-[[package]]
-name = "file-id"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
-dependencies = [
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4664,7 +4636,7 @@ dependencies = [
  "backtrace",
  "bitflags 2.13.1",
  "chrono",
- "ctor 1.0.13",
+ "ctor",
  "derive_more",
  "embed-resource",
  "etagere",
@@ -4862,7 +4834,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "core-graphics 0.24.0",
- "ctor 1.0.13",
+ "ctor",
  "dispatch2",
  "foreign-types",
  "futures",
@@ -6935,66 +6907,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "napi"
-version = "2.16.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55740c4ae1d8696773c78fdafd5d0e5fe9bc9f1b071c7ba493ba5c413a9184f3"
-dependencies = [
- "bitflags 2.13.1",
- "ctor 0.2.9",
- "napi-derive",
- "napi-sys",
- "once_cell",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "napi-build"
-version = "2.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60fdf9b392c50e7c4170fa633bd909490ed7835cea4c046776d1a4dd8d2ae0ab"
-
-[[package]]
-name = "napi-derive"
-version = "2.16.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cbe2585d8ac223f7d34f13701434b9d5f4eb9c332cccce8dee57ea18ab8ab0c"
-dependencies = [
- "cfg-if",
- "convert_case 0.6.0",
- "napi-derive-backend",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "napi-derive-backend"
-version = "1.0.75"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1639aaa9eeb76e91c6ae66da8ce3e89e921cd3885e99ec85f4abacae72fc91bf"
-dependencies = [
- "convert_case 0.6.0",
- "once_cell",
- "proc-macro2",
- "quote",
- "regex",
- "semver",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "napi-sys"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "427802e8ec3a734331fec1035594a210ce1ff4dc5bc1950530920ab717964ea3"
-dependencies = [
- "libloading 0.8.9",
-]
-
-[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7115,19 +7027,6 @@ dependencies = [
  "notify-types",
  "walkdir",
  "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "notify-debouncer-full"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c02b49179cfebc9932238d04d6079912d26de0379328872846118a0fa0dbb302"
-dependencies = [
- "file-id",
- "log",
- "notify",
- "notify-types",
- "walkdir",
 ]
 
 [[package]]
@@ -11435,28 +11334,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-test"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "583321ea4ea9f3d41adc69fca9792f6914517ef444f97ecea35e8dac8e8d5a85"
-dependencies = [
- "serde",
- "serde_json",
- "tauri",
- "tauri-test-macros",
-]
-
-[[package]]
-name = "tauri-test-macros"
-version = "0.2.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "toml 0.8.23",
-]
-
-[[package]]
 name = "tauri-utils"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11465,7 +11342,7 @@ dependencies = [
  "anyhow",
  "brotli",
  "cargo_metadata",
- "ctor 1.0.13",
+ "ctor",
  "dom_query",
  "dunce",
  "glob",
@@ -12100,11 +11977,6 @@ dependencies = [
  "libc",
  "log",
  "mockall",
- "napi",
- "napi-build",
- "napi-derive",
- "notify",
- "notify-debouncer-full",
  "portable-pty",
  "rand_core 0.10.1",
  "rayon",
@@ -12130,7 +12002,6 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
- "tauri-test",
  "tempfile",
  "tokio",
  "tokio-tungstenite",

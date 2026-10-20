@@ -231,42 +231,6 @@ pub async fn run_cloud_action(
   Ok(())
 }
 
-fn owned(app: &AppHandle) -> Result<Arc<Cloud>, String> {
-  owned_cloud(app).ok_or_else(|| "The account is not available in this window.".to_string())
-}
-
-/// The account, or `None` when the webview owns it (no GPUI shell).
-#[tauri::command]
-pub fn cloud_account(app: AppHandle) -> Option<AccountSnapshot> {
-  owned_cloud(&app).map(|cloud| cloud.snapshot())
-}
-
-#[tauri::command]
-pub async fn cloud_sign_out(app: AppHandle) -> Result<(), String> {
-  owned(&app)?.sign_out().await;
-  Ok(())
-}
-
-#[tauri::command]
-pub async fn cloud_exchange_token(app: AppHandle, token: String) -> Result<(), String> {
-  owned(&app)?.exchange_token(&token).await
-}
-
-#[tauri::command]
-pub async fn cloud_refresh_subscription(app: AppHandle) -> Result<(), String> {
-  owned(&app)?.refresh_subscription().await;
-  Ok(())
-}
-
-#[tauri::command]
-pub async fn cloud_workspace_action(
-  app: AppHandle,
-  window: tauri::WebviewWindow,
-  action: CloudAction,
-) -> Result<(), String> {
-  run_cloud_action(&app, window.label(), action).await
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;

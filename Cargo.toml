@@ -2,9 +2,6 @@
 members = ["src-tauri"]
 resolver = "3"
 
-[patch.crates-io]
-tauri-test-macros = { path = "crates/tauri-test-macros" }
-
 # Profiles only take effect in the workspace root manifest.
 
 # Development profile - faster compilation with minimal optimization

@@ -35,10 +35,7 @@
         "rust-lang.rust-analyzer",
         "tauri-apps.tauri-vscode",
         "biomejs.biome"
-      ],
-      "settings": {
-        "rust-analyzer.cargo.features": ["tauri-test"]
-      }
+      ]
     }
   }
 }

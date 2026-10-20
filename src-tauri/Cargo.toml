@@ -32,16 +32,13 @@ gui = [
   "dep:tauri-plugin-single-instance",
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
-# Left out of the NAPI test addon, which has no windows.
 gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image"]
-tauri-test = ["gui", "dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
 embed = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
-napi-build = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -75,9 +72,6 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 
 [dependencies]
 tauri = { version = "2.12", features = ["unstable"], optional = true }
-tauri-test = { version = "0.2.1", optional = true }
-napi = { version = "2", default-features = false, features = ["napi8", "async", "serde-json"], optional = true }
-napi-derive = { version = "2", optional = true }
 tauri-plugin-opener = { version = "2.5.2", optional = true }
 tauri-plugin-dialog = { version = "2.7.0", optional = true }
 tauri-plugin-log = { version = "2.8.0", optional = true }
@@ -94,8 +88,6 @@ sha2 = "0.11"
 ignore = "0.4"
 jj-lib = "0.40.0"
 futures = "0.3"
-notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
-notify-debouncer-full = "0.7"
 log = "0.4"
 regex = "1"
 rayon = "1.10"
@@ -108,7 +100,6 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["registry", "env-filter"] }
 
-tempfile = { version = "3", optional = true }
 async-trait = "0.1.92"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util", "net", "sync"] }

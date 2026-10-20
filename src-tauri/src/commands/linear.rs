@@ -1,70 +1,11 @@
-use crate::linear::{
-  LinearComment, LinearDocument, LinearIssue, LinearProject, LinearTeam, LinearUser,
-};
-use crate::lock_ext::LockExt;
-use crate::AppState;
+use crate::linear::LinearIssue;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LinearKickoffResult {
   pub issue_id: String,
   pub workspace_id: i64,
   pub created: bool,
-}
-
-#[tauri::command]
-pub async fn linear_list_teams(
-  state: State<'_, AppState>,
-  repo_path: String,
-) -> Result<Vec<LinearTeam>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_teams_impl(&client_source).await
-}
-
-#[tauri::command]
-pub async fn linear_list_issues(
-  state: State<'_, AppState>,
-  repo_path: String,
-  team_filter: Option<String>,
-) -> Result<Vec<LinearIssue>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_issues_impl(&client_source, team_filter.as_deref()).await
-}
-
-#[tauri::command]
-pub async fn linear_open_or_create_workspace_from_issue(
-  state: State<'_, AppState>,
-  repo_path: String,
-  issue_id: String,
-) -> Result<LinearKickoffResult, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  let issue = crate::linear::linear_get_issue_impl(&client_source, &issue_id).await?;
-  open_or_create_workspace_from_linear_issue(&repo_path, &issue).await
 }
 
 /// Opens or creates the workspace for one Linear issue. The core never
@@ -129,120 +70,6 @@ pub async fn open_or_create_workspace_from_linear_issue(
   })
 }
 
-#[tauri::command]
-pub async fn linear_get_viewer(
-  state: State<'_, AppState>,
-  repo_path: String,
-) -> Result<LinearUser, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_get_viewer_impl(&client_source).await
-}
-
-#[tauri::command]
-pub async fn linear_list_projects(
-  state: State<'_, AppState>,
-  repo_path: String,
-) -> Result<Vec<LinearProject>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_projects_impl(&client_source).await
-}
-
-#[tauri::command]
-pub async fn linear_list_project_documents(
-  state: State<'_, AppState>,
-  repo_path: String,
-  project_id: String,
-) -> Result<Vec<LinearDocument>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_project_documents_impl(&client_source, &project_id).await
-}
-
-#[tauri::command]
-pub async fn linear_list_issue_comments(
-  state: State<'_, AppState>,
-  repo_path: String,
-  issue_id: String,
-) -> Result<Vec<LinearComment>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_issue_comments_impl(&client_source, &issue_id).await
-}
-
-#[tauri::command]
-pub async fn linear_list_project_comments(
-  state: State<'_, AppState>,
-  repo_path: String,
-  project_id: String,
-) -> Result<Vec<LinearComment>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_project_comments_impl(&client_source, &project_id).await
-}
-
-#[tauri::command]
-pub async fn linear_list_document_comments(
-  state: State<'_, AppState>,
-  repo_path: String,
-  document_id: String,
-) -> Result<Vec<LinearComment>, String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_list_document_comments_impl(&client_source, &document_id).await
-}
-
-/// Gives the Linear client the Supabase session it sends to the
-/// `linear-proxy` Edge Function for OAuth-connected users. `None` clears it
-/// on sign-out.
-#[tauri::command]
-pub fn linear_set_proxy_session(supabase_url: Option<String>, access_token: Option<String>) {
-  crate::linear::set_proxy_session(supabase_url, access_token);
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -268,35 +95,4 @@ mod tests {
     assert_eq!(result.workspace_id, 99);
     assert!(!result.created);
   }
-}
-
-/// Writes what a Linear review covers into the snapshot directory the review
-/// agent reads and anchors its comments on. Returns that directory.
-#[tauri::command]
-pub fn linear_prepare_review(
-  repo_path: String,
-  target_type: String,
-  target_id: String,
-  snapshot: crate::core::linear_review::LinearReviewSnapshot,
-) -> Result<String, String> {
-  crate::core::linear_review::write_snapshot(&repo_path, &target_type, &target_id, &snapshot)
-    .map(|dir| dir.to_string_lossy().into_owned())
-}
-
-#[tauri::command]
-pub async fn linear_apply_review_suggestion(
-  state: State<'_, AppState>,
-  repo_path: String,
-  comment_id: String,
-) -> Result<(), String> {
-  crate::commands::feature_preview::require(
-    &state,
-    crate::core::feature_preview::PreviewFeature::LinearIntegration,
-  )?;
-  let client_source = {
-    let db = state.db.lock_or_recover();
-    crate::linear::resolve_linear_client(&repo_path, &db)?
-  };
-
-  crate::linear::linear_apply_review_suggestion_impl(&client_source, &repo_path, &comment_id).await
 }
