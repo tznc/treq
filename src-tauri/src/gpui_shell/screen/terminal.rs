@@ -132,7 +132,7 @@ pub struct Route {
   /// Dashboard's latest commands; those newer than the last run go once.
   pub commands: Vec<Command>,
   /// A remote repository is active: a new shell runs on the host, in the
-  /// session React resolves (`resolveRemoteShell`).
+  /// session the window resolves (`resolveRemoteShell`).
   pub remote_shell: bool,
 }
 
@@ -2259,7 +2259,7 @@ impl TerminalPane {
   fn add_shell(&mut self, dir: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
     let dir = dir.unwrap_or_else(|| self.active_dir());
     if self.route.remote_shell {
-      // A remote repository's paths exist only on the host: React resolves
+      // A remote repository's paths exist only on the host: the window resolves
       // the session and opens it with `openRemote`.
       self.send("terminal.newRemoteShell", dir.into(), cx);
       return;

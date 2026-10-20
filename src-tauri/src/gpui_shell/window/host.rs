@@ -1,16 +1,28 @@
 //! What a window reads from and asks of the backend, faked in tests.
 //! Everything blocks, so the window calls it off the main thread.
+//!
+//! For a remote repository the backend reads over SSH what it reads from
+//! disk for a local one, and has nothing of what only a local checkout
+//! has (pull requests, supporting repositories).
 
 use std::collections::HashMap;
 
 use tauri::Manager;
 
-use super::data::{Flags, Read, RepoRead};
+use serde_json::Value;
+
+use super::{
+  data::{Flags, Read, RepoRead},
+  remote::{RemoteHost, UserManagedValues},
+};
 use crate::{
   core::{
     self,
     agent_launch::LaunchRequest,
     feature_preview::{self, PreviewFeature},
+    remote::{RepositoryInspection, TreqCommandRequest},
+    remote_control_plane::{SshEndpoint, SshEndpointSource},
+    remote_records::{self, RestoreFailure, RestoreSteps, SavedRepository, UserManagedEndpoint},
     repo::RepoBranch,
     supporting_repos::{self, SupportingRepo},
     SingleRebaseResult, WorkspaceSidebarStatus,
@@ -18,14 +30,15 @@ use crate::{
   github::{GitRemoteInfo, PrInfo},
   gpui_shell::{
     native::{Backend, ToastTone},
-    screen::launch_data::LaunchHost,
+    remote_repo::{self, Cutoff, Mutation, RemoteRepository, Transport},
+    screen::{account_data::CloudAction, launch_data::LaunchHost},
   },
   local_db::{Session, Workspace},
   lock_ext::LockExt,
   AppState,
 };
 
-pub trait WindowHost: Send + Sync {
+pub trait WindowHost: RemoteHost + Send + Sync {
   fn workspaces(&self, repo: &str) -> Result<Vec<Workspace>, String>;
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String>;
   /// `has_changes` of `useWorkspaceGitDetail`.
@@ -123,19 +136,55 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
   out
 }
 
+impl Backend {
+  /// `InspectRepository` of the window's remote repository `repo`.
+  fn inspect_remote(&self, repo: &str) -> Option<RepositoryInspection> {
+    let remote = self.remote(repo)?;
+    remote
+      .read(TreqCommandRequest::InspectRepository {
+        repo: remote.repo.canonical_path.clone(),
+      })
+      .ok()
+  }
+}
+
 impl WindowHost for Backend {
   fn workspaces(&self, repo: &str) -> Result<Vec<Workspace>, String> {
+    if let Some(remote) = self.remote(repo) {
+      return remote.workspaces();
+    }
     core::list_workspaces(repo)
   }
 
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String> {
-    core::list_workspace_statuses(repo)
+    let Some(remote) = self.remote(repo) else {
+      return core::list_workspace_statuses(repo);
+    };
+    // The host has no sidebar listing: each workspace's own inspection.
+    Ok(
+      remote
+        .workspaces()?
+        .into_iter()
+        .map(|workspace| {
+          let has_conflicts = remote
+            .status(Some(workspace.id))
+            .is_ok_and(|s| !s.conflicted_files.is_empty());
+          WorkspaceSidebarStatus {
+            current: workspace,
+            has_conflicts,
+            last_activity_at: None,
+          }
+        })
+        .collect(),
+    )
   }
 
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool> {
-    core::workspace_status(repo, Some(workspace_id))
-      .ok()
-      .map(|status| status.partial.has_changes)
+    let status = match self.remote(repo) {
+      Some(remote) => remote.status(Some(workspace_id)),
+      None => core::workspace_status(repo, Some(workspace_id)),
+    };
+    status.ok().map(|status| status.partial.has_changes)
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -143,22 +192,46 @@ impl WindowHost for Backend {
   }
 
   fn branch(&self, repo: &str) -> Option<RepoBranch> {
+    if self.remote(repo).is_some() {
+      let inspection = self.inspect_remote(repo)?;
+      return Some(RepoBranch {
+        display_ref: inspection
+          .current_branch
+          .clone()
+          .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
+        is_detached: inspection.current_branch.is_none(),
+        current_branch: inspection.current_branch,
+      });
+    }
     core::repo::get_repo_current_branch(repo).ok()
   }
 
   fn default_branch(&self, repo: &str) -> Option<String> {
+    if self.remote(repo).is_some() {
+      return self.inspect_remote(repo).map(|i| i.default_branch);
+    }
     core::repo::get_repo_default_branch(repo).ok()
   }
 
   fn remote(&self, repo: &str) -> Option<GitRemoteInfo> {
+    if let Some(remote) = Backend::remote(self, repo) {
+      return remote.git_remote().ok().flatten();
+    }
     crate::github::get_git_remote_url_impl(repo).ok().flatten()
   }
 
   fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>> {
+    // The poller watches local checkouts only.
+    if Backend::remote(self, repo).is_some() {
+      return HashMap::new();
+    }
     crate::pr_status::global().list_cached(repo)
   }
 
   fn supporting(&self, main_repo: &str) -> Vec<SupportingRepo> {
+    if Backend::remote(self, main_repo).is_some() {
+      return Vec::new();
+    }
     supporting_repos::list(main_repo).unwrap_or_default()
   }
 
@@ -292,7 +365,9 @@ impl WindowHost for Backend {
 
   fn factory_reset(&self) {
     self.save_setting("last_opened_repo_path", "");
+    self.with_db(remote_records::clear_last_opened);
     self.set_window_repo_path("");
+    remote_repo::set_window(self.label(), None);
   }
 
   fn dismiss_send_asset(&self, id: &str) {
@@ -303,5 +378,178 @@ impl WindowHost for Backend {
     self.with_db(|db| {
       core::editor_apps::detect(db);
     });
+  }
+}
+
+/// `restoreSavedRemoteRepository`'s steps on one endpoint: a probe is the
+/// reconnect, and a pinned host key is required.
+struct Steps<'a> {
+  host: &'a Backend,
+  endpoint: &'a SshEndpoint,
+  path: &'a str,
+}
+
+impl RestoreSteps for Steps<'_> {
+  fn reconnect(&self) -> bool {
+    self
+      .host
+      .remote_read(
+        self.endpoint,
+        TreqCommandRequest::ProbeRepo {
+          repo: self.path.to_string(),
+        },
+      )
+      .is_ok()
+  }
+
+  fn validate_host_key(&self) -> bool {
+    self
+      .endpoint
+      .host_keys
+      .iter()
+      .any(|key| !key.fingerprint_sha256.is_empty())
+  }
+
+  fn inspect(&self, canonical_path: &str) -> Result<RepositoryInspection, String> {
+    let value = self.host.remote_read(
+      self.endpoint,
+      TreqCommandRequest::InspectRepository {
+        repo: canonical_path.to_string(),
+      },
+    )?;
+    serde_json::from_value(value).map_err(|e| format!("invalid_remote_json: {e}"))
+  }
+}
+
+fn now_iso() -> String {
+  chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+impl RemoteHost for Backend {
+  fn saved_repositories(&self, endpoint_id: &str, generation: u64) -> Vec<SavedRepository> {
+    self.with_db(|db| remote_records::saved_repositories(db, endpoint_id, generation))
+  }
+
+  fn register_user_managed(&self, values: &UserManagedValues) -> SshEndpoint {
+    let record = UserManagedEndpoint {
+      id: format!("user-managed-{}", super::remote::now_ms()),
+      display_name: values.display_name.clone(),
+      hostname: values.hostname.clone(),
+      port: values.port,
+      username: values.username.clone(),
+      host_key_fingerprint: values.host_key_fingerprint.clone(),
+      auth_identity_reference: values.auth_identity_reference.clone(),
+      alias: values.alias.clone(),
+      created_at: now_iso(),
+    };
+    let endpoint = record.to_endpoint();
+    self.with_db(|db| remote_records::save_user_managed_endpoint(db, record));
+    endpoint
+  }
+
+  fn remote_read(
+    &self,
+    endpoint: &SshEndpoint,
+    request: TreqCommandRequest,
+  ) -> Result<Value, String> {
+    Transport::read(self, endpoint, request).inspect_err(|error| {
+      if let Some(cutoff) = Cutoff::from_error(error) {
+        self.cut_off(&endpoint.id, cutoff);
+      }
+    })
+  }
+
+  fn remote_change(
+    &self,
+    endpoint: &SshEndpoint,
+    request: TreqCommandRequest,
+  ) -> Result<Mutation, String> {
+    remote_repo::keyed_endpoint_mutation(self, endpoint, &request).inspect_err(|error| {
+      if let Some(cutoff) = Cutoff::from_error(error) {
+        self.cut_off(&endpoint.id, cutoff);
+      }
+    })
+  }
+
+  fn save_remote_repository(
+    &self,
+    endpoint_id: &str,
+    generation: u64,
+    path: &str,
+  ) -> Result<SavedRepository, String> {
+    self.with_db(|db| {
+      let record = remote_records::upsert(
+        db,
+        endpoint_id,
+        generation,
+        path,
+        None,
+        Some(Some(now_iso())),
+      )?;
+      remote_records::remember_last_opened(db, &record.id);
+      Ok(record)
+    })
+  }
+
+  fn restore_remote(
+    &self,
+    descriptor: &SavedRepository,
+    endpoint: &SshEndpoint,
+    generation: u64,
+    transition: bool,
+  ) -> Result<(SavedRepository, RepositoryInspection), RestoreFailure> {
+    let state = self.app().state::<AppState>();
+    let steps = Steps {
+      host: self,
+      endpoint,
+      path: &descriptor.canonical_remote_path,
+    };
+    remote_records::restore_saved_repository(
+      || state.db.lock_or_recover(),
+      descriptor,
+      generation,
+      transition,
+      &steps,
+      &now_iso(),
+    )
+  }
+
+  fn last_remote(&self) -> Option<(SavedRepository, SshEndpoint, u64)> {
+    let (descriptor, user_managed, remote_ssh) = self.with_db(|db| {
+      let descriptor = remote_records::saved_repository(db, &remote_records::last_opened_id(db)?)?;
+      let user_managed = remote_records::user_managed_endpoints(db)
+        .into_iter()
+        .find(|e| e.id == descriptor.endpoint_id);
+      let remote_ssh = feature_preview::is_enabled(db, PreviewFeature::RemoteSsh);
+      Some((descriptor, user_managed, remote_ssh))
+    })?;
+    // User-managed endpoints restore only while the preview is on; the
+    // cloud workspace regardless.
+    if let Some(record) = user_managed.filter(|_| remote_ssh) {
+      let generation = descriptor.endpoint_generation;
+      return Some((descriptor, record.to_endpoint(), generation));
+    }
+    let cloud = crate::commands::cloud::owned_cloud(self.app())?;
+    let status = cloud.snapshot().cloud.instance_status?;
+    let endpoint: SshEndpoint = serde_json::from_value(status.endpoint.clone()?).ok()?;
+    if endpoint.id != descriptor.endpoint_id {
+      return None;
+    }
+    let generation = match endpoint.source {
+      SshEndpointSource::Managed { generation, .. } => generation,
+      _ => status
+        .instance
+        .as_ref()
+        .map_or(descriptor.endpoint_generation, |i| i.generation),
+    };
+    Some((descriptor, endpoint, generation))
+  }
+
+  fn cloud_action(&self, action: CloudAction) {
+    crate::gpui_shell::screen::account_data::AccountHost::cloud_action(self, action);
+  }
+
+  fn show_remote(&self, repository: Option<RemoteRepository>) {
+    remote_repo::set_window(self.label(), repository);
   }
 }

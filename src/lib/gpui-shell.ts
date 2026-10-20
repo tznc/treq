@@ -30,6 +30,8 @@ declare global {
     __TREQ_REACT_GITHUB__?: boolean;
     /** React draws a remote repository's workspace view; tests of it set it. */
     __TREQ_REACT_REMOTE_WORKSPACE__?: boolean;
+    /** React restores the last remote repository; tests of its remote flows set it. */
+    __TREQ_REACT_REMOTE__?: boolean;
   }
 }
 

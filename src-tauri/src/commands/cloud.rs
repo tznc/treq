@@ -95,6 +95,13 @@ impl CloudEffects for AppEffects {
 
   fn managed_endpoint(&self, event: ManagedEndpointEvent) {
     let window = self.window.lock_or_recover().clone();
+    // Shell windows adopt it in Rust; React still hears it for its own
+    // views.
+    #[cfg(feature = "gpui-shell")]
+    #[cfg(desktop)]
+    if crate::gpui_shell::is_enabled(&self.app) {
+      crate::gpui_shell::managed_endpoint(&self.app, window.as_deref(), event.clone());
+    }
     let result = match (&event, window) {
       (ManagedEndpointEvent::Connected { .. }, Some(label)) => self.app.emit_to(
         tauri::EventTarget::webview_window(&label),
@@ -119,6 +126,11 @@ impl CloudEffects for AppEffects {
   async fn clear_cutoff(&self, endpoint_id: &str) {
     if let Some(state) = self.app.try_state::<RemoteExecState>() {
       state.0.clear_cutoff(endpoint_id).await;
+    }
+    #[cfg(feature = "gpui-shell")]
+    #[cfg(desktop)]
+    if crate::gpui_shell::is_enabled(&self.app) {
+      crate::gpui_shell::cutoff_cleared(&self.app, endpoint_id);
     }
   }
 

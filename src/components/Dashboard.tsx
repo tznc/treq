@@ -182,7 +182,10 @@ import { remoteForceCutoff } from "../lib/api-extra";
 import { RemoteRepositorySelector } from "./remote/RemoteRepositorySelector";
 import { RemoteTerminalDialog } from "./RemoteTerminalDialog";
 import { useGpuiRemoteDialogs } from "./useGpuiRemoteDialogs";
-import { gpuiDrawsRemoteWorkspace } from "../lib/gpui-remote-types";
+import {
+  gpuiDrawsRemoteWorkspace,
+  rustRunsRemote,
+} from "../lib/gpui-remote-types";
 import { invalidateReviewChangeCount } from "../lib/review-change-count";
 import {
   clearSWRCache,
@@ -1974,8 +1977,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Restore the last-opened remote SSH repository only after reconnect and
   // trust validation. A stored blob or descriptor is not enough on its own.
+  // In a GPUI window Rust restores it.
   useEffect(() => {
-    if (repoPath) {
+    if (repoPath || rustRunsRemote()) {
       return;
     }
     let cancelled = false;

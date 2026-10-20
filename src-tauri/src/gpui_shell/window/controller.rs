@@ -11,11 +11,14 @@ use super::{
   actions::{Menu, Shortcut},
   data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
   host::{read_repo, WindowHost},
-  model::{self, Effect, FolderPurpose, Forward, Model},
+  model::{self, Effect, FolderPurpose, Model},
+  remote::{self, Opened, RemoteEffect},
   sidebar, snapshots,
 };
 use crate::{
-  core::{agent_launch::LaunchRequest, supporting_repos::SupportingRepo},
+  core::{
+    agent_launch::LaunchRequest, cloud::ManagedEndpointEvent, supporting_repos::SupportingRepo,
+  },
   gpui_shell::{
     native::{NativeEvent, ToastTone},
     overlay::OverlaySnapshot,
@@ -40,15 +43,12 @@ pub struct Presentation {
 
 /// Draws a presentation; called only when it changed.
 pub type Presenter = Rc<dyn Fn(Presentation, &mut App)>;
-/// Hands React what it still runs.
-pub type Forwarder = Rc<dyn Fn(Forward, &mut App)>;
 
 pub struct WindowController {
   host: Arc<dyn WindowHost>,
   model: Model,
   data: Data,
   present: Presenter,
-  forward: Forwarder,
   shown: Option<Presentation>,
   /// A read in flight, and what to read once it returns.
   reading: bool,
@@ -57,13 +57,13 @@ pub struct WindowController {
 }
 
 impl WindowController {
-  /// A window on `repo` (`None`: onboarding). Reads the settings and the
-  /// repository, then keeps reading on SWR's intervals.
+  /// A window on `repo` (`None`: onboarding, or the last remote
+  /// repository once it restores). Reads the settings and the repository,
+  /// then keeps reading on SWR's intervals.
   pub fn new(
     host: Arc<dyn WindowHost>,
     repo: Option<String>,
     present: Presenter,
-    forward: Forwarder,
     cx: &mut Context<Self>,
   ) -> Self {
     let repo = repo.filter(|r| !r.is_empty());
@@ -76,7 +76,6 @@ impl WindowController {
       model: Model::new(repo.clone()),
       data: Data::default(),
       present,
-      forward,
       shown: None,
       reading: false,
       queued: None,
@@ -85,15 +84,16 @@ impl WindowController {
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
-    if let Some(repo) = repo {
-      let host = this.host.clone();
-      cx.background_spawn(async move { host.prepare_repo(&repo) })
-        .detach();
+    let mut effects = vec![Effect::ReadPrefs, Effect::Refresh { revision: false }];
+    match repo {
+      Some(repo) => {
+        let host = this.host.clone();
+        cx.background_spawn(async move { host.prepare_repo(&repo) })
+          .detach();
+      }
+      None => effects.push(Effect::from(RemoteEffect::RestoreLast)),
     }
-    this.run(
-      vec![Effect::ReadPrefs, Effect::Refresh { revision: false }],
-      cx,
-    );
+    this.run(effects, cx);
     this
   }
 
@@ -116,17 +116,17 @@ impl WindowController {
     &self.data
   }
 
-  /// A sidebar action; false leaves it to React.
+  /// A sidebar action; false when it is not the model's (a menu or drag `sidebar_actions` runs).
   pub fn sidebar_action(&mut self, action: &SidebarAction, cx: &mut Context<Self>) -> bool {
     self.handled(|model, data| model.sidebar_action(action, data), cx)
   }
 
-  /// A screen action; false leaves it to React.
+  /// A screen action; false when the model has nothing for it.
   pub fn screen_action(&mut self, action: &ScreenAction, cx: &mut Context<Self>) -> bool {
     self.handled(|model, data| model.screen_action(action, data), cx)
   }
 
-  /// An overlay action; false leaves it to React.
+  /// An overlay action; false when the model has nothing for it.
   pub fn overlay_action(&mut self, action: &ScreenAction, cx: &mut Context<Self>) -> bool {
     self.handled(|model, data| model.overlay_action(action, data), cx)
   }
@@ -175,6 +175,55 @@ impl WindowController {
   /// `pr-statuses-updated`: the PR poller's cache changed.
   pub fn prs_changed(&mut self, cx: &mut Context<Self>) {
     self.read(Read::default(), cx);
+  }
+
+  /// `listenManagedEndpoint`: the cloud workspace connected, or its
+  /// certificate renewed.
+  pub fn managed_endpoint(&mut self, event: ManagedEndpointEvent, cx: &mut Context<Self>) {
+    let effects = match event {
+      ManagedEndpointEvent::Connected {
+        endpoint,
+        generation,
+        open_repositories,
+      } => self
+        .model
+        .remote
+        .managed_connected(endpoint, generation, open_repositories),
+      ManagedEndpointEvent::Renewed { endpoint } => self.model.remote.managed_renewed(endpoint),
+    };
+    self.run(effects.into_iter().map(Effect::from).collect(), cx);
+  }
+
+  /// `remoteCutoffStore`: an endpoint was cut off (`Some(reason)`) or
+  /// reauthenticated (`None`).
+  pub fn cutoff_changed(
+    &mut self,
+    endpoint_id: &str,
+    reason: Option<String>,
+    cx: &mut Context<Self>,
+  ) {
+    let cutoffs = &mut self.model.remote.cutoffs;
+    match reason {
+      Some(reason) => {
+        cutoffs.insert(endpoint_id.to_string(), reason);
+      }
+      None => {
+        if cutoffs.remove(endpoint_id).is_some() && self.model.is_remote() {
+          // Back from a cutoff: what was refused reads again.
+          return self.run(vec![Effect::Refresh { revision: true }], cx);
+        }
+      }
+    }
+    self.present(cx);
+  }
+
+  /// The account changed: the connection banner follows the cloud
+  /// workspace's state.
+  pub fn account_changed(&mut self, instance_state: Option<String>, cx: &mut Context<Self>) {
+    if self.model.remote.instance_state != instance_state {
+      self.model.remote.instance_state = instance_state;
+      self.present(cx);
+    }
   }
 
   /// The OS switched between light and dark.
@@ -352,6 +401,7 @@ impl WindowController {
           if confirmed {
             this.model.reset();
             this.data.clear();
+            this.host.show_remote(None);
             this.run(
               vec![toast(
                 ToastTone::Success,
@@ -399,9 +449,114 @@ impl WindowController {
         title,
         description,
       } => self.host.toast(tone, &title, &description),
-      Effect::React(forward) => (self.forward)(forward, cx),
       Effect::OpenUrl(url) => self.host.open_url(&url),
+      Effect::Remote(effect) => self.remote_effect(*effect, cx),
     }
+  }
+
+  /// Runs what the remote side asks: the SSH flows off the main thread.
+  fn remote_effect(&mut self, effect: RemoteEffect, cx: &mut Context<Self>) {
+    match effect {
+      RemoteEffect::LoadSaved {
+        endpoint_id,
+        generation,
+      } => self.background(
+        move |host| {
+          let saved = host.saved_repositories(&endpoint_id, generation);
+          (endpoint_id, saved)
+        },
+        move |this, (endpoint_id, saved), cx| {
+          this
+            .model
+            .remote
+            .saved_listed(&endpoint_id, generation, saved);
+          this.present(cx);
+        },
+        cx,
+      ),
+      RemoteEffect::RegisterUserManaged(values) => self.background(
+        move |host| host.register_user_managed(&values),
+        |this, endpoint, cx| {
+          let effects = this.model.remote.registered(endpoint);
+          this.run(effects.into_iter().map(Effect::from).collect(), cx);
+        },
+        cx,
+      ),
+      RemoteEffect::Probe { endpoint, path } => self.background(
+        move |host| remote::probe(host, &endpoint, &path),
+        |this, result, cx| {
+          this.model.remote.probed(result);
+          this.present(cx);
+        },
+        cx,
+      ),
+      RemoteEffect::Open {
+        endpoint,
+        generation,
+        path,
+        how,
+      } => self.background(
+        move |host| remote::open(host, &endpoint, generation, &path, &how),
+        |this, result, cx| match result {
+          Ok(opened) => this.remote_opened(&opened, cx),
+          Err((probe, error)) => {
+            this.model.remote.failed(probe, error);
+            this.present(cx);
+          }
+        },
+        cx,
+      ),
+      RemoteEffect::Restore {
+        endpoint,
+        generation,
+        descriptor,
+        transition,
+      } => self.background(
+        move |host| {
+          host
+            .restore_remote(&descriptor, &endpoint, generation, transition)
+            .map(|(descriptor, inspection)| Opened {
+              descriptor,
+              inspection,
+              endpoint,
+            })
+        },
+        |this, result, cx| match result {
+          Ok(opened) => this.remote_opened(&opened, cx),
+          Err(failure) => {
+            this.model.remote.restore_failed(failure);
+            this.present(cx);
+          }
+        },
+        cx,
+      ),
+      RemoteEffect::RestoreLast => self.background(
+        |host| remote::restore_last(host),
+        |this, opened, cx| {
+          // A repository opened meanwhile keeps the window.
+          if let Some(opened) = opened.filter(|_| !this.model.has_repo()) {
+            this.remote_opened(&opened, cx);
+          }
+        },
+        cx,
+      ),
+      RemoteEffect::Cloud(action) => self.host.cloud_action(action),
+      RemoteEffect::Show(repository) => self.host.show_remote(repository),
+    }
+  }
+
+  fn remote_opened(&mut self, opened: &Opened, cx: &mut Context<Self>) {
+    // A cutoff another window saw holds here too.
+    let id = &opened.endpoint.id;
+    if let Some(cutoff) = crate::gpui_shell::remote_repo::cutoff(id) {
+      self
+        .model
+        .remote
+        .cutoffs
+        .insert(id.clone(), cutoff.id().to_string());
+    }
+    let effects = self.model.remote_opened(opened);
+    self.run(effects, cx);
   }
 
   /// A folder the user picked for `purpose`.
@@ -596,11 +751,16 @@ fn read_all(
 
 /// The app settings the model follows for a window on `main`.
 fn settings_keys(main: &str) -> Vec<String> {
-  ["theme", "ui_zoom", "workspace_sidebar_width"]
-    .into_iter()
-    .map(String::from)
-    .chain([model::collapsed_key(main)])
-    .collect()
+  [
+    "theme",
+    "ui_zoom",
+    "workspace_sidebar_width",
+    "default_agent",
+  ]
+  .into_iter()
+  .map(String::from)
+  .chain([model::collapsed_key(main)])
+  .collect()
 }
 
 fn toast(tone: ToastTone, title: &str, description: &str) -> Effect {

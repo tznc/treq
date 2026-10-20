@@ -6,6 +6,9 @@
 //! - `model` is the state and `actions` what each action and shortcut does
 //!   to it; `data` is what was read, `host` where it is read from.
 //! - `sidebar` and `snapshots` build what the shell draws.
+//! - `remote` is a window's remote side (its dialogs, the SSH endpoint and
+//!   the remote repository) and `remote_actions` what the remote actions
+//!   do to the model.
 //! - `controller` runs it all for one window; `shell` connects it to the
 //!   `Shell`, and `keys` is its keymap.
 
@@ -15,6 +18,8 @@ mod data;
 mod host;
 mod keys;
 mod model;
+mod remote;
+mod remote_actions;
 mod shell;
 mod sidebar;
 mod snapshots;
@@ -25,9 +30,9 @@ pub(super) use controller::{Presentation, WindowController};
 pub(super) use keys::{from_app, window_shortcut};
 pub(super) use model::DEFAULT_ZOOM;
 pub(super) use shell::{
-  drives, follow_appearance, forget, listen, menu_event, native_event, overlay_action,
-  react_overlay, react_owns, routed, screen_action, set_react_owns, shortcut, sidebar_action,
-  start, window_focused,
+  cutoff_cleared, drives, follow_appearance, forget, instance_state, listen, managed_endpoint,
+  menu_event, native_event, overlay_action, react_overlay, routed, screen_action, shortcut,
+  sidebar_action, start, window_focused,
 };
 
 #[cfg(test)]

@@ -2,12 +2,13 @@
 //! made with the window, draws through the `Shell`, and receives what the
 //! window's views, the backend, the menu bar and app-wide events report.
 //!
-//! React keeps running in the webview. While it shows a remote repository
-//! (or its dialogs) it owns the window, as before the model: its pushes are
-//! drawn and the actions go to it. Otherwise its pushes are ignored.
+//! React keeps running in the webview, but the model owns the window, a
+//! remote repository included: React's pushes are ignored and no action
+//! reaches it. Only `TREQ_WEB_UI` windows, which the model never drives,
+//! are React's.
 
 use std::{
-  collections::HashMap,
+  collections::HashSet,
   rc::Rc,
   sync::{Arc, Mutex},
 };
@@ -17,48 +18,35 @@ use tauri_plugin_gpui::gpui::{prelude::*, App, Entity, WeakEntity};
 
 use super::{
   actions::{Menu, Shortcut},
-  controller::{Forwarder, Presenter, WindowController},
-  model::Forward,
+  controller::{Presenter, WindowController},
 };
 use crate::{
+  core::cloud::ManagedEndpointEvent,
   gpui_shell::{
     defer_main, emit_to_webview,
     native::{Backend, NativeEvent},
     overlay::OverlaySnapshot,
-    screen::{self, ScreenAction, ScreenSnapshot},
+    remote_repo::{self, Cutoff},
+    screen::{self, ScreenAction},
     sidebar::SidebarAction,
     update_shell, Shell, Shells,
   },
   lock_ext::LockExt,
 };
 
-/// The windows the model drives, by label, and whether React owns each now.
-fn driven() -> &'static Mutex<HashMap<String, bool>> {
-  static DRIVEN: std::sync::OnceLock<Mutex<HashMap<String, bool>>> = std::sync::OnceLock::new();
+/// The windows the model drives, by label.
+fn driven() -> &'static Mutex<HashSet<String>> {
+  static DRIVEN: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
   DRIVEN.get_or_init(Default::default)
 }
 
-/// Whether the model handles window `label`'s actions now.
+/// Whether the model handles window `label`'s actions.
 pub fn drives(label: &str) -> bool {
-  driven().lock_or_recover().get(label) == Some(&false)
-}
-
-pub(in crate::gpui_shell) fn set_react_owns(label: &str, owns: bool) {
-  if let Some(entry) = driven().lock_or_recover().get_mut(label) {
-    *entry = owns;
-  }
+  driven().lock_or_recover().contains(label)
 }
 
 pub(in crate::gpui_shell) fn forget(label: &str) {
   driven().lock_or_recover().remove(label);
-}
-
-/// Whether React's `snapshot` is for what only React runs: a remote
-/// repository, its dialogs, or the remote repository form.
-pub fn react_owns(snapshot: &ScreenSnapshot) -> bool {
-  snapshot.repository.is_some()
-    || snapshot.remote.is_open()
-    || matches!(&snapshot.view, screen::View::Onboarding(route) if route.remote_repo.is_some())
 }
 
 /// Gives window `label` its model, on `repo`. Main thread, outside a GPUI
@@ -68,7 +56,7 @@ pub(in crate::gpui_shell) fn start(
   label: &str,
   repo: Option<String>,
 ) -> Result<(), tauri_plugin_gpui::GpuiError> {
-  driven().lock_or_recover().insert(label.to_string(), false);
+  driven().lock_or_recover().insert(label.to_string());
   let (app, label) = (app.clone(), label.to_string());
   update_shell(&label.clone(), move |shell, cx| {
     let weak = cx.weak_entity();
@@ -79,14 +67,8 @@ pub(in crate::gpui_shell) fn start(
         let _ = weak.update(cx, |shell, cx| shell.present(presentation, cx));
       });
     });
-    let forward: Forwarder = {
-      let (app, label) = (app.clone(), label.clone());
-      Rc::new(move |forward, _| match forward {
-        Forward::Event(event) => emit_to_webview(&app, &label, event, ()),
-      })
-    };
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
-    let controller = cx.new(|cx| WindowController::new(host, repo, present, forward, cx));
+    let controller = cx.new(|cx| WindowController::new(host, repo, present, cx));
     if let Some(dark) = shell.os_dark {
       controller.update(cx, |c, cx| c.set_system_dark(dark, cx));
     }
@@ -125,8 +107,8 @@ fn with_controller(
   });
 }
 
-/// An action sink: the model's handler, then React's `event` for what it
-/// leaves.
+/// An action sink: the model's handler for a window it drives, React's
+/// `event` for one it does not.
 pub(in crate::gpui_shell) fn routed(
   app: AppHandle,
   label: String,
@@ -137,11 +119,11 @@ pub(in crate::gpui_shell) fn routed(
     if !drives(&label) {
       return emit_to_webview(&app, &label, event, action);
     }
-    let (app, label) = (app.clone(), label.clone());
+    let label = label.clone();
     // The view that sent it is mid-update.
     cx.defer(move |cx| {
       if !handle(&label, &action, cx) {
-        emit_to_webview(&app, &label, event, action);
+        log::debug!("window {label} has no handler for {action:?}");
       }
     });
   })
@@ -178,29 +160,15 @@ pub(in crate::gpui_shell) fn shortcut(label: &str, shortcut: Shortcut, cx: &mut 
   }
 }
 
-/// Keeps React's overlay for window `label`; whether to draw it. Main
-/// thread, outside a GPUI update.
-pub(in crate::gpui_shell) fn react_overlay(label: &str, snapshot: Option<OverlaySnapshot>) -> bool {
-  let label = label.to_string();
-  tauri_plugin_gpui::with_app(move |cx| {
-    let shell = cx
-      .try_global::<Shells>()
-      .and_then(|shells| shells.0.get(&label))
-      .and_then(WeakEntity::upgrade);
-    match shell {
-      Some(shell) => shell.update(cx, |shell, _| {
-        shell.react.overlay = snapshot;
-        shell.react_draws()
-      }),
-      None => true,
-    }
-  })
-  .unwrap_or(true)
+/// Whether React's overlay for window `label` is drawn: only while the
+/// model does not drive it. Main thread, outside a GPUI update.
+pub(in crate::gpui_shell) fn react_overlay(label: &str, _: Option<OverlaySnapshot>) -> bool {
+  !drives(label)
 }
 
 /// A change the backend reports for window `label` (`Backend::notify`):
-/// the model follows it. True keeps it from React, for the requests the
-/// model answers with a dialog of its own. Any thread.
+/// the model follows it. True keeps it from React, for the requests and
+/// remote feedback the model answers itself. Any thread.
 pub fn native_event(app: &AppHandle, label: &str, event: &NativeEvent) -> bool {
   if !drives(label) {
     return false;
@@ -209,7 +177,45 @@ pub fn native_event(app: &AppHandle, label: &str, event: &NativeEvent) -> bool {
   with_controller(app, label, move |c, cx| {
     c.native_event(&event_for_model, cx)
   });
-  matches!(event, NativeEvent::Open { .. })
+  matches!(
+    event,
+    NativeEvent::Open { .. }
+      | NativeEvent::RemoteMutation { .. }
+      | NativeEvent::RemoteCutoff { .. }
+  )
+}
+
+/// The cloud workspace connected or renewed (`ManagedEndpointEvent`): a
+/// connection goes to window `label` (the one that asked), a renewal to
+/// every window. Any thread.
+pub fn managed_endpoint(app: &AppHandle, label: Option<&str>, event: ManagedEndpointEvent) {
+  let targets = match (&event, label) {
+    (ManagedEndpointEvent::Connected { .. }, Some(label)) => vec![label.to_string()],
+    _ => labels(),
+  };
+  for label in targets {
+    let event = event.clone();
+    with_controller(app, &label, move |c, cx| c.managed_endpoint(event, cx));
+  }
+}
+
+/// An endpoint was reauthenticated: no window blocks it any more. Any
+/// thread.
+pub fn cutoff_cleared(app: &AppHandle, endpoint_id: &str) {
+  remote_repo::clear_cutoff(endpoint_id);
+  for label in labels() {
+    let id = endpoint_id.to_string();
+    with_controller(app, &label, move |c, cx| c.cutoff_changed(&id, None, cx));
+  }
+}
+
+/// The account changed: windows follow the cloud workspace's state. Any
+/// thread.
+pub fn instance_state(app: &AppHandle, state: Option<String>) {
+  for label in labels() {
+    let state = state.clone();
+    with_controller(app, &label, move |c, cx| c.account_changed(state, cx));
+  }
 }
 
 /// A menu bar item for window `label`, as the event `lib.rs` would send
@@ -252,6 +258,27 @@ pub fn listen(app: &AppHandle) {
       with_controller(&handle, &label, |c, cx| c.prs_changed(cx));
     }
   });
+  // `remoteCutoffStore`: the transport tore an endpoint's connections down.
+  let handle = app.clone();
+  app.listen_any(
+    crate::commands::remote_control::REMOTE_CUTOFF_EVENT,
+    move |event| {
+      let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap_or_default();
+      let (Some(id), Some(reason)) = (payload["endpoint_id"].as_str(), payload["reason"].as_str())
+      else {
+        return;
+      };
+      if let Some(cutoff) = Cutoff::parse(reason) {
+        remote_repo::record_cutoff(id, cutoff);
+      }
+      for label in labels() {
+        let (id, reason) = (id.to_string(), reason.to_string());
+        with_controller(&handle, &label, move |c, cx| {
+          c.cutoff_changed(&id, Some(reason), cx)
+        });
+      }
+    },
+  );
   let handle = app.clone();
   app.listen_any("workspace-files-changed", move |event| {
     let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap_or_default();
@@ -265,12 +292,7 @@ pub fn listen(app: &AppHandle) {
 }
 
 fn labels() -> Vec<String> {
-  driven()
-    .lock_or_recover()
-    .iter()
-    .filter(|(_, owns)| !**owns)
-    .map(|(label, _)| label.clone())
-    .collect()
+  driven().lock_or_recover().iter().cloned().collect()
 }
 
 /// Tells the model the OS appearance the shell renders under.

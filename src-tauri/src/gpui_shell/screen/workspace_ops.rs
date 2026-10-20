@@ -35,10 +35,16 @@ impl WorkspaceActionsHost for Backend {
   }
 
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote.delete_workspace(workspace_id);
+    }
     core::delete_workspace(repo_path, &workspace_id).map(drop)
   }
 
   fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote.archive_workspace(workspace_id);
+    }
     core::archive_workspace_removing_directory_later(repo_path, workspace_id)
   }
 

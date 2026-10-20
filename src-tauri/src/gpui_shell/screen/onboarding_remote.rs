@@ -2,7 +2,7 @@
 //! card while an SSH endpoint is connected but no repository is open: the
 //! cut-off notice with Reauthenticate, or `RemoteRepositorySelector`.
 //!
-//! React keeps the form's state and runs probe, open, clone and init: GPUI
+//! The window keeps the form's state and runs probe, open, clone and init: GPUI
 //! draws what the route says and sends what is typed and pressed
 //! (`remoteRepo.*`).
 

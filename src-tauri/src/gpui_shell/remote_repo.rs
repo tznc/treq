@@ -14,13 +14,14 @@ use std::{
   sync::{Arc, Mutex},
 };
 
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
   core::{
     remote::{FileRevision, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
+    remote_idempotency::{self, Outcome},
     PullWorkspaceResult, WorkspaceFileHunksBatch, WorkspaceFileHunksBatchFile, WorkspaceStatus,
   },
   github::GitRemoteInfo,
@@ -37,7 +38,7 @@ pub const ALREADY_APPLIED: &str = "Already applied before the connection dropped
 
 /// The remote repository React shows (`ActiveRepository` with an SSH
 /// location), as the snapshot carries it.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteRepository {
   /// `None` when the repository has no resolved endpoint: every call fails.
@@ -167,6 +168,45 @@ impl Cutoff {
       Cutoff::CertificateExpired
     })
   }
+
+  /// The cutoff an id names (`remote://cutoff`'s `reason`).
+  pub fn parse(id: &str) -> Option<Self> {
+    [
+      Cutoff::SessionEnded,
+      Cutoff::KeyRevoked,
+      Cutoff::InstanceInaccessible,
+      Cutoff::CertificateExpired,
+    ]
+    .into_iter()
+    .find(|c| c.id() == id)
+  }
+}
+
+/// The endpoints cut off until the user reauthenticates, app-wide
+/// (`remoteCutoffStore`): fed by the transport's `remote://cutoff` events
+/// and by commands that find an endpoint cut off.
+fn cutoffs() -> &'static Mutex<HashMap<String, Cutoff>> {
+  static CUTOFFS: std::sync::OnceLock<Mutex<HashMap<String, Cutoff>>> = std::sync::OnceLock::new();
+  CUTOFFS.get_or_init(Mutex::default)
+}
+
+/// Records `endpoint_id` as cut off; true when that changed anything.
+pub fn record_cutoff(endpoint_id: &str, cutoff: Cutoff) -> bool {
+  cutoffs()
+    .lock_or_recover()
+    .insert(endpoint_id.to_string(), cutoff)
+    != Some(cutoff)
+}
+
+/// Lifts `endpoint_id`'s cutoff (a fresh certificate was issued); true when
+/// it was cut off.
+pub fn clear_cutoff(endpoint_id: &str) -> bool {
+  cutoffs().lock_or_recover().remove(endpoint_id).is_some()
+}
+
+/// Why `endpoint_id` is cut off, if it is.
+pub fn cutoff(endpoint_id: &str) -> Option<Cutoff> {
+  cutoffs().lock_or_recover().get(endpoint_id).copied()
 }
 
 /// Runs typed commands on an endpoint and tells React how they went; faked
@@ -183,12 +223,41 @@ pub trait Transport: Send + Sync {
   fn cut_off(&self, endpoint_id: &str, cutoff: Cutoff);
 }
 
-/// Idempotency keys of changes with no confirmed outcome yet, by the
-/// change's inputs (`remoteActionKeys`): a retry of the same change reuses
-/// its key, so the host runs it at most once.
-fn pending_keys() -> &'static Mutex<HashMap<String, String>> {
-  static KEYS: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
-  KEYS.get_or_init(Mutex::default)
+/// How a change's attempt ended, for its idempotency key.
+fn outcome(mutation: &Mutation) -> Outcome {
+  match mutation {
+    Mutation::Applied(_) => Outcome::Applied,
+    Mutation::AlreadyApplied => Outcome::AlreadyApplied,
+    Mutation::Ambiguous(_) => Outcome::Ambiguous,
+  }
+}
+
+/// `dispatchKeyedMutationOverSsh`: sends `request` to `endpoint` with the
+/// key of the same unconfirmed change on that endpoint generation (the
+/// shared `remoteActionKeys`), or a new one. For changes outside an open
+/// repository: clone and init.
+pub fn keyed_endpoint_mutation(
+  transport: &dyn Transport,
+  endpoint: &SshEndpoint,
+  request: &TreqCommandRequest,
+) -> Result<Mutation, String> {
+  let generation = crate::core::remote_records::endpoint_generation(endpoint);
+  let scope = format!("{}#{generation}", endpoint.id);
+  let unkeyed = without_key(request)?;
+  let keys = remote_idempotency::global();
+  let key = keys.key_for(request.kind_name(), &[unkeyed], &scope);
+  let mutation = transport.mutate(endpoint, with_key(request, &key)?)?;
+  keys.settle(&key, outcome(&mutation));
+  Ok(mutation)
+}
+
+/// `request`'s JSON without its idempotency key: the change's inputs.
+fn without_key(request: &TreqCommandRequest) -> Result<Value, String> {
+  let mut value = serde_json::to_value(request).map_err(|e| e.to_string())?;
+  if let Some(object) = value.as_object_mut() {
+    object.remove("idempotency_key");
+  }
+  Ok(value)
 }
 
 /// `request` with its `idempotency_key` set to `key`.
@@ -295,21 +364,11 @@ impl Remote {
     &self,
     request: TreqCommandRequest,
   ) -> Result<Option<T>, String> {
-    let unkeyed = with_key(&request, "")?;
-    let fingerprint = format!(
-      "{}\u{0}{}",
-      self.repo.cache_key,
-      serde_json::to_string(&unkeyed).unwrap_or_default()
-    );
-    let key = pending_keys()
-      .lock_or_recover()
-      .entry(fingerprint.clone())
-      .or_insert_with(|| format!("{}:{}", request.kind_name(), uuid::Uuid::new_v4()))
-      .clone();
+    let unkeyed = without_key(&request)?;
+    let keys = remote_idempotency::global();
+    let key = keys.key_for(request.kind_name(), &[unkeyed], &self.repo.cache_key);
     let mutation = self.dispatch_mutation(with_key(&request, &key)?)?;
-    if !matches!(mutation, Mutation::Ambiguous(_)) {
-      pending_keys().lock_or_recover().remove(&fingerprint);
-    }
+    keys.settle(&key, outcome(&mutation));
     self.finish(mutation)
   }
 
@@ -349,6 +408,28 @@ impl Remote {
     self.read(TreqCommandRequest::ListWorkspaces {
       repo: self.repo_arg(),
     })
+  }
+
+  // -- Workspace lifecycle (`useWorkspaceDeletion`) ----------------------------
+
+  /// `delete_workspace`: forgets the workspace and removes its directory.
+  pub fn delete_workspace(&self, workspace_id: i64) -> Result<(), String> {
+    self
+      .mutation::<Value>(TreqCommandRequest::DeleteWorkspace {
+        repo: self.repo_arg(),
+        workspace: workspace_id.to_string(),
+      })
+      .map(drop)
+  }
+
+  /// `archive_workspace`: removes the directory but keeps the record.
+  pub fn archive_workspace(&self, workspace_id: i64) -> Result<(), String> {
+    self
+      .mutation::<Value>(TreqCommandRequest::ArchiveWorkspace {
+        repo: self.repo_arg(),
+        workspace: workspace_id.to_string(),
+      })
+      .map(drop)
   }
 
   pub fn status(&self, workspace_id: Option<i64>) -> Result<WorkspaceStatus, String> {
@@ -1025,5 +1106,57 @@ pub(crate) mod tests {
       .workspaces()
       .unwrap_err()
       .starts_with("endpoint_unresolved: app"));
+  }
+
+  fn sent_keys(transport: &FakeTransport) -> Vec<String> {
+    transport
+      .sent()
+      .into_iter()
+      .map(|request| {
+        serde_json::to_value(request).unwrap()["idempotency_key"]
+          .as_str()
+          .unwrap()
+          .to_string()
+      })
+      .collect()
+  }
+
+  #[test]
+  fn endpoint_changes_keep_their_key_per_endpoint_generation() {
+    let transport = FakeTransport::default();
+    let endpoint = repository().endpoint.unwrap();
+    let init = TreqCommandRequest::InitRepo {
+      repo: "~/keyed-endpoint-test".into(),
+      idempotency_key: String::new(),
+    };
+    transport
+      .mutations
+      .lock()
+      .unwrap()
+      .insert("InitRepo", Mutation::Ambiguous("lost".into()));
+    keyed_endpoint_mutation(&transport, &endpoint, &init).unwrap();
+    transport.mutations.lock().unwrap().clear();
+    keyed_endpoint_mutation(&transport, &endpoint, &init).unwrap();
+    let mut other = endpoint.clone();
+    other.id = "ep-other".into();
+    keyed_endpoint_mutation(&transport, &other, &init).unwrap();
+    let keys = sent_keys(&transport);
+    assert!(keys[0].starts_with("InitRepo:"));
+    assert_eq!(keys[0], keys[1], "the retry after an unknown outcome");
+    assert_ne!(keys[1], keys[2], "another endpoint never shares a key");
+  }
+
+  #[test]
+  fn cutoffs_are_kept_until_cleared() {
+    let id = "ep-cutoff-registry";
+    assert_eq!(cutoff(id), None);
+    assert!(record_cutoff(id, Cutoff::KeyRevoked));
+    assert!(!record_cutoff(id, Cutoff::KeyRevoked));
+    assert_eq!(cutoff(id), Some(Cutoff::KeyRevoked));
+    assert!(clear_cutoff(id));
+    assert!(!clear_cutoff(id));
+    assert_eq!(cutoff(id), None);
+    assert_eq!(Cutoff::parse("session_ended"), Some(Cutoff::SessionEnded));
+    assert_eq!(Cutoff::parse("nope"), None);
   }
 }

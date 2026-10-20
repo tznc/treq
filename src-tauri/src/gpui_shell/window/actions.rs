@@ -4,16 +4,17 @@
 //! `useGpuiAgentModals`, `useGpuiOverlays`, `useGpuiGithubScreen` and the
 //! panels' own), as changes to the [`Model`] and the [`Effect`]s they need.
 //!
-//! Each returns `None` for an action it leaves to React (a remote
-//! repository's flows), which the window then forwards to the webview.
+//! Each returns `None` for an action that is not the window's: a menu or
+//! drag `sidebar_actions` runs, or one a screen runs itself. The remote
+//! ones are in `remote_actions`.
 
 use serde_json::{json, Value};
 
 use super::{
   data::Data,
   model::{
-    workspace_source, ChangeMove, Effect, FolderPurpose, Forward, GithubTab, Model, Page,
-    PendingSelect, Tab, TerminalSummary,
+    workspace_source, ChangeMove, Effect, FolderPurpose, GithubTab, Model, Page, PendingSelect,
+    Tab, TerminalSummary,
   },
   sidebar, snapshots, tree,
 };
@@ -57,7 +58,7 @@ pub enum Shortcut {
 }
 
 /// What a handler did: changed the model with these effects, or left the
-/// action to React.
+/// action to `sidebar_actions` (a menu or drag) or to nobody.
 pub type Handled = Option<Vec<Effect>>;
 
 fn done() -> Handled {
@@ -95,9 +96,7 @@ impl Model {
       Shortcut::MaximizeTerminal if self.shows_terminal() => {
         self.terminal("toggleMaximize", json!({}));
       }
-      Shortcut::NewAgent if self.shows_terminal() => {
-        return vec![self.start_agent(self.selected, data)];
-      }
+      Shortcut::NewAgent if self.shows_terminal() => return self.new_agent(self.selected, data),
       Shortcut::NewShell if self.shows_terminal() => self.terminal("newShell", json!({})),
       Shortcut::ZoomIn => return vec![self.zoom(super::model::ZOOM_STEP as i32)],
       Shortcut::ZoomOut => return vec![self.zoom(-(super::model::ZOOM_STEP as i32))],
@@ -177,7 +176,7 @@ impl Model {
         if id.is_some() && find(*id).is_none() {
           return done();
         }
-        with(self.start_agent(*id, data))
+        Some(self.new_agent(*id, data))
       }
       SidebarAction::OpenShell { id } => {
         let workspace = find(*id);
@@ -212,13 +211,24 @@ impl Model {
   /// A screen's or dialog's action (`ScreenAction`).
   pub fn screen_action(&mut self, action: &ScreenAction, data: &Data) -> Handled {
     match action {
-      ScreenAction::Press { id } => self.press(id, data),
-      ScreenAction::Field { field, value } => self.field(field, value, data),
+      ScreenAction::Press { id } => match self.remote_press(id) {
+        Some(effects) => Some(effects),
+        None => self.press(id, data),
+      },
+      ScreenAction::Field { field, value } => match self.remote_field(field, value, data) {
+        Some(effects) => Some(effects),
+        None => self.field(field, value, data),
+      },
       ScreenAction::OpenUrl { url } => with(Effect::OpenUrl(url.clone())),
       // The onboarding screen opens a local repository itself.
       ScreenAction::OpenRepo => with(Effect::PickFolder(FolderPurpose::OpenRepo)),
       ScreenAction::RecheckPrerequisites => done(),
-      ScreenAction::OpenRemote | ScreenAction::Commit { .. } => None,
+      ScreenAction::OpenRemote => {
+        self.open_remote_setup();
+        done()
+      }
+      // A slider let go: the screens that have one save it themselves.
+      ScreenAction::Commit { .. } => done(),
     }
   }
 
@@ -547,8 +557,16 @@ impl Model {
       }
       "terminal.newAgent" => {
         let Some(dir) = value.as_str().filter(|d| !d.is_empty()) else {
-          return with(self.start_agent(self.selected, data));
+          return Some(self.new_agent(self.selected, data));
         };
+        if self.is_remote() {
+          let workspace = data
+            .workspaces(self.repo())
+            .iter()
+            .find(|w| super::model::full_path(w) == dir)
+            .map(|w| w.id);
+          return Some(self.start_remote_agent(workspace, data));
+        }
         let workspace = self.linked_repos(data).iter().find_map(|repo| {
           data
             .workspaces(repo)
@@ -621,10 +639,18 @@ impl Model {
         };
         return Some(self.shortcut(shortcut, data));
       }
-      // A remote repository's shell.
       _ => return None,
     }
     done()
+  }
+
+  /// `handleCreateSessionFromSidebar`: an agent session, on the host for a
+  /// remote repository.
+  fn new_agent(&mut self, workspace_id: Option<i64>, data: &Data) -> Vec<Effect> {
+    if self.is_remote() {
+      return self.start_remote_agent(workspace_id, data);
+    }
+    vec![self.start_agent(workspace_id, data)]
   }
 
   /// `useGpuiOverlays`' action handler.
@@ -721,7 +747,7 @@ impl Model {
           .get_or_insert_with(Default::default);
         Vec::new()
       }
-      "start-agent-terminal" => vec![self.start_agent(self.selected, data)],
+      "start-agent-terminal" => self.new_agent(self.selected, data),
       "open-prompt-history" => {
         self.dialogs.prompt_history = Some(None);
         Vec::new()
@@ -789,9 +815,20 @@ impl Model {
         vec![Effect::Refresh { revision: true }]
       }
       NativeEvent::Open { what } => self.open_request(what, data),
-      NativeEvent::Toast { .. }
-      | NativeEvent::RemoteMutation { .. }
-      | NativeEvent::RemoteCutoff { .. } => Vec::new(),
+      NativeEvent::RemoteMutation { status, reason } => {
+        self.remote_mutation(status, reason.as_deref())
+      }
+      NativeEvent::RemoteCutoff {
+        endpoint_id,
+        reason,
+      } => {
+        self
+          .remote
+          .cutoffs
+          .insert(endpoint_id.clone(), reason.clone());
+        Vec::new()
+      }
+      NativeEvent::Toast { .. } => Vec::new(),
     }
   }
 
@@ -838,7 +875,7 @@ impl Model {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
       Menu::AddRepository => {}
-      Menu::OpenSsh => return vec![Effect::React(Forward::Event("menu-open-ssh"))],
+      Menu::OpenSsh => self.open_remote_setup(),
       // With no repository there is no Logs tab: show the log folder.
       Menu::ViewLogs if !self.has_repo() || !data.flags.logs => return vec![Effect::OpenLogDir],
       Menu::ViewLogs => {
