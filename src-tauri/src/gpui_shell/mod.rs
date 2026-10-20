@@ -29,7 +29,9 @@ use tauri_plugin_gpui::{
   webview_frame, GpuiConfig, GpuiWindowExt,
 };
 
+mod checks_run;
 mod form;
+mod menus;
 mod modal;
 pub mod native;
 mod overlay;
@@ -38,8 +40,10 @@ mod popup;
 pub mod remote_repo;
 mod screen;
 mod sidebar;
+mod sidebar_actions;
 mod theme;
 mod time;
+mod toasts;
 mod tooltips;
 mod ui;
 
@@ -325,7 +329,7 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
               shell.label.to_string(),
             ));
             let modal = shell.modal.clone();
-            let screen = cx.new(|_| Screen::new(snapshot, sink, popups, webview, host));
+            let screen = cx.new(|cx| Screen::new(snapshot, sink, popups, webview, host, cx));
             screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
             shell.screen = Some(screen);
           }
@@ -395,18 +399,57 @@ fn overlay_sink(app: AppHandle, label: String) -> screen::ActionSink {
   })
 }
 
-/// Sends sidebar actions to the webview of window `label`. Tauri calls must
-/// not run inside a GPUI update, so each send runs in a task.
+/// Runs the sidebar actions GPUI handles itself ([`sidebar_actions`]) and
+/// sends the rest to the webview of window `label`. Tauri calls must not
+/// run inside a GPUI update, so each send runs in a task.
 fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
-  std::rc::Rc::new(move |action: SidebarAction, _| {
-    let (app, label) = (app.clone(), label.clone());
+  fn send(app: AppHandle, label: String, action: SidebarAction) {
     tauri::async_runtime::spawn(async move {
       let target = tauri::EventTarget::webview_window(&label);
       if let Err(err) = tauri::Emitter::emit_to(&app, target, sidebar::ACTION_EVENT, action) {
         log::warn!("failed to send GPUI sidebar action: {err}");
       }
     });
+  }
+  std::rc::Rc::new(move |action: SidebarAction, cx| {
+    let (app, label) = (app.clone(), label.clone());
+    if !sidebar_actions::handles(&action) {
+      return send(app, label, action);
+    }
+    // The sidebar is mid-update while it sends; read it once it is done.
+    cx.defer(move |cx| {
+      let snapshot = cx
+        .try_global::<Shells>()
+        .and_then(|shells| shells.0.get(&label))
+        .and_then(WeakEntity::upgrade)
+        .and_then(|shell| shell.read(cx).sidebar.clone())
+        .map(|sidebar| sidebar.read(cx).snapshot().clone());
+      let handled = snapshot
+        .is_some_and(|snapshot| sidebar_actions::handle(&app, &label, &snapshot, &action, cx));
+      if !handled {
+        send(app, label, action);
+      }
+    });
   })
+}
+
+/// Closes the terminals of a workspace GPUI removed, in window `label`.
+/// Callable from any thread.
+fn close_workspace_terminals(app: &AppHandle, label: &str, path: String) {
+  terminal_command(app, label, "closeWorkspace", Some(path));
+}
+
+/// Gives window `label`'s terminal pane a command of kind `kind`.
+/// Callable from any thread.
+fn terminal_command(app: &AppHandle, label: &str, kind: &'static str, dir: Option<String>) {
+  let label = label.to_string();
+  defer_main(app, move |_| {
+    let _ = update_shell(&label, move |shell, cx| {
+      if let Some(screen) = &shell.screen {
+        screen.update(cx, |screen, cx| screen.terminal_command(kind, dir, cx));
+      }
+    });
+  });
 }
 
 /// Opens the sidebar's tooltip popups for window `label`.
@@ -508,8 +551,14 @@ pub fn hide_popups(app: &AppHandle) {
   defer_main(app, |_| popup::hide_all());
 }
 
-/// Shows window `label`'s toasts, in its sidebar's theme.
+/// Shows React's toasts in window `label`, with the app's own
+/// ([`toasts`]).
 pub fn update_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
+  toasts::set_react(app, label, toasts);
+}
+
+/// Draws window `label`'s toasts, in its sidebar's theme.
+fn draw_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
   let label = label.to_string();
   defer_main(app, move |app| {
     let dark = tauri_plugin_gpui::with_app({
@@ -541,6 +590,7 @@ pub fn place_toasts(app: &AppHandle, label: &str) {
 /// Forgets a destroyed window's shell.
 pub fn forget_window(label: &str) {
   popup::forget_owner(label);
+  toasts::forget(label);
   remote_repo::set_window(label, None);
   modal::forget(label);
   let label = label.to_string();

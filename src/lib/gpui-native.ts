@@ -18,7 +18,7 @@ export type GpuiNativeEvent =
       kind: "toast";
       title: string;
       description: string;
-      tone: "success" | "warning" | "error";
+      tone: "success" | "warning" | "error" | "info";
       /** A button whose click GPUI handles: `gpuiToastAction`. */
       action?: { label: string; id: number };
     }
@@ -29,7 +29,21 @@ export type GpuiNativeEvent =
       reason?: string;
     }
   /** A remote command found the endpoint's credential cut off. */
-  | { kind: "remoteCutoff"; endpointId: string; reason: CutoffReason };
+  | { kind: "remoteCutoff"; endpointId: string; reason: CutoffReason }
+  /** GPUI deleted or archived these workspaces: leave them if they show. */
+  | { kind: "workspacesRemoved"; repoPath: string; ids: number[] }
+  /** A GPUI menu or button opens something React still routes. */
+  | { kind: "open"; what: GpuiOpenRequest };
+
+/** What GPUI asks React to open (src-tauri/src/gpui_shell/native.rs). */
+export type GpuiOpenRequest =
+  | { kind: "branchSwitcher" }
+  | { kind: "addRepository" }
+  | { kind: "repoSettings"; repoPath: string }
+  | { kind: "locateRepo"; repoPath: string }
+  | { kind: "removeRepo"; repoPath: string }
+  | { kind: "renameWorkspace"; repoPath: string; workspaceId: number }
+  | { kind: "prReview"; number: number; state: string };
 
 const GPUI_NATIVE_EVENT = "gpui-native-event";
 

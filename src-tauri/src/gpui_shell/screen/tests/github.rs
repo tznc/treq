@@ -35,7 +35,7 @@ pub(super) struct Fake {
   history: Vec<RunSummary>,
   logs_enabled: bool,
   /// Calls that fail, by name.
-  fail: Vec<&'static str>,
+  pub(super) fail: Vec<&'static str>,
 }
 
 fn author(login: &str) -> GhAuthor {
@@ -270,6 +270,30 @@ impl GithubHost for FakeHost {
     self.record(format!("trust {repo_path}"));
     Ok(())
   }
+
+  fn acts_locally(&self, _: &str) -> bool {
+    !self.react_actions
+  }
+
+  fn run_checks(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+    run: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    self.record(format!(
+      "run {} in {}",
+      run.key(target.workspace_id),
+      target.workspace_path
+    ));
+    if self.failing.contains(&"run_checks") {
+      return Err("no runner".into());
+    }
+    Ok(vec![crate::core::checks::JobResult {
+      job_id: "test".into(),
+      steps: vec![],
+      success: !self.failing.contains(&"checks_fail"),
+    }])
+  }
 }
 
 fn route(tab: &str, selected: Option<u64>, creating: bool) -> ScreenSnapshot {
@@ -292,10 +316,22 @@ fn harness(
   github: Fake,
   snapshot: ScreenSnapshot,
 ) -> (Harness, Arc<FakeHost>) {
-  let host = Arc::new(FakeHost {
-    github,
-    ..FakeHost::default()
-  });
+  harness_with(
+    cx,
+    FakeHost {
+      github,
+      ..FakeHost::default()
+    },
+    snapshot,
+  )
+}
+
+fn harness_with(
+  cx: &mut TestAppContext,
+  host: FakeHost,
+  snapshot: ScreenSnapshot,
+) -> (Harness, Arc<FakeHost>) {
+  let host = Arc::new(host);
   let h = Harness::with_host(cx, snapshot, host.clone());
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
@@ -676,11 +712,85 @@ fn github_pr_detail_runs_its_workspace_checks(cx: &mut TestAppContext) {
   let fake = Fake {
     workspaces: vec![workspace(3, "feat/a", Some("main"))],
     treq: treq(),
+    ..prs()
+  };
+  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  let reads = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read treq checks"))
+      .count()
+  };
+  let before = reads(&host);
+  h.click("github-run-0");
+  h.click("github-run-0-0");
+  h.click("github-rerun-setup");
+  h.cx.run_until_parked();
+  let runs: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("run "))
+    .collect();
+  assert_eq!(
+    runs,
+    [
+      "run 3:ci.yml in /repo/.treq/workspaces/feat/a",
+      "run 3:ci.yml:test in /repo/.treq/workspaces/feat/a",
+      "run 3:<setup> in /repo/.treq/workspaces/feat/a",
+    ]
+  );
+  assert!(h.sent().is_empty(), "React runs none of them");
+  assert_eq!(reads(&host), before + 3, "each end reads the checks again");
+  assert!(host
+    .calls()
+    .contains(&"notify workspaceChanged".to_string()));
+}
+
+#[gpui::test]
+fn github_pr_detail_shows_a_run_started_elsewhere_as_running(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: treq(),
+    ..prs()
+  };
+  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  h.cx.update(|_, cx| {
+    let mut running = crate::gpui_shell::checks_run::Running::default();
+    running.0.start("/repo", "3:ci.yml");
+    cx.set_global(running);
+  });
+  h.cx.run_until_parked();
+  let keys = h.screen.read_with(&h.cx, |screen, cx| {
+    screen
+      .github
+      .as_ref()
+      .expect("github view")
+      .read(cx)
+      .running_keys(cx)
+  });
+  assert_eq!(keys, ["3:ci.yml"]);
+  // Its button is disabled while it runs.
+  h.click("github-run-0");
+  h.cx.run_until_parked();
+  assert!(!host.calls().iter().any(|c| c.starts_with("run ")));
+}
+
+#[gpui::test]
+fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: treq(),
     history: treq().latest.into_values().collect(),
     logs_enabled: true,
     ..prs()
   };
-  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  let host = FakeHost {
+    github: fake,
+    react_actions: true,
+    ..FakeHost::default()
+  };
+  let (mut h, host) = harness_with(cx, host, route("prs", Some(1), false));
   assert!(h.drawn("github-treq-checks"));
   assert!(h.drawn("setup-script-status"));
   h.click("github-run-0");

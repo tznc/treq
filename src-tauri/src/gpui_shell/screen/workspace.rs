@@ -48,6 +48,8 @@ use crate::gpui_shell::{
   ui::{self, Button, Size, TextSize, Variant},
 };
 
+mod actions;
+
 /// React's base-ui tooltips open after 200ms (`TooltipProvider delay={200}`).
 const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
 
@@ -305,6 +307,10 @@ const PR_POLL: Duration = Duration::from_secs(5);
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
+  /// What the header's own actions ask of the backend.
+  actions: Arc<dyn super::workspace_ops::WorkspaceActionsHost>,
+  /// Those actions in flight.
+  busy: actions::Busy,
   popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
   /// The header popover that shows in the modal window, if one does.
@@ -352,6 +358,8 @@ pub struct WorkspaceView {
   /// Where dropdown buttons were last drawn, in window coordinates.
   bounds: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
   _poll: Task<()>,
+  /// Draws checks as running while one runs anywhere in the app.
+  _running: gpui::Subscription,
 }
 
 impl WorkspaceView {
@@ -390,8 +398,12 @@ impl WorkspaceView {
         break;
       }
     });
+    let running =
+      cx.observe_global::<crate::gpui_shell::checks_run::Running>(|view, cx| view.rebuild(cx));
     let mut this = Self {
       host: host.clone(),
+      actions: host.clone(),
+      busy: actions::Busy::default(),
       popover_host: host.clone(),
       popover: None,
       code_host: host,
@@ -420,6 +432,7 @@ impl WorkspaceView {
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
       _poll: poll,
+      _running: running,
     };
     this.load(cx);
     this
@@ -438,6 +451,7 @@ impl WorkspaceView {
       self.loaded = None;
       self.pr = PrCache::default();
       self.pending = Pending::None;
+      self.busy = actions::Busy::default();
     }
     if stale {
       self.load(cx);
@@ -501,8 +515,9 @@ impl WorkspaceView {
   }
 
   fn rebuild(&mut self, cx: &mut Context<Self>) {
+    let route = self.drawn_route(cx);
     let snapshot = self.loaded.as_ref().map(|loaded| {
-      let (header, tab_row) = workspace_view(&self.route, loaded, &self.pr, self.pending);
+      let (header, tab_row) = workspace_view(&route, loaded, &self.pr, self.pending);
       Workspace { header, tab_row }
     });
     if self.snapshot != snapshot {
@@ -513,20 +528,21 @@ impl WorkspaceView {
   }
 
   /// What the Checks popover draws, from what the header read.
-  fn checks_input(&self) -> Option<popover::ChecksInput> {
+  fn checks_input(&self, cx: &App) -> Option<popover::ChecksInput> {
     let loaded = self.loaded.as_ref()?;
+    let route = self.drawn_route(cx);
     Some(popover::ChecksInput {
       data: loaded.checks.clone()?,
       ci: self.pr.ci.clone().filter(|ci| ci.total > 0),
-      running: self.route.running_checks.clone(),
-      running_workflows: self.route.running_workflows.clone(),
-      setup_rerunning: self.route.setup_rerunning,
+      running: route.running_checks,
+      running_workflows: route.running_workflows,
+      setup_rerunning: route.setup_rerunning,
       logs: loaded.logs_enabled,
     })
   }
 
   /// The popover that header button `key` opens, for the shown workspace.
-  fn popover_kind(&self, key: &str) -> Option<popover::Kind> {
+  fn popover_kind(&self, key: &str, cx: &App) -> Option<popover::Kind> {
     let loaded = self.loaded.as_ref()?;
     let repo_path = self.route.repo_path.clone();
     match key {
@@ -550,7 +566,7 @@ impl WorkspaceView {
           current: target.branch.clone(),
         }))
       }
-      "workspace-checks" => Some(popover::Kind::Checks(self.checks_input()?)),
+      "workspace-checks" => Some(popover::Kind::Checks(self.checks_input(cx)?)),
       _ => None,
     }
   }
@@ -560,11 +576,11 @@ impl WorkspaceView {
     let Some(anchor) = self.bounds.borrow().get(key).copied() else {
       return;
     };
-    let Some(kind) = self.popover_kind(key) else {
+    let Some(kind) = self.popover_kind(key, cx) else {
       return;
     };
     self.close_popover(cx);
-    let (host, react, dark) = (self.popover_host.clone(), self.react.clone(), self.dark);
+    let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
     let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
     let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
       this.close_popover(cx)
@@ -584,7 +600,7 @@ impl WorkspaceView {
     let Some(popover) = self.popover.as_ref().map(|(popover, _)| popover.clone()) else {
       return;
     };
-    let input = self.checks_input();
+    let input = self.checks_input(cx);
     let dark = self.dark;
     popover.update(cx, |popover, cx| {
       popover.set_dark(dark, cx);
@@ -595,6 +611,9 @@ impl WorkspaceView {
   }
 
   pub(super) fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
+    if self.act(&action, cx) {
+      return;
+    }
     let (repo, workspace_id) = (self.route.repo_path.clone(), self.route.workspace_id);
     match action {
       ScreenAction::Press { id } => match id.as_str() {
@@ -1758,7 +1777,8 @@ impl WorkspaceView {
 
   fn terminal_place(&self) -> Place {
     let repo = self.route.repo_path.clone();
-    let workspaces = self.code_host.workspaces(&repo).unwrap_or_default();
+    let workspaces =
+      super::code_data::CodeHost::workspaces(&*self.code_host, &repo).unwrap_or_default();
     let selected = self
       .route
       .workspace_id

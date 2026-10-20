@@ -481,6 +481,16 @@ fn plural(n: usize, word: &str) -> String {
   format!("{n} {word}{}", if n == 1 { "" } else { "s" })
 }
 
+/// The branch must be pushed before a pull request can be made for it:
+/// it is not on the remote, or has commits the remote lacks.
+pub fn needs_push(loaded: &Loaded) -> bool {
+  loaded.workspace.as_ref().is_some_and(|w| w.not_on_remote)
+    || matches!(
+      loaded.status.as_ref().map(|s| &s.remote_sync),
+      Some(RemoteSyncStatus::Ahead { .. } | RemoteSyncStatus::Diverged { .. })
+    )
+}
+
 /// `ShowWorkspace`'s header and tab row, from what was loaded. `None` until
 /// the first load, when React draws nothing different.
 pub fn workspace_view(
@@ -553,11 +563,7 @@ pub fn workspace_view(
     }),
   });
 
-  let needs_push = not_on_remote
-    || matches!(
-      status.map(|s| &s.remote_sync),
-      Some(RemoteSyncStatus::Ahead { .. } | RemoteSyncStatus::Diverged { .. })
-    );
+  let needs_push = needs_push(loaded);
   let has_commits = has_workspace_commits || commits_ahead > 0;
   const NO_COMMITS: &str =
     "Make a commit before creating a pull request. Uncommitted working-copy changes don't count.";

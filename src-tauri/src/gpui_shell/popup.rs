@@ -1107,6 +1107,9 @@ impl PopupView {
       action,
     };
     defer_main(&self.app, move |app| {
+      if super::toasts::click(app, &owner, &click.id, click.action) {
+        return;
+      }
       let target = tauri::EventTarget::webview_window(&owner);
       if let Err(err) = app.emit_to(target, TOAST_EVENT, click) {
         log::warn!("failed to send a GPUI toast click: {err}");

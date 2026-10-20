@@ -58,6 +58,45 @@ pub enum NativeEvent {
   /// A remote command found the endpoint cut off (`noteCutoffFromError`).
   #[serde(rename_all = "camelCase")]
   RemoteCutoff { endpoint_id: String, reason: String },
+  /// GPUI removed (deleted or archived) these workspaces of the repository,
+  /// so React leaves them if they show (`leaveRemovedWorkspaces`).
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRemoved { repo_path: String, ids: Vec<i64> },
+  /// A menu item picked in GPUI that opens something React still routes:
+  /// a dialog, a page or a flow.
+  Open { what: OpenRequest },
+}
+
+/// What a GPUI menu or button asks React to open, tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenRequest {
+  BranchSwitcher,
+  /// The add-supporting-repository flow.
+  AddRepository,
+  #[serde(rename_all = "camelCase")]
+  RepoSettings {
+    repo_path: String,
+  },
+  #[serde(rename_all = "camelCase")]
+  LocateRepo {
+    repo_path: String,
+  },
+  #[serde(rename_all = "camelCase")]
+  RemoveRepo {
+    repo_path: String,
+  },
+  /// The rename dialog for a workspace.
+  #[serde(rename_all = "camelCase")]
+  RenameWorkspace {
+    repo_path: String,
+    workspace_id: i64,
+  },
+  /// The pull request in Treq's PR view (`onViewPrInApp`).
+  PrReview {
+    number: u64,
+    state: String,
+  },
 }
 
 /// A toast's button: `label`, running the action registered as `id`.
@@ -103,6 +142,7 @@ pub enum ToastTone {
   Success,
   Warning,
   Error,
+  Info,
 }
 
 fn package_json() -> serde_json::Value {
@@ -170,6 +210,21 @@ impl Backend {
   /// Tells this window's React app what a screen did. Tauri calls must not
   /// run inside a GPUI update, so it sends from a task.
   pub fn notify(&self, event: NativeEvent) {
+    // The app's own toasts show without React.
+    if let NativeEvent::Toast {
+      title,
+      description,
+      tone,
+      action,
+    } = event
+    {
+      let action = action.map(|action| {
+        let run: super::toasts::ToastActionFn = Box::new(move || run_toast_action(action.id));
+        (action.label, run)
+      });
+      super::toasts::push(&self.app, &self.label, tone, &title, &description, action);
+      return;
+    }
     let (app, label) = (self.app.clone(), self.label.clone());
     tauri::async_runtime::spawn(async move {
       let target = tauri::EventTarget::webview_window(&label);

@@ -11,6 +11,8 @@ struct FakeHost {
   workspaces: Vec<WorkspaceRow>,
   branches: Vec<JjBranch>,
   switch_error: Option<String>,
+  /// Checks fail with this error.
+  run_error: Option<String>,
   calls: Mutex<Vec<String>>,
 }
 
@@ -53,6 +55,133 @@ impl OverlayHost for FakeHost {
   fn open_url(&self, url: &str) {
     self.record(format!("open {url}"));
   }
+
+  fn checks_target(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::running_checks::ChecksTarget> {
+    Some(crate::core::running_checks::ChecksTarget {
+      repo_path: repo_path.into(),
+      workspace_id,
+      workspace_path: format!("{repo_path}/.treq/workspaces/ws{workspace_id}"),
+    })
+  }
+
+  fn run_checks(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+    run: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    self.record(format!(
+      "run {} in {}",
+      run.key(target.workspace_id),
+      target.workspace_path
+    ));
+    if let Some(err) = &self.run_error {
+      return Err(err.clone());
+    }
+    Ok(vec![crate::core::checks::JobResult {
+      job_id: "test".into(),
+      steps: vec![],
+      success: true,
+    }])
+  }
+
+  fn trust_repo(&self, repo_path: &str) -> Result<(), String> {
+    self.record(format!("trust {repo_path}"));
+    Ok(())
+  }
+
+  fn notify(&self, event: crate::gpui_shell::native::NativeEvent) {
+    let json = serde_json::to_value(&event).expect("serialize");
+    let mut line = format!("notify {}", json["kind"].as_str().unwrap_or_default());
+    if let Some(title) = json["title"].as_str() {
+      line += &format!(" {title}");
+    }
+    self.record(line);
+  }
+
+  fn terminal(&self, command: crate::core::palette_commands::TerminalCommand) {
+    self.record(format!("terminal {}", command.kind()));
+  }
+}
+
+fn checks_host(run_error: Option<&str>) -> FakeHost {
+  FakeHost {
+    checks: PaletteChecks {
+      workflows: vec![
+        ("ci.yml".into(), "CI".into()),
+        ("lint.yml".into(), "Lint".into()),
+      ],
+      trusted: true,
+      setup_configured: true,
+      setup_running: false,
+    },
+    run_error: run_error.map(Into::into),
+    ..FakeHost::default()
+  }
+}
+
+/// Picks the palette command labelled `label`.
+fn pick(h: &mut Harness, label: &str) {
+  h.type_text(label);
+  assert_eq!(h.selected().as_deref(), Some(label));
+  h.keys("enter");
+}
+
+fn effects(h: &Harness) -> Vec<String> {
+  h.host
+    .calls()
+    .into_iter()
+    .filter(|c| !c.starts_with("checks ") && !c.starts_with("pr "))
+    .collect()
+}
+
+#[gpui::test]
+fn palette_runs_one_check_and_reports_it(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(true), checks_host(None));
+  pick(&mut h, "Run check: Lint");
+  assert_eq!(h.sent(), vec![press("overlay.close")]);
+  assert_eq!(
+    effects(&h),
+    [
+      "run 4:lint.yml in /repo/.treq/workspaces/ws4",
+      "notify workspaceChanged",
+      "notify toast Lint passed",
+    ]
+  );
+}
+
+#[gpui::test]
+fn palette_runs_all_checks_with_one_report(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(true), checks_host(Some("no runner")));
+  pick(&mut h, "Run checks…");
+  let effects = effects(&h);
+  let toasts: Vec<&String> = effects.iter().filter(|c| c.contains("toast")).collect();
+  assert_eq!(toasts, ["notify toast Checks could not run"]);
+  assert_eq!(effects.iter().filter(|c| c.starts_with("run ")).count(), 2);
+}
+
+#[gpui::test]
+fn palette_reruns_setup_and_trusts_without_a_toast(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(true), checks_host(None));
+  pick(&mut h, "Re-run setup script");
+  assert_eq!(
+    effects(&h),
+    [
+      "run 4:<setup> in /repo/.treq/workspaces/ws4",
+      "notify workspaceChanged",
+    ]
+  );
+}
+
+#[gpui::test]
+fn palette_gives_the_terminal_pane_its_commands(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, palette_json(true), FakeHost::default());
+  pick(&mut h, "Maximize Terminal");
+  assert_eq!(effects(&h), ["terminal toggleMaximize"]);
+  assert_eq!(h.sent(), vec![press("overlay.close")]);
 }
 
 struct Harness {
