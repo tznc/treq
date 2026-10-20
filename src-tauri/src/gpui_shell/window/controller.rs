@@ -103,10 +103,12 @@ impl WindowController {
     })
   }
 
+  #[cfg(test)]
   pub fn model(&self) -> &Model {
     &self.model
   }
 
+  #[cfg(test)]
   pub fn data(&self) -> &Data {
     &self.data
   }

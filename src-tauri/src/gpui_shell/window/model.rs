@@ -59,7 +59,6 @@ impl Tab {
 pub enum GithubTab {
   Issues,
   Prs,
-  MergeQueue,
 }
 
 /// Where in the GitHub view the window is, as its URL route said.
@@ -180,13 +179,6 @@ pub struct Dialogs {
   pub file_picker: bool,
 }
 
-impl Dialogs {
-  /// Whether Escape has a dialog of the window's own to close.
-  pub fn any_overlay(&self) -> bool {
-    self.palette || self.shortcuts || self.workspace_picker || self.branch_switcher
-  }
-}
-
 /// `TerminalSessionSummary`, as far as the sidebar reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSummary {
@@ -292,11 +284,10 @@ pub enum Effect {
   OpenUrl(String),
 }
 
-/// An action GPUI hands to React, for the flows it still runs (a remote
+/// What GPUI hands to React, for the flows it still runs (a remote
 /// repository's).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Forward {
-  Screen(super::super::screen::ScreenAction),
   /// A menu event React listens for, by name.
   Event(&'static str),
 }

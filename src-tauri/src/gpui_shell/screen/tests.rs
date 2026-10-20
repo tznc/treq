@@ -1516,6 +1516,29 @@ fn serializes_actions_as_react_reads_them() {
 }
 
 #[gpui::test]
+fn the_window_models_file_picker_reports_a_dismissal(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let scope = file_picker::Scope {
+    repo_path: "/repo".into(),
+    workspace_id: None,
+    workspace_path: "/repo".into(),
+  };
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
+  assert!(h.drawn("file-picker"));
+  h.click_backdrop();
+  assert_eq!(
+    h.sent().last(),
+    Some(&ScreenAction::Press {
+      id: "filePicker.close".into()
+    })
+  );
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(None, cx));
+  assert!(!h.drawn("file-picker"));
+}
+
+#[gpui::test]
 fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     installed: vec![("git", false), ("gh", true)],

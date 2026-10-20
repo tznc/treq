@@ -1446,6 +1446,8 @@ impl Render for TerminalView {
     div()
       .id(SharedString::from(format!("terminal-{}", self.pty)))
       .debug_selector(|| "terminal-body".into())
+      // The window's keymap leaves the terminal's own keys to it.
+      .key_context("Terminal")
       .track_focus(&self.focus)
       .relative()
       .size_full()

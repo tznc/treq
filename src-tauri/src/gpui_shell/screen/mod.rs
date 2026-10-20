@@ -219,6 +219,9 @@ pub struct Screen {
   remote: Option<Entity<remote::RemoteView>>,
   /// The dialog drawn over the screen, while React keeps it open.
   workspace_modal: Option<workspace_modal::OpenModal>,
+  /// Cmd+P's "Jump to File", while the window model keeps it open.
+  file_picker: Option<(file_picker::Scope, Entity<file_picker::FilePicker>)>,
+  _file_picker: Option<gpui::Subscription>,
 }
 
 impl Screen {
@@ -268,7 +271,42 @@ impl Screen {
       stash: None,
       remote: None,
       workspace_modal: None,
+      file_picker: None,
+      _file_picker: None,
     }
+  }
+
+  /// Opens "Jump to File" on `scope`, or closes it for `None`. A pick goes
+  /// out as `filePicker.select` with the checkout-relative path, a dismissal
+  /// as `filePicker.close`.
+  pub fn set_file_picker(&mut self, scope: Option<file_picker::Scope>, cx: &mut Context<Self>) {
+    if self.file_picker.as_ref().map(|(s, _)| s) == scope.as_ref() {
+      return;
+    }
+    self._file_picker = None;
+    self.file_picker = scope.map(|scope| {
+      let host: Arc<dyn code_data::CodeHost> = self.host.clone();
+      let dark = self.snapshot.dark;
+      let picker = cx.new(|cx| file_picker::FilePicker::new(host, scope.clone(), dark, cx));
+      let sink = self.sink.clone();
+      self._file_picker = Some(cx.subscribe(
+        &picker,
+        move |_, _, event: &file_picker::FilePickerEvent, cx| {
+          let action = match event {
+            file_picker::FilePickerEvent::Selected(path) => ScreenAction::Field {
+              field: "filePicker.select".into(),
+              value: path.clone().into(),
+            },
+            file_picker::FilePickerEvent::Dismissed => ScreenAction::Press {
+              id: "filePicker.close".into(),
+            },
+          };
+          sink(action, cx);
+        },
+      ));
+      (scope, picker)
+    });
+    cx.notify();
   }
 
   /// Draws `modal` over the screen, or closes the open one for `None`. The
@@ -440,7 +478,7 @@ impl Render for Screen {
     }
     let workspace_modal = self.workspace_modal.as_ref().filter(|open| open.shown(cx));
     // The webview is a window of its own; a dialog over it must hide it.
-    let covered = workspace_modal.is_some();
+    let covered = workspace_modal.is_some() || self.file_picker.is_some();
     let workspace_modal = workspace_modal.map(workspace_modal::OpenModal::element);
     let modal = self.modal_view(dark, cx);
     let ctx = Ctx {
@@ -629,6 +667,7 @@ impl Render for Screen {
       .children(remote)
       .children(workspace_modal)
       .children(modal)
+      .children(self.file_picker.as_ref().map(|(_, picker)| picker.clone()))
   }
 }
 

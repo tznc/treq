@@ -233,6 +233,11 @@ impl Backend {
       super::toasts::push(&self.app, &self.label, tone, &title, &description, action);
       return;
     }
+    // The window model follows it; React too, but for the requests the
+    // model answers itself.
+    if super::window::native_event(&self.app, &self.label, &event) {
+      return;
+    }
     let (app, label) = (self.app.clone(), self.label.clone());
     tauri::async_runtime::spawn(async move {
       let target = tauri::EventTarget::webview_window(&label);
