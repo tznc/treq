@@ -1022,6 +1022,22 @@ pub fn archive_workspace_leaving_directory(
   )
 }
 
+/// Archives a workspace and removes its directory in the background, so the
+/// row can go at once (`archive_workspace`).
+pub fn archive_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<(), String> {
+  if let Some(path) = archive_workspace_leaving_directory(repo_path, &workspace_id)? {
+    std::thread::spawn(move || {
+      if let Err(e) = jj::remove_workspace_directory_only(&path) {
+        tracing::warn!("Background workspace directory removal failed: {}", e);
+      }
+    });
+  }
+  Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum RemoveWorkspaceDiskMode {
   /// Forget the jj working copy, leave the directory for a later rm.

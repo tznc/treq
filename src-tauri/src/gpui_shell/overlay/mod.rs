@@ -30,6 +30,7 @@ use crate::jj::JjBranch;
 pub mod cmdk;
 mod data;
 mod palette;
+mod palette_run;
 mod shortcuts;
 #[cfg(test)]
 mod tests;
@@ -403,7 +404,10 @@ impl Overlay {
               cx,
             );
           }
-          id => self.press(&format!("palette.{id}"), cx),
+          id => {
+            let id = id.to_string();
+            self.run_palette(&id, cx);
+          }
         }
       }
       Body::Workspaces(rows) => {

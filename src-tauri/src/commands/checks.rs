@@ -177,12 +177,7 @@ pub async fn rerun_workspace_setup_script(
   workspace_path: String,
 ) -> Result<JobResult, String> {
   tauri::async_runtime::spawn_blocking(move || {
-    let config = crate::repo_config::parse_config(&repo_path)?;
-    let script = config
-      .setup_script
-      .filter(|s| !s.trim().is_empty())
-      .ok_or_else(|| "No setup_script configured in .treq/config.yaml".to_string())?;
-    crate::core::run_setup_script_sync(&repo_path, workspace_id, &workspace_path, &script)
+    crate::core::rerun_workspace_setup_script_sync(&repo_path, workspace_id, &workspace_path)
   })
   .await
   .map_err(|e| e.to_string())?

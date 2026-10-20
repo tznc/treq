@@ -192,6 +192,15 @@ pub trait GithubHost: WorkspaceHost {
   ) -> Result<Vec<RunSummary>, String>;
   fn run_logs(&self, repo_path: &str, run_id: i64, job_id: &str) -> Result<Vec<LogLine>, String>;
   fn trust_repo(&self, repo_path: &str) -> Result<(), String>;
+  /// Whether GPUI runs the repository's actions itself: false for a remote
+  /// repository, whose flows React still runs.
+  fn acts_locally(&self, repo_path: &str) -> bool;
+  /// Runs a workflow, one of its jobs, or the setup script, to the end.
+  fn run_checks(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+    run: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String>;
 }
 
 fn gh() -> Result<(String, String), String> {
@@ -402,6 +411,18 @@ impl GithubHost for Backend {
     );
     Ok(())
   }
+
+  fn acts_locally(&self, repo_path: &str) -> bool {
+    self.remote_containing(repo_path).is_none()
+  }
+
+  fn run_checks(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+    run: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    crate::core::running_checks::run(target, run)
+  }
 }
 
 /// `uniqueByNumber`: pages can overlap when items move between requests;
@@ -610,6 +631,37 @@ fn humanize(slug: &str) -> String {
     .to_string()
 }
 
+/// `buildGitHubComparePrUrl`: GitHub's "Open a pull request" form for
+/// `head` into `base`, filled in.
+pub fn compare_pr_url(
+  owner: &str,
+  repo: &str,
+  base: &str,
+  head: &str,
+  title: &str,
+  body: &str,
+) -> String {
+  // `encodeURIComponent` leaves `!'()*` as they are.
+  let component = |s: &str| {
+    urlencoding::encode(s)
+      .replace("%21", "!")
+      .replace("%27", "'")
+      .replace("%28", "(")
+      .replace("%29", ")")
+      .replace("%2A", "*")
+  };
+  let query = url::form_urlencoded::Serializer::new(String::new())
+    .append_pair("expand", "1")
+    .append_pair("title", title)
+    .append_pair("body", body)
+    .finish();
+  format!(
+    "https://github.com/{owner}/{repo}/compare/{}...{}?{query}",
+    component(base),
+    component(head)
+  )
+}
+
 /// `deriveConventionalPrTitle`.
 pub fn conventional_pr_title(title: &str, branch: &str) -> String {
   let fallback = if title.is_empty() { branch } else { title };
@@ -736,16 +788,7 @@ pub fn check_duration(secs: u64) -> String {
   }
 }
 
-/// `runKey`: how `useRunningChecks` names a running workflow, job or setup.
-pub fn run_key(workspace_id: i64, filename: &str, job: Option<&str>) -> String {
-  match job {
-    Some(job) => format!("{workspace_id}:{filename}:{job}"),
-    None => format!("{workspace_id}:{filename}"),
-  }
-}
-
-/// The file part of a setup script run's `run_key`.
-pub const SETUP_KEY: &str = "<setup>";
+pub use crate::core::running_checks::{run_key, SETUP_KEY};
 
 #[cfg(test)]
 mod tests {

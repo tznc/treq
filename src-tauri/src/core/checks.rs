@@ -541,6 +541,21 @@ pub fn configured_setup_script(repo_path: &str) -> Result<Option<String>, String
   Ok(config.setup_script.filter(|s| !s.trim().is_empty()))
 }
 
+/// Runs the repo's configured setup script again in a workspace
+/// (`rerun_workspace_setup_script`); an error when none is configured.
+pub fn rerun_workspace_setup_script_sync(
+  repo_path: &str,
+  workspace_id: i64,
+  workspace_path: &str,
+) -> Result<JobResult, String> {
+  let config = crate::repo_config::parse_config(repo_path)?;
+  let script = config
+    .setup_script
+    .filter(|s| !s.trim().is_empty())
+    .ok_or_else(|| "No setup_script configured in .treq/config.yaml".to_string())?;
+  run_setup_script_sync(repo_path, workspace_id, workspace_path, &script)
+}
+
 /// Runs the repo's configured setup script for a freshly created workspace.
 /// Stored as a one-job run under `SETUP_SCRIPT_FILENAME` so it shows up in the
 /// same run-history / log-viewer machinery as regular workflow checks.

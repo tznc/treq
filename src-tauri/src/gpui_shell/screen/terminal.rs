@@ -1539,6 +1539,8 @@ pub struct TerminalPane {
   incoming: Option<Route>,
   /// A column to focus when the pane next draws.
   focus_next: Option<String>,
+  /// Commands GPUI itself gave the pane, run at the next draw.
+  later: Vec<Command>,
   /// What the terminals said since the pane last drew.
   events: Vec<(String, TermEvent)>,
   font_size: f32,
@@ -1605,6 +1607,7 @@ impl TerminalPane {
       route: Route::default(),
       incoming: None,
       focus_next: None,
+      later: Vec::new(),
       events: Vec::new(),
       font_size,
       collapsed: true,
@@ -1817,6 +1820,34 @@ impl TerminalPane {
     cx.notify();
   }
 
+  /// Closes every terminal of the workspace at `key` (`closeTerminalsForWorkspace`).
+  fn close_workspace(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    let ids: Vec<String> = self
+      .columns
+      .iter()
+      .filter(|c| self.column_key(c) == key)
+      .map(|c| c.id.clone())
+      .collect();
+    for id in ids {
+      self.close(&id, window, cx);
+    }
+  }
+
+  /// Runs a command of kind `kind` (as React's `GpuiTerminalCommand`s)
+  /// when the pane next draws: closing a removed workspace's terminals, or
+  /// a palette command.
+  pub fn run_later(&mut self, kind: &str, dir: Option<String>, cx: &mut Context<Self>) {
+    self.later.push(Command {
+      nonce: 0,
+      kind: kind.into(),
+      dir,
+      session_id: None,
+      text: None,
+      remote: None,
+    });
+    cx.notify();
+  }
+
   fn run(&mut self, command: &Command, window: &mut Window, cx: &mut Context<Self>) {
     match command.kind.as_str() {
       "toggleCollapse" => self.toggle_collapse(cx),
@@ -1830,15 +1861,7 @@ impl TerminalPane {
       }
       "closeWorkspace" => {
         let key = command.dir.clone().unwrap_or_default();
-        let ids: Vec<String> = self
-          .columns
-          .iter()
-          .filter(|c| self.column_key(c) == key)
-          .map(|c| c.id.clone())
-          .collect();
-        for id in ids {
-          self.close(&id, window, cx);
-        }
+        self.close_workspace(&key, window, cx);
       }
       "send" => {
         if let (Some(id), Some(text)) = (command.session_id, &command.text) {
@@ -2150,9 +2173,7 @@ impl TerminalPane {
       });
       let pending = pending.as_ref();
       let workspace = session.workspace_id.and_then(|id| {
-        self
-          .host
-          .workspaces(&repo)
+        super::code_data::CodeHost::workspaces(&*self.host, &repo)
           .ok()?
           .into_iter()
           .find(|w| w.id == id)
@@ -3377,6 +3398,9 @@ impl Render for TerminalPane {
     }
     if let Some(column) = self.focus_next.take() {
       self.focus_column(&column, window, cx);
+    }
+    for command in std::mem::take(&mut self.later) {
+      self.run(&command, window, cx);
     }
     for (id, event) in std::mem::take(&mut self.events) {
       self.on_term_event(&id, event, window, cx);

@@ -127,6 +127,8 @@ struct FakeHost {
   task_error: Option<String>,
   launches: Mutex<Vec<(launch_data::LaunchRequest, bool)>>,
   started: Mutex<Vec<(launch_data::SessionStart, bool)>>,
+  /// The workspace actions are React's (a remote repository).
+  react_actions: bool,
   calls: Mutex<Vec<String>>,
 }
 
@@ -1380,7 +1382,8 @@ impl Harness {
       let shown = shown.clone();
       Rc::new(move |request, _| shown.borrow_mut().push(request))
     };
-    let (screen, cx) = cx.add_window_view(|_, _| Screen::new(snapshot, sink, popups, None, host));
+    let (screen, cx) =
+      cx.add_window_view(|_, cx| Screen::new(snapshot, sink, popups, None, host, cx));
     let cx = cx.clone();
     Self {
       cx,
@@ -2140,17 +2143,12 @@ fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
   }
   h.click("workspace-linear");
   h.cx.run_until_parked();
-  assert_eq!(
-    h.sent(),
-    vec![
-      press("workspace.viewPr"),
-      press("workspace.merge"),
-      press("workspace.more"),
-    ]
-  );
+  // View PR and More run in GPUI (`workspace/actions.rs`).
+  assert_eq!(h.sent(), vec![press("workspace.merge")]);
   assert_eq!(
     host.writes(),
     vec![
+      "notify open",
       "open https://github.com/tznc/treq/pull/42",
       "open https://linear.app/t/ENG-12",
     ]
@@ -6375,9 +6373,49 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
   }
 }
 
+impl workspace_ops::WorkspaceActionsHost for FakeHost {
+  fn queue(
+    &self,
+    full_name: &str,
+    branch: &str,
+    action: crate::core::account::QueueAction,
+  ) -> Result<(), crate::core::supabase::ApiError> {
+    self.record(format!("queue {full_name} {branch} {action:?}"));
+    if self.failing.contains(&"queue_pro") {
+      return Err(crate::core::supabase::ApiError::new(
+        "pro_required",
+        "Needs Pro",
+      ));
+    }
+    Ok(())
+  }
+
+  fn delete_workspace(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("delete workspace {workspace_id}"));
+    if self.failing.contains(&"delete_workspace") {
+      return Err("busy".into());
+    }
+    Ok(())
+  }
+
+  fn archive_workspace(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("archive workspace {workspace_id}"));
+    if self.failing.contains(&"archive_workspace") {
+      return Err(format!("cannot archive {workspace_id}"));
+    }
+    Ok(())
+  }
+
+  fn ask(&self, _: &str, message: &str) -> bool {
+    self.record(format!("ask {message}"));
+    !self.decline
+  }
+}
+
 mod file_browser;
 mod github;
 mod linear_view;
 mod merge_queue;
 mod pr_review;
+mod workspace_actions;
 mod workspace_dialogs;

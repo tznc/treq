@@ -11,6 +11,7 @@ use super::{
   Busy, DetailKey, GithubView, Popover,
 };
 use crate::{
+  core::running_checks::CheckRun,
   github::{GhIssue, GhIssueComment, GhPullRequest, PrCiStatus},
   gpui_shell::{
     form,
@@ -1176,17 +1177,14 @@ impl GithubView {
   }
 
   fn run_check(&self, ws: &Workspace, filename: &str, job: Option<&str>, cx: &mut Context<Self>) {
-    self.field(
-      "github.checks.run",
-      serde_json::json!({
-        "repoPath": ws.repo_path,
-        "workspaceId": ws.id,
-        "workspacePath": super::super::merge::full_path(ws),
-        "filename": filename,
-        "jobId": job,
-      }),
-      cx,
-    );
+    let run = match job {
+      Some(job) => CheckRun::Job {
+        file: filename.into(),
+        job: job.into(),
+      },
+      None => CheckRun::Workflow(filename.into()),
+    };
+    self.run_treq_check(ws, run, cx);
   }
 
   /// `WorkspaceChecksPanel`.
@@ -1206,7 +1204,7 @@ impl GithubView {
         .child("Loading checks…")
         .into_any_element();
     };
-    let running = &self.route.running_checks;
+    let running = &self.running_keys(cx);
     let is_running =
       |file: &str, job: Option<&str>| running.contains(&data::run_key(ws.id, file, job));
     let setup_running = checks
@@ -1275,11 +1273,7 @@ impl GithubView {
       } else {
         format!("Setup script: {}", setup.status)
       };
-      let ws_json = serde_json::json!({
-        "repoPath": ws.repo_path,
-        "workspaceId": ws.id,
-        "workspacePath": super::super::merge::full_path(ws),
-      });
+      let setup_ws = ws.clone();
       panel = panel.child(
         ui::text(named(div(), "setup-script-status"), TextSize::Sm)
           .flex()
@@ -1317,7 +1311,7 @@ impl GithubView {
               })
               .child(div().ml_1().child("Re-run setup script"))
               .on_click(cx.listener(move |view, _, _, cx| {
-                view.field("github.checks.setup", ws_json.clone(), cx)
+                view.run_treq_check(&setup_ws, CheckRun::Setup, cx)
               })),
           ),
       );

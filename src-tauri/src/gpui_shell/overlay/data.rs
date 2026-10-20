@@ -1,6 +1,16 @@
 //! What the overlays read and change through the backend; faked in tests.
 
-use crate::{core, gpui_shell::native::Backend, jj::JjBranch, local_db};
+use crate::{
+  core::{
+    self,
+    checks::JobResult,
+    palette_commands::TerminalCommand,
+    running_checks::{CheckRun, ChecksTarget},
+  },
+  gpui_shell::native::{Backend, NativeEvent},
+  jj::JjBranch,
+  local_db,
+};
 
 /// `useWorkspaceChecks`, as far as the palette's commands need it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -39,6 +49,15 @@ pub trait OverlayHost: Send + Sync {
   fn branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String>;
   fn switch_branch(&self, repo_path: &str, name: &str) -> Result<(), String>;
   fn open_url(&self, url: &str);
+  /// Where workspace `workspace_id`'s checks run.
+  fn checks_target(&self, repo_path: &str, workspace_id: i64) -> Option<ChecksTarget>;
+  /// Runs a workflow or the setup script to the end.
+  fn run_checks(&self, target: &ChecksTarget, run: &CheckRun) -> Result<Vec<JobResult>, String>;
+  fn trust_repo(&self, repo_path: &str) -> Result<(), String>;
+  /// Tells the window what changed, or shows a toast. Never blocks.
+  fn notify(&self, event: NativeEvent);
+  /// Gives the window's terminal pane a command. Never blocks.
+  fn terminal(&self, command: TerminalCommand);
 }
 
 impl OverlayHost for Backend {
@@ -96,5 +115,41 @@ impl OverlayHost for Backend {
 
   fn open_url(&self, url: &str) {
     Backend::open_url(self, url);
+  }
+
+  fn checks_target(&self, repo_path: &str, workspace_id: i64) -> Option<ChecksTarget> {
+    let workspace = core::list_workspaces(repo_path)
+      .ok()?
+      .into_iter()
+      .find(|w| w.id == workspace_id)?;
+    Some(ChecksTarget {
+      repo_path: workspace.repo_path.clone(),
+      workspace_id,
+      workspace_path: core::context_menu::full_workspace_path(&workspace),
+    })
+  }
+
+  fn run_checks(&self, target: &ChecksTarget, run: &CheckRun) -> Result<Vec<JobResult>, String> {
+    core::running_checks::run(target, run)
+  }
+
+  fn trust_repo(&self, repo_path: &str) -> Result<(), String> {
+    local_db::trust_repo(repo_path)?;
+    Backend::notify(
+      self,
+      NativeEvent::WorkspaceChanged {
+        repo_path: repo_path.into(),
+      },
+    );
+    Ok(())
+  }
+
+  fn notify(&self, event: NativeEvent) {
+    Backend::notify(self, event);
+  }
+
+  fn terminal(&self, command: TerminalCommand) {
+    let dir = None;
+    crate::gpui_shell::terminal_command(self.app(), self.label(), command.kind(), dir);
   }
 }

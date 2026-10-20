@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
 
+pub(super) use changes_data::ChangesHost;
 pub use modal::Modal;
 pub(super) use modal::ModalOpen;
 pub(super) use workspace_data::WorkspaceHost;
@@ -76,6 +77,7 @@ mod workspace_deletion;
 mod workspace_dialog;
 mod workspace_dialog_data;
 mod workspace_modal;
+pub(super) mod workspace_ops;
 
 #[cfg(test)]
 mod tests;
@@ -191,6 +193,8 @@ impl<T> Host for T where
 pub struct Screen {
   snapshot: ScreenSnapshot,
   sink: ActionSink,
+  /// React, for what the screen does not run itself.
+  react: ActionSink,
   popups: PopupSink,
   /// The window's webview, which a screen may frame part of itself around.
   webview: Option<Webview<Wry>>,
@@ -219,14 +223,33 @@ pub struct Screen {
 impl Screen {
   pub fn new(
     snapshot: ScreenSnapshot,
-    sink: ActionSink,
+    react: ActionSink,
     popups: PopupSink,
     webview: Option<Webview<Wry>>,
     host: Arc<dyn Host>,
+    cx: &mut Context<Self>,
   ) -> Self {
+    // What the screen runs itself, the rest going on to React.
+    let react_for_self = react.clone();
+    let screen = cx.weak_entity();
+    let sink: ActionSink = Rc::new(move |action, cx| {
+      if !Screen::runs(&action) {
+        return react(action, cx);
+      }
+      let (screen, react) = (screen.clone(), react.clone());
+      cx.defer(move |cx| {
+        let ran = screen
+          .update(cx, |screen, cx| screen.run(&action, cx))
+          .unwrap_or(false);
+        if !ran {
+          react(action, cx);
+        }
+      });
+    });
     Self {
       snapshot,
       sink,
+      react: react_for_self,
       popups,
       webview,
       host,
@@ -261,6 +284,78 @@ impl Screen {
 
   pub fn snapshot(&self) -> &ScreenSnapshot {
     &self.snapshot
+  }
+
+  /// Whether the screen may run `action` itself ([`Screen::run`]).
+  fn runs(action: &ScreenAction) -> bool {
+    matches!(action, ScreenAction::Field { field, .. } if field == "workspaceDeletion.delete")
+  }
+
+  /// Runs what Dashboard's handlers ran for the screen's dialogs; false
+  /// leaves `action` to React.
+  fn run(&mut self, action: &ScreenAction, cx: &mut Context<Self>) -> bool {
+    let ScreenAction::Field { field, value } = action else {
+      return false;
+    };
+    match (field.as_str(), value.as_i64(), &self.snapshot.modal) {
+      (
+        "workspaceDeletion.delete",
+        Some(id),
+        Some(workspace_modal::ModalRoute::WorkspaceDeletion(route)),
+      ) if self.host.acts_locally(&route.repo_path) => {
+        // The dialog closes first, as `handleDelete` runs after it.
+        (self.react_sink())(
+          ScreenAction::Press {
+            id: "workspaceDeletion.close".into(),
+          },
+          cx,
+        );
+        self.delete_workspace(route.repo_path.clone(), id, cx);
+        true
+      }
+      _ => false,
+    }
+  }
+
+  /// `handleDelete`: asks, deletes and closes the workspace's terminals.
+  fn delete_workspace(&mut self, repo_path: String, id: i64, cx: &mut Context<Self>) {
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let removed = cx
+        .background_spawn(async move {
+          let workspace = code_data::CodeHost::workspaces(&*host, &repo_path)
+            .ok()?
+            .into_iter()
+            .find(|w| w.id == id)?;
+          let workspace = workspace_ops::Removed::of(&workspace);
+          workspace_ops::delete(&*host, &workspace).then_some(workspace)
+        })
+        .await;
+      if let Some(workspace) = removed {
+        let _ = this.update(cx, |screen, cx| screen.close_terminals(workspace.path, cx));
+      }
+    })
+    .detach();
+  }
+
+  /// Closes the terminals of a workspace GPUI removed.
+  pub fn close_terminals(&mut self, path: String, cx: &mut Context<Self>) {
+    self.terminal_command("closeWorkspace", Some(path), cx);
+  }
+
+  /// Gives the workspace's terminal pane a command of kind `kind`, as
+  /// React's `terminalPane()` handle does.
+  pub fn terminal_command(&mut self, kind: &str, dir: Option<String>, cx: &mut Context<Self>) {
+    if let Some(workspace) = &self.workspace {
+      workspace.update(cx, |workspace, cx| {
+        workspace.terminal_command(kind, dir, cx)
+      });
+    }
+  }
+
+  /// Where the screen's own actions go: through [`Screen::run`] to React.
+  fn react_sink(&self) -> ActionSink {
+    self.react.clone()
   }
 
   /// The remote repository's access is cut off: the window dims behind

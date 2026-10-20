@@ -112,7 +112,7 @@ import {
   type AutoReviewEvent,
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
-import { useGpuiNativeEvents } from "../lib/gpui-native";
+import { type GpuiOpenRequest, useGpuiNativeEvents } from "../lib/gpui-native";
 import type { SessionCreationInfo } from "../types/sessions";
 import {
   openRepositoryAtPath as openRepositoryAtPathShared,
@@ -1835,9 +1835,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
           event.select,
         );
         break;
+      case "workspacesRemoved": {
+        const removed = new Set(event.ids);
+        setSelectedWorkspaceIds((ids) => {
+          const kept = new Set([...ids].filter((id) => !removed.has(id)));
+          return kept.size === ids.size ? ids : kept;
+        });
+        if (event.repoPath === dataRepoPath) leaveRemovedWorkspaces(removed);
+        break;
+      }
+      case "open":
+        openGpuiRequest(event.what);
+        break;
       default:
     }
   });
+
+  /** What a GPUI menu or button asks to open. */
+  const openGpuiRequest = (what: GpuiOpenRequest) => {
+    switch (what.kind) {
+      case "branchSwitcher":
+        return setShowBranchSwitcher(true);
+      case "addRepository":
+        if (mainRepoPath && !isRemoteActive) void handleAddSupportingRepo();
+        return;
+      case "repoSettings":
+        return handleOpenRepoSettings(what.repoPath);
+      case "locateRepo":
+        return void handleLocateSupportingRepo(what.repoPath);
+      case "removeRepo":
+        return void handleRemoveSupportingRepo(what.repoPath);
+      case "renameWorkspace": {
+        const list =
+          linkedRepoSessions.find((entry) => entry.repoPath === what.repoPath)
+            ?.workspaces ?? workspaces;
+        const workspace = list.find((w) => w.id === what.workspaceId);
+        if (workspace) {
+          setRenameTarget({ workspace, repoPath: what.repoPath });
+        }
+        return;
+      }
+      case "prReview":
+        return openGitHubPr(what.number, what.state);
+      default:
+    }
+  };
 
   const addSupportingRepoAtPath = async (selected: string) => {
     if (!mainRepoPath) return;

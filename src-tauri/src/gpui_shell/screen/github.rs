@@ -28,9 +28,13 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::{
-  core::RunSummary,
+  core::{
+    running_checks::{CheckRun, ChecksTarget},
+    RunSummary,
+  },
   github::{GhIssue, GhListPage, GhPullRequest, GitRemoteInfo, PrCiStatus},
   gpui_shell::{
+    checks_run,
     form::{self, Controls, SelectOption},
     native::{register_toast_action, NativeEvent, ToastAction, ToastTone},
     popup::PopupSink,
@@ -191,6 +195,8 @@ pub struct GithubView {
   /// The dialog's focus, for Escape.
   dialog_focus: FocusHandle,
   dialog_focused: bool,
+  /// Draws checks as running while one runs anywhere in the app.
+  _running: gpui::Subscription,
 }
 
 impl HasTooltips for GithubView {
@@ -238,6 +244,7 @@ impl GithubView {
       logs_enabled: false,
       dialog_focus: cx.focus_handle(),
       dialog_focused: false,
+      _running: cx.observe_global::<checks_run::Running>(|_, cx| cx.notify()),
     };
     this.load_remote(cx);
     this.load_workspaces(cx);
@@ -259,11 +266,7 @@ impl GithubView {
       self.sync(cx);
       if checks_changed {
         // A run that finished wrote its results.
-        self.load_treq(cx);
-        let open: Vec<String> = self.detail.history_open.iter().cloned().collect();
-        for filename in open {
-          self.load_history(filename, cx);
-        }
+        self.reload_checks(cx);
       }
     }
     cx.notify();
@@ -608,6 +611,75 @@ impl GithubView {
       tone,
       action: None,
     });
+  }
+
+  /// Every run's key in the repository: React's, and those GPUI runs
+  /// ([`checks_run`]).
+  pub(super) fn running_keys(&self, cx: &App) -> Vec<String> {
+    let mut keys = self.route.running_checks.clone();
+    for key in checks_run::keys(cx, &self.route.repo_path) {
+      if !keys.contains(&key) {
+        keys.push(key);
+      }
+    }
+    keys
+  }
+
+  /// Runs a workflow, a job or the setup script of `ws` (`github.checks.*`),
+  /// marked running meanwhile, then reads the results again. React runs
+  /// them for a remote repository.
+  pub(super) fn run_treq_check(&self, ws: &Workspace, run: CheckRun, cx: &mut Context<Self>) {
+    let target = ChecksTarget {
+      repo_path: ws.repo_path.clone(),
+      workspace_id: ws.id,
+      workspace_path: super::merge::full_path(ws),
+    };
+    if !self.host.acts_locally(&ws.repo_path) {
+      let mut value = serde_json::json!({
+        "repoPath": target.repo_path,
+        "workspaceId": target.workspace_id,
+        "workspacePath": target.workspace_path,
+      });
+      let field = match &run {
+        CheckRun::Setup => "github.checks.setup",
+        CheckRun::Workflow(file) => {
+          value["filename"] = file.clone().into();
+          value["jobId"] = serde_json::Value::Null;
+          "github.checks.run"
+        }
+        CheckRun::Job { file, job } => {
+          value["filename"] = file.clone().into();
+          value["jobId"] = job.clone().into();
+          "github.checks.run"
+        }
+      };
+      return self.field(field, value, cx);
+    }
+    let (host, view) = (self.host.clone(), cx.weak_entity());
+    let repo_path = target.repo_path.clone();
+    checks_run::start(
+      cx,
+      target,
+      run,
+      move |target, run| host.run_checks(target, run),
+      move |_, cx| {
+        let _ = view.update(cx, |view, cx| {
+          view
+            .host
+            .notify(NativeEvent::WorkspaceChanged { repo_path });
+          view.reload_checks(cx);
+        });
+      },
+    );
+  }
+
+  /// Reads the workspace's checks and their open run histories again.
+  fn reload_checks(&mut self, cx: &mut Context<Self>) {
+    self.load_treq(cx);
+    let open: Vec<String> = self.detail.history_open.iter().cloned().collect();
+    for filename in open {
+      self.load_history(filename, cx);
+    }
   }
 
   /// Hands `id` to React.

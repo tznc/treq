@@ -699,7 +699,11 @@ fn deletion(current: Option<i64>) -> ScreenSnapshot {
 
 #[gpui::test]
 fn deletion_lists_what_can_be_deleted(cx: &mut TestAppContext) {
-  let mut h = Harness::new(cx, deletion(Some(7)));
+  let host = Arc::new(FakeHost {
+    workspaces: vec![workspace(8, "treq/signup", None)],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, deletion(Some(7)), host.clone());
   assert!(h.drawn("workspace-deletion"));
   // The current workspace's default row, then every workspace but home.
   assert!(h.drawn("workspace-deletion-item-2"));
@@ -707,8 +711,37 @@ fn deletion_lists_what_can_be_deleted(cx: &mut TestAppContext) {
   assert!(!h.drawn("workspace-deletion-home"));
   // Enter deletes the highlighted row: the current workspace's own.
   h.cx.simulate_keystrokes("down enter");
-  assert_eq!(h.sent(), vec![field("workspaceDeletion.delete", 8.into())]);
+  h.cx.run_until_parked();
+  // GPUI deletes it itself, closing the dialog first as `handleDelete` does.
+  assert_eq!(h.sent(), vec![press("workspaceDeletion.close")]);
   assert!(!h.drawn("workspace-deletion"));
+  let calls: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("ask") || c.starts_with("delete") || c.starts_with("notify"))
+    .collect();
+  assert_eq!(
+    calls,
+    [
+      "ask Delete workspace treq/signup?",
+      "delete workspace 8",
+      "notify workspaceChanged",
+      "notify workspacesRemoved",
+      "notify toast Workspace Deleted",
+    ]
+  );
+}
+
+#[gpui::test]
+fn deletion_of_a_remote_workspace_goes_to_react(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    react_actions: true,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, deletion(Some(7)), host);
+  h.cx.simulate_keystrokes("down enter");
+  h.cx.run_until_parked();
+  assert_eq!(h.sent(), vec![field("workspaceDeletion.delete", 8.into())]);
 }
 
 #[gpui::test]
