@@ -3,6 +3,7 @@
 //! and sidebar width), the data it read through SWR, and the snapshots the
 //! shell draws from them.
 
+mod actions;
 mod data;
 mod model;
 mod sidebar;

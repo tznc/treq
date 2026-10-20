@@ -261,7 +261,15 @@ pub enum Effect {
     prompt: Option<String>,
     mode: Option<String>,
     name: Option<String>,
+    /// Shows the session's workspace once it starts (`launchAgentSession`).
+    select: bool,
   },
+  /// Opens the repository at this path in this window (`openRepositoryAtPath`).
+  OpenRepoAt(String),
+  /// Reads the app settings the window follows again.
+  ReadPrefs,
+  /// Drops a `treq send` attachment.
+  DismissSendAsset(String),
   /// Asks, then removes the supporting repository at this path.
   RemoveSupporting(String),
   /// Opens the folder of the app's logs.
@@ -323,6 +331,20 @@ pub struct Model {
   /// The Merge Queue tab's history toggle and page.
   pub show_merged: bool,
   pub history_limit: usize,
+  /// A workspace to select once it is listed.
+  pub pending_select: Option<PendingSelect>,
+}
+
+/// A workspace to select once the window's data lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSelect {
+  pub repo_path: String,
+  pub id: i64,
+  /// Also show the workspace view (`handleSelectWorkspace`), not only
+  /// select it (`handleOpenSession`).
+  pub page: bool,
+  /// Open its Logs tab on the check logs.
+  pub logs: bool,
 }
 
 impl Model {
@@ -382,7 +404,7 @@ impl Model {
 
   /// Shows workspace `id` of the repository on screen (`setSelectedWorkspace`),
   /// starting its view over on the Code tab.
-  fn set_selected(&mut self, id: Option<i64>) {
+  pub(super) fn set_selected(&mut self, id: Option<i64>) {
     if self.selected != id {
       self.view.tab = Tab::Overview;
       self.view.scroll_to_commit = None;
@@ -412,7 +434,7 @@ impl Model {
     self.page = Page::Workspace;
   }
 
-  fn leave_for(&mut self, page: Page) {
+  pub(super) fn leave_for(&mut self, page: Page) {
     let same = std::mem::discriminant(&self.page) == std::mem::discriminant(&page);
     if !same {
       self.back = std::mem::replace(&mut self.page, page);
@@ -651,7 +673,9 @@ impl Model {
   }
 
   /// `handleCreateSessionFromSidebar`: a new agent in the workspace.
-  pub fn start_agent(&mut self, workspace_id: Option<i64>) -> Effect {
+  pub fn start_agent(&mut self, workspace_id: Option<i64>, data: &Data) -> Effect {
+    let workspace = workspace_id.and_then(|id| self.workspace_in(self.repo(), id, data));
+    self.set_selected(workspace.map(|w| w.id));
     Effect::StartAgent {
       repo_path: self.repo().to_string(),
       workspace_id,
@@ -659,7 +683,45 @@ impl Model {
       prompt: None,
       mode: None,
       name: None,
+      select: false,
     }
+  }
+
+  /// Workspace `id` of repository `repo`, as last listed.
+  pub fn workspace_in(&self, repo: &str, id: i64, data: &Data) -> Option<Workspace> {
+    data.workspaces(repo).iter().find(|w| w.id == id).cloned()
+  }
+
+  /// Selects workspace `id` of `repo` once a read lists it (a workspace
+  /// just made, or one GitHub opened); now if it is listed already.
+  pub fn select_when_listed(&mut self, pending: PendingSelect, data: &Data) -> Vec<Effect> {
+    self.pending_select = Some(pending);
+    if self.resolve_pending(data) {
+      Vec::new()
+    } else {
+      vec![Effect::Refresh { revision: true }]
+    }
+  }
+
+  /// Selects the pending workspace if `data` lists it.
+  pub fn resolve_pending(&mut self, data: &Data) -> bool {
+    let Some(pending) = self.pending_select.clone() else {
+      return false;
+    };
+    let Some(workspace) = self.workspace_in(&pending.repo_path, pending.id, data) else {
+      return false;
+    };
+    self.pending_select = None;
+    if pending.page {
+      self.select_workspace(Some(&workspace), data);
+    } else {
+      self.activate_repo(&workspace.repo_path, data);
+      self.set_selected(Some(workspace.id));
+    }
+    if pending.logs {
+      self.open_logs("checks");
+    }
+    true
   }
 
   /// `handleViewFullPrompt`.
