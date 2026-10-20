@@ -12,6 +12,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{
   InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
 };
@@ -624,9 +625,27 @@ impl Overlay {
   ) -> gpui::Stateful<gpui::Div> {
     let id = SharedString::from(format!("overlay-item-{index}"));
     let selector = id.to_string();
+    // cmdk's `[cmdk-item]` is an option named by its label.
+    let description = match &self.body {
+      Body::Palette { commands, .. } => commands[index].description.clone(),
+      _ => None,
+    };
+    let name: Option<SharedString> = match &self.body {
+      Body::Palette { commands, .. } => Some(commands[index].label.clone().into()),
+      Body::Workspaces(Some(rows)) => Some(rows[index].branch_name.clone().into()),
+      Body::Branches {
+        branches: Some(list),
+        ..
+      } => Some(list[index].0.name.clone().into()),
+      _ => None,
+    };
     let base = div()
       .id(id)
       .debug_selector(move || selector)
+      .role(gpui::Role::ListBoxOption)
+      .aria_selected(selected)
+      .when_some(name, |this, name| this.aria_label(name))
+      .when_some(description, |this, d| this.aria_description(d))
       .flex()
       .items_center()
       .gap_3()
@@ -783,13 +802,23 @@ impl Overlay {
               .into_any_element(),
           );
           let selected = self.selected == Some(index);
-          children.push(self.row(p, index, selected, cx).into_any_element());
+          children.push(
+            self
+              .row(p, index, selected, cx)
+              .test_support()
+              .into_any_element(),
+          );
           continue;
         }
       }
       self.rows.push((index, children.len()));
       let selected = self.selected == Some(index);
-      children.push(self.row(p, index, selected, cx).into_any_element());
+      children.push(
+        self
+          .row(p, index, selected, cx)
+          .test_support()
+          .into_any_element(),
+      );
     }
     children
   }
@@ -814,7 +843,9 @@ impl Render for Overlay {
       self.focus.focus(window, cx);
     }
     let dialog = if shortcuts {
-      shortcuts::render(&p, viewport).into_any_element()
+      shortcuts::render(&p, viewport)
+        .test_support()
+        .into_any_element()
     } else {
       let input = self.input(window, cx);
       let palette = matches!(self.body, Body::Palette { .. });
@@ -844,6 +875,8 @@ impl Render for Overlay {
           div()
             .id("overlay-dialog")
             .debug_selector(|| "overlay-dialog".into())
+            .role(gpui::Role::Dialog)
+            .test_support()
             .w(viewport.width * 0.4)
             .rounded(zpx(16.))
             .border_1()

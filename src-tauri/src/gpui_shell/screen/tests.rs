@@ -301,6 +301,10 @@ impl settings_data::SettingsHost for FakeHost {
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
     let pairs: Vec<_> = values.iter().map(|(k, v)| format!("{k}={v}")).collect();
     self.record(format!("set repo {repo_path} {}", pairs.join(" ")));
+    let mut settings = self.settings.lock().unwrap();
+    for (k, v) in values {
+      settings.insert(format!("{repo_path}:{k}"), Some(v.clone()));
+    }
     Ok(())
   }
 
@@ -3954,6 +3958,19 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
   assert!(!h.drawn("discard-all-dialog"));
 }
 
+/// Found by the fuzzer: the confirmation listens for Escape only while
+/// focus is inside it, and opening it leaves the focus where it was.
+#[gpui::test]
+#[ignore = "bug: Escape does not close the Discard all changes confirmation"]
+fn escape_closes_the_discard_all_confirmation(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("discard-all-changes");
+  assert!(h.drawn("discard-all-dialog"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.drawn("discard-all-dialog"));
+  assert!(!host.writes().iter().any(|w| w.starts_with("discard")));
+}
+
 #[gpui::test]
 fn changes_tab_reads_again_only_when_files_change(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -6469,12 +6486,14 @@ impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
       if dry_run { " (dry run)" } else { "" }
     ));
     let taken = self.local_branches.iter().any(|b| b == branch);
+    // As the backend's `validate_branch_name`.
+    let invalid = workspace_dialog_data::branch_name_error(branch, &[]);
     Ok(crate::core::RenameWorkspaceResult {
-      success: !taken,
-      message: if taken {
-        format!("Branch '{branch}' already exists")
-      } else {
-        String::new()
+      success: !taken && invalid.is_none(),
+      message: match invalid {
+        Some(message) => message,
+        None if taken => format!("Branch '{branch}' already exists"),
+        None => String::new(),
       },
       workspace: None,
       updated_children_ids: Vec::new(),
@@ -6561,6 +6580,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
 mod commit_diffs;
 mod conflicts;
 mod file_browser;
+mod fuzz;
 mod github;
 mod linear_view;
 mod logs_explorer;
@@ -6569,5 +6589,6 @@ mod pr_review;
 mod review_comments;
 mod stack_panel;
 mod tab_badges;
+mod testing_library;
 mod workspace_actions;
 mod workspace_dialogs;

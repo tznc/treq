@@ -130,6 +130,8 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
   div()
     .id("keyboard-shortcuts-modal")
     .debug_selector(|| "keyboard-shortcuts-modal".into())
+    .role(gpui::Role::Dialog)
+    .aria_label("Keyboard shortcuts")
     .w_full()
     .max_w(zpx(672.))
     .max_h(viewport.height * 0.85)

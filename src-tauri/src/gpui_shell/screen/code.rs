@@ -1321,14 +1321,17 @@ impl CodeView {
           .flex()
           .items_center()
           .gap(zpx(6.))
-          .child(form::switch_sized(
-            "task-new-workspace",
-            on,
-            false,
-            p,
-            (28., 16., 12.),
-            cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
-          ))
+          .child(
+            form::switch_sized(
+              "task-new-workspace",
+              on,
+              false,
+              p,
+              (28., 16., 12.),
+              cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
+            )
+            .aria_label("Run in a new workspace"),
+          )
           .child(
             ui::text(div(), TextSize::Xs)
               .id("task-new-workspace-label")
@@ -1413,6 +1416,7 @@ impl CodeView {
       .when(self.submitting, |b| {
         b.child(ui::spinner("task-starting", 14., p.primary_foreground))
       })
+      .aria_label(label)
       .child(ui::text(div(), TextSize::Xs).child(label))
       .on_click(cx.listener(|view, _, _, cx| view.submit(false, cx)));
     let submit = self.tips.wrap(
@@ -1427,6 +1431,7 @@ impl CodeView {
       buttons = buttons
         .child(
           small(Button::new("task-submit-menu", p))
+            .aria_label("More submit options")
             .disabled(disabled)
             .rounded_l_none()
             .border_l_1()

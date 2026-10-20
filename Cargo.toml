@@ -2,6 +2,16 @@
 members = ["src-tauri"]
 resolver = "3"
 
+[patch.crates-io]
+# gpui-testing-library and gpui-playwright depend on gpui-kit =0.7.3 from
+# crates.io; treq uses gpui-kit's main branch (also 0.7.3). Patching the
+# crates.io names to that branch builds one gpui-kit for all of them.
+gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+gpui-base = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+gpui-component = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+gpui-component-macros = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+gpui-kit-assets = { git = "https://github.com/Ziinc/gpui-kit", branch = "main" }
+
 # Profiles only take effect in the workspace root manifest.
 
 # Development profile - faster compilation with minimal optimization

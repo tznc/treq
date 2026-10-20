@@ -36,6 +36,10 @@ gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:syntect", "de
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
 embed = []
+# Embeds a Playwright server (gpui-playwright) in the GPUI app so the
+# e2e/desktop suite can drive it. It only listens when `GPUI_PLAYWRIGHT` is
+# set, and release builds leave the feature out.
+e2e = ["gpui-shell", "dep:gpui-playwright"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -62,6 +66,10 @@ tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "mai
 # diffs and code views. The
 # fork mobile-gpui uses, on the same GPUI as tauri-plugin-gpui.
 gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component"], optional = true }
+# Playwright protocol server inside the GPUI app (the `e2e` feature). It
+# reads the elements gpui-kit observes; `painted-text` adds their text. The
+# branch adds `Server::on_adopt_page` (not in 0.1.0 yet).
+gpui-playwright = { git = "https://github.com/Ziinc/gpui-playwright", branch = "claude/project-thread-yruhjk", features = ["painted-text"], optional = true }
 # Syntax highlighting for GPUI diffs, the same syntect set gpui-kit uses.
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"], optional = true }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"], optional = true }
@@ -126,6 +134,9 @@ wiremock = "0.6"
 # tauri-plugin-gpui renders with, plus its test platform.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
+# Testing Library queries, user events and matchers for the GPUI screens. Its
+# `gpui-kit` feature reads what `.test_support()` observes.
+gpui-testing-library = { version = "=0.1.0", features = ["gpui-kit"] }
 
 [[bench]]
 name = "commit_workspace"

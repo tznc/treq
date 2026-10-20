@@ -575,3 +575,68 @@ fn keyboard_shortcuts_close_on_escape_and_question_mark(cx: &mut TestAppContext)
     vec![press("overlay.close"), press("overlay.close")]
   );
 }
+
+// command-palette.test.tsx, in Testing Library's terms: the palette's
+// options are found by role and name, and clicked as a user would.
+mod testing_library {
+  use gpui::{Role, TestAppContext};
+  use gpui_testing_library::{prelude::*, ByRole};
+
+  use super::*;
+
+  fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
+    h.cx.run_until_parked();
+    let window = h.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&h.cx, window);
+    screen.redraw();
+    screen
+  }
+
+  fn option(name: &str) -> ByRole {
+    by::role(Role::ListBoxOption).name(name)
+  }
+
+  #[gpui::test]
+  fn shows_search_files_in_the_palette_dialog(cx: &mut TestAppContext) {
+    let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
+    let screen = screen(&mut h);
+    expect(screen.get_by_role(by::role(Role::Dialog))).to_be_visible();
+    let search = screen.get_by_role(option("Search Files"));
+    expect(&search).to_be_visible();
+    // gpui-testing-library 0.1 does not read gpui-kit's descriptions yet;
+    // the e2e suite checks the description text.
+  }
+
+  #[gpui::test]
+  fn always_shows_go_to_home_and_go_to_settings(cx: &mut TestAppContext) {
+    for workspace in [false, true] {
+      let mut h = Harness::new(cx, palette_json(workspace), FakeHost::default());
+      let screen = screen(&mut h);
+      expect(screen.get_by_role(option("Go to Home"))).to_be_visible();
+      expect(screen.get_by_role(option("Go to Settings"))).to_be_visible();
+      // The first command is selected, as cmdk selects it.
+      expect(screen.get_by_role(option("Go to Home"))).to_be_selected();
+    }
+  }
+
+  #[gpui::test]
+  fn clicking_search_files_asks_for_the_file_picker(cx: &mut TestAppContext) {
+    let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
+    let screen = screen(&mut h);
+    screen
+      .user()
+      .click(&screen.get_by_role(option("Search Files")));
+    h.cx.run_until_parked();
+    assert_eq!(h.sent(), vec![press("palette.search-files")]);
+  }
+
+  #[gpui::test]
+  fn typing_filters_the_options(cx: &mut TestAppContext) {
+    let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
+    let screen = screen(&mut h);
+    screen.user().keyboard("branch");
+    screen.redraw();
+    expect(screen.get_by_role(option("Switch Branch"))).to_be_selected();
+    assert!(screen.query_by_role(option("Go to Home")).is_none());
+  }
+}

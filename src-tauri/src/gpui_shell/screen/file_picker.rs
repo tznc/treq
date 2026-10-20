@@ -5,7 +5,10 @@
 use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
-use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::{
+  base::TestSupportExt as _,
+  component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp},
+};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, rgba, Context, Entity, EventEmitter,
   SharedString, Subscription, Task, Window,
@@ -166,6 +169,9 @@ impl Render for FilePicker {
           div()
             .id(id)
             .debug_selector(move || selector)
+            .role(gpui::Role::ListBoxOption)
+            .aria_label(path.clone())
+            .aria_selected(i == selected)
             .px_3()
             .py(zpx(6.))
             .mx_2()
@@ -187,6 +193,7 @@ impl Render for FilePicker {
                 .child(path.clone()),
             )
             .on_click(cx.listener(move |picker, _, _, cx| picker.choose(i, cx)))
+            .test_support()
         }))
         .into_any_element()
     };

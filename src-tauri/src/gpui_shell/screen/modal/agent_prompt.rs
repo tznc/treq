@@ -7,6 +7,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::time::Duration;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{
     Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
@@ -1121,6 +1122,14 @@ impl AgentPromptView {
       right = right.child(
         ui::text(div(), TextSize::Xs)
           .id("task-save-default")
+          .role(gpui::Role::CheckBox)
+          .aria_label("Set as default for this repo")
+          .aria_toggled(if checked {
+            gpui::accesskit::Toggled::True
+          } else {
+            gpui::accesskit::Toggled::False
+          })
+          .test_support()
           .flex()
           .items_center()
           .gap(zpx(6.))
@@ -1148,6 +1157,11 @@ impl AgentPromptView {
           ui::text(div(), TextSize::Xs)
             .id("task-agent")
             .debug_selector(|| "task-agent".into())
+            .role(gpui::Role::ComboBox)
+            .aria_label("Agent")
+            .aria_value(agent.label())
+            .aria_expanded(self.menu == Some(Menu::Agent))
+            .test_support()
             .h(zpx(28.))
             .px_2()
             .flex()
@@ -1182,6 +1196,7 @@ impl AgentPromptView {
       .when(submitting, |b| {
         b.child(ui::spinner("task-starting", 14., p.primary_foreground))
       })
+      .aria_label(label)
       .child(ui::text(div(), TextSize::Xs).child(label))
       .on_click(cx.listener(|view, _, _, cx| view.submit(false, cx)));
     let submit = self.tips.wrap(
@@ -1196,6 +1211,7 @@ impl AgentPromptView {
       buttons = buttons
         .child(
           small(Button::new("task-submit-menu", p))
+            .aria_label("More submit options")
             .disabled(disabled)
             .rounded_l_none()
             .border_l_1()
@@ -1263,6 +1279,9 @@ impl AgentPromptView {
       .w(zpx(224.))
       .child(
         menu_item("task-plan", p, false)
+          .role(gpui::Role::MenuItem)
+          .aria_label("Plan")
+          .test_support()
           .items_start()
           .child(
             div()
@@ -1288,6 +1307,10 @@ impl AgentPromptView {
       .min_w(zpx(128.))
       .children(Agent::ALL.into_iter().map(|agent| {
         menu_item(format!("task-agent-{}", agent.id()), p, false)
+          .role(gpui::Role::MenuItem)
+          .aria_label(agent.label())
+          .aria_selected(agent == selected)
+          .test_support()
           .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
           .child(div().flex_1().child(agent.label()))
           .when(agent == selected, |this| {
@@ -1379,6 +1402,9 @@ impl Render for AgentPromptView {
         .children(self.file_picker.clone()),
       panel
         .id("agent-prompt-panel")
+        .role(gpui::Role::Dialog)
+        .aria_label("Start a new agent session")
+        .test_support()
         .track_focus(&self.focus)
         .capture_key_down(keys)
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())

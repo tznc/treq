@@ -1452,6 +1452,7 @@ impl ChangesView {
       .flex()
       .child(
         Button::new("commit-options", p)
+          .aria_label("More commit options")
           .size(Size::Sm)
           .h_auto()
           .py(zpx(6.))
