@@ -1956,10 +1956,22 @@ impl Render for WorkspaceView {
         .into_any_element(),
       _ => div().size_full().into_any_element(),
     };
+    let remote = self.route.remote_chrome.clone();
+    let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);
+    let strip = remote.map(|chrome| {
+      let sink = self.sink.clone();
+      let press: super::remote_chrome::Press = Rc::new(move |id| {
+        let sink = sink.clone();
+        Box::new(move |_, _, cx| sink(ScreenAction::Press { id: id.to_string() }, cx))
+      });
+      super::remote_chrome::strip(&chrome, self.dark, &p, &press)
+    });
     let body = match (code, self.sync_terminal(cx)) {
       // The tab, or React's view framed in its place, with GPUI's terminal
-      // pane below.
+      // pane below: a share of the whole view, header and tabs included,
+      // which a maximized pane covers, as React lays it out.
       (code, Some(pane)) => {
+        pane.update(cx, |pane, cx| pane.set_dark(self.dark, cx));
         let covered = pane.read(cx).covers();
         // The webview would stay on top of the pane's lightbox.
         let lightbox = pane.read(cx).covers_window();
@@ -1972,7 +1984,7 @@ impl Render for WorkspaceView {
             .when(!lightbox, |this| this.child(frame(self.webview.as_ref())))
             .into_any_element(),
         };
-        div()
+        let pane_area = div()
           .relative()
           .flex_1()
           .min_h_0()
@@ -1989,9 +2001,31 @@ impl Render for WorkspaceView {
             .size_full(),
           )
           .when(!covered, |this| {
-            this.child(div().flex_1().min_h_0().child(content))
+            this.child(
+              div()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .child(header)
+                .children(tab_row)
+                .child(div().flex_1().min_h_0().child(content)),
+            )
           })
           .child(pane)
+          .when(cut_off, |d| {
+            d.child(super::remote_chrome::cutoff_overlay(&p))
+          });
+        return div()
+          .size_full()
+          .flex()
+          .flex_col()
+          .bg(p.background)
+          .text_color(p.foreground)
+          .children(strip)
+          .child(pane_area)
+          .into_any_element();
       }
       // The tab, with React's terminal pane framed below it.
       (Some(code), None) => {
@@ -2040,16 +2074,6 @@ impl Render for WorkspaceView {
         .debug_selector(|| "workspace-frame".into())
         .child(frame(self.webview.as_ref())),
     };
-    let remote = self.route.remote_chrome.clone();
-    let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);
-    let strip = remote.map(|chrome| {
-      let sink = self.sink.clone();
-      let press: super::remote_chrome::Press = Rc::new(move |id| {
-        let sink = sink.clone();
-        Box::new(move |_, _, cx| sink(ScreenAction::Press { id: id.to_string() }, cx))
-      });
-      super::remote_chrome::strip(&chrome, self.dark, &p, &press)
-    });
     div()
       .size_full()
       .flex()
@@ -2071,5 +2095,6 @@ impl Render for WorkspaceView {
             d.child(super::remote_chrome::cutoff_overlay(&p))
           }),
       )
+      .into_any_element()
   }
 }

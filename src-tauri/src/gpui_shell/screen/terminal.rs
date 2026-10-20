@@ -18,7 +18,10 @@ use std::{
 };
 
 use futures::StreamExt as _;
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::component::{
+  input::{Escape, Input, InputEvent, InputState},
+  Sizable,
+};
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
@@ -28,6 +31,8 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  code_data::{self, Environment, ENVIRONMENT_SETTING},
+  environment,
   terminal_data::{self, AgentStart, Host, Listening, Live, RemoteTarget, Spawn},
   terminal_emu::{self, encode_key, paste_bytes, Key, Mouse, MouseAction, SelectKind},
   terminal_lightbox::{Lightbox, LightboxEvent},
@@ -35,6 +40,7 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
+  native::{NativeEvent, ToastTone},
   popup::{PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   tooltips::{HasTooltips, Tooltips},
@@ -45,6 +51,8 @@ use crate::gpui_shell::{
 const HEIGHT_DEFAULT: f32 = 33.;
 const HEIGHT_MIN: f32 = 15.;
 const HEIGHT_MAX: f32 = 60.;
+/// `h-1`: the divider above the pane, outside its share of the view.
+const DIVIDER_HEIGHT: f32 = 4.;
 /// `h-7`: a column's header.
 const HEADER_HEIGHT: f32 = 28.;
 /// A column never gets narrower than this share of the row (or 300px).
@@ -188,6 +196,22 @@ pub fn agent_column_id(pane_id: i64) -> String {
   format!("agent-{pane_id}")
 }
 
+/// xterm's cell: the font's advance and height, each rounded down to whole
+/// device pixels.
+pub fn cell_size(advance: f32, height: f32, scale: f32) -> (f32, f32) {
+  let down = |v: f32| (v * scale).floor() / scale;
+  (down(advance), down(height))
+}
+
+/// Where a glyph the font placed at `x` draws once each cell is `cell`
+/// wide: at the start of its cell, as xterm's renderer puts it.
+pub fn cell_x(x: f32, advance: f32, cell: f32) -> f32 {
+  if advance <= 0. {
+    return x;
+  }
+  (x / advance + 1e-3).floor() * cell
+}
+
 /// A key press the pane (or the app) handles before a terminal sees it.
 /// `Cmd` is the platform key or Ctrl, as `useTerminalPaneKeyboardShortcuts`
 /// reads it.
@@ -293,6 +317,9 @@ pub struct TerminalView {
   font_size: f32,
   /// The cell size, once measured.
   cell: Option<(f32, f32)>,
+  /// The font's own advance, which the cell width rounds down.
+  advance: f32,
+  pub dark: bool,
   bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
   /// Wheel movement not yet a whole line.
   scroll_rest: f32,
@@ -303,6 +330,7 @@ pub struct TerminalView {
   idle: u64,
   chat_due: bool,
   search: Search,
+  tooltips: Tooltips,
   on_event: OnEvent,
   pub remote: RemoteState,
   _exit: Option<Listening>,
@@ -316,12 +344,19 @@ fn now_millis() -> u128 {
     .unwrap_or_default()
 }
 
+impl HasTooltips for TerminalView {
+  fn tooltips(&mut self) -> &mut Tooltips {
+    &mut self.tooltips
+  }
+}
+
 impl TerminalView {
   pub fn new(
     pty: String,
     start: Start,
     host: Host,
-    font_size: f32,
+    (font_size, dark): (f32, bool),
+    popups: PopupSink,
     on_event: OnEvent,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -334,6 +369,8 @@ impl TerminalView {
       focus: cx.focus_handle(),
       font_size,
       cell: None,
+      advance: 0.,
+      dark,
       bounds: Rc::default(),
       scroll_rest: 0.,
       selecting: false,
@@ -342,6 +379,7 @@ impl TerminalView {
       idle: 0,
       chat_due: false,
       search: Search::default(),
+      tooltips: Tooltips::new(popups, dark),
       on_event,
       remote: RemoteState::default(),
       _exit: None,
@@ -474,19 +512,20 @@ impl TerminalView {
     Some((cols, rows))
   }
 
-  fn measure(&mut self, cx: &App) {
+  fn measure(&mut self, window: &Window, cx: &App) {
     if self.cell.is_some() {
       return;
     }
     let system = cx.text_system();
     let font = system.resolve_font(&gpui::font(theme::MONO_FONT));
     let size = px(self.font_size);
-    let width = system
+    let advance = system
       .advance(font, size, 'm')
       .map(|a| f32::from(a.width))
       .unwrap_or(self.font_size * 0.6);
     let height = f32::from(system.ascent(font, size)) + f32::from(system.descent(font, size)).abs();
-    self.cell = Some((width, height.ceil()));
+    self.advance = advance;
+    self.cell = Some(cell_size(advance, height, window.scale_factor()));
   }
 
   /// Attaches to the PTY once the grid's size is known, starting it if no
@@ -758,7 +797,8 @@ impl TerminalView {
       cx.propagate();
       return;
     }
-    if self.status != Status::Ready {
+    // Keys typed into the search input are the input's.
+    if self.status != Status::Ready || !self.focus.is_focused(window) {
       return;
     }
     if k.key == "f" && (m.platform || m.control) && !m.shift && self.is_agent() {
@@ -811,7 +851,6 @@ impl TerminalView {
       self.write(&String::from_utf8_lossy(&bytes), cx);
       self.cursor_on = true;
       cx.stop_propagation();
-      let _ = window;
     }
   }
 
@@ -1033,26 +1072,61 @@ impl TerminalView {
     }
   }
 
-  fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+  fn search_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let input = self.search.input.clone().filter(|_| self.search.open)?;
     let blank = self.search.query.trim().is_empty();
-    let fg = p.foreground;
-    let accent = p.accent;
+    let (muted, fg, accent) = (p.muted_foreground, p.foreground, p.accent);
+    let bg = p.background;
     let button = |id: &'static str, icon: &'static str, disabled: bool| {
       div()
         .id(id)
         .debug_selector(move || id.into())
-        .size_6()
+        .size_5()
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
-        .when(disabled, |b| b.opacity(0.5))
+        .rounded_sm()
+        .bg(bg)
+        .text_color(muted)
+        .when(disabled, |b| b.opacity(0.4))
         .when(!disabled, |b| {
-          b.cursor_pointer().hover(move |s| s.bg(accent))
+          b.cursor_pointer()
+            .hover(move |s| s.bg(accent).text_color(fg))
         })
-        .child(ui::icon(icon, 16., fg))
+        .child(ui::icon(icon, 16., muted))
     };
+    let tip = |text: &'static str| Some(TooltipContent::Text(text.into()));
+    let previous = button("terminal-find-previous", theme::ICON_CHEVRON_UP, blank)
+      .when(!blank, |b| {
+        b.on_click(cx.listener(|view, _, _, cx| view.find(false, cx)))
+      });
+    let next = button("terminal-find-next", theme::ICON_CHEVRON_DOWN, blank).when(!blank, |b| {
+      b.on_click(cx.listener(|view, _, _, cx| view.find(true, cx)))
+    });
+    let close = button("terminal-close-search", theme::ICON_X, false)
+      .on_click(cx.listener(|view, _, window, cx| view.close_search(window, cx)));
+    let pty = self.pty.clone();
+    let previous = self.tooltips.wrap(
+      format!("terminal-find-previous-tip-{pty}"),
+      Side::Top,
+      tip("Previous (Shift+Enter)"),
+      previous,
+      cx,
+    );
+    let next = self.tooltips.wrap(
+      format!("terminal-find-next-tip-{pty}"),
+      Side::Top,
+      tip("Next (Enter)"),
+      next,
+      cx,
+    );
+    let close = self.tooltips.wrap(
+      format!("terminal-close-search-tip-{pty}"),
+      Side::Top,
+      tip("Close (Esc)"),
+      close,
+      cx,
+    );
     Some(
       div()
         .debug_selector(|| "terminal-search".into())
@@ -1060,12 +1134,14 @@ impl TerminalView {
         .top_2()
         .right_2()
         .flex()
+        .items_center()
         .gap(px(2.))
         .p(px(2.))
-        .rounded(px(6.))
+        .rounded_md()
         .border_1()
         .border_color(p.border)
         .bg(p.background)
+        .text_color(p.foreground)
         .shadow_lg()
         .capture_action(cx.listener(|view, _: &Escape, window, cx| {
           view.close_search(window, cx);
@@ -1075,22 +1151,18 @@ impl TerminalView {
           ui::text(div(), TextSize::Sm)
             .h_6()
             .w_48()
-            .child(Input::new(&input).appearance(false).bordered(false)),
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .border_1()
+            .border_color(p.input)
+            .bg(p.background)
+            .child(Input::new(&input).appearance(false).bordered(false).small()),
         )
-        .child(
-          button("terminal-find-previous", theme::ICON_CHEVRON_UP, blank).when(!blank, |b| {
-            b.on_click(cx.listener(|view, _, _, cx| view.find(false, cx)))
-          }),
-        )
-        .child(
-          button("terminal-find-next", theme::ICON_CHEVRON_DOWN, blank).when(!blank, |b| {
-            b.on_click(cx.listener(|view, _, _, cx| view.find(true, cx)))
-          }),
-        )
-        .child(
-          button("terminal-close-search", theme::ICON_X, false)
-            .on_click(cx.listener(|view, _, window, cx| view.close_search(window, cx))),
-        ),
+        .child(previous)
+        .child(next)
+        .child(close),
     )
   }
 
@@ -1098,32 +1170,7 @@ impl TerminalView {
     let Some(((w, h), frame)) = self.cell.zip(self.with_emulator(|e| e.frame())) else {
       return div();
     };
-    let font = self.font_size;
-    let lines = frame.lines.into_iter().enumerate().map(move |(row, runs)| {
-      div()
-        .absolute()
-        .top(px(TOP_PAD + row as f32 * h))
-        .left_0()
-        .h(px(h))
-        .w_full()
-        .children(runs.into_iter().map(move |run| {
-          div()
-            .absolute()
-            .left(px(run.col as f32 * w))
-            .w(px(run.cells as f32 * w))
-            .h(px(h))
-            .when_some(run.bg, |d, bg| d.bg(rgb(bg)))
-            .text_color(rgb(run.fg))
-            .when(run.bold, |d| d.font_weight(gpui::FontWeight::BOLD))
-            .when(run.italic, |d| d.italic())
-            .when(run.underline, |d| d.underline())
-            .when(run.strike, |d| d.line_through())
-            .text_size(px(font))
-            .line_height(px(h))
-            .whitespace_nowrap()
-            .child(SharedString::from(run.text))
-        }))
-    });
+    let (font_size, advance) = (px(self.font_size), self.advance);
     let cursor = frame.cursor.map(|(row, col)| {
       let base = div()
         .absolute()
@@ -1141,11 +1188,34 @@ impl TerminalView {
           .border_color(rgb(terminal_emu::FOREGROUND))
       }
     });
+    let lines = frame.lines;
     div()
       .absolute()
       .inset_0()
-      .font_family(theme::MONO_FONT)
-      .children(lines)
+      .child(
+        gpui::canvas(
+          |_, _, _| {},
+          move |bounds, _, window, cx| {
+            for (row, runs) in lines.into_iter().enumerate() {
+              let y = bounds.origin.y + px(TOP_PAD + row as f32 * h);
+              for run in runs {
+                let x = bounds.origin.x + px(run.col as f32 * w);
+                if let Some(bg) = run.bg {
+                  window.paint_quad(gpui::fill(
+                    Bounds::new(point(x, y), gpui::size(px(run.cells as f32 * w), px(h))),
+                    rgb(bg),
+                  ));
+                }
+                if run.text.trim().is_empty() && !run.underline && !run.strike {
+                  continue;
+                }
+                paint_run(&run, point(x, y), (w, h, advance), font_size, window, cx);
+              }
+            }
+          },
+        )
+        .size_full(),
+      )
       .children(cursor)
   }
 
@@ -1166,7 +1236,7 @@ impl TerminalView {
         .top(px(top.min(height - thumb)))
         .w(px(SCROLLBAR))
         .h(px(thumb))
-        .rounded_full()
+        .rounded(px(4.))
         .bg(p.border),
     )
   }
@@ -1353,13 +1423,15 @@ impl TerminalView {
 
 impl Render for TerminalView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.measure(cx);
+    self.measure(window, cx);
     self.sync(cx);
     self.ensure_search_input(window, cx);
-    let p = theme::palette(true);
+    self.tooltips.sync(cx);
+    let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
+    let search = self.search_bar(&p, cx);
     div()
       .id(SharedString::from(format!("terminal-{}", self.pty)))
       .debug_selector(|| "terminal-body".into())
@@ -1371,6 +1443,13 @@ impl Render for TerminalView {
       .cursor_text()
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+      // A click anywhere else blurs the terminal, as it does xterm's
+      // textarea; its cursor turns to an outline.
+      .on_mouse_down_out(cx.listener(|view, _, window, cx| {
+        if view.focus.is_focused(window) {
+          window.blur(cx);
+        }
+      }))
       .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
       .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
       .on_mouse_move(cx.listener(Self::on_mouse_move))
@@ -1396,7 +1475,7 @@ impl Render for TerminalView {
       )
       .child(self.grid(focused))
       .children(self.scrollbar(&p))
-      .children(self.search_bar(&p, cx))
+      .children(search)
       .children(self.overlay(&p, cx))
   }
 }
@@ -1441,6 +1520,9 @@ enum Drag {
 pub struct TerminalPane {
   host: Host,
   react: ActionSink,
+  popups: PopupSink,
+  /// The app's theme, which the pane's chrome follows.
+  dark: bool,
   place: Place,
   route: Route,
   incoming: Option<Route>,
@@ -1456,6 +1538,7 @@ pub struct TerminalPane {
   pub container: Rc<Cell<Option<Bounds<Pixels>>>>,
   row: Rc<Cell<Option<Bounds<Pixels>>>>,
   row_scroll: ScrollHandle,
+  controls_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
   drag: Option<Drag>,
   last_command: u64,
   summaries: Vec<Summary>,
@@ -1464,6 +1547,13 @@ pub struct TerminalPane {
   hovered_asset: Option<SendAsset>,
   /// `SendAssetLightbox`, for the column it opened from.
   lightbox: Option<(String, Entity<Lightbox>, Subscription)>,
+  /// `useRepoEnvironment`: where new terminals run, while the
+  /// devcontainers preview is on; and the repository it was read for.
+  environment: Option<Environment>,
+  environment_repo: Option<String>,
+  environment_menu: bool,
+  starting_devcontainer: bool,
+  _environment_task: Option<Task<()>>,
   _keys: Option<Subscription>,
 }
 
@@ -1496,6 +1586,8 @@ impl TerminalPane {
     Self {
       host,
       react,
+      popups: popups.clone(),
+      dark: false,
       place,
       route: Route::default(),
       incoming: None,
@@ -1509,14 +1601,131 @@ impl TerminalPane {
       container: Rc::default(),
       row: Rc::default(),
       row_scroll: ScrollHandle::new(),
+      controls_bounds: Rc::default(),
       drag: None,
       last_command: 0,
       summaries: Vec::new(),
-      tooltips: Tooltips::new(popups, true),
+      tooltips: Tooltips::new(popups, false),
       hovered_asset: None,
       lightbox: None,
+      environment: None,
+      environment_repo: None,
+      environment_menu: false,
+      starting_devcontainer: false,
+      _environment_task: None,
       _keys: None,
     }
+  }
+
+  /// Follows the app's theme, terminals and all.
+  pub fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
+    if self.dark == dark {
+      return;
+    }
+    self.dark = dark;
+    self.tooltips.dark = dark;
+    for column in &self.columns {
+      column.view.update(cx, |view, cx| {
+        view.dark = dark;
+        view.tooltips.dark = dark;
+        cx.notify();
+      });
+    }
+    cx.notify();
+  }
+
+  /// Reads the repository's environment once the pane opens on it.
+  fn load_environment(&mut self, cx: &mut Context<Self>) {
+    if self.collapsed {
+      // Read again on the next open: it may have changed meanwhile.
+      self.environment_repo = None;
+      return;
+    }
+    let repo = self.place.repo_path.clone();
+    if repo.is_empty() || self.environment_repo.as_deref() == Some(&repo) {
+      return;
+    }
+    self.environment_repo = Some(repo.clone());
+    let host = self.host.clone();
+    let task = cx
+      .background_executor()
+      .spawn(async move { code_data::task_settings(&*host, &repo).environment });
+    self._environment_task = Some(cx.spawn(async move |this, cx| {
+      let environment = task.await;
+      let _ = this.update(cx, |pane, cx| {
+        pane.environment = environment;
+        cx.notify();
+      });
+    }));
+  }
+
+  /// `setEnvironment`: saves the choice, starting a stopped devcontainer.
+  fn set_environment(&mut self, devcontainer: bool, cx: &mut Context<Self>) {
+    self.environment_menu = false;
+    let repo = self.place.repo_path.clone();
+    let value = if devcontainer {
+      "devcontainer"
+    } else {
+      "local"
+    };
+    let saved = self
+      .host
+      .set_repo_settings(&repo, &[(ENVIRONMENT_SETTING.into(), value.into())]);
+    if let Err(error) = saved {
+      self.toast("Failed to save setting", error, ToastTone::Error);
+      cx.notify();
+      return;
+    }
+    super::workspace_data::WorkspaceHost::notify(
+      &*self.host,
+      NativeEvent::RepoSettingsChanged { repo_path: repo },
+    );
+    let Some(environment) = self.environment.as_mut() else {
+      return;
+    };
+    environment.devcontainer = devcontainer;
+    let stopped = environment.status.as_ref().is_some_and(|s| !s.running);
+    if devcontainer && stopped && !self.starting_devcontainer {
+      self.start_devcontainer(cx);
+    }
+    cx.notify();
+  }
+
+  fn start_devcontainer(&mut self, cx: &mut Context<Self>) {
+    self.environment_menu = false;
+    self.starting_devcontainer = true;
+    let (host, repo) = (self.host.clone(), self.place.repo_path.clone());
+    let task = cx
+      .background_executor()
+      .spawn(async move { host.devcontainer_up(&repo) });
+    self._environment_task = Some(cx.spawn(async move |this, cx| {
+      let result = task.await;
+      let _ = this.update(cx, |pane, cx| {
+        pane.starting_devcontainer = false;
+        match result {
+          Ok(status) => {
+            if let Some(environment) = pane.environment.as_mut() {
+              environment.status = Some(status);
+            }
+          }
+          Err(error) => pane.toast("Devcontainer did not start", error, ToastTone::Error),
+        }
+        cx.notify();
+      });
+    }));
+    cx.notify();
+  }
+
+  fn toast(&self, title: &str, description: String, tone: ToastTone) {
+    super::workspace_data::WorkspaceHost::notify(
+      &*self.host,
+      NativeEvent::Toast {
+        title: title.into(),
+        description,
+        tone,
+        action: None,
+      },
+    );
   }
 
   /// Whether the pane covers the tab (maximized and open).
@@ -1848,7 +2057,11 @@ impl TerminalPane {
   fn open_agent(&mut self, pane_id: i64, window: &mut Window, cx: &mut Context<Self>) {
     let id = agent_column_id(pane_id);
     if self.columns.iter().any(|c| c.id == id) {
-      self.focus_column(&id, window, cx);
+      // Clicking a column makes it the active session, which React echoes
+      // back: focus stays where the click put it (the search input, say).
+      if self.active.as_deref() != Some(id.as_str()) {
+        self.focus_column(&id, window, cx);
+      }
       return;
     }
     let Some(kind_and_start) = self.agent_session(pane_id) else {
@@ -1857,7 +2070,8 @@ impl TerminalPane {
     let (kind, pty, start) = kind_and_start;
     let on_event = self.on_event(id.clone(), cx);
     let (host, font_size) = (self.host.clone(), self.font_size);
-    let view = cx.new(|cx| TerminalView::new(pty, start, host, font_size, on_event, cx));
+    let (look, popups) = ((font_size, self.dark), self.popups.clone());
+    let view = cx.new(|cx| TerminalView::new(pty, start, host, look, popups, on_event, cx));
     self.columns.push(Column {
       id: id.clone(),
       view,
@@ -1981,7 +2195,8 @@ impl TerminalPane {
       self.font_size,
       Start::Shell { dir: dir.clone() },
     );
-    let view = cx.new(|cx| TerminalView::new(id.clone(), start, host, font_size, on_event, cx));
+    let (look, popups) = ((font_size, self.dark), self.popups.clone());
+    let view = cx.new(|cx| TerminalView::new(id.clone(), start, host, look, popups, on_event, cx));
     self.columns.push(Column {
       id: id.clone(),
       view,
@@ -2007,7 +2222,8 @@ impl TerminalPane {
     let start = Start::Remote {
       target: target.clone(),
     };
-    let view = cx.new(|cx| TerminalView::new(pty, start, host, REMOTE_FONT_SIZE, on_event, cx));
+    let (look, popups) = ((REMOTE_FONT_SIZE, self.dark), self.popups.clone());
+    let view = cx.new(|cx| TerminalView::new(pty, start, host, look, popups, on_event, cx));
     self.columns.push(Column {
       id: id.clone(),
       view,
@@ -2408,6 +2624,44 @@ impl TerminalPane {
           .into_any_element(),
       );
     } else {
+      if let Some(environment) = &self.environment {
+        let trigger = environment::trigger(
+          "terminal-environment",
+          environment,
+          self.starting_devcontainer,
+          environment::PANE_TRIGGER,
+          p,
+        )
+        .on_click(cx.listener(|pane, _, _, cx| {
+          pane.environment_menu = !pane.environment_menu;
+          cx.notify();
+        }));
+        let menu = self.environment_menu.then(|| {
+          let panel = environment::menu(
+            "terminal-environment-menu",
+            environment,
+            self.starting_devcontainer,
+            p,
+            Self::set_environment,
+            Self::start_devcontainer,
+            cx,
+          )
+          .top(px(24.))
+          .right_0()
+          .on_mouse_down_out(cx.listener(|pane, _, _, cx| {
+            pane.environment_menu = false;
+            cx.notify();
+          }));
+          deferred(panel).with_priority(1)
+        });
+        buttons.push(
+          div()
+            .relative()
+            .child(trigger)
+            .children(menu)
+            .into_any_element(),
+        );
+      }
       if self.maximized {
         let b = button("terminal-restore", theme::ICON_MINIMIZE)
           .on_click(cx.listener(|pane, _, _, cx| pane.toggle_maximize(cx)));
@@ -2471,6 +2725,12 @@ impl TerminalPane {
       .bg(p.background.opacity(0.9))
       .p(px(2.))
       .shadow_sm()
+      .child({
+        let bounds = self.controls_bounds.clone();
+        gpui::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+          .absolute()
+          .size_full()
+      })
       .children(buttons)
   }
 
@@ -2550,20 +2810,20 @@ impl TerminalPane {
           .items_center()
           .rounded_md()
           .cursor_pointer()
-          .hover(|s| s.bg(p.accent))
+          .hover(|s| s.bg(p.muted.opacity(0.2)))
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .on_click(cx.listener(move |_, _, _, cx| view.update(cx, |v, cx| v.open_search(cx))))
-          .child(ui::icon(theme::ICON_SEARCH, 16., fg));
+          .child(ui::icon(theme::ICON_SEARCH, 16., rgb(0xe5e7eb).into()));
         let search = self.tooltips.wrap(
           format!("terminal-search-tip-{}", column.id),
-          Side::Bottom,
+          Side::Top,
           Some(TooltipContent::Text("Search (⌘+F)".into())),
           search,
           cx,
         );
         let close = self.tooltips.wrap(
           format!("terminal-close-tip-{}", column.id),
-          Side::Bottom,
+          Side::Top,
           Some(TooltipContent::Shortcut {
             text: "Close".into(),
             keys: "⌘ + W".into(),
@@ -2571,8 +2831,9 @@ impl TerminalPane {
           close
             .h_6()
             .px_2()
-            .hover(|s| s.bg(p.accent))
-            .child(ui::icon(theme::ICON_X, 16., fg)),
+            .rounded_md()
+            .hover(|s| s.bg(p.muted.opacity(0.2)))
+            .child(ui::icon(theme::ICON_X, 16., rgb(0xe5e7eb).into())),
           cx,
         );
         base
@@ -2585,9 +2846,9 @@ impl TerminalPane {
             div()
               .flex()
               .items_center()
-              .gap_2()
+              .gap(px(6.))
               .min_w_0()
-              .child(ui::icon(agent_icon(agent), 16., fg))
+              .child(ui::icon(agent_icon(agent), 16., rgb(0xe5e7eb).into()))
               .child(
                 div()
                   .truncate()
@@ -2605,7 +2866,14 @@ impl TerminalPane {
                 .text_color(rgb(0xd1d5db)),
               ),
           )
-          .child(div().flex().items_center().child(search).child(close))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_1()
+              .child(search)
+              .child(close),
+          )
       }
       Kind::Remote { target } => {
         let view = column.view.clone();
@@ -2702,7 +2970,7 @@ impl TerminalPane {
         let (name, main) = self.label(dir);
         let close = self.tooltips.wrap(
           format!("terminal-close-tip-{}", column.id),
-          Side::Bottom,
+          Side::Top,
           Some(TooltipContent::Shortcut {
             text: "Close".into(),
             keys: "⌘ + W".into(),
@@ -2724,7 +2992,7 @@ impl TerminalPane {
             div()
               .flex()
               .items_center()
-              .gap_2()
+              .gap(px(6.))
               .min_w_0()
               .child(ui::icon(theme::ICON_TERMINAL, 12., p.muted_foreground))
               .child(
@@ -2856,6 +3124,180 @@ impl Render for SendAssetDrag {
   }
 }
 
+/// Part of a cell: x, y, width and height as fractions of the cell.
+pub type CellPart = (f32, f32, f32, f32);
+
+/// A block element (U+2580 to U+259F) as xterm draws it, filling its cell
+/// edge to edge instead of drawing the font's glyph: the parts of the cell
+/// it fills (x, y, width, height, as fractions of the cell) and how opaque
+/// they are (the shades).
+pub fn block(c: char) -> Option<(Vec<CellPart>, f32)> {
+  const UL: CellPart = (0., 0., 0.5, 0.5);
+  const UR: CellPart = (0.5, 0., 0.5, 0.5);
+  const LL: CellPart = (0., 0.5, 0.5, 0.5);
+  const LR: CellPart = (0.5, 0.5, 0.5, 0.5);
+  let full = (0., 0., 1., 1.);
+  let code = c as u32;
+  let rects = match code {
+    0x2580 => vec![(0., 0., 1., 0.5)],
+    0x2581..=0x2587 => {
+      let part = (code - 0x2580) as f32 / 8.;
+      vec![(0., 1. - part, 1., part)]
+    }
+    0x2588 => vec![full],
+    0x2589..=0x258f => vec![(0., 0., (0x2590 - code) as f32 / 8., 1.)],
+    0x2590 => vec![(0.5, 0., 0.5, 1.)],
+    0x2591..=0x2593 => return Some((vec![full], (code - 0x2590) as f32 / 4.)),
+    0x2594 => vec![(0., 0., 1., 0.125)],
+    0x2595 => vec![(0.875, 0., 0.125, 1.)],
+    0x2596 => vec![LL],
+    0x2597 => vec![LR],
+    0x2598 => vec![UL],
+    0x2599 => vec![UL, LL, LR],
+    0x259a => vec![UL, LR],
+    0x259b => vec![UL, UR, LL],
+    0x259c => vec![UL, UR, LR],
+    0x259d => vec![UR],
+    0x259e => vec![UR, LL],
+    0x259f => vec![UR, LL, LR],
+    _ => return None,
+  };
+  Some((rects, 1.))
+}
+
+/// A shade (`░▒▓`) as xterm's custom glyphs draw it: a 2x2 pattern of
+/// device pixels repeated over the cell, a quarter, half or three quarters
+/// of them lit.
+fn paint_shade(
+  origin: gpui::Point<Pixels>,
+  (cell, height): (f32, f32),
+  alpha: f32,
+  color: gpui::Hsla,
+  window: &mut Window,
+) {
+  let pattern: [[bool; 2]; 2] = if alpha <= 0.25 {
+    [[true, false], [false, false]]
+  } else if alpha <= 0.5 {
+    [[true, false], [false, true]]
+  } else {
+    [[false, true], [true, true]]
+  };
+  let dot = 1. / window.scale_factor();
+  let (cols, rows) = ((cell / dot) as usize, (height / dot) as usize);
+  for row in 0..rows {
+    for col in 0..cols {
+      if pattern[row % 2][col % 2] {
+        window.paint_quad(gpui::fill(
+          Bounds::new(
+            point(
+              origin.x + px(col as f32 * dot),
+              origin.y + px(row as f32 * dot),
+            ),
+            gpui::size(px(dot), px(dot)),
+          ),
+          color,
+        ));
+      }
+    }
+  }
+}
+
+/// Paints one run of cells, each glyph at the start of its cell, as
+/// xterm's renderer does when the font's advance is not a whole pixel.
+fn paint_run(
+  run: &terminal_emu::Run,
+  origin: gpui::Point<Pixels>,
+  (cell, height, advance): (f32, f32, f32),
+  font_size: Pixels,
+  window: &mut Window,
+  cx: &mut App,
+) {
+  let color: gpui::Hsla = rgb(run.fg).into();
+  // Block elements fill their cells; the font draws the rest.
+  let mut text = String::with_capacity(run.text.len());
+  for (index, c) in run.text.chars().enumerate() {
+    match block(c) {
+      Some((_, alpha)) if alpha < 1. => {
+        let cell_origin = point(origin.x + px(index as f32 * cell), origin.y);
+        paint_shade(cell_origin, (cell, height), alpha, color, window);
+        text.push(' ');
+      }
+      Some((rects, _)) => {
+        for (x, y, w, h) in rects {
+          let origin = point(
+            origin.x + px((index as f32 + x) * cell),
+            origin.y + px(y * height),
+          );
+          window.paint_quad(gpui::fill(
+            Bounds::new(origin, gpui::size(px(w * cell), px(h * height))),
+            color,
+          ));
+        }
+        text.push(' ');
+      }
+      None => text.push(c),
+    }
+  }
+  if text.trim().is_empty() && !run.underline && !run.strike {
+    return;
+  }
+  let mut font = gpui::font(theme::MONO_FONT);
+  if run.bold {
+    font.weight = gpui::FontWeight::BOLD;
+  }
+  if run.italic {
+    font.style = gpui::FontStyle::Italic;
+  }
+  let text_run = gpui::TextRun {
+    len: text.len(),
+    font,
+    color,
+    background_color: None,
+    underline: run.underline.then_some(gpui::UnderlineStyle {
+      thickness: px(1.),
+      color: Some(color),
+      wavy: false,
+    }),
+    strikethrough: run.strike.then_some(gpui::StrikethroughStyle {
+      thickness: px(1.),
+      color: Some(color),
+    }),
+  };
+  let mut line = window
+    .text_system()
+    .shape_line(text.into(), font_size, &[text_run], None);
+  if (advance - cell).abs() > f32::EPSILON {
+    let layout: &gpui::LineLayout = &line;
+    let snapped = gpui::LineLayout {
+      font_size: layout.font_size,
+      width: px(run.cells as f32 * cell),
+      ascent: layout.ascent,
+      descent: layout.descent,
+      runs: layout
+        .runs
+        .iter()
+        .map(|shaped| gpui::ShapedRun {
+          font_id: shaped.font_id,
+          glyphs: shaped
+            .glyphs
+            .iter()
+            .map(|glyph| gpui::ShapedGlyph {
+              position: point(
+                px(cell_x(f32::from(glyph.position.x), advance, cell)),
+                glyph.position.y,
+              ),
+              ..glyph.clone()
+            })
+            .collect(),
+        })
+        .collect(),
+      len: layout.len,
+    };
+    *line = Arc::new(snapped);
+  }
+  let _ = line.paint(origin, px(height), gpui::TextAlign::Left, None, window, cx);
+}
+
 /// The emulator's name for a mouse button xterm reports.
 fn mouse_button(button: MouseButton) -> Option<terminal_emu::Button> {
   match button {
@@ -2886,7 +3328,8 @@ impl Render for TerminalPane {
     }
     self.tooltips.sync(cx);
     self.sync_lightbox(cx);
-    let p = theme::palette(true);
+    self.load_environment(cx);
+    let p = theme::palette(self.dark);
     if self.collapsed {
       return div()
         .debug_selector(|| "workspace-terminal-pane".into())
@@ -2907,7 +3350,13 @@ impl Render for TerminalPane {
             .w_1()
             .h_full()
             .flex_shrink_0()
-            .bg(p.border)
+            .bg(
+              if matches!(self.drag, Some(Drag::Divider { left: l, .. }) if l == left) {
+                p.primary
+              } else {
+                p.border
+              },
+            )
             .hover(|s| s.bg(p.primary.opacity(0.5)))
             .child(
               div()
@@ -2925,6 +3374,7 @@ impl Render for TerminalPane {
                       x: f32::from(e.position.x),
                     });
                     cx.stop_propagation();
+                    cx.notify();
                   }),
                 ),
             )
@@ -2936,24 +3386,59 @@ impl Render for TerminalPane {
     let row_bounds = self.row.clone();
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
+    // `height%` of the workspace view, as React sizes the pane, with the
+    // divider above it.
+    let view_height = self.container.get().map(|b| f32::from(b.size.height));
     div()
       .flex()
       .flex_col()
       .flex_shrink_0()
       .when(maximized, |d| d.size_full())
-      .when(!maximized, |d| {
-        d.h(relative(self.height / 100.))
-          .max_h(relative(HEIGHT_MAX / 100.))
+      .when(!maximized, |d| match view_height {
+        Some(view) => d.h(px(
+          view * self.height.min(HEIGHT_MAX) / 100. + DIVIDER_HEIGHT,
+        )),
+        None => d.h(relative(self.height / 100.)),
       })
-      .on_mouse_move(cx.listener(|pane, e: &MouseMoveEvent, _, cx| pane.on_drag(e, cx)))
-      .on_mouse_up(
-        MouseButton::Left,
-        cx.listener(|pane, _, _, _| pane.drag = None),
-      )
-      .on_mouse_up_out(
-        MouseButton::Left,
-        cx.listener(|pane, _, _, _| pane.drag = None),
-      )
+      // `activePtySessionId` clears on a click outside the pane.
+      .on_mouse_down_out(cx.listener(|pane, e: &MouseDownEvent, _, cx| {
+        // The controls sit above the pane's edge, but are part of it.
+        let on_controls = pane
+          .controls_bounds
+          .get()
+          .is_some_and(|b| b.contains(&e.position));
+        if !on_controls && pane.active.take().is_some() {
+          cx.notify();
+        }
+      }))
+      // A drag follows the mouse anywhere in the window, as React's
+      // document listeners do, not only over the pane.
+      .when(self.drag.is_some(), |d| {
+        let pane = cx.entity().downgrade();
+        d.child(
+          gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+              let (moved, released) = (pane.clone(), pane.clone());
+              window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                  let _ = moved.update(cx, |pane, cx| pane.on_drag(e, cx));
+                }
+              });
+              window.on_mouse_event(move |_: &gpui::MouseUpEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                  let _ = released.update(cx, |pane, cx| {
+                    pane.drag = None;
+                    cx.notify();
+                  });
+                }
+              });
+            },
+          )
+          .absolute()
+          .size_0(),
+        )
+      })
       .when(!maximized, |d| {
         d.child(
           div()
@@ -2980,6 +3465,7 @@ impl Render for TerminalPane {
                   cx.listener(|pane, _, _, cx| {
                     pane.drag = Some(Drag::Height);
                     cx.stop_propagation();
+                    cx.notify();
                   }),
                 ),
             ),
@@ -2993,6 +3479,8 @@ impl Render for TerminalPane {
           .min_h_0()
           .flex()
           .flex_col()
+          .border_t_1()
+          .border_color(p.border)
           .bg(p.background)
           .child(
             div()
@@ -3045,6 +3533,36 @@ mod tests {
     assert_eq!(scroll_delta(row, (-150., 250.)), -150.);
     // Wider than the row: left edges line up.
     assert_eq!(scroll_delta(row, (300., 1500.)), 300.);
+  }
+
+  #[test]
+  fn rounds_cells_down_to_whole_device_pixels() {
+    assert_eq!(cell_size(8.4, 18.48, 1.), (8., 18.));
+    assert_eq!(cell_size(8.4, 18.48, 2.), (8., 18.));
+    assert_eq!(cell_size(7.2, 15.84, 2.), (7., 15.5));
+  }
+
+  #[test]
+  fn draws_block_elements_as_cell_fractions() {
+    assert_eq!(block('█'), Some((vec![(0., 0., 1., 1.)], 1.)));
+    assert_eq!(block('▀'), Some((vec![(0., 0., 1., 0.5)], 1.)));
+    assert_eq!(block('▂'), Some((vec![(0., 0.75, 1., 0.25)], 1.)));
+    assert_eq!(block('▊'), Some((vec![(0., 0., 0.75, 1.)], 1.)));
+    assert_eq!(block('▐'), Some((vec![(0.5, 0., 0.5, 1.)], 1.)));
+    assert_eq!(block('▒'), Some((vec![(0., 0., 1., 1.)], 0.5)));
+    assert_eq!(
+      block('▚'),
+      Some((vec![(0., 0., 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)], 1.))
+    );
+    assert_eq!(block('a'), None);
+  }
+
+  #[test]
+  fn places_glyphs_on_their_cells() {
+    assert_eq!(cell_x(0., 8.4, 8.), 0.);
+    assert_eq!(cell_x(8.4 * 3., 8.4, 8.), 24.);
+    // A combining mark shaped just past its letter stays in its cell.
+    assert_eq!(cell_x(8.4 * 3. + 0.5, 8.4, 8.), 24.);
   }
 
   #[test]

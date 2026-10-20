@@ -25,11 +25,12 @@ use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
   popup::{Side, TooltipContent},
   screen::{
-    code::{agent_icon, checkbox, menu_item, menu_panel, tw, BLUE_400, BLUE_500, GREEN_500},
+    code::{agent_icon, checkbox, menu_item, menu_panel, tw, BLUE_400, BLUE_500},
     code_data::{
       self, insert_at, mention_at, task_settings, Agent, Environment, TaskSettings,
       ENVIRONMENT_SETTING,
     },
+    environment,
     file_picker::{FilePicker, FilePickerEvent, Scope},
   },
   theme::{self, Palette},
@@ -1266,37 +1267,14 @@ impl AgentPromptView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let devcontainer = env.devcontainer;
-    let (icon, label) = if devcontainer {
-      (theme::ICON_BOX, "Devcontainer")
-    } else {
-      (theme::ICON_LAPTOP, "Local")
-    };
-    let running = env.status.as_ref().is_some_and(|s| s.running);
-    let button = Button::new("task-environment", p)
-      .variant(Variant::Ghost)
-      .size(Size::Sm)
-      .h(px(28.))
-      .px_2()
-      .gap(px(6.))
-      .child(ui::icon(icon, 14., p.foreground))
-      .child(ui::text(div(), TextSize::Xs).child(label))
-      .when(devcontainer, |b| {
-        if self.starting_devcontainer {
-          b.child(ui::spinner(
-            "devcontainer-starting",
-            12.,
-            p.muted_foreground,
-          ))
-        } else {
-          b.child(div().size(px(6.)).rounded_full().bg(if running {
-            tw(GREEN_500)
-          } else {
-            p.muted_foreground.opacity(0.5)
-          }))
-        }
-      })
-      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
+    let button = environment::trigger(
+      "task-environment",
+      env,
+      self.starting_devcontainer,
+      environment::TASK_TRIGGER,
+      p,
+    )
+    .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
     div()
       .relative()
       .child(button)
@@ -1311,100 +1289,17 @@ impl AgentPromptView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let status = env.status.as_ref();
-    let usable = status.is_some_and(|s| s.configured && s.cli_available);
-    let detail = match status {
-      None => "Checking…",
-      Some(s) if !s.configured => "No .devcontainer config in this repo",
-      Some(s) if !s.cli_available => "Install the Dev Containers CLI",
-      Some(_) if self.starting_devcontainer => "Starting…",
-      Some(s) if s.running => "Running",
-      Some(_) => "Stopped",
-    };
-    let item = |id: &'static str,
-                icon: &'static str,
-                title: &'static str,
-                detail: &str,
-                selected: bool,
-                disabled: bool| {
-      menu_item(id, p, disabled)
-        .items_start()
-        .child(
-          div()
-            .mt(px(2.))
-            .child(ui::icon(icon, 14., p.popover_foreground)),
-        )
-        .child(
-          div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .child(div().font_weight(FontWeight::MEDIUM).child(title))
-            .child(
-              ui::text(div(), TextSize::Xs)
-                .text_color(p.muted_foreground)
-                .child(detail.to_string()),
-            ),
-        )
-        .when(selected, |this| {
-          this.child(
-            div()
-              .mt(px(2.))
-              .child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground)),
-          )
-        })
-    };
-    let devcontainer = env.devcontainer;
-    let mut panel = menu_panel("task-environment-menu", p)
-      .top(px(32.))
-      .right_0()
-      .w(px(256.))
-      .child(
-        ui::text(div(), TextSize::Xs)
-          .px_2()
-          .py(px(6.))
-          .text_color(p.muted_foreground)
-          .child("New terminals and agents run in"),
-      )
-      .child(
-        item(
-          "environment-local",
-          theme::ICON_LAPTOP,
-          "Local",
-          "This machine",
-          !devcontainer,
-          false,
-        )
-        .on_click(cx.listener(|view, _, _, cx| view.set_environment(false, cx))),
-      )
-      .child(
-        item(
-          "environment-devcontainer",
-          theme::ICON_BOX,
-          "Devcontainer",
-          detail,
-          devcontainer,
-          !usable,
-        )
-        .when(usable, |this| {
-          this.on_click(cx.listener(|view, _, _, cx| view.set_environment(true, cx)))
-        }),
-      );
-    if devcontainer && usable && !status.is_some_and(|s| s.running) {
-      let starting = self.starting_devcontainer;
-      panel = panel
-        .child(div().h_px().my_1().mx_neg_1().bg(p.border))
-        .child(
-          menu_item("environment-start", p, starting)
-            .child(ui::icon(theme::ICON_PLAY, 14., p.popover_foreground))
-            .child("Start devcontainer")
-            .when(!starting, |this| {
-              this.on_click(cx.listener(|view, _, _, cx| view.start_devcontainer(cx)))
-            }),
-        );
-    }
+    let panel = environment::menu(
+      "task-environment-menu",
+      env,
+      self.starting_devcontainer,
+      p,
+      Self::set_environment,
+      Self::start_devcontainer,
+      cx,
+    )
+    .top(px(32.))
+    .right_0();
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
   }
 }
