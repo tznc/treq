@@ -1,4 +1,4 @@
-use crate::common::TestRepo;
+use crate::common::{JjVerifier, TestRepo};
 use std::path::Path;
 use treq_lib::core::MergeCommit;
 
@@ -478,5 +478,52 @@ fn home_pull_syncs_workspace_working_copy_to_new_tip() {
     vec![wc_id],
     "workspace @ should equal the branch bookmark after home pull (HomeToWorkspace sync); \
          if this fails the infinite rebase-sync loop will recur"
+  );
+}
+
+#[test]
+fn home_commit_moves_branch_but_keeps_dirty_workspace_working_copy() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  TestRepo::run_git(&repo.repo_path, &["add", ".gitignore"]).expect("stage init metadata");
+  TestRepo::run_git(&repo.repo_path, &["commit", "-m", "Commit init metadata"])
+    .expect("commit init metadata");
+  TestRepo::run_git(&repo.repo_path, &["checkout", "-b", PROP_BRANCH])
+    .expect("Failed to create branch");
+  let branch_workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    PROP_BRANCH,
+    None,
+    None,
+    Some(PROP_BRANCH),
+    None,
+    None,
+  )
+  .expect("Failed to create branch workspace");
+  TestRepo::run_git(&repo.repo_path, &["checkout", PROP_BRANCH])
+    .expect("Failed to checkout branch after workspace creation");
+  let workspace_root = workspace_path(&repo.repo_path, &branch_workspace.workspace_path);
+
+  TestRepo::write_workspace_file(&workspace_root, "dirty.txt", "dirty workspace content\n")
+    .expect("Failed to dirty the workspace");
+  let workspace_wc_before = JjVerifier::get_commit_id_for_rev(&workspace_root, "@").unwrap();
+
+  TestRepo::write_workspace_file(&repo.repo_path, "home-dirty-safe-sync.txt", "home commit\n")
+    .expect("Failed to write file in home repo");
+  treq_lib::core::commit_workspace(&repo.repo_path, Option::<i64>::None, "home commit")
+    .expect("Home commit should succeed");
+
+  assert_eq!(
+    resolve_bookmark_tip_ids(&workspace_root, PROP_BRANCH),
+    resolve_bookmark_tip_ids(&repo.repo_path, PROP_BRANCH),
+    "workspace branch should follow the home commit"
+  );
+  assert_eq!(
+    JjVerifier::get_commit_id_for_rev(&workspace_root, "@").unwrap(),
+    workspace_wc_before,
+    "a dirty workspace working copy must not be overwritten"
+  );
+  assert_eq!(
+    read_file(&workspace_root, "dirty.txt"),
+    "dirty workspace content\n"
   );
 }

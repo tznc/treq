@@ -395,6 +395,33 @@ mod tests {
   }
 
   #[test]
+  fn status_reports_a_repo_without_config_as_unconfigured() {
+    let temp = TempDir::new().unwrap();
+    let status = status(temp.path().to_str().unwrap());
+    assert!(!status.configured);
+    assert_eq!(status.config_path, None);
+    assert!(!status.running);
+  }
+
+  #[test]
+  fn status_finds_the_config_and_reports_the_container_stopped() {
+    let temp = TempDir::new().unwrap();
+    std::fs::create_dir(temp.path().join(".devcontainer")).unwrap();
+    std::fs::write(
+      temp.path().join(".devcontainer/devcontainer.json"),
+      r#"{"image":"alpine:3.20"}"#,
+    )
+    .unwrap();
+    let status = status(temp.path().to_str().unwrap());
+    assert!(status.configured);
+    assert_eq!(
+      status.config_path.as_deref(),
+      Some(".devcontainer/devcontainer.json")
+    );
+    assert!(!status.running);
+  }
+
+  #[test]
   fn resolves_repo_root_from_workspace_path() {
     assert_eq!(
       repo_root_for(Path::new("/src/app/.treq/workspaces/feature/sub")),

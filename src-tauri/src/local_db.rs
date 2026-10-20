@@ -232,11 +232,7 @@ impl<'a> RepoStateScope<'a> {
 }
 
 fn resolve_db_path(repo_arg: &str) -> Result<PathBuf, String> {
-  let app_data_dir = std::env::var("TREQ_APP_DATA_DIR")
-    .ok()
-    .filter(|dir| !dir.trim().is_empty())
-    .map(PathBuf::from);
-  RepoStateScope::parse(repo_arg).db_path(app_data_dir.as_deref())
+  RepoStateScope::parse(repo_arg).db_path(crate::core::app_data_dir().as_deref())
 }
 
 /// Initialize the local database for a repository.
@@ -2428,6 +2424,56 @@ mod tests {
   }
 
   #[test]
+  fn review_drafts_list_resolve_and_delete_by_target() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let draft = create_agent_review_comment(
+      repo,
+      "github_pr",
+      "42",
+      "src/search.ts",
+      None,
+      3,
+      4,
+      Some("new"),
+      "Trim first.",
+      None,
+      "local-human",
+      None,
+    )
+    .unwrap();
+    update_agent_review_comment(
+      repo,
+      &draft.id,
+      Some("Trim before matching."),
+      Some("abc123"),
+    )
+    .unwrap();
+
+    let listed = list_agent_review_comments(repo, "github_pr", "42").unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].comment_text, "Trim before matching.");
+    assert_eq!(listed[0].line_hash.as_deref(), Some("abc123"));
+    assert_eq!((listed[0].start_line, listed[0].end_line), (3, 4));
+    assert_eq!(listed[0].side.as_deref(), Some("new"));
+    assert_eq!(listed[0].status, "open");
+    assert!(list_agent_review_comments(repo, "github_pr", "7")
+      .unwrap()
+      .is_empty());
+
+    resolve_agent_review_comment(repo, &draft.id).unwrap();
+    assert_eq!(
+      list_agent_review_comments(repo, "github_pr", "42").unwrap()[0].status,
+      "resolved"
+    );
+
+    delete_agent_review_comment(repo, &draft.id).unwrap();
+    assert!(list_agent_review_comments(repo, "github_pr", "42")
+      .unwrap()
+      .is_empty());
+  }
+
+  #[test]
   fn parses_remote_state_scope_prefix() {
     assert_eq!(
       RepoStateScope::parse("/srv/repo"),
@@ -2451,6 +2497,38 @@ mod tests {
       .db_path(Some(app_data.path()))
       .unwrap();
     assert_ne!(path, other);
+  }
+
+  #[test]
+  fn remote_scope_review_drafts_round_trip_without_creating_the_remote_path() {
+    let app_data = TempDir::new().unwrap();
+    let _guard = crate::core::AppDataDirGuard::set(app_data.path());
+    let remote_path = app_data.path().join("not-on-this-machine");
+    let scope = format!(
+      "{REMOTE_STATE_SCOPE_PREFIX}ssh:ep-review-state#0:{}",
+      remote_path.display()
+    );
+
+    save_pending_review(&scope, 4, "[]", Some("[]"), Some("pending draft"), None).unwrap();
+    save_file_browser_review(&scope, 4, "[]", Some("browser draft")).unwrap();
+
+    assert_eq!(
+      get_pending_review(&scope, 4)
+        .unwrap()
+        .unwrap()
+        .summary_text
+        .as_deref(),
+      Some("pending draft")
+    );
+    assert_eq!(
+      get_file_browser_review(&scope, 4)
+        .unwrap()
+        .unwrap()
+        .summary_text
+        .as_deref(),
+      Some("browser draft")
+    );
+    assert!(!remote_path.exists());
   }
 
   #[test]

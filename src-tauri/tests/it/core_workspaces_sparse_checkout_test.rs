@@ -387,3 +387,48 @@ fn sparse_patterns_registered_in_jj() {
     patterns
   );
 }
+
+/// The create-workspace metadata JSON the app sends carries the sparse
+/// patterns through to the checkout and the stored workspace row.
+#[test]
+fn create_new_workspace_applies_and_persists_sparse_patterns_from_metadata() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  repo
+    .commit_file("src/lib.rs", "pub fn lib() {}\n", "add src/lib.rs")
+    .expect("Failed to commit src/lib.rs");
+  repo
+    .commit_file("docs/guide.md", "# Guide\n", "add docs/guide.md")
+    .expect("Failed to commit docs/guide.md");
+
+  let metadata = treq_lib::core::parse_workspace_metadata(Some(r#"{"sparse_patterns":["src"]}"#));
+  treq_lib::core::create_new_workspace(&repo.repo_path, "feat/sparse-int", None, metadata, None)
+    .expect("Failed to create sparse workspace");
+
+  let stored = treq_lib::local_db::get_workspaces(&repo.repo_path)
+    .unwrap()
+    .into_iter()
+    .find(|w| w.branch_name == "feat/sparse-int")
+    .expect("workspace should be listed");
+  assert_eq!(stored.sparse_patterns, Some(vec!["src".to_string()]));
+  let ws = repo.workspaces_dir().join(&stored.workspace_path);
+  assert!(ws.join("src/lib.rs").exists());
+  assert!(!ws.join("docs").exists());
+}
+
+/// Metadata without sparse patterns stores none and checks out everything.
+#[test]
+fn create_new_workspace_without_sparse_metadata_stores_no_patterns() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  repo
+    .commit_file("docs/guide.md", "# Guide\n", "add docs/guide.md")
+    .expect("Failed to commit docs/guide.md");
+
+  let metadata = treq_lib::core::parse_workspace_metadata(None);
+  let workspace =
+    treq_lib::core::create_new_workspace(&repo.repo_path, "feat/full-int", None, metadata, None)
+      .expect("Failed to create workspace");
+
+  assert_eq!(workspace.sparse_patterns, None);
+  let ws = repo.workspaces_dir().join(&workspace.workspace_path);
+  assert!(ws.join("docs/guide.md").exists());
+}

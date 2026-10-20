@@ -24,6 +24,7 @@ mod core_commits_timestamp_test;
 mod core_git_head_sync_test;
 mod core_jj_sync_status_test;
 mod core_logging_test;
+mod core_remote_dispatch_test;
 mod core_repo_test;
 mod core_resolve_test;
 mod core_stash_test;
