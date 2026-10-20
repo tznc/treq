@@ -57,6 +57,7 @@ mod merge_queue;
 mod merge_queue_data;
 mod modal;
 mod onboarding;
+pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;
 mod pr_review_data;

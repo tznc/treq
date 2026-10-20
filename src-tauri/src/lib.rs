@@ -347,12 +347,11 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
           return;
         }
         let label = open_new_window::new_repo_window_label();
-        let url = open_new_window::new_repo_window_url(&path);
         let title = open_new_window::new_repo_window_title(&path);
         let app_for_window = app_for_init.clone();
         // The GPUI shell builds windows on the main thread.
         let _ = app_for_init.run_on_main_thread(move || {
-          if let Err(err) = open_repo_window(&app_for_window, &label, url, &title) {
+          if let Err(err) = open_repo_window(&app_for_window, &label, Some(path), &title) {
             log::error!("failed to open repo window: {err}");
           }
         });
@@ -361,20 +360,22 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
     });
 }
 
-/// Opens a window showing the React app at `url`: inside the GPUI shell
-/// when it is on (see `gpui_shell`), else as a plain webview window.
+/// Opens a window on repository `repo` (`None`: the start screen): inside
+/// the GPUI shell when it is on (see `gpui_shell`), else as a plain
+/// webview window showing the React app.
 #[cfg(feature = "gui")]
 fn open_repo_window(
   app: &AppHandle,
   label: &str,
-  url: String,
+  repo: Option<String>,
   title: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
   if gpui_shell::is_enabled(app) {
-    return gpui_shell::open_window(app, label, url, title);
+    return gpui_shell::open_window(app, label, repo, title);
   }
+  let url = open_new_window::window_url(repo.as_deref());
   tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(url.into()))
     .title(title)
     .inner_size(1400.0, 900.0)
@@ -511,21 +512,20 @@ pub fn run() {
       let db = Database::new(db_path).expect("Failed to open database");
       db.init().expect("Failed to initialize database");
 
-      // Read saved repo path to embed in the window URL (avoids Onboarding flash)
+      // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
-      let window_url = if let Some(ref path) = saved_repo_path {
-        let encoded = urlencoding::encode(path).into_owned();
-        format!("index.html?repo={}", encoded)
-      } else {
-        "index.html".to_string()
-      };
 
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       if let Err(err) = gpui_shell::init(app) {
         log::error!("GPUI shell unavailable, using the webview window: {err}");
       }
-      open_repo_window(app.handle(), "main", window_url, "Treq - Stacking ADE")?;
+      open_repo_window(
+        app.handle(),
+        "main",
+        saved_repo_path.clone(),
+        "Treq - Stacking ADE",
+      )?;
 
       // Load cached binary paths and initialize in-memory cache
       let binary_paths = commands::load_cached_binary_paths(&db);

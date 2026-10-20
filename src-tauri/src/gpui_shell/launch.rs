@@ -314,11 +314,10 @@ pub fn agent_deep_link(app: &AppHandle, label: Option<String>, url: &str) {
 
 fn open_window_for(app: &AppHandle, repo: &str) {
   let label = crate::open_new_window::new_repo_window_label();
-  let url = crate::open_new_window::new_repo_window_url(repo);
   let title = crate::open_new_window::new_repo_window_title(repo);
-  let app_for_window = app.clone();
+  let (app_for_window, repo) = (app.clone(), repo.to_string());
   let _ = app.run_on_main_thread(move || {
-    if let Err(err) = super::open_window(&app_for_window, &label, url, &title) {
+    if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
       log::error!("failed to open a window for an agent deep link: {err}");
     }
   });

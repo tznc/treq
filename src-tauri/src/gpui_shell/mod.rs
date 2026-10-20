@@ -204,12 +204,14 @@ struct Shells(HashMap<String, WeakEntity<Shell>>);
 impl Global for Shells {}
 
 /// Opens a repo window in the GPUI shell. Must run on the main thread.
+/// `repo` is the repository it opens on (`None`: the start screen).
 pub fn open_window(
   app: &AppHandle,
   label: &str,
-  url: String,
+  repo: Option<String>,
   title: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+  let url = crate::open_new_window::window_url(repo.as_deref());
   let window = tauri::WindowBuilder::new(app, label)
     .title(title)
     .inner_size(1400.0, 900.0)

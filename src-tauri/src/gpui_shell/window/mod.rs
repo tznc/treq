@@ -5,6 +5,7 @@
 
 mod actions;
 mod data;
+mod host;
 mod model;
 mod sidebar;
 mod snapshots;
