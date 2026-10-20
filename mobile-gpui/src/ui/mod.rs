@@ -21,7 +21,6 @@ use gpui_kit::{
 };
 
 use crate::{
-  auth,
   backend::{self, AppEvent, Connection, ConnectionKind},
   managed, store,
 };
@@ -366,7 +365,10 @@ pub fn sign_in(cx: &mut App) {
   let result = backend::get()
     .app
     .opener()
-    .open_url(auth::sign_in_url(), None::<&str>);
+    .open_url(
+      treq_lib::core::auth::sign_in_url(&crate::config::env().web_url),
+      None::<&str>,
+    );
   if let Err(error) = result {
     model(cx).update(cx, |m, cx| {
       m.auth_error = Some(error.to_string());

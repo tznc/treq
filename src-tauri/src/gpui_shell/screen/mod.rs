@@ -28,6 +28,7 @@ use super::{
   theme,
 };
 
+pub mod account_data;
 mod change_move;
 mod changes;
 mod changes_data;
@@ -508,6 +509,9 @@ impl Render for Screen {
           let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
           let view = cx.new(|cx| {
             let mut view = remote::RemoteView::new(host, sink, popups, dark);
+            // The cloud card draws Rust's account.
+            cx.observe_global::<account_data::Account>(|_, cx| cx.notify())
+              .detach();
             view.set_route(route, dark, cx);
             view
           });

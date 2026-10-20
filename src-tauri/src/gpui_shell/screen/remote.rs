@@ -25,11 +25,10 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  account_data::{self, CloudAction},
   commits::{dialog_description, dialog_panel, dialog_title},
   remote_data::{default_key, RemoteHost},
-  settings::account::{
-    cloud_card, cloud_card_element, cloud_delete_dialog_element, ClickFn, CloudRoute,
-  },
+  settings::account::{cloud_card, cloud_card_element, cloud_delete_dialog_element, ClickFn},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -77,8 +76,6 @@ impl Route {
 pub struct SetupRoute {
   /// Whether the "Your own VM" path is offered (the `remoteSsh` preview).
   pub allow_user_managed: bool,
-  /// `instanceStatus`, the provisioning state and the usage.
-  pub cloud: CloudRoute,
   /// React is registering the endpoint the form confirmed.
   pub registering: bool,
 }
@@ -345,6 +342,8 @@ impl RemoteView {
     match (&now.setup, self.setup.is_some()) {
       (None, _) => self.setup = None,
       (Some(setup), false) => {
+        // `handleOpenRemoteSetup` reads the cloud workspace afresh.
+        self.host.cloud_action(CloudAction::Refresh);
         self.setup = Some(Setup {
           mode: Self::first_mode(setup),
           form: None,
@@ -665,12 +664,17 @@ impl RemoteView {
           setup.confirming_delete = id == "cloud.delete.ask";
         }
         if id == "cloud.delete.confirm" {
-          self.press_react("remote.cloud.delete", cx);
+          self.host.cloud_action(CloudAction::Delete);
         }
       }
       "cloud.upgrade" => self
         .host
         .open_url(&format!("{}/dashboard", native::web_url())),
+      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
+      "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
+      // The repository list opens once the endpoint connects.
+      "cloud.openRepositories" => self.host.cloud_action(CloudAction::OpenRepositories),
       other => self.press_react(&format!("remote.{other}"), cx),
     }
     cx.notify();
@@ -828,7 +832,8 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let confirming = self.setup.as_ref().is_some_and(|s| s.confirming_delete);
-    let card = cloud_card(&route.cloud, confirming);
+    let cloud = account_data::account(cx).cloud.unwrap_or_default();
+    let card = cloud_card(&cloud, confirming);
     let press = Self::cloud_press(cx);
     let card = cloud_card_element(&card, p, &self.tips, &press, cx);
     div()

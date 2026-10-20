@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 
 const REPORT_FILE = join("src", "lib", "api.ts");
 const RUST_DIRS = [join("src-tauri", "src")];
+// The mobile app shares `src-tauri/src/core`, so its uses count too.
+const REFERENCE_DIRS = [...RUST_DIRS, join("mobile-gpui", "src")];
 const AST_GREP_RULE = join(
   "test",
   "ast-grep",
@@ -47,7 +49,7 @@ function getAstGrepCommand(rootDir) {
 }
 
 function loadRustText(rootDir) {
-  return RUST_DIRS.flatMap((dir) => collectRustFiles(join(rootDir, dir)))
+  return REFERENCE_DIRS.flatMap((dir) => collectRustFiles(join(rootDir, dir)))
     .map((file) => readFileSync(file, "utf8"))
     .join("\n");
 }

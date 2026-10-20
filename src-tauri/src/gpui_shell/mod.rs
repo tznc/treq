@@ -440,6 +440,23 @@ fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
   });
 }
 
+/// Hands GPUI the account Rust owns ([`crate::core::cloud`]); every shell
+/// window's screens draw from it.
+pub fn account_changed(app: &AppHandle, snapshot: crate::core::cloud::AccountSnapshot) {
+  let account = screen::account_data::Account(Some(screen::account_data::route_from(&snapshot)));
+  defer_main(app, move |_| {
+    let result = tauri_plugin_gpui::with_app(move |cx| {
+      if cx.try_global::<screen::account_data::Account>() != Some(&account) {
+        cx.set_global(account);
+        cx.refresh_windows();
+      }
+    });
+    if let Err(err) = result {
+      log::warn!("failed to update the GPUI account: {err}");
+    }
+  });
+}
+
 /// Opens a menu of `entries` at the last right-click in window `label`'s
 /// sidebar.
 pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {

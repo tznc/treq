@@ -80,6 +80,9 @@ pub(crate) mod test_pty_events;
 
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
+use crate::commands::CloudAction;
+#[cfg(feature = "gui")]
+#[cfg(feature = "tauri-test")]
 use crate::commands::CutoffReasonDto;
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
@@ -464,6 +467,7 @@ pub fn run() {
       if !window.label().starts_with("gpui-popup-") && gpui_shell::is_enabled(window.app_handle()) {
         match event {
           tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
+          tauri::WindowEvent::Focused(true) => commands::cloud::window_focused(window.app_handle()),
           tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             gpui_shell::place_toasts(window.app_handle(), window.label())
           }
@@ -579,6 +583,13 @@ pub fn run() {
         &remote_exec_state,
       ));
       app.manage(remote_exec_state);
+      // GPUI shell windows draw the account from Rust, which owns the
+      // Supabase session; without the shell the webview keeps it.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if gpui_shell::is_enabled(app.handle()) {
+        commands::cloud::start(app.handle());
+      }
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
       crate::core::app_setup_script::spawn_run_if_needed(
@@ -602,7 +613,9 @@ pub fn run() {
             match classify_deep_link(&url) {
               // One window only: the sign-in token can be exchanged once.
               DeepLinkKind::AuthCallback => {
-                emit_to_focused(&handle, "deep-link-received", vec![url]);
+                if !commands::cloud::handle_auth_callback(&handle, &url) {
+                  emit_to_focused(&handle, "deep-link-received", vec![url]);
+                }
               }
               DeepLinkKind::Agent => {
                 if let Some(request) = parse_agent_request_from_url(&url) {
@@ -1046,6 +1059,11 @@ pub fn run() {
       commands::remote_force_cutoff,
       commands::remote_clear_cutoff,
       commands::remote_cut_off_managed,
+      commands::cloud_account,
+      commands::cloud_sign_out,
+      commands::cloud_exchange_token,
+      commands::cloud_refresh_subscription,
+      commands::cloud_workspace_action,
       commands::remote_set_relay_access_token,
       commands::set_window_repo_path,
       commands::set_window_supporting_repo_paths,

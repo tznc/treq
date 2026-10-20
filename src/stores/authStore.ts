@@ -1,12 +1,26 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { create } from "zustand";
-import { getSetting, setSetting } from "../lib/api";
+import {
+  cloudAccount,
+  cloudExchangeToken,
+  cloudRefreshSubscription,
+  cloudSignOut,
+  getSetting,
+  setSetting,
+} from "../lib/api";
 import { remoteCutOffManaged } from "../lib/api-extra";
 import { onWindowFocus } from "../lib/focus-refresh";
+import {
+  type RustAccount,
+  type RustCloudWorkspace,
+  listenRustAccount,
+  rustOwnsAccount,
+} from "../lib/rust-account";
 import {
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
   WEB_URL,
+  sendAccessTokenFrom,
   supabase,
 } from "../lib/supabase";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -27,6 +41,8 @@ export interface AuthState {
   /** Why the last token exchange failed; cleared when a new one starts. */
   signInError: string | null;
   subscription: Subscription | null;
+  /** Rust's cloud workspace, when Rust owns the account; else null. */
+  cloudWorkspace: RustCloudWorkspace | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
@@ -42,6 +58,7 @@ export const defaultAuthState = {
   signingIn: false,
   signInError: null as string | null,
   subscription: null as Subscription | null,
+  cloudWorkspace: null as RustCloudWorkspace | null,
 };
 
 async function persistSession(sess: Session | null) {
@@ -80,12 +97,73 @@ function watchAuthChanges() {
   }).data.subscription;
 }
 
+/** The mirrored account's session, in supabase-js's shape. */
+function sessionFrom(account: RustAccount): Session | null {
+  const mirrored = account.auth.session;
+  if (!mirrored) return null;
+  const user = {
+    id: mirrored.user.id,
+    email: mirrored.user.email ?? undefined,
+    user_metadata: mirrored.user.user_metadata ?? {},
+    app_metadata: {},
+    aud: "authenticated",
+    created_at: "",
+  } as User;
+  return {
+    access_token: mirrored.accessToken,
+    refresh_token: mirrored.refreshToken,
+    expires_at: mirrored.expiresAt,
+    expires_in: Math.max(0, mirrored.expiresAt - Math.floor(Date.now() / 1000)),
+    token_type: "bearer",
+    user,
+  };
+}
+
+function applyRustAccount(account: RustAccount) {
+  const session = sessionFrom(account);
+  useAuthStore.setState({
+    session,
+    user: session?.user ?? null,
+    loading: account.auth.loading,
+    signingIn: account.auth.signingIn,
+    signInError: account.auth.signInError,
+    subscription: account.subscription,
+    cloudWorkspace: account.cloud,
+  });
+}
+
+let mirroring: Promise<boolean> | null = null;
+
+/**
+ * Mirrors Rust's account (`rust-account.ts`): reads it, then follows its
+ * `supabase-account` events, and sends its access token with supabase-js's
+ * requests. False when Rust does not own it in this window.
+ */
+function mirrorRustAccount(): Promise<boolean> {
+  mirroring ??= (async () => {
+    const unlisten = await listenRustAccount(applyRustAccount);
+    const account = await cloudAccount();
+    if (!account) {
+      unlisten();
+      return false;
+    }
+    sendAccessTokenFrom(
+      () => useAuthStore.getState().session?.access_token ?? null,
+    );
+    applyRustAccount(account);
+    return true;
+  })().catch(() => false);
+  return mirroring;
+}
+
 /**
  * Refetches the subscription whenever the window comes back to the
  * foreground, so a purchase or cancellation made on the web dashboard shows
- * up without a restart. Returns a function that stops it.
+ * up without a restart. Returns a function that stops it. Rust rereads its
+ * own on focus.
  */
 export function startSubscriptionRefreshOnFocus(): () => void {
+  if (rustOwnsAccount()) return () => undefined;
   return onWindowFocus(() => {
     void useAuthStore.getState().refreshSubscription();
   });
@@ -144,6 +222,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await openUrl(`${WEB_URL}/sign-in?source=desktop`);
   },
   signOut: async () => {
+    // Rust cuts managed access off, ends the session and clears its copy.
+    if (rustOwnsAccount() && (await mirrorRustAccount())) {
+      await cloudSignOut();
+      return;
+    }
     // Signing out ends the authorization behind managed SSH access, so
     // open managed connections and PTYs are cut off, not left running.
     try {
@@ -156,6 +239,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await persistSession(null);
   },
   fetchSubscription: async () => {
+    if (rustOwnsAccount() && (await mirrorRustAccount())) {
+      await cloudRefreshSubscription();
+      return;
+    }
     const { session } = get();
     if (!session) {
       set({ subscription: null });
@@ -177,6 +264,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await get().fetchSubscription();
   },
   exchangeToken: async (token) => {
+    if (rustOwnsAccount() && (await mirrorRustAccount())) {
+      // Rust reports signing in and its error in the account it sends.
+      await cloudExchangeToken(token);
+      return;
+    }
     set({ signingIn: true, signInError: null });
     try {
       await exchangeTokenForSession(token, set, get);
@@ -191,6 +283,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   restoreSession: async () => {
+    if (rustOwnsAccount() && (await mirrorRustAccount())) return;
     try {
       const stored = await getSetting("supabase_session");
       if (stored) {

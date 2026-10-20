@@ -17,8 +17,8 @@ pub(super) mod account;
 // The tests read what the tabs draw by these names.
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use account::{
-  AccountRoute, AccountTab, CloudCard, CloudUsage, GithubSection, IntegrationsTab, LinearSection,
-  StatusTone,
+  AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
+  GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport, User,
 };
 
 use super::{
@@ -96,9 +96,6 @@ pub struct Route {
   pub repo_path: Option<String>,
   /// The home repository's branch, as the workspace header shows it.
   pub current_branch: Option<String>,
-  /// The auth store, while the Account or Integrations tab shows.
-  #[serde(default)]
-  pub account: Option<Box<AccountRoute>>,
 }
 
 /// What the screen draws.
@@ -440,6 +437,11 @@ impl SettingsView {
       this.load_linear(cx);
     }
     this.sync_account(cx);
+    cx.observe_global::<super::account_data::Account>(|view, cx| {
+      view.sync_account(cx);
+      cx.notify();
+    })
+    .detach();
     this
   }
 

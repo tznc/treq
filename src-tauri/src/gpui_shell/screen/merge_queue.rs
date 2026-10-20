@@ -2,11 +2,14 @@
 //! `MergeQueueTab`): queued branches grouped into stacks above the target
 //! branch they land on, with merged history below it.
 //!
-//! The queue lives in Supabase, which only React reaches: React sends its
-//! entries and the account's plan, and runs what changes the queue
-//! (`mergeQueue.dequeue`, the history page, the refresh). GPUI reads what
-//! the backend knows itself ([`merge_queue_data`]): each queued workspace's
-//! lines changed, the default branch and the target branch's tip.
+//! The queue lives in Supabase, which Rust reaches ([`merge_queue_data`]):
+//! the tab reads the opt-in and the entries every 30 s, removes branches,
+//! and takes the plan from the account ([`account_data`]). React sends the
+//! repository's GitHub name and the history page it shows. The tab also
+//! reads each queued workspace's lines changed, the default branch and the
+//! target branch's tip.
+//!
+//! [`account_data`]: super::account_data
 //!
 //! [`MergeQueueView::tab`] draws only the tab, for a GitHub panel drawn in
 //! GPUI to host; [`MergeQueueView`]'s own render adds the panel's header
@@ -24,6 +27,7 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  account_data,
   code_data::diff_stats,
   merge_queue_data::{
     bar_widths, history_page, max_change, partition, status_label, tip_title, with_local_stats,
@@ -39,7 +43,7 @@ use crate::gpui_shell::{
   ui::{self, Button, Size, TextSize, Variant},
 };
 
-/// What React sends: the panel's remote and plan, and the queue it read.
+/// What React sends: the panel's remote and the history it shows.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Route {
@@ -47,15 +51,24 @@ pub struct Route {
   /// The GitHub remote's `owner/repo`, once read.
   pub full_name: Option<String>,
   pub remote_loading: bool,
-  pub is_pro: bool,
-  /// `get_merge_queue_enabled`, `None` until read.
-  pub queue_enabled: Option<bool>,
-  pub queue_loading: bool,
-  pub entries: Vec<QueueEntry>,
-  /// A Remove is running.
-  pub dequeuing: bool,
   pub show_merged_history: bool,
   pub history_limit: usize,
+}
+
+/// `useQueueEntries` refreshes this often.
+const QUEUE_POLL: Duration = Duration::from_secs(30);
+
+/// The queue, as read from Supabase.
+#[derive(Debug, Clone, Default)]
+struct Queue {
+  /// The `owner/repo` it was read for.
+  full_name: Option<String>,
+  /// `get_merge_queue_enabled`, `None` until read.
+  enabled: Option<bool>,
+  loading: bool,
+  entries: Vec<QueueEntry>,
+  /// A Remove is running.
+  dequeuing: bool,
 }
 
 /// What the tab read from the backend.
@@ -83,6 +96,10 @@ pub struct MergeQueueView {
   dark: bool,
   tips: Tooltips,
   local: Local,
+  queue: Queue,
+  /// The account's plan carries Pro.
+  pro: bool,
+  poll: Option<Task<()>>,
   /// The branches the stats were read for.
   read_for: Option<(String, Vec<String>)>,
   pub(super) copied: bool,
@@ -111,12 +128,69 @@ impl MergeQueueView {
       dark,
       tips: Tooltips::new(popups, dark),
       local: Local::default(),
+      queue: Queue::default(),
+      pro: account_data::account(cx).is_pro(),
+      poll: None,
       read_for: None,
       copied: false,
       copied_reset: None,
     };
+    cx.observe_global::<account_data::Account>(|view, cx| {
+      let pro = account_data::account(cx).is_pro();
+      if view.pro != pro {
+        view.pro = pro;
+        view.read_queue(cx);
+        cx.notify();
+      }
+    })
+    .detach();
+    this.read_queue(cx);
     this.load(cx);
     this
+  }
+
+  /// Reads the opt-in, then the entries, now and every 30 s, for a Pro
+  /// account once the remote is known.
+  fn read_queue(&mut self, cx: &mut Context<Self>) {
+    let full_name = self.route.full_name.clone().filter(|_| self.pro);
+    if self.queue.full_name != full_name {
+      self.queue = Queue {
+        full_name: full_name.clone(),
+        loading: full_name.is_some(),
+        ..Queue::default()
+      };
+    }
+    let Some(full_name) = full_name else {
+      self.poll = None;
+      return;
+    };
+    let host = self.host.clone();
+    self.poll = Some(cx.spawn(async move |this, cx| loop {
+      let name = full_name.clone();
+      let host = host.clone();
+      let read = cx
+        .background_spawn(async move { host.merge_queue(&name) })
+        .await;
+      let kept = this.update(cx, |view, cx| {
+        if view.queue.full_name.as_deref() != Some(full_name.as_str()) {
+          return;
+        }
+        view.queue.loading = false;
+        match read {
+          Ok((enabled, entries)) => {
+            view.queue.enabled = Some(enabled);
+            view.queue.entries = entries;
+          }
+          Err(error) => log::warn!("reading the merge queue failed: {error}"),
+        }
+        view.load(cx);
+        cx.notify();
+      });
+      if kept.is_err() {
+        return;
+      }
+      cx.background_executor().timer(QUEUE_POLL).await;
+    }));
   }
 
   pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
@@ -128,7 +202,11 @@ impl MergeQueueView {
       if self.route.repo_path != route.repo_path {
         self.local = Local::default();
       }
+      let renamed = self.route.full_name != route.full_name;
       self.route = route;
+      if renamed {
+        self.read_queue(cx);
+      }
       self.load(cx);
     }
     cx.notify();
@@ -136,7 +214,7 @@ impl MergeQueueView {
 
   fn branches(&self) -> Vec<String> {
     self
-      .route
+      .queue
       .entries
       .iter()
       .map(|e| e.branch_name.clone())
@@ -152,7 +230,7 @@ impl MergeQueueView {
     }
     self.read_for = Some(key.clone());
     let host = self.host.clone();
-    let entries = self.route.entries.clone();
+    let entries = self.queue.entries.clone();
     let repo = self.route.repo_path.clone();
     cx.spawn(async move |this, cx| {
       let local = cx
@@ -217,8 +295,31 @@ impl MergeQueueView {
     );
   }
 
-  fn dequeue(&self, branches: Vec<String>, cx: &mut App) {
-    self.field("mergeQueue.dequeue", json!(branches), cx);
+  /// `useDequeueBranches`: removes the branches, then rereads the queue.
+  fn dequeue(&mut self, branches: Vec<String>, cx: &mut Context<Self>) {
+    let Some(full_name) = self.queue.full_name.clone() else {
+      return;
+    };
+    if self.queue.dequeuing {
+      return;
+    }
+    self.queue.dequeuing = true;
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move { host.dequeue(&full_name, &branches) })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        view.queue.dequeuing = false;
+        if let Err(error) = result {
+          log::warn!("removing from the merge queue failed: {error}");
+        }
+        view.read_queue(cx);
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
   }
 
   fn copy_tip(&mut self, cx: &mut Context<Self>) {
@@ -321,7 +422,7 @@ impl MergeQueueView {
         })
         .child(label)
     };
-    let pro = (!route.is_pro).then(|| {
+    let pro = (!self.pro).then(|| {
       ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
         .line_height(px(13.))
@@ -349,7 +450,7 @@ impl MergeQueueView {
         )
         .child(tab("github-tab-merge-queue", "Merge Queue", true).children(pro)),
     );
-    let toolbar = (route.is_pro && route.queue_enabled == Some(true) && route.full_name.is_some())
+    let toolbar = (self.pro && self.queue.enabled == Some(true) && route.full_name.is_some())
       .then(|| self.toolbar(p, cx));
     let body = self.tab(p, cx);
     div()
@@ -428,7 +529,7 @@ impl MergeQueueView {
       .w(px(28.))
       .h(px(28.))
       .icon(theme::ICON_REFRESH, 14.)
-      .on_click(cx.listener(|view, _, _, cx| view.press("mergeQueue.refresh", cx)));
+      .on_click(cx.listener(|view, _, _, cx| view.read_queue(cx)));
     div()
       .debug_selector(|| "merge-queue-toolbar".into())
       .flex()
@@ -450,11 +551,23 @@ impl MergeQueueView {
 
   /// `MergeQueueTab`: the upsell, the opt-in, or the queue.
   pub fn tab(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
-    if !self.route.is_pro {
+    if !self.pro {
       return Some(self.upsell(p).into_any_element());
     }
     self.route.full_name.as_ref()?;
-    if self.route.queue_enabled != Some(true) {
+    // Until the opt-in is read, as `useMergeQueueEnabled` loads.
+    if self.queue.enabled.is_none() {
+      return Some(
+        div()
+          .flex()
+          .items_center()
+          .justify_center()
+          .py_12()
+          .child(ui::spinner("merge-queue-loading", 20., p.muted_foreground))
+          .into_any_element(),
+      );
+    }
+    if self.queue.enabled != Some(true) {
       return Some(self.disabled(p, cx).into_any_element());
     }
     Some(self.list(p, cx).into_any_element())
@@ -573,7 +686,7 @@ impl MergeQueueView {
 
   /// `MergeQueueList`: the stacks, the target branch, then merged history.
   fn list(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
-    if self.route.queue_loading {
+    if self.queue.loading {
       return div()
         .flex()
         .items_center()
@@ -581,7 +694,7 @@ impl MergeQueueView {
         .py_12()
         .child(ui::spinner("merge-queue-loading", 20., p.muted_foreground));
     }
-    let entries = with_local_stats(&self.route.entries, &self.local.stats);
+    let entries = with_local_stats(&self.queue.entries, &self.local.stats);
     let (active, history) = partition(&entries);
     let limit = if self.route.show_merged_history {
       self.route.history_limit
@@ -682,7 +795,7 @@ impl MergeQueueView {
     let is_stack = stack.entries.len() > 1;
     let key = stack.entries[0].branch_name.clone();
     let max = max_change(&stack.entries);
-    let dequeuing = self.route.dequeuing;
+    let dequeuing = self.queue.dequeuing;
     let selector = if is_stack {
       format!("merge-queue-stack-{key}")
     } else {
@@ -850,7 +963,7 @@ impl MergeQueueView {
                     .size(Size::Sm)
                     .h_7()
                     .font_weight(FontWeight::NORMAL)
-                    .disabled(self.route.dequeuing)
+                    .disabled(self.queue.dequeuing)
                     .label("Remove")
                     .on_click(
                       cx.listener(move |view, _, _, cx| view.dequeue(vec![branch.clone()], cx)),

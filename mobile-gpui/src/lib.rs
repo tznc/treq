@@ -5,10 +5,8 @@
 //! connected host through treq's own SSH transport and remote command
 //! protocol, linked directly from `treq_lib` instead of going through IPC.
 
-mod auth;
 mod backend;
 mod config;
-mod control_plane;
 mod managed;
 mod remote;
 mod store;
@@ -37,7 +35,7 @@ fn listen_for_deep_links(app: &tauri::App) {
 
   let forward = |urls: Vec<url::Url>| {
     for url in urls {
-      if let Some(token) = auth::callback_token(url.as_str()) {
+      if let Some(token) = treq_lib::core::auth::callback_token(url.as_str()) {
         backend::get().emit(backend::AppEvent::AuthToken(token));
       }
     }

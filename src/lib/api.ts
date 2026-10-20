@@ -1,6 +1,7 @@
 /* eslint-disable max-lines */
 import { invoke } from "@tauri-apps/api/core";
 import type { InstalledSkill, RepoYamlConfig } from "./api-extra";
+import type { RustAccount, RustCloudAction } from "./rust-account";
 import type {
   BranchStatus,
   EditorAppsResponse,
@@ -875,3 +876,21 @@ export const listInstalledSkills = (
   repoPath?: string | null,
 ): Promise<InstalledSkill[]> =>
   invoke("list_installed_skills", { repoPath: localRepoPathOrNull(repoPath) });
+
+// The Supabase account Rust owns in the desktop app (`rust-account.ts`).
+
+/** The account, or null when Rust does not own it in this window. */
+export const cloudAccount = (): Promise<RustAccount | null> =>
+  invoke("cloud_account");
+
+export const cloudSignOut = (): Promise<void> => invoke("cloud_sign_out");
+
+export const cloudExchangeToken = (token: string): Promise<void> =>
+  invoke("cloud_exchange_token", { token });
+
+export const cloudRefreshSubscription = (): Promise<void> =>
+  invoke("cloud_refresh_subscription");
+
+/** Runs a cloud workspace action; an endpoint it connects comes back as `managed-endpoint`. */
+export const cloudWorkspaceAction = (action: RustCloudAction): Promise<void> =>
+  invoke("cloud_workspace_action", { action });

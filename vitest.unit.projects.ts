@@ -33,6 +33,7 @@ export const domTestFiles = [
   "src/lib/repo-url.test.ts",
   "src/lib/utils.copyText.test.ts",
   "src/stores/authStore.freshness.test.ts",
+  "src/stores/authStore.rust.test.ts",
   "src/stores/signOutCutoff.test.ts",
 ];
 

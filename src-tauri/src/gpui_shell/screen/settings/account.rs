@@ -1,24 +1,29 @@
 //! The Account and Integrations tabs (`AccountSettings`,
 //! `GitHubIntegrationSettings`, `LinearIntegrationSettings`).
 //!
-//! The Supabase session lives in React's auth store, so React sends what it
-//! knows of it (the user, the plan, the cloud workspace, the GitHub
-//! repositories) in the route, and runs what needs the session: signing
-//! out, the token exchange, the cloud workspace flows and Linear OAuth.
-//! GPUI opens the website links and reads and saves the Linear API key
-//! itself.
+//! The Supabase account is Rust's ([`account_data`]): the tabs draw the
+//! [`Account`] global and call the backend to sign out, trade a pasted
+//! sign-in token, list the GitHub repositories, start Linear OAuth and run
+//! the cloud workspace flows. GPUI also opens the website links and reads
+//! and saves the Linear API key.
+//!
+//! [`account_data`]: crate::gpui_shell::screen::account_data
+//! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, px, AnyElement, Context, FontWeight, Window};
 
-use super::{help, toast, SettingsView};
+use super::{help, toast, SettingsView, Tab};
 use crate::gpui_shell::{
   form,
   native::{self, NativeEvent, ToastTone},
   popup::{Side, TooltipContent},
-  screen::ScreenAction,
+  screen::{
+    account_data::{self, CloudAction},
+    ScreenAction,
+  },
   theme::{self, tw, Palette},
   tooltips::{HasTooltips, Tooltips},
   ui::{self, Button, Size, TextSize, Variant},
@@ -27,7 +32,10 @@ use crate::gpui_shell::{
 /// The repository setting the Linear API key is stored under.
 const LINEAR_API_KEY: &str = "linear_api_key";
 
-/// What React sends of its auth store and the flows it runs.
+/// The account as the tabs draw it: Rust's [`Account`], with what the tabs
+/// load and run themselves.
+///
+/// [`Account`]: crate::gpui_shell::screen::account_data::Account
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AccountRoute {
@@ -250,6 +258,15 @@ pub struct LinearSection {
 /// The tabs' own state.
 #[derive(Default)]
 pub(super) struct State {
+  /// Rust's account, as of the last change.
+  rust: AccountRoute,
+  /// The pasted token being exchanged, and why the last exchange failed.
+  dev: DevCallbackRoute,
+  /// The GitHub repositories, once asked for while signed in.
+  github: Option<GithubRoute>,
+  linear_oauth_loading: bool,
+  /// The cloud workspace was read for this sign-in.
+  cloud_read: bool,
   callback_url: String,
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
@@ -266,6 +283,12 @@ struct Linear {
   editing: bool,
   draft: String,
   saving: bool,
+}
+
+impl AccountRoute {
+  pub fn is_pro(&self) -> bool {
+    is_pro(self.subscription.as_ref())
+  }
 }
 
 /// `isProSubscription`: statuses that still carry Pro.
@@ -446,12 +469,19 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
 }
 
 impl SettingsView {
-  fn account_route(&self) -> Option<&AccountRoute> {
-    self.route.account.as_deref()
+  /// Rust's account with what the tabs loaded.
+  fn account_route(&self) -> Option<AccountRoute> {
+    let state = &self.account;
+    Some(AccountRoute {
+      dev_callback: state.dev.clone(),
+      github: state.github.clone(),
+      linear_oauth_loading: state.linear_oauth_loading,
+      ..state.rust.clone()
+    })
   }
 
   fn signed_in_pro(&self) -> bool {
-    is_pro(self.account_route().and_then(|a| a.subscription.as_ref()))
+    is_pro(self.account.rust.subscription.as_ref())
   }
 
   pub(super) fn account_tab(&self) -> AccountTab {
@@ -511,7 +541,7 @@ impl SettingsView {
 
   pub(super) fn integrations_tab(&self) -> IntegrationsTab {
     let account = self.account_route();
-    let github = match account {
+    let github = match &account {
       None => GithubSection::Loading,
       Some(account) if account.loading => GithubSection::Loading,
       Some(AccountRoute { user: None, .. }) => GithubSection::SignedOut,
@@ -581,7 +611,7 @@ impl SettingsView {
             "Pro plan: connect via OAuth"
           }
           .into(),
-          oauth_loading: account.is_some_and(|a| a.linear_oauth_loading),
+          oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
           key_priority_note: key.is_some() && pro,
         }
       });
@@ -665,8 +695,10 @@ impl SettingsView {
   /// Loads the avatar React's user has, once per URL.
   pub(super) fn sync_avatar(&mut self, cx: &mut Context<Self>) {
     let url = self
-      .account_route()
-      .and_then(|a| a.user.as_ref())
+      .account
+      .rust
+      .user
+      .as_ref()
       .and_then(|u| u.avatar_url.clone())
       .filter(|url| !url.is_empty());
     if self.account.avatar.as_ref().map(|(u, _)| u) == url.as_ref() {
@@ -696,13 +728,124 @@ impl SettingsView {
     );
   }
 
+  /// Takes Rust's account, then loads what the shown tab needs of it.
   /// Signing in clears the pasted callback, as a successful Go does.
   pub(super) fn sync_account(&mut self, cx: &mut Context<Self>) {
-    if self.account_route().is_some_and(|a| a.user.is_some()) {
+    self.account.rust = account_data::account(cx);
+    let signed_in = self.account.rust.user.is_some();
+    if signed_in {
       self.account.callback_url.clear();
       self.account.callback_error = None;
+    } else {
+      self.account.github = None;
+      self.account.cloud_read = false;
     }
     self.sync_avatar(cx);
+    if !signed_in || self.account.rust.loading {
+      return;
+    }
+    // `AccountSettings` reads the cloud workspace once per sign-in.
+    if self.route.tab == Tab::Account && !self.account.cloud_read {
+      self.account.cloud_read = true;
+      self.host.cloud_action(CloudAction::Refresh);
+    }
+    if self.route.tab == Tab::Integrations && self.account.github.is_none() {
+      self.load_github(cx);
+    }
+  }
+
+  fn load_github(&mut self, cx: &mut Context<Self>) {
+    self.account.github = Some(GithubRoute {
+      loading: true,
+      ..GithubRoute::default()
+    });
+    self.spawn(
+      cx,
+      |host| host.github_repositories(),
+      |view, result, _| {
+        view.account.github = Some(match result {
+          Ok(repositories) => GithubRoute {
+            loading: false,
+            failed: false,
+            repositories: repositories
+              .into_iter()
+              .map(|r| GithubRepo {
+                id: r.id,
+                full_name: r.full_name,
+                private: r.private,
+              })
+              .collect(),
+          },
+          Err(error) => {
+            log::warn!("reading the GitHub repositories failed: {error}");
+            GithubRoute {
+              loading: false,
+              failed: true,
+              repositories: Vec::new(),
+            }
+          }
+        });
+      },
+    );
+  }
+
+  /// The dev build's pasted-callback exchange.
+  fn exchange_pasted(&mut self, token: String, cx: &mut Context<Self>) {
+    self.account.dev = DevCallbackRoute {
+      loading: true,
+      error: None,
+    };
+    self.spawn(
+      cx,
+      move |host| host.exchange_token(&token),
+      |view, result, _| {
+        view.account.dev = DevCallbackRoute {
+          loading: false,
+          error: result.err(),
+        };
+      },
+    );
+  }
+
+  /// `startLinearOAuth`: opens Linear's OAuth page, or toasts why not.
+  fn start_linear_oauth(&mut self, cx: &mut Context<Self>) {
+    if self.account.linear_oauth_loading {
+      return;
+    }
+    self.account.linear_oauth_loading = true;
+    self.spawn(
+      cx,
+      |host| host.linear_oauth_url(),
+      |view, result, _| {
+        view.account.linear_oauth_loading = false;
+        let host = view.host.clone();
+        match result {
+          Ok(url) => host.open_url(&url),
+          // The server decides entitlement; the Pro gate is display only.
+          Err(error) if error.is_pro_required() => {
+            let opener = host.clone();
+            let id = native::register_toast_action(move || {
+              opener.open_url(&format!("{}/dashboard", native::web_url()))
+            });
+            host.notify(NativeEvent::Toast {
+              title: "Linear OAuth needs Pro".into(),
+              description: "Add a personal Linear API key above to use Linear on the Free plan."
+                .into(),
+              tone: ToastTone::Warning,
+              action: Some(native::ToastAction {
+                label: "Upgrade to Pro".into(),
+                id,
+              }),
+            });
+          }
+          Err(error) => host.notify(toast(
+            ToastTone::Error,
+            "Error starting OAuth flow",
+            error.message,
+          )),
+        }
+      },
+    );
   }
 
   /// The account and integrations buttons GPUI handles; false for the rest.
@@ -717,26 +860,29 @@ impl SettingsView {
       "account.devCallback.go" => match callback_token(&self.account.callback_url) {
         Ok(token) => {
           self.account.callback_error = None;
-          (self.react)(
-            ScreenAction::Field {
-              field: "account.devCallback".into(),
-              value: token.into(),
-            },
-            cx,
-          );
+          self.exchange_pasted(token, cx);
         }
         Err(err) => self.account.callback_error = Some(err),
       },
+      "account.signOut" => self.host.sign_out(),
+      "linear.oauth" => self.start_linear_oauth(cx),
+      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
+      "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
+      "cloud.openRepositories" => {
+        self.host.cloud_action(CloudAction::OpenRepositories);
+        (self.react)(
+          ScreenAction::Press {
+            id: "settings.close".into(),
+          },
+          cx,
+        );
+      }
       "cloud.delete.ask" => self.account.confirming_delete = true,
       "cloud.delete.cancel" => self.account.confirming_delete = false,
       "cloud.delete.confirm" => {
         self.account.confirming_delete = false;
-        (self.react)(
-          ScreenAction::Press {
-            id: "cloud.delete".into(),
-          },
-          cx,
-        );
+        self.host.cloud_action(CloudAction::Delete);
       }
       "linear.apiKey.edit" => {
         if let Some(linear) = &mut self.account.linear {
