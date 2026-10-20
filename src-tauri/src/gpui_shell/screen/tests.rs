@@ -6700,5 +6700,6 @@ mod merge_queue;
 mod pr_review;
 mod review_comments;
 mod stack_panel;
+mod tab_badges;
 mod workspace_actions;
 mod workspace_dialogs;
