@@ -52,7 +52,7 @@ impl Command {
 
 /// Opens the workspace's pull request in the browser; GPUI runs it.
 pub const OPEN_PR_IN_BROWSER: &str = "open-workspace-pr-browser";
-/// Navigates the webview to the pull request (`window.location.href`).
+/// Opens the pull request too: in the browser, as there is no in-app page.
 pub const OPEN_PR_HERE: &str = "open-workspace-pr-current-window";
 
 /// The palette's commands, as `CommandPalette` builds them from

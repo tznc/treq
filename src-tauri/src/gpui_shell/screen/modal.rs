@@ -7,8 +7,7 @@
 //! stashes, and hands back what only React can do: closing the dialog,
 //! starting the agent session, running a past prompt, applying a stash to a
 //! new workspace. Each dialog covers the whole window, sidebar included, as
-//! React's `Dialog` does. GPUI cannot paint over the webview, so a screen
-//! that frames it leaves it out of the frame while a dialog is open.
+//! React's `Dialog` did.
 
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;

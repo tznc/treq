@@ -1,12 +1,10 @@
-//! The window an [`Overlay`] dialog opens in. GPUI cannot paint over the
-//! webview (a native child window), so a dialog that covers the whole shell
-//! window, backdrop included, gets a borderless transparent window of its
-//! own, placed over the shell window's client area and kept above it. Unlike
-//! the popups (`popup`), it takes focus, for its search field.
+//! The window an [`Overlay`] dialog opens in: a dialog that covers the whole
+//! shell window, backdrop included, gets a borderless transparent window of
+//! its own, placed over the shell window's client area and kept above it.
+//! Unlike the popups (`popup`), it takes focus, for its search field.
 //!
 //! The workspace header's popovers (`popover`) open here too, over a
-//! transparent backdrop, so one can drop over the framed webview and a click
-//! outside it closes it.
+//! transparent backdrop, so a click outside one closes it.
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 

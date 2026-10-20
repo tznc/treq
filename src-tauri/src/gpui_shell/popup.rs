@@ -2,8 +2,8 @@
 //! toasts, drawn like the React app's `TooltipContent`, `ContextMenuContent`
 //! and `ToastItem`.
 //!
-//! GPUI cannot paint over the webview (a native child window), so each popup
-//! is a small borderless, unfocusable Tauri window with GPUI attached. One
+//! Each popup is a small borderless, unfocusable Tauri window with GPUI
+//! attached, so it can reach past the edge of the shell window. One
 //! window per [`Slot`] (per shell window, for toasts) is built on first use,
 //! then moved and resized.
 

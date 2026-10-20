@@ -4,7 +4,7 @@
 //!
 //! The shell reads every key before an element takes it (an interceptor,
 //! with the modifiers GDK reports held), so a text field never types a
-//! shortcut. The webview's keys still reach React directly.
+//! shortcut.
 
 use tauri_plugin_gpui::gpui::Modifiers;
 

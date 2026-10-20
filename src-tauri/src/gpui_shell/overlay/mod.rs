@@ -1,13 +1,12 @@
-//! Dashboard's window-wide dialogs, drawn by GPUI over the whole window
-//! (sidebar, GPUI screen and webview alike): `CommandPalette`,
-//! `KeyboardShortcutsModal`, `WorkspacePicker` and `BranchSwitcher`.
+//! The window-wide dialogs, drawn over the whole window, sidebar included:
+//! the command palette, the keyboard shortcuts sheet, the workspace picker
+//! and the branch switcher.
 //!
-//! React keeps which one is open (Dashboard state) and pushes it with
-//! `gpui_overlay_update`; GPUI shows it in a modal window over the shell
-//! window (see `modal`). The dialogs read and switch branches through the
-//! backend themselves. What runs a Dashboard handler (a palette command,
-//! the picked workspace, closing) goes back to the webview as a
-//! `gpui-overlay-action` event, and React pushes what shows next.
+//! The window model keeps which one is open and pushes it; GPUI shows it in
+//! a modal window over the shell window (see `modal`). The dialogs read and
+//! switch branches through the backend themselves. What the model decides
+//! (a palette command, the picked workspace, closing) goes back to it as a
+//! screen action, and the model pushes what shows next.
 
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
