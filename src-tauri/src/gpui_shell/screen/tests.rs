@@ -6699,5 +6699,6 @@ mod logs_explorer;
 mod merge_queue;
 mod pr_review;
 mod review_comments;
+mod stack_panel;
 mod workspace_actions;
 mod workspace_dialogs;
