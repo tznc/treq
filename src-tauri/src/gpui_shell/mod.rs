@@ -111,6 +111,51 @@ struct Shell {
   screen: Option<gpui::Entity<Screen>>,
   /// The dialog React asked for, drawn over the screen once there is one.
   modal: Option<Modal>,
+  /// Sends Dashboard's shortcuts pressed in this window to React.
+  shortcuts: Option<gpui::Subscription>,
+}
+
+impl Shell {
+  /// Dashboard's shortcuts pressed in GPUI (the webview's keys reach React
+  /// directly) go back to it, as `shortcuts` says. An interceptor sees every
+  /// key, focused element or not, before a text field takes it.
+  fn watch_shortcuts(&mut self, window: &gpui::Window, cx: &mut gpui::Context<Self>) {
+    if self.shortcuts.is_some() {
+      return;
+    }
+    let sink = overlay_sink(self.app.clone(), self.label.to_string());
+    let handle = window.window_handle();
+    self.shortcuts = Some(cx.intercept_keystrokes(move |event, window, cx| {
+      if window.window_handle() != handle {
+        return;
+      }
+      let keystroke = &event.keystroke;
+      let m = held_modifiers(keystroke.modifiers);
+      let within = |name: &str| event.context_stack.iter().any(|c| c.contains(name));
+      let found = shortcuts::app_shortcut(
+        &keystroke.key,
+        keystroke.key_char.as_deref(),
+        m.secondary(),
+        m.shift,
+        m.alt,
+        within("Input"),
+        within(screen::TERMINAL_CONTEXT),
+      );
+      let action = match found {
+        Some(shortcuts::AppShortcut::Palette) => ScreenAction::Press {
+          id: "overlay.commandPalette".into(),
+        },
+        Some(shortcuts::AppShortcut::Key(key)) => ScreenAction::Field {
+          field: "overlay.shortcut".into(),
+          value: key.into(),
+        },
+        None => return,
+      };
+      // React's handlers take the key, so a text field does not type it.
+      cx.stop_propagation();
+      sink(action, cx);
+    }));
+  }
 }
 
 impl Render for Shell {
@@ -130,42 +175,11 @@ impl Render for Shell {
         gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
       ));
     let app = self.app.clone();
-    let palette_sink = overlay_sink(self.app.clone(), self.label.to_string());
+    self.watch_shortcuts(window, cx);
     gpui::div()
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
-      // Dashboard's shortcuts pressed in GPUI (the webview's keys reach
-      // React directly) go back to it, as `shortcuts` says.
-      .capture_key_down(move |event, window, cx| {
-        let keystroke = &event.keystroke;
-        let m = keystroke.modifiers;
-        let contexts = window.context_stack();
-        let within = |name: &str| contexts.iter().any(|c| c.contains(name));
-        let found = shortcuts::app_shortcut(
-          &keystroke.key,
-          keystroke.key_char.as_deref(),
-          m.secondary(),
-          m.shift,
-          m.alt,
-          within("Input"),
-          within(screen::TERMINAL_CONTEXT),
-        );
-        match found {
-          Some(shortcuts::AppShortcut::Palette) => {
-            let id = "overlay.commandPalette".to_string();
-            palette_sink(ScreenAction::Press { id }, cx);
-          }
-          Some(shortcuts::AppShortcut::Key(key)) => palette_sink(
-            ScreenAction::Field {
-              field: "overlay.shortcut".into(),
-              value: key.into(),
-            },
-            cx,
-          ),
-          None => {}
-        }
-      })
       // A click anywhere in the window closes an open menu, as one outside
       // a native menu does.
       .capture_any_mouse_down(move |_, _, _| defer_main(&app, |_| popup::hide_menus()))
@@ -243,6 +257,7 @@ pub fn open_window(
       sidebar: None,
       screen: None,
       modal: None,
+      shortcuts: None,
     });
     cx.default_global::<Shells>()
       .0
@@ -267,6 +282,20 @@ pub fn open_window(
 
   update_shell(label, move |shell, _| shell.webview = Some(webview))?;
   Ok(())
+}
+
+/// `m` with the modifiers the keyboard holds. TAO on Linux reports only the
+/// last modifier pressed, so Ctrl+Shift+N reached GPUI as Shift+N.
+fn held_modifiers(mut m: gpui::Modifiers) -> gpui::Modifiers {
+  #[cfg(target_os = "linux")]
+  if let Some(keymap) = gtk::gdk::Display::default().and_then(|d| gtk::gdk::Keymap::for_display(&d)) {
+    use gtk::gdk::ModifierType;
+    let held = ModifierType::from_bits_truncate(keymap.modifier_state());
+    m.control |= held.contains(ModifierType::CONTROL_MASK);
+    m.shift |= held.contains(ModifierType::SHIFT_MASK);
+    m.alt |= held.contains(ModifierType::MOD1_MASK);
+  }
+  m
 }
 
 /// GPUI paints over GTK's menu bar, which still took the clicks on the top
