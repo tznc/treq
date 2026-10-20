@@ -365,6 +365,7 @@ impl Transport for Backend {
   }
 
   fn cut_off(&self, endpoint_id: &str, cutoff: Cutoff) {
+    remote_repo::record_cutoff(endpoint_id, cutoff);
     self.notify(NativeEvent::RemoteCutoff {
       endpoint_id: endpoint_id.to_string(),
       reason: cutoff.id().to_string(),

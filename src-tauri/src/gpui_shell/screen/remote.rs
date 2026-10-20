@@ -76,7 +76,7 @@ impl Route {
 pub struct SetupRoute {
   /// Whether the "Your own VM" path is offered (the `remoteSsh` preview).
   pub allow_user_managed: bool,
-  /// React is registering the endpoint the form confirmed.
+  /// The window is registering the endpoint the form confirmed.
   pub registering: bool,
 }
 
@@ -116,7 +116,7 @@ struct Form {
   probe_error: String,
   resolving: bool,
   resolve_error: String,
-  /// The confirmed values went to React, which is registering them.
+  /// The confirmed values went to the window, which is registering them.
   submitting: bool,
   _subscriptions: Vec<Subscription>,
 }

@@ -10,7 +10,10 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use super::data::Data;
+use super::{
+  data::Data,
+  remote::{Remote, RemoteEffect},
+};
 use crate::local_db::Workspace;
 
 /// `DEFAULT_SIDEBAR_WIDTH` and its clamp (`sidebarWidthStore`).
@@ -197,6 +200,8 @@ pub struct Prefs {
   pub system_dark: bool,
   pub zoom: u32,
   pub sidebar_width: f32,
+  /// `default_agent`, which a remote repository's sessions start.
+  pub default_agent: Option<String>,
 }
 
 impl Default for Prefs {
@@ -206,6 +211,7 @@ impl Default for Prefs {
       system_dark: false,
       zoom: DEFAULT_ZOOM,
       sidebar_width: DEFAULT_SIDEBAR_WIDTH,
+      default_agent: None,
     }
   }
 }
@@ -284,17 +290,15 @@ pub enum Effect {
     title: String,
     description: String,
   },
-  /// What only React does: the action goes to the webview.
-  React(Forward),
   OpenUrl(String),
+  /// The remote side's ([`super::remote`]).
+  Remote(Box<RemoteEffect>),
 }
 
-/// What GPUI hands to React, for the flows it still runs (a remote
-/// repository's).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Forward {
-  /// A menu event React listens for, by name.
-  Event(&'static str),
+impl From<RemoteEffect> for Effect {
+  fn from(effect: RemoteEffect) -> Self {
+    Self::Remote(Box::new(effect))
+  }
 }
 
 /// A shell window's state.
@@ -329,6 +333,8 @@ pub struct Model {
   pub history_limit: usize,
   /// A workspace to select once it is listed.
   pub pending_select: Option<PendingSelect>,
+  /// The remote dialogs, endpoint and repository.
+  pub remote: Remote,
 }
 
 /// A workspace to select once the window's data lists it.
@@ -377,6 +383,12 @@ impl Model {
 
   /// `setRepoPath` and `onRepositoryOpened`.
   pub fn open_repo(&mut self, path: &str) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    // A local repository takes the screen from a remote one.
+    if self.remote.repository.take().is_some() {
+      self.remote.form.connected = false;
+      effects.push(Effect::from(RemoteEffect::Show(None)));
+    }
     self.main_repo = path.to_string();
     self.supporting = None;
     self.selected = None;
@@ -384,7 +396,8 @@ impl Model {
     self.multi.clear();
     self.page = Page::Workspace;
     self.view = WorkspaceView::default();
-    vec![Effect::Refresh { revision: true }]
+    effects.push(Effect::Refresh { revision: true });
+    effects
   }
 
   /// `activateRepo`: puts a linked repository (or the main one) on screen.
@@ -833,18 +846,22 @@ impl Model {
     if let Some(width) = get("workspace_sidebar_width").and_then(|w| w.parse::<f32>().ok()) {
       self.prefs.sidebar_width = width.round().clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
     }
+    self.prefs.default_agent = get("default_agent").filter(|a| !a.is_empty());
     self.collapsed = get(&collapsed_key(&self.main_repo))
       .and_then(|raw| serde_json::from_str(&raw).ok())
       .unwrap_or_default();
   }
 
-  /// Factory Reset, once confirmed: back to onboarding.
+  /// Factory Reset, once confirmed: back to onboarding, with no remote
+  /// repository either.
   pub fn reset(&mut self) {
+    let cutoffs = std::mem::take(&mut self.remote.cutoffs);
     *self = Self {
       prefs: self.prefs.clone(),
       history_limit: HISTORY_PAGE,
       ..Self::default()
     };
+    self.remote.cutoffs = cutoffs;
   }
 }
 

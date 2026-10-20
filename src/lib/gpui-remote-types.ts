@@ -1,4 +1,5 @@
 import type { PtyLaunchSpec, SshEndpoint } from "./api-types-remote";
+import { isGpuiShellHost } from "./gpui-shell";
 
 /**
  * What Dashboard draws above a remote repository's workspace view, which
@@ -54,4 +55,18 @@ export interface GpuiRemoteTerminalTarget {
 /** Whether GPUI may draw a remote repository's workspace view. */
 export function gpuiDrawsRemoteWorkspace(): boolean {
   return window.__TREQ_REACT_REMOTE_WORKSPACE__ !== true;
+}
+
+/**
+ * Whether Rust's window model runs the remote flows, restoring the last
+ * remote repository among them (src-tauri/src/gpui_shell/window/remote.rs):
+ * in every GPUI window except a `TREQ_WEB_UI` one, and except in the tests
+ * that run them in React.
+ */
+export function rustRunsRemote(): boolean {
+  return (
+    isGpuiShellHost() &&
+    window.__TREQ_WEB_UI__ !== true &&
+    window.__TREQ_REACT_REMOTE__ !== true
+  );
 }

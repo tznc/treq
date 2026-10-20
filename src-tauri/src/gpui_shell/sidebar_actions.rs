@@ -1,7 +1,8 @@
 //! The sidebar clicks GPUI handles itself, which `useGpuiSidebar` and
 //! Dashboard's handlers ran: the home and workspace row menus, archiving
 //! one or several workspaces, and dropping a row onto another to stack it.
-//! The rest, and everything for a remote repository, go to React.
+//! A remote repository's are read and changed over SSH, off the main
+//! thread. The rest go to the window model (or React under `TREQ_WEB_UI`).
 
 use std::sync::Arc;
 
@@ -11,7 +12,6 @@ use tauri_plugin_gpui::gpui::App;
 use super::{
   menus,
   native::{Backend, NativeEvent, OpenRequest},
-  remote_repo,
   screen::{
     workspace_ops::{self, Removed},
     ChangesHost, WorkspaceHost,
@@ -26,8 +26,8 @@ use crate::{
   local_db::Workspace,
 };
 
-/// Whether GPUI may handle `action` (it still hands it to React when it
-/// cannot find what it is for).
+/// Whether GPUI may handle `action` (a window the model does not drive
+/// still hands it to React when GPUI cannot find what it is for).
 pub fn handles(action: &SidebarAction) -> bool {
   matches!(
     action,
@@ -40,7 +40,7 @@ pub fn handles(action: &SidebarAction) -> bool {
 }
 
 /// Runs `action` for window `label`, whose sidebar shows `snapshot`.
-/// False leaves it to React. Main thread only.
+/// False when it is not for anything GPUI finds (React takes it under `TREQ_WEB_UI`). Main thread only.
 pub fn handle(
   app: &AppHandle,
   label: &str,
@@ -48,9 +48,6 @@ pub fn handle(
   action: &SidebarAction,
   _: &mut App,
 ) -> bool {
-  if remote_repo::for_window(label).is_some() {
-    return false;
-  }
   let backend = Arc::new(Backend::new(app.clone(), label.to_string()));
   let Some(active) = snapshot.repos.iter().find(|r| r.active) else {
     return false;
@@ -77,21 +74,25 @@ pub fn handle(
       workspace_menu(app, label, backend, repo_path, *id, false)
     }
     SidebarAction::BulkArchive => {
-      let Ok(workspaces) = core::list_workspaces(&active.path) else {
-        return false;
-      };
-      let selected: Vec<Removed> = active
+      let ids: Vec<i64> = active
         .workspaces
         .iter()
         .filter(|row| row.selected)
-        .filter_map(|row| workspaces.iter().find(|w| w.id == row.id))
-        .map(Removed::of)
+        .map(|row| row.id)
         .collect();
-      if selected.is_empty() {
+      if ids.is_empty() {
         return false;
       }
-      let app = app.clone();
+      let (app, repo_path) = (app.clone(), active.path.clone());
       std::thread::spawn(move || {
+        let Ok(workspaces) = workspaces(&backend, &repo_path) else {
+          return;
+        };
+        let selected: Vec<Removed> = workspaces
+          .iter()
+          .filter(|w| ids.contains(&w.id))
+          .map(Removed::of)
+          .collect();
         for workspace in workspace_ops::archive_all(&*backend, &selected) {
           super::close_workspace_terminals(&app, backend.label(), workspace.path);
         }
@@ -99,32 +100,43 @@ pub fn handle(
       true
     }
     SidebarAction::MoveWorkspace { id, onto } => {
-      let Ok(workspaces) = core::list_workspaces(&active.path) else {
-        return false;
-      };
-      let find = |id: i64| workspaces.iter().find(|w| w.id == id).cloned();
-      let Some(workspace) = find(*id) else {
-        return false;
-      };
-      let target = match onto {
-        Some(onto) => match find(*onto) {
-          Some(onto) => onto.branch_name,
-          None => return true,
-        },
-        // Onto the list: the home branch (`effectiveDefaultBranch`).
-        None => active
-          .home_ref
-          .clone()
-          .filter(|r| !r.is_empty())
-          .unwrap_or_else(|| "main".into()),
-      };
+      let (id, onto) = (*id, *onto);
+      // Onto the list: the home branch (`effectiveDefaultBranch`).
+      let home = active
+        .home_ref
+        .clone()
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| "main".into());
       let repo_path = active.path.clone();
       std::thread::spawn(move || {
+        let Ok(workspaces) = workspaces(&backend, &repo_path) else {
+          return;
+        };
+        let find = |id: i64| workspaces.iter().find(|w| w.id == id).cloned();
+        let Some(workspace) = find(id) else {
+          return;
+        };
+        let target = match onto {
+          Some(onto) => match find(onto) {
+            Some(onto) => onto.branch_name,
+            None => return,
+          },
+          None => home,
+        };
         workspace_ops::move_workspace(&*backend, &repo_path, &workspace, &target)
       });
       true
     }
     _ => false,
+  }
+}
+
+/// `repo_path`'s workspaces, over SSH for the window's remote repository.
+/// Blocks.
+fn workspaces(backend: &Backend, repo_path: &str) -> Result<Vec<Workspace>, String> {
+  match backend.remote(repo_path) {
+    Some(remote) => remote.workspaces(),
+    None => core::list_workspaces(repo_path),
   }
 }
 
@@ -138,7 +150,9 @@ fn editors(host: &dyn ChangesHost) -> EditorApps {
 }
 
 /// `workspaceMenuEntries` for workspace `id` of `repo_path`, which may be
-/// a repository that is not on screen (`archive` false).
+/// a repository that is not on screen (`archive` false). A remote
+/// repository's workspace is read off the main thread, and has no pull
+/// request poller.
 fn workspace_menu(
   app: &AppHandle,
   label: &str,
@@ -147,6 +161,23 @@ fn workspace_menu(
   id: i64,
   archive: bool,
 ) -> bool {
+  if backend.remote(repo_path).is_some() {
+    let (app, label, repo_path) = (app.clone(), label.to_string(), repo_path.to_string());
+    std::thread::spawn(move || {
+      let Some(workspace) = workspaces(&backend, &repo_path)
+        .ok()
+        .and_then(|list| list.into_iter().find(|w| w.id == id))
+      else {
+        return;
+      };
+      super::defer_main(&app.clone(), move |app| {
+        let items =
+          context_menu::workspace_items(&workspace, &repo_path, None, editors(&*backend), archive);
+        show(app, &label, backend, items);
+      });
+    });
+    return true;
+  }
   let Some(workspace) = core::list_workspaces(repo_path)
     .ok()
     .and_then(|list| list.into_iter().find(|w| w.id == id))
@@ -208,7 +239,7 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     } => {
       let app = app.clone();
       std::thread::spawn(move || {
-        let Some(workspace) = core::list_workspaces(&repo_path)
+        let Some(workspace) = workspaces(&backend, &repo_path)
           .ok()
           .and_then(|list| list.into_iter().find(|w| w.id == workspace_id))
         else {

@@ -82,6 +82,9 @@ beforeEach(() => {
   // React's remote workspace view, which most remote tests drive;
   // gpui-remote-workspace.test.tsx turns GPUI's on.
   window.__TREQ_REACT_REMOTE_WORKSPACE__ = true;
+  // React's remote flows (restoring the last remote repository), which
+  // the remote tests drive; Rust runs them in the app.
+  window.__TREQ_REACT_REMOTE__ = true;
   // React's own Supabase account, which the tests sign in with; Rust owns
   // it in the app (src/lib/rust-account.ts).
   window.__TREQ_REACT_SUPABASE__ = true;

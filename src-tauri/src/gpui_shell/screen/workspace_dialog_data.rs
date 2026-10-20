@@ -142,6 +142,11 @@ impl WorkspaceDialogHost for Backend {
   }
 
   fn retarget(&self, repo_path: &str, workspace: &Workspace, target: &str) -> Result<(), String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote
+        .update_workspace(workspace.id, Some(target), None, None)
+        .map(drop);
+    }
     let path = full_path(workspace);
     if !std::path::Path::new(&path).exists() {
       return Err(format!(

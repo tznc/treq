@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use super::{
   data::Data,
   model::{full_path, GithubTab, Model, Page, Tab},
+  remote::{self, MERGE_REASON},
   sidebar,
 };
 use crate::{
@@ -37,13 +38,73 @@ pub fn screen(model: &Model, data: &Data) -> Option<ScreenSnapshot> {
   if let Some(modal) = workspace_modal(model, data) {
     value["modal"] = modal;
   }
+  value["remote"] = remote_dialogs(model, data);
+  if let Some(repository) = &model.remote.repository {
+    value["repository"] = serde_json::to_value(repository).unwrap_or_default();
+  }
   read(value, "screen")
+}
+
+/// The remote dialogs open over the screen (`gpuiRemoteDialogs`).
+fn remote_dialogs(model: &Model, data: &Data) -> Value {
+  let remote = &model.remote;
+  let setup = remote.setup.then(|| {
+    json!({
+      "allowUserManaged": data.flags.remote_ssh,
+      "registering": remote.registering,
+    })
+  });
+  // The terminal dialog needs a connected endpoint and an open repository.
+  let terminal = remote
+    .endpoint
+    .as_ref()
+    .zip(remote.repository.as_ref())
+    .filter(|_| remote.terminal)
+    .map(|(endpoint, repository)| {
+      let workspace = model.selected_workspace(data);
+      let (workspace_id, _) = remote::terminal_target(
+        &repository.canonical_path,
+        workspace.map(|w| (w.workspace_name.as_str(), "")),
+      );
+      json!({
+        "endpoint": endpoint,
+        "repositoryId": repository.canonical_path,
+        "workspaceId": workspace_id,
+      })
+    });
+  json!({
+    "setup": setup,
+    "terminal": terminal,
+    "ambiguous": remote.ambiguous,
+  })
+}
+
+/// `RemoteStatusBanner`, the strip and the capability notice around a
+/// remote repository's workspace view.
+fn remote_chrome(model: &Model) -> Value {
+  let remote = &model.remote;
+  let Some(repository) = &remote.repository else {
+    return Value::Null;
+  };
+  let cut_off = remote.cutoff().is_some();
+  let state = if cut_off {
+    "cutoff"
+  } else {
+    remote::connection_state(remote.instance_state.as_deref(), remote.endpoint.is_some())
+  };
+  json!({
+    "displayName": repository.display_name,
+    "terminal": remote.endpoint.is_some(),
+    "state": state,
+    "cutOff": cut_off,
+    "notices": [MERGE_REASON],
+  })
 }
 
 /// Which page shows, as `GpuiScreenView`.
 fn view(model: &Model, data: &Data) -> Value {
   if !model.has_repo() {
-    return json!({"kind": "onboarding"});
+    return json!({"kind": "onboarding", "remoteRepo": model.remote.form_json()});
   }
   let repo = model.repo();
   match &model.page {
@@ -137,10 +198,10 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
       "pending": [],
       "sessionsRevision": data.sessions_revision,
       "commands": model.commands,
-      "remoteShell": false,
+      "remoteShell": model.is_remote(),
     },
     "fileBrowser": file_browser,
-    "remoteChrome": null,
+    "remoteChrome": remote_chrome(model),
   })
 }
 
@@ -455,6 +516,73 @@ mod tests {
     };
     assert_eq!(route.initial_workspace_id, None, "an unknown workspace");
     assert_eq!(route.workspaces.len(), 2);
+  }
+
+  fn remote_model() -> Model {
+    use crate::gpui_shell::remote_repo::tests::repository;
+    let mut model = Model::new(None);
+    let repository = repository();
+    model.main_repo = repository.canonical_path.clone();
+    model.remote.endpoint = repository.endpoint.clone();
+    model.remote.repository = Some(repository);
+    model
+  }
+
+  #[test]
+  fn shows_the_remote_repository_with_its_chrome_and_remote_shells() {
+    let model = remote_model();
+    let snapshot = screen(&model, &Data::default()).unwrap();
+    assert!(snapshot.repository.is_some());
+    let View::Workspace(route) = snapshot.view else {
+      panic!("not the workspace view");
+    };
+    let chrome = route.remote_chrome.unwrap();
+    assert_eq!(chrome.state, "online");
+    assert!(chrome.terminal);
+    assert_eq!(chrome.notices, [MERGE_REASON]);
+    assert!(route.terminal.unwrap().remote_shell);
+  }
+
+  #[test]
+  fn a_cut_off_endpoint_shows_the_cutoff_banner() {
+    let mut model = remote_model();
+    let id = model.remote.endpoint.clone().unwrap().id;
+    model.remote.cutoffs.insert(id, "session_ended".into());
+    let View::Workspace(route) = screen(&model, &Data::default()).unwrap().view else {
+      panic!("not the workspace view");
+    };
+    let chrome = route.remote_chrome.unwrap();
+    assert_eq!(chrome.state, "cutoff");
+    assert!(chrome.cut_off);
+  }
+
+  #[test]
+  fn routes_the_remote_dialogs() {
+    let mut model = remote_model();
+    model.remote.setup = true;
+    model.remote.terminal = true;
+    model.remote.ambiguous = Some("lost".into());
+    let remote = screen(&model, &Data::default()).unwrap().remote;
+    assert!(remote.setup.is_some());
+    let terminal = remote.terminal.unwrap();
+    assert_eq!(terminal.workspace_id, "root");
+    assert_eq!(remote.ambiguous.as_deref(), Some("lost"));
+  }
+
+  #[test]
+  fn shows_the_repository_form_under_onboarding_while_an_endpoint_is_connected() {
+    let mut model = remote_model();
+    model.main_repo.clear();
+    model.remote.repository = None;
+    let View::Onboarding(route) = screen(&model, &Data::default()).unwrap().view else {
+      panic!("not onboarding");
+    };
+    let form = route.remote_repo.unwrap();
+    assert!(form.selector);
+    assert_eq!(form.path, remote::DEFAULT_PATH);
+    assert!(
+      matches!(screen(&Model::new(None), &Data::default()).unwrap().view, View::Onboarding(r) if r.remote_repo.is_none())
+    );
   }
 
   #[test]

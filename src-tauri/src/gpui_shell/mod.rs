@@ -122,9 +122,8 @@ struct Shell {
   /// The window model, which draws the window unless `TREQ_WEB_UI` is set
   /// (see `window`).
   window: Option<gpui::Entity<window::WindowController>>,
-  /// What the model last presented, and what React last pushed.
+  /// What the model last presented.
   presented: Option<window::Presentation>,
-  react: ReactPushes,
   /// `ui_zoom`, in percent.
   zoom: u32,
   /// The OS appearance last rendered under.
@@ -302,7 +301,6 @@ pub fn open_window(
       modal: None,
       window: None,
       presented: None,
-      react: ReactPushes::default(),
       zoom: window::DEFAULT_ZOOM,
       os_dark: None,
       shortcuts: None,
@@ -392,13 +390,11 @@ fn update_shell(
 }
 
 /// Shows `snapshot` in the GPUI sidebar of window `label`, or removes the
-/// sidebar for `None`. A window the model drives draws React's only while
-/// React owns it (a remote repository).
+/// sidebar for `None`. A window the model drives ignores React's.
 pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnapshot>) {
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| {
-      shell.react.sidebar = snapshot.clone();
       if shell.react_draws() {
         shell.show_sidebar(snapshot, cx);
       }
@@ -417,13 +413,6 @@ pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapsh
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| {
-      let owns = snapshot.as_ref().is_some_and(window::react_owns);
-      shell.react.screen = snapshot.clone();
-      if shell.window.is_some() && owns != shell.react.owns {
-        shell.react.owns = owns;
-        window::set_react_owns(&shell.label, owns);
-        return shell.redraw(cx);
-      }
       if shell.react_draws() {
         shell.show_screen(snapshot, cx);
       }
@@ -441,7 +430,6 @@ pub fn update_modal(app: &AppHandle, label: &str, modal: Option<Modal>) {
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| {
-      shell.react.modal = modal.clone();
       if shell.react_draws() {
         shell.show_modal(modal, cx);
       }
@@ -452,51 +440,15 @@ pub fn update_modal(app: &AppHandle, label: &str, modal: Option<Modal>) {
   });
 }
 
-/// What React last pushed to a window the model drives, drawn while React
-/// owns it.
-#[derive(Default)]
-struct ReactPushes {
-  sidebar: Option<SidebarSnapshot>,
-  screen: Option<ScreenSnapshot>,
-  modal: Option<Modal>,
-  overlay: Option<OverlaySnapshot>,
-  /// React shows a remote repository or its dialogs.
-  owns: bool,
-}
-
 impl Shell {
-  /// Whether React's pushes are drawn: always without the window model,
-  /// else while React owns the window.
+  /// Whether React's pushes are drawn: only without the window model
+  /// (`TREQ_WEB_UI`).
   fn react_draws(&self) -> bool {
-    self.window.is_none() || self.react.owns
+    self.window.is_none()
   }
 
-  /// Draws whichever of React and the model owns the window now.
-  fn redraw(&mut self, cx: &mut gpui::Context<Self>) {
-    if self.react_draws() {
-      let react = &self.react;
-      let (sidebar, screen, modal, overlay) = (
-        react.sidebar.clone(),
-        react.screen.clone(),
-        react.modal.clone(),
-        react.overlay.clone(),
-      );
-      self.show_sidebar(sidebar, cx);
-      self.show_screen(screen, cx);
-      self.show_modal(modal, cx);
-      self.show_overlay(overlay);
-      self.show_file_picker(None, cx);
-    } else if let Some(presented) = self.presented.take() {
-      self.present(presented, cx);
-    }
-  }
-
-  /// Draws what the window model presents, unless React owns the window.
+  /// Draws what the window model presents.
   fn present(&mut self, next: window::Presentation, cx: &mut gpui::Context<Self>) {
-    if self.react.owns {
-      self.presented = Some(next);
-      return;
-    }
     let before = self.presented.take();
     if before.as_ref().is_none_or(|b| b.sidebar != next.sidebar) {
       self.show_sidebar(next.sidebar.clone(), cx);
@@ -676,7 +628,7 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
         .map(|sidebar| sidebar.read(cx).snapshot().clone());
       let handled = snapshot
         .is_some_and(|snapshot| sidebar_actions::handle(&app, &label, &snapshot, &action, cx));
-      if !handled {
+      if !handled && !driven {
         send(app, label, action);
       }
     });
@@ -734,8 +686,16 @@ fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
 }
 
 /// Hands GPUI the account Rust owns ([`crate::core::cloud`]); every shell
-/// window's screens draw from it.
+/// window's screens draw from it, and the window models follow the cloud
+/// workspace's state.
 pub fn account_changed(app: &AppHandle, snapshot: crate::core::cloud::AccountSnapshot) {
+  let state = snapshot
+    .cloud
+    .instance_status
+    .as_ref()
+    .and_then(|s| s.instance.as_ref())
+    .map(|i| i.status.clone());
+  window::instance_state(app, state);
   let account = screen::account_data::Account(Some(screen::account_data::route_from(&snapshot)));
   defer_main(app, move |_| {
     let result = tauri_plugin_gpui::with_app(move |cx| {
@@ -846,6 +806,25 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
 /// Window `label` gained focus.
 pub fn window_focused(app: &AppHandle, label: &str) {
   window::window_focused(app, label);
+}
+
+/// The cloud workspace connected (for window `label`, which asked) or its
+/// certificate renewed. True when the window models take it.
+pub fn managed_endpoint(
+  app: &AppHandle,
+  label: Option<&str>,
+  event: crate::core::cloud::ManagedEndpointEvent,
+) -> bool {
+  if std::env::var_os(screen::WEB_UI_ENV).is_some() {
+    return false;
+  }
+  window::managed_endpoint(app, label, event);
+  true
+}
+
+/// An endpoint was reauthenticated: its cutoff is lifted everywhere.
+pub fn cutoff_cleared(app: &AppHandle, endpoint_id: &str) {
+  window::cutoff_cleared(app, endpoint_id);
 }
 
 /// Forgets a destroyed window's shell.
