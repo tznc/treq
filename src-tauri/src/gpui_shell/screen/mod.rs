@@ -22,6 +22,7 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Windo
 pub(super) use changes_data::ChangesHost;
 pub use modal::Modal;
 pub(super) use modal::ModalOpen;
+pub use terminal::TERMINAL_CONTEXT;
 pub(super) use workspace_data::WorkspaceHost;
 
 use super::{

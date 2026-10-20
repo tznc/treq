@@ -103,6 +103,17 @@ describe("Dashboard dialogs drawn by GPUI", () => {
     await waitFor(() => expect(gpuiOverlay()).toBeNull());
   });
 
+  it("shows the keyboard shortcuts for ? pressed in GPUI", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+    sendGpuiOverlayAction({
+      kind: "field",
+      field: "overlay.shortcut",
+      value: "?",
+    });
+    await findGpuiOverlay("keyboardShortcuts");
+  });
+
   describe("with a workspace", () => {
     let alphaId: number;
 

@@ -307,3 +307,14 @@ fn file_browser_tree_menu_copies_paths(cx: &mut TestAppContext) {
   );
   assert!(host.calls().contains(&"notify toast Copied".to_string()));
 }
+
+#[gpui::test]
+fn file_lines_show_their_numbers_in_a_gutter(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, serde_json::json!({}));
+  browser(&mut h);
+  let gutter = h.cx.debug_bounds("code-gutter-1").expect("gutter");
+  let line = h.cx.debug_bounds("code-line-1").expect("line");
+  // Four `ch` of line number, as React's `min-w-[4ch]` gutter.
+  assert!(gutter.size.width >= gpui::px(30.), "{gutter:?}");
+  assert_eq!(gutter.left(), line.left());
+}

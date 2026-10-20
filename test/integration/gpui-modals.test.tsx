@@ -10,6 +10,7 @@ import {
   gpuiModal,
   sendGpuiScreenAction,
 } from "../gpui-screen";
+import { sendGpuiOverlayAction } from "../gpui-overlay";
 import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 
@@ -34,6 +35,17 @@ describe("GPUI agent prompt, prompt history and stash dialogs", () => {
     expect(
       screen.queryByRole("heading", { name: "Start a new agent session" }),
     ).toBeNull();
+  });
+
+  it("opens the agent prompt for Cmd+I pressed in GPUI", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+    sendGpuiOverlayAction({
+      kind: "field",
+      field: "overlay.shortcut",
+      value: "i",
+    });
+    await findGpuiModal("agentPrompt");
   });
 
   it("closes the dialog when GPUI presses close", async () => {

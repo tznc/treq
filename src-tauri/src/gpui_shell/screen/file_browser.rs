@@ -1801,9 +1801,12 @@ impl FileBrowserView {
         div()
           .id(SharedString::from(format!("code-gutter-{n}")))
           .debug_selector(move || format!("code-gutter-{n}"))
+          .relative()
           .flex()
           .flex_none()
           .items_start()
+          // Room for the add-comment button's overhang past the number.
+          .pr_1()
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, e: &MouseDownEvent, _, cx| view.press_line(n, e, cx)),
@@ -1830,9 +1833,11 @@ impl FileBrowserView {
           )
           .child(
             div()
-              .flex_none()
+              // Over the number's padding: a negative margin collapses the gutter.
+              .absolute()
+              .top_0()
+              .right_0()
               .size_5()
-              .ml(px(-16.))
               .flex()
               .items_center()
               .justify_center()

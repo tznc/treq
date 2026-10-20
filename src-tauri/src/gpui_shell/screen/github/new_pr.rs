@@ -334,7 +334,11 @@ impl GithubView {
       .flex_col()
       .gap_4()
       .child(dialog_title("New Pull Request"))
-      .child(div().child(tabs).child(div().pt_4().child(content)));
+      .child(
+        div()
+          .child(div().flex().child(tabs))
+          .child(div().pt_4().child(content)),
+      );
     deferred(
       anchored().position(point(px(0.), px(0.))).child(
         backdrop

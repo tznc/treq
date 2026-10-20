@@ -469,6 +469,16 @@ fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn github_tabs_fit_their_triggers(cx: &mut TestAppContext) {
+  // `TabsList` is `inline-flex`: as wide as its tabs, not the list.
+  let (mut h, _) = harness(cx, issues(), route("issues", None, false));
+  h.cx.run_until_parked();
+  let tabs = h.cx.debug_bounds("github-tabs").expect("tabs");
+  let list = h.cx.debug_bounds("github-list").expect("list");
+  assert!(tabs.size.width < list.size.width / 2.);
+}
+
+#[gpui::test]
 fn github_without_a_remote_says_so(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, Fake::default(), route("issues", Some(4), false));
   assert!(!h.drawn("github-new"));
