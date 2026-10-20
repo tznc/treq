@@ -1010,4 +1010,290 @@ mod tests {
     );
     assert!(!workspace.submitting);
   }
+
+  // -- `managed-ssh-connection.test.ts` -----------------------------------
+
+  async fn trust_mocks(server: &MockServer, certificate: Option<u16>) {
+    mount(
+      server,
+      "remote-ssh-trust",
+      json!({"action": "register_client_key"}),
+      json!({"key": {"id": "k1", "comment": "treq-managed-vm"}}),
+    )
+    .await;
+    let response = match certificate {
+      None => ResponseTemplate::new(200).set_body_json(json!({
+        "certificate": "cert", "serial": "1", "expires_at": "2099-01-01T00:00:00Z", "endpoint": endpoint()
+      })),
+      Some(status) => ResponseTemplate::new(status).set_body_json(json!({"error": "refused"})),
+    };
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-ssh-trust"))
+      .and(body_partial_json(json!({"action": "issue_certificate"})))
+      .respond_with(response)
+      .mount(server)
+      .await;
+  }
+
+  async fn bodies(server: &MockServer, action: &str) -> Vec<Value> {
+    server
+      .received_requests()
+      .await
+      .unwrap_or_default()
+      .into_iter()
+      .filter_map(|r| serde_json::from_slice::<Value>(&r.body).ok())
+      .filter(|b| b["action"] == action)
+      .collect()
+  }
+
+  /// The cutoff effects, without the usage reads beside them.
+  fn cutoff_log(fake: &Fake) -> Vec<String> {
+    let log = fake.log.lock().unwrap();
+    log
+      .iter()
+      .filter(|e| !e.starts_with("usage"))
+      .cloned()
+      .collect()
+  }
+
+  fn connected(fake: &Fake) -> Vec<(u64, bool)> {
+    fake
+      .endpoints
+      .lock()
+      .unwrap()
+      .iter()
+      .filter_map(|e| match e {
+        ManagedEndpointEvent::Connected {
+          generation,
+          open_repositories,
+          ..
+        } => Some((*generation, *open_repositories)),
+        _ => None,
+      })
+      .collect()
+  }
+
+  #[tokio::test]
+  async fn registers_the_public_key_with_a_stable_idempotency_key() {
+    let server = MockServer::start().await;
+    let (cloud, _) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("ready"),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.refresh_cloud().await;
+    cloud.open_repositories().await;
+    cloud.reauthenticate("e1").await;
+    let registered = bodies(&server, "register_client_key").await;
+    assert_eq!(registered.len(), 2);
+    for body in registered {
+      // Only the public key is ever read and sent.
+      assert_eq!(body["public_key"], "ssh-ed25519 AAA /k/id_ed25519");
+      assert_eq!(body["idempotency_key"], "register-client-key:/k/id_ed25519");
+    }
+  }
+
+  #[tokio::test]
+  async fn provisions_then_polls_readiness_until_connectable() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "ensure"}),
+      json!({}),
+    )
+    .await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-instance"))
+      .and(body_partial_json(json!({"action": "status"})))
+      .respond_with(ResponseTemplate::new(200).set_body_json(status("provisioning")))
+      .up_to_n_times(1)
+      .with_priority(1)
+      .mount(&server)
+      .await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("ready"),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.provision().await;
+    let stages: Vec<_> = fake
+      .snapshots
+      .lock()
+      .unwrap()
+      .iter()
+      .filter_map(|s| s.cloud.provisioning_stage.clone())
+      .collect();
+    assert!(stages.contains(&"Waiting for the cloud workspace (provisioning)...".to_string()));
+    assert_eq!(connected(&fake), [(4, true)]);
+    let ensured = bodies(&server, "ensure").await;
+    assert!(ensured[0]["idempotency_key"]
+      .as_str()
+      .unwrap()
+      .starts_with("provision-managed-"));
+    let workspace = cloud.snapshot().cloud;
+    assert_eq!(workspace.provisioning_stage, None);
+    assert_eq!(workspace.provisioning_error, None);
+  }
+
+  #[tokio::test]
+  async fn surfaces_a_readiness_failure_instead_of_polling_forever() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "ensure"}),
+      json!({}),
+    )
+    .await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("failed"),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.provision().await;
+    assert_eq!(
+      cloud.snapshot().cloud.provisioning_error.as_deref(),
+      Some("Managed instance provisioning failed (status: failed).")
+    );
+    assert!(connected(&fake).is_empty());
+  }
+
+  #[tokio::test]
+  async fn opening_repositories_rejects_an_instance_that_is_not_ready() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("suspended"),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.refresh_cloud().await;
+    cloud.open_repositories().await;
+    assert_eq!(
+      cloud.snapshot().cloud.provisioning_error.as_deref(),
+      Some("Managed instance is not ready (status: suspended).")
+    );
+    assert!(connected(&fake).is_empty());
+    assert!(bodies(&server, "issue_certificate").await.is_empty());
+  }
+
+  #[tokio::test]
+  async fn reauthenticating_clears_the_cutoff_only_after_a_fresh_certificate() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("ready"),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.refresh_cloud().await;
+    cloud.reauthenticate("e1").await;
+    assert_eq!(cutoff_log(&fake), ["clear e1"]);
+    assert_eq!(connected(&fake), [(4, false)]);
+  }
+
+  #[tokio::test]
+  async fn a_failed_reauthentication_keeps_the_cutoff() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("ready"),
+    )
+    .await;
+    trust_mocks(&server, Some(409)).await;
+    cloud.refresh_cloud().await;
+    cloud.reauthenticate("e1").await;
+    assert!(cutoff_log(&fake).is_empty());
+    assert!(cloud.snapshot().cloud.provisioning_error.is_some());
+  }
+
+  #[tokio::test]
+  async fn waking_uses_a_new_idempotency_key_every_attempt_then_reconnects() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("ready"),
+    )
+    .await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "wake"}),
+      json!({}),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.refresh_cloud().await;
+    cloud.wake().await;
+    cloud.wake().await;
+    let keys: Vec<_> = bodies(&server, "wake")
+      .await
+      .into_iter()
+      .map(|b| b["idempotency_key"].as_str().unwrap().to_string())
+      .collect();
+    assert_eq!(keys.len(), 2);
+    assert!(keys[0].starts_with("wake-i1-"));
+    assert_ne!(keys[0], keys[1]);
+    // Wake leaves the repository view alone.
+    assert_eq!(connected(&fake), [(4, false), (4, false)]);
+  }
+
+  #[tokio::test]
+  async fn a_renewal_swaps_the_certificate_without_reactivating_the_endpoint() {
+    let server = MockServer::start().await;
+    let (cloud, fake) = signed_in(&server).await;
+    mount(
+      &server,
+      "remote-instance",
+      json!({"action": "status"}),
+      status("ready"),
+    )
+    .await;
+    trust_mocks(&server, None).await;
+    cloud.refresh_cloud().await;
+    cloud.open_repositories().await;
+    let lease = cloud.managed.lock().unwrap().lease.clone().unwrap();
+    let mut renewed: SshEndpoint = serde_json::from_value(endpoint()).unwrap();
+    renewed.authentication = SshAuthentication::Certificate {
+      key_reference: "/k/id_ed25519".into(),
+      certificate: Some("cert-2".into()),
+    };
+    let hooks = Hooks(Arc::downgrade(&cloud));
+    hooks.renewed(&lease, renewed.clone());
+    let mut other = renewed.clone();
+    other.id = "e-other".into();
+    hooks.renewed(&lease, other);
+    let events = fake.endpoints.lock().unwrap().clone();
+    assert_eq!(connected(&fake).len(), 1, "no second activation");
+    assert_eq!(
+      events.last(),
+      Some(&ManagedEndpointEvent::Renewed { endpoint: renewed })
+    );
+    assert_eq!(events.len(), 2, "a renewal for another endpoint is dropped");
+  }
 }

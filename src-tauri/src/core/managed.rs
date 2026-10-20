@@ -43,7 +43,10 @@ pub fn now_ms() -> i64 {
 
 /// Milliseconds until a lease should renew: at `issued + 0.8 × lifetime`.
 pub fn renewal_delay_ms(issued_at_ms: i64, expires_at_ms: i64, now_ms: i64) -> i64 {
-  let lifetime = (expires_at_ms - issued_at_ms).max(0) as f64;
+  if expires_at_ms <= issued_at_ms {
+    return 0;
+  }
+  let lifetime = (expires_at_ms - issued_at_ms) as f64;
   let renew_at = expires_at_ms as f64 - lifetime * RENEWAL_REMAINING_FRACTION;
   (renew_at as i64 - now_ms).max(0)
 }
@@ -163,16 +166,27 @@ pub trait RenewalHooks: Send + Sync {
 /// Renews `lease` until a cutoff, then reports it. Abort the task to stop.
 pub async fn renewal_loop(
   supabase: Arc<Supabase>,
+  lease: Lease,
+  key_reference: String,
+  hooks: Arc<dyn RenewalHooks>,
+) {
+  renewal_loop_with(supabase, lease, key_reference, hooks, renewal_backoff).await;
+}
+
+/// [`renewal_loop`] with the retry backoff `backoff`.
+async fn renewal_loop_with(
+  supabase: Arc<Supabase>,
   mut lease: Lease,
   key_reference: String,
   hooks: Arc<dyn RenewalHooks>,
+  backoff: fn(u32) -> Duration,
 ) {
   let mut attempt = 0u32;
   let reason = loop {
     let delay = if attempt == 0 {
       renewal_delay_ms(lease.issued_at, lease.expires_at, now_ms())
     } else {
-      renewal_backoff(attempt - 1).as_millis() as i64
+      backoff(attempt - 1).as_millis() as i64
     };
     tokio::time::sleep(Duration::from_millis(delay as u64)).await;
 
@@ -194,7 +208,7 @@ pub async fn renewal_loop(
         }
         log::warn!("certificate renewal failed, retrying: {error}");
         let remaining = lease.expires_at - now_ms();
-        if remaining <= renewal_backoff(attempt).as_millis() as i64 {
+        if remaining <= backoff(attempt).as_millis() as i64 {
           tokio::time::sleep(Duration::from_millis(remaining.max(0) as u64)).await;
           break CutoffReason::CertificateExpired;
         }
@@ -237,7 +251,19 @@ mod tests {
   #[test]
   fn renews_at_eighty_percent_of_the_lifetime() {
     assert_eq!(renewal_delay_ms(0, 1000, 0), 800);
-    assert_eq!(renewal_delay_ms(0, 1000, 900), 0);
+    assert_eq!(renewal_delay_ms(0, 1000, 800), 0);
+    assert_eq!(RENEWAL_REMAINING_FRACTION, 0.2);
+  }
+
+  #[test]
+  fn never_returns_a_negative_delay_for_a_late_renewal() {
+    assert_eq!(renewal_delay_ms(0, 1000, 950), 0);
+  }
+
+  #[test]
+  fn returns_zero_for_a_non_positive_lifetime() {
+    assert_eq!(renewal_delay_ms(1000, 1000, 500), 0);
+    assert_eq!(renewal_delay_ms(1000, 500, 500), 0);
   }
 
   #[test]
@@ -258,7 +284,14 @@ mod tests {
       classify_renewal_error(&error(409, "Key has been revoked")),
       Some(CutoffReason::KeyRevoked)
     );
+    assert_eq!(
+      classify_renewal_error(&error(409, "Instance is not ready (status: suspended)")),
+      Some(CutoffReason::InstanceInaccessible)
+    );
     assert_eq!(classify_renewal_error(&error(502, "")), None);
+    assert_eq!(classify_renewal_error(&error(503, "busy")), None);
+    // A request that never reached the server (`Failed to fetch`).
+    assert_eq!(classify_renewal_error(&error(0, "network")), None);
   }
 
   #[test]
@@ -380,5 +413,171 @@ mod tests {
     renewal_loop(Arc::new(supabase), lease, "key".into(), hooks.clone()).await;
     assert_eq!(*hooks.cut.lock().unwrap(), vec![CutoffReason::SessionEnded]);
     assert!(hooks.renewed.lock().unwrap().is_empty());
+  }
+
+  async fn signed_in(server: &MockServer) -> Arc<Supabase> {
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/exchange-desktop-token"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "access_token": "a1", "refresh_token": "r", "expires_in": 3600,
+        "user": {"id": "u1", "email": "ada@example.com"}
+      })))
+      .mount(server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-ssh-trust"))
+      .and(body_partial_json(json!({"action": "report_cutoff"})))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})))
+      .mount(server)
+      .await;
+    let (supabase, _) = client(&server.uri());
+    supabase.auth.exchange_token("t").await.unwrap();
+    Arc::new(supabase)
+  }
+
+  /// Answers renewals with `statuses` in turn (200 renews), then 503.
+  async fn renewals(server: &MockServer, statuses: &[u16]) {
+    for status in statuses {
+      let response = if *status == 200 {
+        ResponseTemplate::new(200).set_body_json(certificate("2099-01-01T00:00:00Z"))
+      } else {
+        ResponseTemplate::new(*status).set_body_json(json!({"error": "refused"}))
+      };
+      Mock::given(method("POST"))
+        .and(path("/functions/v1/remote-ssh-trust"))
+        .and(body_partial_json(
+          json!({"action": "issue_certificate", "renewal": true}),
+        ))
+        .respond_with(response)
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(server)
+        .await;
+    }
+  }
+
+  fn lease(lifetime_ms: i64) -> Lease {
+    let now = now_ms();
+    Lease {
+      instance_id: "i1".into(),
+      key_id: "k1".into(),
+      endpoint_id: "e1".into(),
+      issued_at: now,
+      expires_at: now + lifetime_ms,
+    }
+  }
+
+  fn fast(_: u32) -> Duration {
+    Duration::from_millis(20)
+  }
+
+  #[tokio::test]
+  async fn renews_transparently_while_the_session_stays_valid() {
+    let server = MockServer::start().await;
+    let supabase = signed_in(&server).await;
+    renewals(&server, &[200]).await;
+    let hooks = Arc::new(Recorder::default());
+    let task = tokio::spawn(renewal_loop_with(
+      supabase,
+      lease(50),
+      "key".into(),
+      hooks.clone(),
+      fast,
+    ));
+    for _ in 0..200 {
+      if !hooks.renewed.lock().unwrap().is_empty() {
+        break;
+      }
+      tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    task.abort();
+    assert_eq!(*hooks.renewed.lock().unwrap(), ["e1"]);
+    assert!(hooks.cut.lock().unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn cuts_off_without_retrying_when_renewal_is_refused_for_a_revoked_key() {
+    let server = MockServer::start().await;
+    let supabase = signed_in(&server).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-ssh-trust"))
+      .and(body_partial_json(
+        json!({"action": "issue_certificate", "renewal": true}),
+      ))
+      .respond_with(
+        ResponseTemplate::new(409).set_body_json(json!({"error": "Key has been revoked"})),
+      )
+      .expect(1)
+      .mount(&server)
+      .await;
+    let hooks = Arc::new(Recorder::default());
+    renewal_loop_with(supabase, lease(10), "key".into(), hooks.clone(), fast).await;
+    assert_eq!(*hooks.cut.lock().unwrap(), vec![CutoffReason::KeyRevoked]);
+  }
+
+  #[tokio::test]
+  async fn retries_a_transient_failure_and_still_renews_before_expiry() {
+    let server = MockServer::start().await;
+    let supabase = signed_in(&server).await;
+    renewals(&server, &[503, 200]).await;
+    let hooks = Arc::new(Recorder::default());
+    let task = tokio::spawn(renewal_loop_with(
+      supabase,
+      lease(1_000),
+      "key".into(),
+      hooks.clone(),
+      fast,
+    ));
+    // The first renewal is due at 800 ms of the 1 s lease.
+    for _ in 0..2000 {
+      if !hooks.renewed.lock().unwrap().is_empty() {
+        break;
+      }
+      tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    task.abort();
+    assert_eq!(*hooks.renewed.lock().unwrap(), ["e1"]);
+    assert!(hooks.cut.lock().unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn lets_the_certificate_lapse_if_retries_never_land_before_expiry() {
+    let server = MockServer::start().await;
+    let supabase = signed_in(&server).await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/remote-ssh-trust"))
+      .and(body_partial_json(
+        json!({"action": "issue_certificate", "renewal": true}),
+      ))
+      .respond_with(ResponseTemplate::new(503).set_body_json(json!({"error": "busy"})))
+      .mount(&server)
+      .await;
+    let hooks = Arc::new(Recorder::default());
+    // Retries every 20 ms; the 100 ms lease runs out first.
+    renewal_loop_with(supabase, lease(100), "key".into(), hooks.clone(), fast).await;
+    assert_eq!(
+      *hooks.cut.lock().unwrap(),
+      vec![CutoffReason::CertificateExpired]
+    );
+    assert!(hooks.renewed.lock().unwrap().is_empty());
+  }
+
+  #[tokio::test]
+  async fn stopping_prevents_any_further_renewal_or_cutoff() {
+    let server = MockServer::start().await;
+    let supabase = signed_in(&server).await;
+    renewals(&server, &[200]).await;
+    let hooks = Arc::new(Recorder::default());
+    let task = tokio::spawn(renewal_loop_with(
+      supabase,
+      lease(200),
+      "key".into(),
+      hooks.clone(),
+      fast,
+    ));
+    task.abort();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(hooks.renewed.lock().unwrap().is_empty());
+    assert!(hooks.cut.lock().unwrap().is_empty());
   }
 }
