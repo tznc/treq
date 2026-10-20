@@ -6,7 +6,8 @@
 export function dispatchGpuiAppShortcut(key: string): void {
   const mac = navigator.platform.toUpperCase().includes("MAC");
   const command = key !== "?";
-  window.dispatchEvent(
+  // From the body: `useKeyboardShortcut` reads the target as an element.
+  document.body.dispatchEvent(
     new KeyboardEvent("keydown", {
       key,
       metaKey: command && mac,
