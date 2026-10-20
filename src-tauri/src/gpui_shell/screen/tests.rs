@@ -46,6 +46,8 @@ struct FakeHost {
   files: Vec<String>,
   /// What the Commits tab reads.
   diff: Option<crate::jj::JjRevisionDiff>,
+  /// Deferred file diffs `commit_file_diff` loads.
+  file_diffs: Vec<crate::jj::JjFileDiff>,
   description: String,
   /// What the Changes tab reads.
   working: Option<crate::jj::JjRevisionDiff>,
@@ -1120,6 +1122,13 @@ impl commits_data::CommitsHost for FakeHost {
       .as_ref()
       .and_then(|d| {
         d.hunks_by_file
+          .iter()
+          .find(|f| f.path == file_path)
+          .cloned()
+      })
+      .or_else(|| {
+        self
+          .file_diffs
           .iter()
           .find(|f| f.path == file_path)
           .cloned()
@@ -6681,6 +6690,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
   assert_eq!(shown, [path]);
 }
 
+mod commit_diffs;
 mod conflicts;
 mod file_browser;
 mod github;

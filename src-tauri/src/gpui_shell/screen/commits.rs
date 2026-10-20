@@ -1568,6 +1568,7 @@ impl Render for CommitsView {
       if own.is_empty() {
         list = list.child(
           div()
+            .debug_selector(|| "own-commits-empty".into())
             .mb_3()
             .pl_7()
             .text_color(p.muted_foreground)
@@ -1583,6 +1584,7 @@ impl Render for CommitsView {
         .child(div().h(px(1.)).bg(p.border).my_4().mx_2())
         .child(
           ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "target-divider".into())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(p.muted_foreground)
             .mb_2()
@@ -2111,12 +2113,16 @@ impl CommitsView {
       return div();
     };
     if diff.too_large_to_render {
-      return div().p_3().text_color(p.muted_foreground).child(
-        diff
-          .render_block_reason
-          .clone()
-          .unwrap_or_else(|| "This commit diff is too large to render.".into()),
-      );
+      return div()
+        .debug_selector(|| "commit-diff-blocked".into())
+        .p_3()
+        .text_color(p.muted_foreground)
+        .child(
+          diff
+            .render_block_reason
+            .clone()
+            .unwrap_or_else(|| "This commit diff is too large to render.".into()),
+        );
     }
     if diff.committed_files.is_empty() {
       return div()

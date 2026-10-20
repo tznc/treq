@@ -1,0 +1,104 @@
+//! The Commits tab's diff size limits and its target section
+//! (`workspace/commits.test.tsx`). The backend decides which file diffs
+//! are deferred (over 500 lines) and which commits are blocked (over
+//! 10,000); `it/core_commits_test.rs` covers that.
+
+use gpui::TestAppContext;
+
+use super::*;
+
+fn host_with_diff(diff: serde_json::Value) -> FakeHost {
+  let mut host = commits_host();
+  host.diff = serde_json::from_value(diff).ok();
+  host
+}
+
+#[gpui::test]
+fn commits_tab_loads_a_deferred_file_diff_on_request(cx: &mut TestAppContext) {
+  let mut host = host_with_diff(serde_json::json!({
+    "committed_files": [{
+      "path": "huge-diff.txt", "status": "A", "previous_path": null,
+      "changed_line_count": 501, "diff_deferred": true
+    }],
+    "hunks_by_file": [],
+    "too_large_to_render": false
+  }));
+  host.file_diffs = serde_json::from_value(serde_json::json!([{
+    "path": "huge-diff.txt",
+    "hunks": [{"id": "h", "header": "@@ -0,0 +1,1 @@", "lines": ["+large diff line 501"], "patch": ""}]
+  }]))
+  .expect("file diff");
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-a");
+  assert!(h.drawn("commit-file-row"));
+  assert!(h.drawn("load-deferred-diff"));
+  h.click("load-deferred-diff");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"read file diff a huge-diff.txt".to_string()));
+  assert!(!h.drawn("load-deferred-diff"), "the diff shows instead");
+}
+
+#[gpui::test]
+fn commits_tab_blocks_a_commit_too_large_to_render(cx: &mut TestAppContext) {
+  let host = host_with_diff(serde_json::json!({
+    "committed_files": [{
+      "path": "huge-commit.txt", "status": "A", "previous_path": null,
+      "changed_line_count": 10001, "diff_deferred": true
+    }],
+    "hunks_by_file": [],
+    "too_large_to_render": true,
+    "render_block_reason": "This commit changes more than 10,000 lines and is too large to render."
+  }));
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-a");
+  assert!(h.drawn("commit-diff-blocked"));
+  assert!(!h.drawn("commit-file-row"));
+  assert!(!h.drawn("load-deferred-diff"));
+}
+
+fn on_target(id: &str) -> serde_json::Value {
+  let mut c = commit(id, 1, 0);
+  c["on_target_only"] = true.into();
+  c
+}
+
+fn host_with_log(commits: Vec<serde_json::Value>, workspace_branch: &str) -> FakeHost {
+  let mut host = commits_host();
+  host.history = serde_json::from_value(serde_json::json!({
+    "commits": commits,
+    "target_branch": "main",
+    "workspace_branch": workspace_branch
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+fn commits_tab_divides_the_workspace_from_its_target(cx: &mut TestAppContext) {
+  let host = host_with_log(vec![commit("a", 1, 0), on_target("t")], "feature/login");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  assert!(h.drawn("commit-row-a"));
+  assert!(h.drawn("target-divider"));
+  assert!(h.drawn("commit-row-t"));
+  assert!(!h.drawn("own-commits-empty"));
+}
+
+#[gpui::test]
+fn commits_tab_says_a_workspace_has_no_commits_above_its_target(cx: &mut TestAppContext) {
+  let host = host_with_log(vec![on_target("t")], "feature/login");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  assert!(h.drawn("own-commits-empty"));
+  assert!(h.drawn("target-divider"));
+  assert!(h.drawn("commit-row-t"));
+}
+
+#[gpui::test]
+fn commits_tab_draws_no_target_section_on_the_default_branch(cx: &mut TestAppContext) {
+  let host = host_with_log(vec![commit("a", 1, 0), on_target("t")], "main");
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  assert!(h.drawn("commit-row-a"));
+  assert!(!h.drawn("target-divider"));
+  assert!(!h.drawn("own-commits-empty"));
+}
