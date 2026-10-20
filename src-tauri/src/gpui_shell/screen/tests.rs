@@ -6685,5 +6685,6 @@ mod github;
 mod linear_view;
 mod merge_queue;
 mod pr_review;
+mod review_comments;
 mod workspace_actions;
 mod workspace_dialogs;
