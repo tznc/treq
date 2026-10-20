@@ -731,6 +731,9 @@ impl terminal_data::TerminalHost for FakeHost {
   }
 
   fn write_pty(&self, id: &str, data: &str) -> Result<(), String> {
+    if self.failing.contains(&"write_pty") {
+      return Err("channel closed".into());
+    }
     self.record(format!("write {id} {data:?}"));
     Ok(())
   }
@@ -4467,6 +4470,126 @@ fn detaching_a_remote_session_keeps_it_running(cx: &mut TestAppContext) {
     .calls()
     .iter()
     .any(|c| c.starts_with("close remote-pty-")));
+}
+
+#[gpui::test]
+fn a_failed_remote_write_shows_the_error_with_reattach(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    failing: vec!["write_pty"],
+    ..terminal_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  assert!(!h.drawn("remote-terminal-lost"));
+  h.cx.simulate_input("ls");
+  h.cx.run_until_parked();
+  assert!(h.drawn("remote-terminal-lost"), "{:?}", host.calls());
+  assert!(h.drawn("remote-terminal-reattach"));
+  // The session is replaced by a fresh attach.
+  h.click("remote-terminal-reattach");
+  h.cx.run_until_parked();
+  assert_eq!(host.attached().len(), 2);
+  assert!(!h.drawn("remote-terminal-lost"));
+}
+
+#[gpui::test]
+fn a_remote_terminal_has_no_search(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  h.cx.simulate_keystrokes("cmd-f");
+  assert!(!h.drawn("terminal-search"));
+  assert!(h.drawn("remote-terminal-header"));
+}
+
+fn drop_files(h: &mut Harness, at: gpui::Point<gpui::Pixels>) {
+  let paths = gpui::ExternalPaths(["/tmp/a b.txt".into()].into_iter().collect());
+  h.cx.simulate_event(gpui::FileDropEvent::Entered {
+    position: at,
+    paths,
+  });
+  h.cx
+    .simulate_event(gpui::FileDropEvent::Submit { position: at });
+  h.cx.run_until_parked();
+}
+
+#[gpui::test]
+fn files_dropped_on_a_shell_are_typed_but_not_on_a_remote_session(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({ "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }] }),
+  );
+  let at = h
+    .cx
+    .debug_bounds("terminal-column-shell")
+    .expect("shell")
+    .center();
+  drop_files(&mut h, at);
+  let writes = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("write "))
+      .count()
+  };
+  assert_eq!(writes(&host), 1, "{:?}", host.calls());
+
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  let at = h
+    .cx
+    .debug_bounds("terminal-column-shell")
+    .expect("remote")
+    .center();
+  drop_files(&mut h, at);
+  assert_eq!(writes(&host), 0, "{:?}", host.calls());
+}
+
+#[gpui::test]
+fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  let open = |nonce: u64, label: &str| {
+    let mut command = open_remote_command(nonce);
+    command["commands"][0]["remote"]["label"] = label.into();
+    command
+  };
+  set_terminal(&mut h, open(1, "shell-a"));
+  let mut commands = open(1, "shell-a")["commands"].as_array().cloned().unwrap();
+  for (nonce, label) in [(2, "shell-b"), (3, "shell-c")] {
+    commands.extend(open(nonce, label)["commands"].as_array().cloned().unwrap());
+  }
+  set_terminal(&mut h, serde_json::json!({ "commands": commands }));
+  let container = h
+    .cx
+    .debug_bounds("terminal-scroll-container")
+    .expect("container");
+  let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
+  assert!(
+    header.right() > container.right(),
+    "the last session overflows the row: {header:?} {container:?}"
+  );
+  let at = gpui::point(container.right() - gpui::px(8.), header.center().y);
+  for click_count in [1, 2] {
+    h.cx.simulate_event(gpui::MouseDownEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+      first_mouse: false,
+    });
+    h.cx.simulate_event(gpui::MouseUpEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+    });
+  }
+  h.cx.run_until_parked();
+  let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
+  assert!(
+    header.right() <= container.right() + gpui::px(1.),
+    "{header:?} {container:?}"
+  );
 }
 
 #[gpui::test]
