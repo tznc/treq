@@ -18,6 +18,8 @@ use tauri_plugin_gpui::{
 };
 
 mod checks_run;
+#[cfg(feature = "e2e")]
+pub mod e2e;
 mod form;
 mod keys;
 pub mod launch;
@@ -75,6 +77,8 @@ pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiErro
           }
         })
         .detach();
+        #[cfg(feature = "e2e")]
+        e2e::start(cx);
       }),
   )?;
   window::listen(app.handle());
@@ -147,6 +151,8 @@ impl Render for Shell {
     window: &mut gpui::Window,
     cx: &mut gpui::Context<Self>,
   ) -> impl IntoElement {
+    #[cfg(feature = "e2e")]
+    e2e::shell_window(window.window_handle());
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark

@@ -1,0 +1,76 @@
+//! The `e2e` feature: a Playwright server (gpui-playwright) inside the app,
+//! which `e2e/desktop` drives with stock `@playwright/test`. It listens only
+//! when `GPUI_PLAYWRIGHT` is set (see `gpui_playwright::Server::from_env`),
+//! and release builds leave the feature out.
+//!
+//! `context.newPage()` adopts a repo window. The command palette and the
+//! other overlays open in a dialog window of their own (see `modal`), so a
+//! test asks for a second page once one shows (`dialogPage` in the suite):
+//! with the repo window taken, a page adopts the active window, since a
+//! dialog takes focus as it opens. Adopted windows stay open when a test's
+//! context closes.
+
+use std::cell::RefCell;
+
+use tauri_plugin_gpui::gpui::{AnyWindowHandle, App};
+
+thread_local! {
+  /// The windows a `Shell` draws: the repo windows.
+  static SHELLS: RefCell<Vec<AnyWindowHandle>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Notes that `window` is a repo window. `Shell` calls it as it renders.
+pub(super) fn shell_window(window: AnyWindowHandle) {
+  SHELLS.with(|shells| {
+    let mut shells = shells.borrow_mut();
+    if !shells.contains(&window) {
+      shells.push(window);
+    }
+  });
+}
+
+/// The repository the first window opens on, in place of the saved one.
+pub const REPO_ENV: &str = "TREQ_E2E_REPO";
+
+/// The repository `REPO_ENV` names, when the e2e suite runs the app.
+pub fn repo() -> Option<String> {
+  std::env::var(REPO_ENV).ok().filter(|r| !r.is_empty())
+}
+
+/// Starts the server when `GPUI_PLAYWRIGHT` asks for it.
+pub fn start(cx: &mut App) {
+  let Some(server) = gpui_playwright::Server::from_env() else {
+    return;
+  };
+  if let Err(err) = server.on_adopt_page(page_window).start(cx) {
+    log::error!("gpui-playwright failed to start: {err}");
+  }
+}
+
+/// Of the windows no page holds: a repo window, else the active window,
+/// else the largest, so a tooltip or menu window is never picked.
+fn page_window(free: &[AnyWindowHandle], cx: &mut App) -> Option<AnyWindowHandle> {
+  if let Some(shell) = SHELLS.with(|shells| {
+    let shells = shells.borrow();
+    free.iter().find(|w| shells.contains(w)).copied()
+  }) {
+    return Some(shell);
+  }
+  let windows: Vec<(AnyWindowHandle, bool, f32)> = free
+    .iter()
+    .filter_map(|w| {
+      w.update(cx, |_, window, _| {
+        let size = window.viewport_size();
+        let area = f32::from(size.width) * f32::from(size.height);
+        (*w, window.is_window_active(), area)
+      })
+      .ok()
+    })
+    .filter(|(_, _, area)| *area >= 300. * 300.)
+    .collect();
+  windows
+    .iter()
+    .find(|(_, active, _)| *active)
+    .or_else(|| windows.iter().max_by(|a, b| a.2.total_cmp(&b.2)))
+    .map(|(w, _, _)| *w)
+}
