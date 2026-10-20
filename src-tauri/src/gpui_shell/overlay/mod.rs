@@ -39,9 +39,6 @@ mod tests;
 pub use data::OverlayHost;
 use data::{PaletteChecks, PrLink, WorkspaceRow};
 
-/// Event React listens to on its own webview window.
-pub const ACTION_EVENT: &str = "gpui-overlay-action";
-
 /// Which dialog shows, and the theme to draw it in.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]

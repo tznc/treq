@@ -1,10 +1,7 @@
 //! The workspace sidebar, drawn by GPUI.
 //!
-//! React still owns the sidebar's data: it builds a [`SidebarSnapshot`] from
-//! the same queries the rest of the app uses and pushes it with the
-//! `gpui_sidebar_update` command. GPUI draws it, and sends every click back
-//! to the window's webview as a `gpui-sidebar-action` event, which React
-//! carries out with the app's own handlers.
+//! The window model builds its [`SidebarSnapshot`] and carries out every
+//! click the sidebar sends back as a [`SidebarAction`].
 
 use crate::gpui_shell::ui::zpx;
 use std::{
@@ -26,9 +23,6 @@ use super::{
 
 #[cfg(test)]
 mod tests;
-
-/// Event React listens to on its own webview window.
-pub const ACTION_EVENT: &str = "gpui-sidebar-action";
 
 /// How long the pointer rests on an element before its tooltip shows, as in
 /// the React app's `TooltipProvider`.

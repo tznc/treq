@@ -1399,8 +1399,7 @@ impl Harness {
       let shown = shown.clone();
       Rc::new(move |request, _| shown.borrow_mut().push(request))
     };
-    let (screen, cx) =
-      cx.add_window_view(|_, cx| Screen::new(snapshot, sink, popups, None, host, cx));
+    let (screen, cx) = cx.add_window_view(|_, cx| Screen::new(snapshot, sink, popups, host, cx));
     let cx = cx.clone();
     Self {
       cx,
@@ -2235,13 +2234,13 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
   let reads = host
     .calls()
     .iter()
-    .filter(|c| c.starts_with("read workspace"))
+    .filter(|c| c.starts_with("read workspace "))
     .count();
   assert_eq!(reads, 2, "it reads the workspace again after syncing");
 }
 
 #[gpui::test]
-fn workspace_header_reads_again_when_react_refreshes(cx: &mut TestAppContext) {
+fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   assert!(h.drawn("workspace-sync"));
   h.update(|s| s.dark = true);
@@ -2253,7 +2252,7 @@ fn workspace_header_reads_again_when_react_refreshes(cx: &mut TestAppContext) {
   let reads: Vec<_> = host
     .calls()
     .into_iter()
-    .filter(|c| c.starts_with("read workspace"))
+    .filter(|c| c.starts_with("read workspace "))
     .collect();
   assert_eq!(reads, vec!["read workspace 0", "read workspace 3"]);
   assert!(host.calls().contains(&"read pr feature/login".to_string()));
@@ -2269,115 +2268,6 @@ fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
   h.click("workspace-tab-changes");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![field("workspace.tab", "changes".into())]);
-}
-
-#[gpui::test]
-fn workspace_keeps_the_tab_row_while_the_browser_shows(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("http://localhost:3000"));
-  assert!(h.drawn("workspace-tab-row"));
-  assert!(h.drawn("browser-address"));
-  assert!(h.drawn("browser-reload"));
-  assert!(h.drawn("workspace-header"));
-  assert!(h.drawn("workspace-frame"));
-}
-
-impl Harness {
-  /// What was sent to React for the controls whose id starts with `prefix`.
-  fn sent_for(&self, prefix: &str) -> Vec<ScreenAction> {
-    self
-      .sent()
-      .into_iter()
-      .filter(|action| match action {
-        ScreenAction::Press { id } => id.starts_with(prefix),
-        ScreenAction::Field { field, .. } => field.starts_with(prefix),
-        _ => false,
-      })
-      .collect()
-  }
-}
-
-fn browser_route(url: &str) -> ScreenSnapshot {
-  let mut route = changes_route();
-  if let View::Workspace(r) = &mut route.view {
-    r.review_switcher = true;
-    r.browser = Some(workspace_data::BrowserRoute { url: url.into() });
-  }
-  route
-}
-
-fn set_browser_url(h: &mut Harness, url: &str) {
-  h.update(|s| {
-    if let View::Workspace(r) = &mut s.view {
-      r.browser = Some(workspace_data::BrowserRoute { url: url.into() });
-    }
-  });
-}
-
-#[gpui::test]
-fn browser_reload_asks_react_to_reload(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("http://localhost:3000"));
-  h.click("browser-reload");
-  h.cx.run_until_parked();
-  assert_eq!(h.sent_for("browser."), vec![press("browser.reload")]);
-}
-
-#[gpui::test]
-fn browser_address_reports_a_url_it_would_not_open(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("https://example.com"));
-  assert!(h.drawn("browser-address-error"));
-  assert!(h.drawn("browser-address-invalid"));
-  set_browser_url(&mut h, "http://127.0.0.1:8080/x");
-  h.cx.run_until_parked();
-  assert!(!h.drawn("browser-address-error"));
-  assert!(!h.drawn("browser-address-invalid"));
-}
-
-#[gpui::test]
-fn browser_address_navigates_on_enter(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route(""));
-  h.click("browser-address");
-  h.cx.simulate_input(" http://localhost:5173 ");
-  h.cx.simulate_keystrokes("enter");
-  h.cx.run_until_parked();
-  assert_eq!(
-    h.sent_for("browser."),
-    vec![field("browser.navigate", "http://localhost:5173".into())]
-  );
-}
-
-#[gpui::test]
-fn browser_address_ignores_enter_for_a_refused_url(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route(""));
-  h.click("browser-address");
-  h.cx.simulate_input("https://example.com");
-  h.cx.simulate_keystrokes("enter");
-  h.cx.run_until_parked();
-  assert!(h.sent_for("browser.").is_empty());
-  assert!(h.drawn("browser-address-error"));
-}
-
-#[gpui::test]
-fn browser_switcher_names_the_view_that_shows(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host(), browser_route("http://localhost:3000"));
-  assert!(h.drawn("review-switcher"));
-  h.update(|s| {
-    if let View::Workspace(r) = &mut s.view {
-      r.browser = None;
-    }
-  });
-  assert!(!h.drawn("browser-address"));
-}
-
-#[gpui::test]
-fn workspace_frame_fills_the_space_below(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  h.cx.run_until_parked();
-  let header = h.cx.debug_bounds("workspace-header").expect("header");
-  let row = h.cx.debug_bounds("workspace-tab-row").expect("tab row");
-  let frame = h.cx.debug_bounds("workspace-frame").expect("frame");
-  assert_eq!(row.top(), header.bottom());
-  assert_eq!(frame.top(), row.bottom());
-  assert!(frame.size.height > gpui::px(100.));
 }
 
 #[gpui::test]
@@ -3325,7 +3215,6 @@ fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
     "code-readme",
     "commit-item-a",
     "commit-item-b",
-    "workspace-frame",
   ] {
     assert!(h.drawn(selector), "{selector}");
   }
@@ -3648,7 +3537,6 @@ fn commits_tab_lists_commits_and_opens_their_diffs(cx: &mut TestAppContext) {
     "commit-row-a",
     "commit-row-b",
     "shift-commits-to-now",
-    "workspace-frame",
   ] {
     assert!(h.drawn(selector), "{selector}");
   }
@@ -4064,22 +3952,6 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
     "{writes:?}"
   );
   assert!(!h.drawn("discard-all-dialog"));
-}
-
-#[gpui::test]
-fn changes_tab_offers_the_browser_view(cx: &mut TestAppContext) {
-  let mut route = changes_route();
-  if let View::Workspace(r) = &mut route.view {
-    r.review_switcher = true;
-  }
-  let (mut h, _) = workspace_harness(cx, changes_host(), route);
-  assert!(h.drawn("review-switcher"));
-  h.update(|s| {
-    if let View::Workspace(r) = &mut s.view {
-      r.review_switcher = false;
-    }
-  });
-  assert!(!h.drawn("review-switcher"));
 }
 
 #[gpui::test]
@@ -6013,18 +5885,12 @@ fn agent_prompt_closes_through_react(cx: &mut TestAppContext) {
 #[gpui::test]
 fn dialogs_cover_the_screen_until_closed(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), history_modal());
-  let open = |h: &mut Harness| {
-    h.cx
-      .update(|_, cx| cx.try_global::<modal::ModalOpen>().is_some_and(|m| m.0))
-  };
-  assert!(open(&mut h));
+  assert!(h.drawn("prompt-history-modal"));
   assert!(h.drawn("onboarding-open-repo"));
   h.set_modal(None);
-  assert!(!open(&mut h));
   assert!(!h.drawn("prompt-history-modal"));
   // Another kind replaces the first.
   h.set_modal(Some(stash_modal()));
-  assert!(open(&mut h));
   assert!(h.drawn("stash-modal"));
 }
 
@@ -6470,27 +6336,6 @@ fn dialogs_stack_in_react_order(cx: &mut TestAppContext) {
   // The later dialog is above the earlier: its buttons take the click.
   h.click("remote-ambiguous-dismiss");
   assert_eq!(h.sent(), vec![press("remote.ambiguous.dismiss")]);
-}
-
-#[gpui::test]
-fn workspace_stops_framing_the_webview_under_a_dialog(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, FakeHost::default(), workspace_route());
-  let covered = |h: &Harness| {
-    h.screen.read_with(&h.cx, |screen, cx| {
-      screen
-        .workspace
-        .as_ref()
-        .map(|workspace| workspace.read(cx).is_covered())
-    })
-  };
-  h.cx.run_until_parked();
-  assert_eq!(covered(&h), Some(false));
-  h.update(|s| s.remote.ambiguous = Some("Connection reset".into()));
-  h.cx.run_until_parked();
-  assert_eq!(covered(&h), Some(true));
-  h.update(|s| s.remote.ambiguous = None);
-  h.cx.run_until_parked();
-  assert_eq!(covered(&h), Some(false));
 }
 
 #[gpui::test]

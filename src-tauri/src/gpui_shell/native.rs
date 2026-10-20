@@ -1,10 +1,8 @@
-//! What GPUI screens call to read and change the app's state directly, in
-//! place of React's handlers.
+//! What GPUI screens call to read and change the app's state directly.
 //!
-//! React still draws the parts of the window GPUI does not yet, and caches
-//! what it read from the backend. So after a screen changes something, it
-//! tells React with a [`NativeEvent`], and React updates its own views (it
-//! never repeats the change).
+//! After a screen changes something, it tells its window's model with a
+//! [`NativeEvent`], so the model rereads what went stale (it never repeats
+//! the change).
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -22,10 +20,7 @@ use crate::{
   AppState,
 };
 
-/// Event React listens to on its own webview window.
-pub const EVENT: &str = "gpui-native-event";
-
-/// What a GPUI screen did, for React to show, tagged by `kind`.
+/// What a GPUI screen did, for the window model to follow, tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NativeEvent {
@@ -37,7 +32,7 @@ pub enum NativeEvent {
   #[serde(rename_all = "camelCase")]
   RepoSettingsChanged { repo_path: String },
   /// Something in the repository at `repo_path` changed (a push, sync or
-  /// rebase), so everything React read from it is stale.
+  /// rebase), so everything read from it is stale.
   #[serde(rename_all = "camelCase")]
   WorkspaceChanged { repo_path: String },
   Toast {
@@ -48,18 +43,19 @@ pub enum NativeEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     action: Option<ToastAction>,
   },
-  /// How a change GPUI sent to the remote repository ended, for React's
-  /// feedback (`useRemoteMutationFeedback().report`).
+  /// How a change GPUI sent to the remote repository ended, for the
+  /// window's feedback.
   RemoteMutation {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
   },
-  /// A remote command found the endpoint cut off (`noteCutoffFromError`).
+  /// A remote command found the endpoint cut off.
   #[serde(rename_all = "camelCase")]
   RemoteCutoff { endpoint_id: String, reason: String },
-  /// The backend started an agent session (`gpui_shell::launch`). React
-  /// makes it the active session, and with `select` shows its workspace.
+  /// The backend started an agent session (`gpui_shell::launch`). The
+  /// model makes it the active session, and with `select` shows its
+  /// workspace.
   #[serde(rename_all = "camelCase")]
   AgentSessionStarted {
     session: crate::core::agent_launch::SessionStart,
@@ -67,15 +63,16 @@ pub enum NativeEvent {
     select: bool,
   },
   /// GPUI removed (deleted or archived) these workspaces of the repository,
-  /// so React leaves them if they show (`leaveRemovedWorkspaces`).
+  /// so the window leaves them if they show.
   #[serde(rename_all = "camelCase")]
   WorkspacesRemoved { repo_path: String, ids: Vec<i64> },
-  /// A menu item picked in GPUI that opens something React still routes:
-  /// a dialog, a page or a flow.
+  /// A menu item picked in GPUI that opens something the window model
+  /// routes: a dialog, a page or a flow.
   Open { what: OpenRequest },
 }
 
-/// What a GPUI menu or button asks React to open, tagged by `kind`.
+/// What a GPUI menu or button asks the window model to open, tagged by
+/// `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum OpenRequest {
@@ -135,8 +132,8 @@ pub fn register_toast_action(action: impl FnOnce() + Send + 'static) -> u64 {
   id
 }
 
-/// Runs, once, the action of the toast button `id` (`gpui_toast_action`).
-/// Blocks for as long as the action does.
+/// Runs, once, the action of the toast button `id`. Blocks for as long as
+/// the action does.
 pub fn run_toast_action(id: u64) {
   let action = toast_actions().lock_or_recover().1.remove(&id);
   if let Some(action) = action {
@@ -215,10 +212,8 @@ impl Backend {
       .insert(self.label.clone(), path.to_string());
   }
 
-  /// Tells this window's React app what a screen did. Tauri calls must not
-  /// run inside a GPUI update, so it sends from a task.
+  /// Tells this window's model what a screen did, and shows its toasts.
   pub fn notify(&self, event: NativeEvent) {
-    // The app's own toasts show without React.
     if let NativeEvent::Toast {
       title,
       description,
@@ -233,18 +228,7 @@ impl Backend {
       super::toasts::push(&self.app, &self.label, tone, &title, &description, action);
       return;
     }
-    // The window model follows it; React too, but for the requests the
-    // model answers itself.
-    if super::window::native_event(&self.app, &self.label, &event) {
-      return;
-    }
-    let (app, label) = (self.app.clone(), self.label.clone());
-    tauri::async_runtime::spawn(async move {
-      let target = tauri::EventTarget::webview_window(&label);
-      if let Err(err) = tauri::Emitter::emit_to(&app, target, EVENT, event) {
-        log::warn!("failed to send a GPUI native event: {err}");
-      }
-    });
+    super::window::native_event(&self.app, &self.label, event);
   }
 
   pub fn toast(&self, tone: ToastTone, title: impl Into<String>, description: impl Into<String>) {
@@ -256,7 +240,7 @@ impl Backend {
     });
   }
 
-  /// Opens `url` in the default browser, from a task like `notify`.
+  /// Opens `url` in the default browser, from a task.
   pub fn open_url(&self, url: &str) {
     let (app, url) = (self.app.clone(), url.to_string());
     tauri::async_runtime::spawn(async move {

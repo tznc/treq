@@ -3,15 +3,14 @@
 //! In a GPUI shell window, Rust restores and refreshes the session, trades
 //! the sign-in deep link for one, reads the subscription, runs the cloud
 //! workspace flows and renews their certificates. GPUI draws from
-//! [`Cloud::snapshot`]; the webview mirrors it from [`ACCOUNT_EVENT`] (and
-//! [`cloud_account`] at startup) and asks for changes with these commands.
+//! [`Cloud::snapshot`].
 //!
 //! [`core::cloud`]: crate::core::cloud
 
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use super::remote_control::{self, RemoteExecState};
 use crate::{
@@ -28,11 +27,6 @@ use crate::{
   lock_ext::LockExt,
   AppState,
 };
-
-/// The webview's mirror of [`AccountSnapshot`].
-pub const ACCOUNT_EVENT: &str = "supabase-account";
-/// A managed endpoint to adopt ([`ManagedEndpointEvent`]).
-pub const MANAGED_ENDPOINT_EVENT: &str = "managed-endpoint";
 
 /// Managed while Rust owns the account (GPUI shell windows).
 pub struct CloudState {
@@ -77,7 +71,6 @@ struct AppEffects {
 #[async_trait]
 impl CloudEffects for AppEffects {
   fn changed(&self, snapshot: &AccountSnapshot) {
-    let _ = self.app.emit(ACCOUNT_EVENT, snapshot);
     #[cfg(feature = "gpui-shell")]
     #[cfg(desktop)]
     crate::gpui_shell::account_changed(&self.app, snapshot.clone());
@@ -94,25 +87,12 @@ impl CloudEffects for AppEffects {
   }
 
   fn managed_endpoint(&self, event: ManagedEndpointEvent) {
-    let window = self.window.lock_or_recover().clone();
-    // Shell windows adopt it in Rust; React still hears it for its own
-    // views.
+    // The window models adopt it.
     #[cfg(feature = "gpui-shell")]
     #[cfg(desktop)]
-    if crate::gpui_shell::is_enabled(&self.app) {
-      crate::gpui_shell::managed_endpoint(&self.app, window.as_deref(), event.clone());
-    }
-    let result = match (&event, window) {
-      (ManagedEndpointEvent::Connected { .. }, Some(label)) => self.app.emit_to(
-        tauri::EventTarget::webview_window(&label),
-        MANAGED_ENDPOINT_EVENT,
-        &event,
-      ),
-      _ => self.app.emit(MANAGED_ENDPOINT_EVENT, &event),
-    };
-    if let Err(error) = result {
-      log::warn!("failed to send a managed endpoint: {error}");
-    }
+    crate::gpui_shell::managed_endpoint(&self.app, self.window.lock_or_recover().as_deref(), event);
+    #[cfg(not(all(feature = "gpui-shell", desktop)))]
+    let _ = event;
   }
 
   async fn cut_off(&self, endpoint_id: &str, reason: CutoffReason) {
@@ -129,9 +109,7 @@ impl CloudEffects for AppEffects {
     }
     #[cfg(feature = "gpui-shell")]
     #[cfg(desktop)]
-    if crate::gpui_shell::is_enabled(&self.app) {
-      crate::gpui_shell::cutoff_cleared(&self.app, endpoint_id);
-    }
+    crate::gpui_shell::cutoff_cleared(&self.app, endpoint_id);
   }
 
   fn local_identities(&self) -> Result<Vec<LocalSshIdentity>, String> {
@@ -158,8 +136,8 @@ impl CloudEffects for AppEffects {
   }
 }
 
-/// Takes the account over from the webview: restores the session and keeps
-/// it fresh. Call once from setup, after the app and remote states.
+/// Restores the session and keeps it fresh. Call once from setup, after the
+/// app and remote states.
 #[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
 pub fn start(app: &AppHandle) {
   let effects = Arc::new(AppEffects {
@@ -186,11 +164,10 @@ pub fn owned_cloud(app: &AppHandle) -> Option<Arc<Cloud>> {
   app.try_state::<CloudState>().map(|s| s.cloud.clone())
 }
 
-/// Trades the one-time token of a `treq://auth/callback` link, when Rust
-/// owns the account. False leaves the link to the webview.
-pub fn handle_auth_callback(app: &AppHandle, url: &str) -> bool {
+/// Trades the one-time token of a `treq://auth/callback` link.
+pub fn handle_auth_callback(app: &AppHandle, url: &str) {
   let Some(cloud) = owned_cloud(app) else {
-    return false;
+    return;
   };
   if let Some(token) = crate::core::auth::callback_token(url) {
     tauri::async_runtime::spawn(async move {
@@ -199,7 +176,6 @@ pub fn handle_auth_callback(app: &AppHandle, url: &str) -> bool {
       }
     });
   }
-  true
 }
 
 /// A window came to the front: reread the plan, as a purchase on the

@@ -1757,11 +1757,6 @@ impl TerminalPane {
     self.maximized && !self.collapsed
   }
 
-  /// The lightbox covers the whole window, webview and all.
-  pub fn covers_window(&self) -> bool {
-    self.lightbox.is_some()
-  }
-
   pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
     if self.place == place {
       return;

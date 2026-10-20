@@ -30,9 +30,9 @@ pub(super) use controller::{Presentation, WindowController};
 pub(super) use host::WindowHost;
 pub(super) use keys::{from_app, window_shortcut};
 pub(super) use shell::{
-  cutoff_cleared, drives, follow_appearance, forget, instance_state, listen, managed_endpoint,
-  menu_event, native_event, overlay_action, react_overlay, routed, screen_action, shortcut,
-  sidebar_action, start, window_focused,
+  cutoff_cleared, follow_appearance, forget, instance_state, listen, managed_endpoint, menu_event,
+  native_event, overlay_action, routed, screen_action, shortcut, sidebar_action, start,
+  window_focused,
 };
 
 #[cfg(test)]

@@ -11,7 +11,6 @@ pub enum PreviewFeature {
   RemoteSsh,
   LinearIntegration,
   Logs,
-  Browser,
   Devcontainers,
 }
 
@@ -22,7 +21,6 @@ impl PreviewFeature {
       Self::RemoteSsh => "remoteSsh",
       Self::LinearIntegration => "linearIntegration",
       Self::Logs => "logs",
-      Self::Browser => "browser",
       Self::Devcontainers => "devcontainers",
     }
   }
@@ -119,7 +117,6 @@ mod tests {
     assert!(!package_json_default(PreviewFeature::SkillsInstallation));
     assert!(!package_json_default(PreviewFeature::RemoteSsh));
     assert!(!package_json_default(PreviewFeature::LinearIntegration));
-    assert!(!package_json_default(PreviewFeature::Browser));
   }
 
   #[test]

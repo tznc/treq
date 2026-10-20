@@ -1,9 +1,7 @@
 //! A window's toasts, as `toastStore` keeps them: in the order they came,
 //! each expiring after a while, sooner without an action button.
 //!
-//! Toasts come from two places while React still runs: the app's own
-//! (pushed here) and React's store (replaced wholesale on each change).
-//! Both show in one list, in arrival order.
+//! They show in one list, in arrival order.
 
 use std::time::Duration;
 
@@ -12,7 +10,7 @@ pub const PLAIN_DURATION: Duration = Duration::from_millis(5000);
 /// How long a toast with an action button shows.
 pub const ACTION_DURATION: Duration = Duration::from_millis(12000);
 
-/// The prefix of the ids the app's own toasts get; React's never have it.
+/// The prefix of toast ids.
 pub const OWN_PREFIX: &str = "treq-";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +52,7 @@ pub struct ToastQueue {
 }
 
 impl ToastQueue {
-  /// Adds one of the app's own toasts; returns it with its new id.
+  /// Adds a toast; returns it with its new id.
   pub fn push(
     &mut self,
     title: &str,
@@ -75,23 +73,6 @@ impl ToastQueue {
     toast
   }
 
-  /// Takes React's whole list: React's toasts not in it go, new ones join
-  /// at the end, and the app's own stay where they are.
-  pub fn set_react(&mut self, react: Vec<QueuedToast>) {
-    self
-      .toasts
-      .retain(|(_, t)| is_own(&t.id) || react.iter().any(|r| r.id == t.id));
-    for toast in react {
-      match self.toasts.iter_mut().find(|(_, t)| t.id == toast.id) {
-        Some((_, existing)) => *existing = toast,
-        None => {
-          self.seq += 1;
-          self.toasts.push((self.seq, toast));
-        }
-      }
-    }
-  }
-
   /// Drops toast `id` (expired or closed); false when it was gone.
   pub fn remove(&mut self, id: &str) -> bool {
     let before = self.toasts.len();
@@ -105,24 +86,9 @@ impl ToastQueue {
   }
 }
 
-/// Whether toast `id` is the app's own, rather than React's.
-pub fn is_own(id: &str) -> bool {
-  id.starts_with(OWN_PREFIX)
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  fn react(id: &str) -> QueuedToast {
-    QueuedToast {
-      id: id.into(),
-      title: id.into(),
-      description: None,
-      kind: ToastKind::Info,
-      action: None,
-    }
-  }
 
   fn ids(queue: &ToastQueue) -> Vec<String> {
     queue.list().into_iter().map(|t| t.id).collect()
@@ -144,31 +110,14 @@ mod tests {
   }
 
   #[test]
-  fn keeps_own_and_react_toasts_in_arrival_order() {
+  fn keeps_toasts_in_arrival_order() {
     let mut queue = ToastQueue::default();
-    let own = queue.push("Pushed", Some(""), ToastKind::Success, None);
-    assert_eq!(own.description, None, "an empty description shows none");
-    queue.set_react(vec![react("a")]);
+    let first = queue.push("Pushed", Some(""), ToastKind::Success, None);
+    assert_eq!(first.description, None, "an empty description shows none");
     let second = queue.push("Synced", None, ToastKind::Success, None);
-    queue.set_react(vec![react("a"), react("b")]);
-    assert_eq!(
-      ids(&queue),
-      [own.id.clone(), "a".into(), second.id.clone(), "b".into()]
-    );
-
-    // React dropped "a": only it goes.
-    queue.set_react(vec![react("b")]);
-    assert_eq!(ids(&queue), [own.id.clone(), second.id.clone(), "b".into()]);
-    assert!(queue.remove(&own.id));
-    assert!(!queue.remove(&own.id));
-    assert_eq!(ids(&queue), [second.id, "b".to_string()]);
-  }
-
-  #[test]
-  fn tells_own_toasts_from_reacts() {
-    let mut queue = ToastQueue::default();
-    let own = queue.push("x", None, ToastKind::Error, None);
-    assert!(is_own(&own.id));
-    assert!(!is_own("k3j9x"));
+    assert_eq!(ids(&queue), [first.id.clone(), second.id.clone()]);
+    assert!(queue.remove(&first.id));
+    assert!(!queue.remove(&first.id));
+    assert_eq!(ids(&queue), [second.id]);
   }
 }

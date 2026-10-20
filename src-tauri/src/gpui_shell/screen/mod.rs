@@ -1,27 +1,19 @@
-//! Full-window screens drawn by GPUI in place of the webview.
+//! Full-window screens drawn by GPUI.
 //!
 //! Each screen reads and changes the app's state through the backend itself
-//! (a [`Host`], faked in tests). React only routes: it pushes a
-//! [`ScreenSnapshot`] with the `gpui_screen_update` command saying which
-//! screen shows and for what (a tab, a repository, a workspace), and GPUI
-//! draws it where the webview would be, leaving the webview out of the frame
-//! (hidden, with React still running in it). What a screen leaves to React
-//! (closing it, flows not ported yet) goes back to the window's webview as
-//! `gpui-screen-action` events; what it changed itself goes as native events
-//! (`native::NativeEvent`), so React's caches follow.
-//!
-//! React keeps drawing its UI too, so pushing `null` (for a screen or dialog
-//! GPUI does not draw yet) brings the webview back with React's version.
+//! (a [`Host`], faked in tests). The window model routes: it presents a
+//! [`ScreenSnapshot`] saying which screen shows and for what (a tab, a
+//! repository, a workspace). What a screen leaves to the model (closing it,
+//! navigating) goes back as [`ScreenAction`]s; what it changed itself goes
+//! as native events (`native::NativeEvent`), so the model's data follows.
 
 use std::{rc::Rc, sync::Arc};
 
 use serde::{Deserialize, Serialize};
-use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
 
 pub(super) use changes_data::ChangesHost;
 pub use modal::Modal;
-pub(super) use modal::ModalOpen;
 pub use terminal::TERMINAL_CONTEXT;
 pub(super) use workspace_data::WorkspaceHost;
 
@@ -84,24 +76,18 @@ pub(super) mod workspace_ops;
 #[cfg(test)]
 mod tests;
 
-/// Event React listens to on its own webview window.
-pub const ACTION_EVENT: &str = "gpui-screen-action";
-
-/// Set to show React's screens instead of GPUI's, to compare the two.
-pub const WEB_UI_ENV: &str = "TREQ_WEB_UI";
-
 /// What the screen shows, and the theme to draw it in.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenSnapshot {
-  /// React's resolved theme, which can differ from the OS appearance.
+  /// The resolved theme, which can differ from the OS appearance.
   pub dark: bool,
   /// The remote dialogs open over the screen.
   #[serde(default)]
   pub remote: remote::Route,
   #[serde(flatten)]
   pub view: View,
-  /// The Dashboard dialog open over the screen.
+  /// The workspace dialog open over the screen.
   #[serde(default)]
   pub modal: Option<workspace_modal::ModalRoute>,
   /// The remote repository the window shows; absent for a local one. The
@@ -117,7 +103,7 @@ pub enum View {
   /// No repository open: open one, or check the required tools.
   Onboarding(onboarding::Route),
   Settings(settings::Route),
-  /// The workspace view's header and tab row, with the webview below.
+  /// The workspace view: its header, tabs and terminal pane.
   Workspace(Box<workspace_data::Route>),
   /// The commits and files a workspace merges, and the merge.
   MergePreview(merge::Route),
@@ -131,7 +117,7 @@ pub enum View {
   MergeQueue(merge_queue::Route),
 }
 
-/// What a click on a screen asks React to do, tagged by `kind`.
+/// What a click on a screen asks the window model to do, tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScreenAction {
@@ -191,18 +177,16 @@ impl<T> Host for T where
 {
 }
 
-/// The GPUI view for whichever screen React pushed last.
+/// The GPUI view for whichever screen the model presented last.
 pub struct Screen {
   snapshot: ScreenSnapshot,
   sink: ActionSink,
-  /// React, for what the screen does not run itself.
+  /// The window model, for what the screen does not run itself.
   react: ActionSink,
   popups: PopupSink,
-  /// The window's webview, which a screen may frame part of itself around.
-  webview: Option<Webview<Wry>>,
   host: Arc<dyn Host>,
   /// Screens with state of their own (text being edited, open dropdowns),
-  /// kept while React keeps sending them.
+  /// kept while the model keeps presenting them.
   onboarding: Option<Entity<onboarding::OnboardingView>>,
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
@@ -218,7 +202,7 @@ pub struct Screen {
   stash: Option<Entity<modal::stash::StashView>>,
   /// The remote dialogs, while one is open.
   remote: Option<Entity<remote::RemoteView>>,
-  /// The dialog drawn over the screen, while React keeps it open.
+  /// The dialog drawn over the screen, while the model keeps it open.
   workspace_modal: Option<workspace_modal::OpenModal>,
   /// Cmd+P's "Jump to File", while the window model keeps it open.
   file_picker: Option<(file_picker::Scope, Entity<file_picker::FilePicker>)>,
@@ -230,11 +214,10 @@ impl Screen {
     snapshot: ScreenSnapshot,
     react: ActionSink,
     popups: PopupSink,
-    webview: Option<Webview<Wry>>,
     host: Arc<dyn Host>,
     cx: &mut Context<Self>,
   ) -> Self {
-    // What the screen runs itself, the rest going on to React.
+    // What the screen runs itself, the rest going on to the model.
     let react_for_self = react.clone();
     let screen = cx.weak_entity();
     let sink: ActionSink = Rc::new(move |action, cx| {
@@ -256,7 +239,6 @@ impl Screen {
       sink,
       react: react_for_self,
       popups,
-      webview,
       host,
       onboarding: None,
       settings: None,
@@ -311,13 +293,12 @@ impl Screen {
   }
 
   /// Draws `modal` over the screen, or closes the open one for `None`. The
-  /// dialog's own state (typed text, the selection) lasts while React keeps
-  /// sending the same kind of dialog.
+  /// dialog's own state (typed text, the selection) lasts while the model
+  /// keeps presenting the same kind of dialog.
   pub fn set_modal(&mut self, modal: Option<Modal>, cx: &mut Context<Self>) {
     if self.modal == modal {
       return;
     }
-    cx.set_global(ModalOpen(modal.is_some()));
     self.modal = modal;
     cx.notify();
   }
@@ -478,8 +459,6 @@ impl Render for Screen {
       },
     }
     let workspace_modal = self.workspace_modal.as_ref().filter(|open| open.shown(cx));
-    // The webview is a window of its own; a dialog over it must hide it.
-    let covered = workspace_modal.is_some() || self.file_picker.is_some();
     let workspace_modal = workspace_modal.map(workspace_modal::OpenModal::element);
     let modal = self.modal_view(dark, cx);
     let ctx = Ctx {
@@ -529,19 +508,13 @@ impl Render for Screen {
         let route = (**route).clone();
         match &self.workspace {
           Some(view) => {
-            view.update(cx, |view, cx| {
-              view.set_covered(covered, cx);
-              view.set_route(route, dark, cx)
-            });
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
             view.clone().into_any_element()
           }
           None => {
             let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
-            let webview = self.webview.clone();
-            let view = cx.new(|cx| {
-              workspace::WorkspaceView::new(route, host, sink, dark, popups, webview, cx)
-            });
-            view.update(cx, |view, cx| view.set_covered(covered, cx));
+            let view =
+              cx.new(|cx| workspace::WorkspaceView::new(route, host, sink, dark, popups, cx));
             self.workspace = Some(view.clone());
             view.into_any_element()
           }
@@ -626,14 +599,7 @@ impl Render for Screen {
         }
       }
     };
-    // A dialog over the whole window would leave the webview on top, so the
-    // workspace stops framing it.
     let remote_open = self.snapshot.remote.is_open();
-    if let Some(workspace) = &self.workspace {
-      workspace.update(cx, |workspace, cx| {
-        workspace.set_covered(remote_open || covered, cx)
-      });
-    }
     let remote = if remote_open {
       let route = self.snapshot.remote.clone();
       Some(match &self.remote {

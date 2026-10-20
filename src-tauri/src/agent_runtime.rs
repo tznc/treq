@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-use tauri::{AppHandle, Emitter, EventTarget, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::agent_dispatch;
 use crate::local_db;
@@ -27,7 +27,7 @@ pub(crate) fn extract_repo_from_agent_deep_link(url: &str) -> Option<String> {
 fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> Option<String> {
   let state = app.state::<AppState>();
   let normalized_target = agent_dispatch::normalize_repo_path(repo);
-  let windows = app.webview_windows();
+  let windows = app.windows();
 
   let pick = |labels: Vec<String>| -> Option<String> {
     let mut fallback: Option<String> = None;
@@ -74,29 +74,20 @@ fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> Option<Stri
   pick(supporting_labels)
 }
 
-/// Whether GPUI shell windows start agents themselves
-/// (`gpui_shell::launch`) instead of their React apps.
-fn shell_launches(app: &AppHandle) -> bool {
-  #[cfg(feature = "gpui-shell")]
-  #[cfg(desktop)]
-  if crate::gpui_shell::is_enabled(app) {
-    return true;
-  }
-  let _ = app;
-  false
-}
-
-/// Starts the agent link `url` for window `label` from Rust, when the
-/// shell does. Returns false to leave it to the window's React app.
+/// Starts the agent link `url` in window `label` (`gpui_shell::launch`).
+/// False without the GPUI shell, which has no windows to start it in.
 fn shell_deep_link(app: &AppHandle, label: Option<&str>, url: &str) -> bool {
-  if !shell_launches(app) {
-    return false;
-  }
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
-  crate::gpui_shell::launch::agent_deep_link(app, label.map(str::to_string), url);
-  let _ = (label, url);
-  true
+  {
+    crate::gpui_shell::launch::agent_deep_link(app, label.map(str::to_string), url);
+    true
+  }
+  #[cfg(not(all(feature = "gpui-shell", desktop)))]
+  {
+    let _ = (app, label, url);
+    false
+  }
 }
 
 /// An agent link no window can take: the shell opens a window for its
@@ -108,15 +99,7 @@ pub(crate) fn open_window_for_agent_link(app: &AppHandle, url: &str) -> bool {
 pub(crate) fn route_agent_deep_link(app: &AppHandle, url: String) -> bool {
   if let Some(repo) = extract_repo_from_agent_deep_link(&url) {
     if let Some(label) = find_target_window_label_for_repo(app, &repo) {
-      if shell_deep_link(app, Some(&label), &url) {
-        return true;
-      }
-      let _ = app.emit_to(
-        EventTarget::webview_window(&label),
-        "deep-link-received",
-        vec![url],
-      );
-      return true;
+      return shell_deep_link(app, Some(&label), &url);
     }
   }
   false
@@ -166,12 +149,6 @@ pub(crate) fn route_agent_dispatch_request(
     if shell_deep_link(app, Some(&label), &url) {
       return agent_dispatch::AgentDispatchResponse::handled();
     }
-    let _ = app.emit_to(
-      EventTarget::webview_window(&label),
-      "deep-link-received",
-      vec![url],
-    );
-    return agent_dispatch::AgentDispatchResponse::handled();
   }
   agent_dispatch::AgentDispatchResponse::not_handled(format!(
     "no matching window for repo '{}' request_id '{}'",
@@ -183,19 +160,11 @@ pub(crate) fn route_send_dispatch_request(
   app: &AppHandle,
   request: &crate::send_dispatch::SendDispatchRequest,
 ) -> agent_dispatch::AgentDispatchResponse {
-  if let Some(label) = find_target_window_label_for_repo(app, &request.repo) {
-    // GPUI's terminal panes read the attachment from Rust; React keeps its
-    // own copy for the views it still draws.
+  if find_target_window_label_for_repo(app, &request.repo).is_some() {
+    // The window's terminal panes read the attachment from Rust.
     #[cfg(feature = "gpui-shell")]
     #[cfg(desktop)]
-    if shell_launches(app) {
-      crate::gpui_shell::launch::treq_send(app, request);
-    }
-    let _ = app.emit_to(
-      EventTarget::webview_window(&label),
-      "treq-send-received",
-      request.clone(),
-    );
+    crate::gpui_shell::launch::treq_send(app, request);
     return agent_dispatch::AgentDispatchResponse::handled();
   }
   agent_dispatch::AgentDispatchResponse::not_handled(format!(
@@ -215,7 +184,7 @@ pub(crate) fn route_notify_dispatch_request(
   use tauri_plugin_notification::{NotificationExt, PermissionState};
 
   let any_window_focused = app
-    .webview_windows()
+    .windows()
     .values()
     .any(|window| window.is_focused().unwrap_or(false));
   let setting = app
@@ -310,7 +279,7 @@ pub(crate) fn start_instance_registry_heartbeat(app: AppHandle) {
         continue;
       }
     };
-    let windows = app.webview_windows();
+    let windows = app.windows();
     let mut snapshots = Vec::new();
     if let Some(repo_map) = repo_map {
       for (label, repo_path) in repo_map {

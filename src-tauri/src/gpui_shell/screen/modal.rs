@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Div, FontWeight, Global, SharedString,
+  self, anchored, deferred, div, point, prelude::*, px, App, Div, FontWeight, SharedString,
   Stateful,
 };
 
@@ -43,12 +43,6 @@ pub enum Modal {
   PromptHistory(prompt_history::Route),
   Stash(stash::Route),
 }
-
-/// Whether a dialog is open, for screens that frame the webview.
-#[derive(Default)]
-pub struct ModalOpen(pub bool);
-
-impl Global for ModalOpen {}
 
 /// What the dialogs read from and change in the backend; faked in tests.
 /// Everything but `notify` blocks, so it is called off the main thread.

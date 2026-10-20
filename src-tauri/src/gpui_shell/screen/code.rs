@@ -428,11 +428,6 @@ impl CodeView {
     task
   }
 
-  /// A dialog (the file picker) covers the whole window.
-  pub(super) fn covers_window(&self) -> bool {
-    self.picker.is_some()
-  }
-
   /// `handleTextChange`: follows an `@` being typed.
   pub(super) fn text_changed(&mut self, text: String, cursor: usize, cx: &mut Context<Self>) {
     self.task_text = text;

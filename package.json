@@ -13,8 +13,7 @@
     "remoteSsh": false,
     "devcontainers": false,
     "linearIntegration": false,
-    "logs": true,
-    "browser": false
+    "logs": true
   },
   "env": {
     "dev": {
