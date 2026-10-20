@@ -104,16 +104,7 @@ impl SettingsHost for Backend {
         "Changing repository settings",
       ));
     }
-    for (key, value) in values {
-      self.with_db(|db| {
-        db.set_repo_setting(repo_path, key, value)
-          .map_err(|e| e.to_string())
-      })?;
-      if key == "ignore_generated_treq_paths" && value == "true" {
-        crate::jj::ensure_optional_gitignore_entries(repo_path).map_err(|e| e.to_string())?;
-      }
-    }
-    Ok(())
+    self.with_db(|db| save_repo_settings(db, repo_path, values))
   }
 
   fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String> {
@@ -501,4 +492,81 @@ pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
     "Last run {ran_at} · {}",
     status.last_status.as_deref().unwrap_or("unknown")
   )
+}
+
+/// `set_repo_setting` for each value. Opting in to
+/// `ignore_generated_treq_paths` also adds the optional `.gitignore`
+/// entries, as the command does.
+pub fn save_repo_settings(
+  db: &crate::db::Database,
+  repo_path: &str,
+  values: &[(String, String)],
+) -> Result<(), String> {
+  for (key, value) in values {
+    db.set_repo_setting(repo_path, key, value)
+      .map_err(|e| e.to_string())?;
+    if key == "ignore_generated_treq_paths" && value == "true" {
+      crate::jj::ensure_optional_gitignore_entries(repo_path).map_err(|e| e.to_string())?;
+    }
+  }
+  Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use tempfile::TempDir;
+
+  use super::save_repo_settings;
+
+  fn setup() -> (TempDir, crate::db::Database) {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".gitignore"), ".treq/\n").unwrap();
+    let db = crate::db::Database::new(dir.path().join("test.db")).unwrap();
+    db.init().unwrap();
+    (dir, db)
+  }
+
+  fn set(key: &str, value: &str) -> Vec<(String, String)> {
+    vec![(key.into(), value.into())]
+  }
+
+  #[test]
+  fn saves_repo_settings_without_touching_the_gitignore() {
+    let (dir, db) = setup();
+    let repo = dir.path().to_str().unwrap();
+
+    save_repo_settings(&db, repo, &set("default_agent", "codex")).unwrap();
+    save_repo_settings(&db, repo, &set("ignore_generated_treq_paths", "false")).unwrap();
+
+    assert_eq!(
+      db.get_repo_setting(repo, "default_agent")
+        .unwrap()
+        .as_deref(),
+      Some("codex")
+    );
+    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    assert_eq!(gitignore, ".treq/\n");
+  }
+
+  #[test]
+  fn opting_in_adds_the_optional_gitignore_entries() {
+    let (dir, db) = setup();
+    let repo = dir.path().to_str().unwrap();
+
+    save_repo_settings(&db, repo, &set("ignore_generated_treq_paths", "true")).unwrap();
+
+    assert_eq!(
+      db.get_repo_setting(repo, "ignore_generated_treq_paths")
+        .unwrap()
+        .as_deref(),
+      Some("true")
+    );
+    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    for entry in [".jj*/", ".agents/skills/treq*/", ".claude/skills/treq*/"] {
+      assert!(
+        gitignore.lines().any(|l| l == entry),
+        "{entry} in {gitignore}"
+      );
+    }
+  }
 }

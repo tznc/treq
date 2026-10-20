@@ -1763,6 +1763,7 @@ impl LogsView {
           list = list.child(
             div()
               .id(("sql-template", i))
+              .debug_selector(move || format!("sql-template-{label}"))
               .flex()
               .flex_col()
               .gap(px(2.))

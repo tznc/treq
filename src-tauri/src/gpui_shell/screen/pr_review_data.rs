@@ -125,18 +125,17 @@ impl PrReviewHost for Backend {
   }
 
   fn create_draft(&self, repo_path: &str, number: u64, draft: &NewDraft) -> Result<(), String> {
-    crate::commands::agent_review::create_review_draft(
-      repo_path.into(),
-      TARGET.into(),
-      number.to_string(),
-      draft.file_path.clone(),
-      draft.start_line,
-      draft.end_line,
-      Some(side_name(draft.side).into()),
-      draft.text.clone(),
-      draft.line_hash.clone(),
-    )
-    .map(|_| ())
+    let draft = crate::core::review_drafts::NewReviewDraft {
+      target_type: TARGET.into(),
+      target_id: number.to_string(),
+      file_path: draft.file_path.clone(),
+      start_line: draft.start_line,
+      end_line: draft.end_line,
+      side: Some(side_name(draft.side).into()),
+      comment_text: draft.text.clone(),
+      line_hash: draft.line_hash.clone(),
+    };
+    crate::core::review_drafts::create_review_draft(repo_path, &draft).map(|_| ())
   }
 
   fn update_draft(

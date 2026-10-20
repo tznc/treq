@@ -1574,6 +1574,10 @@ impl ChangesView {
         rows = rows.child(
           div()
             .id(SharedString::from(format!("conflict-row-{path}")))
+            .debug_selector({
+              let id = format!("conflict-row-{path}");
+              move || id
+            })
             .py_1()
             .flex()
             .items_center()
@@ -2453,6 +2457,7 @@ impl ChangesView {
       ),
       Body::Empty => card.child(
         div()
+          .debug_selector(|| "empty-diff-placeholder".into())
           .px_3()
           .py_6()
           .flex()
@@ -2989,6 +2994,7 @@ impl ChangesView {
           ),
         };
         ui::text(div(), TextSize::Xs)
+          .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
           .px(px(6.))
           .py(px(2.))
@@ -2999,8 +3005,10 @@ impl ChangesView {
           .text_color(fg)
           .child(label)
       });
+      let line_id = format!("conflict-line-{}-{i}-{side:?}", conflict.id);
       pre = pre.child(
         div()
+          .debug_selector(move || line_id)
           .flex()
           .when_some(bg, |this, bg| this.bg(bg))
           .when(kind == ConflictLineKind::Marker, |this| {

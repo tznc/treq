@@ -46,6 +46,8 @@ struct FakeHost {
   files: Vec<String>,
   /// What the Commits tab reads.
   diff: Option<crate::jj::JjRevisionDiff>,
+  /// Deferred file diffs `commit_file_diff` loads.
+  file_diffs: Vec<crate::jj::JjFileDiff>,
   description: String,
   /// What the Changes tab reads.
   working: Option<crate::jj::JjRevisionDiff>,
@@ -61,6 +63,8 @@ struct FakeHost {
   pr_viewer: Option<String>,
   /// What the Logs tab reads.
   logs: Vec<crate::core::checks_logs::LogRecordView>,
+  /// What the Logs tab's chart reads.
+  buckets: Vec<crate::core::checks_logs::LogBucket>,
   workflows: Vec<crate::core::checks::WorkflowInfo>,
   chats: Vec<crate::core::agent_chat::AgentChat>,
   sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
@@ -1008,7 +1012,7 @@ impl logs_data::LogsHost for FakeHost {
     _: &str,
     _: &crate::core::checks_logs::LogQuery,
   ) -> Result<Vec<crate::core::checks_logs::LogBucket>, String> {
-    Ok(Vec::new())
+    Ok(self.buckets.clone())
   }
 
   fn app_setup_logs(
@@ -1118,6 +1122,13 @@ impl commits_data::CommitsHost for FakeHost {
       .as_ref()
       .and_then(|d| {
         d.hunks_by_file
+          .iter()
+          .find(|f| f.path == file_path)
+          .cloned()
+      })
+      .or_else(|| {
+        self
+          .file_diffs
           .iter()
           .find(|f| f.path == file_path)
           .cloned()
@@ -6642,10 +6653,53 @@ impl workspace_ops::WorkspaceActionsHost for FakeHost {
   }
 }
 
+/// `open-non-git-folder.test.tsx`: `openRepositoryAtPath` on a folder
+/// without `.git` toasts, creates no `.treq` and remembers nothing.
+#[test]
+fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
+  let dir = tempfile::TempDir::new().unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost::default();
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(host.calls(), ["notify toast Failed to open repository"]);
+  assert!(shown.is_empty(), "not the window's repository");
+  assert!(!dir.path().join(".treq").exists());
+}
+
+#[test]
+fn opening_a_repository_remembers_it_and_reports_it_open() {
+  let dir = tempfile::TempDir::new().unwrap();
+  std::fs::create_dir(dir.path().join(".git")).unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost::default();
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(
+    host.calls(),
+    [
+      format!("set last_opened_repo_path={path}"),
+      "notify repoOpened".into(),
+      "notify toast Repository Opened".into(),
+    ]
+  );
+  assert_eq!(shown, [path]);
+}
+
+mod commit_diffs;
+mod conflicts;
 mod file_browser;
 mod github;
 mod linear_view;
+mod logs_explorer;
 mod merge_queue;
 mod pr_review;
+mod review_comments;
+mod stack_panel;
+mod tab_badges;
 mod workspace_actions;
 mod workspace_dialogs;
