@@ -6,7 +6,7 @@
 //! draws what the route says and sends what is typed and pressed
 //! (`remoteRepo.*`).
 
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, App, ClickEvent, Context, Div, Entity, FontWeight, SharedString,
@@ -194,7 +194,7 @@ fn input(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl Into
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
-    .child(Input::new(state).appearance(false).bordered(false).flex_1())
+    .child(ui::input(state).appearance(false).bordered(false).flex_1())
 }
 
 fn caption(text: &'static str) -> impl IntoElement {

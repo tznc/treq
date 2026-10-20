@@ -506,7 +506,10 @@ impl ChangesView {
           if k.key == "escape" {
             cx.stop_propagation();
             view.open_reply(&close, false, cx);
-          } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+          } else if k.key == "enter"
+            && (crate::gpui_shell::keys::held(k.modifiers).platform
+              || crate::gpui_shell::keys::held(k.modifiers).control)
+          {
             cx.stop_propagation();
             view.send_reply(&send, cx);
           }

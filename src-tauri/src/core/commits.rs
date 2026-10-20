@@ -259,10 +259,10 @@ fn workspace_target(
 /// The operation id of the abandon, for toast undo.
 pub fn abandon_commit(
   repo_path: &str,
-  workspace_id: Option<i64>,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
 ) -> Result<String, String> {
-  let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id)?;
+  let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
   if let Some(workspace) = &workspace {
@@ -386,10 +386,10 @@ pub fn undo_commit(
 /// `Ok(())` on success, or an error string.
 pub fn revert_commit(
   repo_path: &str,
-  workspace_id: Option<i64>,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
 ) -> Result<(), String> {
-  let (workspace_dir, _) = workspace_target(repo_path, workspace_id)?;
+  let (workspace_dir, _) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
   jj::jj_revert_commit(workspace_dir_str, commit_change_id)
@@ -412,10 +412,10 @@ pub fn revert_commit(
 /// The commit's full description on success, or an error string.
 pub fn get_commit_description(
   repo_path: &str,
-  workspace_id: Option<i64>,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
 ) -> Result<String, String> {
-  let (workspace_dir, _) = workspace_target(repo_path, workspace_id)?;
+  let (workspace_dir, _) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
   jj::jj_get_commit_description(workspace_dir_str, commit_change_id)
@@ -434,11 +434,11 @@ pub fn get_commit_description(
 /// `Ok(())` on success, or an error string.
 pub fn describe_commit(
   repo_path: &str,
-  workspace_id: Option<i64>,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
   description: &str,
 ) -> Result<(), String> {
-  let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id)?;
+  let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
   if let Some(workspace) = &workspace {

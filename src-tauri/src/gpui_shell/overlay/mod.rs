@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use gpui_kit::component::input::{
-  Input, InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
+  InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -506,7 +506,7 @@ impl Overlay {
   /// cmdk's root `onKeyDown`, and Escape closing the dialog.
   fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
     let key = event.keystroke.key.as_str();
-    let m = event.keystroke.modifiers;
+    let m = crate::gpui_shell::keys::held(event.keystroke.modifiers);
     if key == "escape" {
       self.close(cx);
       cx.stop_propagation();
@@ -875,7 +875,7 @@ impl Render for Overlay {
                 })
                 .child(
                   // `[cmdk-input]` has no padding of its own: the row's.
-                  Input::new(&input)
+                  ui::input(&input)
                     .appearance(false)
                     .bordered(false)
                     .px_0()

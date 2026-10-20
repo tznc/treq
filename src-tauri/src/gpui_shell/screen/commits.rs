@@ -16,7 +16,7 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, Context, Div, Entity,
@@ -2445,7 +2445,10 @@ impl CommitsView {
         if k.key == "escape" {
           cx.stop_propagation();
           view.cancel_comment(cx);
-        } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+        } else if k.key == "enter"
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+        {
           cx.stop_propagation();
           view.send_comment(false, cx);
         }
@@ -2502,7 +2505,10 @@ impl CommitsView {
       if k.key == "escape" {
         cx.stop_propagation();
         view.close_dialog(cx);
-      } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+      } else if k.key == "enter"
+        && (crate::gpui_shell::keys::held(k.modifiers).platform
+          || crate::gpui_shell::keys::held(k.modifiers).control)
+      {
         cx.stop_propagation();
         match view.dialog {
           Some(Dialog::Describe { .. }) => view.save_description(cx),
@@ -2614,7 +2620,7 @@ impl CommitsView {
                 .font_weight(FontWeight::MEDIUM)
                 .child(label),
             )
-            .children(input.map(|i| Styled::h(Input::new(i), px(40.))))
+            .children(input.map(|i| Styled::h(ui::input(i), px(40.))))
         };
         let inputs = inputs.as_ref();
         let fields = if form.to_day {

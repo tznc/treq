@@ -204,3 +204,19 @@ fn test_describe_commit_invalid_change_id() {
   let result = treq_lib::core::get_commit_description(&repo.repo_path, workspace.id, "");
   assert!(result.is_err(), "Should reject empty change_id");
 }
+
+#[test]
+fn test_describe_and_revert_commit_in_the_home_repo() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  TestRepo::write_workspace_file(&repo.repo_path, "home.txt", "content").expect("write file");
+  treq_lib::jj::jj_commit(&repo.repo_path, "Home message").expect("commit in home");
+
+  // No workspace id: jj runs in the repository itself.
+  treq_lib::core::describe_commit(&repo.repo_path, None, "@-", "Home renamed")
+    .expect("describe in home");
+  assert_eq!(
+    treq_lib::core::get_commit_description(&repo.repo_path, None, "@-").expect("read"),
+    "Home renamed"
+  );
+  treq_lib::core::revert_commit(&repo.repo_path, None, "@-").expect("revert in home");
+}

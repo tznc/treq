@@ -1299,8 +1299,9 @@ impl Render for ChangesView {
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
         if k.key == "a"
-          && (k.modifiers.platform || k.modifiers.control)
-          && !k.modifiers.shift
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+          && !crate::gpui_shell::keys::held(k.modifiers).shift
           && !view.read_only()
         {
           let files = view.files().to_vec();
@@ -1481,7 +1482,9 @@ impl ChangesView {
       .gap_2()
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, window, cx| {
         let k = &e.keystroke;
-        if k.modifiers.platform || k.modifiers.control {
+        if crate::gpui_shell::keys::held(k.modifiers).platform
+          || crate::gpui_shell::keys::held(k.modifiers).control
+        {
           if k.key == "enter" {
             cx.stop_propagation();
             view.run_commit(CommitAction::Commit, window, cx);

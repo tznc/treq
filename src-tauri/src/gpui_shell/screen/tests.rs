@@ -3313,7 +3313,7 @@ fn code_tab_hands_navigation_to_react(cx: &mut TestAppContext) {
 #[gpui::test]
 fn code_tab_starts_a_task_in_the_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("fix the login button");
   h.click("task-submit");
   h.cx.run_until_parked();
@@ -3342,7 +3342,7 @@ fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
   let route = serde_json::from_value(route).expect("home route");
   let (mut h, host) = workspace_harness(cx, host, route);
   assert!(h.drawn("task-new-workspace"));
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("fix login");
   h.click("task-submit");
   h.cx.run_until_parked();
@@ -3364,9 +3364,30 @@ fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn clicking_empty_space_blurs_the_focused_input(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  let focused = |h: &mut Harness| {
+    h.cx.run_until_parked();
+    h.cx.update(|window, cx| window.focused(cx).is_some())
+  };
+  // The task input starts focused.
+  assert!(focused(&mut h));
+  // A mouse-down on a spot nothing focuses takes the focus off it, as in a
+  // browser, so a key such as "?" then reaches the app's shortcuts.
+  h.cx.simulate_click(
+    gpui::point(gpui::px(1395.), gpui::px(895.)),
+    Modifiers::none(),
+  );
+  assert!(!focused(&mut h));
+  // Clicking an input focuses it again.
+  h.click("task-input");
+  assert!(focused(&mut h));
+}
+
+#[gpui::test]
 fn code_tab_suggests_files_for_mentions(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("look at @log");
   h.cx
     .executor()

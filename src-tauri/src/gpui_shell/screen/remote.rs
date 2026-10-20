@@ -15,7 +15,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::component::{
-  input::{Input, InputEvent, InputState},
+  input::{InputEvent, InputState},
   select::{Select, SelectEvent, SelectState},
 };
 use serde::Deserialize;
@@ -209,7 +209,7 @@ fn text_field(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
-    .child(Input::new(state).appearance(false).bordered(false).flex_1())
+    .child(ui::input(state).appearance(false).bordered(false).flex_1())
 }
 
 /// A `<label className="flex flex-col gap-1">`: a caption over a control.

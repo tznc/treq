@@ -25,6 +25,7 @@ use super::{
   overlay::cmdk,
   screen::{ActionSink, ScreenAction},
   theme::{self, Palette},
+  ui,
 };
 
 mod checks;
@@ -314,6 +315,6 @@ impl SearchField {
   }
 
   fn element(&self) -> Input {
-    Input::new(&self.input).appearance(false).bordered(false)
+    ui::input(&self.input).appearance(false).bordered(false)
   }
 }

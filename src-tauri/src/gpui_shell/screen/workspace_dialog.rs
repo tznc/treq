@@ -1395,7 +1395,7 @@ impl WorkspaceDialog {
                 .flex()
                 .items_center()
                 .child(
-                  Input::new(&picker.input)
+                  ui::input(&picker.input)
                     .appearance(false)
                     .bordered(false)
                     .flex_1(),
@@ -2098,7 +2098,10 @@ impl Render for WorkspaceDialog {
     let (backdrop, panel) = dialog_panel("workspace-dialog", 640., viewport, &p);
     let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
       let k = &e.keystroke;
-      if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+      if k.key == "enter"
+        && (crate::gpui_shell::keys::held(k.modifiers).platform
+          || crate::gpui_shell::keys::held(k.modifiers).control)
+      {
         cx.stop_propagation();
         view.submit(cx);
       } else if k.key == "escape" && view.picker.is_none() {

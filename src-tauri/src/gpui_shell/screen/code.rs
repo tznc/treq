@@ -148,7 +148,7 @@ pub struct CodeView {
   pub(super) settings: Option<TaskSettings>,
   task: Option<Entity<TextareaState>>,
   pub(super) task_text: String,
-  focused: bool,
+  pub(super) focused: bool,
   pub(super) mention: Option<Mention>,
   pub(super) agent_override: Option<Agent>,
   pub(super) save_default: bool,

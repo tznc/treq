@@ -130,7 +130,7 @@ impl Popover {
   /// cmdk's root `onKeyDown`, after Escape.
   pub(super) fn target_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
     let key = event.keystroke.key.as_str();
-    let m = event.keystroke.modifiers;
+    let m = crate::gpui_shell::keys::held(event.keystroke.modifiers);
     let step = match key {
       "down" if m.platform => Some(cmdk::Move::Last),
       "up" if m.platform => Some(cmdk::Move::First),

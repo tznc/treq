@@ -3,7 +3,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   anchored, deferred, div, point, prelude::*, px, Context, Entity, FocusHandle, FontWeight,
@@ -283,7 +283,10 @@ impl Render for RenameDialog {
       if k.key == "escape" {
         cx.stop_propagation();
         view.close(cx);
-      } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+      } else if k.key == "enter"
+        && (crate::gpui_shell::keys::held(k.modifiers).platform
+          || crate::gpui_shell::keys::held(k.modifiers).control)
+      {
         cx.stop_propagation();
         view.submit(cx);
       }
@@ -316,7 +319,7 @@ impl Render for RenameDialog {
                   .debug_selector(|| "rename-branch-name".into())
                   .w_full()
                   .child(
-                    Styled::h(Input::new(&input).disabled(pending), px(40.))
+                    Styled::h(ui::input(&input).disabled(pending), px(40.))
                       .when_some(status, |this, icon| {
                         this.suffix(div().pr(px(4.)).child(icon))
                       }),
