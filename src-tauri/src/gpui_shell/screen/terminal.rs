@@ -807,7 +807,7 @@ impl TerminalView {
 
   fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
     let k = &event.keystroke;
-    let m = &k.modifiers;
+    let m = crate::gpui_shell::keys::held(k.modifiers);
     if shortcut(&k.key, m.control, m.platform, m.shift, m.alt).is_some() {
       // The pane's, or the app's: let it go on.
       cx.propagate();
@@ -2368,7 +2368,7 @@ impl TerminalPane {
         return;
       }
       let k = &event.keystroke;
-      let m = &k.modifiers;
+      let m = crate::gpui_shell::keys::held(k.modifiers);
       if let Some(found) = shortcut(&k.key, m.control, m.platform, m.shift, m.alt) {
         pane.shortcut(found, window, cx);
       } else if k.key == "c" && (m.platform || m.control) && pane.lightbox.is_none() {

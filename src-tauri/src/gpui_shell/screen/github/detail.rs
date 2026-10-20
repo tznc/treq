@@ -404,7 +404,10 @@ impl GithubView {
           .when(submit_on_enter, |d| {
             d.capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
               let k = &e.keystroke;
-              if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+              if k.key == "enter"
+                && (crate::gpui_shell::keys::held(k.modifiers).platform
+                  || crate::gpui_shell::keys::held(k.modifiers).control)
+              {
                 cx.stop_propagation();
                 view.post_comment(cx);
               }

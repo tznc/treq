@@ -1125,7 +1125,7 @@ impl commits_data::CommitsHost for FakeHost {
       .ok_or_else(|| "no file diff".into())
   }
 
-  fn abandon(&self, _: &str, _: i64, change_id: &str) -> Result<String, String> {
+  fn abandon(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("abandon {change_id}"));
     Ok("op1".into())
   }
@@ -1145,7 +1145,7 @@ impl commits_data::CommitsHost for FakeHost {
     Ok(())
   }
 
-  fn revert(&self, _: &str, _: i64, change_id: &str) -> Result<(), String> {
+  fn revert(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<(), String> {
     self.record(format!("revert {change_id}"));
     Ok(())
   }
@@ -1155,12 +1155,18 @@ impl commits_data::CommitsHost for FakeHost {
     Ok(())
   }
 
-  fn commit_description(&self, _: &str, _: i64, change_id: &str) -> Result<String, String> {
+  fn commit_description(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("read description {change_id}"));
     Ok(self.description.clone())
   }
 
-  fn describe(&self, _: &str, _: i64, change_id: &str, description: &str) -> Result<(), String> {
+  fn describe(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    change_id: &str,
+    description: &str,
+  ) -> Result<(), String> {
     self.record(format!("describe {change_id} {description:?}"));
     Ok(())
   }
@@ -3330,7 +3336,7 @@ fn code_tab_hands_navigation_to_react(cx: &mut TestAppContext) {
 #[gpui::test]
 fn code_tab_starts_a_task_in_the_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("fix the login button");
   h.click("task-submit");
   h.cx.run_until_parked();
@@ -3359,7 +3365,7 @@ fn code_tab_runs_home_tasks_in_a_new_workspace(cx: &mut TestAppContext) {
   let route = serde_json::from_value(route).expect("home route");
   let (mut h, host) = workspace_harness(cx, host, route);
   assert!(h.drawn("task-new-workspace"));
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("fix login");
   h.click("task-submit");
   h.cx.run_until_parked();
@@ -3516,9 +3522,30 @@ fn code_tab_offers_no_new_workspace_toggle_inside_a_workspace(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn clicking_empty_space_blurs_the_focused_input(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  let focused = |h: &mut Harness| {
+    h.cx.run_until_parked();
+    h.cx.update(|window, cx| window.focused(cx).is_some())
+  };
+  // The task input starts focused.
+  assert!(focused(&mut h));
+  // A mouse-down on a spot nothing focuses takes the focus off it, as in a
+  // browser, so a key such as "?" then reaches the app's shortcuts.
+  h.cx.simulate_click(
+    gpui::point(gpui::px(1395.), gpui::px(895.)),
+    Modifiers::none(),
+  );
+  assert!(!focused(&mut h));
+  // Clicking an input focuses it again.
+  h.click("task-input");
+  assert!(focused(&mut h));
+}
+
+#[gpui::test]
 fn code_tab_suggests_files_for_mentions(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  h.click("agent-task-input");
+  h.click("task-input");
   h.cx.simulate_input("look at @log");
   h.cx
     .executor()
@@ -3614,6 +3641,25 @@ fn commits_tab_lists_commits_and_opens_their_diffs(cx: &mut TestAppContext) {
   assert!(!h.drawn("add-comment-0-1"));
   h.click("commit-row-a");
   assert!(!h.drawn("commit-file-row"));
+}
+
+#[gpui::test]
+fn commits_tab_rewrites_commits_in_the_home_repo(cx: &mut TestAppContext) {
+  let mut route = route_json(None, "main");
+  route["code"] = true.into();
+  route["tab"] = "commits".into();
+  let route = serde_json::from_value(route).expect("home commits route");
+  let (mut h, host) = workspace_harness(cx, commits_host(), route);
+  h.click("commit-row-a");
+  for selector in ["edit-description-a", "revert-commit-a", "delete-commit-a"] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  h.click("revert-commit-a");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"revert a".to_string()));
+  h.click("edit-description-a");
+  assert!(h.drawn("edit-description-dialog"));
+  assert!(host.calls().contains(&"read description a".to_string()));
 }
 
 #[gpui::test]

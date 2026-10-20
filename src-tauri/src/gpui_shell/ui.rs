@@ -9,6 +9,8 @@ use tauri_plugin_gpui::gpui::{
   Hsla, SharedString, StyleRefinement, Transformation, Window,
 };
 
+use gpui_kit::component::input::{Input, InputState};
+
 use super::theme::{self, Palette};
 
 /// A click handler that GPUI elements can share.
@@ -37,6 +39,12 @@ impl TextSize {
 pub fn text<E: Styled>(el: E, size: TextSize) -> E {
   let (font, line) = size.metrics();
   el.text_size(px(font)).line_height(px(line))
+}
+
+/// A single-line input at `text-sm`. gpui-kit's own medium size is 14px,
+/// Tailwind's `text-sm` here 13px, so placeholders and text came out larger.
+pub fn input(state: &gpui::Entity<InputState>) -> Input {
+  Input::new(state).text_size(px(13.))
 }
 
 /// A Lucide icon from the bundled set.

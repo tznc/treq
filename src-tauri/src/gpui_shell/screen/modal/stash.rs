@@ -1,7 +1,7 @@
 //! `StashModal`: the repository's stashed changes, each one's diff, and
 //! applying, copying and deleting them.
 
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, px, ClipboardItem, Context, Entity, FontWeight, SharedString,
@@ -775,12 +775,7 @@ impl StashView {
             div()
               .debug_selector(|| "stash-apply-workspace-select".into())
               .w_full()
-              .child(
-                Input::new(&input)
-                  .appearance(false)
-                  .bordered(false)
-                  .flex_1(),
-              ),
+              .child(ui::input(&input).appearance(false).bordered(false).flex_1()),
           ),
       )
       .child(

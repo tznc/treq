@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use gpui_kit::component::{
-  input::{Input, InputEvent, InputState, Textarea, TextareaState},
+  input::{InputEvent, InputState, Textarea, TextareaState},
   searchable_list::SearchableListItem,
   select::{Select, SelectEvent, SelectState},
   slider::{Slider, SliderEvent, SliderState},
@@ -24,6 +24,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   screen::{ActionSink, ScreenAction},
   theme::{self, Palette},
+  ui,
 };
 
 /// One `<option>` of a `<select>`.
@@ -281,7 +282,7 @@ pub fn input_field(
     .w_full()
     .child(
       // `Input::h` sets a multi-line height; a single line takes its own.
-      Styled::h(Input::new(state).disabled(disabled), px(FIELD_HEIGHT))
+      Styled::h(ui::input(state).disabled(disabled), px(FIELD_HEIGHT))
         .when(mono, |this| this.font_family(theme::MONO_FONT)),
     )
 }
@@ -293,6 +294,7 @@ pub fn textarea_field(
   disabled: bool,
 ) -> impl IntoElement {
   Textarea::new(state)
+    .text_size(px(13.))
     .disabled(disabled)
     .when(mono, |this| this.font_family(theme::MONO_FONT))
 }

@@ -4,7 +4,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, rgba, Context, Entity, EventEmitter,
   SharedString, Subscription, Task, Window,
@@ -221,12 +221,7 @@ impl Render for FilePicker {
           .px_3()
           .border_b_1()
           .border_color(p.border)
-          .child(
-            Input::new(&input)
-              .appearance(false)
-              .bordered(false)
-              .flex_1(),
-          ),
+          .child(ui::input(&input).appearance(false).bordered(false).flex_1()),
       )
       .child(
         div()

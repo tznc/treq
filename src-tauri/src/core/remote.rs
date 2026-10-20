@@ -2446,7 +2446,10 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       // Naturally idempotent: it overwrites the description each call, so no
       // idempotency key is needed or accepted.
       json(crate::core::commits::describe_commit(
-        &repo, id, &commit, &message,
+        &repo,
+        Some(id),
+        &commit,
+        &message,
       ))
     }
     TreqCommandRequest::SplitCommit {
@@ -2540,7 +2543,11 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       || {
         let id =
           workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        json(crate::core::commits::abandon_commit(&repo, id, &commit))
+        json(crate::core::commits::abandon_commit(
+          &repo,
+          Some(id),
+          &commit,
+        ))
       },
     ),
     TreqCommandRequest::UndoOperation {
@@ -2567,7 +2574,11 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       || {
         let id =
           workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        json(crate::core::commits::revert_commit(&repo, id, &commit))
+        json(crate::core::commits::revert_commit(
+          &repo,
+          Some(id),
+          &commit,
+        ))
       },
     ),
     TreqCommandRequest::ResolveConflict {

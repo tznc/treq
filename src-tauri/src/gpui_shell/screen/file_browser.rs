@@ -19,7 +19,7 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
 use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
@@ -1014,9 +1014,10 @@ impl FileBrowserView {
       let k = &event.keystroke;
       if window.window_handle().window_id() == id
         && k.key == "f"
-        && (k.modifiers.platform || k.modifiers.control)
-        && !k.modifiers.shift
-        && !k.modifiers.alt
+        && (crate::gpui_shell::keys::held(k.modifiers).platform
+          || crate::gpui_shell::keys::held(k.modifiers).control)
+        && !crate::gpui_shell::keys::held(k.modifiers).shift
+        && !crate::gpui_shell::keys::held(k.modifiers).alt
       {
         view.open_search(cx);
       }

@@ -10,7 +10,7 @@
 
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, uniform_list, App, Bounds, Context, Div,
   Entity, FontWeight, Hsla, MouseButton, Pixels, ScrollStrategy, SharedString, StyledText,
@@ -618,9 +618,10 @@ impl LogsView {
         let k = &event.keystroke;
         if window.window_handle().window_id() == id
           && k.key == "f"
-          && (k.modifiers.platform || k.modifiers.control)
-          && !k.modifiers.shift
-          && !k.modifiers.alt
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+          && !crate::gpui_shell::keys::held(k.modifiers).shift
+          && !crate::gpui_shell::keys::held(k.modifiers).alt
           && !view.explorer_open
         {
           view.find.open = true;
@@ -781,7 +782,7 @@ impl LogsView {
         self
           .search_input
           .as_ref()
-          .map(|i| Input::new(i).appearance(false).bordered(false).px_0()),
+          .map(|i| ui::input(i).appearance(false).bordered(false).px_0()),
       )
   }
 
@@ -1291,7 +1292,7 @@ impl LogsView {
             .rounded(px(6.))
             .border_1()
             .border_color(p.input)
-            .child(Input::new(&input).appearance(false).bordered(false)),
+            .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
           ui::text(div(), TextSize::Xs)

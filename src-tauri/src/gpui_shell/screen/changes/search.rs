@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{AnyElement, StyledText, Task};
-use gpui_kit::component::input::{Escape, Input, InputState};
+use gpui_kit::component::input::{Escape, InputState};
 
 use super::*;
 
@@ -113,9 +113,10 @@ impl ChangesView {
       let k = &event.keystroke;
       if window.window_handle().window_id() == id
         && k.key == "f"
-        && (k.modifiers.platform || k.modifiers.control)
-        && !k.modifiers.shift
-        && !k.modifiers.alt
+        && (crate::gpui_shell::keys::held(k.modifiers).platform
+          || crate::gpui_shell::keys::held(k.modifiers).control)
+        && !crate::gpui_shell::keys::held(k.modifiers).shift
+        && !crate::gpui_shell::keys::held(k.modifiers).alt
       {
         view.open_search(cx);
       }
@@ -428,7 +429,7 @@ impl ChangesView {
             .rounded(px(6.))
             .border_1()
             .border_color(p.input)
-            .child(Input::new(&input).appearance(false).bordered(false)),
+            .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
           ui::text(div(), TextSize::Xs)

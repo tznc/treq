@@ -124,7 +124,10 @@ impl FileBrowserView {
         if k.key == "escape" {
           cx.stop_propagation();
           view.cancel_edit(cx);
-        } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+        } else if k.key == "enter"
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+        {
           cx.stop_propagation();
           view.save_edit(cx);
         }
@@ -182,7 +185,10 @@ impl FileBrowserView {
         if k.key == "escape" {
           cx.stop_propagation();
           view.cancel_draft(cx);
-        } else if k.key == "enter" && (k.modifiers.platform || k.modifiers.control) {
+        } else if k.key == "enter"
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+        {
           cx.stop_propagation();
           view.submit_draft(cx);
         }
@@ -279,7 +285,7 @@ impl FileBrowserView {
             .rounded(px(6.))
             .border_1()
             .border_color(p.input)
-            .child(Input::new(&input).appearance(false).bordered(false)),
+            .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
           ui::text(div(), TextSize::Xs)

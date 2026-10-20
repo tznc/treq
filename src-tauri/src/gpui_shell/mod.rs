@@ -31,6 +31,7 @@ use tauri_plugin_gpui::{
 
 mod checks_run;
 mod form;
+mod keys;
 pub mod launch;
 mod menus;
 mod modal;
@@ -148,7 +149,7 @@ impl Shell {
         return;
       }
       let keystroke = &event.keystroke;
-      let m = held_modifiers(keystroke.modifiers);
+      let m = keys::held(keystroke.modifiers);
       let within = |name: &str| event.context_stack.iter().any(|c| c.contains(name));
       let found = shortcuts::app_shortcut(
         &keystroke.key,
@@ -218,7 +219,11 @@ impl Render for Shell {
       .font_family(theme::SANS_FONT)
       // A click anywhere in the window closes an open menu, as one outside
       // a native menu does.
-      .capture_any_mouse_down(move |_, _, _| defer_main(&app, |_| popup::hide_menus()))
+      .capture_any_mouse_down(move |_, window, cx| {
+        // Blurs the focused input too, as a browser does.
+        window.blur(cx);
+        defer_main(&app, |_| popup::hide_menus())
+      })
       // Shown only until the webview's first frame, so opening a window
       // does not flash.
       .bg(theme::palette(dark).background)
@@ -328,21 +333,6 @@ pub fn open_window(
     window::start(app, label, repo)?;
   }
   Ok(())
-}
-
-/// `m` with the modifiers the keyboard holds. TAO on Linux reports only the
-/// last modifier pressed, so Ctrl+Shift+N reached GPUI as Shift+N.
-fn held_modifiers(mut m: gpui::Modifiers) -> gpui::Modifiers {
-  #[cfg(target_os = "linux")]
-  if let Some(keymap) = gtk::gdk::Display::default().and_then(|d| gtk::gdk::Keymap::for_display(&d))
-  {
-    use gtk::gdk::ModifierType;
-    let held = ModifierType::from_bits_truncate(keymap.modifier_state());
-    m.control |= held.contains(ModifierType::CONTROL_MASK);
-    m.shift |= held.contains(ModifierType::SHIFT_MASK);
-    m.alt |= held.contains(ModifierType::MOD1_MASK);
-  }
-  m
 }
 
 /// GPUI paints over GTK's menu bar, which still took the clicks on the top

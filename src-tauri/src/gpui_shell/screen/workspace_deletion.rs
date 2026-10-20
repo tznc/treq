@@ -2,7 +2,7 @@
 //! picks the workspace; React asks for confirmation and deletes it, as it
 //! does from the workspace header.
 
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, rgba, Context, Entity, FontWeight,
@@ -359,12 +359,7 @@ impl Render for WorkspaceDeletion {
           .px_3()
           .border_b_1()
           .border_color(p.border)
-          .child(
-            Input::new(&input)
-              .appearance(false)
-              .bordered(false)
-              .flex_1(),
-          ),
+          .child(ui::input(&input).appearance(false).bordered(false).flex_1()),
       )
       .child(
         div()

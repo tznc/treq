@@ -8,8 +8,7 @@ use std::time::Duration;
 
 use gpui_kit::component::{
   input::{
-    Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea,
-    TextareaState,
+    Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
   },
   Sizable,
 };
@@ -841,7 +840,7 @@ impl AgentPromptView {
               .border_b_1()
               .border_color(p.border)
               .child(
-                Input::new(&picker.input)
+                ui::input(&picker.input)
                   .appearance(false)
                   .bordered(false)
                   .flex_1(),
