@@ -230,11 +230,8 @@ pub fn open_window(
     .title(title)
     .inner_size(1400.0, 900.0)
     .build()?;
-  // GPUI paints over GTK's menu bar, which still took the clicks on the top
-  // ~25px (the header's Stack and branch buttons, the sidebar's settings).
-  // Its accelerators stay with the window.
   #[cfg(target_os = "linux")]
-  window.hide_menu()?;
+  hide_menu_bar(&window)?;
 
   let shell_label = label.to_string();
   let shell_app = app.clone();
@@ -269,6 +266,40 @@ pub fn open_window(
   webview.hide()?;
 
   update_shell(label, move |shell, _| shell.webview = Some(webview))?;
+  Ok(())
+}
+
+/// GPUI paints over GTK's menu bar, which still took the clicks on the top
+/// ~25px (the header's Stack and branch buttons, the sidebar's settings).
+/// Hidden for good, as `show_all` would show it again; its accelerators
+/// (Ctrl+O...) stay with the window. Tauri adds it after `build` returns, so
+/// this looks for it until it is there.
+#[cfg(target_os = "linux")]
+fn hide_menu_bar(window: &tauri::Window) -> tauri::Result<()> {
+  use gtk::{
+    glib::{timeout_add_local, ControlFlow},
+    prelude::{Cast, ContainerExt, WidgetExt},
+  };
+  fn hide(widget: &gtk::Widget) -> bool {
+    if let Some(bar) = widget.downcast_ref::<gtk::MenuBar>() {
+      bar.set_no_show_all(true);
+      bar.hide();
+      return true;
+    }
+    widget
+      .downcast_ref::<gtk::Container>()
+      .is_some_and(|c| c.children().iter().any(hide))
+  }
+  let gtk_window = window.gtk_window()?;
+  let mut tries = 0;
+  timeout_add_local(std::time::Duration::from_millis(50), move || {
+    tries += 1;
+    if hide(gtk_window.upcast_ref()) || tries >= 100 {
+      ControlFlow::Break
+    } else {
+      ControlFlow::Continue
+    }
+  });
   Ok(())
 }
 
