@@ -538,7 +538,7 @@ pub async fn abandon_commit(
   let result = tauri::async_runtime::spawn_blocking(move || {
     crate::core::abandon_commit(
       &repo_path_for_task,
-      workspace_id,
+      Some(workspace_id),
       &commit_change_id_for_task,
     )
   })
@@ -598,7 +598,7 @@ pub async fn revert_commit(
   let result = tauri::async_runtime::spawn_blocking(move || {
     crate::core::revert_commit(
       &repo_path_for_task,
-      workspace_id,
+      Some(workspace_id),
       &commit_change_id_for_task,
     )
   })

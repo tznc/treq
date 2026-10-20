@@ -272,7 +272,7 @@ pub async fn get_commit_description(
   commit_change_id: String,
 ) -> Result<String, String> {
   tauri::async_runtime::spawn_blocking(move || {
-    core::get_commit_description(&repo_path, workspace_id, &commit_change_id)
+    core::get_commit_description(&repo_path, Some(workspace_id), &commit_change_id)
   })
   .await
   .map_err(|e| format!("Failed to join get_commit_description task: {}", e))?
@@ -290,7 +290,14 @@ pub async fn describe_commit(
   let result = tauri::async_runtime::spawn_blocking({
     let repo_path = repo_path.clone();
     let commit_change_id = commit_change_id.clone();
-    move || core::describe_commit(&repo_path, workspace_id, &commit_change_id, &description)
+    move || {
+      core::describe_commit(
+        &repo_path,
+        Some(workspace_id),
+        &commit_change_id,
+        &description,
+      )
+    }
   })
   .await
   .map_err(|e| format!("Failed to join describe_commit task: {}", e))?;

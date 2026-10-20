@@ -53,7 +53,12 @@ pub trait CommitsHost: CodeHost {
     file_path: &str,
   ) -> Result<JjFileDiff, String>;
   /// Returns the operation id, for undo.
-  fn abandon(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<String, String>;
+  fn abandon(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    change_id: &str,
+  ) -> Result<String, String>;
   fn undo_operation(
     &self,
     repo_path: &str,
@@ -68,18 +73,23 @@ pub trait CommitsHost: CodeHost {
     change_id: &str,
   ) -> Result<String, String>;
   fn undo_commit(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<(), String>;
-  fn revert(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<(), String>;
+  fn revert(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    change_id: &str,
+  ) -> Result<(), String>;
   fn shift_to_now(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   fn commit_description(
     &self,
     repo_path: &str,
-    workspace_id: i64,
+    workspace_id: Option<i64>,
     change_id: &str,
   ) -> Result<String, String>;
   fn describe(
     &self,
     repo_path: &str,
-    workspace_id: i64,
+    workspace_id: Option<i64>,
     change_id: &str,
     description: &str,
   ) -> Result<(), String>;
@@ -103,6 +113,11 @@ pub trait CommitsHost: CodeHost {
   fn restore_snapshot(&self, workspace_path: &str, snapshot_id: &str) -> Result<(), String>;
   /// A native OK/Cancel warning (`ask`); true for OK.
   fn confirm(&self, title: &str, message: &str) -> bool;
+}
+
+/// Remote hosts only run these against a workspace, not the home repository.
+fn remote_workspace(workspace_id: Option<i64>) -> Result<i64, String> {
+  workspace_id.ok_or_else(|| unsupported("Rewriting commits in a remote home repository"))
 }
 
 impl CommitsHost for Backend {
@@ -147,9 +162,14 @@ impl CommitsHost for Backend {
     core::get_commit_file_diff(&state.db, repo_path, workspace_id, revision, file_path)
   }
 
-  fn abandon(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<String, String> {
+  fn abandon(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    change_id: &str,
+  ) -> Result<String, String> {
     match self.remote_containing(repo_path) {
-      Some(remote) => remote.abandon(workspace_id, change_id),
+      Some(remote) => remote.abandon(remote_workspace(workspace_id)?, change_id),
       None => core::abandon_commit(repo_path, workspace_id, change_id),
     }
   }
@@ -185,9 +205,14 @@ impl CommitsHost for Backend {
     }
   }
 
-  fn revert(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<(), String> {
+  fn revert(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    change_id: &str,
+  ) -> Result<(), String> {
     match self.remote_containing(repo_path) {
-      Some(remote) => remote.revert(workspace_id, change_id),
+      Some(remote) => remote.revert(remote_workspace(workspace_id)?, change_id),
       None => core::revert_commit(repo_path, workspace_id, change_id),
     }
   }
@@ -202,11 +227,11 @@ impl CommitsHost for Backend {
   fn commit_description(
     &self,
     repo_path: &str,
-    workspace_id: i64,
+    workspace_id: Option<i64>,
     change_id: &str,
   ) -> Result<String, String> {
     match self.remote_containing(repo_path) {
-      Some(remote) => remote.commit_description(workspace_id, change_id),
+      Some(remote) => remote.commit_description(remote_workspace(workspace_id)?, change_id),
       None => core::get_commit_description(repo_path, workspace_id, change_id),
     }
   }
@@ -214,12 +239,12 @@ impl CommitsHost for Backend {
   fn describe(
     &self,
     repo_path: &str,
-    workspace_id: i64,
+    workspace_id: Option<i64>,
     change_id: &str,
     description: &str,
   ) -> Result<(), String> {
     match self.remote_containing(repo_path) {
-      Some(remote) => remote.describe(workspace_id, change_id, description),
+      Some(remote) => remote.describe(remote_workspace(workspace_id)?, change_id, description),
       None => core::describe_commit(repo_path, workspace_id, change_id, description),
     }
   }

@@ -1125,7 +1125,7 @@ impl commits_data::CommitsHost for FakeHost {
       .ok_or_else(|| "no file diff".into())
   }
 
-  fn abandon(&self, _: &str, _: i64, change_id: &str) -> Result<String, String> {
+  fn abandon(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("abandon {change_id}"));
     Ok("op1".into())
   }
@@ -1145,7 +1145,7 @@ impl commits_data::CommitsHost for FakeHost {
     Ok(())
   }
 
-  fn revert(&self, _: &str, _: i64, change_id: &str) -> Result<(), String> {
+  fn revert(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<(), String> {
     self.record(format!("revert {change_id}"));
     Ok(())
   }
@@ -1155,12 +1155,18 @@ impl commits_data::CommitsHost for FakeHost {
     Ok(())
   }
 
-  fn commit_description(&self, _: &str, _: i64, change_id: &str) -> Result<String, String> {
+  fn commit_description(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("read description {change_id}"));
     Ok(self.description.clone())
   }
 
-  fn describe(&self, _: &str, _: i64, change_id: &str, description: &str) -> Result<(), String> {
+  fn describe(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    change_id: &str,
+    description: &str,
+  ) -> Result<(), String> {
     self.record(format!("describe {change_id} {description:?}"));
     Ok(())
   }
@@ -3456,6 +3462,25 @@ fn commits_tab_lists_commits_and_opens_their_diffs(cx: &mut TestAppContext) {
   assert!(!h.drawn("add-comment-0-1"));
   h.click("commit-row-a");
   assert!(!h.drawn("commit-file-row"));
+}
+
+#[gpui::test]
+fn commits_tab_rewrites_commits_in_the_home_repo(cx: &mut TestAppContext) {
+  let mut route = route_json(None, "main");
+  route["code"] = true.into();
+  route["tab"] = "commits".into();
+  let route = serde_json::from_value(route).expect("home commits route");
+  let (mut h, host) = workspace_harness(cx, commits_host(), route);
+  h.click("commit-row-a");
+  for selector in ["edit-description-a", "revert-commit-a", "delete-commit-a"] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  h.click("revert-commit-a");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"revert a".to_string()));
+  h.click("edit-description-a");
+  assert!(h.drawn("edit-description-dialog"));
+  assert!(host.calls().contains(&"read description a".to_string()));
 }
 
 #[gpui::test]

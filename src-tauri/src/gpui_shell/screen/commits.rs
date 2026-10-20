@@ -517,9 +517,7 @@ impl CommitsView {
   }
 
   fn abandon(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
-    let Some(ws) = self.parent.workspace_id() else {
-      return;
-    };
+    let ws = self.parent.workspace_id();
     let message = format!(
       "Abandon commit {} — {}?",
       commit.short_id,
@@ -537,7 +535,7 @@ impl CommitsView {
           Self::changed(host.as_ref(), &parent);
           let short = commit.short_id.clone();
           let undo = native::register_toast_action(move || {
-            let event = match host.undo_operation(&parent.repo_path, Some(ws), &operation) {
+            let event = match host.undo_operation(&parent.repo_path, ws, &operation) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
                 toast_event(
@@ -621,9 +619,7 @@ impl CommitsView {
   }
 
   fn revert(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
-    let Some(ws) = self.parent.workspace_id() else {
-      return;
-    };
+    let ws = self.parent.workspace_id();
     let message = format!(
       "Revert commit {} — {}? This creates a new commit that reverses its changes.",
       commit.short_id,
@@ -934,9 +930,7 @@ impl CommitsView {
   // --- Dialogs ---
 
   pub(super) fn edit_description(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
-    let Some(ws) = self.parent.workspace_id() else {
-      return;
-    };
+    let ws = self.parent.workspace_id();
     let change = commit.change_id.clone();
     self.dialog = Some(Dialog::Describe {
       commit,
@@ -960,9 +954,7 @@ impl CommitsView {
   }
 
   fn save_description(&mut self, cx: &mut Context<Self>) {
-    let Some(ws) = self.parent.workspace_id() else {
-      return;
-    };
+    let ws = self.parent.workspace_id();
     let Some(Dialog::Describe {
       commit,
       loaded: Some(loaded),
@@ -2004,7 +1996,7 @@ impl CommitsView {
               .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
           )
         })
-        .when(own && workspace, |this| {
+        .when(own, |this| {
           this.child(
             outline(
               format!("edit-description-{short}"),
@@ -2028,16 +2020,14 @@ impl CommitsView {
             )
           },
         )
-        .when(workspace, |this| {
-          this.child(
-            outline(
-              format!("revert-commit-{short}"),
-              theme::ICON_ROTATE_CCW,
-              "Revert commit",
-            )
-            .on_click(Self::on_commit(commit, Self::revert, cx)),
+        .child(
+          outline(
+            format!("revert-commit-{short}"),
+            theme::ICON_ROTATE_CCW,
+            "Revert commit",
           )
-        })
+          .on_click(Self::on_commit(commit, Self::revert, cx)),
+        )
         .when(own && workspace && !commit.is_immutable, |this| {
           this.child(
             outline(
@@ -2060,12 +2050,10 @@ impl CommitsView {
               .disabled(removing)
               .on_click(Self::on_commit(commit, Self::stash, cx)),
             )
-            .when(workspace, |this| {
-              this.child(
-                destructive_outline(format!("delete-commit-{short}"), "Delete commit")
-                  .on_click(Self::on_commit(commit, Self::abandon, cx)),
-              )
-            })
+            .child(
+              destructive_outline(format!("delete-commit-{short}"), "Delete commit")
+                .on_click(Self::on_commit(commit, Self::abandon, cx)),
+            )
         });
     }
     let content = match self.diffs.get(&commit.commit_id) {
