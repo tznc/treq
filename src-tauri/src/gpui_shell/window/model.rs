@@ -639,7 +639,7 @@ impl Model {
     match workspace {
       Some(workspace) => {
         self.set_selected(Some(workspace.id));
-        let dir = super::super::screen::workspace_ops::Removed::of(workspace).path;
+        let dir = full_path(workspace);
         self.terminal("newShell", json!({"dir": dir}));
       }
       None => {
@@ -789,6 +789,11 @@ impl Model {
       ..Self::default()
     };
   }
+}
+
+/// A workspace's checkout (`getFullWorkspacePath`).
+pub fn full_path(workspace: &Workspace) -> String {
+  crate::core::context_menu::full_workspace_path(workspace)
 }
 
 /// The setting the folded groups of a main repository are kept under.

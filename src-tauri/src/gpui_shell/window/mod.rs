@@ -6,4 +6,5 @@
 mod data;
 mod model;
 mod sidebar;
+mod snapshots;
 mod tree;
