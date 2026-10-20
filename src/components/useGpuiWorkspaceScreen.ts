@@ -276,7 +276,6 @@ export function useGpuiWorkspaceScreen({
       case "terminal.navigate":
       case "terminal.summaries":
       case "terminal.dismissAsset":
-      case "terminal.shortcut":
         return handlers.terminal?.(name, value);
       case "changes.subView":
         if (value === "diff" || value === "browser") {

@@ -16,7 +16,7 @@ use tauri::{AppHandle, Listener};
 use tauri_plugin_gpui::gpui::{prelude::*, App, Entity, WeakEntity};
 
 use super::{
-  actions::Menu,
+  actions::{Menu, Shortcut},
   controller::{Forwarder, Presenter, WindowController},
   model::Forward,
 };
@@ -169,6 +169,13 @@ pub(in crate::gpui_shell) fn sidebar_action(
   cx: &mut App,
 ) -> bool {
   controller(label, cx).is_some_and(|c| c.update(cx, |c, cx| c.sidebar_action(action, cx)))
+}
+
+/// A keyboard shortcut pressed in window `label`.
+pub(in crate::gpui_shell) fn shortcut(label: &str, shortcut: Shortcut, cx: &mut App) {
+  if let Some(controller) = controller(label, cx) {
+    controller.update(cx, |c, cx| c.shortcut(shortcut, cx));
+  }
 }
 
 /// Keeps React's overlay for window `label`; whether to draw it. Main

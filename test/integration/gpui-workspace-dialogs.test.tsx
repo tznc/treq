@@ -10,6 +10,7 @@ import {
   gpuiScreen,
   sendGpuiScreenAction,
 } from "../gpui-screen";
+import { sendGpuiOverlayAction } from "../gpui-overlay";
 import { clickGpuiRow, pickGpuiRowMenuItem } from "../gpui-sidebar";
 import { render, screen, waitFor } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
@@ -41,6 +42,22 @@ describe("GPUI workspace dialogs", () => {
     openRepo(repoPath);
     alphaId = await createWorkspace(repoPath, "feat/alpha");
     user = userEvent.setup();
+  });
+
+  it("opens the stack dialog for Cmd+Shift+N pressed in GPUI", async () => {
+    render(<Dashboard />);
+    await findGpuiScreen("workspace");
+
+    sendGpuiOverlayAction({
+      kind: "field",
+      field: "overlay.shortcut",
+      value: "N",
+    });
+    const dialog = await findGpuiModal("workspaceDialog");
+    expect(dialog.defaults).toEqual({
+      targetBranch: defaultBranch,
+      source: { kind: "home" },
+    });
   });
 
   it("draws the stack dialog over the screen instead of React", async () => {

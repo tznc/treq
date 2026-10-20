@@ -3247,6 +3247,32 @@ fn fields(h: &Harness, name: &str) -> Vec<serde_json::Value> {
 }
 
 #[gpui::test]
+fn stack_line_counts_stay_on_one_line(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    workspaces: [
+      workspace_row("feature/login"),
+      serde_json::json!({"id": 8, "branch_name": "feature/logout", "target_branch": "feature/login"}),
+    ]
+    .into_iter()
+    .map(|row| {
+      let mut base = workspace_row("feature/login");
+      base.as_object_mut().expect("row").extend(row.as_object().expect("row").clone());
+      serde_json::from_value(base).expect("workspace")
+    })
+    .collect(),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  let counts = h
+    .cx
+    .debug_bounds("workspace-loc-indicator")
+    .expect("indicator");
+  // One `text-xs` line, as React's grid of `ch` columns keeps it.
+  assert!(counts.size.height <= gpui::px(16.), "{counts:?}");
+}
+
+#[gpui::test]
 fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   for selector in [
