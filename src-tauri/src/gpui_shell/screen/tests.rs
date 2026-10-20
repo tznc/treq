@@ -61,6 +61,8 @@ struct FakeHost {
   pr_viewer: Option<String>,
   /// What the Logs tab reads.
   logs: Vec<crate::core::checks_logs::LogRecordView>,
+  /// What the Logs tab's chart reads.
+  buckets: Vec<crate::core::checks_logs::LogBucket>,
   workflows: Vec<crate::core::checks::WorkflowInfo>,
   chats: Vec<crate::core::agent_chat::AgentChat>,
   sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
@@ -1008,7 +1010,7 @@ impl logs_data::LogsHost for FakeHost {
     _: &str,
     _: &crate::core::checks_logs::LogQuery,
   ) -> Result<Vec<crate::core::checks_logs::LogBucket>, String> {
-    Ok(Vec::new())
+    Ok(self.buckets.clone())
   }
 
   fn app_setup_logs(
@@ -6683,6 +6685,7 @@ mod conflicts;
 mod file_browser;
 mod github;
 mod linear_view;
+mod logs_explorer;
 mod merge_queue;
 mod pr_review;
 mod review_comments;
