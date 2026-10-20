@@ -41,6 +41,9 @@ struct FakeHost {
   /// The folder `pick_folder` answers with.
   folder: Option<String>,
   decline: bool,
+  /// The next workspaces read panics, as a backend read before the app's
+  /// state is managed did.
+  panic_once: std::sync::atomic::AtomicBool,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
 }
@@ -72,6 +75,12 @@ impl FakeHost {
 impl WindowHost for FakeHost {
   fn workspaces(&self, repo: &str) -> Result<Vec<Workspace>, String> {
     self.record(format!("workspaces {repo}"));
+    if self
+      .panic_once
+      .swap(false, std::sync::atomic::Ordering::SeqCst)
+    {
+      panic!("state() called before manage()");
+    }
     Ok(
       self
         .workspaces
@@ -350,6 +359,19 @@ fn follows_the_system_appearance_on_the_system_theme(cx: &mut TestAppContext) {
     .controller
     .update(cx, |c, cx| c.set_system_dark(true, cx));
   assert!(window.last().dark);
+}
+
+#[gpui::test]
+fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .panic_once
+    .store(true, std::sync::atomic::Ordering::SeqCst);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  assert!(window.sidebar_ids().is_empty(), "the first read failed");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(window.sidebar_ids(), [1, 2]);
 }
 
 #[gpui::test]
