@@ -220,10 +220,6 @@ jobs:
         with:
           node-version: "24"
 
-      # treq_lib embeds the desktop frontend, which this app does not use.
-      - name: Placeholder frontend dist
-        run: mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html
-
       - name: Track tauri-gpui main
         working-directory: mobile-gpui
         run: cargo update -p tauri-plugin-gpui
@@ -285,9 +281,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "24"
-
-      - name: Placeholder frontend dist
-        run: mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html
 
       # - Track tauri-gpui main, as the Android job does.
       # - libc 0.2.190 made the `_dyld_*` functions macOS-only, which breaks

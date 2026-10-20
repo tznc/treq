@@ -195,20 +195,6 @@ fn send_subcommand_defines_a_browser_flag() {
 }
 
 #[test]
-fn asset_protocol_allows_files_below_hidden_workspace_directories() {
-  let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
-  let config = fs::read_to_string(config_path).expect("failed to read tauri.conf.json");
-  let json: Value = serde_json::from_str(&config).expect("failed to parse tauri.conf.json");
-  let scope = &json["app"]["security"]["assetProtocol"]["scope"];
-
-  assert_eq!(
-    scope["requireLiteralLeadingDot"].as_bool(),
-    Some(false),
-    "workspace paths pass through the hidden .treq directory"
-  );
-}
-
-#[test]
 fn parse_agent_mode_maps_edit_and_plan() {
   assert_eq!(
     parse_agent_mode("edit").expect("edit mode should parse"),

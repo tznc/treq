@@ -211,8 +211,7 @@ pub fn parse_scope(value: &str) -> Option<SkillInstallScope> {
 
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
 
-/// `PREVIEW_FEATURES` in `src/lib/features.ts`: each feature's title and
-/// its page on the website.
+/// Each preview feature's title and its page on the website.
 pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
   (
     PreviewFeature::SkillsInstallation,

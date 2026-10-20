@@ -3,8 +3,7 @@
  * then CI/merge until every queue for the repo is drained.
  */
 import { expect, it } from "vitest";
-import { buildQueueStacks } from "../../../src/lib/merge-queue-stacks";
-import type { QueueEntryStatus } from "../../../src/lib/api-types";
+import { buildQueueStacks, type QueueEntryStatus } from "../queue-stacks";
 import { getServiceClient } from "../clients";
 import { withMergeQueueFixture } from "../fixture";
 import { recordOutcome } from "../record";

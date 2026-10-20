@@ -56,9 +56,6 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev \
             libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
-      # treq_lib embeds the desktop frontend, which this app does not use.
-      - name: Placeholder frontend dist
-        run: mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html
       - name: cargo test
         working-directory: mobile-gpui
         run: cargo test --lib
@@ -99,8 +96,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
-      - name: Placeholder frontend dist
-        run: mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html
       # The generated Gradle project calls back into the Tauri CLI, so it is
       # a local npm install.
       - name: Build debug APK (arm64 + x86_64)

@@ -1,7 +1,0 @@
-id: unused-pub-rust-function-candidate
-language: rust
-files:
-  - "src-tauri/src/**/*.rs"
-rule:
-  kind: function_item
-  regex: "^pub(?:\\s+async)?\\s+fn\\s+[A-Za-z_]\\w*\\b"

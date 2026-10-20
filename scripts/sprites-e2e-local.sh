@@ -39,7 +39,4 @@ eval "$(supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)='
 export TREQ_REMOTE_E2E=1 TREQ_REMOTE_E2E_NATIVE=1
 export SUPABASE_TEST_URL="$API_URL" SUPABASE_TEST_ANON_KEY="$ANON_KEY" SUPABASE_TEST_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
 
-# treq_lib embeds the desktop frontend; the suite does not need a real build.
-[ -f src/dist/index.html ] || { mkdir -p src/dist && echo '<!doctype html>' >src/dist/index.html; }
-
 cargo test --manifest-path src-tauri/Cargo.toml --test remote_e2e_native -- --ignored --nocapture --test-threads=1

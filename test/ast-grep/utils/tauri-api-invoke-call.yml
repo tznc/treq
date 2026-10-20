@@ -1,6 +1,0 @@
-id: tauri-api-invoke-call
-language: TypeScript
-rule:
-  all:
-    - pattern: invoke("$CMD", $$$)
-    - kind: call_expression

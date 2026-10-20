@@ -34,9 +34,6 @@ The [nightly release](https://github.com/tznc/treq/releases/tag/nightly) also ca
 ## Develop
 
 ```bash
-# once: treq_lib embeds the desktop frontend, which this app does not use
-mkdir -p ../src/dist && echo '<!doctype html>' > ../src/dist/index.html
-
 cargo run                      # desktop window, for quick UI iteration
 cargo test --lib
 

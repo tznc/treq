@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lock_ext::LockExt;
 
-/// Every agent treq can launch, as `src/lib/agents.ts` lists them.
+/// Every agent treq can launch.
 pub const AGENTS: [(&str, &str); 4] = [
   ("claude", "Claude"),
   ("codex", "Codex"),

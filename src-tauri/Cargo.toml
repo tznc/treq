@@ -74,7 +74,7 @@ alacritty_terminal = { version = "0.26", default-features = false, optional = tr
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [dependencies]
-tauri = { version = "2.12", features = ["protocol-asset", "unstable"], optional = true }
+tauri = { version = "2.12", features = ["unstable"], optional = true }
 tauri-test = { version = "0.2.1", optional = true }
 napi = { version = "2", default-features = false, features = ["napi8", "async", "serde-json"], optional = true }
 napi-derive = { version = "2", optional = true }

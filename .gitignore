@@ -10,7 +10,6 @@ profile.json.gz
 
 # Build outputs
 /dist
-/src/dist
 *.log
 
 # IDE
@@ -53,13 +52,6 @@ src-tauri/gen/
 
 !/certs/.env
 
-# treq-napi
-# tauri-test writes a Node loader next to the cdylib
-src-tauri/target/index.js
-
-# screenshot harness output (compiled CSS, HTML snapshots, PNGs)
-scripts/screenshot/.generated/
-
 # Working copies of marketing recaptures. Committed README hero: assets/screenshots/code.png
 # Site crops are generated in Deploy Web CI, not committed, except native GPUI
 # sidebar captures under assets/screenshots/landing/ (browser capture cannot
@@ -72,9 +64,6 @@ web/static/img/landing/*.png
 
 # service-qa harness output (outcome manifests)
 scripts/service-qa/.generated/
-*storybook.log
-storybook-static
-scripts/storybook/.generated/
 .cursor-artifacts/
 .jj*/
 .agents/skills/treq*/

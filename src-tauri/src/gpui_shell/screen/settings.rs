@@ -238,7 +238,8 @@ fn options(pairs: &[(&str, &str)]) -> Vec<SelectOption> {
     .collect()
 }
 
-/// `AGENTS` in `src/lib/agents.ts`, after a first "default" option.
+/// The launchable agents (`core::agent_launch::AGENTS`), after a first
+/// "default" option.
 fn agent_options(default: &str) -> Vec<SelectOption> {
   options(&[
     ("", default),

@@ -1,7 +1,5 @@
 ruleDirs:
   - test/ast-grep/rules
   - test/ast-grep/rules-js
-utilDirs:
-  - test/ast-grep/utils
 testConfigs:
   - testDir: test/ast-grep/__tests__

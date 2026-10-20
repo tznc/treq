@@ -1,6 +1,5 @@
-//! Building blocks shared by GPUI screens, drawn to match the React app's
-//! `src/components/ui` primitives (sizes and colors from its Tailwind
-//! classes).
+//! Building blocks shared by GPUI screens: the sizes and colors the React
+//! app's UI primitives had, from their Tailwind classes.
 
 use std::{rc::Rc, time::Duration};
 
@@ -49,8 +48,8 @@ pub fn apply_zoom(window: &mut Window, cx: &App) {
 /// A click handler that GPUI elements can share.
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// Tailwind's text scale as `tailwind.config.js` overrides it: size and line
-/// height in pixels.
+/// The app's text scale (Tailwind's names, as the React UI overrode them):
+/// size and line height in pixels.
 #[derive(Clone, Copy)]
 pub enum TextSize {
   Xs,

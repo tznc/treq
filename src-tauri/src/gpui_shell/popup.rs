@@ -1788,8 +1788,8 @@ mod tests {
   }
 
   #[test]
-  fn reads_every_menu_icon_react_sends() {
-    // `MenuIcon` in src/lib/native-context-menu.ts.
+  fn reads_every_menu_icon() {
+    // Every icon a menu item can name.
     let names = [
       "archive",
       "copy",
