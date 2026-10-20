@@ -47,6 +47,7 @@ mod time;
 mod toasts;
 mod tooltips;
 mod ui;
+mod window;
 
 pub use overlay::OverlaySnapshot;
 pub use popup::{MenuEntry, Toast};
