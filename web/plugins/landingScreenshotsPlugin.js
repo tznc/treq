@@ -28,7 +28,7 @@ function landingScreenshotsPlugin(context) {
     async loadContent() {
       if (process.env.SKIP_LANDING_SCREENSHOTS === '1') {
         console.warn(
-          '[landing-screenshots] skipped capture (SKIP_LANDING_SCREENSHOTS=1). Using files already in static/img.',
+          '[landing-screenshots] skipped staging (SKIP_LANDING_SCREENSHOTS=1). Using files already in static/img.',
         );
         return;
       }
@@ -36,38 +36,20 @@ function landingScreenshotsPlugin(context) {
         return;
       }
 
-      const landingDir = path.join(context.siteDir, 'static', 'img', 'landing');
-      const listPath = path.join(
-        context.siteDir,
-        'src',
-        'data',
-        'landing-screenshots.json',
-      );
-      const files = JSON.parse(fs.readFileSync(listPath, 'utf8'));
-      fs.mkdirSync(landingDir, {recursive: true});
-
-      const missing = files.filter(
-        (name) => !fs.existsSync(path.join(landingDir, name)),
-      );
-      if (missing.length === 0 && process.env.FORCE_LANDING_SCREENSHOTS !== '1') {
-        return;
-      }
-
-      // Copies the committed screenshots (assets/screenshots/) into place.
-      const result = spawnSync('node', ['scripts/stage-landing-screenshots.mjs'], {
-        cwd: context.siteDir,
-        stdio: 'inherit',
-        env: process.env,
-        shell: false,
-      });
-      if (result.status !== 0) {
-        const stillMissing = files.filter(
-          (name) => !fs.existsSync(path.join(landingDir, name)),
-        );
-        if (stillMissing.length > 0) {
-          console.warn(
-            `[landing-screenshots] staging exited ${result.status}. Missing: ${stillMissing.join(', ')}.`,
-          );
+      // The landing PNGs are generated (e2e/desktop/landing), never
+      // committed: stage the hero, then fail the build on a missing PNG.
+      for (const script of [
+        'scripts/stage-landing-screenshots.mjs',
+        'scripts/assert-landing-screenshots.mjs',
+      ]) {
+        const result = spawnSync('node', [script], {
+          cwd: context.siteDir,
+          stdio: 'inherit',
+          env: process.env,
+          shell: false,
+        });
+        if (result.status !== 0) {
+          throw new Error(`[landing-screenshots] ${script} exited ${result.status}`);
         }
       }
     },
