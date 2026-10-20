@@ -186,7 +186,7 @@ pub struct WorkspaceMetadata {
   pub tracker_item_title: Option<String>,
 }
 
-/// Parse the creation metadata JSON sent by the frontend/NAPI callers.
+/// Parse the creation metadata JSON callers send.
 /// Unknown fields are ignored; empty arrays are normalized to `None`.
 /// Invalid or missing JSON yields an all-`None` metadata.
 pub fn parse_workspace_metadata(metadata: Option<&str>) -> WorkspaceMetadata {

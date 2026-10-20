@@ -117,7 +117,7 @@ jobs:
         run: npm ci
 
       # Desktop only links the `treq` binary. The staticlib and cdylib crate
-      # types exist for iOS/Android and the NAPI test addon, and with LTO each
+      # types exist for iOS/Android, and with LTO each
       # one is a separate whole-program link, roughly tripling link time.
       - name: Build only the rlib for desktop
         run: |
@@ -346,13 +346,6 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
@@ -434,9 +427,6 @@ jobs:
           jj --version
           gh --version
 
-      - name: Install dependencies
-        run: npm ci
-
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
@@ -448,25 +438,3 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --profile ci
-
-  windows-js-unit:
-    needs: check
-    if: needs.check.outputs.should_run == 'true'
-    name: test-js / test:unit / windows-latest
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run unit tests
-        run: npm run test:unit

@@ -6,18 +6,17 @@ sidebar_position: 4
 
 _Developer documentation for working on Treq locally._
 
-Treq splits into a React interface, a Rust core runtime, and a test bridge the integration tests use. Start any change by working out which layer owns the behavior, then write the smallest test that proves your change.
+The Treq desktop app is Rust throughout: GPUI draws the windows, and a core runtime owns the repository logic. Start any change by working out which layer owns the behavior, then write the smallest test that proves your change.
 
 ## Repository Layout
 
 | Path | Purpose |
 |---|---|
-| `src/` | React interface, hooks, shared frontend utilities, and app state providers. |
-| `src-tauri/src/commands/` | Thin command handlers. Keep business logic out of this layer. |
+| `src-tauri/src/gpui_shell/` | The windows: GPUI views and each window's model. |
+| `src-tauri/src/commands/` | Thin app-state handlers. Keep business logic out of this layer. |
 | `src-tauri/src/core/` | Workspace, commit, repository, and change-management logic. |
 | `src-tauri/src/jj.rs` | Jujutsu and Git repository integration. |
-| `src-tauri/` with `--features tauri-test` | Native test bridge (`tauri-test`) used by frontend integration tests. |
-| `test/` | Vitest unit and integration tests. |
+| `test/` | Vitest unit tests for the Supabase Edge Functions. |
 | `web/` | Documentation site. |
 
 ## Development Setup
@@ -44,30 +43,22 @@ npm start
 
 Backend changes are test-first. Write a failing Rust test, make the smallest change that passes it, then run it again.
 
-Frontend integration tests should hit the real backend through the native test bridge. Do not mock repository behavior when the feature leans on workspace state, file status, commits, or rebasing.
+Do not mock repository behavior when the feature leans on workspace state, file status, commits, or rebasing: the Rust tests run against real jj repositories.
 
 | Change type | Test location |
 |---|---|
 | Core Rust behavior | Inline tests next to the Rust module. |
-| Command behavior | Command tests plus integration coverage when user-visible. |
-| React behavior | `test/` for focused UI logic, `test/integration/` for workspace flows. |
+| Window and screen behavior | The `tests.rs` next to the view in `src-tauri/src/gpui_shell/`. |
 | Documentation | Markdown lint and local docs preview. |
 
 ## Common Commands
 
 ```bash
-npm run build:napi
-npm run test:run
-npm test
 cargo test --manifest-path src-tauri/Cargo.toml
-npm run screenshot:readme
+npm test
 ```
 
-Run `npm run build:napi` after Rust changes that integration tests depend on.
-
-`npm run screenshot:readme` (alias `npm run screenshot:landing`) captures the overview shot at `assets/screenshots/code.png` and the site shots under `web/static/img/`. Site shots stay out of git. The Deploy Web workflow generates them in the `landing-screenshots` job. The docs job then copies those PNGs into `web/static/img` (`/img/code.png` and `/img/landing/*`) before `docusaurus build`.
-
-Set `SKIP_LANDING_SCREENSHOTS=1` on docs-only CI so the site build does not recapture. Set `FORCE_LANDING_SCREENSHOTS=1` to recapture even when files already exist.
+The overview shot (`assets/screenshots/code.png`) and the site shots (`assets/screenshots/landing/`) are committed. The site build copies them into `web/static/img` (`/img/code.png` and `/img/landing/*`) before `docusaurus build`.
 
 ## Implementation Rules
 

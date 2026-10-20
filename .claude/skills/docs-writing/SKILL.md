@@ -119,8 +119,8 @@ Concept pages explain the system. They are not a dump of every UI affordance.
 
 When a review or the flow needs a UI crop:
 
-1. Prefer a real app capture via `/app-qa` / `scripts/screenshot/specs/` when the environment can build the native addon.
-2. Store docs assets under `web/static/img/docs/`. Pass `publishTo: "web/static/img/docs/<name>.png"` (and optionally `clipSelector`) to `captureDocument` so regenerating the spec updates the committed asset. Landing crops from `scripts/screenshot/specs/readme-*.spec.tsx` publish to gitignored `web/static/img/landing/`. The committed README/hero shot is `assets/screenshots/code.png`.
+1. Capture the running app.
+2. Store docs assets under `web/static/img/docs/`. Landing crops are committed under `assets/screenshots/landing/` and the README/hero shot is `assets/screenshots/code.png`; the web build copies both into `web/static/img/`.
 3. Embed with `ThemeAwareImage` from `@site/src/components/ThemeAwareImage` and a short caption.
 4. Crop tightly to the control. Do not ship a full-window dashboard when a button and menu suffice.
 

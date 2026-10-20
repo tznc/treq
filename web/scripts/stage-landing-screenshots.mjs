@@ -3,11 +3,10 @@
  * Puts hero + landing PNGs into web/static/img so Docusaurus can copy them.
  *
  * Order:
- * 1. Copy every PNG from an optional source tree (CI artifact).
+ * 1. Copy every PNG from an optional source tree (a fresh capture).
  * 2. If the hero is still missing, copy assets/screenshots/code.png.
  * 3. Copy committed crops from assets/screenshots/landing/ that are still
- *    missing. These are native captures of the GPUI sidebar, which browser
- *    capture cannot draw.
+ *    missing.
  * 4. If a landing crop is still missing, copy the hero so /img/landing/*.png
  *    never 404s when capture did not run.
  */

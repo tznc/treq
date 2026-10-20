@@ -63,10 +63,9 @@ jobs:
           workspaces: |
             . -> target
 
-      - name: Build frontend assets
-        run: |
-          npm ci
-          npm run build
+      # The Tauri CLI that packages the app below.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build release CLI binary
         run: cargo build --release --locked --bin treq --target aarch64-apple-darwin

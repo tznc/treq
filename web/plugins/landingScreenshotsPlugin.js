@@ -53,9 +53,9 @@ function landingScreenshotsPlugin(context) {
         return;
       }
 
-      const repoRoot = path.resolve(context.siteDir, '..');
-      const result = spawnSync('npm', ['run', 'screenshot:readme'], {
-        cwd: repoRoot,
+      // Copies the committed screenshots (assets/screenshots/) into place.
+      const result = spawnSync('node', ['scripts/stage-landing-screenshots.mjs'], {
+        cwd: context.siteDir,
         stdio: 'inherit',
         env: process.env,
         shell: false,
@@ -66,7 +66,7 @@ function landingScreenshotsPlugin(context) {
         );
         if (stillMissing.length > 0) {
           console.warn(
-            `[landing-screenshots] screenshot:readme exited ${result.status}. Missing: ${stillMissing.join(', ')}.`,
+            `[landing-screenshots] staging exited ${result.status}. Missing: ${stillMissing.join(', ')}.`,
           );
         }
       }

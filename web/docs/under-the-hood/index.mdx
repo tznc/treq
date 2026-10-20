@@ -181,12 +181,6 @@ The Rust PTY manager starts and tracks shell processes through `portable-pty`. O
 
 [Agent sessions](/docs/concepts/agent-sessions) use the same terminal path. Treq builds the agent command, feeds in the task prompt, and starts the process in the chosen workspace directory.
 
-## Native Test Bridge
-
-The `treq-napi` crate exposes the Rust backend as a Node native addon. Frontend integration tests swap Tauri dispatch for this bridge.
-
-The tests render the real React app and call the same Rust core against throwaway colocated repositories. They cover repository behavior without opening a desktop window.
-
 ## Concurrency Boundaries
 
 App state locks guard the mutable resources that commands share. Repository commit locks force changes to one repository path into single file.

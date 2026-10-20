@@ -1,7 +1,7 @@
 /**
- * Writes a plain-English outcome checklist next to each service-qa run, the
- * same role PNG expectations play in app-qa: Vitest asserts prove the
- * contract; this file is the agent-facing checklist for step 5 of the skill.
+ * Writes a plain-English outcome checklist next to each service-qa run:
+ * Vitest asserts prove the contract; this file is the agent-facing checklist
+ * for step 5 of the skill.
  */
 import fs from "node:fs";
 import path from "node:path";

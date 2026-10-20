@@ -32,8 +32,7 @@ Part of the `service-qa` skill.
    default (`{ pro: false }` for a Free user), since enabling and running
    the merge queue require it.
 6. **`recordOutcome(name, { expectations, details })`** — writes
-   `scripts/service-qa/.generated/<name>.json`. Like app-qa's
-   `captureDocument` expectations, these are plain-English claims for the
+   `scripts/service-qa/.generated/<name>.json`. These are plain-English claims for the
    agent checklist in step 5 — complementary to the Vitest `expect` calls,
    not a replacement.
 

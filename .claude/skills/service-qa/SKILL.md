@@ -19,16 +19,15 @@ description: >-
   asked. If you see `additionalContext` from `post-edit-service-qa.sh` naming a
   changed file, that *is* the request.
 
-## Relationship to app-qa
+## Relationship to the desktop UI tests
 
-| Skill | Proves | Stack |
+| Check | Proves | Stack |
 |---|---|---|
-| `/app-qa` | UI pixels and interaction | real jj + NAPI + jsdom React; **mocks** Supabase |
+| Desktop UI tests (Rust, `src-tauri/src/gpui_shell/`) | UI and interaction | real jj, GPUI test windows; Supabase stubbed |
 | `/service-qa` | Auth, RLS, RPCs, Edge Functions | real local Supabase CLI; **no** mocked supabase-js |
-| UI + live Supabase | Desktop button → real RPC/RLS + webhook drain | screenshot harness **without** mocking `src/lib/supabase` (see `scripts/screenshot/specs/service-qa-ui-live-supabase.spec.tsx`); enqueue via simulated `pull_request` labeled webhooks, CI via `check_suite`, merges via worker + `MERGE_QUEUE_GITHUB_STUB` |
 
-Do not substitute one for the other. A green `/app-qa` screenshot with a mocked
-`supabase.rpc` does not prove the migration or Edge Function works. A green
+Do not substitute one for the other. A green UI test with a stubbed Supabase
+does not prove the migration or Edge Function works. A green
 service-qa RPC alone does not prove the desktop button wiring is correct — when
 the user asks for screenshots of the UI talking to Supabase, capture via the
 screenshot harness against `http://127.0.0.1:54321` (email/password session on
@@ -188,7 +187,7 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    `<name>.json` so step 5 has a concrete checklist. Keep real Vitest
    assertions in the spec body too.
 
-   **At most 3 expectations per outcome** — same discipline as app-qa. If you
+   **At most 3 expectations per outcome.** If you
    need more, split into a second `recordOutcome` with its own `name`.
 
 4. **Run it.**
@@ -227,10 +226,11 @@ same contract, extend its steps instead of writing a near-duplicate file.
 
 ## What not to do
 
-- Do not mock `@supabase/supabase-js` or `src/lib/supabase`.
+- Do not mock `@supabase/supabase-js`.
 - Do not hit production Supabase.
 - Do not put business logic in the harness — only health, clients, seed, and
   outcome recording.
-- Do not start the full desktop UI inside service-qa; that is app-qa's job.
+- Do not start the full desktop UI inside service-qa; the desktop UI tests
+  cover it.
 - Do not skip the failing step: a green test written against a mock is a false
   test for this skill.

@@ -20,9 +20,6 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/actions/napi-addon/**"
       - ".github/workflows/warm-caches.yml"
   workflow_dispatch:
 
@@ -37,39 +34,6 @@ defaults:
     shell: bash
 
 jobs:
-  # Consumer: ci.yml test-js / test:integration (via the napi-addon action).
-  napi:
-    name: NAPI addon
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    env:
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_TEST_DEBUG: 0
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: install dependencies (ubuntu only)
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
-        with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: webkit-4.1-1
-          execute_install_scripts: true
-
-      - name: Install dependencies
-        run: npm ci
-
-      - uses: ./.github/actions/napi-addon
-        with:
-          warm: "true"
-
   # Consumer: ci.yml test-rust (clippy + tests, ubuntu).
   rust:
     name: clippy + test build / ubuntu-22.04

@@ -51,17 +51,7 @@ for Node, Rust, and Tauri Linux build dependencies. See the
 
 ### Regenerating screenshots
 
-The committed overview shot is `assets/screenshots/code.png`. Site crops are generated in the Deploy Web `landing-screenshots` job and are not committed.
-
-Regenerate locally with `npm run screenshot:readme`. Docs-only CI sets `SKIP_LANDING_SCREENSHOTS=1`.
-
-```bash
-npm run screenshot:readme
-# same as
-npm run screenshot:landing
-```
-
-Specs live at `scripts/screenshot/specs/readme-*.spec.tsx`.
+The overview shot (`assets/screenshots/code.png`) and the site crops (`assets/screenshots/landing/`, listed in `web/src/data/landing-screenshots.json`) are committed. To update one, capture the running app and replace the PNG; the web build copies them into `web/static/img`.
 
 ### Bumping the version
 

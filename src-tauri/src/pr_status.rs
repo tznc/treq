@@ -606,7 +606,7 @@ fn production_list_branches() -> BranchListFn {
   })
 }
 
-/// Initialize (or return) the process-global manager used by Tauri + NAPI.
+/// Initialize (or return) the process-global manager.
 pub fn global() -> &'static PrStatusManager {
   GLOBAL.get_or_init(|| {
     PrStatusManager::new_with_ci(
