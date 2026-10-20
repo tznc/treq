@@ -37,9 +37,10 @@ jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-24.04
-    # PRs get 15 minutes. The main push run saves the cache PRs restore, so
-    # it gets room for a cold build.
-    timeout-minutes: ${{ github.event_name == 'push' && 30 || 15 }}
+    # The main push run saves the cache PRs restore, so it gets room for a
+    # cold build. PRs get 25: one that adds dependencies main's cache lacks
+    # builds the desktop crate cold too.
+    timeout-minutes: ${{ github.event_name == 'push' && 30 || 25 }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1

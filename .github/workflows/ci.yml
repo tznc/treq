@@ -306,7 +306,9 @@ jobs:
   test-rust:
     needs: detect-changes
     if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
-    timeout-minutes: 20
+    # Warm runs take a few minutes; 30 leaves room for a PR whose new
+    # dependencies are not in main's cache yet (clippy + tests built cold).
+    timeout-minutes: 30
     # macOS runs after merge in warm-caches.yml: macOS runners are the
     # scarcest and slowest, and the tests rarely differ by platform.
     name: test-rust / clippy + test / ubuntu-22.04
