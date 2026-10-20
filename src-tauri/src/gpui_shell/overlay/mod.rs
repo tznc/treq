@@ -870,9 +870,11 @@ impl Render for Overlay {
                   this.child(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground).mr_2())
                 })
                 .child(
+                  // `[cmdk-input]` has no padding of its own: the row's.
                   Input::new(&input)
                     .appearance(false)
                     .bordered(false)
+                    .px_0()
                     .flex_1(),
                 ),
             )

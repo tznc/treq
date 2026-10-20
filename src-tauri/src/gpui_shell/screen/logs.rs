@@ -781,7 +781,7 @@ impl LogsView {
         self
           .search_input
           .as_ref()
-          .map(|i| Input::new(i).appearance(false).bordered(false)),
+          .map(|i| Input::new(i).appearance(false).bordered(false).px_0()),
       )
   }
 
