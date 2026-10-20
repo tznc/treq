@@ -59,7 +59,10 @@ mod tests {
     assert_eq!(cmd("p", false), Some(AppShortcut::Key("p")));
     assert_eq!(cmd("c", false), None);
     assert_eq!(cmd("k", true), None);
-    assert_eq!(app_shortcut("k", None, true, false, true, false, false), None);
+    assert_eq!(
+      app_shortcut("k", None, true, false, true, false, false),
+      None
+    );
   }
 
   #[test]
@@ -84,7 +87,13 @@ mod tests {
     assert_eq!(q(false, false), Some(AppShortcut::Key("?")));
     assert_eq!(q(true, false), None);
     assert_eq!(q(false, true), None);
-    assert_eq!(app_shortcut("/", Some("/"), false, false, false, false, false), None);
-    assert_eq!(app_shortcut("i", Some("i"), false, false, false, false, false), None);
+    assert_eq!(
+      app_shortcut("/", Some("/"), false, false, false, false, false),
+      None
+    );
+    assert_eq!(
+      app_shortcut("i", Some("i"), false, false, false, false, false),
+      None
+    );
   }
 }

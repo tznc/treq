@@ -288,7 +288,8 @@ pub fn open_window(
 /// last modifier pressed, so Ctrl+Shift+N reached GPUI as Shift+N.
 fn held_modifiers(mut m: gpui::Modifiers) -> gpui::Modifiers {
   #[cfg(target_os = "linux")]
-  if let Some(keymap) = gtk::gdk::Display::default().and_then(|d| gtk::gdk::Keymap::for_display(&d)) {
+  if let Some(keymap) = gtk::gdk::Display::default().and_then(|d| gtk::gdk::Keymap::for_display(&d))
+  {
     use gtk::gdk::ModifierType;
     let held = ModifierType::from_bits_truncate(keymap.modifier_state());
     m.control |= held.contains(ModifierType::CONTROL_MASK);
