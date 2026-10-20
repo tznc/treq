@@ -8,6 +8,7 @@
 //! comes back as the next [`Route`]. The Merge Queue tab and the PR review
 //! page are still React's: GPUI hands their routes back and React draws them.
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
@@ -17,8 +18,7 @@ use std::{
 
 use gpui_kit::component::{input::Input, GlobalState};
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, prelude::*, px, App, Context, Div, FocusHandle, FontWeight, SharedString,
-  Window,
+  self, deferred, div, prelude::*, App, Context, Div, FocusHandle, FontWeight, SharedString, Window,
 };
 
 use super::{
@@ -932,7 +932,7 @@ pub(super) fn tabs_list(p: &Palette) -> Div {
     .flex()
     .gap_1()
     .p_1()
-    .rounded(px(6.))
+    .rounded(zpx(6.))
     .bg(p.muted)
 }
 
@@ -946,10 +946,10 @@ pub(super) fn tab_trigger(
   named(div(), id)
     .flex()
     .items_center()
-    .gap(px(6.))
+    .gap(zpx(6.))
     .px_3()
     .py_1()
-    .rounded(px(6.))
+    .rounded(zpx(6.))
     .font_weight(FontWeight::MEDIUM)
     .cursor_pointer()
     .when(active, |t| {
@@ -1053,7 +1053,7 @@ impl GithubView {
       .border_r_1()
       .border_color(p.border)
       .overflow_hidden()
-      .when(show_detail, |d| d.w(px(380.)).flex_none())
+      .when(show_detail, |d| d.w(zpx(380.)).flex_none())
       .when(!show_detail, |d| d.flex_1().min_w_0())
       .child(header)
       .child(
@@ -1109,11 +1109,11 @@ impl GithubView {
         .when(!mq.pro, |t| {
           t.child(
             ui::text(div(), TextSize::Sm)
-              .line_height(px(13.))
+              .line_height(zpx(13.))
               .font_weight(FontWeight::SEMIBOLD)
               .px_1()
-              .py(px(1.))
-              .rounded(px(4.))
+              .py(zpx(1.))
+              .rounded(zpx(4.))
               .bg(tw::color(tw::GREEN_500).opacity(0.2))
               .text_color(green)
               .child("PRO"),
@@ -1137,8 +1137,8 @@ impl GithubView {
       .gap_1()
       .border_1()
       .border_color(p.border)
-      .rounded(px(6.))
-      .p(px(2.))
+      .rounded(zpx(6.))
+      .p(zpx(2.))
       .bg(p.muted.opacity(0.3))
       .children(StateFilter::options(self.route.tab).iter().map(|&filter| {
         let active = filter == current;
@@ -1147,8 +1147,8 @@ impl GithubView {
           TextSize::Sm,
         )
         .px_2()
-        .py(px(2.))
-        .rounded(px(4.))
+        .py(zpx(2.))
+        .rounded(zpx(4.))
         .cursor_pointer()
         .when(active, |b| {
           b.bg(p.background).text_color(p.foreground).shadow_sm()
@@ -1176,12 +1176,12 @@ impl GithubView {
         .id("github-search")
         .debug_selector(|| "github-search".into())
         .flex_1()
-        .min_w(px(160.))
-        .max_w(px(320.))
+        .min_w(zpx(160.))
+        .max_w(zpx(320.))
         .child(ui::text(
           Styled::h(
             Input::new(&state).prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
-            px(28.),
+            zpx(28.),
           ),
           TextSize::Sm,
         ))
@@ -1202,8 +1202,8 @@ impl GithubView {
         Button::new("github-refresh", p)
           .variant(Variant::Ghost)
           .size(Size::Icon)
-          .w(px(28.))
-          .h(px(28.))
+          .w(zpx(28.))
+          .h(zpx(28.))
           .icon(theme::ICON_REFRESH, 14.)
           .on_click(cx.listener(|view, _, _, cx| view.reload_list(false, cx))),
       )
@@ -1211,7 +1211,7 @@ impl GithubView {
         d.child(
           Button::new("github-new", p)
             .size(Size::Sm)
-            .h(px(28.))
+            .h(zpx(28.))
             .gap_0()
             .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground).mr_1())
             .label("New")
@@ -1231,7 +1231,7 @@ impl GithubView {
     let button = Button::new("github-filters", p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .h(px(28.))
+      .h(zpx(28.))
       .gap_1()
       .when(count > 0, |b| {
         b.border_color(p.primary.opacity(0.4))
@@ -1244,7 +1244,7 @@ impl GithubView {
           ui::text(div(), TextSize::Xs)
             .rounded_full()
             .bg(p.primary)
-            .px(px(6.))
+            .px(zpx(6.))
             .text_color(p.primary_foreground)
             .child(count.to_string()),
         )
@@ -1366,7 +1366,7 @@ impl GithubView {
               .child(label),
           )
           .child(ui::text(
-            div().h(px(32.)).child(form::select_field(
+            div().h(zpx(32.)).child(form::select_field(
               SharedString::from(field.replace('.', "-")),
               &state,
               false,
@@ -1409,14 +1409,14 @@ impl GithubView {
     deferred(
       named(div(), "github-filters-popover")
         .absolute()
-        .top(px(32.))
+        .top(zpx(32.))
         .left_0()
-        .w(px(448.))
+        .w(zpx(448.))
         .p_3()
         .flex()
         .flex_col()
         .gap_2()
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(p.border)
         .bg(p.popover)
@@ -1571,7 +1571,7 @@ impl GithubView {
                       .child(parts::state_chip(&pr.state, pr.is_draft, p))
                       .child(
                         div()
-                          .max_w(px(160.))
+                          .max_w(zpx(160.))
                           .truncate()
                           .child(pr.author.login.clone()),
                       )
@@ -1585,14 +1585,14 @@ impl GithubView {
                             .font_family(theme::MONO_FONT)
                             .child(
                               div()
-                                .max_w(px(256.))
+                                .max_w(zpx(256.))
                                 .truncate()
                                 .child(pr.head_ref_name.clone()),
                             )
                             .child(div().flex_none().child("→"))
                             .child(
                               div()
-                                .max_w(px(256.))
+                                .max_w(zpx(256.))
                                 .truncate()
                                 .child(pr.base_ref_name.clone()),
                             ),
@@ -1633,7 +1633,7 @@ impl GithubView {
     named(div(), id)
       .w_full()
       .px_3()
-      .py(px(10.))
+      .py(zpx(10.))
       .border_b_1()
       .border_color(p.border)
       .flex()

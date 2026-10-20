@@ -3,6 +3,7 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -12,7 +13,7 @@ use std::{
 
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
-  self, div, img, prelude::*, px, rgb, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
+  self, div, img, prelude::*, rgb, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
   FocusHandle, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels,
   SharedString, Stateful, Subscription, Window,
 };
@@ -643,7 +644,7 @@ fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
     .flex()
     .items_center()
     .justify_center()
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .when(disabled, |d| d.opacity(0.4))
     .when(!disabled, |d| {
       d.cursor_pointer().hover(|s| s.bg(white(0.15)))
@@ -689,7 +690,7 @@ impl Lightbox {
             b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom + 1., cx)))
           }),
         )
-        .child(div().mx(px(2.)).h_4().w_px().bg(white(0.2)));
+        .child(div().mx(zpx(2.)).h_4().w_px().bg(white(0.2)));
     }
     let pill = content(
       pill
@@ -712,14 +713,14 @@ impl Lightbox {
         ui::text(div(), TextSize::Sm)
           .id("treq-send-review-input")
           .debug_selector(|| "treq-send-review-input".into())
-          .min_w(px(224.))
-          .max_w(px(448.))
+          .min_w(zpx(224.))
+          .max_w(zpx(448.))
           .flex_1()
           .h_9()
           .px_3()
           .flex()
           .items_center()
-          .rounded(px(6.))
+          .rounded(zpx(6.))
           .border_1()
           .border_color(white(0.15))
           .bg(gpui::black().opacity(0.4))
@@ -758,10 +759,10 @@ impl Lightbox {
     let box_at = move |rect: Rect| {
       div()
         .absolute()
-        .left(px(rect.x as f32 * w))
-        .top(px(rect.y as f32 * h))
-        .w(px(rect.width as f32 * w))
-        .h(px(rect.height as f32 * h))
+        .left(zpx(rect.x as f32 * w))
+        .top(zpx(rect.y as f32 * h))
+        .w(zpx(rect.width as f32 * w))
+        .h(zpx(rect.height as f32 * h))
         .border_2()
     };
     let mut layer = div()
@@ -769,8 +770,8 @@ impl Lightbox {
       .debug_selector(|| "treq-send-highlight-layer".into())
       .relative()
       .flex_none()
-      .w(px(w))
-      .h(px(h))
+      .w(zpx(w))
+      .h(zpx(h))
       .child(
         img(PathBuf::from(&asset.path))
           .object_fit(ObjectFit::Contain)
@@ -812,7 +813,7 @@ impl Lightbox {
           .top_0()
           .ml_2()
           .w_56()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .border_1()
           .border_color(white(0.2))
           .bg(rgb(ZINC_950))
@@ -821,10 +822,10 @@ impl Lightbox {
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .child(
             ui::text(div(), TextSize::Sm)
-              .min_h(px(72.))
+              .min_h(zpx(72.))
               .px_3()
               .py_2()
-              .rounded(px(6.))
+              .rounded(zpx(6.))
               .border_1()
               .border_color(white(0.15))
               .text_color(rgb(ZINC_100))
@@ -841,7 +842,7 @@ impl Lightbox {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(8.))
+                .rounded(zpx(8.))
                 .cursor_pointer()
                 .hover(|s| s.bg(white(0.1)))
                 .on_click(cx.listener(move |view, _, _, cx| view.remove_highlight(id, cx)))
@@ -874,11 +875,11 @@ impl Lightbox {
       .overflow_scroll()
       .flex()
       .when(zoomed, |d| {
-        d.h(px(vh * 0.8))
+        d.h(zpx(vh * 0.8))
           .items_start()
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
       })
-      .when(!zoomed, |d| d.max_h(px(vh * 0.8)).items_center())
+      .when(!zoomed, |d| d.max_h(zpx(vh * 0.8)).items_center())
       // An image wider than the box scrolls from its left edge.
       .when(w <= shell, |d| d.justify_center())
       .child(layer);
@@ -904,7 +905,7 @@ impl Lightbox {
           .items_start()
           .gap_3()
           .px_4()
-          .py(px(2.))
+          .py(zpx(2.))
           .hover(|s| s.bg(white(0.05)))
           .when(pending, |d| d.bg(rgb(RED).opacity(0.15)))
           .when(commented, |d| d.bg(rgb(AMBER_500).opacity(0.1)))
@@ -921,7 +922,7 @@ impl Lightbox {
               .flex_none()
               .flex()
               .justify_end()
-              .line_height(px(TEXT_LINE))
+              .line_height(zpx(TEXT_LINE))
               .text_color(rgb(ZINC_500))
               .child(n.to_string()),
           )
@@ -952,10 +953,10 @@ impl Lightbox {
               .font_family(theme::SANS_FONT)
               .child(
                 ui::text(div(), TextSize::Sm)
-                  .min_h(px(72.))
+                  .min_h(zpx(72.))
                   .px_3()
                   .py_2()
-                  .rounded(px(6.))
+                  .rounded(zpx(6.))
                   .border_1()
                   .border_color(palette.input)
                   .bg(palette.background)
@@ -1022,12 +1023,12 @@ impl Lightbox {
       .id("treq-send-text-preview")
       .debug_selector(|| "treq-send-text-preview".into())
       .w_full()
-      .max_w(px(1152.))
-      .max_h(px(max_h))
+      .max_w(zpx(1152.))
+      .max_h(zpx(max_h))
       .flex()
       .flex_col()
       .overflow_hidden()
-      .rounded(px(12.))
+      .rounded(zpx(12.))
       .bg(rgb(ZINC_900))
       .shadow_2xl()
       .child(
@@ -1036,7 +1037,7 @@ impl Lightbox {
           .border_b_1()
           .border_color(white(0.1))
           .px_4()
-          .py(px(6.))
+          .py(zpx(6.))
           .text_color(rgb(ZINC_500))
           .child("Click a line to comment. Drag or Shift+click to select multiple lines."),
       )
@@ -1047,8 +1048,8 @@ impl Lightbox {
           .flex_shrink(1.)
           .overflow_y_scroll()
           .font_family(theme::MONO_FONT)
-          .text_size(px(13.))
-          .line_height(px(TEXT_LINE))
+          .text_size(zpx(13.))
+          .line_height(zpx(TEXT_LINE))
           .text_color(rgb(ZINC_100))
           .children(rows),
       );
@@ -1077,7 +1078,7 @@ impl Lightbox {
         .debug_selector(move || id.into())
         .absolute()
         .top(gpui::relative(0.5))
-        .mt(px(-32.))
+        .mt(zpx(-32.))
         .when(next, |d| d.right_3())
         .when(!next, |d| d.left_3())
         .size_16()
@@ -1110,9 +1111,9 @@ impl Lightbox {
       .id("treq-send-unsaved-dialog")
       .debug_selector(|| "treq-send-unsaved-dialog".into())
       .w_full()
-      .max_w(px(512.))
+      .max_w(zpx(512.))
       .p_6()
-      .rounded(px(16.))
+      .rounded(zpx(16.))
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
@@ -1123,10 +1124,10 @@ impl Lightbox {
         div()
           .flex()
           .flex_col()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(px(15.))
+              .line_height(zpx(15.))
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .child("Discard unsent comments?"),
           )
@@ -1204,7 +1205,7 @@ impl Render for Lightbox {
       .flex()
       .flex_col()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .children(current.as_ref().map(|asset| {
         ui::text(div(), TextSize::Sm)
           .id("treq-send-preview-title")
@@ -1259,8 +1260,8 @@ impl Render for Lightbox {
           .id("treq-send-preview-carousel-shell")
           .debug_selector(|| "treq-send-preview-carousel-shell".into())
           .relative()
-          .w(px(vw * 0.9))
-          .min_w(px(vw * 0.75))
+          .w(zpx(vw * 0.9))
+          .min_w(zpx(vw * 0.75))
           .px_3()
           .on_mouse_down(
             MouseButton::Left,

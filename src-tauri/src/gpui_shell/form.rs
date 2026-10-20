@@ -7,6 +7,7 @@
 //! field keeps what is typed rather than taking the snapshot's value, which
 //! can lag a keystroke behind.
 
+use crate::gpui_shell::ui::zpx;
 use std::collections::HashMap;
 
 use gpui_kit::component::{
@@ -18,7 +19,7 @@ use gpui_kit::component::{
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, px, App, Context, Entity, Focusable as _, SharedString, Subscription, Window,
+  div, prelude::*, App, Context, Entity, Focusable as _, SharedString, Subscription, Window,
 };
 
 use super::{
@@ -282,7 +283,7 @@ pub fn input_field(
     .w_full()
     .child(
       // `Input::h` sets a multi-line height; a single line takes its own.
-      Styled::h(ui::input(state).disabled(disabled), px(FIELD_HEIGHT))
+      Styled::h(ui::input(state).disabled(disabled), zpx(FIELD_HEIGHT))
         .when(mono, |this| this.font_family(theme::MONO_FONT)),
     )
 }
@@ -294,7 +295,7 @@ pub fn textarea_field(
   disabled: bool,
 ) -> impl IntoElement {
   Textarea::new(state)
-    .text_size(px(13.))
+    .text_size(zpx(13.))
     .disabled(disabled)
     .when(mono, |this| this.font_family(theme::MONO_FONT))
 }
@@ -315,7 +316,7 @@ pub fn select_field(
       Select::new(state)
         .id(id)
         .disabled(disabled)
-        .h(px(FIELD_HEIGHT)),
+        .h(zpx(FIELD_HEIGHT)),
     )
 }
 
@@ -359,8 +360,8 @@ pub fn switch_sized(
     .flex()
     .flex_none()
     .items_center()
-    .w(px(width))
-    .h(px(height))
+    .w(zpx(width))
+    .h(zpx(height))
     .rounded_full()
     .border_2()
     .border_color(gpui_kit::transparent_black())
@@ -373,11 +374,11 @@ pub fn switch_sized(
     .when(disabled, |this| this.opacity(0.5))
     .child(
       div()
-        .size(px(thumb))
+        .size(zpx(thumb))
         .rounded_full()
         .bg(palette.background)
         .shadow_lg()
-        .when(checked, |this| this.ml(px(width - 4. - thumb))),
+        .when(checked, |this| this.ml(zpx(width - 4. - thumb))),
     )
     .when(!disabled, |this| {
       this

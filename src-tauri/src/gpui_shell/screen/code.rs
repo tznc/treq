@@ -9,6 +9,7 @@
 //!
 //! [`code_data`]: super::code_data
 
+use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::{
@@ -866,7 +867,7 @@ const YELLOW_500: u32 = 0xeab308;
 
 /// `rounded-lg border` around a section.
 fn section(p: &Palette) -> Div {
-  div().rounded(px(12.)).border_1().border_color(p.border)
+  div().rounded(zpx(12.)).border_1().border_color(p.border)
 }
 
 /// A dropdown's panel (`DropdownMenuContent`), drawn over the tab.
@@ -876,7 +877,7 @@ pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
     .debug_selector(move || id.into())
     .absolute()
     .p_1()
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .border_1()
     .border_color(p.border)
     .bg(p.popover)
@@ -897,8 +898,8 @@ pub(super) fn menu_item(id: impl Into<SharedString>, p: &Palette, disabled: bool
     .items_center()
     .gap_2()
     .px_2()
-    .py(px(6.))
-    .rounded(px(6.))
+    .py(zpx(6.))
+    .rounded(zpx(6.))
     .when(disabled, |this| this.opacity(0.5))
     .when(!disabled, |this| {
       this.cursor_pointer().hover(move |s| s.bg(hover))
@@ -917,12 +918,12 @@ pub(super) fn checkbox(
   div()
     .id(id)
     .debug_selector(move || selector)
-    .size(px(13.))
+    .size(zpx(13.))
     .flex_none()
     .flex()
     .items_center()
     .justify_center()
-    .rounded(px(3.))
+    .rounded(zpx(3.))
     .when(checked, |this| {
       this
         .bg(accent)
@@ -939,13 +940,13 @@ pub(super) fn checkbox(
 /// `ui/kbd.tsx`.
 pub(super) fn kbd(p: &Palette, text: &str) -> Div {
   ui::text(div(), TextSize::Xs)
-    .h(px(20.))
-    .min_w(px(20.))
+    .h(zpx(20.))
+    .min_w(zpx(20.))
     .px_1()
     .flex()
     .items_center()
     .justify_center()
-    .rounded(px(6.))
+    .rounded(zpx(6.))
     .bg(p.muted)
     .text_color(p.muted_foreground)
     .font_weight(FontWeight::MEDIUM)
@@ -988,8 +989,8 @@ pub(super) fn markdown(
     .replace_all(text, "")
     .to_string();
   div()
-    .text_size(px(size))
-    .line_height(px(line))
+    .text_size(zpx(size))
+    .line_height(zpx(line))
     .child(TextView::markdown(id, text).style(style).selectable(true))
 }
 
@@ -1032,7 +1033,7 @@ impl Render for CodeView {
       .child(left)
       .child(
         div()
-          .w(px(240.))
+          .w(zpx(240.))
           .flex_none()
           .h_full()
           .bg(p.muted.opacity(0.2))
@@ -1043,18 +1044,18 @@ impl Render for CodeView {
 }
 
 fn skeleton(p: &Palette) -> impl IntoElement {
-  let bar = |h: f32| div().h(px(h)).rounded(px(4.)).bg(p.muted.opacity(0.4));
+  let bar = |h: f32| div().h(zpx(h)).rounded(zpx(4.)).bg(p.muted.opacity(0.4));
   div()
     .debug_selector(|| "workspace-overview-skeleton".into())
     .flex()
     .flex_col()
     .gap_4()
     .child(pulse(
-      div().h(px(40.)).rounded(px(12.)).bg(p.muted.opacity(0.5)),
+      div().h(zpx(40.)).rounded(zpx(12.)).bg(p.muted.opacity(0.5)),
       "sk-1",
     ))
     .child(pulse(
-      div().h(px(40.)).rounded(px(12.)).bg(p.muted.opacity(0.5)),
+      div().h(zpx(40.)).rounded(zpx(12.)).bg(p.muted.opacity(0.5)),
       "sk-2",
     ))
     .child(
@@ -1065,9 +1066,9 @@ fn skeleton(p: &Palette) -> impl IntoElement {
         .gap_2()
         .child(pulse(
           div()
-            .h(px(16.))
-            .w(px(128.))
-            .rounded(px(4.))
+            .h(zpx(16.))
+            .w(zpx(128.))
+            .rounded(zpx(4.))
             .bg(p.muted.opacity(0.5)),
           "sk-3",
         ))
@@ -1088,7 +1089,7 @@ impl CodeView {
     Some(
       div()
         .debug_selector(|| "code-conflicts".into())
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(red.opacity(0.3))
         .bg(red.opacity(0.05))
@@ -1098,7 +1099,7 @@ impl CodeView {
         .gap_3()
         .child(
           div()
-            .mt(px(2.))
+            .mt(zpx(2.))
             .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 20., red)),
         )
         .child(
@@ -1156,13 +1157,13 @@ impl CodeView {
     div()
       .debug_selector(|| "agent-task-input".into())
       .w_full()
-      .max_w(px(672.))
+      .max_w(zpx(672.))
       .mx_auto()
       .child(
         div()
           .id("task-card")
-          .min_h(px(112.))
-          .rounded(px(16.))
+          .min_h(zpx(112.))
+          .rounded(zpx(16.))
           .border_1()
           .border_color(border)
           .bg(p.background)
@@ -1208,15 +1209,15 @@ impl CodeView {
               .px_3()
               .pt_3()
               .pb_1()
-              .min_h(px(44.))
-              .max_h(px(200.))
+              .min_h(zpx(44.))
+              .max_h(zpx(200.))
               .child(
                 Textarea::new(&task)
                   .appearance(false)
                   .bordered(false)
                   .xsmall()
-                  .text_size(px(13.))
-                  .line_height(px(20.)),
+                  .text_size(zpx(13.))
+                  .line_height(zpx(20.)),
               ),
           )
           .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
@@ -1235,7 +1236,7 @@ impl CodeView {
       .debug_selector(|| "task-mentions".into())
       .mx_2()
       .mb_1()
-      .rounded(px(12.))
+      .rounded(zpx(12.))
       .border_1()
       .border_color(p.border)
       .bg(p.muted.opacity(0.5))
@@ -1259,7 +1260,7 @@ impl CodeView {
           .debug_selector(move || selector)
           .w_full()
           .px_3()
-          .py(px(6.))
+          .py(zpx(6.))
           .flex()
           .items_center()
           .gap_2()
@@ -1294,7 +1295,7 @@ impl CodeView {
     let new_workspace = (self.parent.workspace.is_none())
       .then(|| self.settings.as_ref().map(|s| s.new_workspace))
       .flatten();
-    let small = |b: Button| b.size(Size::Sm).h(px(28.));
+    let small = |b: Button| b.size(Size::Sm).h(zpx(28.));
 
     let add = div()
       .relative()
@@ -1324,7 +1325,7 @@ impl CodeView {
           .ml_1()
           .flex()
           .items_center()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .child(form::switch_sized(
             "task-new-workspace",
             on,
@@ -1358,7 +1359,7 @@ impl CodeView {
           .id("task-save-default")
           .flex()
           .items_center()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .cursor_pointer()
           .text_color(p.muted_foreground)
           .child(checkbox("task-save-default-box", checked, tw(BLUE_500), p))
@@ -1377,18 +1378,18 @@ impl CodeView {
         .relative()
         .flex()
         .items_center()
-        .gap(px(6.))
+        .gap(zpx(6.))
         .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
         .child(
           ui::text(div(), TextSize::Xs)
             .id("task-agent")
             .debug_selector(|| "task-agent".into())
-            .h(px(28.))
+            .h(zpx(28.))
             .px_2()
             .flex()
             .items_center()
             .gap_1()
-            .rounded(px(8.))
+            .rounded(zpx(8.))
             .border_1()
             .border_color(p.border)
             .bg(p.background)
@@ -1435,7 +1436,7 @@ impl CodeView {
             .rounded_l_none()
             .border_l_1()
             .border_color(gpui::white().opacity(0.2))
-            .px(px(6.))
+            .px(zpx(6.))
             .icon(theme::ICON_CHEVRON_DOWN, 14.)
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
         )
@@ -1469,9 +1470,9 @@ impl CodeView {
 
   fn add_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let panel = menu_panel("task-add-menu", p)
-      .top(px(32.))
+      .top(zpx(32.))
       .left_0()
-      .min_w(px(128.))
+      .min_w(zpx(128.))
       .child(
         menu_item("task-add-file", p, false)
           .child(ui::icon(theme::ICON_PLUS, 16., p.popover_foreground))
@@ -1489,9 +1490,9 @@ impl CodeView {
 
   fn plan_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let panel = menu_panel("task-plan-menu", p)
-      .top(px(32.))
+      .top(zpx(32.))
       .right_0()
-      .w(px(224.))
+      .w(zpx(224.))
       .child(
         menu_item("task-plan", p, false)
           .items_start()
@@ -1499,7 +1500,7 @@ impl CodeView {
             div()
               .flex()
               .flex_col()
-              .gap(px(2.))
+              .gap(zpx(2.))
               .child(div().font_weight(FontWeight::MEDIUM).child("Plan"))
               .child(
                 ui::text(div(), TextSize::Xs)
@@ -1514,9 +1515,9 @@ impl CodeView {
 
   fn agent_menu(&self, selected: Agent, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let panel = menu_panel("task-agent-menu", p)
-      .top(px(32.))
+      .top(zpx(32.))
       .right_0()
-      .min_w(px(128.))
+      .min_w(zpx(128.))
       .children(Agent::ALL.into_iter().map(|agent| {
         menu_item(format!("task-agent-{}", agent.id()), p, false)
           .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
@@ -1566,7 +1567,7 @@ impl CodeView {
       Self::start_devcontainer,
       cx,
     )
-    .top(px(32.))
+    .top(zpx(32.))
     .right_0();
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
   }
@@ -1609,8 +1610,8 @@ impl CodeView {
               Button::new("workspace-description-edit", p)
                 .variant(Variant::Ghost)
                 .size(Size::Icon)
-                .w(px(28.))
-                .h(px(28.))
+                .w(zpx(28.))
+                .h(zpx(28.))
                 .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
                 .on_click(cx.listener(move |view, _, window, cx| {
                   view.edit_description(text.clone(), window, cx)
@@ -1712,7 +1713,7 @@ impl CodeView {
     let header = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .font_weight(FontWeight::SEMIBOLD)
       .text_color(p.muted_foreground)
       .mb_4()
@@ -1737,8 +1738,8 @@ impl CodeView {
       .child(
         div()
           .flex_none()
-          .mt(px(2.))
-          .size(px(14.))
+          .mt(zpx(2.))
+          .size(zpx(14.))
           .flex()
           .items_center()
           .justify_center()
@@ -1767,10 +1768,10 @@ impl CodeView {
             .child(
               div()
                 .absolute()
-                .left(px(7.))
+                .left(zpx(7.))
                 .top_2()
                 .bottom_2()
-                .w(px(2.))
+                .w(zpx(2.))
                 .bg(p.border),
             )
             .children(rows)
@@ -1814,7 +1815,7 @@ impl CodeView {
       .py_2()
       .px_2()
       .mx_neg_2()
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .cursor_pointer()
       .when(row.current, |this| {
         this
@@ -1836,7 +1837,7 @@ impl CodeView {
               .flex()
               .items_center()
               .gap_2()
-              .mt(px(2.))
+              .mt(zpx(2.))
               .flex_wrap()
               .child(time)
               .when(ins > 0 || del > 0, |this| {
@@ -1871,12 +1872,12 @@ impl CodeView {
         .py_2()
         .border_1()
         .border_color(p.border)
-        .rounded(px(12.))
+        .rounded(zpx(12.))
         .bg(p.background)
         .hover(move |s| s.bg(hover))
         .cursor_pointer()
         .w_full()
-        .max_w(px(320.))
+        .max_w(zpx(320.))
         .child(ui::icon(theme::ICON_SEARCH, 16., p.muted_foreground))
         .child(
           ui::text(div(), TextSize::Sm)
@@ -1968,8 +1969,8 @@ impl CodeView {
                     .min_w_0()
                     .flex()
                     .font_family(theme::MONO_FONT)
-                    .text_size(px(font))
-                    .line_height(px((font * 1.5).round()))
+                    .text_size(zpx(font))
+                    .line_height(zpx((font * 1.5).round()))
                     .child(
                       div()
                         .min_w_0()
@@ -1995,7 +1996,7 @@ impl CodeView {
                   .id(SharedString::from(format!("submodule-sync-{path}")))
                   .flex()
                   .items_center()
-                  .gap(px(6.))
+                  .gap(zpx(6.))
                   .flex_none()
                   .pr_4()
                   .pl_2()
@@ -2117,10 +2118,10 @@ impl CodeView {
     let mut track = div().relative().child(
       div()
         .absolute()
-        .left(px(7.))
+        .left(zpx(7.))
         .top_2()
         .bottom_2()
-        .w(px(2.))
+        .w(zpx(2.))
         .bg(p.border),
     );
     if let Some(wc) = &tentative {
@@ -2158,7 +2159,7 @@ impl CodeView {
             this
               .flex()
               .items_center()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .child(ui::spinner("history-loading", 12., p.muted_foreground))
               .child("Loading...")
           })
@@ -2272,8 +2273,8 @@ impl CodeView {
       .debug_selector(move || selector)
       .flex_1()
       .min_w_0()
-      .pt(px(2.))
-      .rounded(px(8.))
+      .pt(zpx(2.))
+      .rounded(zpx(8.))
       .cursor_pointer()
       .when(first && !target && !tentative, |this| {
         // Opaque over the column's `bg-muted/20`, or the shadow shows through.
@@ -2299,7 +2300,7 @@ impl CodeView {
         |this, label| {
           this.child(
             ui::text(div(), TextSize::Sm)
-              .mt(px(2.))
+              .mt(zpx(2.))
               .font_family(theme::MONO_FONT)
               .text_color(p.muted_foreground)
               .truncate()
@@ -2312,13 +2313,13 @@ impl CodeView {
           .flex()
           .items_center()
           .gap_2()
-          .mt(px(2.))
+          .mt(zpx(2.))
           .flex_wrap()
           .when(commit.is_immutable, |this| {
             this.child(
               ui::text(div(), TextSize::Xs)
-                .px(px(6.))
-                .py(px(2.))
+                .px(zpx(6.))
+                .py(zpx(2.))
                 .rounded_full()
                 .bg(p.muted)
                 .text_color(p.muted_foreground)
@@ -2360,7 +2361,7 @@ impl CodeView {
       .py_2()
       .px_2()
       .mx_neg_2()
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .hover(move |s| s.bg(hover))
       .when(tentative, |this| {
         this.bg(yellow_bg).border_1().border_color(yellow_border)
@@ -2369,7 +2370,7 @@ impl CodeView {
       .child(
         div().relative().flex_none().child(
           div()
-            .size(px(14.))
+            .size(zpx(14.))
             .rounded_full()
             .border_2()
             .border_color(p.background)
@@ -2402,11 +2403,11 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
   let dashes = || {
     div()
       .flex_1()
-      .h(px(1.))
+      .h(zpx(1.))
       .overflow_hidden()
       .flex()
-      .gap(px(3.))
-      .children((0..60).map(|_| div().flex_none().w(px(3.)).h(px(1.)).bg(p.border)))
+      .gap(zpx(3.))
+      .children((0..60).map(|_| div().flex_none().w(zpx(3.)).h(zpx(1.)).bg(p.border)))
   };
   div().my_4().pl_7().child(
     div()
@@ -2426,9 +2427,9 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
 
 /// `StackDot`.
 fn stack_dot(highlighted: bool, p: &Palette) -> impl IntoElement {
-  div().flex_none().mt(px(2.)).child(
+  div().flex_none().mt(zpx(2.)).child(
     div()
-      .size(px(14.))
+      .size(zpx(14.))
       .rounded_full()
       .border_2()
       .border_color(p.background)
@@ -2466,7 +2467,7 @@ fn loc_indicator(
     ui::text(div(), TextSize::Xs)
       .flex_none()
       .whitespace_nowrap()
-      .w(px(ch as f32 * CH))
+      .w(zpx(ch as f32 * CH))
       .font_family(theme::MONO_FONT)
       .text_color(color)
       .child(text)
@@ -2475,7 +2476,7 @@ fn loc_indicator(
     .debug_selector(|| "workspace-loc-indicator".into())
     .flex()
     .items_center()
-    .gap(px(6.))
+    .gap(zpx(6.))
     .child(
       count(format!("+{insertions}"), green, plus_ch)
         .flex()
@@ -2486,22 +2487,22 @@ fn loc_indicator(
         .flex()
         .flex_none()
         .items_center()
-        .h(px(6.))
+        .h(zpx(6.))
         .child(
           div()
             .flex()
             .justify_end()
             .h_full()
-            .w(px(HALF))
-            .child(div().h_full().w(px(width(insertions))).bg(green)),
+            .w(zpx(HALF))
+            .child(div().h_full().w(zpx(width(insertions))).bg(green)),
         )
         .child(div().w_px().h_full().bg(p.border))
         .child(
           div()
             .flex()
             .h_full()
-            .w(px(HALF))
-            .child(div().h_full().w(px(width(deletions))).bg(red)),
+            .w(zpx(HALF))
+            .child(div().h_full().w(zpx(width(deletions))).bg(red)),
         ),
     )
     .child(count(format!("-{deletions}"), red, minus_ch))

@@ -9,6 +9,7 @@
 //!
 //! [`commits_data`]: super::commits_data
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1374,9 +1375,9 @@ pub(super) fn dialog_panel(
   let panel = div()
     .debug_selector(move || id.into())
     .w_full()
-    .max_w(px(max_width))
+    .max_w(zpx(max_width))
     .p_6()
-    .rounded(px(16.))
+    .rounded(zpx(16.))
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -1387,7 +1388,7 @@ pub(super) fn dialog_panel(
 
 pub(super) fn dialog_title(title: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(px(15.))
+    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(title)
 }
@@ -1401,8 +1402,8 @@ pub(super) fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> 
 /// A pill badge (`px-1.5 py-0.5 rounded-full border font-medium`).
 fn badge(text: &'static str, fg: Hsla, bg: Hsla, border: Hsla) -> Div {
   div()
-    .px(px(6.))
-    .py(px(2.))
+    .px(zpx(6.))
+    .py(zpx(2.))
     .rounded_full()
     .bg(bg)
     .text_color(fg)
@@ -1421,8 +1422,8 @@ fn menu_item(id: impl Into<SharedString>, label: &'static str, p: &Palette) -> S
     .id(id)
     .debug_selector(move || selector)
     .px_2()
-    .py(px(6.))
-    .rounded(px(6.))
+    .py(zpx(6.))
+    .rounded(zpx(6.))
     .whitespace_nowrap()
     .cursor_pointer()
     .hover(move |s| s.bg(hover))
@@ -1500,10 +1501,10 @@ impl Render for CommitsView {
     let mut list = div().relative().child(
       div()
         .absolute()
-        .left(px(7.))
+        .left(zpx(7.))
         .top_2()
         .bottom_2()
-        .w(px(2.))
+        .w(zpx(2.))
         .bg(p.border),
     );
     if let Some((commit, label)) = &tentative {
@@ -1550,7 +1551,7 @@ impl Render for CommitsView {
             this
               .flex()
               .items_center()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .child(ui::spinner(
                 SharedString::from(format!("{id}-spin")),
                 12.,
@@ -1581,7 +1582,7 @@ impl Render for CommitsView {
       }
       list = list
         // `border-t`, drawn as a rule: an empty div paints no border.
-        .child(div().h(px(1.)).bg(p.border).my_4().mx_2())
+        .child(div().h(zpx(1.)).bg(p.border).my_4().mx_2())
         .child(
           ui::text(div(), TextSize::Sm)
             .debug_selector(|| "target-divider".into())
@@ -1615,7 +1616,7 @@ impl Render for CommitsView {
           Button::new("shift-commits-to-now", &p)
             .variant(Variant::Outline)
             .size(Size::Sm)
-            .gap(px(6.))
+            .gap(zpx(6.))
             .disabled(self.shifting)
             .child(if self.shifting {
               ui::spinner("shift-spin", 16., p.foreground).into_any_element()
@@ -1638,7 +1639,7 @@ impl Render for CommitsView {
           .items_center()
           .justify_between()
           .gap_3()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .border_1()
           .border_color(p.destructive.opacity(0.4))
           .bg(p.destructive.opacity(0.05))
@@ -1666,7 +1667,7 @@ impl Render for CommitsView {
             Button::new("resolve-conflicts-button", &p)
               .variant(Variant::Destructive)
               .size(Size::Sm)
-              .gap(px(6.))
+              .gap(zpx(6.))
               .icon(theme::ICON_MERGE, 16.)
               .label("Resolve conflicts…")
               .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
@@ -1767,14 +1768,14 @@ impl CommitsView {
       .px_2()
       .mx_neg_2()
       .w_full()
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .cursor_pointer()
       .when(tentative, |this| this.bg(yellow))
       .hover(move |s| s.bg(hover))
       .child(
         div().relative().flex_none().child(
           div()
-            .size(px(14.))
+            .size(zpx(14.))
             .rounded_full()
             .border_2()
             .border_color(p.background)
@@ -1785,12 +1786,12 @@ impl CommitsView {
         div()
           .flex_1()
           .min_w_0()
-          .pt(px(2.))
+          .pt(zpx(2.))
           .child(
             div()
               .flex()
               .items_center()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .child(ui::icon(
                 if expanded {
                   theme::ICON_CHEVRON_DOWN
@@ -1807,7 +1808,7 @@ impl CommitsView {
               .flex()
               .items_center()
               .gap_2()
-              .mt(px(2.))
+              .mt(zpx(2.))
               .pl_5()
               .when(commit.has_conflicts, |this| {
                 this.child(
@@ -1887,7 +1888,7 @@ impl CommitsView {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .gap(px(6.))
+        .gap(zpx(6.))
         .icon(icon, 16.)
         .label(label)
     };
@@ -1896,7 +1897,7 @@ impl CommitsView {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .gap(px(6.))
+        .gap(zpx(6.))
         .border_color(red.opacity(0.3))
         .text_color(red)
         .hover_bg(red.opacity(0.1))
@@ -1937,11 +1938,11 @@ impl CommitsView {
           .id("move-commit-menu")
           .debug_selector(|| "move-commit-menu".into())
           .absolute()
-          .top(px(36.))
+          .top(zpx(36.))
           .left_0()
-          .min_w(px(128.))
+          .min_w(zpx(128.))
           .p_1()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -1992,7 +1993,7 @@ impl CommitsView {
             Button::new(format!("resolve-commit-{short}"), p)
               .variant(Variant::Destructive)
               .size(Size::Sm)
-              .gap(px(6.))
+              .gap(zpx(6.))
               .icon(theme::ICON_MERGE, 16.)
               .label("Resolve…")
               .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
@@ -2086,7 +2087,7 @@ impl CommitsView {
       div()
         .border_1()
         .border_color(p.border)
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .overflow_hidden()
         .child(content),
     )
@@ -2180,7 +2181,7 @@ impl CommitsView {
                         div()
                           .id(SharedString::from(format!("load-diff-{}", file.path)))
                           .debug_selector(|| "load-deferred-diff".into())
-                          .rounded(px(8.))
+                          .rounded(zpx(8.))
                           .border_1()
                           .border_color(p.border)
                           .px_2()
@@ -2251,7 +2252,7 @@ impl CommitsView {
       .items_center()
       .gap_2()
       .px_3()
-      .py(px(6.))
+      .py(zpx(6.))
       .w_full()
       .cursor_pointer()
       .hover(move |s| s.bg(hover))
@@ -2276,9 +2277,9 @@ impl CommitsView {
       .child(
         div()
           .font_weight(FontWeight::MEDIUM)
-          .px(px(6.))
-          .py(px(2.))
-          .rounded(px(4.))
+          .px(zpx(6.))
+          .py(zpx(2.))
+          .rounded(zpx(4.))
           .text_color(fg)
           .bg(bg)
           .child(file.status.clone()),
@@ -2315,7 +2316,7 @@ impl CommitsView {
     let mut el = div().font_family(theme::MONO_FONT).child(
       div()
         .px_3()
-        .py(px(2.))
+        .py(zpx(2.))
         .bg(p.muted.opacity(0.6))
         .text_color(p.muted_foreground)
         .border_t_1()
@@ -2372,8 +2373,8 @@ impl CommitsView {
             div()
               .id(SharedString::from(format!("add-comment-{h}-{l}")))
               .debug_selector(move || format!("add-comment-{h}-{l}"))
-              .p(px(1.))
-              .rounded(px(4.))
+              .p(zpx(1.))
+              .rounded(zpx(4.))
               .bg(p.primary)
               .opacity(0.)
               .group_hover("diff-line", |s| s.opacity(1.))
@@ -2440,7 +2441,7 @@ impl CommitsView {
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .mx_2()
       .my_1()
       .px_4()
@@ -2542,7 +2543,7 @@ impl CommitsView {
             div()
               .flex()
               .flex_col()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .child(dialog_title("Edit Commit Description"))
               .child(dialog_description(
                 format!("Editing {}", commit.short_id),
@@ -2620,13 +2621,13 @@ impl CommitsView {
           div()
             .flex()
             .flex_col()
-            .gap(px(6.))
+            .gap(zpx(6.))
             .child(
               ui::text(div(), TextSize::Sm)
                 .font_weight(FontWeight::MEDIUM)
                 .child(label),
             )
-            .children(input.map(|i| Styled::h(ui::input(i), px(40.))))
+            .children(input.map(|i| Styled::h(ui::input(i), zpx(40.))))
         };
         let inputs = inputs.as_ref();
         let fields = if form.to_day {
@@ -2665,7 +2666,7 @@ impl CommitsView {
             div()
               .flex()
               .flex_col()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .child(dialog_title("Edit commit timestamp"))
               .child(dialog_description(
                 format!(
@@ -2787,7 +2788,7 @@ impl CommitsView {
             div()
               .flex()
               .items_center()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .child(dialog_title("Resolve commit conflicts inplace"))
               .child(help),
           )

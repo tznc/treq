@@ -12,6 +12,7 @@ mod review;
 pub(in crate::gpui_shell::screen) mod search;
 pub(super) mod threads;
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1269,7 +1270,7 @@ fn header_button(
     .id(id)
     .debug_selector(move || selector)
     .p_1()
-    .rounded(px(4.))
+    .rounded(zpx(4.))
     .cursor_pointer()
     .text_color(fg)
     .hover(move |s| s.bg(hover))
@@ -1415,7 +1416,7 @@ impl ChangesView {
       }
     }
     div()
-      .w(px(240.))
+      .w(zpx(240.))
       .flex_none()
       .h_full()
       .flex()
@@ -1440,8 +1441,8 @@ impl ChangesView {
       .size(Size::Sm)
       .flex_1()
       .h_auto()
-      .py(px(6.))
-      .gap(px(6.))
+      .py(zpx(6.))
+      .gap(zpx(6.))
       .rounded_r_none()
       .disabled(disabled)
       .when(self.pending.is_some(), |b| {
@@ -1458,8 +1459,8 @@ impl ChangesView {
         Button::new("commit-options", p)
           .size(Size::Sm)
           .h_auto()
-          .py(px(6.))
-          .px(px(6.))
+          .py(zpx(6.))
+          .px(zpx(6.))
           .rounded_l_none()
           .border_l_1()
           .border_color(border)
@@ -1498,7 +1499,7 @@ impl ChangesView {
         div()
           .debug_selector(|| "commit-message".into())
           .when(error.is_some(), |this| {
-            this.rounded(px(6.)).border_1().border_color(p.destructive)
+            this.rounded(zpx(6.)).border_1().border_color(p.destructive)
           })
           .children(self.message_input.as_ref().map(Textarea::new)),
       )
@@ -1742,7 +1743,7 @@ impl ChangesView {
             "move-changes-files"
           })
           .p_1()
-          .rounded(px(4.))
+          .rounded(zpx(4.))
           .cursor_pointer()
           .bg(primary.opacity(0.1))
           .hover(move |s| s.bg(primary.opacity(0.2)))
@@ -1882,8 +1883,8 @@ impl ChangesView {
       div()
         .id(SharedString::from(id))
         .debug_selector(move || selector)
-        .p(px(2.))
-        .rounded(px(4.))
+        .p(zpx(2.))
+        .rounded(zpx(4.))
         .cursor_pointer()
         .when(hidden, |this| {
           this.opacity(0.).group_hover("file-row", |s| s.opacity(1.))
@@ -1898,7 +1899,7 @@ impl ChangesView {
     };
     let mut actions = div().flex().items_center().gap_1().flex_none().child(
       div()
-        .min_w(px(8.))
+        .min_w(zpx(8.))
         .text_color(p.muted_foreground)
         .child(file.status.clone()),
     );
@@ -2067,9 +2068,9 @@ impl ChangesView {
         .flex()
         .items_center()
         .gap_1()
-        .px(px(6.))
-        .py(px(2.))
-        .rounded(px(4.))
+        .px(zpx(6.))
+        .py(zpx(2.))
+        .rounded(zpx(4.))
         .ml_auto()
         .cursor_pointer()
         .text_color(color)
@@ -2220,7 +2221,7 @@ impl ChangesView {
           .flex()
           .flex_col()
           .gap_2()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .border_1()
           .border_color(p.border)
           .p_3()
@@ -2390,7 +2391,7 @@ impl ChangesView {
       })
       .relative()
       .mb_4()
-      .rounded(px(12.))
+      .rounded(zpx(12.))
       .border_1()
       .border_color(p.border)
       .overflow_hidden()
@@ -2424,7 +2425,7 @@ impl ChangesView {
           .flex()
           .items_center()
           .justify_center()
-          .py(px(32.))
+          .py(zpx(32.))
           .text_color(muted)
           .child(
             div()
@@ -2524,8 +2525,8 @@ impl ChangesView {
       div()
         .flex_none()
         .px_2()
-        .py(px(2.))
-        .rounded(px(4.))
+        .py(zpx(2.))
+        .rounded(zpx(4.))
         .bg(bg)
         .text_color(fg)
         .child(text)
@@ -2570,7 +2571,7 @@ impl ChangesView {
           .flex_1()
           .flex()
           .items_center()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .child(
             div()
               .truncate()
@@ -2620,7 +2621,7 @@ impl ChangesView {
             .id(SharedString::from(format!("add-file-comment-{path}")))
             .debug_selector(|| "add-file-comment-button".into())
             .p_1()
-            .rounded(px(4.))
+            .rounded(zpx(4.))
             .cursor_pointer()
             .hover(move |s| s.bg(accent))
             .child(ui::icon(theme::ICON_MESSAGE_PLUS, 14., muted))
@@ -2660,8 +2661,8 @@ impl ChangesView {
           .items_center()
           .gap_1()
           .px_2()
-          .py(px(2.))
-          .rounded(px(4.))
+          .py(zpx(2.))
+          .rounded(zpx(4.))
           .cursor_pointer()
           .bg(viewed_bg)
           .text_color(viewed_fg)
@@ -2735,7 +2736,7 @@ impl ChangesView {
           .id(SharedString::from(key.clone()))
           .relative()
           .p_1()
-          .rounded(px(4.))
+          .rounded(zpx(4.))
           .cursor_pointer()
           .hover(move |s| s.bg(accent))
           .child(ui::icon(theme::ICON_MORE, 12., fg))
@@ -2823,7 +2824,7 @@ impl ChangesView {
             .flex()
             .items_center()
             .px_2()
-            .py(px(2.))
+            .py(zpx(2.))
             .when(expandable, |this| {
               this.child(
                 div()
@@ -2904,7 +2905,7 @@ impl ChangesView {
               .justify_center()
               .gap_1()
               .px_2()
-              .py(px(2.))
+              .py(zpx(2.))
               .text_color(muted)
               .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., muted))
               .child("Show more lines below"),
@@ -2933,7 +2934,7 @@ impl ChangesView {
       .font_family(theme::MONO_FONT)
       .bg(p.muted.opacity(0.3))
       .p_3()
-      .rounded(px(4.));
+      .rounded(zpx(4.));
     let lines: Vec<(String, ConflictLineKind, ConflictLineRole)> = if region.lines.is_empty() {
       region
         .content
@@ -2996,9 +2997,9 @@ impl ChangesView {
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
-          .px(px(6.))
-          .py(px(2.))
-          .rounded(px(4.))
+          .px(zpx(6.))
+          .py(zpx(2.))
+          .rounded(zpx(4.))
           .font_family(theme::SANS_FONT)
           .font_weight(FontWeight::MEDIUM)
           .bg(bg)
@@ -3025,7 +3026,7 @@ impl ChangesView {
         div()
           .debug_selector(|| "conflict-deleted-side".into())
           .my_1()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .border_1()
           .border_color(border)
           .bg(bg)
@@ -3104,9 +3105,9 @@ impl ChangesView {
       .id("discard-all-dialog")
       .debug_selector(|| "discard-all-dialog".into())
       .w_full()
-      .max_w(px(512.))
+      .max_w(zpx(512.))
       .p_6()
-      .rounded(px(16.))
+      .rounded(zpx(16.))
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
@@ -3124,10 +3125,10 @@ impl ChangesView {
         div()
           .flex()
           .flex_col()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(px(15.))
+              .line_height(zpx(15.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Discard all changes?"),
           )
@@ -3193,7 +3194,7 @@ impl ChangesView {
 
 /// `Skeleton`: `animate-pulse rounded-md bg-primary/10`.
 fn skeleton(p: &Palette) -> Div {
-  div().rounded(px(8.)).bg(p.primary.opacity(0.1))
+  div().rounded(zpx(8.)).bg(p.primary.opacity(0.1))
 }
 
 /// `HunkContextLineRow`: a line read by "Show more lines".
@@ -3233,7 +3234,7 @@ fn context_row(
         .flex_1()
         .min_w_0()
         .px_2()
-        .py(px(2.))
+        .py(zpx(2.))
         .text_color(p.muted_foreground)
         .child(highlight::styled(
           if line.is_empty() { " " } else { line },

@@ -5,13 +5,46 @@
 use std::{rc::Rc, time::Duration};
 
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, svg, Animation, AnimationExt as _, App, ClickEvent, Div, ElementId,
-  Hsla, SharedString, StyleRefinement, Transformation, Window,
+  self, div, prelude::*, svg, Animation, AnimationExt as _, App, ClickEvent, Div, ElementId, Hsla,
+  SharedString, StyleRefinement, Transformation, Window,
 };
 
 use gpui_kit::component::input::{Input, InputState};
 
 use super::theme::{self, Palette};
+
+/// The rem size at 100% `ui_zoom`, as the webview's root font size.
+pub const BASE_REM: f32 = 16.;
+
+/// `v` CSS pixels as rems, so the length follows the window's rem size,
+/// which `ui_zoom` scales the way React's CSS `zoom` scaled every length.
+pub fn zpx(v: f32) -> gpui::Rems {
+  gpui::rems(v / BASE_REM)
+}
+
+/// `v` CSS pixels at the window's zoom, for what needs `Pixels`: painting,
+/// bounds and viewport math.
+pub fn zoomed(v: f32, window: &Window) -> gpui::Pixels {
+  window.rem_size() * (v / BASE_REM)
+}
+
+/// `ui_zoom` in percent, app-wide, for every GPUI window: the shell's, its
+/// dialogs' and its popups'.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct UiZoom(pub u32);
+
+impl gpui::Global for UiZoom {}
+
+/// The zoom as a factor (1.0 at 100%).
+pub fn zoom_factor(cx: &App) -> f32 {
+  cx.try_global::<UiZoom>().map_or(100, |z| z.0) as f32 / 100.
+}
+
+/// Sizes `window`'s rems at the app's zoom. Call at the top of a window's
+/// root `render`.
+pub fn apply_zoom(window: &mut Window, cx: &App) {
+  window.set_rem_size(gpui::px(BASE_REM * zoom_factor(cx)));
+}
 
 /// A click handler that GPUI elements can share.
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -38,20 +71,20 @@ impl TextSize {
 /// Sets the font size and line height of `el` from the Tailwind scale.
 pub fn text<E: Styled>(el: E, size: TextSize) -> E {
   let (font, line) = size.metrics();
-  el.text_size(px(font)).line_height(px(line))
+  el.text_size(zpx(font)).line_height(zpx(line))
 }
 
 /// A single-line input at `text-sm`. gpui-kit's own medium size is 14px,
 /// Tailwind's `text-sm` here 13px, so placeholders and text came out larger.
 pub fn input(state: &gpui::Entity<InputState>) -> Input {
-  Input::new(state).text_size(px(13.))
+  Input::new(state).text_size(zpx(13.))
 }
 
 /// A Lucide icon from the bundled set.
 pub fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
     .path(path)
-    .size(px(size))
+    .size(zpx(size))
     .flex_none()
     .text_color(color)
 }
@@ -200,16 +233,16 @@ impl RenderOnce for Button {
       .justify_center()
       .gap_2()
       .whitespace_nowrap()
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .font_weight(gpui::FontWeight::MEDIUM)
       .text_color(fg);
     let base = match self.size {
-      Size::Default => text(base.h(px(40.)).px_4().py_2(), TextSize::Sm),
-      Size::Icon => base.size(px(40.)),
-      Size::IconXs => base.size(px(24.)),
-      Size::Lg => text(base.h(px(44.)).px_6(), TextSize::Lg),
-      Size::Sm => text(base.h(px(32.)).px_3(), TextSize::Sm),
-      Size::Xs => text(base.h(px(24.)).px_2(), TextSize::Sm),
+      Size::Default => text(base.h(zpx(40.)).px_4().py_2(), TextSize::Sm),
+      Size::Icon => base.size(zpx(40.)),
+      Size::IconXs => base.size(zpx(24.)),
+      Size::Lg => text(base.h(zpx(44.)).px_6(), TextSize::Lg),
+      Size::Sm => text(base.h(zpx(32.)).px_3(), TextSize::Sm),
+      Size::Xs => text(base.h(zpx(24.)).px_2(), TextSize::Sm),
     };
     let disabled = self.disabled;
     let base = match self.variant {
@@ -250,7 +283,7 @@ impl RenderOnce for Button {
 /// `ui/card.tsx`'s `Card`: a bordered, rounded surface.
 pub fn card(p: &Palette) -> Div {
   div()
-    .rounded(px(12.))
+    .rounded(zpx(12.))
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.card)

@@ -2,6 +2,7 @@
 //! comments, drawn in the Changes tab's diff (`GithubCommentCard`,
 //! `GithubThreadsInlineList`, `AgentReviewCommentCard`).
 
+use crate::gpui_shell::ui::zpx;
 use std::time::Duration;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
@@ -338,7 +339,7 @@ impl ChangesView {
       .items_center()
       .gap_2()
       .px_3()
-      .py(px(6.))
+      .py(zpx(6.))
       .cursor_pointer()
       .hover(move |s| s.bg(toggle_hover))
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
@@ -363,9 +364,9 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_1()
-          .px(px(6.))
-          .py(px(2.))
-          .rounded(px(4.))
+          .px(zpx(6.))
+          .py(zpx(2.))
+          .rounded(zpx(4.))
           .bg(p.muted)
           .text_color(muted)
           .font_weight(FontWeight::MEDIUM)
@@ -392,7 +393,7 @@ impl ChangesView {
       );
     }
     let mut card = div()
-      .rounded(px(6.))
+      .rounded(zpx(6.))
       .border_1()
       .border_color(sky(0.3))
       .bg(sky(0.05))
@@ -432,9 +433,9 @@ impl ChangesView {
       .group("github-comment")
       .relative()
       .bg(p.background)
-      .rounded(px(6.))
-      .p(px(10.))
-      .pr(px(36.))
+      .rounded(zpx(6.))
+      .p(zpx(10.))
+      .pr(zpx(36.))
       .border_1()
       .border_color(p.border.opacity(0.6))
       .child(
@@ -442,7 +443,7 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .mb(px(6.))
+          .mb(zpx(6.))
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
@@ -473,7 +474,7 @@ impl ChangesView {
             .top_2()
             .right_2()
             .p_1()
-            .rounded(px(4.))
+            .rounded(zpx(4.))
             .cursor_pointer()
             .opacity(0.)
             .group_hover("github-comment", |s| s.opacity(1.))
@@ -505,7 +506,7 @@ impl ChangesView {
     let mut card = div()
       .debug_selector(|| "agent-review-comment-card".into())
       .font_family(theme::MONO_FONT)
-      .rounded(px(6.))
+      .rounded(zpx(6.))
       .border_1()
       .border_color(violet(0.4))
       .bg(violet(0.05))
@@ -550,7 +551,7 @@ impl ChangesView {
       actions = actions.child(
         Button::new(SharedString::from(format!("agent-apply-{id}")), p)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .disabled(busy)
           .icon(theme::ICON_WAND, 12.)
           .label("Apply")
@@ -565,7 +566,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-send-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .disabled(busy)
           .icon(theme::ICON_TERMINAL, 12.)
           .label("Send to agent")
@@ -576,7 +577,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-resolve-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .disabled(busy)
           .icon(theme::ICON_CHECK, 12.)
           .label("Resolve")
@@ -588,7 +589,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-delete-{id}")), p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .text_color(muted)
           .disabled(busy)
           .icon(theme::ICON_TRASH, 12.)
@@ -619,7 +620,7 @@ fn violet(alpha: f32) -> Hsla {
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
 fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
   ui::text(div(), TextSize::Xs)
-    .size(px(size))
+    .size(zpx(size))
     .flex_none()
     .rounded_full()
     .bg(p.muted)
@@ -707,7 +708,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
             .flex()
             .items_start()
             .px_2()
-            .py(px(1.))
+            .py(zpx(1.))
             .when_some(bg, |this, bg| this.bg(bg))
             .child(
               div()
@@ -730,13 +731,13 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       .debug_selector(|| "agent-review-suggestion".into())
       .font_family(theme::MONO_FONT)
       .px_2()
-      .py(px(6.))
+      .py(zpx(6.))
       .bg(tw::color(tw::GREEN_500).opacity(0.1))
       .child(suggested.to_string())
       .into_any_element(),
   };
   div()
-    .rounded(px(4.))
+    .rounded(zpx(4.))
     .border_1()
     .border_color(p.border.opacity(0.6))
     .overflow_hidden()

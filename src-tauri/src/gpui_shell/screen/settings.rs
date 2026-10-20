@@ -5,11 +5,12 @@
 //! React still owns which tab shows, closing the page, and the Supabase
 //! session the Account and Integrations tabs show (see `account`).
 
+use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, AnyElement, Context, FontWeight, SharedString, Window,
+  self, div, prelude::*, AnyElement, Context, FontWeight, SharedString, Window,
 };
 
 pub(super) mod account;
@@ -1141,15 +1142,15 @@ fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEven
 /// `<Label>`: 13px medium, `leading-none`.
 fn label(text: impl Into<SharedString>) -> gpui::Div {
   div()
-    .text_size(px(13.))
-    .line_height(px(13.))
+    .text_size(zpx(13.))
+    .line_height(zpx(13.))
     .font_weight(FontWeight::MEDIUM)
     .child(text.into())
 }
 
 /// The muted help line under a field, `mt-1` or `mt-2`.
 fn help(text: impl Into<SharedString>, p: &Palette, mt: f32) -> gpui::Div {
-  ui::text(div().mt(px(mt)), TextSize::Sm)
+  ui::text(div().mt(zpx(mt)), TextSize::Sm)
     .text_color(p.muted_foreground)
     .child(text.into())
 }
@@ -1227,7 +1228,7 @@ impl Render for SettingsView {
       );
 
     let tabs = div()
-      .w(px(192.))
+      .w(zpx(192.))
       .flex_none()
       .flex()
       .flex_col()
@@ -1245,7 +1246,7 @@ impl Render for SettingsView {
           .gap_2()
           .px_4()
           .py_2()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .map(|this| {
@@ -1344,7 +1345,7 @@ impl Render for SettingsView {
           .overflow_y_scroll()
           .child(
             div()
-              .max_w(px(896.))
+              .max_w(zpx(896.))
               .mx_auto()
               .p_6()
               .flex()
@@ -1812,8 +1813,8 @@ impl SettingsView {
         div()
           .child(
             div()
-              .text_size(px(13.))
-              .line_height(px(20.))
+              .text_size(zpx(13.))
+              .line_height(zpx(20.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Feature Preview"),
           )
@@ -1836,7 +1837,7 @@ impl SettingsView {
               .items_center()
               .justify_between()
               .gap_4()
-              .rounded(px(8.))
+              .rounded(zpx(8.))
               .border_1()
               .border_color(p.border)
               .p_4()
@@ -1921,7 +1922,7 @@ impl SettingsView {
           .gap_3()
           .child(
             div()
-              .min_w(px(192.))
+              .min_w(zpx(192.))
               .flex_1()
               .child(label("Search skills"))
               .child(div().mt_2().child(form::input_field(
@@ -1933,7 +1934,7 @@ impl SettingsView {
           )
           .child(
             div()
-              .min_w(px(160.))
+              .min_w(zpx(160.))
               .child(label("Install level"))
               .child(div().mt_2().child(form::select_field("skills-scope", &scope, false))),
           ),
@@ -1982,9 +1983,9 @@ impl SettingsView {
       .gap_2()
       .border_1()
       .border_color(p.border)
-      .rounded(px(6.))
+      .rounded(zpx(6.))
       .p_3()
-      .pr(px(48.))
+      .pr(zpx(48.))
       .debug_selector(move || selector)
       .when(row.installed.is_some(), |this| {
         this.child(
@@ -2074,7 +2075,7 @@ impl SettingsView {
                   .font_weight(FontWeight::MEDIUM)
                   .child("Install level"),
               )
-              .child(div().w(px(128.)).child(form::select_field(
+              .child(div().w(zpx(128.)).child(form::select_field(
                 format!("skill-level-{id}"),
                 &level,
                 row.busy,
@@ -2119,13 +2120,13 @@ impl SettingsView {
           .id("skill-install-dialog")
           .debug_selector(|| "skill-install-dialog".into())
           .w_full()
-          .max_w(px(576.))
+          .max_w(zpx(576.))
           .mx_4()
           .flex()
           .flex_col()
           .gap_4()
           .p_6()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .border_1()
           .border_color(p.border)
           .bg(p.background)

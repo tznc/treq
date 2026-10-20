@@ -633,12 +633,22 @@ impl WindowController {
       })
       .collect();
     self.background(
-      move |host| read_all(host, &main, supporting, read, &known),
-      move |this, (main, supporting, reads), cx| {
+      // A read that panics must not leave `reading` set, or the window
+      // never reads again.
+      move |host| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+          read_all(host, &main, supporting, read, &known)
+        }))
+      },
+      move |this, result, cx| {
         this.reading = false;
-        // A repository opened while reading the one before.
-        if main == this.model.main_repo {
-          this.apply(supporting, reads, cx);
+        match result {
+          // A repository opened while reading the one before.
+          Ok((main, supporting, reads)) if main == this.model.main_repo => {
+            this.apply(supporting, reads, cx);
+          }
+          Ok(_) => {}
+          Err(_) => log::error!("reading the window's repositories panicked"),
         }
         if let Some(next) = this.queued.take() {
           this.read(next, cx);

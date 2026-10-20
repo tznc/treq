@@ -11,6 +11,7 @@
 //! [`Closed`] event. What only React can do (retargeting the workspace,
 //! running workflows, the prompt history dialog) goes back as screen actions.
 
+use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use gpui_kit::component::input::{
@@ -196,9 +197,9 @@ impl Popover {
     div()
       .id(id)
       .debug_selector(move || id.into())
-      .w(px(width))
-      .p(px(padding))
-      .rounded(px(6.))
+      .w(zpx(width))
+      .p(zpx(padding))
+      .rounded(zpx(6.))
       .border_1()
       .border_color(p.border)
       .bg(p.popover)

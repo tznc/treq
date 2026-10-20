@@ -10,6 +10,7 @@
 //! [`terminal_data`]: super::terminal_data
 //! [`terminal_emu`]: super::terminal_emu
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::Cell,
   rc::Rc,
@@ -1151,8 +1152,8 @@ impl TerminalView {
         .right_2()
         .flex()
         .items_center()
-        .gap(px(2.))
-        .p(px(2.))
+        .gap(zpx(2.))
+        .p(zpx(2.))
         .rounded_md()
         .border_1()
         .border_color(p.border)
@@ -1190,16 +1191,16 @@ impl TerminalView {
     let cursor = frame.cursor.map(|(row, col)| {
       let base = div()
         .absolute()
-        .top(px(TOP_PAD + row as f32 * h))
-        .left(px(col as f32 * w))
-        .h(px(h));
+        .top(zpx(TOP_PAD + row as f32 * h))
+        .left(zpx(col as f32 * w))
+        .h(zpx(h));
       if focused {
         base
-          .w(px(1.))
+          .w(zpx(1.))
           .when(self.cursor_on, |d| d.bg(rgb(terminal_emu::FOREGROUND)))
       } else {
         base
-          .w(px(w))
+          .w(zpx(w))
           .border_1()
           .border_color(rgb(terminal_emu::FOREGROUND))
       }
@@ -1249,10 +1250,10 @@ impl TerminalView {
       div()
         .absolute()
         .right_0()
-        .top(px(top.min(height - thumb)))
-        .w(px(SCROLLBAR))
-        .h(px(thumb))
-        .rounded(px(4.))
+        .top(zpx(top.min(height - thumb)))
+        .w(zpx(SCROLLBAR))
+        .h(zpx(thumb))
+        .rounded(zpx(4.))
         .bg(p.border),
     )
   }
@@ -1394,7 +1395,7 @@ impl TerminalView {
             .bg(p.background.opacity(0.9))
             .child(
               ui::card(p)
-                .max_w(px(384.))
+                .max_w(zpx(384.))
                 .p_4()
                 .shadow_lg()
                 .flex()
@@ -2474,7 +2475,7 @@ impl TerminalPane {
           img(std::path::PathBuf::from(&asset.path))
             .object_fit(ObjectFit::Contain)
             .size_full()
-            .rounded(px(7.)),
+            .rounded(zpx(7.)),
         )
       } else {
         ui::text(div(), TextSize::Xs)
@@ -2492,7 +2493,7 @@ impl TerminalPane {
               .truncate()
               .flex()
               .justify_center()
-              .line_height(px(14.))
+              .line_height(zpx(14.))
               .child(asset.title.clone()),
           )
       };
@@ -2509,9 +2510,9 @@ impl TerminalPane {
         .relative()
         .flex_none()
         .h_20()
-        .w(px(144.))
-        .min_w(px(144.))
-        .rounded(px(8.))
+        .w(zpx(144.))
+        .min_w(zpx(144.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(gpui::white().opacity(if shown { 0.4 } else { 0.15 }))
         .bg(rgb(0x2a2a2a))
@@ -2540,8 +2541,8 @@ impl TerminalPane {
                 move || format!("terminal-send-dismiss-{id}")
               })
               .absolute()
-              .top(px(-8.))
-              .right(px(-8.))
+              .top(zpx(-8.))
+              .right(zpx(-8.))
               .size_5()
               .flex()
               .items_center()
@@ -2725,7 +2726,7 @@ impl TerminalPane {
             Self::start_devcontainer,
             cx,
           )
-          .top(px(24.))
+          .top(zpx(24.))
           .right_0()
           .on_mouse_down_out(cx.listener(|pane, _, _, cx| {
             pane.environment_menu = false;
@@ -2802,7 +2803,7 @@ impl TerminalPane {
       .border_1()
       .border_color(p.border.opacity(0.8))
       .bg(p.background.opacity(0.9))
-      .p(px(2.))
+      .p(zpx(2.))
       .shadow_sm()
       .child({
         let bounds = self.controls_bounds.clone();
@@ -2822,15 +2823,15 @@ impl TerminalPane {
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .debug_selector(|| "terminal-workspace-label".into())
-        .max_w(px(200.))
+        .max_w(zpx(200.))
         .truncate()
         .rounded_sm()
         .bg(p.muted.opacity(0.6))
         .px_1()
-        .py(px(2.))
+        .py(zpx(2.))
         .font_family(theme::MONO_FONT)
         .font_weight(gpui::FontWeight::MEDIUM)
-        .line_height(px(12.))
+        .line_height(zpx(12.))
         .text_color(p.muted_foreground)
         .cursor_pointer()
         .hover(|s| s.bg(p.muted))
@@ -2858,8 +2859,8 @@ impl TerminalPane {
       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
       .on_click(cx.listener(move |pane, _, window, cx| pane.close(&close_id, window, cx)));
     let base = ui::text(div(), TextSize::Sm)
-      .h(px(HEADER_HEIGHT))
-      .min_h(px(HEADER_HEIGHT))
+      .h(zpx(HEADER_HEIGHT))
+      .min_h(zpx(HEADER_HEIGHT))
       .px_2()
       .flex()
       .items_center()
@@ -2925,7 +2926,7 @@ impl TerminalPane {
             div()
               .flex()
               .items_center()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .min_w_0()
               .child(ui::icon(agent_icon(agent), 16., rgb(0xe5e7eb).into()))
               .child(
@@ -2996,8 +2997,8 @@ impl TerminalPane {
         div().flex_shrink_0().child(
           ui::text(div(), TextSize::Sm)
             .debug_selector(|| "remote-terminal-header".into())
-            .h(px(REMOTE_HEADER_HEIGHT))
-            .min_h(px(REMOTE_HEADER_HEIGHT))
+            .h(zpx(REMOTE_HEADER_HEIGHT))
+            .min_h(zpx(REMOTE_HEADER_HEIGHT))
             .flex_shrink_0()
             .px_2()
             .flex()
@@ -3011,7 +3012,7 @@ impl TerminalPane {
               div()
                 .flex()
                 .items_center()
-                .gap(px(6.))
+                .gap(zpx(6.))
                 .min_w_0()
                 .font_weight(gpui::FontWeight::MEDIUM)
                 .text_color(muted)
@@ -3071,7 +3072,7 @@ impl TerminalPane {
             div()
               .flex()
               .items_center()
-              .gap(px(6.))
+              .gap(zpx(6.))
               .min_w_0()
               .child(ui::icon(theme::ICON_TERMINAL, 12., p.muted_foreground))
               .child(
@@ -3122,9 +3123,9 @@ impl TerminalPane {
       .min_h_0()
       .overflow_hidden()
       .flex_shrink_0()
-      .when_some(column.width, |d, w| d.w(px(w)))
+      .when_some(column.width, |d, w| d.w(zpx(w)))
       .when(column.width.is_none(), |d| d.flex_1())
-      .min_w(px(min))
+      .min_w(zpx(min))
       .on_mouse_down(
         MouseButton::Left,
         cx.listener(move |pane, e: &MouseDownEvent, _, cx| {
@@ -3193,7 +3194,7 @@ impl Render for SendAssetDrag {
     ui::text(div(), TextSize::Xs)
       .px_2()
       .py_1()
-      .rounded(px(6.))
+      .rounded(zpx(6.))
       .border_1()
       .border_color(gpui::white().opacity(0.4))
       .bg(rgb(0x2a2a2a))
@@ -3420,7 +3421,7 @@ impl Render for TerminalPane {
         .debug_selector(|| "workspace-terminal-pane".into())
         .flex()
         .justify_end()
-        .m(px(6.))
+        .m(zpx(6.))
         .child(self.controls(&p, cx))
         .into_any_element();
     }
@@ -3448,7 +3449,7 @@ impl Render for TerminalPane {
                 .absolute()
                 .top_0()
                 .bottom_0()
-                .left(px(-4.))
+                .left(zpx(-4.))
                 .w_3()
                 .cursor_ew_resize()
                 .on_mouse_down(
@@ -3480,7 +3481,7 @@ impl Render for TerminalPane {
       .flex_shrink_0()
       .when(maximized, |d| d.size_full())
       .when(!maximized, |d| match view_height {
-        Some(view) => d.h(px(
+        Some(view) => d.h(zpx(
           view * self.height.min(HEIGHT_MAX) / 100. + DIVIDER_HEIGHT,
         )),
         None => d.h(relative(self.height / 100.)),
@@ -3542,7 +3543,7 @@ impl Render for TerminalPane {
                 .absolute()
                 .left_0()
                 .right_0()
-                .top(px(-4.))
+                .top(zpx(-4.))
                 .h_3()
                 .cursor_ns_resize()
                 .on_mouse_down(
@@ -3587,9 +3588,9 @@ impl Render for TerminalPane {
           .child(
             div()
               .absolute()
-              .right(px(6.))
-              .when(maximized, |d| d.bottom(px(6.)))
-              .when(!maximized, |d| d.top(px(-28.)))
+              .right(zpx(6.))
+              .when(maximized, |d| d.bottom(zpx(6.)))
+              .when(!maximized, |d| d.top(zpx(-28.)))
               .child(controls),
           ),
       )

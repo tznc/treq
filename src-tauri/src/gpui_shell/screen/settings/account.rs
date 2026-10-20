@@ -10,10 +10,11 @@
 //! [`account_data`]: crate::gpui_shell::screen::account_data
 //! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
+use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, px, AnyElement, Context, FontWeight, Window};
+use tauri_plugin_gpui::gpui::{self, div, prelude::*, AnyElement, Context, FontWeight, Window};
 
 use super::{help, toast, SettingsView, Tab};
 use crate::gpui_shell::{
@@ -932,7 +933,7 @@ fn centered(gap: f32) -> gpui::Div {
     .items_center()
     .justify_center()
     .py_16()
-    .gap(px(gap))
+    .gap(zpx(gap))
 }
 
 /// `<h3 className="text-lg font-semibold">`.
@@ -1034,8 +1035,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       let button = Button::new("cloud-repair", p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .h(px(28.))
-        .gap(px(6.))
+        .h(zpx(28.))
+        .gap(zpx(6.))
         .disabled(c.submitting)
         .child(ui::icon(theme::ICON_WRENCH, 14., p.foreground))
         .label("Repair")
@@ -1053,8 +1054,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     let delete = Button::new("cloud-delete", p)
       .variant(Variant::Ghost)
       .size(Size::Icon)
-      .w(px(28.))
-      .h(px(28.))
+      .w(zpx(28.))
+      .h(zpx(28.))
       .disabled(c.submitting)
       .child(ui::icon(theme::ICON_TRASH, 16., p.muted_foreground))
       .on_click(press("cloud.delete.ask"));
@@ -1095,7 +1096,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         } => div()
           .flex()
           .flex_col()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .child(
             div()
               .flex()
@@ -1108,7 +1109,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .child(
             div()
               .debug_selector(|| "cloud-disk-usage".into())
-              .h(px(6.))
+              .h(zpx(6.))
               .rounded_full()
               .overflow_hidden()
               .bg(p.muted)
@@ -1201,7 +1202,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   let green = tw::color(tw::GREEN_500);
   div()
     .debug_selector(|| "cloud-workspace-card".into())
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .border_1()
     .border_color(p.border)
     .p_4()
@@ -1228,10 +1229,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .gap_2()
           .child(
             ui::text(div(), TextSize::Xs)
-              .rounded(px(4.))
+              .rounded(zpx(4.))
               .bg(green.opacity(0.2))
-              .px(px(6.))
-              .py(px(2.))
+              .px(zpx(6.))
+              .py(zpx(2.))
               .font_weight(FontWeight::SEMIBOLD)
               .text_color(tw::color(if p.dark {
                 tw::GREEN_400
@@ -1286,13 +1287,13 @@ pub(in crate::gpui_shell::screen) fn cloud_delete_dialog_element(
         .id("cloud-delete-dialog")
         .debug_selector(|| "cloud-delete-dialog".into())
         .w_full()
-        .max_w(px(512.))
+        .max_w(zpx(512.))
         .mx_4()
         .flex()
         .flex_col()
         .gap_4()
         .p_6()
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(p.border)
         .bg(p.background)
@@ -1362,7 +1363,7 @@ impl SettingsView {
         centered(16.)
           .child(
             div()
-              .size(px(64.))
+              .size(zpx(64.))
               .rounded_full()
               .bg(p.muted)
               .flex()
@@ -1416,13 +1417,13 @@ impl SettingsView {
     let yellow = tw::color(tw::YELLOW_500);
     div()
       .w_full()
-      .max_w(px(384.))
+      .max_w(zpx(384.))
       .mt_4()
       .p_3()
       .border_1()
       .border_dashed()
       .border_color(yellow.opacity(0.5))
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .bg(yellow.opacity(0.05))
       .child(
         ui::text(div(), TextSize::Xs)
@@ -1471,12 +1472,12 @@ impl SettingsView {
       .and_then(|(_, image)| image.clone());
     let avatar: AnyElement = match avatar {
       Some(image) => gpui::img(image)
-        .size(px(48.))
+        .size(zpx(48.))
         .flex_none()
         .rounded_full()
         .into_any_element(),
       None => div()
-        .size(px(48.))
+        .size(zpx(48.))
         .flex_none()
         .rounded_full()
         .bg(p.muted)
@@ -1490,7 +1491,7 @@ impl SettingsView {
       div()
         .border_1()
         .border_color(p.border)
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .p_4()
     };
     let row = |name: String, value: AnyElement| {
@@ -1685,7 +1686,7 @@ impl SettingsView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .py(px(6.))
+                    .py(zpx(6.))
                     .child(div().font_family(theme::MONO_FONT).child(name.clone()))
                     .child(div().text_color(p.muted_foreground).child(if *private {
                       "Private"
@@ -1724,7 +1725,7 @@ impl SettingsView {
         .flex()
         .flex_none()
         .gap_2()
-        .child(div().w(px(256.)).child(form::input_field(
+        .child(div().w(zpx(256.)).child(form::input_field(
           "linear-api-key-input",
           &input,
           false,

@@ -1,8 +1,9 @@
 //! `github-panel/shared.tsx`: the chips, rows and states the GitHub view's
 //! lists and details share.
 
+use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, rgb, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
+  self, div, prelude::*, rgb, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
 };
 
 use super::super::github_data::{self as data, CiState};
@@ -62,7 +63,7 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
     .items_center()
     .gap_1()
     .px_2()
-    .py(px(2.))
+    .py(zpx(2.))
     .rounded_full()
     .bg(bg)
     .text_color(fg)
@@ -82,9 +83,9 @@ pub fn label_chip(label: &GhLabel) -> Div {
   let color = hex(&label.color);
   ui::text(div(), TextSize::Sm)
     .flex_none()
-    .px(px(6.))
-    .py(px(2.))
-    .rounded(px(4.))
+    .px(zpx(6.))
+    .py(zpx(2.))
+    .rounded(zpx(4.))
     .font_weight(FontWeight::MEDIUM)
     .bg(color.opacity(0.2))
     .text_color(color)
@@ -152,7 +153,7 @@ pub fn check_row(
     .flex()
     .items_center()
     .gap_2()
-    .py(px(6.))
+    .py(zpx(6.))
     .px_2()
     .child(ci_icon(format!("{id}-spin"), state, 16., p))
     .child(
@@ -172,7 +173,7 @@ pub fn check_row(
   match on_open.filter(|_| !check.link.is_empty()) {
     Some(open) => named(div(), id)
       .w_full()
-      .rounded(px(4.))
+      .rounded(zpx(4.))
       .cursor_pointer()
       .hover(move |s| s.bg(muted.opacity(0.5)))
       .on_click(open)
@@ -292,7 +293,7 @@ pub fn open_in_web(id: &'static str, p: &Palette, on_click: OnClick) -> Button {
   Button::new(id, p)
     .variant(Variant::Outline)
     .size(Size::Sm)
-    .gap(px(6.))
+    .gap(zpx(6.))
     .icon(theme::ICON_EXTERNAL_LINK, 16.)
     .label("Open in Web")
     .on_click(on_click)
@@ -314,7 +315,7 @@ pub fn busy_spinner(button: Button, id: &str, busy: bool, color: Hsla) -> Button
 pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) -> Div {
   ui::text(div(), TextSize::Sm)
     .bg(p.muted.opacity(0.3))
-    .rounded(px(6.))
+    .rounded(zpx(6.))
     .p_3()
     .child(
       div()
@@ -338,7 +339,7 @@ pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) ->
 pub fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
   named(div(), id)
     .p_1()
-    .rounded(px(8.))
+    .rounded(zpx(8.))
     .border_1()
     .border_color(p.border)
     .bg(p.popover)
@@ -357,8 +358,8 @@ pub fn menu_item(
   let accent = p.menu_accent;
   ui::text(named(div(), id), TextSize::Sm)
     .px_2()
-    .py(px(6.))
-    .rounded(px(4.))
+    .py(zpx(6.))
+    .rounded(zpx(4.))
     .cursor_pointer()
     .hover(move |s| s.bg(accent))
     .on_click(on_click)

@@ -13,13 +13,14 @@
 //!
 //! [`workspace_data`]: super::workspace_data
 
+use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
+  self, div, prelude::*, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
   FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Window,
 };
 
@@ -837,7 +838,7 @@ impl WorkspaceView {
         .font_family(theme::MONO_FONT)
         .font_weight(FontWeight::SEMIBOLD)
         .min_w_0()
-        .max_w(px(220.))
+        .max_w(zpx(220.))
         .truncate()
         .child(text.to_string())
     };
@@ -863,7 +864,7 @@ impl WorkspaceView {
             .items_center()
             .gap_1()
             .px_2()
-            .py(px(2.))
+            .py(zpx(2.))
             .rounded_full()
             .bg(p.muted)
             .font_weight(FontWeight::MEDIUM)
@@ -881,7 +882,7 @@ impl WorkspaceView {
           .variant(Variant::Outline)
           .size(Size::Sm)
           .disabled(target.disabled)
-          .max_w(px(220.))
+          .max_w(zpx(220.))
           .map(|b| {
             let fg = b.foreground();
             if target.loading {
@@ -930,7 +931,7 @@ impl WorkspaceView {
               .font_family(theme::MONO_FONT)
               .text_color(p.muted_foreground)
               .min_w_0()
-              .max_w(px(220.))
+              .max_w(zpx(220.))
               .truncate()
               .child(home_target.branch.clone()),
           );
@@ -1024,9 +1025,9 @@ impl WorkspaceView {
         div()
           .id("workspace-status-skeleton")
           .debug_selector(|| "workspace-status-skeleton".into())
-          .h(px(24.))
-          .w(px(56.))
-          .rounded(px(4.))
+          .h(zpx(24.))
+          .w(zpx(56.))
+          .rounded(zpx(4.))
           .bg(p.muted.opacity(0.6))
           .with_animation("workspace-status-pulse", pulse(), |el, delta| {
             el.opacity(pulse_opacity(delta))
@@ -1255,7 +1256,7 @@ impl WorkspaceView {
       .rounded_l_none()
       .border_l_1()
       .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
-      .px(px(6.))
+      .px(zpx(6.))
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
       .on_click(self.press_dropdown("workspace-create-pr-menu", "workspace.createPrMenu"));
     div()
@@ -1289,11 +1290,11 @@ impl WorkspaceView {
         Variant::Ghost
       })
       .size(Size::Sm)
-      .h(px(24.))
+      .h(zpx(24.))
       .gap_1()
       .px_2()
-      .text_size(px(11.))
-      .line_height(px(16.))
+      .text_size(zpx(11.))
+      .line_height(zpx(16.))
       .text_color(p.muted_foreground)
       .disabled(sync.disabled)
       .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
@@ -1319,9 +1320,9 @@ impl WorkspaceView {
       .child(
         div()
           .absolute()
-          .top(px(-2.))
-          .right(px(-2.))
-          .size(px(8.))
+          .top(zpx(-2.))
+          .right(zpx(-2.))
+          .size(zpx(8.))
           .rounded_full()
           .bg(dot)
           .with_animation("workspace-sync-pulse", pulse(), |el, delta| {
@@ -1344,7 +1345,7 @@ impl WorkspaceView {
     Button::new("workspace-checks", p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .gap(px(6.))
+      .gap(zpx(6.))
       .px_2()
       .map(|b| {
         if running {
@@ -1368,7 +1369,7 @@ impl WorkspaceView {
           div()
             .border_l_1()
             .border_color(p.border)
-            .pl(px(6.))
+            .pl(zpx(6.))
             .text_color(text)
             .child(gh.label),
         )
@@ -1450,7 +1451,7 @@ impl WorkspaceView {
                 div()
                   .absolute()
                   .inset_0()
-                  .rounded(px(6.))
+                  .rounded(zpx(6.))
                   .border_1()
                   .border_color(p.destructive)
                   .debug_selector(|| "browser-address-invalid".into()),
@@ -1459,7 +1460,7 @@ impl WorkspaceView {
             .child(
               div()
                 .absolute()
-                .right(px(4.))
+                .right(zpx(4.))
                 .top_0()
                 .bottom_0()
                 .flex()
@@ -1498,7 +1499,7 @@ impl WorkspaceView {
         .debug_selector(move || id.into())
         .rounded_full()
         .px_2()
-        .py(px(2.))
+        .py(zpx(2.))
         .font_weight(FontWeight::MEDIUM)
         .bg(bg)
         .text_color(fg)
@@ -1534,7 +1535,7 @@ impl WorkspaceView {
       .flex()
       .gap_1()
       .p_1()
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .bg(p.muted)
       .children(tabs.into_iter().map(|(tab, icon, label, extra)| {
         let active = tab == row.tab;
@@ -1551,10 +1552,10 @@ impl WorkspaceView {
           .debug_selector(move || selector)
           .flex()
           .items_center()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .px_3()
           .py_1()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1661,7 +1662,7 @@ impl WorkspaceView {
         Button::new("review-switcher", p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .gap(px(6.))
+          .gap(zpx(6.))
           .icon(
             if browser {
               theme::ICON_GLOBE
@@ -1721,29 +1722,29 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
     .debug_selector(|| "loc-diff-marker".into())
     .flex()
     .items_center()
-    .gap(px(6.))
+    .gap(zpx(6.))
     .child(count(format!("+{}", loc.insertions), green))
     .child(
       div()
         .flex()
         .flex_none()
         .items_center()
-        .h(px(6.))
+        .h(zpx(6.))
         .child(
           div()
             .flex()
             .justify_end()
             .h_full()
-            .w(px(HALF))
-            .child(div().h_full().w(px(width(loc.insertions))).bg(green)),
+            .w(zpx(HALF))
+            .child(div().h_full().w(zpx(width(loc.insertions))).bg(green)),
         )
         .child(div().w_px().h_full().bg(p.border))
         .child(
           div()
             .flex()
             .h_full()
-            .w(px(HALF))
-            .child(div().h_full().w(px(width(loc.deletions))).bg(red)),
+            .w(zpx(HALF))
+            .child(div().h_full().w(zpx(width(loc.deletions))).bg(red)),
         ),
     )
     .child(count(format!("-{}", loc.deletions), red))
@@ -2132,7 +2133,7 @@ impl Render for WorkspaceView {
       // Until the first load: the empty bar, as tall as a row of buttons.
       None => div()
         .flex_none()
-        .h(px(49.))
+        .h(zpx(49.))
         .border_b_1()
         .border_color(p.border)
         .debug_selector(|| "workspace-header".into()),
@@ -2260,7 +2261,7 @@ impl Render for WorkspaceView {
           .child(
             div()
               .flex_none()
-              .h(px(self.route.frame_height.unwrap_or(FRAME_FALLBACK)))
+              .h(zpx(self.route.frame_height.unwrap_or(FRAME_FALLBACK)))
               .debug_selector(|| "workspace-frame".into())
               .when(!covered, |this| this.child(frame(self.webview.as_ref()))),
           )

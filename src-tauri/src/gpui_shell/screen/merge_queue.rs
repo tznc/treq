@@ -17,12 +17,13 @@
 //!
 //! [`merge_queue_data`]: super::merge_queue_data
 
+use crate::gpui_shell::ui::zpx;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, AnyElement, App, ClipboardItem, Context, Div, FontWeight, Hsla,
+  self, div, prelude::*, AnyElement, App, ClipboardItem, Context, Div, FontWeight, Hsla,
   SharedString, Task, Window,
 };
 
@@ -395,7 +396,7 @@ impl MergeQueueView {
           .child(
             heading
               .font_weight(FontWeight::SEMIBOLD)
-              .line_height(px(16.25)),
+              .line_height(zpx(16.25)),
           ),
       );
     let tab = |id: &'static str, label: &'static str, active: bool| {
@@ -405,10 +406,10 @@ impl MergeQueueView {
         .debug_selector(move || id.into())
         .flex()
         .items_center()
-        .gap(px(6.))
+        .gap(zpx(6.))
         .px_3()
         .py_1()
-        .rounded(px(6.))
+        .rounded(zpx(6.))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .when(active, |this| {
@@ -425,10 +426,10 @@ impl MergeQueueView {
     let pro = (!self.pro).then(|| {
       ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(13.))
+        .line_height(zpx(13.))
         .px_1()
-        .py(px(1.))
-        .rounded(px(4.))
+        .py(zpx(1.))
+        .rounded(zpx(4.))
         .bg(tw::color(tw::GREEN_500).opacity(0.2))
         .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
         .child("PRO")
@@ -438,7 +439,7 @@ impl MergeQueueView {
         .flex()
         .gap_1()
         .p_1()
-        .rounded(px(6.))
+        .rounded(zpx(6.))
         .bg(p.muted)
         .child(
           tab("github-tab-issues", "Issues", false)
@@ -478,11 +479,11 @@ impl MergeQueueView {
     let on = self.route.show_merged_history;
     let fg = p.foreground;
     let check = div()
-      .size(px(14.))
+      .size(zpx(14.))
       .flex()
       .items_center()
       .justify_center()
-      .rounded(px(2.))
+      .rounded(zpx(2.))
       .border_1()
       .when(on, |this| {
         this.border_color(p.primary).bg(p.primary).child(ui::icon(
@@ -499,10 +500,10 @@ impl MergeQueueView {
       .debug_selector(|| "merge-queue-merged".into())
       .flex()
       .items_center()
-      .gap(px(6.))
+      .gap(zpx(6.))
       .h_7()
       .px_2()
-      .rounded(px(6.))
+      .rounded(zpx(6.))
       .border_1()
       .cursor_pointer()
       .when(on, |this| {
@@ -526,8 +527,8 @@ impl MergeQueueView {
     let refresh = Button::new("merge-queue-refresh", p)
       .variant(Variant::Ghost)
       .size(Size::Icon)
-      .w(px(28.))
-      .h(px(28.))
+      .w(zpx(28.))
+      .h(zpx(28.))
       .icon(theme::ICON_REFRESH, 14.)
       .on_click(cx.listener(|view, _, _, cx| view.read_queue(cx)));
     div()
@@ -586,9 +587,9 @@ impl MergeQueueView {
       .p_6()
       .child(
         div()
-          .max_w(px(448.))
+          .max_w(zpx(448.))
           .w_full()
-          .rounded(px(12.))
+          .rounded(zpx(12.))
           .border_1()
           .border_color(p.border)
           .bg(gpui::linear_gradient(
@@ -620,9 +621,9 @@ impl MergeQueueView {
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::SEMIBOLD)
-                  .px(px(6.))
-                  .py(px(2.))
-                  .rounded(px(4.))
+                  .px(zpx(6.))
+                  .py(zpx(2.))
+                  .rounded(zpx(4.))
                   .bg(tw::color(tw::GREEN_500).opacity(0.2))
                   .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
                   .child("PRO"),
@@ -634,7 +635,7 @@ impl MergeQueueView {
               )
               .child(
                 ui::text(div(), TextSize::Sm)
-                  .line_height(px(13. * 1.625))
+                  .line_height(zpx(13. * 1.625))
                   .text_center()
                   .text_color(p.muted_foreground)
                   .child(
@@ -764,10 +765,10 @@ impl MergeQueueView {
     let rail = div()
       .debug_selector(|| "merge-queue-rail".into())
       .absolute()
-      .left(px(35. - 12.))
+      .left(zpx(35. - 12.))
       .top_0()
       .bottom_0()
-      .w(px(2.))
+      .w(zpx(2.))
       .bg(p.border);
     div()
       .debug_selector(|| "merge-queue-list".into())
@@ -803,7 +804,7 @@ impl MergeQueueView {
     };
     let mut card = div()
       .debug_selector(move || selector)
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .border_1()
       .border_color(p.border)
       .p_4();
@@ -830,11 +831,11 @@ impl MergeQueueView {
         ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
-          .gap(px(6.))
+          .gap(zpx(6.))
           .font_weight(FontWeight::SEMIBOLD)
           .text_color(p.muted_foreground)
           .mb_3()
-          .pl(px(26.))
+          .pl(zpx(26.))
           .child(ui::icon(theme::ICON_LAYERS, 16., p.muted_foreground))
           .child(format!("Stack of {n}"))
           .child(
@@ -918,9 +919,9 @@ impl MergeQueueView {
       .gap_3()
       .py_2()
       .child(
-        div().flex_none().mt(px(2.)).size(px(14.)).child(
+        div().flex_none().mt(zpx(2.)).size(zpx(14.)).child(
           div()
-            .size(px(14.))
+            .size(zpx(14.))
             .rounded_full()
             .border_2()
             .border_color(p.background)
@@ -978,13 +979,13 @@ impl MergeQueueView {
               .flex_wrap()
               .items_center()
               .gap_2()
-              .mt(px(2.))
+              .mt(zpx(2.))
               .min_w_0()
               .child(
                 ui::text(div(), TextSize::Xs)
                   .flex_none()
                   .px_2()
-                  .py(px(2.))
+                  .py(zpx(2.))
                   .rounded_full()
                   .bg(chip_bg)
                   .text_color(chip_fg)
@@ -1020,7 +1021,7 @@ impl MergeQueueView {
         .ml_auto()
         .flex()
         .items_center()
-        .gap(px(6.))
+        .gap(zpx(6.))
         .child(
           ui::text(div(), TextSize::Xs)
             .font_family(theme::MONO_FONT)
@@ -1031,23 +1032,23 @@ impl MergeQueueView {
           div()
             .flex()
             .flex_none()
-            .h(px(6.))
+            .h(zpx(6.))
             .items_center()
             .child(
               div()
-                .w(px(half))
+                .w(zpx(half))
                 .h_full()
                 .flex()
                 .justify_end()
-                .child(div().h_full().w(px(add)).bg(green)),
+                .child(div().h_full().w(zpx(add)).bg(green)),
             )
-            .child(div().w(px(1.)).h_full().bg(p.border))
+            .child(div().w(zpx(1.)).h_full().bg(p.border))
             .child(
               div()
-                .w(px(half))
+                .w(zpx(half))
                 .h_full()
                 .flex()
-                .child(div().h_full().w(px(del)).bg(red)),
+                .child(div().h_full().w(zpx(del)).bg(red)),
             ),
         )
         .child(
@@ -1088,7 +1089,7 @@ impl MergeQueueView {
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(2.))
+        .gap(zpx(2.))
         .child(
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "merge-queue-tip-sha".into())
@@ -1117,7 +1118,7 @@ impl MergeQueueView {
       .child(
         div()
           .flex_none()
-          .size(px(14.))
+          .size(zpx(14.))
           .flex()
           .items_center()
           .justify_center()
@@ -1140,9 +1141,9 @@ impl MergeQueueView {
                 ui::text(div(), TextSize::Xs)
                   .debug_selector(|| "merge-queue-target-branch".into())
                   .flex_none()
-                  .px(px(6.))
-                  .py(px(2.))
-                  .rounded(px(4.))
+                  .px(zpx(6.))
+                  .py(zpx(2.))
+                  .rounded(zpx(4.))
                   .font_family(theme::MONO_FONT)
                   .font_weight(FontWeight::MEDIUM)
                   .bg(p.muted)

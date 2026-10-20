@@ -2,7 +2,8 @@
 //! repository run, this machine or its devcontainer. The task input, the
 //! agent prompt dialog and the terminal pane each show one.
 
-use tauri_plugin_gpui::gpui::{div, prelude::*, px, Context, Div, FontWeight, Stateful};
+use crate::gpui_shell::ui::zpx;
+use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, FontWeight, Stateful};
 
 use super::{
   code::{menu_item, menu_panel, tw, GREEN_500},
@@ -53,9 +54,9 @@ pub(crate) fn trigger(
   Button::new(id, p)
     .variant(Variant::Ghost)
     .size(Size::Sm)
-    .h(px(size.height))
-    .px(px(size.padding))
-    .gap(px(6.))
+    .h(zpx(size.height))
+    .px(zpx(size.padding))
+    .gap(zpx(6.))
     .child(ui::icon(icon, size.icon, p.foreground))
     .child(ui::text(div(), TextSize::Xs).child(label))
     .when(devcontainer, |b| {
@@ -66,7 +67,7 @@ pub(crate) fn trigger(
           p.muted_foreground,
         ))
       } else {
-        b.child(div().size(px(6.)).rounded_full().bg(if running {
+        b.child(div().size(zpx(6.)).rounded_full().bg(if running {
           tw(GREEN_500)
         } else {
           p.muted_foreground.opacity(0.5)
@@ -107,7 +108,7 @@ pub(crate) fn menu<V: 'static>(
       .items_start()
       .child(
         div()
-          .mt(px(2.))
+          .mt(zpx(2.))
           .child(ui::icon(icon, 14., p.popover_foreground)),
       )
       .child(
@@ -116,7 +117,7 @@ pub(crate) fn menu<V: 'static>(
           .min_w_0()
           .flex()
           .flex_col()
-          .gap(px(2.))
+          .gap(zpx(2.))
           .child(div().font_weight(FontWeight::MEDIUM).child(title))
           .child(
             ui::text(div(), TextSize::Xs)
@@ -127,18 +128,18 @@ pub(crate) fn menu<V: 'static>(
       .when(selected, |this| {
         this.child(
           div()
-            .mt(px(2.))
+            .mt(zpx(2.))
             .child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground)),
         )
       })
   };
   let devcontainer = env.devcontainer;
   let mut panel = menu_panel(id, p)
-    .w(px(256.))
+    .w(zpx(256.))
     .child(
       ui::text(div(), TextSize::Xs)
         .px_2()
-        .py(px(6.))
+        .py(zpx(6.))
         .text_color(p.muted_foreground)
         .child("New terminals and agents run in"),
     )

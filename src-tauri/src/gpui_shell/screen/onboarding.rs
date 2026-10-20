@@ -5,10 +5,11 @@
 //! remote button still goes to React, which opens the remote dialog GPUI
 //! draws (`screen/remote.rs`).
 
+use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc};
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{div, prelude::*, px, Context, FontWeight, Window};
+use tauri_plugin_gpui::gpui::{div, prelude::*, Context, FontWeight, Window};
 
 use super::onboarding_remote;
 
@@ -272,7 +273,7 @@ pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {
     .flex()
     .flex_col()
     .items_center()
-    .gap(px(6.))
+    .gap(zpx(6.))
     .p_6()
     .child(
       div()
@@ -327,14 +328,18 @@ pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {
     .items_center()
     .justify_center()
     .child(
-      ui::card(&p).w(px(384.)).child(header).child(actions).child(
-        div()
-          .border_t_1()
-          .border_color(p.border.opacity(0.5))
-          .px_6()
-          .pt_4()
-          .pb_6()
-          .child(checklist::render(&screen.checklist, ctx)),
-      ),
+      ui::card(&p)
+        .w(zpx(384.))
+        .child(header)
+        .child(actions)
+        .child(
+          div()
+            .border_t_1()
+            .border_color(p.border.opacity(0.5))
+            .px_6()
+            .pt_4()
+            .pb_6()
+            .child(checklist::render(&screen.checklist, ctx)),
+        ),
     )
 }

@@ -1,6 +1,7 @@
 //! `NewPrDialog`: a pull request from a workspace (`CreatePrFromWorkspaceForm`)
 //! or from any branch (`CreatePrForm`).
 
+use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
   anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
   MouseButton, SharedString, Window,
@@ -394,9 +395,9 @@ impl GithubView {
         let muted = p.muted;
         div()
           .id("github-new-pr-workspaces")
-          .max_h(px(240.))
+          .max_h(zpx(240.))
           .overflow_y_scroll()
-          .rounded(px(6.))
+          .rounded(zpx(6.))
           .border_1()
           .border_color(p.border)
           .children(list.iter().enumerate().map(|(i, ws)| {
@@ -610,7 +611,7 @@ impl GithubView {
       .rounded_l_none()
       .border_l_1()
       .border_color(gpui_kit::white().opacity(0.2))
-      .px(px(6.))
+      .px(zpx(6.))
       .disabled(pending)
       .icon(theme::ICON_CHEVRON_DOWN, 16.)
       .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::PrType, cx)));
@@ -619,9 +620,9 @@ impl GithubView {
       deferred(
         parts::menu_panel("github-new-pr-type-menu", p)
           .absolute()
-          .top(px(36.))
+          .top(zpx(36.))
           .left_0()
-          .w(px(320.))
+          .w(zpx(320.))
           .on_mouse_down_out(cx.listener(|view, _, _, cx| view.close_popover(Popover::PrType, cx)))
           .children(PR_TYPES.iter().map(|&(is_draft, _, item, description)| {
             ui::text(
@@ -638,19 +639,19 @@ impl GithubView {
             .relative()
             .flex()
             .flex_col()
-            .gap(px(2.))
-            .py(px(6.))
+            .gap(zpx(2.))
+            .py(zpx(6.))
             .pl_8()
             .pr_2()
-            .rounded(px(4.))
+            .rounded(zpx(4.))
             .cursor_pointer()
             .hover(move |s| s.bg(accent))
             .child(
               div()
                 .absolute()
                 .left_2()
-                .top(px(8.))
-                .size(px(14.))
+                .top(zpx(8.))
+                .size(zpx(14.))
                 .flex()
                 .items_center()
                 .justify_center()

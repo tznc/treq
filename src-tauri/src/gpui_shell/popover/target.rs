@@ -1,6 +1,7 @@
 //! The target branch popover: `TargetBranchSelector`'s search over the
 //! repository's branches (`w-[300px] p-0`, a cmdk list).
 
+use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, KeyDownEvent, SharedString, Window,
 };
@@ -234,7 +235,7 @@ impl Popover {
               .id(id)
               .debug_selector(move || selector)
               .px_3()
-              .py(px(6.))
+              .py(zpx(6.))
               .flex()
               .items_center()
               .gap_2()
@@ -265,8 +266,8 @@ impl Popover {
     div()
       .id("target-branch-popover")
       .debug_selector(|| "target-branch-popover".into())
-      .w(px(WIDTH))
-      .rounded(px(6.))
+      .w(zpx(WIDTH))
+      .rounded(zpx(6.))
       .border_1()
       .border_color(p.border)
       .bg(p.background)
@@ -276,14 +277,14 @@ impl Popover {
         ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
-          .h(px(40.))
+          .h(zpx(40.))
           .px_3()
           .children(input.map(|input| input.flex_1())),
       )
       .child(
         div()
           .id("target-branch-list")
-          .max_h(px(300.))
+          .max_h(zpx(300.))
           .overflow_y_scroll()
           .track_scroll(&state.scroll)
           .children(children),

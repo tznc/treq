@@ -5,6 +5,7 @@
 //! ahead and its diff, and merges it. React still owns leaving the page,
 //! which a merge does too (its caches refresh then).
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -14,7 +15,7 @@ use std::{
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, hsla, prelude::*, px, relative, rgb, App, Context, FontWeight, Hsla,
+  self, deferred, div, hsla, prelude::*, relative, rgb, App, Context, FontWeight, Hsla,
   SharedString, Window,
 };
 
@@ -418,7 +419,7 @@ fn empty(p: &Palette, label: String) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
     .border_1()
     .border_color(p.border)
-    .rounded(px(12.))
+    .rounded(zpx(12.))
     .p_6()
     .text_center()
     .text_color(p.muted_foreground)
@@ -430,7 +431,7 @@ fn list(p: &Palette) -> gpui::Div {
   div()
     .border_1()
     .border_color(p.border)
-    .rounded(px(12.))
+    .rounded(zpx(12.))
     .flex()
     .flex_col()
 }
@@ -573,7 +574,7 @@ impl MergeView {
       .flex()
       .items_center()
       .child(confirm)
-      .child(div().w(px(1.)).h(px(40.)).bg(p.foreground.opacity(0.3)))
+      .child(div().w(zpx(1.)).h(zpx(40.)).bg(p.foreground.opacity(0.3)))
       .child(menu)
       .when(self.menu_open && !disabled, |this| {
         this.child(self.strategy_menu(commit_count, target, p))
@@ -646,11 +647,11 @@ impl MergeView {
         .id("merge-strategy-menu")
         .debug_selector(|| "merge-strategy-menu".into())
         .absolute()
-        .top(px(44.))
+        .top(zpx(44.))
         .right_0()
-        .w(px(256.))
+        .w(zpx(256.))
         .p_1()
-        .rounded(px(8.))
+        .rounded(zpx(8.))
         .border_1()
         .border_color(p.border)
         .bg(p.popover)
@@ -678,7 +679,7 @@ impl MergeView {
             .py_3()
             .pl_8()
             .pr_2()
-            .rounded(px(6.))
+            .rounded(zpx(6.))
             .cursor_pointer()
             .hover(move |s| s.bg(p.menu_accent))
             .child(
@@ -838,9 +839,9 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
             ui::text(div(), TextSize::Xs)
               .flex_none()
               .bg(p.muted)
-              .px(px(6.))
-              .py(px(2.))
-              .rounded(px(4.))
+              .px(zpx(6.))
+              .py(zpx(2.))
+              .rounded(zpx(4.))
               .font_family(theme::MONO_FONT)
               .child(commit.short_id.clone()),
           )
@@ -860,7 +861,7 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                   .flex_wrap()
                   .items_center()
                   .gap_2()
-                  .mt(px(2.))
+                  .mt(zpx(2.))
                   .text_color(p.muted_foreground)
                   .child(commit.author_name.clone())
                   .when(commit.insertions > 0 || commit.deletions > 0, |this| {

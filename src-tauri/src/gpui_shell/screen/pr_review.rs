@@ -10,6 +10,7 @@
 //!
 //! [`pr_review_data`]: super::pr_review_data
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
   rc::Rc,
@@ -435,7 +436,7 @@ impl PrReviewView {
       ui::text(div(), TextSize::Xs)
         .debug_selector(|| "pr-review-subtitle".into())
         .flex()
-        .gap(px(4.))
+        .gap(zpx(4.))
         .overflow_hidden()
         .whitespace_nowrap()
         .text_color(muted)
@@ -450,8 +451,8 @@ impl PrReviewView {
       Button::new("pr-review-open-github", p)
         .variant(Variant::Ghost)
         .size(Size::Icon)
-        .w(px(32.))
-        .h(px(32.))
+        .w(zpx(32.))
+        .h(zpx(32.))
         .icon(theme::ICON_EXTERNAL_LINK, 16.)
         .on_click(move |_, _, _| host.open_url(&url))
     });
@@ -473,8 +474,8 @@ impl PrReviewView {
         Button::new("pr-review-back", p)
           .variant(Variant::Ghost)
           .size(Size::Icon)
-          .w(px(32.))
-          .h(px(32.))
+          .w(zpx(32.))
+          .h(zpx(32.))
           .icon(theme::ICON_ARROW_LEFT, 16.)
           .on_click(cx.listener(|view, _, _, cx| {
             view.send(
@@ -494,7 +495,7 @@ impl PrReviewView {
             ui::text(div(), TextSize::Sm)
               .debug_selector(|| "pr-review-title".into())
               .flex()
-              .gap(px(4.))
+              .gap(zpx(4.))
               .overflow_hidden()
               .whitespace_nowrap()
               .font_weight(FontWeight::MEDIUM)
@@ -587,7 +588,7 @@ impl PrReviewView {
         .child(div().truncate().flex_1().child(name))
         .child(
           div()
-            .text_size(px(10.))
+            .text_size(zpx(10.))
             .text_color(p.muted_foreground)
             .child(file.status.clone()),
         )
@@ -625,7 +626,7 @@ impl PrReviewView {
       let dot = div()
         .mt_1()
         .flex_none()
-        .size(px(13.))
+        .size(zpx(13.))
         .rounded_full()
         .border_1()
         .border_color(if checked {
@@ -637,7 +638,7 @@ impl PrReviewView {
         .items_center()
         .justify_center()
         .when(checked, |this| {
-          this.child(div().size(px(7.)).rounded_full().bg(p.primary))
+          this.child(div().size(zpx(7.)).rounded_full().bg(p.primary))
         });
       radios = radios.child(
         ui::text(div(), TextSize::Sm)
@@ -676,9 +677,9 @@ impl PrReviewView {
     let panel = div()
       .id("pr-review-popover")
       .debug_selector(|| "pr-review-popover".into())
-      .w(px(width))
+      .w(zpx(width))
       .p_4()
-      .rounded(px(8.))
+      .rounded(zpx(8.))
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -720,7 +721,7 @@ impl PrReviewView {
         self
           .summary_input
           .as_ref()
-          .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Sm).min_h(px(80.))),
+          .map(|(state, _)| ui::text(Textarea::new(state), TextSize::Sm).min_h(zpx(80.))),
       )
       .child(radios)
       .child(

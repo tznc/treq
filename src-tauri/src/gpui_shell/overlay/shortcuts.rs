@@ -1,6 +1,7 @@
 //! `KeyboardShortcutsModal`: the "?" reference of the app's shortcuts.
 
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, px, SharedString};
+use crate::gpui_shell::ui::zpx;
+use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
 use crate::gpui_shell::{
   theme::Palette,
@@ -52,10 +53,10 @@ fn kbd(p: &Palette, key: &str) -> gpui::Div {
     .flex_none()
     .items_center()
     .justify_center()
-    .h(px(20.))
-    .min_w(px(20.))
+    .h(zpx(20.))
+    .min_w(zpx(20.))
     .px_1()
-    .rounded(px(6.))
+    .rounded(zpx(6.))
     .bg(p.muted)
     .text_color(p.muted_foreground)
     .font_weight(gpui::FontWeight::MEDIUM)
@@ -130,11 +131,11 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     .id("keyboard-shortcuts-modal")
     .debug_selector(|| "keyboard-shortcuts-modal".into())
     .w_full()
-    .max_w(px(672.))
+    .max_w(zpx(672.))
     .max_h(viewport.height * 0.85)
     .overflow_y_scroll()
     .p_6()
-    .rounded(px(16.))
+    .rounded(zpx(16.))
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -143,7 +144,7 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     .occlude()
     .child(
       ui::text(div(), TextSize::Lg)
-        .line_height(px(TextSize::Lg.metrics().0))
+        .line_height(zpx(TextSize::Lg.metrics().0))
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .child("Keyboard shortcuts"),
     )

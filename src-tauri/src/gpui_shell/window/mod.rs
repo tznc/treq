@@ -29,7 +29,6 @@ pub(super) use actions::Shortcut;
 pub(super) use controller::{Presentation, WindowController};
 pub(super) use host::WindowHost;
 pub(super) use keys::{from_app, window_shortcut};
-pub(super) use model::DEFAULT_ZOOM;
 pub(super) use shell::{
   cutoff_cleared, drives, follow_appearance, forget, instance_state, listen, managed_endpoint,
   menu_event, native_event, overlay_action, react_overlay, routed, screen_action, shortcut,

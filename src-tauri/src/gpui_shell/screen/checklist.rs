@@ -1,8 +1,9 @@
 //! `PrerequisiteChecklist`: which of Git, the agent CLIs and the GitHub CLI
 //! are installed, with an install link for each missing one.
 
+use crate::gpui_shell::ui::zpx;
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{div, prelude::*, px, FontWeight, SharedString};
+use tauri_plugin_gpui::gpui::{div, prelude::*, FontWeight, SharedString};
 
 use super::{Ctx, ScreenAction};
 use crate::core::{self, PrerequisiteStatus};
@@ -78,8 +79,8 @@ pub fn render(list: &Checklist, ctx: &Ctx) -> impl IntoElement {
           .variant(Variant::Ghost)
           .size(Size::Sm)
           .disabled(list.validating)
-          .mr(px(-8.))
-          .h(px(24.))
+          .mr(zpx(-8.))
+          .h(zpx(24.))
           .gap_1()
           .px_2(),
         TextSize::Xs,

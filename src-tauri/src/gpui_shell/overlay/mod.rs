@@ -9,6 +9,7 @@
 //! the picked workspace, closing) goes back to the webview as a
 //! `gpui-overlay-action` event, and React pushes what shows next.
 
+use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use gpui_kit::component::input::{
@@ -570,9 +571,9 @@ fn group_branches(list: Vec<JjBranch>) -> Vec<(JjBranch, usize)> {
 /// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
 fn kbd(p: &Palette, key: &str) -> gpui::Div {
   ui::text(div(), TextSize::Xs)
-    .px(px(6.))
-    .py(px(2.))
-    .rounded(px(4.))
+    .px(zpx(6.))
+    .py(zpx(2.))
+    .rounded(zpx(4.))
     .bg(p.muted)
     .child(SharedString::from(key.to_string()))
 }
@@ -671,9 +672,9 @@ impl Overlay {
       Body::Palette { commands, .. } => {
         let command = &commands[index];
         base
-          .py(px(6.))
+          .py(zpx(6.))
           .mx_2()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .text_color(p.foreground)
           .when(!selected, |this| {
             this.hover(|s| s.bg(p.menu_accent.opacity(0.3)))
@@ -691,7 +692,7 @@ impl Overlay {
         base
           .py_2()
           .mx_2()
-          .rounded(px(8.))
+          .rounded(zpx(8.))
           .when(selected, |this| this.text_color(p.foreground))
           .when(!selected, |this| {
             this.hover(|s| s.bg(p.menu_accent.opacity(0.5)))
@@ -777,8 +778,8 @@ impl Overlay {
               .px_3()
               .py_2()
               .mt_2()
-              .text_size(px(11.))
-              .line_height(px(16.))
+              .text_size(zpx(11.))
+              .line_height(zpx(16.))
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .text_color(p.muted_foreground)
               .child(BRANCH_GROUPS[g].to_uppercase())
@@ -847,7 +848,7 @@ impl Render for Overlay {
             .id("overlay-dialog")
             .debug_selector(|| "overlay-dialog".into())
             .w(viewport.width * 0.4)
-            .rounded(px(16.))
+            .rounded(zpx(16.))
             .border_1()
             .border_color(if palette {
               p.border
@@ -866,7 +867,7 @@ impl Render for Overlay {
               ui::text(div(), TextSize::Sm)
                 .flex()
                 .items_center()
-                .h(px(48.))
+                .h(zpx(48.))
                 .px_3()
                 .border_b_1()
                 .border_color(p.border)
@@ -885,7 +886,7 @@ impl Render for Overlay {
             .child(
               div()
                 .id("overlay-list")
-                .max_h(px(if palette { 300. } else { 400. }))
+                .max_h(zpx(if palette { 300. } else { 400. }))
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
                 .py_2()
