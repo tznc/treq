@@ -4,9 +4,13 @@
 //! shell draws from them.
 
 mod actions;
+mod controller;
 mod data;
 mod host;
 mod model;
 mod sidebar;
 mod snapshots;
 mod tree;
+
+#[cfg(test)]
+mod tests;
