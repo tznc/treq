@@ -18,6 +18,7 @@ struct Harness {
 }
 
 type Sink = Arc<dyn Fn(String) + Send + Sync>;
+type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
@@ -68,6 +69,10 @@ struct FakeHost {
   ptys: Mutex<Vec<String>>,
   /// PTY output listeners, by PTY id.
   sinks: Mutex<Vec<(String, Sink)>>,
+  /// Remote session exit listeners, by local id.
+  exits: Mutex<Vec<(String, ExitSink)>>,
+  /// What `PtyList` says of a remote session (`None`: the host is down).
+  remote_running: Mutex<Option<bool>>,
   /// Whether confirmations are cancelled.
   decline: bool,
   /// What the dialogs read: the prompt history, and the stashes and their diff.
@@ -405,6 +410,11 @@ impl merge::MergeHost for FakeHost {
 impl code_data::CodeHost for FakeHost {
   fn overview(&self, _: &str, workspace_id: Option<i64>) -> Result<code_data::Overview, String> {
     self.record(format!("read overview {workspace_id:?}"));
+    if self.failing.contains(&"remote_overview") {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Browsing the file tree",
+      ));
+    }
     Ok(self.overview.clone())
   }
 
@@ -744,6 +754,44 @@ impl terminal_data::TerminalHost for FakeHost {
     terminal_data::Listening::new(|| {})
   }
 
+  fn listen_exit(
+    &self,
+    id: &str,
+    sink: Box<dyn Fn(Option<u32>) + Send + Sync>,
+  ) -> terminal_data::Listening {
+    self
+      .exits
+      .lock()
+      .unwrap()
+      .push((id.to_string(), Arc::from(sink)));
+    terminal_data::Listening::new(|| {})
+  }
+
+  fn remote_attach(
+    &self,
+    id: &str,
+    target: &terminal_data::RemoteTarget,
+    _: u16,
+    _: u16,
+  ) -> Result<(), String> {
+    self.record(format!("attach {id} to {}", target.label));
+    if self.failing.contains(&"remote_attach") {
+      return Err("ssh: connection refused".into());
+    }
+    self.ptys.lock().unwrap().push(id.to_string());
+    Ok(())
+  }
+
+  fn remote_running(&self, target: &terminal_data::RemoteTarget) -> Option<bool> {
+    self.record(format!("list {}", target.label));
+    *self.remote_running.lock().unwrap()
+  }
+
+  fn remote_stop(&self, target: &terminal_data::RemoteTarget) -> Result<(), String> {
+    self.record(format!("stop {}", target.label));
+    Ok(())
+  }
+
   fn sessions(&self, _: &str) -> Result<Vec<crate::local_db::Session>, String> {
     Ok(self.sessions.clone())
   }
@@ -812,6 +860,31 @@ impl terminal_data::TerminalHost for FakeHost {
 
 impl FakeHost {
   /// Sends `data` as the PTY's output.
+  /// Ends the channel of remote session `id`.
+  fn exit(&self, id: &str, status: Option<u32>) {
+    let sinks: Vec<_> = self
+      .exits
+      .lock()
+      .unwrap()
+      .iter()
+      .filter(|(pty, _)| pty == id)
+      .map(|(_, sink)| sink.clone())
+      .collect();
+    for sink in sinks {
+      sink(status);
+    }
+  }
+
+  /// The local ids of remote sessions attached so far, in order.
+  fn attached(&self) -> Vec<String> {
+    self
+      .calls()
+      .iter()
+      .filter_map(|c| c.strip_prefix("attach "))
+      .map(|c| c.split(' ').next().unwrap_or_default().to_string())
+      .collect()
+  }
+
   fn output(&self, id: &str, data: &str) {
     let sinks: Vec<_> = self
       .sinks
@@ -1313,6 +1386,104 @@ fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
     ]
   );
   assert_eq!(h.sent(), vec![ScreenAction::OpenRemote]);
+}
+
+fn onboarding_with_form(form: serde_json::Value) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "onboarding",
+    "dark": false,
+    "remoteRepo": form,
+  }))
+  .expect("onboarding")
+}
+
+/// Scrolls the onboarding screen down to the form under the card.
+fn scroll_to_form(h: &mut Harness) {
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("onboarding-open-repo")
+    .expect("card")
+    .center();
+  h.cx.simulate_event(gpui::ScrollWheelEvent {
+    position: at,
+    delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-5000.))),
+    modifiers: Modifiers::none(),
+    touch_phase: gpui::TouchPhase::Moved,
+  });
+  h.cx.run_until_parked();
+}
+
+#[gpui::test]
+fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(serde_json::json!({
+      "selector": true,
+      "saved": [{ "id": "r1", "display_name": "app", "canonical_remote_path": "/srv/app" }],
+      "path": "/srv/new",
+      "probe": { "is_repo": false, "needs_clone": true },
+      "cloneUrl": "",
+      "confirmInit": false,
+      "error": "probe failed",
+    })),
+    host,
+  );
+  for selector in [
+    "onboarding-open-repo",
+    "remote-repository-selector",
+    "remote-saved-repo",
+    "remote-repo-path",
+    "remote-repo-probe",
+    "remote-repo-not-a-repo",
+    "remote-repo-clone-url",
+    "remote-repo-init",
+    "remote-repo-error",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(!h.drawn("remote-repo-open"));
+  assert!(!h.drawn("remote-repo-cutoff"));
+  scroll_to_form(&mut h);
+  h.click("remote-repo-probe");
+  h.click("remote-saved-repo");
+  h.click("remote-repo-confirm-init");
+  // Initialize waits for the confirmation; Clone for a URL.
+  h.click("remote-repo-init");
+  h.click("remote-repo-clone");
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("remoteRepo.probe"),
+      ScreenAction::Field {
+        field: "remoteRepo.select".into(),
+        value: "r1".into()
+      },
+      ScreenAction::Field {
+        field: "remoteRepo.confirmInit".into(),
+        value: true.into()
+      },
+    ]
+  );
+}
+
+#[gpui::test]
+fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(serde_json::json!({
+      "cutoff": "session_ended",
+      "selector": true,
+    })),
+    host,
+  );
+  assert!(h.drawn("remote-repo-cutoff"));
+  assert!(!h.drawn("remote-repository-selector"));
+  scroll_to_form(&mut h);
+  h.click("remote-repo-reauthenticate");
+  assert_eq!(h.sent(), vec![press("remoteRepo.reauthenticate")]);
 }
 
 #[gpui::test]
@@ -2846,6 +3017,7 @@ fn code_host() -> FakeHost {
     overview: code_data::Overview {
       entries: vec![entry("src", true), entry("README.md", false)],
       readme: Some("# Login".into()),
+      unavailable: false,
     },
     history: serde_json::from_value(serde_json::json!({
       "commits": [commit("a", 10, 4), commit("b", 2, 0)],
@@ -2901,6 +3073,18 @@ fn code_tab_draws_files_history_and_readme(cx: &mut TestAppContext) {
     calls.iter().any(|c| c.starts_with("read commits Some(7)")),
     "{calls:?}"
   );
+}
+
+#[gpui::test]
+fn code_tab_says_a_remote_file_tree_is_unavailable(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    failing: vec!["remote_overview"],
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-files-unavailable"));
+  assert!(!h.drawn("code-files-empty"));
+  assert!(h.drawn("code-go-to-file"), "Go to file still opens files");
 }
 
 #[gpui::test]
@@ -3260,6 +3444,81 @@ fn changes_route() -> ScreenSnapshot {
   route["code"] = true.into();
   route["tab"] = "changes".into();
   serde_json::from_value(route).expect("changes route")
+}
+
+fn remote_chrome(state: &str, cut_off: bool) -> serde_json::Value {
+  serde_json::json!({
+    "displayName": "app",
+    "terminal": true,
+    "state": state,
+    "cutOff": cut_off,
+    "notices": ["Merging a remote workspace is not available yet."],
+  })
+}
+
+#[gpui::test]
+fn a_remote_repository_hides_stash_all(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  assert!(h.drawn("stash-all-changes"));
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.remote_chrome = serde_json::from_value(remote_chrome("online", false)).ok();
+    }
+  });
+  h.cx.run_until_parked();
+  assert!(!h.drawn("stash-all-changes"));
+  assert!(h.drawn("discard-all-changes"));
+}
+
+#[gpui::test]
+fn a_remote_repository_draws_dashboards_strip(cx: &mut TestAppContext) {
+  let mut route = route_json(Some(7), "main");
+  route["remoteChrome"] = remote_chrome("offline", false);
+  let snapshot = serde_json::from_value(route).expect("remote route");
+  let (mut h, _) = workspace_harness(cx, code_host(), snapshot);
+  for selector in [
+    "remote-strip",
+    "remote-terminal-link",
+    "remote-refresh-link",
+    "remote-status-banner",
+    "remote-banner-reconnect",
+    "remote-banner-refresh",
+    "remote-capability-notice",
+    "workspace-header",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(!h.drawn("remote-banner-wake"));
+  assert!(!h.drawn("remote-cutoff-overlay"));
+  h.click("remote-terminal-link");
+  h.click("remote-banner-reconnect");
+  h.click("remote-refresh-link");
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("remote.terminal"),
+      press("remote.reconnect"),
+      press("remote.refresh")
+    ]
+  );
+}
+
+#[gpui::test]
+fn a_cut_off_remote_repository_dims_the_window(cx: &mut TestAppContext) {
+  let mut route = route_json(Some(7), "main");
+  route["remoteChrome"] = remote_chrome("cutoff", true);
+  let snapshot = serde_json::from_value(route).expect("remote route");
+  let (mut h, _) = workspace_harness(cx, code_host(), snapshot);
+  assert!(h.drawn("remote-cutoff-overlay"));
+  assert!(h.drawn("remote-status-banner"));
+  assert!(
+    !h.drawn("remote-banner-refresh"),
+    "no Refresh while cut off"
+  );
+  // The strip's links take no clicks.
+  h.click("remote-terminal-link");
+  h.click("remote-refresh-link");
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
 }
 
 #[gpui::test]
@@ -4099,6 +4358,133 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!h.drawn("terminal-column-shell"));
   assert!(h.drawn("terminal-column-agent"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
+}
+
+fn open_remote_command(nonce: u64) -> serde_json::Value {
+  serde_json::json!({
+    "commands": [{
+      "nonce": nonce,
+      "kind": "openRemote",
+      "remote": {
+        "endpoint": crate::gpui_shell::remote_repo::tests::repository().endpoint,
+        "repositoryId": "/srv/app",
+        "workspaceId": "root",
+        "remoteWorkingDirectory": "/srv/app",
+        "label": "shell-k1",
+        "launch": { "type": "shell" },
+        "reattach": false,
+      },
+    }],
+  })
+}
+
+#[gpui::test]
+fn terminal_pane_attaches_a_remote_session(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  assert!(h.drawn("terminal-column-shell"));
+  assert!(h.drawn("remote-terminal-header"));
+  assert!(h.drawn("remote-terminal-stop"));
+  assert!(h.drawn("remote-terminal-detach"));
+  let attached = host.attached();
+  assert_eq!(attached.len(), 1, "{:?}", host.calls());
+  assert!(attached[0].starts_with("remote-pty-ep-1-root-shell-k1-"));
+  assert!(!h.drawn("remote-terminal-attaching"), "attached");
+  h.cx.simulate_input("ls");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with(&format!("write {}", attached[0]))));
+  // The session ended on the host: the header says so, no overlay.
+  *host.remote_running.lock().unwrap() = Some(false);
+  host.exit(&attached[0], Some(0));
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"list shell-k1".to_string()));
+  assert!(h.drawn("remote-terminal-ended"));
+  assert!(!h.drawn("remote-terminal-lost"));
+}
+
+#[gpui::test]
+fn a_dropped_remote_session_reattaches_once_then_waits(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  *host.remote_running.lock().unwrap() = Some(true);
+  host.exit(&host.attached()[0], None);
+  h.cx.run_until_parked();
+  let attached = host.attached();
+  assert_eq!(attached.len(), 2, "reattached on its own");
+  assert_ne!(attached[0], attached[1], "with a fresh local id");
+  assert!(host.calls().contains(&format!("close {}", attached[0])));
+  // Dropping again within the cooldown waits for the user.
+  host.exit(&attached[1], None);
+  h.cx.run_until_parked();
+  assert_eq!(host.attached().len(), 2);
+  assert!(h.drawn("remote-terminal-lost"));
+  h.click("remote-terminal-reattach");
+  h.cx.run_until_parked();
+  assert_eq!(host.attached().len(), 3);
+  assert!(!h.drawn("remote-terminal-lost"));
+}
+
+#[gpui::test]
+fn an_unreachable_remote_session_offers_reattach_and_close(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    failing: vec!["remote_attach"],
+    ..terminal_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  assert!(h.drawn("remote-terminal-lost"));
+  h.click("remote-terminal-close");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-column-shell"));
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("close remote-pty-")));
+}
+
+#[gpui::test]
+fn stopping_a_remote_session_ends_it_on_the_host(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  h.click("remote-terminal-stop");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"stop shell-k1".to_string()));
+  assert!(!h.drawn("terminal-column-shell"));
+}
+
+#[gpui::test]
+fn detaching_a_remote_session_keeps_it_running(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  h.click("remote-terminal-detach");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-column-shell"));
+  assert!(!host.calls().contains(&"stop shell-k1".to_string()));
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("close remote-pty-")));
+}
+
+#[gpui::test]
+fn a_remote_repository_asks_react_for_new_shells(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "remoteShell": true,
+      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/srv/app" }],
+    }),
+  );
+  assert_eq!(
+    fields(&h, "terminal.newRemoteShell"),
+    vec![serde_json::json!("/srv/app")]
+  );
+  assert!(!host.calls().iter().any(|c| c.starts_with("spawn ")));
+  assert!(!h.drawn("terminal-column-shell"));
 }
 
 #[gpui::test]

@@ -1,4 +1,5 @@
 import { FolderOpen, Server } from "lucide-react";
+import type { GpuiRemoteRepoForm } from "../lib/gpui-remote-types";
 import { useGpuiScreen } from "../lib/gpui-screen";
 import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
 import { Button } from "./ui/button";
@@ -14,6 +15,12 @@ interface OnboardingProps {
   onOpenRepo: () => Promise<void>;
   onOpenRemoteSsh?: () => Promise<void>;
   remoteLabel?: string;
+  /** Dashboard's explicit-endpoint form, which GPUI draws under the card. */
+  gpuiRemoteRepo?: {
+    form: GpuiRemoteRepoForm;
+    press: (id: string) => void;
+    field: (name: string, value: unknown) => void;
+  } | null;
 }
 
 /**
@@ -21,18 +28,31 @@ interface OnboardingProps {
  * opens repositories through the backend itself. Only the remote dialog is
  * still React's.
  */
-function useGpuiOnboarding(onOpenRemoteSsh?: () => Promise<void>) {
-  useGpuiScreen({ kind: "onboarding" }, (action) => {
-    if (action.kind === "openRemote") void onOpenRemoteSsh?.();
-  });
+function useGpuiOnboarding(
+  onOpenRemoteSsh: (() => Promise<void>) | undefined,
+  remoteRepo: OnboardingProps["gpuiRemoteRepo"],
+) {
+  useGpuiScreen(
+    {
+      kind: "onboarding",
+      ...(remoteRepo?.form ? { remoteRepo: remoteRepo.form } : {}),
+    },
+    (action) => {
+      if (action.kind === "openRemote") void onOpenRemoteSsh?.();
+      if (action.kind === "press") remoteRepo?.press(action.id);
+      if (action.kind === "field")
+        remoteRepo?.field(action.field, action.value);
+    },
+  );
 }
 
 export const Onboarding: React.FC<OnboardingProps> = ({
   onOpenRepo,
   onOpenRemoteSsh,
   remoteLabel = "Open via SSH",
+  gpuiRemoteRepo,
 }) => {
-  useGpuiOnboarding(onOpenRemoteSsh);
+  useGpuiOnboarding(onOpenRemoteSsh, gpuiRemoteRepo);
   return (
     <div className="flex h-screen items-center justify-center bg-background mx-auto">
       <Card className="w-96">

@@ -79,8 +79,14 @@ import {
   type PersistedRemoteRepository,
 } from "../lib/active-repository";
 import { ActiveRepositoryProvider } from "../lib/active-repository-context";
-import { capabilitiesFor } from "../lib/remote-capabilities";
-import { invalidateRemoteRepositoryData } from "../lib/remote-mutation-ui";
+import {
+  capabilitiesFor,
+  capabilityNoticeMessages,
+} from "../lib/remote-capabilities";
+import {
+  invalidateRemoteRepositoryData,
+  useRemoteMutationFeedback,
+} from "../lib/remote-mutation-ui";
 import {
   useRemoteAgentRefresh,
   useRemoteChangeMarkerWatch,
@@ -168,6 +174,7 @@ import { remoteForceCutoff } from "../lib/api-extra";
 import { RemoteRepositorySelector } from "./remote/RemoteRepositorySelector";
 import { RemoteTerminalDialog } from "./RemoteTerminalDialog";
 import { useGpuiRemoteDialogs } from "./useGpuiRemoteDialogs";
+import { gpuiDrawsRemoteWorkspace } from "../lib/gpui-remote-types";
 import { invalidateReviewChangeCount } from "../lib/review-change-count";
 import {
   clearSWRCache,
@@ -1717,6 +1724,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
         break;
       }
+      // A change GPUI sent over SSH, reported as `applyMutationDispatchResult` does.
+      case "remoteMutation":
+        useRemoteMutationFeedback
+          .getState()
+          .report(
+            event.status === "ambiguous"
+              ? { status: "ambiguous", reason: event.reason ?? "" }
+              : event.status === "applied"
+                ? { status: "applied", value: null }
+                : { status: "already_applied" },
+          );
+        break;
+      case "remoteCutoff":
+        useRemoteCutoffStore
+          .getState()
+          .recordCutoff(event.endpointId, event.reason);
+        break;
       default:
     }
   });
@@ -2393,7 +2417,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   ) => {
     const scope = remoteSessionScope(workspace);
     if (!scope) return;
-    terminalPaneRef.current?.openRemoteSession({
+    terminalPane()?.openRemoteSession({
       ...scope,
       label: newRemoteSessionLabel(agent),
       launch: remoteLaunchFor(agent),
@@ -2519,6 +2543,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (cutoffReason) return;
     invalidateRemoteRepositoryData();
     void refreshInstanceStatus();
+  };
+
+  // The strip GPUI draws above a remote repository's workspace view.
+  const gpuiRemoteChrome = isRemoteActive
+    ? {
+        displayName: activeRepository?.displayName ?? "",
+        terminal: Boolean(activeSshEndpoint),
+        state: remoteConnectionState,
+        cutOff: Boolean(cutoffReason),
+        notices: capabilityNoticeMessages(remoteCaps),
+      }
+    : null;
+  const handleGpuiRemotePress = (id: string) => {
+    switch (id) {
+      case "remote.terminal":
+        if (!cutoffReason) setShowRemoteTerminalDialog(true);
+        return;
+      case "remote.refresh":
+        return handleRefreshRemote();
+      case "remote.wake":
+        return void handleWakeManaged();
+      case "remote.reconnect":
+        return void refreshInstanceStatus();
+      default:
+    }
   };
 
   const handleStartShellFromSidebar = (workspace: Workspace) => {
@@ -3071,8 +3120,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // GPUI draws the terminal pane with the workspace screen, for local
   // repositories; React's pane steps in while GPUI steps aside.
   const [gpuiFramed, setGpuiFramed] = useState(false);
+  const gpuiDrawsWorkspace = !isRemoteActive || gpuiDrawsRemoteWorkspace();
   const gpuiTerminalEnabled =
-    gpuiFramed && !isRemoteActive && gpuiDrawsTerminalPane();
+    gpuiFramed && gpuiDrawsWorkspace && gpuiDrawsTerminalPane();
+  // React's pane is gone while GPUI draws it, so its maximize no longer
+  // covers the tab.
+  useEffect(() => {
+    if (gpuiTerminalEnabled) setTerminalMaximized(false);
+  }, [gpuiTerminalEnabled]);
   const gpuiTerminalPending = useMemo(
     () =>
       Array.from(pendingSessionData, ([sessionId, data]) => ({
@@ -3093,6 +3148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     activeSessionId: isSessionView ? activeSessionId : null,
     pending: gpuiTerminalPending,
     sessionsRevision: gpuiTerminalRevision,
+    remoteShell: Boolean(isRemoteActive),
     onNewAgent: () =>
       handleCreateSessionFromSidebar(selectedWorkspace?.id ?? null),
   });
@@ -3201,6 +3257,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         return handleTerminalCloseSession(value as number);
       case "terminal.newAgent":
         return handleTerminalNewSession(value as string | null);
+      case "terminal.newRemoteShell": {
+        const target = resolveRemoteShell(value as string);
+        if (target) gpuiTerminal.handle.openRemoteSession(target);
+        return;
+      }
       case "terminal.navigate": {
         const { key, isMainRepo } = value as {
           key: string;
@@ -3329,8 +3390,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onRegisterUserManaged: handleRegisterUserManaged,
     terminal: remoteTerminalDialog,
     onCloseTerminal: () => setShowRemoteTerminalDialog(false),
-    onOpenTerminalTarget: (target) =>
-      terminalPaneRef.current?.openRemoteSession(target),
+    onOpenTerminalTarget: (target) => terminalPane()?.openRemoteSession(target),
   });
 
   const remoteSetupDialog = (
@@ -3404,6 +3464,57 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
     ) : null;
 
+  // The same form, drawn by GPUI under its onboarding card.
+  const gpuiRemoteRepo =
+    activeSshEndpoint && !activeRemoteRepo && !dataRepoPath
+      ? {
+          form: {
+            cutoff: cutoffs[activeSshEndpoint.id] ?? null,
+            selector: !explicitEndpointRepoConnected,
+            saved: savedRemoteRepos,
+            selectedId: selectedSavedRepoId,
+            path: explicitEndpointRepoPath,
+            probe: explicitEndpointProbe,
+            cloneUrl: explicitEndpointCloneUrl,
+            confirmInit: confirmInitRemoteRepo,
+            busy: remoteRepoBusy,
+            error: explicitEndpointError || null,
+          },
+          press: (id: string) => {
+            switch (id) {
+              case "remoteRepo.reauthenticate":
+                return void handleReauthenticateManaged();
+              case "remoteRepo.probe":
+                return void handleProbeExplicitEndpointRepo();
+              case "remoteRepo.open":
+                return void handleConnectExplicitEndpointRepo();
+              case "remoteRepo.clone":
+                return void handleCloneExplicitEndpointRepo();
+              case "remoteRepo.init":
+                return void handleInitExplicitEndpointRepo();
+              default:
+            }
+          },
+          field: (name: string, value: unknown) => {
+            switch (name) {
+              case "remoteRepo.select":
+                return void handleSelectSavedRemoteRepo(value as string);
+              case "remoteRepo.path":
+                setExplicitEndpointRepoPath(value as string);
+                setSelectedSavedRepoId(null);
+                setExplicitEndpointProbe(null);
+                setExplicitEndpointRepoConnected(false);
+                return;
+              case "remoteRepo.cloneUrl":
+                return setExplicitEndpointCloneUrl(value as string);
+              case "remoteRepo.confirmInit":
+                return setConfirmInitRemoteRepo(value as boolean);
+              default:
+            }
+          },
+        }
+      : null;
+
   // Review-tab files can move to the home repository or any workspace.
   const changeFilesMove = {
     targets: [
@@ -3429,6 +3540,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               remoteLabel={
                 remoteSshEnabled ? "Open via SSH" : "Open cloud workspace"
               }
+              gpuiRemoteRepo={gpuiRemoteRepo}
             />
             {explicitEndpointPathForm}
             {remoteSetupDialog}
@@ -3584,8 +3696,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           onViewFullPrompt={handleViewFullPrompt}
                           gpuiActive={
                             isSessionView &&
-                            !isRemoteActive &&
-                            !terminalMaximized
+                            gpuiDrawsWorkspace &&
+                            // A maximized React pane covers the tab; GPUI's
+                            // own pane maximizes over its screen.
+                            !(terminalMaximized && !gpuiDrawsTerminalPane())
                           }
                           gpuiFrameHeight={gpuiFrameHeight}
                           onGpuiContentHeight={setGpuiContentHeight}
@@ -3594,6 +3708,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             field: handleGpuiTerminalField,
                           }}
                           onGpuiFramedChange={setGpuiFramed}
+                          gpuiRemote={{
+                            chrome: gpuiRemoteChrome,
+                            press: handleGpuiRemotePress,
+                          }}
                         />
                       </ErrorBoundary>
                     </div>
@@ -3752,7 +3870,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <MergePreviewPage
                       workspace={mergeWorkspace}
                       repoPath={dataRepoPath}
-                      gpui={!isRemoteActive}
+                      gpui={gpuiDrawsWorkspace}
                       onCancel={() => {
                         setMergeWorkspace(null);
                         setViewMode("show-workspace");
@@ -3963,7 +4081,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       : null,
                   )}
                   onOpenTarget={(target) =>
-                    terminalPaneRef.current?.openRemoteSession(target)
+                    terminalPane()?.openRemoteSession(target)
                   }
                 />
               )}

@@ -10,6 +10,8 @@ use std::{rc::Rc, sync::Arc};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{div, prelude::*, px, Context, FontWeight, Window};
 
+use super::onboarding_remote;
+
 use super::{
   checklist::{self, Checklist, ToolsHost},
   ActionSink, Ctx, ScreenAction,
@@ -27,9 +29,15 @@ use crate::{
   },
 };
 
-/// What React sends for this screen: nothing, as GPUI reads its own data.
+/// What React sends for this screen: only the explicit-endpoint form, as
+/// GPUI reads the rest itself.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
-pub struct Route {}
+#[serde(rename_all = "camelCase", default)]
+pub struct Route {
+  /// An SSH endpoint is connected with no repository open: the form under
+  /// the card.
+  pub remote_repo: Option<super::onboarding_remote::Form>,
+}
 
 /// What the screen draws.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +77,8 @@ pub struct OnboardingView {
   statuses: Option<Vec<PrerequisiteStatus>>,
   validating: bool,
   dark: bool,
+  route: Route,
+  inputs: onboarding_remote::Inputs,
 }
 
 impl OnboardingView {
@@ -95,6 +105,8 @@ impl OnboardingView {
       validating: false,
       dark,
       host,
+      route: Route::default(),
+      inputs: onboarding_remote::Inputs::default(),
     };
     this.check(cx);
     this
@@ -103,6 +115,13 @@ impl OnboardingView {
   pub fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
     if self.dark != dark {
       self.dark = dark;
+      cx.notify();
+    }
+  }
+
+  pub fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
+    if self.route != route {
+      self.route = route;
       cx.notify();
     }
   }
@@ -147,12 +166,35 @@ impl OnboardingView {
 }
 
 impl Render for OnboardingView {
-  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let p = theme::palette(self.dark);
     let ctx = Ctx {
-      palette: theme::palette(self.dark),
+      palette: p,
       sink: &self.sink,
     };
-    render(&self.screen(), &ctx)
+    let card = render(&self.screen(), &ctx);
+    let Some(form) = self.route.remote_repo.clone() else {
+      return card.into_any_element();
+    };
+    // Dashboard draws the form under the full-height card, so the window
+    // scrolls down to it.
+    self.inputs.sync(&form, &self.react, window, cx);
+    div()
+      .id("onboarding-scroll")
+      .size_full()
+      .flex()
+      .flex_col()
+      .overflow_y_scroll()
+      .child(div().flex_shrink_0().h_full().child(card))
+      .child(onboarding_remote::render(
+        &form,
+        &self.inputs,
+        &self.react,
+        self.dark,
+        &p,
+        cx,
+      ))
+      .into_any_element()
   }
 }
 

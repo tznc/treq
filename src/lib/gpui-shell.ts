@@ -28,6 +28,8 @@ declare global {
     __TREQ_REACT_WORKSPACE_DIALOGS__?: boolean;
     /** React draws the GitHub view's Issues and Pull Requests tabs; tests of them set it. */
     __TREQ_REACT_GITHUB__?: boolean;
+    /** React draws a remote repository's workspace view; tests of it set it. */
+    __TREQ_REACT_REMOTE_WORKSPACE__?: boolean;
   }
 }
 

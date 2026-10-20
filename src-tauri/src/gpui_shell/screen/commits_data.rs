@@ -9,7 +9,7 @@ use regex::Regex;
 use super::code_data::CodeHost;
 use crate::{
   core::{self, ResolveConflictsSession},
-  gpui_shell::native::Backend,
+  gpui_shell::{native::Backend, remote_repo::unsupported},
   jj::{JjDiffHunk, JjFileDiff, JjLogCommit, JjLogResult, JjRevisionDiff},
 };
 
@@ -113,6 +113,9 @@ impl CommitsHost for Backend {
     target_limit: Option<usize>,
     home_limit: Option<usize>,
   ) -> Result<JjLogResult, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.commits(workspace_id);
+    }
     let home_limit = home_limit.filter(|_| workspace_id.is_none());
     core::list_commits(repo_path, workspace_id, true, target_limit, home_limit)
   }
@@ -123,6 +126,9 @@ impl CommitsHost for Backend {
     workspace_id: Option<i64>,
     revision: &str,
   ) -> Result<JjRevisionDiff, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.commit_diff(workspace_id, revision);
+    }
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     core::get_commit_diff(&state.db, repo_path, workspace_id, revision)
   }
@@ -134,12 +140,18 @@ impl CommitsHost for Backend {
     revision: &str,
     file_path: &str,
   ) -> Result<JjFileDiff, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.commit_file_diff(workspace_id, revision, file_path);
+    }
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     core::get_commit_file_diff(&state.db, repo_path, workspace_id, revision, file_path)
   }
 
   fn abandon(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<String, String> {
-    core::abandon_commit(repo_path, workspace_id, change_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.abandon(workspace_id, change_id),
+      None => core::abandon_commit(repo_path, workspace_id, change_id),
+    }
   }
 
   fn undo_operation(
@@ -148,7 +160,10 @@ impl CommitsHost for Backend {
     workspace_id: Option<i64>,
     operation_id: &str,
   ) -> Result<(), String> {
-    core::undo_repo_operation(repo_path, workspace_id, operation_id).map(|_| ())
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.undo_operation(workspace_id, operation_id),
+      None => core::undo_repo_operation(repo_path, workspace_id, operation_id).map(|_| ()),
+    }
   }
 
   fn stash(
@@ -157,18 +172,30 @@ impl CommitsHost for Backend {
     workspace_id: Option<i64>,
     change_id: &str,
   ) -> Result<String, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Stashing"));
+    }
     core::stash_commit(repo_path, workspace_id, change_id).map(|entry| entry.short_commit_id)
   }
 
   fn undo_commit(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<(), String> {
-    core::undo_commit(repo_path, workspace_id, change_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.undo_commit(workspace_id, change_id),
+      None => core::undo_commit(repo_path, workspace_id, change_id),
+    }
   }
 
   fn revert(&self, repo_path: &str, workspace_id: i64, change_id: &str) -> Result<(), String> {
-    core::revert_commit(repo_path, workspace_id, change_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.revert(workspace_id, change_id),
+      None => core::revert_commit(repo_path, workspace_id, change_id),
+    }
   }
 
   fn shift_to_now(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Shifting commit timestamps"));
+    }
     core::shift_mutable_commits_to_now(repo_path, workspace_id)
   }
 
@@ -178,7 +205,10 @@ impl CommitsHost for Backend {
     workspace_id: i64,
     change_id: &str,
   ) -> Result<String, String> {
-    core::get_commit_description(repo_path, workspace_id, change_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.commit_description(workspace_id, change_id),
+      None => core::get_commit_description(repo_path, workspace_id, change_id),
+    }
   }
 
   fn describe(
@@ -188,7 +218,10 @@ impl CommitsHost for Backend {
     change_id: &str,
     description: &str,
   ) -> Result<(), String> {
-    core::describe_commit(repo_path, workspace_id, change_id, description)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.describe(workspace_id, change_id, description),
+      None => core::describe_commit(repo_path, workspace_id, change_id, description),
+    }
   }
 
   fn shift_timestamp(
@@ -198,6 +231,9 @@ impl CommitsHost for Backend {
     change_id: &str,
     shift: &TimeShift,
   ) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Shifting commit timestamps"));
+    }
     match shift {
       TimeShift::By {
         days,
@@ -224,6 +260,9 @@ impl CommitsHost for Backend {
     workspace_id: Option<i64>,
     change_ids: Option<Vec<String>>,
   ) -> Result<ResolveConflictsSession, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Starting a conflict resolution session"));
+    }
     core::start_resolve_conflicts(repo_path, workspace_id, change_ids)
   }
 
@@ -232,15 +271,24 @@ impl CommitsHost for Backend {
   }
 
   fn snapshot_working_copy(&self, workspace_path: &str) -> Result<String, String> {
-    core::snapshot_working_copy(workspace_path)
+    match self.remote_containing(workspace_path) {
+      Some(remote) => remote.snapshot(workspace_path),
+      None => core::snapshot_working_copy(workspace_path),
+    }
   }
 
   fn discard_all(&self, workspace_path: &str) -> Result<(), String> {
-    core::discard_all_changes(workspace_path).map(|_| ())
+    match self.remote_containing(workspace_path) {
+      Some(remote) => remote.restore_all(workspace_path),
+      None => core::discard_all_changes(workspace_path).map(|_| ()),
+    }
   }
 
   fn restore_snapshot(&self, workspace_path: &str, snapshot_id: &str) -> Result<(), String> {
-    core::restore_working_copy_snapshot(workspace_path, snapshot_id).map(|_| ())
+    match self.remote_containing(workspace_path) {
+      Some(remote) => remote.restore_snapshot(workspace_path, snapshot_id),
+      None => core::restore_working_copy_snapshot(workspace_path, snapshot_id).map(|_| ()),
+    }
   }
 
   fn confirm(&self, title: &str, message: &str) -> bool {

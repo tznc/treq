@@ -85,6 +85,10 @@ impl SettingsHost for Backend {
   }
 
   fn repo_settings(&self, repo_path: &str, keys: &[String]) -> Result<Values, String> {
+    // A remote repository has no settings yet: every key reads its default.
+    if self.remote_containing(repo_path).is_some() {
+      return Ok(keys.iter().map(|key| (key.clone(), None)).collect());
+    }
     self.with_db(|db| {
       keys
         .iter()
@@ -95,6 +99,11 @@ impl SettingsHost for Backend {
   }
 
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Changing repository settings",
+      ));
+    }
     for (key, value) in values {
       self.with_db(|db| {
         db.set_repo_setting(repo_path, key, value)

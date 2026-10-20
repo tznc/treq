@@ -12,7 +12,7 @@ use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole, ConflictRegionView, ConflictStyle},
   core::{self, WorkspaceFileHunksBatch},
   github::GhReviewThread,
-  gpui_shell::native::Backend,
+  gpui_shell::{native::Backend, remote_repo::unsupported},
   jj::{JjDiffHunk, JjFileChange, JjRevisionDiff},
   local_db::{AgentReviewComment, PendingReview, StashEntry},
 };
@@ -132,11 +132,17 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: Option<i64>,
   ) -> Result<Vec<JjFileChange>, String> {
-    core::list_changed_files(repo_path, workspace_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.changed_files(workspace_id),
+      None => core::list_changed_files(repo_path, workspace_id),
+    }
   }
 
   fn workspace_diff(&self, repo_path: &str, workspace_id: i64) -> Result<JjRevisionDiff, String> {
-    core::workspace_diff(repo_path, workspace_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.workspace_diff(workspace_id),
+      None => core::workspace_diff(repo_path, workspace_id),
+    }
   }
 
   fn file_hunks(
@@ -145,6 +151,9 @@ impl ChangesHost for Backend {
     workspace_id: Option<i64>,
     paths: Vec<String>,
   ) -> Result<WorkspaceFileHunksBatch, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.file_hunks_batch(workspace_id, paths);
+    }
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     let style = core::resolve_conflict_marker_style(&state.db);
     core::list_file_hunks_batch(repo_path, workspace_id, paths, &style)
@@ -158,11 +167,21 @@ impl ChangesHost for Backend {
     start: usize,
     end: usize,
   ) -> Result<Vec<String>, String> {
-    core::get_file_lines(repo_path, workspace_id, path, false, start, end).map(|l| l.lines)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote
+        .file_lines(workspace_id, path, false, start, end)
+        .map(|l| l.lines),
+      None => {
+        core::get_file_lines(repo_path, workspace_id, path, false, start, end).map(|l| l.lines)
+      }
+    }
   }
 
   fn discard_file(&self, workspace_path: &str, path: &str) -> Result<(), String> {
-    core::discard_file_changes(workspace_path, path).map(|_| ())
+    match self.remote_containing(workspace_path) {
+      Some(remote) => remote.restore_file(workspace_path, path).map(drop),
+      None => core::discard_file_changes(workspace_path, path).map(|_| ()),
+    }
   }
 
   fn commit(
@@ -171,7 +190,10 @@ impl ChangesHost for Backend {
     workspace_id: Option<i64>,
     message: &str,
   ) -> Result<String, String> {
-    core::commit_workspace_with_auto_push(repo_path, workspace_id, message)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.create_commit(workspace_id, message),
+      None => core::commit_workspace_with_auto_push(repo_path, workspace_id, message),
+    }
   }
 
   fn split(
@@ -180,15 +202,24 @@ impl ChangesHost for Backend {
     message: &str,
     paths: Vec<String>,
   ) -> Result<String, String> {
-    core::split_working_copy(workspace_path, message, paths)
+    match self.remote_containing(workspace_path) {
+      Some(remote) => remote.split(workspace_path, message, paths),
+      None => core::split_working_copy(workspace_path, message, paths),
+    }
   }
 
   fn push_remote(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<String, String> {
-    core::push_workspace_to_remote(repo_path, workspace_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.push(workspace_id),
+      None => core::push_workspace_to_remote(repo_path, workspace_id),
+    }
   }
 
   fn stash_all(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<StashEntry, String> {
-    core::stash_workspace_changes(repo_path, workspace_id)
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.stash_changes(workspace_id),
+      None => core::stash_workspace_changes(repo_path, workspace_id),
+    }
   }
 
   fn load_review(
@@ -196,7 +227,7 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Option<PendingReview>, String> {
-    crate::local_db::get_pending_review(repo_path, workspace_id)
+    crate::local_db::get_pending_review(&self.state_scope(repo_path), workspace_id)
   }
 
   fn save_review(
@@ -207,15 +238,20 @@ impl ChangesHost for Backend {
     summary: Option<&str>,
     notes: Option<&str>,
   ) -> Result<(), String> {
-    crate::local_db::save_pending_review(repo_path, workspace_id, comments, None, summary, notes)
+    let scope = self.state_scope(repo_path);
+    crate::local_db::save_pending_review(&scope, workspace_id, comments, None, summary, notes)
       .map(|_| ())
   }
 
   fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
-    crate::local_db::clear_pending_review(repo_path, workspace_id)
+    crate::local_db::clear_pending_review(&self.state_scope(repo_path), workspace_id)
   }
 
   fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String> {
+    // A remote repository reads no pull request, so it has no threads.
+    if self.remote_containing(repo_path).is_some() {
+      return Ok(Vec::new());
+    }
     let Some(remote) = crate::github::get_git_remote_url_impl(repo_path)? else {
       return Ok(Vec::new());
     };
@@ -243,39 +279,45 @@ impl ChangesHost for Backend {
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
     crate::local_db::list_agent_review_comments(
-      repo_path,
+      &self.state_scope(repo_path),
       super::changes_threads::WORKSPACE_DIFF,
       &workspace_id.to_string(),
     )
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::local_db::resolve_agent_review_comment(repo_path, id)
+    crate::local_db::resolve_agent_review_comment(&self.state_scope(repo_path), id)
   }
 
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::local_db::delete_agent_review_comment(repo_path, id)
+    crate::local_db::delete_agent_review_comment(&self.state_scope(repo_path), id)
   }
 
   fn apply_agent_suggestion(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Applying a review suggestion"));
+    }
     crate::commands::agent_review::apply_agent_review_suggestion(repo_path.into(), id.into())
   }
 
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String> {
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.mark_file_viewed(workspace_path, path, hash)
+    db.mark_file_viewed(&self.state_scope(workspace_path), path, hash)
       .map_err(|e| e.to_string())
   }
 
   fn unmark_viewed(&self, workspace_path: &str, path: &str) -> Result<(), String> {
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.unmark_file_viewed(workspace_path, path)
+    db.unmark_file_viewed(&self.state_scope(workspace_path), path)
       .map_err(|e| e.to_string())
   }
 
   fn github_remote(&self, repo_path: &str) -> bool {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.git_remote().ok().flatten().is_some();
+    }
     crate::github::get_git_remote_url_impl(repo_path)
       .ok()
       .flatten()

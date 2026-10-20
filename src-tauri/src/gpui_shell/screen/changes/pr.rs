@@ -104,6 +104,7 @@ impl ChangesView {
       conflicted_files: Vec::new(),
       default_branch: String::new(),
       revision: 0,
+      remote: false,
     };
     let changes: Host = host.clone();
     let mut this = Self::blank(parent, Options::default(), changes, react, popups, dark);

@@ -445,5 +445,6 @@ pub mod tw {
   pub const GREEN_400: u32 = 0x4ade80;
   pub const GREEN_700: u32 = 0x15803d;
   pub const YELLOW_400: u32 = 0xfacc15;
+  pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_600: u32 = 0xca8a04;
 }

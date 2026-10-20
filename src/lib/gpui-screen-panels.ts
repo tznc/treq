@@ -1,4 +1,16 @@
-// The repository panels GPUI draws: Linear, GitHub, PR review, merge queue.
+// The repository panels GPUI draws: merge preview, Linear, GitHub, PR
+// review, merge queue.
+
+/**
+ * MergePreviewPage, which GPUI reads and merges itself
+ * (src-tauri/src/gpui_shell/screen/merge.rs). It presses
+ * "mergePreview.cancel" to leave and "mergePreview.merged" once merged.
+ */
+export interface GpuiMergePreviewScreen {
+  kind: "mergePreview";
+  repoPath: string;
+  workspaceId: number;
+}
 
 /**
  * LinearPanel, which GPUI reads from the backend's Linear client

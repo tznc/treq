@@ -4,10 +4,18 @@ import { create } from "zustand";
 import { useThemeStore } from "../stores/themeStore";
 import { gpuiModalUpdate, gpuiScreenUpdate } from "./api";
 import type { SshEndpoint } from "./api-types-remote";
+import type {
+  GpuiRemoteChrome,
+  GpuiRemoteRepoForm,
+  GpuiRemoteTerminalTarget,
+} from "./gpui-remote-types";
+import { useActiveRepository } from "./active-repository-context";
+import { repositoryCacheKey } from "./active-repository";
 import { isGpuiShellHost } from "./gpui-shell";
 import type {
   GpuiGithubScreen,
   GpuiLinearScreen,
+  GpuiMergePreviewScreen,
   GpuiMergeQueueScreen,
   GpuiPrReviewScreen,
 } from "./gpui-screen-panels";
@@ -146,13 +154,18 @@ export interface GpuiWorkspaceScreen {
   logsSource: string | null;
   /** Bumped by "open in Logs" links, so GPUI's Logs tab starts over on `logsSource`. */
   logsKey: number;
-  /** GPUI draws the terminal pane below the tab; null while React does (remote). */
+  /** GPUI draws the terminal pane below the tab; null while React does. */
   terminal: GpuiTerminalRoute | null;
   /** GPUI draws the Code tab's file browser, opened on this file or folder (full paths). */
   fileBrowser: {
     selectedFile: string | null;
     expandedDir: string | null;
   } | null;
+  /**
+   * A remote repository's strip, banner and notice above the header
+   * (`remote` is the snapshot's remote dialogs).
+   */
+  remoteChrome: GpuiRemoteChrome | null;
 }
 
 /** A Dashboard request of the terminal pane (its imperative handle). */
@@ -165,10 +178,13 @@ export interface GpuiTerminalCommand {
     | "newShell"
     | "newAgent"
     | "closeWorkspace"
-    | "send";
+    | "send"
+    | "openRemote";
   dir?: string | null;
   sessionId?: number | null;
   text?: string | null;
+  /** `openRemote`'s session. */
+  remote?: GpuiRemoteTerminalTarget | null;
 }
 
 /** What GPUI's terminal pane (src-tauri/src/gpui_shell/screen/terminal.rs) needs from React. */
@@ -198,22 +214,17 @@ export interface GpuiTerminalRoute {
     path: string;
     title: string;
   }[];
-}
-
-/**
- * MergePreviewPage, which GPUI reads and merges itself
- * (src-tauri/src/gpui_shell/screen/merge.rs). It presses
- * "mergePreview.cancel" to leave and "mergePreview.merged" once merged.
- */
-interface GpuiMergePreviewScreen {
-  kind: "mergePreview";
-  repoPath: string;
-  workspaceId: number;
+  /**
+   * A remote repository is active: a new shell runs on its host, so GPUI
+   * sends "terminal.newRemoteShell" with the directory and React answers
+   * with an `openRemote` command.
+   */
+  remoteShell: boolean;
 }
 
 export type GpuiScreenView =
   /** GPUI reads its data from the backend and opens repositories itself. */
-  | { kind: "onboarding" }
+  | { kind: "onboarding"; remoteRepo?: GpuiRemoteRepoForm | null }
   | GpuiSettingsScreen
   | GpuiWorkspaceScreen
   | GpuiMergePreviewScreen
@@ -478,6 +489,23 @@ export function listenGpuiScreenActions(
  * `onAction` for its clicks. A webview modal (a dialog GPUI does not draw
  * yet) brings the webview back while it is open, so it stays usable.
  */
+/**
+ * The remote repository the window shows, as the snapshot's `repository`:
+ * GPUI's backend sends what its screens read and change in it over SSH, as
+ * `repository-adapter.ts` does.
+ */
+function gpuiRemoteRepository(repo: ReturnType<typeof useActiveRepository>) {
+  // As `activeForPath`: any repository that is not local routes remotely.
+  if (!repo || repo.transport.type === "local") return null;
+  return {
+    endpoint: repo.transport.type === "ssh" ? repo.transport.endpoint : null,
+    endpointId: repo.endpointId,
+    canonicalPath: repo.canonicalPath,
+    cacheKey: repositoryCacheKey(repo),
+    displayName: repo.displayName,
+  };
+}
+
 export function useGpuiScreen(
   view: GpuiScreenView | null,
   onAction: (action: GpuiScreenAction) => void,
@@ -487,6 +515,7 @@ export function useGpuiScreen(
   const domModal = useWindowModalBackdrop(host) !== null;
   const remote = useGpuiRemoteStore((s) => s.route);
   const modal = useGpuiWorkspaceModalStore((s) => s.modal);
+  const repository = gpuiRemoteRepository(useActiveRepository());
   // A GPUI dialog covers the window, so a webview modal closing under it
   // (the command palette opening Delete Workspace) does not drop the screen.
   const json =
@@ -496,6 +525,7 @@ export function useGpuiScreen(
           dark,
           ...(remote ? { remote } : {}),
           ...(modal ? { modal } : {}),
+          ...(repository ? { repository } : {}),
         })
       : null;
 

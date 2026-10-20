@@ -1,6 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef } from "react";
 import { isGpuiShellHost } from "./gpui-shell";
+import type { CutoffReason } from "./remote-cert-lifecycle";
 
 /**
  * What a GPUI screen did through the backend itself
@@ -20,7 +21,15 @@ export type GpuiNativeEvent =
       tone: "success" | "warning" | "error";
       /** A button whose click GPUI handles: `gpuiToastAction`. */
       action?: { label: string; id: number };
-    };
+    }
+  /** How a change GPUI sent to the remote repository ended. */
+  | {
+      kind: "remoteMutation";
+      status: "applied" | "already_applied" | "ambiguous";
+      reason?: string;
+    }
+  /** A remote command found the endpoint's credential cut off. */
+  | { kind: "remoteCutoff"; endpointId: string; reason: CutoffReason };
 
 const GPUI_NATIVE_EVENT = "gpui-native-event";
 

@@ -27,7 +27,7 @@ use super::{
     self, conflict_count, description, diff_stats, display_title, group_by_day, headline,
     history_commits, insert_at, looks_like_markdown, mention_at, session_name, task_branch_name,
     task_settings, workspace_stack, Agent, CodeHost, Overview, TaskSettings, ENVIRONMENT_SETTING,
-    NEW_WORKSPACE_SETTING,
+    NEW_WORKSPACE_SETTING, REMOTE_FILE_TREE_REASON,
   },
   file_picker::{FilePicker, FilePickerEvent, Scope},
   merge::full_path,
@@ -66,12 +66,15 @@ pub struct Parent {
   pub default_branch: String,
   /// Bumped when React refreshes its caches, so the tab reads again.
   pub revision: u64,
+  /// The repository is remote: local-only actions stay hidden.
+  pub remote: bool,
 }
 
 impl PartialEq for Parent {
   fn eq(&self, other: &Self) -> bool {
     let json = |w: &Option<Workspace>| serde_json::to_value(w).ok();
     self.repo_path == other.repo_path
+      && self.remote == other.remote
       && self.conflicted_files == other.conflicted_files
       && self.default_branch == other.default_branch
       && self.revision == other.revision
@@ -276,12 +279,7 @@ impl CodeView {
   fn load_overview(&mut self, cx: &mut Context<Self>) {
     self.read(
       |host, parent| {
-        host
-          .overview(&parent.repo_path, parent.workspace_id())
-          .unwrap_or_else(|err| {
-            log::warn!("Failed to load workspace overview: {err}");
-            Overview::default()
-          })
+        Overview::or_unavailable(host.overview(&parent.repo_path, parent.workspace_id()))
       },
       |view, overview, _| view.overview = Some(overview),
       cx,
@@ -2019,6 +2017,7 @@ impl CodeView {
     let mut list = section(p).flex().flex_col();
     let loaded = self.overview.is_some();
     let empty = entries.is_empty();
+    let unavailable = self.overview.as_ref().is_some_and(|o| o.unavailable);
     for (i, entry) in entries.into_iter().enumerate() {
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
@@ -2128,11 +2127,23 @@ impl CodeView {
     if loaded && empty {
       list = list.child(
         ui::text(div(), TextSize::Sm)
+          .debug_selector(move || {
+            if unavailable {
+              "code-files-unavailable"
+            } else {
+              "code-files-empty"
+            }
+            .into()
+          })
           .px_4()
           .py_8()
           .text_center()
           .text_color(p.muted_foreground)
-          .child("No files found"),
+          .child(if unavailable {
+            REMOTE_FILE_TREE_REASON
+          } else {
+            "No files found"
+          }),
       );
     }
     list
