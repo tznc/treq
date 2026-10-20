@@ -122,10 +122,7 @@ impl Data {
   }
 
   pub fn loaded(&self, path: &str) -> bool {
-    self
-      .repos
-      .get(path)
-      .is_some_and(|r| r.workspaces.is_some())
+    self.repos.get(path).is_some_and(|r| r.workspaces.is_some())
   }
 
   pub fn sessions(&self, path: &str) -> &[Session] {

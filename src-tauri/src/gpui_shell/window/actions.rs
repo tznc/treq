@@ -77,7 +77,10 @@ impl Model {
       Shortcut::Stack if repo => return self.stack(data),
       Shortcut::Palette => self.dialogs.palette = true,
       Shortcut::AgentPrompt if repo => {
-        self.dialogs.agent_prompt.get_or_insert_with(Default::default);
+        self
+          .dialogs
+          .agent_prompt
+          .get_or_insert_with(Default::default);
       }
       Shortcut::FilePicker if repo => self.dialogs.file_picker = true,
       Shortcut::ToggleShortcuts => self.dialogs.shortcuts = !self.dialogs.shortcuts,
@@ -396,7 +399,9 @@ impl Model {
       // The dialogs.
       "workspaceDialog.created" => {
         self.dialogs.workspace_dialog = None;
-        let Some(id) = value.as_i64() else { return done() };
+        let Some(id) = value.as_i64() else {
+          return done();
+        };
         return Some(self.select_when_listed(
           PendingSelect {
             repo_path: repo,
@@ -649,7 +654,10 @@ impl Model {
         }
         "workspacePicker.select" => {
           let repo = self.repo().to_string();
-          if let Some(workspace) = value.as_i64().and_then(|id| self.workspace_in(&repo, id, data)) {
+          if let Some(workspace) = value
+            .as_i64()
+            .and_then(|id| self.workspace_in(&repo, id, data))
+          {
             self.set_selected(Some(workspace.id));
           }
           self.dialogs.workspace_picker = false;
@@ -707,7 +715,10 @@ impl Model {
         Vec::new()
       }
       "start-agent-with-prompt" => {
-        self.dialogs.agent_prompt.get_or_insert_with(Default::default);
+        self
+          .dialogs
+          .agent_prompt
+          .get_or_insert_with(Default::default);
         Vec::new()
       }
       "start-agent-terminal" => vec![self.start_agent(self.selected, data)],
@@ -963,7 +974,10 @@ mod tests {
   #[test]
   fn leaves_menus_and_drags_to_their_own_handlers() {
     let (mut model, data) = (model(), data());
-    assert_eq!(model.sidebar_action(&SidebarAction::BulkArchive, &data), None);
+    assert_eq!(
+      model.sidebar_action(&SidebarAction::BulkArchive, &data),
+      None
+    );
   }
 
   #[test]
@@ -994,7 +1008,12 @@ mod tests {
       panic!("not GitHub");
     };
     assert_eq!(
-      (github.tab, github.filter.as_str(), github.selected, github.review),
+      (
+        github.tab,
+        github.filter.as_str(),
+        github.selected,
+        github.review
+      ),
       (GithubTab::Prs, "closed", Some(12), Some(12))
     );
     model.screen_action(&press("prReview.close"), &data);
@@ -1080,7 +1099,10 @@ mod tests {
     model.dialogs.shortcuts = true;
     model.dialogs.palette = true;
     model.overlay_action(&press("overlay.close"), &data);
-    assert!(!model.dialogs.shortcuts && model.dialogs.palette, "the top one");
+    assert!(
+      !model.dialogs.shortcuts && model.dialogs.palette,
+      "the top one"
+    );
   }
 
   #[test]
@@ -1120,7 +1142,10 @@ mod tests {
   fn shortcuts_open_dialogs_and_zoom() {
     let (mut model, data) = (model(), data());
     model.shortcut(Shortcut::NewWorkspace, &data);
-    assert_eq!(model.dialogs.workspace_dialog.as_ref().unwrap().1, json!({}));
+    assert_eq!(
+      model.dialogs.workspace_dialog.as_ref().unwrap().1,
+      json!({})
+    );
     model.shortcut(Shortcut::ToggleShortcuts, &data);
     assert!(model.dialogs.shortcuts);
     model.shortcut(Shortcut::Escape, &data);

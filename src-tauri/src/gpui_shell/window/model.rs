@@ -239,11 +239,16 @@ pub enum FolderPurpose {
 pub enum Effect {
   /// Read the window's data again; `true` bumps the screens' revision, as
   /// `invalidateQueries` does.
-  Refresh { revision: bool },
+  Refresh {
+    revision: bool,
+  },
   /// Asks for a folder, for `purpose`.
   PickFolder(FolderPurpose),
   /// Persists app setting `key`.
-  SaveSetting { key: String, value: String },
+  SaveSetting {
+    key: String,
+    value: String,
+  },
   /// Starts an agent session (`handleCreateSessionFromSidebar` and
   /// `launchAgentSession`); `prompt` and `mode` seed it.
   StartAgent {
@@ -549,8 +554,7 @@ impl Model {
     let Some(selected) = self.selected else {
       return;
     };
-    if repo == self.repo() && before.contains(&selected) && !now.iter().any(|w| w.id == selected)
-    {
+    if repo == self.repo() && before.contains(&selected) && !now.iter().any(|w| w.id == selected) {
       self.return_home();
     }
   }

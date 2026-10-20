@@ -52,8 +52,8 @@ mod tests {
     let db = Database::new(dir.path().join("app.db")).unwrap();
     db.init().unwrap();
     let apps = detect_with(&db, |name| name == "Zed");
-    assert_eq!(apps["zed"], true);
-    assert_eq!(apps["cursor"], false);
+    assert!(apps["zed"]);
+    assert!(!apps["cursor"]);
     assert_eq!(
       db.get_setting("editor_app_zed").unwrap().as_deref(),
       Some("true")

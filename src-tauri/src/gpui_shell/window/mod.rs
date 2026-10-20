@@ -25,8 +25,9 @@ pub(super) use controller::{Presentation, WindowController};
 pub(super) use keys::{bind as bind_keys, on_shortcuts, KEY_CONTEXT};
 pub(super) use model::DEFAULT_ZOOM;
 pub(super) use shell::{
-  drives, follow_appearance, forget, listen, menu_event, native_event, overlay_action, react_overlay,
-  react_owns, routed, screen_action, set_react_owns, sidebar_action, start, window_focused,
+  drives, follow_appearance, forget, listen, menu_event, native_event, overlay_action,
+  react_overlay, react_owns, routed, screen_action, set_react_owns, sidebar_action, start,
+  window_focused,
 };
 
 #[cfg(test)]

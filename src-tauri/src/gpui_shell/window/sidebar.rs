@@ -219,8 +219,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   Some(SidebarSnapshot {
     repo_name: main
       .split('/')
-      .filter(|p| !p.is_empty())
-      .next_back()
+      .rfind(|p| !p.is_empty())
       .unwrap_or("Repository")
       .to_string(),
     settings_open: matches!(model.page, Page::Settings { .. }),

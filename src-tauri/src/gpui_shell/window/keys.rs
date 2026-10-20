@@ -142,8 +142,18 @@ mod tests {
   #[gpui::test]
   fn binds_the_window_shortcuts(cx: &mut TestAppContext) {
     assert_eq!(
-      pressed(cx, false, "secondary-p ? secondary-= secondary-j secondary-i"),
-      ["filePicker", "shortcuts", "zoomIn", "terminal", "agentPrompt"]
+      pressed(
+        cx,
+        false,
+        "secondary-p ? secondary-= secondary-j secondary-i"
+      ),
+      [
+        "filePicker",
+        "shortcuts",
+        "zoomIn",
+        "terminal",
+        "agentPrompt"
+      ]
     );
   }
 

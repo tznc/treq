@@ -289,7 +289,10 @@ impl Window {
 fn repo_host() -> Arc<FakeHost> {
   Arc::new(FakeHost::on(
     "/repo",
-    vec![workspace(1, "a", Some("main")), workspace(2, "b", Some("a"))],
+    vec![
+      workspace(1, "a", Some("main")),
+      workspace(2, "b", Some("a")),
+    ],
   ))
 }
 
@@ -319,11 +322,10 @@ fn shows_onboarding_without_a_repository(cx: &mut TestAppContext) {
 #[gpui::test]
 fn follows_the_theme_zoom_and_sidebar_width_settings(cx: &mut TestAppContext) {
   let host = repo_host();
-  host
-    .settings
-    .lock()
-    .unwrap()
-    .extend([("theme".into(), "dark".into()), ("ui_zoom".into(), "120".into())]);
+  host.settings.lock().unwrap().extend([
+    ("theme".into(), "dark".into()),
+    ("ui_zoom".into(), "120".into()),
+  ]);
   let window = Window::open(cx, host.clone(), Some("/repo"));
   assert!(window.last().dark);
   assert_eq!(window.last().zoom, 120);
@@ -380,12 +382,21 @@ fn a_workspace_change_reads_everything_again(cx: &mut TestAppContext) {
     .unwrap()
     .push(workspace(3, "c", Some("b")));
   window.controller.update(cx, |c, cx| {
-    c.native_event(&NativeEvent::WorkspaceChanged { repo_path: "/repo".into() }, cx)
+    c.native_event(
+      &NativeEvent::WorkspaceChanged {
+        repo_path: "/repo".into(),
+      },
+      cx,
+    )
   });
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2, 3]);
   assert_eq!(host.count("detail 3"), 1);
-  assert_eq!(host.count("detail 1"), 2, "an invalidation reads the detail");
+  assert_eq!(
+    host.count("detail 1"),
+    2,
+    "an invalidation reads the detail"
+  );
   assert_eq!(
     window.controller.read_with(cx, |c, _| c.data().revision),
     revision + 1
@@ -432,10 +443,14 @@ fn selects_a_created_workspace_once_it_is_listed(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_window_regaining_focus_reads_the_changes_again(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  let before = window.controller.read_with(cx, |c, _| c.model().view.changes_revision);
+  let before = window
+    .controller
+    .read_with(cx, |c, _| c.model().view.changes_revision);
   window.controller.update(cx, |c, cx| c.focused(cx));
   window.controller.update(cx, |c, cx| c.files_changed(9, cx));
-  let after = window.controller.read_with(cx, |c, _| c.model().view.changes_revision);
+  let after = window
+    .controller
+    .read_with(cx, |c, _| c.model().view.changes_revision);
   assert_eq!(after, before + 1, "another workspace's files do not count");
 }
 
@@ -534,7 +549,9 @@ fn force_rebases_the_selected_workspace(cx: &mut TestAppContext) {
     .controller
     .update(cx, |c, cx| c.menu(Menu::ForceRebase, cx));
   cx.run_until_parked();
-  assert!(host.calls().contains(&"toast No workspace selected".to_string()));
+  assert!(host
+    .calls()
+    .contains(&"toast No workspace selected".to_string()));
   window.sidebar(
     cx,
     SidebarAction::SelectWorkspace {

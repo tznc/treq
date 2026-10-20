@@ -147,7 +147,11 @@ pub(in crate::gpui_shell) fn routed(
   })
 }
 
-pub(in crate::gpui_shell) fn screen_action(label: &str, action: &ScreenAction, cx: &mut App) -> bool {
+pub(in crate::gpui_shell) fn screen_action(
+  label: &str,
+  action: &ScreenAction,
+  cx: &mut App,
+) -> bool {
   controller(label, cx).is_some_and(|c| c.update(cx, |c, cx| c.screen_action(action, cx)))
 }
 
@@ -195,7 +199,9 @@ pub fn native_event(app: &AppHandle, label: &str, event: &NativeEvent) -> bool {
     return false;
   }
   let event_for_model = event.clone();
-  with_controller(app, label, move |c, cx| c.native_event(&event_for_model, cx));
+  with_controller(app, label, move |c, cx| {
+    c.native_event(&event_for_model, cx)
+  });
   matches!(event, NativeEvent::Open { .. })
 }
 

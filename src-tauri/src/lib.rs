@@ -306,7 +306,12 @@ fn pick_folder_and_notify(app: AppHandle, label: String) {
           return;
         }
       };
-      if !gpui_menu_event(&app, &label, "menu-repository-path-selected", Some(path.clone())) {
+      if !gpui_menu_event(
+        &app,
+        &label,
+        "menu-repository-path-selected",
+        Some(path.clone()),
+      ) {
         let _ = app.emit_to(
           EventTarget::webview_window(&label),
           "menu-repository-path-selected",

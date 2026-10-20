@@ -234,10 +234,9 @@ pub fn modal(model: &Model, data: &Data) -> Option<Modal> {
       })
       .collect();
     json!({"kind": "stash", "repoPath": repo, "workspaces": targets})
-  } else if let Some(focus) = dialogs.prompt_history {
-    json!({"kind": "promptHistory", "repoPath": repo, "initialSelectedId": focus})
   } else {
-    return None;
+    let focus = dialogs.prompt_history?;
+    json!({"kind": "promptHistory", "repoPath": repo, "initialSelectedId": focus})
   };
   read(value, "dialog")
 }
@@ -359,7 +358,11 @@ mod tests {
     assert!(route.code);
     assert_eq!(route.scroll_to_commit.as_deref(), Some("abc"));
     assert_eq!(route.show_committed, Some(true));
-    let targets: Vec<_> = route.move_targets.iter().map(|t| t.branch.as_str()).collect();
+    let targets: Vec<_> = route
+      .move_targets
+      .iter()
+      .map(|t| t.branch.as_str())
+      .collect();
     assert_eq!(targets, [".", "login"], "everything but the source");
     let terminal = route.terminal.unwrap();
     assert_eq!(terminal.commands.len(), 1);
@@ -380,7 +383,10 @@ mod tests {
   fn routes_each_page() {
     let mut model = Model::new(Some("/repo".into()));
     model.open_settings();
-    assert!(matches!(screen(&model, &data()).unwrap().view, View::Settings(_)));
+    assert!(matches!(
+      screen(&model, &data()).unwrap().view,
+      View::Settings(_)
+    ));
     model.open_github_pr(7, "MERGED");
     let View::Github(route) = screen(&model, &data()).unwrap().view else {
       panic!("not GitHub");
@@ -389,10 +395,16 @@ mod tests {
     if let Page::Github(github) = &mut model.page {
       github.review = Some(7);
     }
-    assert!(matches!(screen(&model, &data()).unwrap().view, View::PrReview(_)));
+    assert!(matches!(
+      screen(&model, &data()).unwrap().view,
+      View::PrReview(_)
+    ));
     model.selected = Some(1);
     model.open_merge_preview();
-    assert!(matches!(screen(&model, &data()).unwrap().view, View::MergePreview(_)));
+    assert!(matches!(
+      screen(&model, &data()).unwrap().view,
+      View::MergePreview(_)
+    ));
     model.open_linear();
     assert!(
       matches!(screen(&model, &data()).unwrap().view, View::Workspace(_)),
@@ -428,7 +440,10 @@ mod tests {
     let data = data();
     assert_eq!(modal(&model, &data), None);
     model.dialogs.prompt_history = Some(Some(3));
-    assert!(matches!(modal(&model, &data), Some(Modal::PromptHistory(_))));
+    assert!(matches!(
+      modal(&model, &data),
+      Some(Modal::PromptHistory(_))
+    ));
     model.dialogs.stash = true;
     assert!(matches!(modal(&model, &data), Some(Modal::Stash(_))));
     model.dialogs.agent_prompt = Some(AgentPrompt {

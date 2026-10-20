@@ -90,7 +90,10 @@ impl WindowController {
       cx.background_spawn(async move { host.prepare_repo(&repo) })
         .detach();
     }
-    this.run(vec![Effect::ReadPrefs, Effect::Refresh { revision: false }], cx);
+    this.run(
+      vec![Effect::ReadPrefs, Effect::Refresh { revision: false }],
+      cx,
+    );
     this
   }
 
@@ -263,7 +266,10 @@ impl WindowController {
           move |host| host.launch(&request, select),
           |this, result, cx| {
             if let Err(err) = result {
-              this.run(vec![toast(ToastTone::Error, "Failed to start session", &err)], cx);
+              this.run(
+                vec![toast(ToastTone::Error, "Failed to start session", &err)],
+                cx,
+              );
             }
           },
           cx,
@@ -278,8 +284,10 @@ impl WindowController {
         let keys = settings_keys(&main);
         self.background(
           move |host| {
-            let values: HashMap<String, Option<String>> =
-              keys.into_iter().map(|k| (k.clone(), host.setting(&k))).collect();
+            let values: HashMap<String, Option<String>> = keys
+              .into_iter()
+              .map(|k| (k.clone(), host.setting(&k)))
+              .collect();
             (values, host.flags())
           },
           |this, (values, flags), cx| {
@@ -505,7 +513,12 @@ impl WindowController {
     self.data.retain(&paths);
     // A supporting repository removed from elsewhere leaves the screen.
     if let Some(path) = &self.model.supporting {
-      if !self.data.supporting().iter().any(|r| r.exists && &r.path == path) {
+      if !self
+        .data
+        .supporting()
+        .iter()
+        .any(|r| r.exists && &r.path == path)
+      {
         self.model.supporting = None;
         self.model.selected = None;
       }

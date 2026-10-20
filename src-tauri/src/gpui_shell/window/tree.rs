@@ -115,11 +115,10 @@ pub fn flatten(rows: &[Row], is_merged: impl Fn(&str) -> bool) -> Vec<Node> {
       pending.extend(nodes[i].children.iter().copied());
     }
   }
-  for i in 0..nodes.len() {
-    let canonical =
-      by_branch.get(nodes[i].row.status.current.branch_name.as_str()) == Some(&i);
+  for (i, node) in nodes.iter_mut().enumerate() {
+    let canonical = by_branch.get(node.row.status.current.branch_name.as_str()) == Some(&i);
     if canonical && !reached.contains(&i) {
-      nodes[i].children.clear();
+      node.children.clear();
       roots.push(i);
     }
   }
