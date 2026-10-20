@@ -11,20 +11,50 @@ fn entry(branch: &str, target: &str, position: i64, status: &str) -> serde_json:
   })
 }
 
-fn queue(entries: Vec<serde_json::Value>, extra: serde_json::Value) -> ScreenSnapshot {
+/// The tab on `o/r`, with Rust's account and queue: `extra` may hold
+/// `isPro` and `queueEnabled` (both default on) and `queueLoading` (the
+/// queue never read); the rest goes to the route.
+fn open(
+  cx: &mut TestAppContext,
+  host: FakeHost,
+  entries: Vec<serde_json::Value>,
+  extra: serde_json::Value,
+) -> (Harness, Arc<FakeHost>) {
+  let mut extra = extra.as_object().cloned().unwrap_or_default();
+  let mut flag = |key: &str, default: bool| {
+    extra
+      .remove(key)
+      .and_then(|v| v.as_bool())
+      .unwrap_or(default)
+  };
+  let (pro, enabled, loading) = (
+    flag("isPro", true),
+    flag("queueEnabled", true),
+    flag("queueLoading", false),
+  );
   let mut route = serde_json::json!({
     "kind": "mergeQueue", "dark": false, "repoPath": "/repo", "fullName": "o/r",
-    "remoteLoading": false, "isPro": true, "queueEnabled": true, "queueLoading": false,
-    "entries": entries, "dequeuing": false, "showMergedHistory": false, "historyLimit": 5
+    "remoteLoading": false, "showMergedHistory": false, "historyLimit": 5
   });
-  for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+  for (k, v) in extra {
     route[k] = v;
   }
-  serde_json::from_value(route).expect("merge queue route")
+  let entries = serde_json::from_value(serde_json::Value::Array(entries)).expect("entries");
+  *host.queue.lock().unwrap() = (!loading).then_some((enabled, entries));
+  let snapshot = serde_json::from_value(route).expect("merge queue route");
+  let (mut h, host) = workspace_harness(cx, host, snapshot);
+  if pro {
+    h.set_account(account_state(
+      serde_json::json!({ "user": ada(), "subscription": super::pro() }),
+    ));
+  }
+  (h, host)
 }
 
-fn active_queue() -> ScreenSnapshot {
-  queue(
+fn active_queue(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  open(
+    cx,
+    queue_host(),
     vec![
       entry("solo", "main", 1, "queued"),
       entry("base", "main", 2, "testing"),
@@ -52,8 +82,12 @@ fn queue_host() -> FakeHost {
 
 #[gpui::test]
 fn merge_queue_sells_pro_to_free_accounts(cx: &mut TestAppContext) {
-  let snapshot = queue(vec![], serde_json::json!({"isPro": false}));
-  let (mut h, _) = workspace_harness(cx, queue_host(), snapshot);
+  let (mut h, _) = open(
+    cx,
+    queue_host(),
+    vec![],
+    serde_json::json!({"isPro": false}),
+  );
   assert!(h.drawn("merge-queue-upsell"));
   assert!(h.drawn("github-tab-merge-queue"));
   assert!(!h.drawn("merge-queue-toolbar"));
@@ -61,8 +95,12 @@ fn merge_queue_sells_pro_to_free_accounts(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn merge_queue_sends_its_opt_in_to_settings(cx: &mut TestAppContext) {
-  let snapshot = queue(vec![], serde_json::json!({"queueEnabled": false}));
-  let (mut h, _) = workspace_harness(cx, queue_host(), snapshot);
+  let (mut h, _) = open(
+    cx,
+    queue_host(),
+    vec![],
+    serde_json::json!({"queueEnabled": false}),
+  );
   assert!(h.drawn("merge-queue-disabled"));
   h.click("merge-queue-enable");
   h.cx.run_until_parked();
@@ -71,7 +109,7 @@ fn merge_queue_sends_its_opt_in_to_settings(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn merge_queue_draws_stacks_above_the_target_branch(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, queue_host(), active_queue());
+  let (mut h, host) = active_queue(cx);
   for selector in [
     "github-repo-name",
     "merge-queue-toolbar",
@@ -99,23 +137,27 @@ fn merge_queue_draws_stacks_above_the_target_branch(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn merge_queue_removes_branches_through_react(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, queue_host(), active_queue());
+fn merge_queue_removes_branches_through_rust(cx: &mut TestAppContext) {
+  let (mut h, host) = active_queue(cx);
   h.click("merge-queue-remove-solo");
   h.click("merge-queue-remove-base");
   h.cx.run_until_parked();
-  assert_eq!(
-    fields(&h, "mergeQueue.dequeue"),
-    vec![
-      serde_json::json!(["solo"]),
-      serde_json::json!(["base", "mid"])
-    ]
-  );
+  assert_eq!(host.writes(), ["dequeue o/r solo", "dequeue o/r base,mid"]);
+  assert!(h.sent().is_empty());
+  // Each removal rereads the queue.
+  let reads = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| *c == "read queue o/r")
+      .count()
+  };
+  assert_eq!(reads(&host), 3);
 }
 
 #[gpui::test]
 fn merge_queue_shows_an_empty_queue(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, queue_host(), queue(vec![], serde_json::json!({})));
+  let (mut h, _) = open(cx, queue_host(), vec![], serde_json::json!({}));
   assert!(h.drawn("merge-queue-empty"));
   assert!(h.drawn("merge-queue-target"));
 }
@@ -125,8 +167,12 @@ fn merge_queue_pages_merged_history(cx: &mut TestAppContext) {
   let merged: Vec<_> = (1..=7)
     .map(|i| entry(&format!("done{i}"), "main", i, "merged"))
     .collect();
-  let snapshot = queue(merged, serde_json::json!({"showMergedHistory": true}));
-  let (mut h, _) = workspace_harness(cx, queue_host(), snapshot);
+  let (mut h, _) = open(
+    cx,
+    queue_host(),
+    merged,
+    serde_json::json!({"showMergedHistory": true}),
+  );
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(2000.)));
   assert!(h.drawn("merge-queue-history"));
@@ -144,11 +190,12 @@ fn merge_queue_pages_merged_history(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn merge_queue_hides_history_until_asked(cx: &mut TestAppContext) {
-  let snapshot = queue(
+  let (mut h, host) = open(
+    cx,
+    queue_host(),
     vec![entry("done", "main", 1, "merged")],
     serde_json::json!({}),
   );
-  let (mut h, _) = workspace_harness(cx, queue_host(), snapshot);
   assert!(!h.drawn("merge-queue-history"));
   h.click("merge-queue-merged");
   h.click("merge-queue-refresh");
@@ -158,14 +205,21 @@ fn merge_queue_hides_history_until_asked(cx: &mut TestAppContext) {
     fields(&h, "mergeQueue.showMerged"),
     vec![serde_json::json!(true)]
   );
+  // Refresh rereads the queue itself.
+  let reads = host
+    .calls()
+    .iter()
+    .filter(|c| *c == "read queue o/r")
+    .count();
+  assert_eq!(reads, 2);
   let sent = h.sent();
-  assert!(sent.contains(&press("mergeQueue.refresh")));
+  assert!(!sent.contains(&press("mergeQueue.refresh")));
   assert!(sent.contains(&press("github.tab:prs")));
 }
 
 #[gpui::test]
 fn merge_queue_copies_the_tip_sha(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, queue_host(), active_queue());
+  let (mut h, _) = active_queue(cx);
   h.click("merge-queue-copy-sha");
   h.cx.run_until_parked();
   let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
@@ -174,8 +228,12 @@ fn merge_queue_copies_the_tip_sha(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn merge_queue_waits_for_the_queue(cx: &mut TestAppContext) {
-  let snapshot = queue(vec![], serde_json::json!({"queueLoading": true}));
-  let (mut h, _) = workspace_harness(cx, queue_host(), snapshot);
+  let (mut h, _) = open(
+    cx,
+    queue_host(),
+    vec![],
+    serde_json::json!({"queueLoading": true}),
+  );
   assert!(!h.drawn("merge-queue-list"));
   assert!(!h.drawn("merge-queue-target"));
 }

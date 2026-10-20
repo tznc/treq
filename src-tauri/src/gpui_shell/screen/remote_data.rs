@@ -4,7 +4,7 @@
 
 use tauri::Manager;
 
-use super::checklist::ToolsHost;
+use super::{account_data::AccountHost, checklist::ToolsHost};
 use crate::{
   core::{
     feature_preview::{self, PreviewFeature},
@@ -21,7 +21,7 @@ use crate::{
 
 /// What the remote dialogs ask of the backend; faked in tests. Everything
 /// but `open_url` blocks, so it is called off the main thread.
-pub trait RemoteHost: ToolsHost {
+pub trait RemoteHost: ToolsHost + AccountHost {
   /// The `~/.ssh/config` aliases the hostname field suggests; none while
   /// the Remote SSH preview is off.
   fn ssh_aliases(&self) -> Vec<String>;

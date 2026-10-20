@@ -17,7 +17,9 @@
 
 import type { IssueCertificateResponse } from "./api-types-remote";
 import { remoteForceCutoff } from "./api-extra";
+import { useAuthStore } from "../stores/authStore";
 import { issueCertificate, reportCutoff } from "./remote-control-plane";
+import { rustOwnsAccount } from "./rust-account";
 import { supabase } from "./supabase";
 
 /**
@@ -275,9 +277,15 @@ export function startManagedCertificateRenewal(
     endpointId: lease.endpointId,
     initialLease: { issuedAt: lease.issuedAt, expiresAt: lease.expiresAt },
     isSessionValid: async () => {
-      const { data, error } = await supabase.auth.getSession();
-      if (error || !data.session) return false;
-      const expiresAtMs = (data.session.expires_at ?? 0) * 1000;
+      // Rust's session, mirrored, when it owns the account; it refreshes
+      // the session itself.
+      const session = rustOwnsAccount()
+        ? useAuthStore.getState().session
+        : await supabase.auth
+            .getSession()
+            .then(({ data, error }) => (error ? null : data.session));
+      if (!session) return false;
+      const expiresAtMs = (session.expires_at ?? 0) * 1000;
       return expiresAtMs === 0 || expiresAtMs > Date.now();
     },
     issue: async (instanceId, keyId) =>

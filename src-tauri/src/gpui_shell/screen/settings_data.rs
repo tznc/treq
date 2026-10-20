@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use super::{checklist::ToolsHost, settings::RepositoryFields};
+use super::{account_data::AccountHost, checklist::ToolsHost, settings::RepositoryFields};
 use crate::{
   core::{
     app_setup_script::{self, AppSetupScriptStatus},
@@ -18,7 +18,7 @@ pub type Values = HashMap<String, Option<String>>;
 
 /// What the settings screen asks of the backend; faked in tests. Everything
 /// but `notify` and `open_url` blocks, so it is called off the main thread.
-pub trait SettingsHost: ToolsHost {
+pub trait SettingsHost: ToolsHost + AccountHost {
   fn settings(&self, keys: &[String]) -> Result<Values, String>;
   fn set_settings(&self, values: &[(String, String)]) -> Result<(), String>;
   fn setup_script(&self) -> Result<AppSetupScriptStatus, String>;

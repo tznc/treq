@@ -133,24 +133,36 @@ pub async fn remote_force_cutoff(
   app: tauri::AppHandle,
   endpoint_id: String,
   reason: CutoffReasonDto,
-  state: State<'_, RemoteExecState>,
-  pty_state: State<'_, crate::commands::remote_pty_commands::RemotePtyState>,
 ) -> Result<(), String> {
-  state.0.force_cutoff(&endpoint_id, reason.into()).await;
+  force_cutoff(&app, &endpoint_id, reason.into()).await;
+  Ok(())
+}
+
+/// [`remote_force_cutoff`], for Rust callers (the certificate renewal loop).
+pub async fn force_cutoff(app: &tauri::AppHandle, endpoint_id: &str, reason: CutoffReason) {
+  use tauri::Manager;
+  app
+    .state::<RemoteExecState>()
+    .0
+    .force_cutoff(endpoint_id, reason)
+    .await;
   // PRD "Hard cutoff on revocation or expiry": tears down open exec *and*
   // PTY channels for the endpoint. `force_cutoff` above only tears down the
   // pooled SSH connection itself; the PTY manager's own session map (which
   // holds a channel handle per session, not the pool) must be swept
   // separately so no PTY session for this endpoint outlives the cutoff.
-  pty_state.0.close_all_for_endpoint(&endpoint_id).await;
+  app
+    .state::<crate::commands::remote_pty_commands::RemotePtyState>()
+    .0
+    .close_all_for_endpoint(endpoint_id)
+    .await;
   let _ = app.emit(
     REMOTE_CUTOFF_EVENT,
     RemoteCutoffEvent {
-      endpoint_id,
-      reason,
+      endpoint_id: endpoint_id.to_string(),
+      reason: reason.into(),
     },
   );
-  Ok(())
 }
 
 /// Cuts off every managed endpoint on sign-out (PRD "Hard cutoff on
@@ -158,14 +170,23 @@ pub async fn remote_force_cutoff(
 /// managed connections and their PTY sessions, emits `remote://cutoff` for
 /// each, and refuses new managed connections until the user signs in again.
 #[tauri::command]
-pub async fn remote_cut_off_managed(
-  app: tauri::AppHandle,
-  state: State<'_, RemoteExecState>,
-  pty_state: State<'_, crate::commands::remote_pty_commands::RemotePtyState>,
-) -> Result<(), String> {
+pub async fn remote_cut_off_managed(app: tauri::AppHandle) -> Result<(), String> {
+  cut_off_managed(&app).await;
+  Ok(())
+}
+
+/// [`remote_cut_off_managed`], for Rust callers (signing out).
+pub async fn cut_off_managed(app: &tauri::AppHandle) {
+  use tauri::Manager;
   let reason = CutoffReasonDto::SessionEnded;
-  for endpoint_id in state.0.cut_off_managed(reason.into()).await {
-    pty_state.0.close_all_for_endpoint(&endpoint_id).await;
+  let ended = app
+    .state::<RemoteExecState>()
+    .0
+    .cut_off_managed(reason.into())
+    .await;
+  let ptys = app.state::<crate::commands::remote_pty_commands::RemotePtyState>();
+  for endpoint_id in ended {
+    ptys.0.close_all_for_endpoint(&endpoint_id).await;
     let _ = app.emit(
       REMOTE_CUTOFF_EVENT,
       RemoteCutoffEvent {
@@ -174,7 +195,6 @@ pub async fn remote_cut_off_managed(
       },
     );
   }
-  Ok(())
 }
 
 /// Clears a previously forced cutoff after the user reauthenticates and a

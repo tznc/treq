@@ -57,9 +57,11 @@ import {
   updateSessionAccess,
   openSystemLogDir,
   gpuiToastAction,
+  cloudWorkspaceAction,
   type StashEntry,
   type Workspace,
 } from "../lib/api";
+import { useAuthStore } from "../stores/authStore";
 import { requestOpenSystemLogs } from "../lib/open-logs-request";
 import type { RemoteRepository } from "../lib/api-types";
 import type {
@@ -162,6 +164,11 @@ import {
 } from "../lib/managed-ssh-connection";
 import { startManagedCertificateRenewal } from "../lib/remote-cert-lifecycle";
 import { ensureRelayAccessTokenSync } from "../lib/remote-relay-auth";
+import {
+  listenManagedEndpoint,
+  type RustCloudAction,
+  rustOwnsAccount,
+} from "../lib/rust-account";
 import {
   newRemoteSessionLabel,
   remoteAgentIdFor,
@@ -419,12 +426,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // -- Remote setup flow (managed + user-owned endpoints) ------------------
   const [showRemoteSetupDialog, setShowRemoteSetupDialog] = useState(false);
-  const [instanceStatus, setInstanceStatus] =
+  const [ownInstanceStatus, setInstanceStatus] =
     useState<InstanceStatusResponse | null>(null);
-  const [provisioningStage, setProvisioningStage] = useState<string>();
-  const [provisioningError, setProvisioningError] = useState<string>();
-  const [cloudUsage, setCloudUsage] = useState<MachineUsageReport>();
-  const [cloudUsageError, setCloudUsageError] = useState<string>();
+  const [ownProvisioningStage, setProvisioningStage] = useState<string>();
+  const [ownProvisioningError, setProvisioningError] = useState<string>();
+  const [ownCloudUsage, setCloudUsage] = useState<MachineUsageReport>();
+  const [ownCloudUsageError, setCloudUsageError] = useState<string>();
+  // Rust's cloud workspace, when Rust owns the account and runs its flows.
+  const rustCloud = useAuthStore((s) => s.cloudWorkspace);
+  const instanceStatus = rustCloud
+    ? rustCloud.instanceStatus
+    : ownInstanceStatus;
+  const provisioningStage = rustCloud
+    ? (rustCloud.provisioningStage ?? undefined)
+    : ownProvisioningStage;
+  const provisioningError = rustCloud
+    ? (rustCloud.provisioningError ?? undefined)
+    : ownProvisioningError;
+  const cloudUsage = rustCloud ? (rustCloud.usage ?? undefined) : ownCloudUsage;
+  const cloudUsageError = rustCloud
+    ? (rustCloud.usageError ?? undefined)
+    : ownCloudUsageError;
+  /** Hands a cloud workspace flow to Rust; true when Rust owns them. */
+  const ranInRust = (action: RustCloudAction): boolean => {
+    if (!rustCloud) return false;
+    void cloudWorkspaceAction(action).catch((error: unknown) => {
+      addToast({
+        title: "Cloud workspace action failed",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    });
+    return true;
+  };
   // Explicit user-managed or managed endpoints carry a native SSH identity.
   // Alias-backed repositories still use the same workspace tree; they
   // dispatch through `remote_dispatch_local` until an endpoint with a
@@ -566,6 +600,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     void useRemoteCutoffStore.getState().startListening();
     return () => useRemoteCutoffStore.getState().stopListening();
+  }, []);
+
+  // Rust runs the cloud workspace flows when it owns the account: a managed
+  // endpoint it connects becomes the active one, as `activateEndpoint` and
+  // `adoptManagedConnection` make it here, and its renewals swap the
+  // certificate.
+  useEffect(() => {
+    if (!rustOwnsAccount()) return;
+    let unlisten: (() => void) | undefined;
+    let stopped = false;
+    void listenManagedEndpoint((event) => {
+      if (event.kind === "renewed") {
+        setActiveSshEndpoint((current) =>
+          current?.id === event.endpoint.id ? event.endpoint : current,
+        );
+        return;
+      }
+      renewalRef.current?.controller.stop();
+      renewalRef.current = null;
+      setActiveSshEndpoint(event.endpoint);
+      setActiveEndpointGeneration(event.generation);
+      if (!event.openRepositories) return;
+      setExplicitEndpointRepoConnected(false);
+      setShowRemoteSetupDialog(false);
+      void refreshSavedRemoteRepos(event.endpoint.id, event.generation).catch(
+        () => undefined,
+      );
+    }).then((fn) => {
+      if (stopped) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
   }, []);
 
   // Stop renewal on disconnect or endpoint replacement (PRD "Stop renewal on
@@ -832,17 +901,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleOpenRemoteSetup = async () => {
     setProvisioningError(undefined);
+    // Rust rereads the cloud workspace, and its usage, for its own dialog.
+    const rustReads = ranInRust({ action: "refresh" });
     try {
       const [hosts, status] = await Promise.all([
         // ~/.ssh/config discovery only feeds the user-managed form.
         useFeaturePreviewStore.getState().flags.remoteSsh
           ? listSshHosts().catch(() => [])
           : Promise.resolve([]),
-        getInstanceStatus().catch(() => null),
+        rustReads ? null : getInstanceStatus().catch(() => null),
       ]);
       setRemoteSshHosts(hosts.map((h) => h.alias));
-      setInstanceStatus(status);
-      void loadCloudUsage(status);
+      if (!rustReads) {
+        setInstanceStatus(status);
+        void loadCloudUsage(status);
+      }
     } catch {
       // Best-effort: the dialog still opens and shows what it could load.
     }
@@ -888,6 +961,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const refreshCloudWorkspace = async () => {
+    if (ranInRust({ action: "refresh" })) return;
     setProvisioningError(undefined);
     const status = await getInstanceStatus().catch(() => null);
     if (status) setInstanceStatus(status);
@@ -938,6 +1012,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // "Managed VM certificate flow"), plus the initial silent-renewal start.
   // See `src/lib/managed-ssh-connection.ts` for the state machine itself.
   const handleProvisionManaged = async () => {
+    if (ranInRust({ action: "provision" })) return;
     setProvisioningError(undefined);
     setProvisioningStage("Requesting provisioning...");
     try {
@@ -991,6 +1066,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // skips provisioning/readiness polling since the instance is already
   // `ready`.
   const handleConnectManaged = async () => {
+    if (ranInRust({ action: "openRepositories" })) return;
     setProvisioningError(undefined);
     try {
       const keyReference = await resolveManagedKeyReference();
@@ -1018,6 +1094,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // (via `activateEndpoint` replacing the endpoint), reconnect - only then is
   // interaction restored (the new `activeSshEndpoint` is what gates it).
   const handleWakeManaged = async () => {
+    if (ranInRust({ action: "wake" })) return;
     const instanceId = instanceStatus?.instance?.instance_id;
     if (!instanceId) return;
     setProvisioningError(undefined);
@@ -1043,6 +1120,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // `reauthenticateManagedInstance` confirms fresh certificate issuance
   // succeeded.
   const handleReauthenticateManaged = async (keyReference?: string) => {
+    if (
+      activeSshEndpoint &&
+      ranInRust({ action: "reauthenticate", endpointId: activeSshEndpoint.id })
+    )
+      return;
     const resolvedKeyReference = keyReference ?? selectedKeyReference;
     if (
       !activeSshEndpoint ||
@@ -1071,6 +1153,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleReprovisionManaged = async () => {
+    if (ranInRust({ action: "repair" })) return;
     const instanceId = instanceStatus?.instance?.instance_id;
     if (!instanceId) return;
     setProvisioningError(undefined);
@@ -1088,6 +1171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleDeleteManagedInstance = async () => {
+    if (ranInRust({ action: "delete" })) return;
     const instanceId = instanceStatus?.instance?.instance_id;
     if (!instanceId) return;
     setProvisioningError(undefined);
@@ -1111,6 +1195,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // blocked right away rather than only after the current certificate would
   // otherwise have been silently renewed.
   const handleRevokeKey = async (keyReference: string) => {
+    if (ranInRust({ action: "revokeKey", keyReference })) return;
     setProvisioningError(undefined);
     const keyId = managedKeyId ?? keyReference;
     try {
@@ -1151,6 +1236,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleOpenManagedRepositories = () => {
+    if (ranInRust({ action: "openRepositories" })) return;
     const serverEndpoint = instanceStatus?.endpoint;
     if (!serverEndpoint) return;
     // The control plane's endpoint names its own key id, which the native

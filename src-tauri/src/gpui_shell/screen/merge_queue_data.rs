@@ -1,39 +1,55 @@
 //! The GitHub panel's Merge Queue tab (`MergeQueueTab`): the rules of
-//! `lib/merge-queue-stacks.ts` and the queue parts' labels and bars. The
-//! queue itself comes from Supabase, which only React reaches, so React
-//! sends its entries; GPUI reads what the backend knows (the workspaces'
-//! diff stats, the default branch and the target branch's tip).
+//! `lib/merge-queue-stacks.ts` and the queue parts' labels and bars, and
+//! what the tab reads: the queue from Supabase ([`crate::core::account`]),
+//! and the workspaces' diff stats, the default branch and the target
+//! branch's tip.
 
 use std::collections::{HashMap, HashSet};
 
-use serde::Deserialize;
-
 use super::{code_data::CodeHost, workspace_dialog_data::WorkspaceDialogHost};
+use crate::core::account;
+pub use crate::core::account::QueueEntry;
 
 /// `MERGE_QUEUE_HISTORY_PAGE_SIZE`: merged entries each "Load more" adds.
 pub const HISTORY_PAGE: usize = 5;
 /// `DIFF_BAR_HALF_WIDTH_PX`.
 pub const BAR_HALF: f32 = 14.;
 
-/// What the tab reads from the backend; faked in tests.
-pub trait MergeQueueHost: CodeHost + WorkspaceDialogHost {}
+/// What the tab reads from the backend; faked in tests. Blocks.
+pub trait MergeQueueHost: CodeHost + WorkspaceDialogHost {
+  /// Whether `full_name` opted in to the merge queue, and its entries in
+  /// position order (none while it has not).
+  fn merge_queue(&self, full_name: &str) -> Result<(bool, Vec<QueueEntry>), String>;
+  /// Removes `branches` (a stack, bottom first) from the queue.
+  fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String>;
+}
 
-impl<T: CodeHost + WorkspaceDialogHost> MergeQueueHost for T {}
+impl MergeQueueHost for crate::gpui_shell::native::Backend {
+  fn merge_queue(&self, full_name: &str) -> Result<(bool, Vec<QueueEntry>), String> {
+    let cloud = crate::commands::cloud::owned_cloud(self.app())
+      .ok_or("The account is not available in this window.")?;
+    tauri::async_runtime::block_on(async {
+      let enabled = account::queue_enabled(&cloud.supabase, full_name).await?;
+      let entries = if enabled {
+        account::queue_entries(&cloud.supabase, full_name).await?
+      } else {
+        Vec::new()
+      };
+      Ok::<_, crate::core::supabase::ApiError>((enabled, entries))
+    })
+    .map_err(|e| e.to_string())
+  }
 
-/// A queued branch (`QueueEntry`, from `get_repo_branch_queue_statuses`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct QueueEntry {
-  pub branch_name: String,
-  pub pr_number: Option<u64>,
-  #[serde(default)]
-  pub pr_title: Option<String>,
-  pub status: String,
-  pub position: i64,
-  pub target_branch: String,
-  #[serde(default)]
-  pub insertions: Option<u32>,
-  #[serde(default)]
-  pub deletions: Option<u32>,
+  fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String> {
+    let cloud = crate::commands::cloud::owned_cloud(self.app())
+      .ok_or("The account is not available in this window.")?;
+    tauri::async_runtime::block_on(account::dequeue_branches(
+      &cloud.supabase,
+      full_name,
+      branches,
+    ))
+    .map_err(|e| e.to_string())
+  }
 }
 
 /// Branches stacked on each other, in merge order (bottom first).

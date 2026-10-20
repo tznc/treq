@@ -4,6 +4,7 @@
 // treq session to find it.
 
 import { linearSetProxySession } from "./api-linear";
+import { rustOwnsAccount } from "./rust-account";
 import { SUPABASE_URL } from "./supabase";
 import {
   type AccessTokenSyncDeps,
@@ -20,7 +21,8 @@ export function ensureLinearProxySessionSync(
   ),
 ): Promise<void> {
   if (started) return started;
-  started = startAccessTokenSync(deps);
+  // Rust pushes its own session's token on each refresh.
+  started = rustOwnsAccount() ? Promise.resolve() : startAccessTokenSync(deps);
   return started;
 }
 

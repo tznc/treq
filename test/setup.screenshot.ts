@@ -57,6 +57,8 @@ vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
 }));
 beforeEach(() => {
   window.__TREQ_GPUI_SHELL__ = true;
+  // React's own Supabase account (same as test/setup.integration.ts).
+  window.__TREQ_REACT_SUPABASE__ = true;
 });
 
 const jjCalls: string[] = [];

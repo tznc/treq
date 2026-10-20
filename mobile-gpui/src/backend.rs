@@ -1,6 +1,6 @@
 //! Process-wide services shared by every screen: the tokio runtime that
 //! treq's SSH transport needs, the settings database, the SSH connection
-//! pool and remote PTY manager, and the HTTP client for Supabase.
+//! pool and remote PTY manager, and the Supabase client.
 //!
 //! GPUI's executor is not tokio, so async work is started here with
 //! [`spawn`] and its result awaited from GPUI through a oneshot channel.
@@ -14,13 +14,16 @@ use std::{
 use futures::channel::{mpsc, oneshot};
 use treq_lib::{
   core::{
-    remote_control_plane::SshEndpoint, remote_pty::RemotePtyManager,
+    auth::{Auth, SessionStore, SESSION_SETTING},
+    remote_control_plane::SshEndpoint,
+    remote_pty::RemotePtyManager,
     remote_ssh_transport::SshConnectionPool,
+    supabase::Supabase,
   },
   db::Database,
 };
 
-use crate::auth::AuthState;
+use crate::config;
 
 /// Something the UI should react to, sent from background work.
 #[derive(Debug, Clone)]
@@ -57,8 +60,8 @@ pub struct Backend {
   pub db: Mutex<Database>,
   pub pool: Arc<SshConnectionPool>,
   pub ptys: RemotePtyManager,
-  pub http: reqwest::Client,
-  pub auth: AuthState,
+  pub supabase: Arc<Supabase>,
+  pub auth: Arc<Auth>,
   connection: Mutex<Option<Connection>>,
   events: mpsc::UnboundedSender<AppEvent>,
 }
@@ -93,16 +96,25 @@ pub fn init(
     .build()?;
   let pool = Arc::new(new_pool(&app));
   let (events, receiver) = mpsc::unbounded();
+  let supabase = Arc::new(Supabase::new(&config::env().supabase, Arc::new(SettingsStore)));
+  // Sign-in changes reach the UI as `Auth(email)`.
+  supabase.auth.subscribe(|status| {
+    let email = status
+      .session
+      .as_ref()
+      .map(|s| s.user.email.clone().unwrap_or_else(|| s.user.id.clone()));
+    if let Some(backend) = try_get() {
+      backend.emit(AppEvent::Auth(email));
+    }
+  });
   let backend = Arc::new(Backend {
     ptys: RemotePtyManager::new(pool.clone()),
     runtime,
     app,
     db: Mutex::new(db),
     pool,
-    http: reqwest::Client::builder()
-      .user_agent(concat!("treq-gpui/", env!("CARGO_PKG_VERSION")))
-      .build()?,
-    auth: AuthState::default(),
+    auth: supabase.auth.clone(),
+    supabase,
     connection: Mutex::new(None),
     events,
   });
@@ -110,6 +122,21 @@ pub fn init(
     .set(backend)
     .map_err(|_| anyhow::anyhow!("backend initialized twice"))?;
   Ok(receiver)
+}
+
+/// Keeps the Supabase session in the settings database.
+struct SettingsStore;
+
+impl SessionStore for SettingsStore {
+  fn load(&self) -> Option<String> {
+    try_get()?.setting(SESSION_SETTING)
+  }
+
+  fn save(&self, value: &str) {
+    if let Some(backend) = try_get() {
+      backend.set_setting(SESSION_SETTING, value);
+    }
+  }
 }
 
 #[cfg(mobile)]
@@ -143,6 +170,10 @@ pub fn spawn_detached(future: impl Future<Output = ()> + Send + 'static) {
 impl Backend {
   pub fn emit(&self, event: AppEvent) {
     let _ = self.events.unbounded_send(event);
+  }
+
+  pub fn with_db<T>(&self, f: impl FnOnce(&Database) -> T) -> T {
+    f(&self.db.lock().unwrap_or_else(|e| e.into_inner()))
   }
 
   pub fn setting(&self, key: &str) -> Option<String> {

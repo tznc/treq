@@ -8,6 +8,7 @@
 // the token stays fresh.
 
 import { remoteSetRelayAccessToken } from "./api-extra";
+import { rustOwnsAccount } from "./rust-account";
 import {
   type AccessTokenSyncDeps,
   startAccessTokenSync,
@@ -27,7 +28,8 @@ export function ensureRelayAccessTokenSync(
   deps: RelayAuthDeps = supabaseTokenDeps(remoteSetRelayAccessToken),
 ): Promise<void> {
   if (started) return started;
-  started = startAccessTokenSync(deps);
+  // Rust pushes its own session's token on each refresh.
+  started = rustOwnsAccount() ? Promise.resolve() : startAccessTokenSync(deps);
   return started;
 }
 
