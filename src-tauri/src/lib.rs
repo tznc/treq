@@ -550,18 +550,6 @@ pub fn run() {
       // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
 
-      #[cfg(feature = "gpui-shell")]
-      #[cfg(desktop)]
-      if let Err(err) = gpui_shell::init(app) {
-        log::error!("GPUI shell unavailable, using the webview window: {err}");
-      }
-      open_repo_window(
-        app.handle(),
-        "main",
-        saved_repo_path.clone(),
-        "Treq - Stacking ADE",
-      )?;
-
       // Load cached binary paths and initialize in-memory cache
       let binary_paths = commands::load_cached_binary_paths(&db);
       binary_paths::init_binary_paths_cache(binary_paths);
@@ -625,6 +613,19 @@ pub fn run() {
         &remote_exec_state,
       ));
       app.manage(remote_exec_state);
+      // Only now: a shell window's model reads the database and the binary
+      // caches as soon as the window is made.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if let Err(err) = gpui_shell::init(app) {
+        log::error!("GPUI shell unavailable, using the webview window: {err}");
+      }
+      open_repo_window(
+        app.handle(),
+        "main",
+        saved_repo_path.clone(),
+        "Treq - Stacking ADE",
+      )?;
       // GPUI shell windows draw the account from Rust, which owns the
       // Supabase session; without the shell the webview keeps it.
       #[cfg(feature = "gpui-shell")]
