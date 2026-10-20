@@ -55,6 +55,9 @@ struct FakeHost {
   /// The next workspaces read panics, as a backend read before the app's
   /// state is managed did.
   panic_once: std::sync::atomic::AtomicBool,
+  /// The next branch read fails, as one before `prepare_repo`'s jj init
+  /// does.
+  no_branch_once: std::sync::atomic::AtomicBool,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
 }
@@ -118,6 +121,12 @@ impl WindowHost for FakeHost {
   }
 
   fn branch(&self, _: &str) -> Option<RepoBranch> {
+    if self
+      .no_branch_once
+      .swap(false, std::sync::atomic::Ordering::SeqCst)
+    {
+      return None;
+    }
     Some(RepoBranch {
       current_branch: Some("main".into()),
       display_ref: "main".into(),
@@ -505,6 +514,17 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);
+}
+
+#[gpui::test]
+fn reads_the_branch_again_when_the_first_read_raced_the_repo_init(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .no_branch_once
+    .store(true, std::sync::atomic::Ordering::SeqCst);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let repos = window.last().sidebar.unwrap().repos;
+  assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
 }
 
 #[gpui::test]
