@@ -2464,6 +2464,8 @@ fn loc_indicator(
   let red = tw(if dark { RED_400 } else { RED_600 });
   let count = |text: String, color: Hsla, ch: usize| {
     ui::text(div(), TextSize::Xs)
+      .flex_none()
+      .whitespace_nowrap()
       .w(px(ch as f32 * CH))
       .font_family(theme::MONO_FONT)
       .text_color(color)
