@@ -613,3 +613,253 @@ fn leaves_what_only_react_runs_to_it(cx: &mut TestAppContext) {
     [Forward::Event("menu-open-ssh")]
   );
 }
+
+fn session_started(workspace_id: Option<i64>, select: bool) -> NativeEvent {
+  NativeEvent::AgentSessionStarted {
+    session: crate::core::agent_launch::SessionStart {
+      session_id: 7,
+      repo_path: "/repo".into(),
+      workspace_id,
+      ..Default::default()
+    },
+    pane_session_id: 7,
+    select,
+  }
+}
+
+fn toasts(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("toast "))
+    .collect()
+}
+
+fn select(window: &Window, cx: &mut TestAppContext, id: i64, toggle: bool) {
+  window.sidebar(
+    cx,
+    SidebarAction::SelectWorkspace {
+      id,
+      shift: false,
+      toggle,
+    },
+  );
+}
+
+/// `session-started-toast.test.tsx`: `showBackendSession` shows no toast,
+/// and a session started without `select` leaves the page and selection.
+#[gpui::test]
+fn a_started_session_shows_no_toast_and_keeps_the_page(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 1, false);
+  // Started in another workspace, from the prompt dialog's picker.
+  window.controller.update(cx, |c, cx| {
+    c.native_event(&session_started(Some(2), false), cx)
+  });
+  cx.run_until_parked();
+  assert_eq!(window.route_workspace(), Some(1), "the selection stays");
+  assert_eq!(
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().active_session),
+    Some(7)
+  );
+  // Started from the Linear view.
+  window.sidebar(cx, SidebarAction::OpenLinear);
+  window.controller.update(cx, |c, cx| {
+    c.native_event(&session_started(Some(2), false), cx)
+  });
+  cx.run_until_parked();
+  assert_eq!(
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().page.clone()),
+    super::model::Page::Linear
+  );
+  // A deep link or review shows its workspace.
+  window.controller.update(cx, |c, cx| {
+    c.native_event(&session_started(Some(2), true), cx)
+  });
+  cx.run_until_parked();
+  assert_eq!(window.route_workspace(), Some(2));
+  assert_eq!(toasts(&host), Vec::<String>::new());
+}
+
+fn remove(host: &FakeHost, id: i64) {
+  host
+    .workspaces
+    .lock()
+    .unwrap()
+    .get_mut("/repo")
+    .unwrap()
+    .retain(|w| w.id != id);
+}
+
+/// What `workspace_ops` reports for an archive: the change, then the ids.
+fn archived(window: &Window, cx: &mut TestAppContext, ids: Vec<i64>) {
+  window.controller.update(cx, |c, cx| {
+    c.native_event(
+      &NativeEvent::WorkspaceChanged {
+        repo_path: "/repo".into(),
+      },
+      cx,
+    );
+    c.native_event(
+      &NativeEvent::WorkspacesRemoved {
+        repo_path: "/repo".into(),
+        ids,
+      },
+      cx,
+    );
+  });
+  cx.run_until_parked();
+}
+
+fn stack_host() -> Arc<FakeHost> {
+  Arc::new(FakeHost::on(
+    "/repo",
+    vec![
+      workspace(1, "feat/alpha", Some("main")),
+      workspace(2, "feat/beta", Some("main")),
+      workspace(3, "feat/child", Some("feat/alpha")),
+    ],
+  ))
+}
+
+/// `workspace-removal-navigation.test.tsx` (`leaveRemovedWorkspaces`).
+#[gpui::test]
+fn archiving_another_workspace_keeps_the_open_one(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 2, false);
+  remove(&host, 1);
+  archived(&window, cx, vec![1]);
+  assert!(!window.sidebar_ids().contains(&1));
+  assert_eq!(window.route_workspace(), Some(2));
+}
+
+#[gpui::test]
+fn archiving_the_open_workspace_lands_on_its_stack_parent(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 3, false);
+  remove(&host, 3);
+  archived(&window, cx, vec![3]);
+  assert_eq!(window.route_workspace(), Some(1));
+  // With no parent left, the home view.
+  select(&window, cx, 2, false);
+  remove(&host, 2);
+  archived(&window, cx, vec![2]);
+  assert_eq!(window.route_workspace(), None);
+}
+
+/// The listed-ids effect: a poll that no longer lists the open workspace.
+#[gpui::test]
+fn a_workspace_removed_outside_the_app_leaves_the_view(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 3, false);
+  remove(&host, 3);
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert!(!window.sidebar_ids().contains(&3));
+  assert_eq!(window.route_workspace(), None, "home, not the parent");
+}
+
+/// Bulk Archive with one failure: only the archived row leaves.
+#[gpui::test]
+fn archiving_drops_the_removed_rows_from_the_multi_selection(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 1, true);
+  select(&window, cx, 2, true);
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(2));
+  remove(&host, 1);
+  archived(&window, cx, vec![1]);
+  assert!(window.sidebar_ids().contains(&2));
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(1));
+}
+
+/// `supporting-repos.test.tsx`: a home row and a labelled group per
+/// repository, the main one first; folding one leaves the others.
+#[gpui::test]
+fn draws_a_home_row_and_group_for_each_repository(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::on(
+    "/code/main",
+    vec![workspace(1, "feat/main-work", Some("main"))],
+  ));
+  let mut theirs = workspace(7, "feat/supporting-work", Some("main"));
+  theirs.repo_path = "/code/svc".into();
+  host
+    .workspaces
+    .lock()
+    .unwrap()
+    .insert("/code/svc".into(), vec![theirs]);
+  host.supporting.lock().unwrap().extend([
+    SupportingRepo {
+      path: "/code/svc".into(),
+      exists: true,
+    },
+    SupportingRepo {
+      path: "/gone/lib".into(),
+      exists: false,
+    },
+  ]);
+  let window = Window::open(cx, host.clone(), Some("/code/main"));
+  let repos = window.last().sidebar.unwrap().repos;
+  let titles = |i: usize| -> Vec<String> {
+    repos[i]
+      .workspaces
+      .iter()
+      .map(|w| w.title.clone())
+      .collect()
+  };
+  assert_eq!(
+    repos.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+    ["/code/main", "/code/svc", "/gone/lib"]
+  );
+  assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
+  assert!(repos[0].active && !repos[1].active);
+  assert_eq!(
+    repos.iter().map(|r| r.label.as_deref()).collect::<Vec<_>>(),
+    [Some("main"), Some("svc"), Some("lib")]
+  );
+  assert_eq!(titles(0), ["feat/main-work"]);
+  assert_eq!(titles(1), ["feat/supporting-work"]);
+  assert!(repos[2].missing && !repos[2].loading && titles(2).is_empty());
+  assert_eq!(host.count("workspaces /gone/lib"), 0, "not read");
+
+  window.sidebar(
+    cx,
+    SidebarAction::ToggleRepo {
+      repo_path: "/code/svc".into(),
+    },
+  );
+  let repos = window.last().sidebar.unwrap().repos;
+  assert!(repos[1].collapsed && !repos[0].collapsed);
+  assert_eq!(
+    host.count(r#"save sidebar_collapsed_repos:/code/main=["/code/svc"]"#),
+    1
+  );
+
+  // A supporting workspace puts its repository on screen; home returns.
+  window.sidebar(
+    cx,
+    SidebarAction::OpenRepoWorkspace {
+      repo_path: "/code/svc".into(),
+      id: 7,
+    },
+  );
+  assert_eq!(window.route_workspace(), Some(7));
+  let repos = window.last().sidebar.unwrap().repos;
+  assert!(repos[1].active && repos[1].workspaces[0].selected);
+  window.sidebar(
+    cx,
+    SidebarAction::SelectHome {
+      repo_path: "/code/main".into(),
+    },
+  );
+  assert_eq!(window.route_workspace(), None);
+  assert!(window.last().sidebar.unwrap().repos[0].home_selected);
+}
