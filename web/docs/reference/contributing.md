@@ -58,7 +58,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm test
 ```
 
-The overview shot (`assets/screenshots/code.png`) and the site shots (`assets/screenshots/landing/`) are committed. The site build copies them into `web/static/img` (`/img/code.png` and `/img/landing/*`) before `docusaurus build`.
+The overview shot (`assets/screenshots/code.png`) is committed, and the site build copies it to `/img/code.png`. The landing images (`/img/landing/*`) are generated, not committed: run `npm run landing` in `e2e/desktop` to write them into `web/static/img/landing/`. A production build fails if any listed image is missing.
 
 ## Implementation Rules
 

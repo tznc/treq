@@ -30,6 +30,28 @@ DISPLAY=:98 npm test
 `$CARGO_TARGET_DIR/debug/treq`, else `target/debug/treq`), and
 `TREQ_E2E_PORT` changes the server port (default 9333).
 
+## Landing screenshots
+
+`npm run landing` captures the website's landing images from the running app
+and writes each PNG named in `web/src/data/landing-screenshots.json` into
+`web/static/img/landing/` (or `LANDING_OUT`). They are generated, never
+committed. It uses its own config (`landing/landing.config.ts`), so `npm
+test` does not run it.
+
+`landing/launch.ts` seeds a demo `lorem-ipsum/event-bus` repository through
+the `treq` CLI (`landing/seed.ts`: stacked workspaces and a real rebase
+conflict), puts a fake `gh` with fixture PRs, issues, checks and review
+threads on `PATH` (`landing/fake-gh.mjs`, no network or token), and starts
+the app at `GDK_SCALE=2` in the dark theme. `landing/capture.spec.ts` drives
+it and takes each shot.
+
+```sh
+xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run landing
+```
+
+The Deploy Web workflow runs this for production builds and passes the PNGs
+to the site build as the `landing-screenshots` artifact.
+
 ## Writing tests
 
 Elements are found the way gpui-kit observes them: give an element an id, a

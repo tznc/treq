@@ -51,7 +51,7 @@ for Node, Rust, and Tauri Linux build dependencies. See the
 
 ### Regenerating screenshots
 
-The overview shot (`assets/screenshots/code.png`) and the site crops (`assets/screenshots/landing/`, listed in `web/src/data/landing-screenshots.json`) are committed. To update one, capture the running app and replace the PNG; the web build copies them into `web/static/img`.
+The overview shot (`assets/screenshots/code.png`) is committed; to update it, capture the running app and replace the PNG. The site's landing images (listed in `web/src/data/landing-screenshots.json`) are generated, never committed: `npm run landing` in `e2e/desktop` drives the app on a demo repository and writes them into `web/static/img/landing/` (see [e2e/desktop/README.md](e2e/desktop/README.md)). The Deploy Web workflow captures them for production builds.
 
 ### Bumping the version
 

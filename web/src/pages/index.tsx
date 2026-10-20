@@ -385,7 +385,7 @@ function ProofSection(): ReactNode {
           <LandingShot
             className={styles.proofImage}
             file="isolation-right.png"
-            alt="Changes in feat/empty-event-message with a different uncommitted Home.tsx edit"
+            alt="Changes in feat/empty-event-message with a different uncommitted feed.ts edit"
             width={2320}
             height={1580}
           />

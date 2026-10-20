@@ -120,7 +120,7 @@ Concept pages explain the system. They are not a dump of every UI affordance.
 When a review or the flow needs a UI crop:
 
 1. Capture the running app.
-2. Store docs assets under `web/static/img/docs/`. Landing crops are committed under `assets/screenshots/landing/` and the README/hero shot is `assets/screenshots/code.png`; the web build copies both into `web/static/img/`.
+2. Store docs assets under `web/static/img/docs/`. The README/hero shot is committed as `assets/screenshots/code.png` and the web build copies it into `web/static/img/`. Landing images are generated into `web/static/img/landing/` by `npm run landing` in `e2e/desktop`; never commit them.
 3. Embed with `ThemeAwareImage` from `@site/src/components/ThemeAwareImage` and a short caption.
 4. Crop tightly to the control. Do not ship a full-window dashboard when a button and menu suffice.
 
