@@ -10,7 +10,12 @@
 //! [`terminal_data`]: super::terminal_data
 //! [`terminal_emu`]: super::terminal_emu
 
-use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
+use std::{
+  cell::Cell,
+  rc::Rc,
+  sync::Arc,
+  time::{Duration, Instant},
+};
 
 use futures::StreamExt as _;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
@@ -23,7 +28,7 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
-  terminal_data::{self, AgentStart, Host, Live, Spawn},
+  terminal_data::{self, AgentStart, Host, Listening, Live, RemoteTarget, Spawn},
   terminal_emu::{self, encode_key, paste_bytes, Key, Mouse, MouseAction, SelectKind},
   terminal_lightbox::{Lightbox, LightboxEvent},
   terminal_send::{assets_for, shell_quote, SendAsset},
@@ -55,6 +60,16 @@ const SCROLLBAR: f32 = 8.;
 /// `pt-1` above the grid.
 const TOP_PAD: f32 = 4.;
 const TERMINAL_BG: u32 = terminal_emu::BACKGROUND;
+/// `RemoteTerminalPanel`'s xterm font size.
+const REMOTE_FONT_SIZE: f32 = 13.;
+/// `h-8`: a remote session's header.
+const REMOTE_HEADER_HEIGHT: f32 = 32.;
+/// `AUTO_REATTACH_COOLDOWN_MS`: one automatic reattach covers a brief
+/// drop; a session that keeps dropping waits for the user.
+const AUTO_REATTACH_COOLDOWN: Duration = Duration::from_secs(30);
+/// `text-amber-500` and `text-red-500`.
+const AMBER_500: u32 = 0xf59e0b;
+const RED_500: u32 = 0xef4444;
 
 /// A new agent session's start, as React keeps it (`pendingSessionData`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -74,11 +89,14 @@ pub struct Pending {
 pub struct Command {
   /// Bumped per command, so each runs once.
   pub nonce: u64,
-  /// `toggleCollapse`, `toggleMaximize`, `newShell`, `newAgent`, `closeWorkspace`, `send`.
+  /// `toggleCollapse`, `toggleMaximize`, `newShell`, `newAgent`,
+  /// `closeWorkspace`, `send`, `openRemote`.
   pub kind: String,
   pub dir: Option<String>,
   pub session_id: Option<i64>,
   pub text: Option<String>,
+  /// `openRemote`'s persistent session.
+  pub remote: Option<RemoteTarget>,
 }
 
 /// What the route says about the pane while GPUI draws it.
@@ -94,6 +112,9 @@ pub struct Route {
   pub commands: Vec<Command>,
   /// `treq send` attachments not yet dismissed (`treqSendStore`).
   pub send_assets: Vec<SendAsset>,
+  /// A remote repository is active: a new shell runs on the host, in the
+  /// session React resolves (`resolveRemoteShell`).
+  pub remote_shell: bool,
 }
 
 /// `TerminalSessionSummary`, which the sidebar spins on.
@@ -195,6 +216,25 @@ pub enum Start {
     workspace_id: Option<i64>,
     working_dir: Option<String>,
   },
+  /// A persistent session on a remote host (`RemoteTerminalPanel`).
+  Remote {
+    target: RemoteTarget,
+  },
+}
+
+/// How a remote session's channel stands (`RemoteTerminalPanel`'s state).
+#[derive(Debug, Clone, Default)]
+pub struct RemoteState {
+  /// Attaches after the first (`attachCount`).
+  attaches: u32,
+  /// The session is gone on the host, with its exit status.
+  pub ended: Option<Option<u32>>,
+  /// The channel closed but the session may still run.
+  detached: bool,
+  /// The channel closed: typing goes nowhere.
+  closed: bool,
+  pub stopping: bool,
+  last_auto: Option<Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -251,7 +291,16 @@ pub struct TerminalView {
   chat_due: bool,
   search: Search,
   on_event: OnEvent,
+  pub remote: RemoteState,
+  _exit: Option<Listening>,
   _tasks: Vec<Task<()>>,
+}
+
+fn now_millis() -> u128 {
+  std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_millis())
+    .unwrap_or_default()
 }
 
 impl TerminalView {
@@ -281,12 +330,122 @@ impl TerminalView {
       chat_due: false,
       search: Search::default(),
       on_event,
+      remote: RemoteState::default(),
+      _exit: None,
       _tasks: Vec::new(),
     }
   }
 
   pub fn is_agent(&self) -> bool {
     matches!(self.start, Start::Agent { .. })
+  }
+
+  fn remote_target(&self) -> Option<&RemoteTarget> {
+    match &self.start {
+      Start::Remote { target } => Some(target),
+      _ => None,
+    }
+  }
+
+  /// Listens for the remote channel's end before attaching, as
+  /// `RemoteTerminalPanel` subscribes first.
+  fn watch_exit(&mut self, cx: &mut Context<Self>) {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    self._exit = Some(self.host.listen_exit(
+      &self.pty,
+      Box::new(move |status| {
+        let _ = tx.unbounded_send(status);
+      }),
+    ));
+    self._tasks.push(cx.spawn(async move |this, cx| {
+      if let Some(status) = rx.next().await {
+        let _ = this.update(cx, |view, cx| view.on_remote_exit(status, cx));
+      }
+    }));
+  }
+
+  /// `handleChannelExit`: the session outlives its channel, so the host is
+  /// asked whether the session still runs.
+  fn on_remote_exit(&mut self, status: Option<u32>, cx: &mut Context<Self>) {
+    self.remote.closed = true;
+    let Some(target) = self.remote_target().cloned() else {
+      return;
+    };
+    if self.remote.stopping {
+      return;
+    }
+    let host = self.host.clone();
+    let task = cx
+      .background_executor()
+      .spawn(async move { host.remote_running(&target) });
+    self._tasks.push(cx.spawn(async move |this, cx| {
+      let running = task.await;
+      let _ = this.update(cx, |view, cx| {
+        if view.remote.stopping {
+          return;
+        }
+        let now = Instant::now();
+        let cooled = view
+          .remote
+          .last_auto
+          .is_none_or(|last| now.duration_since(last) > AUTO_REATTACH_COOLDOWN);
+        match running {
+          Some(false) => view.remote.ended = Some(status),
+          Some(true) if cooled => {
+            view.remote.last_auto = Some(now);
+            view.reattach(cx);
+            return;
+          }
+          _ => view.remote.detached = true,
+        }
+        cx.notify();
+      });
+    }));
+  }
+
+  /// "Reattach": a fresh local id on the same persistent session, the old
+  /// channel closed.
+  pub fn reattach(&mut self, cx: &mut Context<Self>) {
+    let Some(target) = self.remote_target() else {
+      return;
+    };
+    let next = terminal_data::remote_pty_id(target, now_millis());
+    let previous = std::mem::replace(&mut self.pty, next);
+    let _ = self.host.close_pty(&previous);
+    terminal_data::detach(&previous);
+    self.live = None;
+    self._exit = None;
+    self._tasks.clear();
+    self.status = Status::Preparing;
+    self.remote.attaches += 1;
+    self.remote.ended = None;
+    self.remote.detached = false;
+    self.remote.closed = false;
+    cx.notify();
+  }
+
+  /// "Stop": ends the session on the host, then closes the column.
+  pub fn stop(&mut self, cx: &mut Context<Self>) {
+    let Some(target) = self.remote_target().cloned() else {
+      return;
+    };
+    self.remote.stopping = true;
+    cx.notify();
+    let host = self.host.clone();
+    let task = cx
+      .background_executor()
+      .spawn(async move { host.remote_stop(&target) });
+    self._tasks.push(cx.spawn(async move |this, cx| {
+      let result = task.await;
+      let _ = this.update(cx, |view, cx| {
+        view.remote.stopping = false;
+        match result {
+          Ok(()) => (view.on_event)(TermEvent::Close, cx),
+          Err(error) => view.status = Status::Failed(error),
+        }
+        cx.notify();
+      });
+    }));
   }
 
   /// The grid's size for the measured bounds.
@@ -433,12 +592,21 @@ impl TerminalView {
   fn launch(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {
     let (host, pty, start) = (self.host.clone(), self.pty.clone(), self.start.clone());
     self.status = Status::Preparing;
+    if matches!(start, Start::Remote { .. }) {
+      self.watch_exit(cx);
+    }
     let task = cx.background_executor().spawn(async move {
       if host.pty_exists(&pty) {
         let _ = host.resize_pty(&pty, rows as u16, cols as u16);
         return Ok(None);
       }
       let (spawn, warning) = match &start {
+        Start::Remote { target } => {
+          host
+            .remote_attach(&pty, target, cols as u16, rows as u16)
+            .map_err(|e| (false, e))?;
+          return Ok(None);
+        }
         Start::Shell { dir } => (
           Spawn {
             id: pty.clone(),
@@ -491,6 +659,7 @@ impl TerminalView {
             Status::Ready
           }
           Err((true, error)) => Status::AgentFailed(error),
+          Err((false, error)) if view.remote_target().is_some() => Status::Failed(error),
           Err((false, error)) if error.contains("Session not found") => Status::Failed(
             "Terminal session is still initializing. Please wait a moment and try again.".into(),
           ),
@@ -541,6 +710,10 @@ impl TerminalView {
   }
 
   pub fn write(&self, data: &str) {
+    // A remote channel takes nothing until it is attached (`isReadyRef`).
+    if self.remote_target().is_some() && (self.status != Status::Ready || self.remote.closed) {
+      return;
+    }
     if let Some(live) = &self.live {
       live.typed(data);
       if let Ok(mut emulator) = live.emulator.lock() {
@@ -979,7 +1152,98 @@ impl TerminalView {
     )
   }
 
+  /// `RemoteTerminalPanel`'s overlays: attaching, and a lost channel or
+  /// an error with Reattach and Close.
+  fn remote_overlay(
+    &self,
+    target: &RemoteTarget,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<Div> {
+    let error = match &self.status {
+      Status::Failed(error) | Status::AgentFailed(error) => Some(error.clone()),
+      _ => None,
+    };
+    if error.is_some() || self.remote.detached {
+      let message = error.clone().unwrap_or_else(|| {
+        "Connection to the remote session was lost. The session may still be running on the host."
+          .into()
+      });
+      return Some(
+        ui::text(div(), TextSize::Sm)
+          .debug_selector(|| "remote-terminal-lost".into())
+          .absolute()
+          .inset_0()
+          .flex()
+          .flex_col()
+          .items_center()
+          .justify_center()
+          .gap_2()
+          .px_4()
+          .text_center()
+          .bg(p.background.opacity(0.9))
+          .child(
+            div()
+              .text_color(if error.is_some() {
+                rgb(RED_500).into()
+              } else {
+                p.foreground
+              })
+              .child(message),
+          )
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(
+                ui::Button::new("remote-terminal-reattach", p)
+                  .size(ui::Size::Sm)
+                  .label("Reattach")
+                  .on_click(cx.listener(|view, _, _, cx| view.reattach(cx))),
+              )
+              .child(
+                ui::Button::new("remote-terminal-close", p)
+                  .size(ui::Size::Sm)
+                  .variant(ui::Variant::Outline)
+                  .label("Close")
+                  .on_click(cx.listener(|view, _, _, cx| (view.on_event)(TermEvent::Close, cx))),
+              ),
+          ),
+      );
+    }
+    if self.status != Status::Preparing || self.remote.ended.is_some() {
+      return None;
+    }
+    let reattaching = target.reattach || self.remote.attaches > 0;
+    Some(
+      ui::text(div(), TextSize::Sm)
+        .debug_selector(|| "remote-terminal-attaching".into())
+        .absolute()
+        .inset_0()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .bg(p.background.opacity(0.8))
+        .text_color(p.muted_foreground)
+        .child(div().mb_2().child(ui::spinner(
+          "remote-terminal-spinner",
+          20.,
+          p.muted_foreground,
+        )))
+        .child(if reattaching {
+          "Reattaching…"
+        } else {
+          "Starting remote session…"
+        }),
+    )
+  }
+
   fn overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+    if let Some(target) = self.remote_target() {
+      return self.remote_overlay(&target.clone(), p, cx);
+    }
     match &self.status {
       Status::Ready => None,
       Status::Preparing => Some(
@@ -1141,6 +1405,10 @@ enum Kind {
   },
   Shell {
     dir: String,
+  },
+  /// A persistent remote session, in a shell slot.
+  Remote {
+    target: Box<RemoteTarget>,
   },
 }
 
@@ -1311,6 +1579,11 @@ impl TerminalPane {
       "toggleMaximize" => self.toggle_maximize(cx),
       "newShell" => self.add_shell(command.dir.clone(), window, cx),
       "newAgent" => self.new_agent(cx),
+      "openRemote" => {
+        if let Some(target) = command.remote.clone() {
+          self.open_remote(target, window, cx);
+        }
+      }
       "closeWorkspace" => {
         let key = command.dir.clone().unwrap_or_default();
         let ids: Vec<String> = self
@@ -1352,6 +1625,7 @@ impl TerminalPane {
         ..
       } => workspace_path.clone().unwrap_or_else(|| repo_path.clone()),
       Kind::Shell { dir } => dir.clone(),
+      Kind::Remote { target } => target.remote_working_directory.clone(),
     }
   }
 
@@ -1458,8 +1732,9 @@ impl TerminalPane {
           agent: Some(agent.clone()),
           is_streaming: column.streaming,
         },
-        Kind::Shell { dir } => {
-          let (name, main) = self.label(dir);
+        Kind::Shell { .. } | Kind::Remote { .. } => {
+          let dir = self.column_key(column);
+          let (name, main) = self.label(&dir);
           Summary {
             id: column.id.clone(),
             kind: "shell",
@@ -1654,10 +1929,13 @@ impl TerminalPane {
 
   fn add_shell(&mut self, dir: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
     let dir = dir.unwrap_or_else(|| self.active_dir());
-    let millis = std::time::SystemTime::now()
-      .duration_since(std::time::UNIX_EPOCH)
-      .map(|d| d.as_millis())
-      .unwrap_or_default();
+    if self.route.remote_shell {
+      // A remote repository's paths exist only on the host: React resolves
+      // the session and opens it with `openRemote`.
+      self.send("terminal.newRemoteShell", dir.into(), cx);
+      return;
+    }
+    let millis = now_millis();
     let id = terminal_data::shell_pty_id(&dir, millis);
     let on_event = self.on_event(id.clone(), cx);
     let (host, font_size, start) = (
@@ -1678,6 +1956,32 @@ impl TerminalPane {
     self.publish(cx);
     let _ = window;
     cx.notify();
+  }
+
+  /// `handleOpenRemoteSession`: the session joins the row in a shell slot
+  /// and becomes the active terminal.
+  fn open_remote(&mut self, target: RemoteTarget, window: &mut Window, cx: &mut Context<Self>) {
+    let millis = now_millis();
+    let id = terminal_data::remote_column_id(&target.label, millis);
+    let pty = terminal_data::remote_pty_id(&target, millis);
+    let on_event = self.on_event(id.clone(), cx);
+    let host = self.host.clone();
+    let start = Start::Remote {
+      target: target.clone(),
+    };
+    let view = cx.new(|cx| TerminalView::new(pty, start, host, REMOTE_FONT_SIZE, on_event, cx));
+    self.columns.push(Column {
+      id: id.clone(),
+      view,
+      kind: Kind::Remote {
+        target: Box::new(target),
+      },
+      width: None,
+      streaming: false,
+      bounds: Rc::default(),
+    });
+    self.publish(cx);
+    self.focus_column(&id, window, cx);
   }
 
   fn close(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2265,6 +2569,97 @@ impl TerminalPane {
           )
           .child(div().flex().items_center().child(search).child(close))
       }
+      Kind::Remote { target } => {
+        let view = column.view.clone();
+        let (ended, stopping) = {
+          let state = &view.read(cx).remote;
+          (state.ended, state.stopping)
+        };
+        let muted = p.muted_foreground;
+        let stop = ui::text(
+          ui::Button::new("remote-terminal-stop", p)
+            .variant(ui::Variant::Ghost)
+            .size(ui::Size::Xs)
+            .disabled(stopping)
+            .h_6()
+            .px_2(),
+          TextSize::Xs,
+        )
+        .label("Stop")
+        .on_click({
+          let view = view.clone();
+          move |_, _, cx| view.update(cx, |v, cx| v.stop(cx))
+        });
+        let detach_id = column.id.clone();
+        let detach = ui::Button::new("remote-terminal-detach", p)
+          .variant(ui::Variant::Ghost)
+          .size(ui::Size::IconXs)
+          .icon(theme::ICON_X, 14.)
+          .on_click(cx.listener(move |pane, _, window, cx| pane.close(&detach_id, window, cx)));
+        let detach = self.tooltips.wrap(
+          format!("remote-terminal-detach-tip-{}", column.id),
+          Side::Bottom,
+          Some(TooltipContent::Text(
+            "Detach (the session keeps running)".into(),
+          )),
+          div()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(detach),
+          cx,
+        );
+        // Wrapped so the active column's selector does not replace this one.
+        div().flex_shrink_0().child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "remote-terminal-header".into())
+            .h(px(REMOTE_HEADER_HEIGHT))
+            .min_h(px(REMOTE_HEADER_HEIGHT))
+            .flex_shrink_0()
+            .px_2()
+            .flex()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_r_1()
+            .border_color(p.border)
+            .bg(p.background)
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .min_w_0()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(muted)
+                .child(ui::icon(theme::ICON_TERMINAL_SQUARE, 14., muted).flex_shrink_0())
+                .child(
+                  div()
+                    .truncate()
+                    .child(format!("{} · {}", target.endpoint.hostname, target.label)),
+                )
+                .children(ended.map(|status| {
+                  ui::text(div(), TextSize::Xs)
+                    .debug_selector(|| "remote-terminal-ended".into())
+                    .text_color(rgb(AMBER_500))
+                    .child(match status {
+                      Some(code) => format!("(session ended, exit {code})"),
+                      None => "(session ended)".into(),
+                    })
+                })),
+            )
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                  div()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(stop),
+                )
+                .child(detach),
+            ),
+        )
+      }
       Kind::Shell { dir } => {
         let (name, main) = self.label(dir);
         let close = self.tooltips.wrap(
@@ -2309,7 +2704,12 @@ impl TerminalPane {
 
   fn column(&mut self, index: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let header = self.header(index, p, cx);
-    let previews = self.previews(index, cx);
+    let remote = matches!(self.columns[index].kind, Kind::Remote { .. });
+    let previews = if remote {
+      None
+    } else {
+      self.previews(index, cx)
+    };
     let min = self.min_width();
     let column = &self.columns[index];
     let (id, view, bounds) = (
@@ -2375,6 +2775,16 @@ impl TerminalPane {
           })
           .child(view)
           .children(previews)
+      })
+      // `ring-1 ring-inset ring-primary/40` on the active remote session.
+      .when(remote && active, |d| {
+        d.relative().child(
+          div()
+            .absolute()
+            .inset_0()
+            .border_1()
+            .border_color(p.primary.opacity(0.4)),
+        )
       })
   }
 }

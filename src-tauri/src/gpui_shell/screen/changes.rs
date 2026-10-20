@@ -269,10 +269,6 @@ impl ChangesView {
     self.discard_dialog || self.review.discard_dialog
   }
 
-  fn home(&self) -> bool {
-    self.parent.workspace.is_none()
-  }
-
   /// Runs `work` off the main thread, then `apply`s it unless the tab moved
   /// to another workspace meanwhile.
   fn run<T: Send + 'static>(
@@ -1617,7 +1613,8 @@ impl ChangesView {
     let hover = p.foreground.opacity(0.1);
     let mut buttons = div().flex().items_center().gap_1();
     if !files.is_empty() {
-      if !staged && !self.home() || !staged && self.home() {
+      // `onStashAll` is left out for a remote repository.
+      if !staged && !self.parent.remote {
         let stash = header_button("stash-all-changes", theme::ICON_ARCHIVE, muted, hover).on_click(
           cx.listener(|view, _, _, cx| {
             cx.stop_propagation();

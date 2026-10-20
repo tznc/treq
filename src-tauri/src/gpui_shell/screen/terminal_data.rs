@@ -9,14 +9,20 @@ use std::{
 };
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use serde::Deserialize;
 
 use super::{
   logs_data::LogsHost,
   terminal_emu::{Emulator, Output},
 };
 use crate::{
-  core::agent_command::{self, AgentPaths, AutoCommand},
-  gpui_shell::native::Backend,
+  core::{
+    agent_command::{self, AgentPaths, AutoCommand},
+    remote::TreqCommandRequest,
+    remote_control_plane::SshEndpoint,
+    remote_pty::PtyLaunchSpec,
+  },
+  gpui_shell::{native::Backend, remote_repo::Transport},
   lock_ext::LockExt,
 };
 
@@ -42,6 +48,61 @@ pub struct AgentStart {
   pub permission_mode: Option<String>,
 }
 
+/// Where a persistent remote shell or agent runs (`RemoteTerminalTarget`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteTarget {
+  pub endpoint: SshEndpoint,
+  pub repository_id: String,
+  pub workspace_id: String,
+  pub remote_working_directory: String,
+  /// The persistent session's label on the host.
+  pub label: String,
+  /// What starts when no session has the label yet; the login shell if
+  /// unset.
+  #[serde(default)]
+  pub launch: Option<PtyLaunchSpec>,
+  /// Picking up a running session: only the loading text differs.
+  #[serde(default)]
+  pub reattach: bool,
+}
+
+/// Local ids of remote sessions start with this (`makeSessionId`).
+pub const REMOTE_PTY_PREFIX: &str = "remote-pty-";
+
+/// `makeSessionId`: a fresh local id per attach, since the backend never
+/// reuses one; the label names the session on the host.
+pub fn remote_pty_id(target: &RemoteTarget, millis: u128) -> String {
+  format!(
+    "{REMOTE_PTY_PREFIX}{}-{}-{}-{millis}",
+    target.endpoint.id, target.workspace_id, target.label
+  )
+}
+
+pub fn is_remote_pty(id: &str) -> bool {
+  id.starts_with(REMOTE_PTY_PREFIX)
+}
+
+/// The pane's column id for a remote session (`handleOpenRemoteSession`):
+/// it shares the shell slot.
+pub fn remote_column_id(label: &str, millis: u128) -> String {
+  let label: String = label
+    .chars()
+    .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+    .collect();
+  format!("shell-remote-{label}-{millis}")
+}
+
+/// Whether a `PtyList` answer has `label` still running: `None` when the
+/// answer can't be read.
+pub fn session_running(list: &serde_json::Value, label: &str) -> Option<bool> {
+  let sessions = list.as_array()?;
+  Some(sessions.iter().any(|s| {
+    s.get("label").and_then(|l| l.as_str()) == Some(label)
+      && s.get("running").and_then(|r| r.as_bool()) == Some(true)
+  }))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prepared {
   pub command: String,
@@ -58,6 +119,23 @@ pub trait TerminalHost: LogsHost {
   fn close_pty(&self, id: &str) -> Result<(), String>;
   /// Calls `sink` with each chunk of the PTY's output until dropped.
   fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening;
+  /// Calls `sink` with the exit status when a remote session's channel
+  /// ends, until dropped.
+  fn listen_exit(&self, id: &str, sink: Box<dyn Fn(Option<u32>) + Send + Sync>) -> Listening;
+  /// `remote_pty_reattach`: attaches local session `id` to the target's
+  /// persistent session, starting it first if none runs.
+  fn remote_attach(
+    &self,
+    id: &str,
+    target: &RemoteTarget,
+    cols: u16,
+    rows: u16,
+  ) -> Result<(), String>;
+  /// Whether the target's session still runs on the host (`PtyList`);
+  /// `None` when the host can't be asked.
+  fn remote_running(&self, target: &RemoteTarget) -> Option<bool>;
+  /// `PtyStop`: ends the persistent session on the host.
+  fn remote_stop(&self, target: &RemoteTarget) -> Result<(), String>;
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String>;
   /// The repository's supporting repositories that still exist.
   fn supporting_repos(&self, repo_path: &str) -> Vec<String>;
@@ -159,6 +237,13 @@ impl TerminalHost for Backend {
 
   fn pty_exists(&self, id: &str) -> bool {
     use tauri::Manager;
+    if is_remote_pty(id) {
+      return self
+        .app()
+        .state::<crate::commands::remote_pty_commands::RemotePtyState>()
+        .0
+        .session_exists(id);
+    }
     self
       .app()
       .state::<crate::AppState>()
@@ -168,6 +253,10 @@ impl TerminalHost for Backend {
 
   fn write_pty(&self, id: &str, data: &str) -> Result<(), String> {
     use tauri::Manager;
+    if is_remote_pty(id) {
+      remote_channel(self, id, RemoteOp::Write(data.to_string()));
+      return Ok(());
+    }
     self
       .app()
       .state::<crate::AppState>()
@@ -177,6 +266,10 @@ impl TerminalHost for Backend {
 
   fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String> {
     use tauri::Manager;
+    if is_remote_pty(id) {
+      remote_channel(self, id, RemoteOp::Resize { cols, rows });
+      return Ok(());
+    }
     self
       .app()
       .state::<crate::AppState>()
@@ -186,6 +279,11 @@ impl TerminalHost for Backend {
 
   fn close_pty(&self, id: &str) -> Result<(), String> {
     use tauri::Manager;
+    if is_remote_pty(id) {
+      // Detach: the channel closes, the session keeps running on the host.
+      remote_channel(self, id, RemoteOp::Close);
+      return Ok(());
+    }
     let manager = self.app().state::<crate::AppState>().pty_manager.clone();
     let id = id.to_string();
     std::thread::spawn(move || {
@@ -199,7 +297,12 @@ impl TerminalHost for Backend {
   fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening {
     use tauri::Listener;
     let app = self.app().clone();
-    let handler = app.listen(format!("pty-data-{id}"), move |event| {
+    let event = if is_remote_pty(id) {
+      format!("remote-pty-data-{id}")
+    } else {
+      format!("pty-data-{id}")
+    };
+    let handler = app.listen(event, move |event| {
       if let Ok(data) = serde_json::from_str::<String>(event.payload()) {
         sink(data);
       }
@@ -207,8 +310,84 @@ impl TerminalHost for Backend {
     Listening::new(move || app.unlisten(handler))
   }
 
+  fn listen_exit(&self, id: &str, sink: Box<dyn Fn(Option<u32>) + Send + Sync>) -> Listening {
+    use tauri::Listener;
+    let app = self.app().clone();
+    let handler = app.listen(format!("remote-pty-exit-{id}"), move |event| {
+      let payload = serde_json::from_str::<serde_json::Value>(event.payload()).unwrap_or_default();
+      sink(
+        payload
+          .get("exit_status")
+          .and_then(|s| s.as_u64())
+          .map(|s| s as u32),
+      );
+    });
+    Listening::new(move || app.unlisten(handler))
+  }
+
+  fn remote_attach(
+    &self,
+    id: &str,
+    target: &RemoteTarget,
+    cols: u16,
+    rows: u16,
+  ) -> Result<(), String> {
+    use tauri::Manager;
+    self.with_db(|db| {
+      crate::core::feature_preview::require_remote_for_source(db, &target.endpoint.source)
+    })?;
+    let manager = self
+      .app()
+      .state::<crate::commands::remote_pty_commands::RemotePtyState>()
+      .0
+      .clone();
+    tauri::async_runtime::block_on(crate::commands::remote_pty_commands::reattach(
+      self.app().clone(),
+      &manager,
+      &self.exec_pool(),
+      crate::commands::remote_pty_commands::Reattach {
+        session_id: id.to_string(),
+        window_label: Some(self.label().to_string()),
+        endpoint: target.endpoint.clone(),
+        repository_id: target.repository_id.clone(),
+        workspace_id: target.workspace_id.clone(),
+        label: target.label.clone(),
+        remote_working_directory: target.remote_working_directory.clone(),
+        launch: target.launch.clone().unwrap_or(PtyLaunchSpec::Shell),
+        cols,
+        rows,
+      },
+    ))
+  }
+
+  fn remote_running(&self, target: &RemoteTarget) -> Option<bool> {
+    let list = Transport::read(
+      self,
+      &target.endpoint,
+      TreqCommandRequest::PtyList {
+        repo: target.repository_id.clone(),
+        workspace: Some(target.workspace_id.clone()),
+      },
+    )
+    .ok()?;
+    session_running(&list, &target.label)
+  }
+
+  fn remote_stop(&self, target: &RemoteTarget) -> Result<(), String> {
+    Transport::read(
+      self,
+      &target.endpoint,
+      TreqCommandRequest::PtyStop {
+        repo: target.repository_id.clone(),
+        workspace: target.workspace_id.clone(),
+        label: target.label.clone(),
+      },
+    )
+    .map(drop)
+  }
+
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String> {
-    crate::local_db::get_sessions(repo_path)
+    crate::local_db::get_sessions(&self.state_scope(repo_path))
   }
 
   fn supporting_repos(&self, repo_path: &str) -> Vec<String> {
@@ -296,6 +475,59 @@ impl TerminalHost for Backend {
   ) -> Result<String, String> {
     crate::send_dispatch::write_send_review_image_bytes(repo_path, name, png)
       .map(|path| path.to_string_lossy().to_string())
+  }
+}
+
+/// What a remote session's channel is asked, in the order it was asked.
+enum RemoteOp {
+  Write(String),
+  Resize { cols: u16, rows: u16 },
+  Close,
+}
+
+/// Sends `op` to the session's channel. Each session has a thread that
+/// runs its ops in order, so keystrokes reach the host as typed and the UI
+/// never waits on the network.
+fn remote_channel(backend: &Backend, id: &str, op: RemoteOp) {
+  use std::sync::mpsc::Sender;
+  use tauri::Manager;
+  static CHANNELS: std::sync::OnceLock<Mutex<HashMap<String, Sender<RemoteOp>>>> =
+    std::sync::OnceLock::new();
+  let channels = CHANNELS.get_or_init(Mutex::default);
+  let closing = matches!(op, RemoteOp::Close);
+  let mut channels = channels.lock_or_recover();
+  let sender = channels.entry(id.to_string()).or_insert_with(|| {
+    let manager = backend
+      .app()
+      .state::<crate::commands::remote_pty_commands::RemotePtyState>()
+      .0
+      .clone();
+    let (tx, rx) = std::sync::mpsc::channel::<RemoteOp>();
+    let id = id.to_string();
+    std::thread::spawn(move || {
+      while let Ok(op) = rx.recv() {
+        let done = matches!(op, RemoteOp::Close);
+        let result = tauri::async_runtime::block_on(async {
+          match op {
+            RemoteOp::Write(data) => manager.write(&id, data.as_bytes()).await,
+            RemoteOp::Resize { cols, rows } => manager.resize(&id, cols, rows).await,
+            RemoteOp::Close => manager.close(&id).await,
+          }
+        });
+        if let Err(error) = result {
+          // The channel may already be gone; never log what was typed.
+          log::debug!("remote pty op failed: session_id={id}, error={error}");
+        }
+        if done {
+          break;
+        }
+      }
+    });
+    tx
+  });
+  let _ = sender.send(op);
+  if closing {
+    channels.remove(id);
   }
 }
 
@@ -519,6 +751,36 @@ mod tests {
       (repo_hash("/api") as i64 + 1) * 1_000_000 + 3
     );
     assert_eq!(shell_pty_id("/a/b c", 5), "shell--a-b-c-5");
+  }
+
+  #[test]
+  fn names_remote_sessions_like_react() {
+    let target: RemoteTarget = serde_json::from_value(serde_json::json!({
+      "endpoint": crate::gpui_shell::remote_repo::tests::repository().endpoint,
+      "repositoryId": "/srv/app",
+      "workspaceId": "root",
+      "remoteWorkingDirectory": "/srv/app",
+      "label": "shell-k1",
+      "launch": { "type": "shell" },
+      "reattach": false,
+    }))
+    .unwrap();
+    assert_eq!(remote_pty_id(&target, 9), "remote-pty-ep-1-root-shell-k1-9");
+    assert!(is_remote_pty(&remote_pty_id(&target, 9)));
+    assert!(!is_remote_pty("shell--srv-app-9"));
+    assert_eq!(remote_column_id("claude-k1", 5), "shell-remote-claude-k1-5");
+  }
+
+  #[test]
+  fn reads_whether_a_remote_session_still_runs() {
+    let list = serde_json::json!([
+      { "label": "shell-a", "running": false },
+      { "label": "shell-b", "running": true },
+    ]);
+    assert_eq!(session_running(&list, "shell-b"), Some(true));
+    assert_eq!(session_running(&list, "shell-a"), Some(false));
+    assert_eq!(session_running(&list, "gone"), Some(false));
+    assert_eq!(session_running(&serde_json::json!({}), "shell-b"), None);
   }
 
   #[test]

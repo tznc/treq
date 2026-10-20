@@ -73,6 +73,9 @@ beforeEach(() => {
   // React's workspace dialogs, which most tests drive;
   // gpui-workspace-dialogs.test.tsx turns GPUI's on.
   window.__TREQ_REACT_WORKSPACE_DIALOGS__ = true;
+  // React's remote workspace view, which most remote tests drive;
+  // gpui-remote-workspace.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_REMOTE_WORKSPACE__ = true;
   window.__TREQ_GPUI_SHELL__ = true;
 });
 afterEach(() => closeTestPtys(tauriTest.invoke));

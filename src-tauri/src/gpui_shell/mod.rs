@@ -34,6 +34,7 @@ mod modal;
 pub mod native;
 mod overlay;
 mod popup;
+pub mod remote_repo;
 mod screen;
 mod sidebar;
 mod theme;
@@ -148,7 +149,30 @@ impl Render for Shell {
       // Shown only until the webview's first frame, so opening a window
       // does not flash.
       .bg(theme::palette(dark).background)
-      .when_some(self.sidebar.clone(), |this, sidebar| this.child(sidebar))
+      .when_some(self.sidebar.clone(), |this, sidebar| {
+        // The cut-off overlay spans the sidebar too; the workspace view
+        // dims its own part below the remote strip.
+        let cut_off = self
+          .screen
+          .as_ref()
+          .map(|s| s.read(cx))
+          .filter(|s| s.cut_off());
+        match cut_off {
+          Some(screen) => {
+            let p = screen.palette();
+            this.child(
+              gpui::div()
+                .relative()
+                .flex_none()
+                .h_full()
+                .flex()
+                .child(sidebar)
+                .child(screen::remote_chrome::cutoff_overlay(&p)),
+            )
+          }
+          None => this.child(sidebar),
+        }
+      })
       .child(
         gpui::div()
           .flex_1()
@@ -274,6 +298,9 @@ pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnap
 /// screens can be compared with GPUI's.
 pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapshot>) {
   let snapshot = snapshot.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
+  if let Some(snapshot) = &snapshot {
+    remote_repo::set_window(label, snapshot.repository.clone());
+  }
   let label = label.to_string();
   let _ = app.run_on_main_thread(move || {
     let result = update_shell(&label, move |shell, cx| match snapshot {
@@ -496,6 +523,7 @@ pub fn place_toasts(app: &AppHandle, label: &str) {
 /// Forgets a destroyed window's shell.
 pub fn forget_window(label: &str) {
   popup::forget_owner(label);
+  remote_repo::set_window(label, None);
   modal::forget(label);
   let label = label.to_string();
   let _ = tauri_plugin_gpui::with_app(move |cx| {

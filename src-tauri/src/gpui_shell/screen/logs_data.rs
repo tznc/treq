@@ -51,10 +51,12 @@ impl Backend {
 
 impl LogsHost for Backend {
   fn repo_logs(&self, repo_path: &str, query: &LogQuery) -> Result<Vec<LogRecordView>, String> {
+    self.local_only(repo_path, "Checks and logs")?;
     crate::core::checks_logs::query_repo_logs(repo_path, query)
   }
 
   fn log_timeseries(&self, repo_path: &str, query: &LogQuery) -> Result<Vec<LogBucket>, String> {
+    self.local_only(repo_path, "Checks and logs")?;
     crate::core::checks_logs::query_log_timeseries(repo_path, query, 1)
   }
 
@@ -77,18 +79,22 @@ impl LogsHost for Backend {
   }
 
   fn workflows(&self, repo_path: &str) -> Result<Vec<WorkflowInfo>, String> {
+    self.local_only(repo_path, "Checks and logs")?;
     crate::core::checks::list_workflows_sync(repo_path)
   }
 
   fn agent_chats(&self, repo_path: &str) -> Result<Vec<AgentChatSummary>, String> {
+    self.local_only(repo_path, "Agent chat logs")?;
     crate::core::agent_chat::list_agent_chats(repo_path)
   }
 
   fn agent_chat(&self, repo_path: &str, session_id: i64) -> Result<Option<AgentChat>, String> {
+    self.local_only(repo_path, "Agent chat logs")?;
     crate::core::agent_chat::get_agent_chat(repo_path, session_id)
   }
 
   fn run_sql(&self, repo_path: &str, sql: &str) -> Result<SqlResult, String> {
+    self.local_only(repo_path, "Checks and logs")?;
     crate::core::checks_logs::run_logs_sql(repo_path, sql, SQL_MAX_ROWS)
   }
 }

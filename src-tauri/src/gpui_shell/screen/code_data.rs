@@ -15,7 +15,11 @@ use crate::{
     feature_preview::{self, PreviewFeature},
     MaybeEmptyParam, WorkspaceEntry,
   },
-  gpui_shell::{native::Backend, time},
+  gpui_shell::{
+    native::Backend,
+    remote_repo::{unsupported, UNSUPPORTED},
+    time,
+  },
   jj::{JjLogCommit, JjLogResult},
   local_db::{self, Workspace},
 };
@@ -72,6 +76,28 @@ pub const ENVIRONMENT_SETTING: &str = "environment";
 pub struct Overview {
   pub entries: Vec<WorkspaceEntry>,
   pub readme: Option<String>,
+  /// The repository is remote, which has no file tree yet.
+  pub unavailable: bool,
+}
+
+/// What the Code tab's file list says for a remote repository.
+pub const REMOTE_FILE_TREE_REASON: &str = "Browsing the file tree is not available for remote repositories yet. Use Go to file to open a file.";
+
+impl Overview {
+  /// `ShowWorkspace`'s overview read: a remote repository's refusal shows
+  /// as an empty, unavailable tree; any other failure as an empty one.
+  pub fn or_unavailable(read: Result<Overview, String>) -> Overview {
+    read.unwrap_or_else(|err| {
+      let unavailable = err.starts_with(UNSUPPORTED);
+      if !unavailable {
+        log::warn!("Failed to load workspace overview: {err}");
+      }
+      Overview {
+        unavailable,
+        ..Overview::default()
+      }
+    })
+  }
 }
 
 /// The task input's settings for a repository.
@@ -142,9 +168,13 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
 
 impl CodeHost for Backend {
   fn overview(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<Overview, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Browsing the file tree"));
+    }
     Ok(Overview {
       entries: core::ls_workspace_with_status(repo_path, workspace_id)?,
       readme: core::get_workspace_readme(repo_path, workspace_id)?,
+      unavailable: false,
     })
   }
 
@@ -155,10 +185,16 @@ impl CodeHost for Backend {
     include_target: bool,
     limit: Option<usize>,
   ) -> Result<JjLogResult, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.commits(workspace_id);
+    }
     core::list_commits(repo_path, workspace_id, include_target, None, limit)
   }
 
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.workspaces();
+    }
     Ok(
       core::list_workspace_statuses(repo_path)?
         .into_iter()
@@ -168,6 +204,9 @@ impl CodeHost for Backend {
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Syncing a git submodule"));
+    }
     core::set_submodule_synced(repo_path, path, enabled).map(|_| ())
   }
 
@@ -177,6 +216,11 @@ impl CodeHost for Backend {
     workspace_id: i64,
     description: &str,
   ) -> Result<(), String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote
+        .update_workspace(workspace_id, None, None, Some(description))
+        .map(drop);
+    }
     let description = if description.is_empty() {
       MaybeEmptyParam::EmptyValue
     } else {
@@ -199,6 +243,10 @@ impl CodeHost for Backend {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String> {
+    // A remote repository searches on the host; it has no local index.
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.search_files(workspace_id, query, limit);
+    }
     crate::commands::workspace::ensure_workspace_indexed(
       repo_path.to_string(),
       workspace_id,
@@ -231,8 +279,13 @@ impl CodeHost for Backend {
   }
 
   fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
-    let workspaces = core::list_workspaces(repo_path)?;
-    let branches = core::list_repo_branches(repo_path)?;
+    let (workspaces, branches) = match self.remote_containing(repo_path) {
+      Some(remote) => (remote.workspaces()?, remote.branches()?),
+      None => (
+        core::list_workspaces(repo_path)?,
+        core::list_repo_branches(repo_path)?,
+      ),
+    };
     Ok(
       workspaces
         .into_iter()
@@ -243,6 +296,16 @@ impl CodeHost for Backend {
   }
 
   fn create_workspace(&self, repo_path: &str, branch: &str, title: &str) -> Result<i64, String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      // Copy files and the setup script are local repository settings,
+      // which a remote repository has none of.
+      let metadata = core::WorkspaceMetadata {
+        title: Some(title.trim().to_string()).filter(|t| !t.is_empty()),
+        ..Default::default()
+      };
+      let metadata = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+      return remote.create_workspace(branch, None, Some(metadata));
+    }
     let copy_files = self.with_db(|db| {
       let raw = db
         .get_repo_setting(repo_path, "included_copy_files")
@@ -265,7 +328,8 @@ impl CodeHost for Backend {
     workspace_id: Option<i64>,
     name: &str,
   ) -> Result<i64, String> {
-    self.with_db(|db| core::sessions::create_session(db, repo_path, workspace_id, name.into()))
+    let scope = self.state_scope(repo_path);
+    self.with_db(|db| core::sessions::create_session(db, &scope, workspace_id, name.into()))
   }
 
   fn pick_files(&self) -> Option<Vec<String>> {

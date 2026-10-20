@@ -9,7 +9,18 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::{db::Database, lock_ext::LockExt, AppState};
+use super::remote_repo::{self, Cutoff, Mutation, Remote, Transport};
+use crate::{
+  core::{
+    feature_preview,
+    remote::{self as remote_command, MutationRetryOutcome, TreqCommandRequest},
+    remote_control_plane::SshEndpoint,
+    remote_ssh_transport::{CancellationToken, ExecLimits},
+  },
+  db::Database,
+  lock_ext::LockExt,
+  AppState,
+};
 
 /// Event React listens to on its own webview window.
 pub const EVENT: &str = "gpui-native-event";
@@ -37,6 +48,16 @@ pub enum NativeEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     action: Option<ToastAction>,
   },
+  /// How a change GPUI sent to the remote repository ended, for React's
+  /// feedback (`useRemoteMutationFeedback().report`).
+  RemoteMutation {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+  },
+  /// A remote command found the endpoint cut off (`noteCutoffFromError`).
+  #[serde(rename_all = "camelCase")]
+  RemoteCutoff { endpoint_id: String, reason: String },
 }
 
 /// A toast's button: `label`, running the action registered as `id`.
@@ -175,6 +196,110 @@ impl Backend {
       if let Err(err) = app.opener().open_url(&url, None::<&str>) {
         log::warn!("failed to open {url}: {err}");
       }
+    });
+  }
+}
+
+impl Backend {
+  /// The window's remote repository, when `path` names it (`activeForPath`).
+  pub fn remote(&self, path: &str) -> Option<Remote> {
+    let repo = remote_repo::for_window(&self.label).filter(|repo| repo.matches(path))?;
+    Some(Remote::new(repo, std::sync::Arc::new(self.clone())))
+  }
+
+  /// The window's remote repository, when `path` is anything inside it
+  /// (`remoteRepositoryContaining`).
+  pub fn remote_containing(&self, path: &str) -> Option<Remote> {
+    let repo = remote_repo::for_window(&self.label).filter(|repo| repo.contains(path))?;
+    Some(Remote::new(repo, std::sync::Arc::new(self.clone())))
+  }
+
+  /// `repoStateScope`: where `path`'s review state is kept on this machine.
+  /// `assertLocalOperation`: refuses `operation` for a remote repository.
+  pub fn local_only(&self, path: &str, operation: &str) -> Result<(), String> {
+    match self.remote_containing(path) {
+      Some(_) => Err(remote_repo::unsupported(operation)),
+      None => Ok(()),
+    }
+  }
+
+  pub fn state_scope(&self, path: &str) -> String {
+    match remote_repo::for_window(&self.label).filter(|repo| repo.contains(path)) {
+      Some(repo) => repo.scope(path),
+      None => path.to_string(),
+    }
+  }
+
+  pub(crate) fn exec_pool(
+    &self,
+  ) -> std::sync::Arc<crate::core::remote_ssh_transport::SshConnectionPool> {
+    self
+      .app
+      .state::<crate::commands::remote_control::RemoteExecState>()
+      .0
+      .clone()
+  }
+}
+
+impl Transport for Backend {
+  fn read(
+    &self,
+    endpoint: &SshEndpoint,
+    request: TreqCommandRequest,
+  ) -> Result<serde_json::Value, String> {
+    self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
+    let pool = self.exec_pool();
+    tauri::async_runtime::block_on(remote_command::execute_remote_command::<serde_json::Value>(
+      &pool,
+      endpoint,
+      request,
+      ExecLimits::default(),
+      &CancellationToken::new(),
+    ))
+    .map_err(|error| error.to_string())
+  }
+
+  fn mutate(
+    &self,
+    endpoint: &SshEndpoint,
+    request: TreqCommandRequest,
+  ) -> Result<Mutation, String> {
+    self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
+    let pool = self.exec_pool();
+    let metrics = pool.metrics.clone();
+    let outcome = tauri::async_runtime::block_on(remote_command::retry_after_reconnect::<
+      serde_json::Value,
+      _,
+    >(
+      &pool,
+      endpoint,
+      request,
+      ExecLimits::default(),
+      &CancellationToken::new(),
+      move |verification| metrics.record_post_reconnect_verification(verification),
+    ))
+    .map_err(|error| error.to_string())?;
+    Ok(match outcome {
+      MutationRetryOutcome::Applied(value) => Mutation::Applied(value),
+      MutationRetryOutcome::AlreadyApplied => Mutation::AlreadyApplied,
+      MutationRetryOutcome::Ambiguous { reason } => Mutation::Ambiguous(reason),
+    })
+  }
+
+  fn report(&self, mutation: &Mutation) {
+    self.notify(NativeEvent::RemoteMutation {
+      status: mutation.status(),
+      reason: match mutation {
+        Mutation::Ambiguous(reason) => Some(reason.clone()),
+        _ => None,
+      },
+    });
+  }
+
+  fn cut_off(&self, endpoint_id: &str, cutoff: Cutoff) {
+    self.notify(NativeEvent::RemoteCutoff {
+      endpoint_id: endpoint_id.to_string(),
+      reason: cutoff.id().to_string(),
     });
   }
 }

@@ -19,7 +19,10 @@ use crate::{
     RemoteSyncStatus, WorkspaceStatus,
   },
   github::{GitRemoteInfo, PrCiStatus, PrInfo},
-  gpui_shell::native::{Backend, NativeEvent},
+  gpui_shell::{
+    native::{Backend, NativeEvent},
+    remote_repo::{unsupported, Remote},
+  },
   jj::{self, HomeRebaseDryRunResult, JjLogResult},
   local_db,
 };
@@ -84,6 +87,10 @@ pub struct Route {
   /// (a remote repository's).
   #[serde(default)]
   pub terminal: Option<super::terminal::Route>,
+  /// A remote repository's strip, banner and notice above the header;
+  /// absent for a local one. (`remote` is the snapshot's remote dialogs.)
+  #[serde(default)]
+  pub remote_chrome: Option<super::remote_chrome::RemoteChrome>,
 }
 
 impl Route {
@@ -205,6 +212,9 @@ fn unique_paths<'a>(paths: impl Iterator<Item = &'a str>) -> usize {
 
 impl WorkspaceHost for Backend {
   fn load(&self, route: &Route) -> Loaded {
+    if let Some(remote) = self.remote(&route.repo_path) {
+      return load_remote(self, &remote, route);
+    }
     let repo = route.repo_path.as_str();
     let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
     let workspace = route.workspace_id.and_then(|id| {
@@ -303,6 +313,13 @@ impl WorkspaceHost for Backend {
   }
 
   fn pr_cache(&self, repo_path: &str, branch: &str) -> PrCache {
+    if self.remote_containing(repo_path).is_some() {
+      // `localReadOr`: no pull request is read for a remote repository.
+      return PrCache {
+        pr: Some(None),
+        ci: None,
+      };
+    }
     let poller = crate::pr_status::global();
     poller.watch_repo(repo_path);
     PrCache {
@@ -312,7 +329,11 @@ impl WorkspaceHost for Backend {
   }
 
   fn push(&self, repo_path: &str, workspace_id: Option<i64>) -> Outcome {
-    match core::push_workspace_to_remote(repo_path, workspace_id) {
+    let pushed = match self.remote(repo_path) {
+      Some(remote) => remote.push(workspace_id),
+      None => core::push_workspace_to_remote(repo_path, workspace_id),
+    };
+    match pushed {
       Ok(_) => Outcome::ok(
         "Pushed to remote",
         "Changes pushed successfully".to_string(),
@@ -322,11 +343,17 @@ impl WorkspaceHost for Backend {
   }
 
   fn sync(&self, repo_path: &str, workspace_id: Option<i64>) -> Outcome {
-    let style = self.with_db(core::resolve_conflict_marker_style_from_db);
-    let pulled = core::pull_workspace_from_remote(repo_path, workspace_id, &style);
-    match pulled
-      .and_then(|pull| core::push_workspace_to_remote(repo_path, workspace_id).map(|_| pull))
-    {
+    let synced = match self.remote(repo_path) {
+      Some(remote) => remote
+        .pull(workspace_id)
+        .and_then(|pull| remote.push(workspace_id).map(|_| pull)),
+      None => {
+        let style = self.with_db(core::resolve_conflict_marker_style_from_db);
+        core::pull_workspace_from_remote(repo_path, workspace_id, &style)
+          .and_then(|pull| core::push_workspace_to_remote(repo_path, workspace_id).map(|_| pull))
+      }
+    };
+    match synced {
       Ok(pull) if pull.has_conflicts => Outcome {
         ok: true,
         warning: true,
@@ -342,6 +369,12 @@ impl WorkspaceHost for Backend {
   }
 
   fn rebase_home(&self, repo_path: &str, branch: &str) -> Outcome {
+    if self.remote_containing(repo_path).is_some() {
+      return Outcome::failed(
+        "Rebase failed",
+        unsupported("Rebasing the repository branch"),
+      );
+    }
     match jj::jj_rebase_home_repo_branch(repo_path, branch, DEFAULT_BRANCH) {
       Ok(result) if result.success => Outcome::ok(
         "Rebase complete",
@@ -358,6 +391,92 @@ impl WorkspaceHost for Backend {
 
   fn notify(&self, event: NativeEvent) {
     Backend::notify(self, event);
+  }
+}
+
+/// `ShowWorkspace`'s reads for a remote repository, through its typed
+/// commands. The home branch's dry-run rebase and the workflow checks are
+/// local-only (`assertLocalOperation`), so they stay empty.
+fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
+  let warn = |what: &str, err: String| log::warn!("remote workspace header: {what}: {err}");
+  let workspace = route.workspace_id.and_then(|id| {
+    remote
+      .workspaces()
+      .map_err(|e| warn("workspaces", e))
+      .ok()?
+      .into_iter()
+      .find(|w| w.id == id)
+  });
+  let status = remote
+    .status(route.workspace_id)
+    .map_err(|e| warn("status", e))
+    .ok();
+  let origin = remote
+    .git_remote()
+    .map_err(|e| warn("remote", e))
+    .ok()
+    .flatten();
+  let commits = route.workspace_id.and_then(|id| {
+    remote
+      .commits(Some(id))
+      .map_err(|e| warn("commits", e))
+      .ok()
+  });
+  let include_committed = workspace
+    .as_ref()
+    .is_some_and(|w| w.branch_name != route.default_target());
+  let (review_count, uncommitted_count) = match route.workspace_id {
+    Some(id) if include_committed => remote
+      .workspace_diff(id)
+      .map(|diff| {
+        let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
+        (
+          unique_paths(all.map(|f| f.path.as_str())),
+          diff.uncommitted_files.len(),
+        )
+      })
+      .unwrap_or_else(|e| {
+        warn("diff", e);
+        (0, 0)
+      }),
+    id => remote
+      .changed_files(id)
+      .map(|files| {
+        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
+        (count, count)
+      })
+      .unwrap_or_else(|e| {
+        warn("changed files", e);
+        (0, 0)
+      }),
+  };
+  let on_home_feature = route.workspace_id.is_none() && route.home_branch != DEFAULT_BRANCH;
+  let home_ahead = if on_home_feature {
+    remote
+      .commits(None)
+      .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
+      .unwrap_or(0)
+  } else {
+    0
+  };
+  let (linear_enabled, logs_enabled) = backend.with_db(|db| {
+    (
+      feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
+      feature_preview::is_enabled(db, PreviewFeature::Logs),
+    )
+  });
+  Loaded {
+    workspace,
+    status,
+    remote: origin,
+    commits,
+    review_count,
+    uncommitted_count,
+    home_ahead,
+    home_dry_run: None,
+    checks: None,
+    linear_enabled,
+    logs_enabled,
   }
 }
 

@@ -66,6 +66,8 @@ interface Handlers {
   /** The Diff/Browser switcher. */
   reviewSubView?: (view: "diff" | "browser") => void;
   openBranchSwitcher?: () => void;
+  /** The remote strip and banner: "remote.terminal", "remote.refresh"... */
+  remote?: (id: string) => void;
   stack?: () => void;
   merge?: () => void;
   openDetails: () => void;
@@ -144,6 +146,11 @@ export function useGpuiWorkspaceScreen({
         return handlers.merge?.();
       case "code.filePicker":
         return handlers.openFilePicker?.();
+      case "remote.terminal":
+      case "remote.refresh":
+      case "remote.wake":
+      case "remote.reconnect":
+        return handlers.remote?.(id);
       case "workspace.details":
         return handlers.openDetails();
       case "workspace.more": {
@@ -219,6 +226,7 @@ export function useGpuiWorkspaceScreen({
       case "terminal.activeSession":
       case "terminal.closeSession":
       case "terminal.newAgent":
+      case "terminal.newRemoteShell":
       case "terminal.navigate":
       case "terminal.summaries":
       case "terminal.dismissAsset":

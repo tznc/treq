@@ -1548,6 +1548,7 @@ impl WorkspaceView {
         .unwrap_or_default(),
       default_branch: self.route.default_target().to_string(),
       revision: self.route.revision,
+      remote: self.route.remote_chrome.is_some(),
     };
     let dark = self.dark;
     let (host, react, popups) = (
@@ -1758,14 +1759,36 @@ impl Render for WorkspaceView {
         .debug_selector(|| "workspace-frame".into())
         .child(frame(self.webview.as_ref())),
     };
+    let remote = self.route.remote_chrome.clone();
+    let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);
+    let strip = remote.map(|chrome| {
+      let sink = self.sink.clone();
+      let press: super::remote_chrome::Press = Rc::new(move |id| {
+        let sink = sink.clone();
+        Box::new(move |_, _, cx| sink(ScreenAction::Press { id: id.to_string() }, cx))
+      });
+      super::remote_chrome::strip(&chrome, self.dark, &p, &press)
+    });
     div()
       .size_full()
       .flex()
       .flex_col()
       .bg(p.background)
       .text_color(p.foreground)
-      .child(header)
-      .children(tab_row)
-      .child(body)
+      .children(strip)
+      .child(
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .flex()
+          .flex_col()
+          .child(header)
+          .children(tab_row)
+          .child(body)
+          .when(cut_off, |d| {
+            d.child(super::remote_chrome::cutoff_overlay(&p))
+          }),
+      )
   }
 }

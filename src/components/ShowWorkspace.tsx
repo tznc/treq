@@ -111,6 +111,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { WorkspaceDescription } from "./WorkspaceDescription";
 import { useGpuiWorkspaceScreen } from "./useGpuiWorkspaceScreen";
 import { GpuiPartsProvider, useGpuiPartsHost } from "../lib/gpui-parts";
+import type { GpuiRemoteChrome } from "../lib/gpui-remote-types";
 import type { GpuiTerminalRoute, GpuiWorkspaceTab } from "../lib/gpui-screen";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
@@ -196,6 +197,11 @@ interface ShowWorkspaceProps {
   };
   /** Whether GPUI draws the header and tab row now. */
   onGpuiFramedChange?: (framed: boolean) => void;
+  /** A remote repository's strip above the header, which GPUI draws. */
+  gpuiRemote?: {
+    chrome: GpuiRemoteChrome | null;
+    press: (id: string) => void;
+  };
 }
 
 const StatusPip = ({ status }: { status?: string }) =>
@@ -253,6 +259,7 @@ export const ShowWorkspace = ({
   gpuiFrameHeight = null,
   onGpuiContentHeight,
   gpuiTerminal,
+  gpuiRemote,
   onGpuiFramedChange,
 }: ShowWorkspaceProps) => {
   const workingDirectory = workspace
@@ -1188,6 +1195,7 @@ export const ShowWorkspace = ({
       logsSource: activeTab === "logs" ? logsSource : null,
       logsKey,
       terminal: gpuiTerminal?.route ?? null,
+      remoteChrome: gpuiRemote?.chrome ?? null,
     },
     handlers: {
       setTab: setActiveTab,
@@ -1224,6 +1232,7 @@ export const ShowWorkspace = ({
       sendAgentComment: handleSendAgentReviewCommentToAgent,
       sendLogsToAgent: handleSendLogsToAgent,
       terminal: gpuiTerminal?.field,
+      remote: gpuiRemote?.press,
       reviewSubView: reviewSubView.select,
       openBranchSwitcher: onOpenBranchSwitcher,
       stack: onCreateStackedWorkspace,

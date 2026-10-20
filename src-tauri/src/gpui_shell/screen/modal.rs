@@ -64,26 +64,31 @@ pub trait ModalsHost: CodeHost {
 
 impl ModalsHost for Backend {
   fn prompt_history(&self, repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
-    crate::local_db::get_prompt_history(repo_path)
+    crate::local_db::get_prompt_history(&self.state_scope(repo_path))
   }
 
   fn stashes(&self, repo_path: &str) -> Result<Vec<StashEntry>, String> {
+    self.local_only(repo_path, "Stashing")?;
     crate::core::list_stashes(repo_path)
   }
 
   fn stash_diff(&self, repo_path: &str, stash_id: i64) -> Result<JjRevisionDiff, String> {
+    self.local_only(repo_path, "Stashing")?;
     crate::core::get_stash_diff(repo_path, stash_id)
   }
 
   fn apply_stash(&self, repo_path: &str, stash_id: i64, target_branch: &str) -> Result<(), String> {
+    self.local_only(repo_path, "Stashing")?;
     crate::core::apply_stash(repo_path, stash_id, target_branch)
   }
 
   fn delete_stash(&self, repo_path: &str, stash_id: i64) -> Result<(), String> {
+    self.local_only(repo_path, "Stashing")?;
     crate::core::delete_stash(repo_path, stash_id)
   }
 
   fn stash_patch(&self, repo_path: &str, stash_id: i64) -> Result<String, String> {
+    self.local_only(repo_path, "Stashing")?;
     crate::core::export_stash_git_patch(repo_path, stash_id)
   }
 }

@@ -302,9 +302,64 @@ pub async fn remote_pty_reattach(
   app_state: State<'_, AppState>,
 ) -> Result<(), String> {
   crate::commands::feature_preview::require_remote_for_endpoint(&app_state, &endpoint)?;
+  reattach(
+    app,
+    &pty_state.0,
+    &exec_state.0,
+    Reattach {
+      session_id,
+      window_label,
+      endpoint,
+      repository_id,
+      workspace_id,
+      label,
+      remote_working_directory,
+      launch,
+      cols,
+      rows,
+    },
+  )
+  .await
+}
+
+/// A persistent session to attach a local session id to.
+pub struct Reattach {
+  pub session_id: String,
+  pub window_label: Option<String>,
+  pub endpoint: SshEndpoint,
+  pub repository_id: String,
+  pub workspace_id: String,
+  pub label: String,
+  pub remote_working_directory: String,
+  pub launch: PtyLaunchSpec,
+  pub cols: u16,
+  pub rows: u16,
+}
+
+/// `remote_pty_reattach`'s work, shared with the native terminal pane:
+/// fetches the attach command, then opens the channel with it, emitting the
+/// session's `remote-pty-data-<id>` / `remote-pty-exit-<id>` events.
+pub async fn reattach(
+  app: tauri::AppHandle,
+  manager: &RemotePtyManager,
+  pool: &std::sync::Arc<crate::core::remote_ssh_transport::SshConnectionPool>,
+  request: Reattach,
+) -> Result<(), String> {
+  let Reattach {
+    session_id,
+    window_label,
+    endpoint,
+    repository_id,
+    workspace_id,
+    label,
+    remote_working_directory,
+    launch,
+    cols,
+    rows,
+  } = request;
   let cancellation = CancellationToken::new();
   let attach_command = crate::core::remote::execute_remote_command::<String>(
-    &exec_state.0,
+    pool,
     &endpoint,
     TreqCommandRequest::PtyAttachCommand {
       repo: repository_id.clone(),
@@ -321,7 +376,6 @@ pub async fn remote_pty_reattach(
   .await
   .map_err(|e| e.to_string())?;
 
-  let manager = pty_state.0.clone();
   let binding = RemotePtyBinding {
     endpoint_id: endpoint.id.clone(),
     repository_id,

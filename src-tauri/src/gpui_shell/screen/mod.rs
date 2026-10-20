@@ -44,7 +44,9 @@ mod logs_data;
 mod merge;
 mod modal;
 mod onboarding;
+mod onboarding_remote;
 mod remote;
+pub(super) mod remote_chrome;
 mod remote_data;
 mod rename_dialog;
 mod settings;
@@ -84,6 +86,10 @@ pub struct ScreenSnapshot {
   /// The Dashboard dialog open over the screen.
   #[serde(default)]
   pub modal: Option<workspace_modal::ModalRoute>,
+  /// The remote repository the window shows; absent for a local one. The
+  /// backend sends what the screens read and change in it over SSH.
+  #[serde(default)]
+  pub repository: Option<super::remote_repo::RemoteRepository>,
 }
 
 /// One screen's data, tagged by `kind`.
@@ -219,6 +225,19 @@ impl Screen {
     &self.snapshot
   }
 
+  /// The remote repository's access is cut off: the window dims behind
+  /// `remote-cutoff-overlay`.
+  pub fn cut_off(&self) -> bool {
+    match &self.snapshot.view {
+      View::Workspace(route) => route.remote_chrome.as_ref().is_some_and(|r| r.cut_off),
+      _ => false,
+    }
+  }
+
+  pub fn palette(&self) -> super::theme::Palette {
+    super::theme::palette(self.snapshot.dark)
+  }
+
   pub fn set_snapshot(&mut self, snapshot: ScreenSnapshot, cx: &mut Context<Self>) {
     if self.snapshot != snapshot {
       self.snapshot = snapshot;
@@ -282,18 +301,28 @@ impl Render for Screen {
       sink: &self.sink,
     };
     let body = match &self.snapshot.view {
-      View::Onboarding(_) => match &self.onboarding {
-        Some(view) => {
-          view.update(cx, |view, cx| view.set_dark(dark, cx));
-          view.clone().into_any_element()
+      View::Onboarding(route) => {
+        let route = route.clone();
+        match &self.onboarding {
+          Some(view) => {
+            view.update(cx, |view, cx| {
+              view.set_dark(dark, cx);
+              view.set_route(route, cx);
+            });
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink) = (self.host.clone(), self.sink.clone());
+            let view = cx.new(|cx| {
+              let mut view = onboarding::OnboardingView::new(host, sink, dark, cx);
+              view.set_route(route, cx);
+              view
+            });
+            self.onboarding = Some(view.clone());
+            view.into_any_element()
+          }
         }
-        None => {
-          let (host, sink) = (self.host.clone(), self.sink.clone());
-          let view = cx.new(|cx| onboarding::OnboardingView::new(host, sink, dark, cx));
-          self.onboarding = Some(view.clone());
-          view.into_any_element()
-        }
-      },
+      }
       View::Settings(route) => {
         let route = route.clone();
         match &self.settings {

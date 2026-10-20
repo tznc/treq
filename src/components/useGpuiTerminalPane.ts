@@ -22,9 +22,12 @@ export function useGpuiTerminalPane({
   activeSessionId,
   pending,
   sessionsRevision,
+  remoteShell = false,
   onNewAgent,
 }: {
   enabled: boolean;
+  /** A remote repository is active: new shells run on its host. */
+  remoteShell?: boolean;
   activeSessionId: number | null;
   pending: Pending[];
   sessionsRevision: number;
@@ -44,8 +47,8 @@ export function useGpuiTerminalPane({
       toggleCollapse: () => send({ kind: "toggleCollapse" }),
       toggleMaximize: () => send({ kind: "toggleMaximize" }),
       createShellSession: (dir) => send({ kind: "newShell", dir }),
-      // Remote repositories keep React's pane.
-      openRemoteSession: () => {},
+      openRemoteSession: (target) =>
+        send({ kind: "openRemote", remote: target }),
       closeTerminalsForWorkspace: (dir) =>
         send({ kind: "closeWorkspace", dir }),
       sendToTerminal: (id, text) => {
@@ -96,9 +99,24 @@ export function useGpuiTerminalPane({
   const route = useMemo(
     () =>
       enabled
-        ? { activeSessionId, pending, sessionsRevision, commands, sendAssets }
+        ? {
+            activeSessionId,
+            pending,
+            sessionsRevision,
+            commands,
+            sendAssets,
+            remoteShell,
+          }
         : null,
-    [enabled, activeSessionId, pending, sessionsRevision, commands, sendAssets],
+    [
+      enabled,
+      activeSessionId,
+      pending,
+      sessionsRevision,
+      commands,
+      sendAssets,
+      remoteShell,
+    ],
   );
   return { route, handle };
 }
