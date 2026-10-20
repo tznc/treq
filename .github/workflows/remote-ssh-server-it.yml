@@ -250,6 +250,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
+          # The CLI-only build below; a new key so the partial cache a
+          # timed-out default-features build saved is not restored.
+          key: no-default-features
           workspaces: |
             ./src-tauri -> target
 
@@ -264,7 +267,7 @@ jobs:
 
       - name: Build real-sshd integration tests
         working-directory: src-tauri
-        run: cargo test --locked --test remote_ssh_server_it --no-run
+        run: cargo test --locked --no-default-features --test remote_ssh_server_it --no-run
 
       # Split from the build step and wrapped in `timeout`: the PTY tests
       # have hung with no further output and no error at least twice in a
@@ -294,7 +297,7 @@ jobs:
           TREQ_SSH_IT_WORKSPACE_DIR: /config/selected-workspace
         run: |
           timeout --signal=ABRT 120 \
-            cargo test --locked --test remote_ssh_server_it -- --test-threads=1 --nocapture
+            cargo test --locked --no-default-features --test remote_ssh_server_it -- --test-threads=1 --nocapture
 
       - name: Show sshd container logs
         if: always()
