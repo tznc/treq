@@ -10,6 +10,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, Context, Div, Entity, FontWeight, Hsla, Pixels, SharedString, Stateful,
@@ -197,11 +198,20 @@ pub fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
 
 /// `DialogHeader`: `flex flex-col space-y-1.5`.
 pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
+  let title: SharedString = title.into();
   div()
     .flex()
     .flex_col()
     .gap(zpx(6.))
-    .child(dialog_title(title))
+    // `DialogTitle` is the dialog's heading.
+    .child(
+      div()
+        .id("dialog-title")
+        .role(gpui::Role::Heading)
+        .aria_label(title.clone())
+        .test_support()
+        .child(dialog_title(title)),
+    )
     .child(description)
 }
 

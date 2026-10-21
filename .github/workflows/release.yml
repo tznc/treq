@@ -97,7 +97,7 @@ jobs:
         run: npm ci
 
       # Desktop only links the `treq` binary. The staticlib and cdylib crate
-      # types exist for iOS/Android and the NAPI test addon, and with LTO each
+      # types exist for iOS/Android, and with LTO each
       # one is a separate whole-program link, roughly tripling link time.
       - name: Build only the rlib for desktop
         run: |

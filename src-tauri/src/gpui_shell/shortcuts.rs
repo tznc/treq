@@ -1,6 +1,5 @@
-//! Dashboard's keyboard shortcuts pressed while GPUI has focus. The
-//! webview's own keys reach React directly; GPUI's go back to it as the key
-//! React listens for (`useKeyboardShortcut`), so both answer the same way.
+//! The window's keyboard shortcuts (React's `useKeyboardShortcut` set): what
+//! a key press asks of the app.
 
 /// What a key press GPUI saw asks of the app.
 #[derive(Debug, Clone, PartialEq)]

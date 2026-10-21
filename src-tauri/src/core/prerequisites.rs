@@ -16,12 +16,6 @@ pub struct PrerequisiteStatus {
 /// Looks up every prerequisite on the user's PATH and the usual install
 /// directories, the same way Treq finds `gh` and the agent CLIs.
 pub fn check_prerequisites() -> Vec<PrerequisiteStatus> {
-  #[cfg(feature = "tauri-test")]
-  if let Some(search_path) = std::env::var_os("TREQ_TEST_PREREQ_PATH") {
-    return check_prerequisites_with(|name| {
-      crate::binary_paths::detect_binary_in(name, &search_path)
-    });
-  }
   check_prerequisites_with(crate::binary_paths::detect_binary)
 }
 

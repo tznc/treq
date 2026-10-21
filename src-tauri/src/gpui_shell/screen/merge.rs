@@ -469,6 +469,7 @@ impl Render for MergeView {
       .flex_none()
       .child(
         Button::new("merge-back", &p)
+          .aria_label("Back")
           .variant(Variant::Ghost)
           .size(Size::Sm)
           .icon(theme::ICON_ARROW_LEFT, 16.)

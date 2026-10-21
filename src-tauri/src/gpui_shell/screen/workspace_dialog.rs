@@ -1189,7 +1189,7 @@ impl WorkspaceDialog {
                 .debug_selector(|| "workspace-dialog-title".into())
                 .w_full()
                 .child(ui::text(
-                  Styled::h(Input::new(&title), zpx(32.)),
+                  Styled::h(Input::new(&title).aria_label("Title"), zpx(32.)),
                   TextSize::Sm,
                 )),
             ),
@@ -1489,9 +1489,12 @@ impl WorkspaceDialog {
                 .debug_selector(|| "workspace-dialog-branch".into())
                 .w_full()
                 .child(
-                  ui::text(Styled::h(Input::new(branch), zpx(32.)), TextSize::Sm)
-                    .font_family(theme::MONO_FONT)
-                    .when_some(status_icon, |this, icon| this.suffix(icon)),
+                  ui::text(
+                    Styled::h(Input::new(branch).aria_label("Branch Name"), zpx(32.)),
+                    TextSize::Sm,
+                  )
+                  .font_family(theme::MONO_FONT)
+                  .when_some(status_icon, |this, icon| this.suffix(icon)),
                 ),
             )
             .when_some(hint, |this, (text, color, id)| {

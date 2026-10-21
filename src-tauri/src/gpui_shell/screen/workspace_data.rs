@@ -8,8 +8,8 @@ use serde::Deserialize;
 use super::{
   checklist::ToolsHost,
   workspace::{
-    Checks, CommitsLabel, CreatePr, Disabled, GithubChecks, Header, HomeTarget, Linear, Loc, Merge,
-    MergeQueue, Pill, PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, MergeQueue,
+    Pill, PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -31,15 +31,8 @@ use crate::{
 /// `ShowWorkspace`'s `defaultBranch`: the literal it compares branches with.
 pub const DEFAULT_BRANCH: &str = "main";
 
-/// The Browser view's state, which React's `BrowserPanel` owns.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct BrowserRoute {
-  /// The address the page shows.
-  pub url: String,
-}
-
-/// What React sends: which workspace shows, and the state of the flows it
-/// still runs (target branch, Changes refresh, PR creation, checks).
+/// What the window model presents: which workspace shows, and the state of
+/// the flows it runs (target branch, Changes refresh, PR creation, checks).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Route {
@@ -65,15 +58,9 @@ pub struct Route {
   /// The workspace's setup script is being re-run from this window.
   #[serde(default)]
   pub setup_rerunning: bool,
-  /// Bumped whenever React refreshes its caches, so GPUI reads again.
+  /// Bumped whenever the window model refreshes its data, so GPUI reads
+  /// again.
   pub revision: u64,
-  /// GPUI draws the Code tab (React's file browser is closed).
-  #[serde(default)]
-  pub code: bool,
-  /// How tall React's part below the tab (the terminal pane) is, once it
-  /// measured it.
-  #[serde(default)]
-  pub frame_height: Option<f32>,
   /// The commit the Commits tab should scroll to and open.
   #[serde(default)]
   pub scroll_to_commit: Option<String>,
@@ -86,21 +73,13 @@ pub struct Route {
   /// Bumped when the workspace's files change or the window gains focus.
   #[serde(default)]
   pub changes_revision: u64,
-  /// The browser preview is on and the Changes tab shows its Diff view, so
-  /// the tab row offers the Diff/Browser switcher.
-  #[serde(default)]
-  pub review_switcher: bool,
-  /// The Browser view shows: its address bar takes the tab row's slot.
-  #[serde(default)]
-  pub browser: Option<BrowserRoute>,
   /// The Logs tab's source (`LogSource`) while it shows.
   #[serde(default)]
   pub logs_source: Option<String>,
   /// Bumped by "open in Logs" links, so the tab starts over on `logs_source`.
   #[serde(default)]
   pub logs_key: u64,
-  /// GPUI draws the terminal pane below the tab; `None` while React does
-  /// (a remote repository's).
+  /// The terminal pane below the tab.
   #[serde(default)]
   pub terminal: Option<super::terminal::Route>,
   /// GPUI draws the Code tab's file browser (`showFileBrowserInCode`).
@@ -627,17 +606,22 @@ pub fn workspace_view(
     } else {
       None
     };
+    let (ci_passed, ci_total) = ci.map_or((0, 0), |ci| (ci.passed as usize, ci.total as usize));
+    let parts: Vec<String> = [
+      has_treq.then(|| match state {
+        "running" => "Treq running".to_string(),
+        "not-run" => "Treq not run".to_string(),
+        _ => format!("Treq {passed}/{total}"),
+      }),
+      ci.map(|ci| format!("GitHub {}/{}", ci.passed, ci.total)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     Some(Checks {
       status: combined.map(str::to_string),
-      treq: has_treq.then(|| match state {
-        "running" => "running".to_string(),
-        "not-run" => "not run".to_string(),
-        _ => format!("{passed}/{total}"),
-      }),
-      github: ci.map(|ci| GithubChecks {
-        label: format!("GH {}/{}", ci.passed, ci.total),
-        state: ci.state.clone(),
-      }),
+      count: format!("{}/{}", passed + ci_passed, total + ci_total),
+      name: format!("Checks: {}", parts.join(", ")),
     })
   });
 

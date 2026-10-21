@@ -1,10 +1,9 @@
 //! The workspace header's popovers (React's `PopoverContent` under the
 //! Details button, `TargetBranchSelector` and `ChecksPopover`).
 //!
-//! GPUI cannot paint over the webview (a native child window), so a popover
-//! that drops over the framed React content opens in the modal window
-//! (`modal`): transparent, placed over the whole shell window, so a click
-//! anywhere outside the popover closes it, as base-ui's outside press does.
+//! A popover opens in the modal window (`modal`): transparent, placed over
+//! the whole shell window, so a click anywhere outside the popover closes
+//! it, as base-ui's outside press does.
 //! The workspace view builds the popover and hands it to the window with a
 //! [`PopupRequest::ShowPopover`](super::popup::PopupRequest); the popover
 //! reads what it lists from the backend itself and says it is done with a

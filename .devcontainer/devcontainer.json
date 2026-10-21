@@ -18,27 +18,13 @@
     "source=treq-target-${devcontainerId},target=${containerWorkspaceFolder}/target,type=volume"
   ],
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "forwardPorts": [1420, 6006],
-  "portsAttributes": {
-    "1420": {
-      "label": "Treq frontend",
-      "onAutoForward": "notify"
-    },
-    "6006": {
-      "label": "Storybook",
-      "onAutoForward": "notify"
-    }
-  },
   "customizations": {
     "vscode": {
       "extensions": [
         "rust-lang.rust-analyzer",
         "tauri-apps.tauri-vscode",
         "biomejs.biome"
-      ],
-      "settings": {
-        "rust-analyzer.cargo.features": ["tauri-test"]
-      }
+      ]
     }
   }
 }

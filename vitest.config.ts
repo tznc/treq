@@ -1,21 +1,20 @@
 import { defineConfig } from "vitest/config";
-import { unitProjects } from "./vitest.unit.projects";
 
 /**
- * Default vitest entry: runs unit + integration as separate projects.
- * Prefer `npm run test:unit` / `npm run test:integration` in CI so setup
- * cost (NAPI build, jj) is only paid where needed.
- *
- * Lists the unit and integration projects directly rather than via
- * vitest.unit.config.ts / vitest.integration.config.ts -- Vitest doesn't
- * support a project entry that itself declares `projects`.
+ * The Supabase-side unit tests: billing, merge queue, Linear proxy and the
+ * remote SSH relay's traceability. The desktop app's tests are Rust
+ * (`cargo test`); `scripts/service-qa` has its own config.
  */
 export default defineConfig({
   test: {
-    projects: [
-      ...unitProjects,
-      "./vitest.integration-serial.config.ts",
-      "./vitest.integration-parallel.config.ts",
+    environment: "node",
+    globals: true,
+    include: [
+      "test/billing/**/*.test.ts",
+      "test/merge-queue/**/*.test.ts",
+      "test/linear-proxy/**/*.test.ts",
+      "test/remote-ssh-traceability.test.ts",
     ],
+    testTimeout: 15000,
   },
 });

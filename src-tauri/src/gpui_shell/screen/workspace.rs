@@ -1,24 +1,20 @@
-//! The workspace view's header and tab row (React's `ShowWorkspace`), with
-//! the webview framed below them.
+//! The workspace view (React's `ShowWorkspace`): its header, tab row, the
+//! tab's content and the terminal pane.
 //!
 //! The header reads its data from the backend ([`workspace_data`]) and
-//! pushes, syncs and rebases the home branch itself. React says which
-//! workspace shows, and draws the tab's content in the frame, leaving its own
-//! header and tab row out of it (its "framed" layout). The popovers under the
-//! target branch, checks and details buttons are GPUI's too (see
-//! [`popover`](crate::gpui_shell::popover)): they open in the modal window,
-//! over the framed webview, and hand back to React only what it still owns
-//! (retargeting, running workflows). Menus are GPUI's, opened by React below
-//! the button that asked for them.
+//! pushes, syncs and rebases the home branch itself. The window model says
+//! which workspace shows. The popovers under the target branch, checks and
+//! details buttons open in the modal window (see
+//! [`popover`](crate::gpui_shell::popover)); menus open below the button
+//! that asked for them.
 //!
 //! [`workspace_data`]: super::workspace_data
 
 use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
-use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
-use tauri::{Webview, Wry};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
   FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Window,
@@ -42,10 +38,9 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
-  form,
   native::{NativeEvent, ToastTone},
   popover::{self, Popover, PopoverHost},
-  popup::{self, PopupRequest, PopupSink, Side, TooltipContent},
+  popup::{PopupRequest, PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   ui::{self, Button, Size, TextSize, Variant},
 };
@@ -54,19 +49,6 @@ mod actions;
 
 /// React's base-ui tooltips open after 200ms (`TooltipProvider delay={200}`).
 const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
-
-/// `AddressBar`: the Browser view's text field, which follows the url the
-/// page shows and keeps what is typed until Enter navigates.
-struct AddressBar {
-  input: Entity<InputState>,
-  /// The url last copied into the field.
-  url: String,
-  _subscription: gpui::Subscription,
-}
-
-/// The message under a url `AddressBar` rejects.
-pub(super) const BROWSER_URL_HINT: &str =
-  "Only http://localhost, http://127.0.0.1 and file:// URLs are supported";
 
 /// Where the terminal pane was last placed: the repository, workspace and
 /// sessions revision.
@@ -175,15 +157,10 @@ pub struct Sync {
 pub struct Checks {
   /// "passed", "failed" or "running"; None for nothing run yet.
   pub status: Option<String>,
-  pub treq: Option<String>,
-  pub github: Option<GithubChecks>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct GithubChecks {
-  pub label: String,
-  /// `PrCiStatus.state`: "success", "failure" or "pending".
-  pub state: String,
+  /// Treq's and GitHub's checks together, as "passed/total".
+  pub count: String,
+  /// The accessible name, naming each source ("Checks: Treq 3/3, GitHub 4/4").
+  pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -281,7 +258,6 @@ mod tw {
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_500: u32 = 0xeab308;
   pub const YELLOW_600: u32 = 0xca8a04;
-  pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_950: u32 = 0x422006;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const BLUE_700: u32 = 0x1d4ed8;
@@ -299,7 +275,6 @@ mod tw {
   pub const GREEN: [u32; 4] = [GREEN_400, GREEN_500, GREEN_600, GREEN_700];
   pub const RED: [u32; 4] = [RED_400, RED_500, RED_600, RED_700];
   pub const PURPLE: [u32; 4] = [PURPLE_400, PURPLE_500, PURPLE_600, PURPLE_700];
-  pub const YELLOW: [u32; 4] = [YELLOW_400, YELLOW_500, YELLOW_600, YELLOW_700];
 }
 
 /// How often the branch's pull request is re-read from the PR poller's
@@ -320,8 +295,6 @@ pub struct WorkspaceView {
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
-  /// The Browser view's address bar, while it shows.
-  address: Option<AddressBar>,
   /// The Code tab, while GPUI draws it.
   pub(super) code: Option<Entity<CodeView>>,
   /// The Code tab's file browser, while GPUI draws it.
@@ -332,8 +305,6 @@ pub struct WorkspaceView {
   pub(super) changes: Option<Entity<ChangesView>>,
   /// The Logs tab and the `logs_key` it started on.
   logs: Option<(Entity<LogsView>, u64)>,
-  /// The tab's height last sent to React (`workspace.contentHeight`).
-  content_height: Rc<std::cell::Cell<f32>>,
   /// React, for what the header does not do itself.
   react: ActionSink,
   /// Where the tabs and the terminal pane send their actions: React, but
@@ -353,9 +324,6 @@ pub struct WorkspaceView {
   snapshot: Option<Workspace>,
   dark: bool,
   popups: PopupSink,
-  webview: Option<Webview<Wry>>,
-  /// A dialog covers the window, which the framed webview would paint over.
-  covered: bool,
   /// The element whose tooltip is pending or shown (`true`).
   tooltip: Option<(SharedString, bool)>,
   /// The tooltip whose popup is open.
@@ -368,26 +336,12 @@ pub struct WorkspaceView {
 }
 
 impl WorkspaceView {
-  #[cfg(test)]
-  pub fn is_covered(&self) -> bool {
-    self.covered
-  }
-
-  /// Stops framing the webview while a dialog covers the window.
-  pub fn set_covered(&mut self, covered: bool, cx: &mut Context<Self>) {
-    if self.covered != covered {
-      self.covered = covered;
-      cx.notify();
-    }
-  }
-
   pub fn new(
     route: Route,
     host: Arc<dyn TerminalHost>,
     react: ActionSink,
     dark: bool,
     popups: PopupSink,
-    webview: Option<Webview<Wry>>,
     cx: &mut Context<Self>,
   ) -> Self {
     let view = cx.weak_entity();
@@ -425,13 +379,11 @@ impl WorkspaceView {
       popover: None,
       code_host: host,
       terminal: None,
-      address: None,
       code: None,
       file_browser: None,
       commits: None,
       changes: None,
       logs: None,
-      content_height: Rc::default(),
       react,
       children,
       sink,
@@ -444,8 +396,6 @@ impl WorkspaceView {
       snapshot: None,
       dark,
       popups,
-      webview,
-      covered: false,
       tooltip: None,
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
@@ -704,22 +654,6 @@ impl WorkspaceView {
   fn press(&self, id: &'static str) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
     let sink = self.sink.clone();
     move |_, _, cx| sink(ScreenAction::Press { id: id.to_string() }, cx)
-  }
-
-  /// A press that React answers with a menu, opened below the button.
-  fn press_dropdown(
-    &self,
-    key: &'static str,
-    id: &'static str,
-  ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
-    let bounds = self.bounds.clone();
-    let press = self.press(id);
-    move |event, window, cx| {
-      if let Some(anchor) = bounds.borrow().get(key).copied() {
-        popup::set_dropdown_anchor(anchor);
-      }
-      press(event, window, cx);
-    }
   }
 
   /// Records the bounds of its parent as `key`'s, for a dropdown to open
@@ -1014,6 +948,15 @@ impl WorkspaceView {
         cx,
       ));
     }
+    if let Some(checks) = &h.checks {
+      right = right.child(
+        div()
+          .relative()
+          .flex_none()
+          .child(self.checks(checks, p))
+          .child(self.record_bounds("workspace-checks")),
+      );
+    }
     if let Some(pr) = &h.view_pr {
       right = right.child(self.view_pr(pr, p, cx));
     }
@@ -1036,15 +979,6 @@ impl WorkspaceView {
     }
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
-    }
-    if let Some(checks) = &h.checks {
-      right = right.child(
-        div()
-          .relative()
-          .flex_none()
-          .child(self.checks(checks, p))
-          .child(self.record_bounds("workspace-checks")),
-      );
     }
     if let Some(queue) = &h.merge_queue {
       let button = Button::new("workspace-merge-queue", p)
@@ -1070,6 +1004,7 @@ impl WorkspaceView {
       let green = tw::color(tw::GREEN_600);
       let hover = tw::color(tw::GREEN_700);
       let button = Button::new("workspace-merge", p)
+        .aria_label("Merge...")
         .variant(if merge.passing {
           Variant::Default
         } else {
@@ -1133,7 +1068,7 @@ impl WorkspaceView {
               .px_1()
               .disabled(more.disabled)
               .icon(theme::ICON_MORE, 16.)
-              .on_click(self.press_dropdown("workspace-more", "workspace.more")),
+              .on_click(self.press("workspace.more")),
           )
           .child(self.record_bounds("workspace-more")),
       );
@@ -1258,7 +1193,7 @@ impl WorkspaceView {
       .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
       .px(zpx(6.))
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
-      .on_click(self.press_dropdown("workspace-create-pr-menu", "workspace.createPrMenu"));
+      .on_click(self.press("workspace.createPrMenu"));
     div()
       .flex()
       .flex_none()
@@ -1354,140 +1289,16 @@ impl WorkspaceView {
           b.child(icon)
         }
       })
-      .child("Checks")
-      .when_some(checks.treq.clone(), |b, treq| {
-        b.child(div().text_color(p.muted_foreground).child(treq))
-      })
-      .when_some(checks.github.clone(), |b, gh| {
-        let colors = match gh.state.as_str() {
-          "success" => tw::GREEN,
-          "failure" => tw::RED,
-          _ => tw::YELLOW,
-        };
-        let (text, _, _) = tw::state(self.dark, colors);
-        b.child(
-          div()
-            .border_l_1()
-            .border_color(p.border)
-            .pl(zpx(6.))
-            .text_color(text)
-            .child(gh.label),
-        )
-      })
+      .child(
+        div()
+          .text_color(p.muted_foreground)
+          .child(checks.count.clone()),
+      )
+      .aria_label(checks.name.clone())
       .on_click(self.press("workspace.checks"))
   }
 
-  /// Creates the address bar when the Browser view opens, drops it when it
-  /// closes, and follows the url the page navigates to.
-  fn sync_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(browser) = self.route.browser.as_ref() else {
-      self.address = None;
-      return;
-    };
-    let url = browser.url.clone();
-    match &mut self.address {
-      Some(address) => {
-        if address.url != url {
-          address.url = url.clone();
-          address
-            .input
-            .update(cx, |input, cx| input.set_value(url, window, cx));
-        }
-      }
-      None => {
-        let input = cx.new(|cx| {
-          InputState::new(window, cx)
-            .placeholder("http://localhost:3000 or file:///path/to/index.html")
-        });
-        input.update(cx, |input, cx| input.set_value(url.clone(), window, cx));
-        let subscription =
-          cx.subscribe(&input, |view, input, event: &InputEvent, cx| match event {
-            InputEvent::Change => cx.notify(),
-            InputEvent::PressEnter { .. } => {
-              let value = input.read(cx).value().trim().to_string();
-              if !value.is_empty() && crate::core::browser_url::is_allowed_browser_url(&value) {
-                (view.react)(
-                  ScreenAction::Field {
-                    field: "browser.navigate".into(),
-                    value: value.into(),
-                  },
-                  cx,
-                );
-              }
-            }
-            _ => {}
-          });
-        self.address = Some(AddressBar {
-          input,
-          url,
-          _subscription: subscription,
-        });
-      }
-    }
-  }
-
-  /// `AddressBar.tsx`: the field with its reload button inside, and the
-  /// reason for a url it would not open.
-  fn address_bar(&self, p: &Palette, cx: &App) -> Option<Div> {
-    let address = self.address.as_ref()?;
-    let draft = address.input.read(cx).value().trim().to_string();
-    let valid = draft.is_empty() || crate::core::browser_url::is_allowed_browser_url(&draft);
-    let field = form::input_field("browser-address", &address.input, false, false);
-    Some(
-      div()
-        .flex_1()
-        .min_w_0()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(
-          div()
-            .relative()
-            .flex_1()
-            .min_w_0()
-            .child(field)
-            .when(!valid, |this| {
-              this.child(
-                div()
-                  .absolute()
-                  .inset_0()
-                  .rounded(zpx(6.))
-                  .border_1()
-                  .border_color(p.destructive)
-                  .debug_selector(|| "browser-address-invalid".into()),
-              )
-            })
-            .child(
-              div()
-                .absolute()
-                .right(zpx(4.))
-                .top_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .child(
-                  Button::new("browser-reload", p)
-                    .variant(Variant::Ghost)
-                    .size(Size::IconXs)
-                    .icon(theme::ICON_ROTATE_CW, 14.)
-                    .on_click(self.press("browser.reload")),
-                ),
-            ),
-        )
-        .when(!valid, |this| {
-          this.child(
-            ui::text(div(), TextSize::Xs)
-              .debug_selector(|| "browser-address-error".into())
-              .whitespace_nowrap()
-              .truncate()
-              .text_color(p.destructive)
-              .child(BROWSER_URL_HINT),
-          )
-        }),
-    )
-  }
-
-  fn tab_row(&self, row: &TabRow, p: &Palette, cx: &App) -> Div {
+  fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
     let dark = self.dark;
     let pill = |count: u32, tone: Tone, id: &'static str| {
       let (bg, fg) = match tone {
@@ -1550,6 +1361,10 @@ impl WorkspaceView {
         ui::text(div(), TextSize::Sm)
           .id(id)
           .debug_selector(move || selector)
+          .role(gpui::Role::Tab)
+          .aria_label(label)
+          .aria_selected(active)
+          .test_support()
           .flex()
           .items_center()
           .gap(zpx(6.))
@@ -1607,86 +1422,9 @@ impl WorkspaceView {
       .border_b_1()
       .border_color(p.border)
       .debug_selector(|| "workspace-tab-row".into())
-      .child(
-        div()
-          .flex()
-          .flex_none()
-          .items_center()
-          .gap_2()
-          .child(list)
-          .when(
-            row.tab == Tab::Changes && self.route.review_switcher,
-            |this| this.child(self.review_switcher(p)),
-          ),
-      )
-      .child(
-        self
-          .address_bar(p, cx)
-          .unwrap_or_else(|| div().flex_1().min_w_0()),
-      )
+      .child(div().flex().flex_none().items_center().gap_2().child(list))
+      .child(div().flex_1().min_w_0())
       .child(status)
-  }
-
-  /// `useReviewSubView`'s Diff/Browser switcher, which names the view that
-  /// shows; picking one hands the choice to React.
-  fn review_switcher(&self, p: &Palette) -> impl IntoElement {
-    let (bounds, popups, sink, dark) = (
-      self.bounds.clone(),
-      self.popups.clone(),
-      self.sink.clone(),
-      self.dark,
-    );
-    let browser = self.route.browser.is_some();
-    let pick = move |view: &'static str| {
-      let sink = sink.clone();
-      move |cx: &mut App| {
-        sink(
-          ScreenAction::Field {
-            field: "changes.subView".into(),
-            value: view.into(),
-          },
-          cx,
-        )
-      }
-    };
-    let items = move || {
-      vec![
-        popup::NativeMenuItem::item("Diff", pick("diff")).icon(popup::MenuIcon::FileDiff),
-        popup::NativeMenuItem::item("Browser", pick("browser")).icon(popup::MenuIcon::Globe),
-      ]
-    };
-    div()
-      .relative()
-      .flex_none()
-      .child(
-        Button::new("review-switcher", p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .gap(zpx(6.))
-          .icon(
-            if browser {
-              theme::ICON_GLOBE
-            } else {
-              theme::ICON_FILE_DIFF
-            },
-            16.,
-          )
-          .label(if browser { "Browser" } else { "Diff" })
-          .child(ui::icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground))
-          .on_click(move |_, _, cx| {
-            let Some(anchor) = bounds.borrow().get("review-switcher").copied() else {
-              return;
-            };
-            let request = PopupRequest::ShowDropdown {
-              entries: popup::native_entries(items()),
-              anchor,
-              dark,
-            };
-            let popups = popups.clone();
-            cx.defer(move |cx| popups(request, cx));
-          }),
-      )
-      .child(self.record_bounds("review-switcher"))
   }
 }
 
@@ -1910,10 +1648,6 @@ impl WorkspaceView {
   }
 }
 
-/// The frame's height before React measured its terminal pane: the
-/// collapsed pane's bar.
-const FRAME_FALLBACK: f32 = 40.;
-
 impl WorkspaceView {
   /// The terminal pane, placed in the shown workspace, while the route
   /// asks GPUI to draw it.
@@ -1980,7 +1714,7 @@ impl WorkspaceView {
 
   /// The tab GPUI draws (Code or Commits), kept in step with the header.
   fn tab_body(&mut self, cx: &mut Context<Self>) -> Option<Body> {
-    let loaded = self.loaded.as_ref().filter(|_| self.route.code);
+    let loaded = self.loaded.as_ref();
     let tab = self.route.tab;
     let Some(loaded) =
       loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes | Tab::Logs))
@@ -1990,7 +1724,6 @@ impl WorkspaceView {
       self.commits = None;
       self.changes = None;
       self.logs = None;
-      self.content_height.set(0.);
       return None;
     };
     let parent = Parent {
@@ -2100,17 +1833,6 @@ enum Body {
 }
 
 impl Body {
-  /// A dialog over the whole window would leave the webview on top.
-  fn covers_window(&self, cx: &App) -> bool {
-    match self {
-      Body::Code(code) => code.read(cx).covers_window(),
-      Body::FileBrowser(browser) => browser.read(cx).covers_window(),
-      Body::Commits(commits) => commits.read(cx).covers_window(),
-      Body::Changes(changes) => changes.read(cx).covers_window(),
-      Body::Logs(_) => false,
-    }
-  }
-
   fn into_any_element(self) -> gpui::AnyElement {
     match self {
       Body::Code(code) => code.into_any_element(),
@@ -2123,9 +1845,8 @@ impl Body {
 }
 
 impl Render for WorkspaceView {
-  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.sync_tooltip_popup(cx);
-    self.sync_address(window, cx);
     let p = theme::palette(self.dark);
     let snapshot = self.snapshot.clone();
     let header = match &snapshot {
@@ -2140,20 +1861,8 @@ impl Render for WorkspaceView {
     };
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
-      .map(|row| self.tab_row(&row, &p, cx));
+      .map(|row| self.tab_row(&row, &p));
     let code = self.tab_body(cx);
-    // A dialog drawn over the screen cannot cover the webview, so the
-    // frame steps aside while one is open.
-    let dialog_open = self.covered
-      || cx
-        .try_global::<super::modal::ModalOpen>()
-        .is_some_and(|m| m.0);
-    let frame = |webview: Option<&Webview<Wry>>| match webview {
-      Some(webview) if !dialog_open => tauri_plugin_gpui::webview_frame(webview)
-        .size_full()
-        .into_any_element(),
-      _ => div().size_full().into_any_element(),
-    };
     let remote = self.route.remote_chrome.clone();
     let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);
     let strip = remote.map(|chrome| {
@@ -2165,22 +1874,16 @@ impl Render for WorkspaceView {
       super::remote_chrome::strip(&chrome, self.dark, &p, &press)
     });
     let body = match (code, self.sync_terminal(cx)) {
-      // The tab, or React's view framed in its place, with GPUI's terminal
-      // pane below: a share of the whole view, header and tabs included,
-      // which a maximized pane covers, as React lays it out.
+      // The tab with the terminal pane below: a share of the whole view,
+      // header and tabs included, which a maximized pane covers, as React
+      // lays it out.
       (code, Some(pane)) => {
         pane.update(cx, |pane, cx| pane.set_dark(self.dark, cx));
         let covered = pane.read(cx).covers();
-        // The webview would stay on top of the pane's lightbox.
-        let lightbox = pane.read(cx).covers_window();
         let container = pane.read(cx).container.clone();
         let content = match code {
           Some(code) => code.into_any_element(),
-          None => div()
-            .size_full()
-            .debug_selector(|| "workspace-frame".into())
-            .when(!lightbox, |this| this.child(frame(self.webview.as_ref())))
-            .into_any_element(),
+          None => div().size_full().into_any_element(),
         };
         let pane_area = div()
           .relative()
@@ -2225,52 +1928,14 @@ impl Render for WorkspaceView {
           .child(pane_area)
           .into_any_element();
       }
-      // The tab, with React's terminal pane framed below it.
-      (Some(code), None) => {
-        let covered = code.covers_window(cx);
-        let sent = self.content_height.clone();
-        let sink = self.sink.clone();
-        div()
-          .relative()
-          .flex_1()
-          .min_h_0()
-          .flex()
-          .flex_col()
-          .child(
-            gpui::canvas(
-              move |bounds, _, cx| {
-                let height = f32::from(bounds.size.height).round();
-                if sent.replace(height) != height {
-                  sink(
-                    ScreenAction::Field {
-                      field: "workspace.contentHeight".into(),
-                      value: height.into(),
-                    },
-                    cx,
-                  );
-                }
-              },
-              |_, _, _, _| {},
-            )
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full(),
-          )
-          .child(div().flex_1().min_h_0().child(code.into_any_element()))
-          .child(
-            div()
-              .flex_none()
-              .h(zpx(self.route.frame_height.unwrap_or(FRAME_FALLBACK)))
-              .debug_selector(|| "workspace-frame".into())
-              .when(!covered, |this| this.child(frame(self.webview.as_ref()))),
-          )
-      }
-      (None, None) => div()
+      // The tab alone, while no terminal pane shows.
+      (Some(code), None) => div()
         .flex_1()
         .min_h_0()
-        .debug_selector(|| "workspace-frame".into())
-        .child(frame(self.webview.as_ref())),
+        .flex()
+        .flex_col()
+        .child(div().flex_1().min_h_0().child(code.into_any_element())),
+      (None, None) => div().flex_1().min_h_0(),
     };
     div()
       .size_full()

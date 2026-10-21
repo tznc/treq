@@ -1,6 +1,5 @@
 use crate::AppState;
 use std::path::{Path, PathBuf};
-use tauri::{Emitter, State};
 
 fn resolve_local_working_dir(
   repo_path: Option<&str>,
@@ -116,84 +115,6 @@ pub(crate) fn launch(
   )
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn pty_create_session(
-  state: State<'_, AppState>,
-  session_id: String,
-  window_label: Option<String>,
-  working_dir: Option<String>,
-  repo_path: Option<String>,
-  workspace_id: Option<i64>,
-  shell: Option<String>,
-  initial_command: Option<String>,
-  suppress_echo_for: Option<String>,
-  remote_host: Option<String>,
-) -> Result<(), String> {
-  log::debug!(
-        "pty_create_session: session_id={}, working_dir={:?}, shell={:?}, initial_command_present={}, suppress_echo_for_present={}",
-        session_id,
-        working_dir,
-        shell,
-        initial_command.is_some(),
-        suppress_echo_for.is_some()
-    );
-  let pty_manager = state.pty_manager.clone();
-  let sid = session_id.clone();
-  let event_name = format!("pty-data-{}", sid);
-  let emit_output: Box<dyn Fn(String) + Send + 'static> =
-    match state.watcher_manager.cloned_app_handle() {
-      Some(app) => Box::new(move |data| {
-        if let Err(error) = app.emit(&event_name, data) {
-          log::warn!(
-            "pty emit failed: session_id={}, event={}, error={}",
-            sid,
-            event_name,
-            error
-          );
-        }
-      }),
-      // Integration tests have no Tauri AppHandle. They skip the PTY spawn
-      // unless a test opts in, and then read output from the test sink.
-      #[cfg(feature = "tauri-test")]
-      None if crate::test_pty_events::pty_enabled() => {
-        Box::new(move |data| crate::test_pty_events::push(&event_name, data))
-      }
-      None => return Ok(()),
-    };
-
-  let Launch {
-    shell,
-    shell_args,
-    working_dir,
-    initial_command,
-  } = launch(
-    &state,
-    &session_id,
-    remote_host.as_deref(),
-    repo_path.as_deref(),
-    workspace_id,
-    working_dir,
-    shell,
-    initial_command,
-  )?;
-
-  tauri::async_runtime::spawn_blocking(move || {
-    pty_manager.create_session(
-      session_id,
-      window_label,
-      working_dir,
-      shell,
-      shell_args,
-      initial_command,
-      suppress_echo_for,
-      emit_output,
-    )
-  })
-  .await
-  .map_err(|error| error.to_string())?
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -247,59 +168,4 @@ mod tests {
       Some("/repo/.treq/resolve/change".to_string())
     );
   }
-}
-
-#[tauri::command]
-pub fn pty_session_exists(state: State<AppState>, session_id: String) -> Result<bool, String> {
-  Ok(state.pty_manager.session_exists(&session_id))
-}
-
-#[tauri::command]
-pub fn pty_write(state: State<AppState>, session_id: String, data: String) -> Result<(), String> {
-  log::debug!(
-    "pty_write: session_id={}, data_len={}",
-    session_id,
-    data.len()
-  );
-  state.pty_manager.write_to_session(&session_id, &data)
-}
-
-#[tauri::command]
-pub fn pty_resize(
-  state: State<AppState>,
-  session_id: String,
-  rows: u16,
-  cols: u16,
-) -> Result<(), String> {
-  log::debug!(
-    "pty_resize: session_id={}, rows={}, cols={}",
-    session_id,
-    rows,
-    cols
-  );
-  state.pty_manager.resize_session(&session_id, rows, cols)
-}
-
-#[tauri::command]
-pub fn pty_write_suppress_echo(
-  state: State<AppState>,
-  session_id: String,
-  data: String,
-) -> Result<(), String> {
-  log::debug!(
-    "pty_write_suppress_echo: session_id={}, data_len={}",
-    session_id,
-    data.len()
-  );
-  state.pty_manager.set_auto_command(&session_id, &data)?;
-  state.pty_manager.write_to_session(&session_id, &data)
-}
-
-#[tauri::command]
-pub async fn pty_close(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-  log::debug!("pty_close: session_id={}", session_id);
-  let pty_manager = state.pty_manager.clone();
-  tauri::async_runtime::spawn_blocking(move || pty_manager.close_session(&session_id))
-    .await
-    .map_err(|error| error.to_string())?
 }

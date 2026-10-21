@@ -7,15 +7,14 @@
 //! stashes, and hands back what only React can do: closing the dialog,
 //! starting the agent session, running a past prompt, applying a stash to a
 //! new workspace. Each dialog covers the whole window, sidebar included, as
-//! React's `Dialog` does. GPUI cannot paint over the webview, so a screen
-//! that frames it leaves it out of the frame while a dialog is open.
+//! React's `Dialog` did.
 
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Div, FontWeight, Global, SharedString,
+  self, anchored, deferred, div, point, prelude::*, px, App, Div, FontWeight, SharedString,
   Stateful,
 };
 
@@ -43,12 +42,6 @@ pub enum Modal {
   PromptHistory(prompt_history::Route),
   Stash(stash::Route),
 }
-
-/// Whether a dialog is open, for screens that frame the webview.
-#[derive(Default)]
-pub struct ModalOpen(pub bool);
-
-impl Global for ModalOpen {}
 
 /// What the dialogs read from and change in the backend; faked in tests.
 /// Everything but `notify` blocks, so it is called off the main thread.

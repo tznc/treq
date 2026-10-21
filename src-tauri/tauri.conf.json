@@ -3,25 +3,9 @@
   "productName": "Treq",
   "version": "0.3.0",
   "identifier": "com.treq",
-  "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../src/dist"
-  },
+  "build": {},
   "app": {
-    "windows": [],
-    "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src ipc: http://ipc.localhost ipc://localhost http://127.0.0.1:54321 https://xnlljmfiqyumiyexydyl.supabase.co; img-src 'self' asset: http://asset.localhost data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'",
-      "assetProtocol": {
-        "enable": true,
-        "scope": {
-          "requireLiteralLeadingDot": false,
-          "allow": ["$HOME/**/*", "$HOME/**/.treq/**/*"],
-          "deny": ["$HOME/.ssh/**"]
-        }
-      }
-    }
+    "windows": []
   },
   "plugins": {
     "cli": {

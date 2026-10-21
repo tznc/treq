@@ -64,8 +64,6 @@ SKIP_STACK=1 scripts/sprites-e2e-local.sh
 Use this when the test project's Edge Functions already have `TREQ_SPRITES_API_TOKEN` and `TREQ_SPRITES_API_URL` set to the test organization. See `remote_e2e_README.md`.
 
 ```bash
-mkdir -p src/dist && echo '<!doctype html>' > src/dist/index.html   # once
-
 export TREQ_REMOTE_E2E=1 TREQ_REMOTE_E2E_NATIVE=1
 export SUPABASE_TEST_URL=https://<test-project>.supabase.co
 export SUPABASE_TEST_ANON_KEY=<anon key>

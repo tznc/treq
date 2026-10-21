@@ -1,11 +1,6 @@
 //! How a shell window and its [`WindowController`] meet: the controller is
 //! made with the window, draws through the `Shell`, and receives what the
 //! window's views, the backend, the menu bar and app-wide events report.
-//!
-//! React keeps running in the webview, but the model owns the window, a
-//! remote repository included: React's pushes are ignored and no action
-//! reaches it. Only `TREQ_WEB_UI` windows, which the model never drives,
-//! are React's.
 
 use std::{
   collections::HashSet,
@@ -23,9 +18,8 @@ use super::{
 use crate::{
   core::cloud::ManagedEndpointEvent,
   gpui_shell::{
-    defer_main, emit_to_webview,
+    defer_main,
     native::{Backend, NativeEvent},
-    overlay::OverlaySnapshot,
     remote_repo::{self, Cutoff},
     screen::{self, ScreenAction},
     sidebar::SidebarAction,
@@ -40,8 +34,8 @@ fn driven() -> &'static Mutex<HashSet<String>> {
   DRIVEN.get_or_init(Default::default)
 }
 
-/// Whether the model handles window `label`'s actions.
-pub fn drives(label: &str) -> bool {
+/// Whether window `label` has its model.
+fn drives(label: &str) -> bool {
   driven().lock_or_recover().contains(label)
 }
 
@@ -107,18 +101,12 @@ fn with_controller(
   });
 }
 
-/// An action sink: the model's handler for a window it drives, React's
-/// `event` for one it does not.
+/// An action sink: the model's handler for window `label`.
 pub(in crate::gpui_shell) fn routed(
-  app: AppHandle,
   label: String,
-  event: &'static str,
   handle: fn(&str, &ScreenAction, &mut App) -> bool,
 ) -> screen::ActionSink {
   Rc::new(move |action: ScreenAction, cx| {
-    if !drives(&label) {
-      return emit_to_webview(&app, &label, event, action);
-    }
     let label = label.clone();
     // The view that sent it is mid-update.
     cx.defer(move |cx| {
@@ -160,29 +148,10 @@ pub(in crate::gpui_shell) fn shortcut(label: &str, shortcut: Shortcut, cx: &mut 
   }
 }
 
-/// Whether React's overlay for window `label` is drawn: only while the
-/// model does not drive it. Main thread, outside a GPUI update.
-pub(in crate::gpui_shell) fn react_overlay(label: &str, _: Option<OverlaySnapshot>) -> bool {
-  !drives(label)
-}
-
 /// A change the backend reports for window `label` (`Backend::notify`):
-/// the model follows it. True keeps it from React, for the requests and
-/// remote feedback the model answers itself. Any thread.
-pub fn native_event(app: &AppHandle, label: &str, event: &NativeEvent) -> bool {
-  if !drives(label) {
-    return false;
-  }
-  let event_for_model = event.clone();
-  with_controller(app, label, move |c, cx| {
-    c.native_event(&event_for_model, cx)
-  });
-  matches!(
-    event,
-    NativeEvent::Open { .. }
-      | NativeEvent::RemoteMutation { .. }
-      | NativeEvent::RemoteCutoff { .. }
-  )
+/// the model follows it. Any thread.
+pub fn native_event(app: &AppHandle, label: &str, event: NativeEvent) {
+  with_controller(app, label, move |c, cx| c.native_event(&event, cx));
 }
 
 /// The cloud workspace connected or renewed (`ManagedEndpointEvent`): a
@@ -218,9 +187,9 @@ pub fn instance_state(app: &AppHandle, state: Option<String>) {
   }
 }
 
-/// A menu bar item for window `label`, as the event `lib.rs` would send
-/// React (`payload`: the folder "Open…" picked). True when the model
-/// handles it. Any thread.
+/// A menu bar item for window `label`, named by the event `lib.rs` gives
+/// it (`payload`: the folder "Open…" picked). True when the model handles
+/// it. Any thread.
 pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<String>) -> bool {
   if !drives(label) {
     return false;

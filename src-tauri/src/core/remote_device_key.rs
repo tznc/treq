@@ -197,8 +197,7 @@ pub async fn ensure_device_key(_app: &tauri::AppHandle) -> Result<DeviceKeyInfo,
 mod tests {
   // Exercising `ensure_device_key` end to end requires a running mobile
   // keystore/biometric plugin, which is not available in a unit test
-  // process - see the `app-qa`/device-build path for that coverage
-  // instead. This module keeps the platform-independent key-material
+  // process - a device build covers that instead. This module keeps the platform-independent key-material
   // helpers covered.
   use super::*;
 

@@ -1,8 +1,0 @@
-{
-  "name": "treq-src-tauri",
-  "private": true,
-  "type": "commonjs",
-  "scripts": {
-    "tauri": "tauri"
-  }
-}

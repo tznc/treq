@@ -45,7 +45,6 @@ use agent_runtime::{
   start_agent_ipc_listener, start_instance_registry_heartbeat,
 };
 #[cfg(feature = "gui")]
-use commands::file_watcher::WatcherManager;
 #[cfg(feature = "gui")]
 use db::Database;
 #[cfg(feature = "gui")]
@@ -58,61 +57,22 @@ use std::sync::Mutex;
 #[cfg(desktop)]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 #[cfg(feature = "gui")]
-use tauri::{AppHandle, Emitter, EventTarget, Manager};
+use tauri::{AppHandle, Manager};
 #[cfg(feature = "gui")]
 use tauri_plugin_log::{Target, TargetKind};
 
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
+// `tests/common` names the crate as integration tests see it.
+#[cfg(test)]
 extern crate self as treq_lib;
 
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-mod e2e_test_helpers;
-
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-mod tauri_test_bridge;
-
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-pub(crate) mod test_pty_events;
-
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::commands::CloudAction;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::commands::CutoffReasonDto;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::core::remote::TreqCommandRequest;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::core::remote_control_plane::SshEndpoint;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::core::remote_pty::PtyLaunchSpec;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use crate::core::skills::SkillInstallScope;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use commands::RemoteExecState;
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-use commands::RemotePtyState;
-
-#[cfg(feature = "gui")]
-#[cfg(feature = "tauri-test")]
-#[tauri_test::setup(init = tauri_test_bridge::init_test_state)]
-pub struct TauriTestApp;
+/// The real-repository fixture the integration tests use (`tests/common`).
+#[cfg(test)]
+mod test_repo;
 
 #[cfg(feature = "gui")]
 pub(crate) struct AppState {
   db: Mutex<Database>,
   pty_manager: PtyManager,
-  watcher_manager: WatcherManager,
   window_repo_paths: Mutex<HashMap<String, String>>,
   window_last_focused_at: Mutex<HashMap<String, u64>>,
   /// Supporting repository paths shown in each window, by window label.
@@ -129,7 +89,6 @@ impl AppState {
   pub(crate) fn new(
     db: Database,
     pty_manager: PtyManager,
-    watcher_manager: WatcherManager,
     dispatch_instance_id: String,
     dispatch_started_at: u64,
     dispatch_endpoint: String,
@@ -138,7 +97,6 @@ impl AppState {
     Self {
       db: Mutex::new(db),
       pty_manager,
-      watcher_manager,
       window_repo_paths: Mutex::new(HashMap::new()),
       window_last_focused_at: Mutex::new(HashMap::new()),
       window_supporting_repo_paths: Mutex::new(HashMap::new()),
@@ -150,12 +108,22 @@ impl AppState {
   }
 }
 
-/// Picks which webview a menu event targets, following the same rule as
-/// `emit_to_focused`: the currently focused window, falling back to the
-/// most recently focused one that still exists.
+/// The app's repo windows by label, leaving out the popup windows the GPUI
+/// shell opens over them (tooltips, menus, toasts and dialogs).
+#[cfg(feature = "gui")]
+fn repo_windows(app: &AppHandle) -> HashMap<String, tauri::Window> {
+  app
+    .windows()
+    .into_iter()
+    .filter(|(label, _)| !label.starts_with("gpui-popup-"))
+    .collect()
+}
+
+/// Picks which window a menu event targets: the currently focused window,
+/// falling back to the most recently focused one that still exists.
 #[cfg(feature = "gui")]
 fn resolve_menu_target_label(app: &AppHandle) -> Option<String> {
-  let windows = app.webview_windows();
+  let windows = repo_windows(app);
   let focused: Vec<String> = windows
     .iter()
     .filter_map(|(label, window)| {
@@ -174,41 +142,28 @@ fn resolve_menu_target_label(app: &AppHandle) -> Option<String> {
   open_new_window::resolve_menu_event_window_label(&focused, &last_focused, &existing)
 }
 
-/// Hands a menu event for window `label` to its GPUI window model; false
-/// when React handles it.
+/// Hands a menu event for window `label` to its GPUI window model.
 #[cfg(feature = "gui")]
-fn gpui_menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<String>) -> bool {
+fn gpui_menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<String>) {
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
-  if gpui_shell::is_enabled(app) {
-    return gpui_shell::menu_event(app, label, event, payload);
+  if !gpui_shell::menu_event(app, label, event, payload) {
+    log::debug!("window {label} has no handler for {event}");
   }
+  #[cfg(not(all(feature = "gpui-shell", desktop)))]
   let _ = (app, label, event, payload);
-  false
 }
 
-/// A menu event for the focused window: its GPUI window model's, else
-/// React's (`emit_to_focused`).
+/// A menu event for the focused window's model.
+///
+/// On macOS the menu bar unfocuses every window, so this falls back to the
+/// most recently focused window and never broadcasts: a broadcast would run
+/// folder pickers in every open window.
 #[cfg(feature = "gui")]
 fn menu_to_focused(app: &AppHandle, event: &str) {
-  let Some(label) = resolve_menu_target_label(app) else {
-    return;
-  };
-  if !gpui_menu_event(app, &label, event, None) {
-    let _ = app.emit_to(EventTarget::webview_window(&label), event, ());
+  if let Some(label) = resolve_menu_target_label(app) {
+    gpui_menu_event(app, &label, event, None);
   }
-}
-
-/// Emits an event only to the focused webview window.
-///
-/// On macOS the menu bar unfocuses every window, so this never broadcasts
-/// globally — a broadcast would run folder pickers in every open webview.
-#[cfg(feature = "gui")]
-pub fn emit_to_focused<S: serde::Serialize + Clone>(app: &AppHandle, event: &str, payload: S) {
-  let Some(label) = resolve_menu_target_label(app) else {
-    return;
-  };
-  let _ = app.emit_to(EventTarget::webview_window(&label), event, payload);
 }
 
 /// What a `treq://` deep link asks the app to do.
@@ -223,8 +178,7 @@ enum DeepLinkKind {
   Unknown,
 }
 
-/// Sorts a deep link by what it asks for. An auth callback is matched by the
-/// same rule as `authCallbackToken` in `src/lib/auth-deep-link.ts`.
+/// Sorts a deep link by what it asks for.
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn classify_deep_link(url: &str) -> DeepLinkKind {
@@ -247,7 +201,7 @@ fn classify_deep_link(url: &str) -> DeepLinkKind {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 fn focus_target_window(app: &AppHandle) {
-  let Some(window) = resolve_menu_target_label(app).and_then(|l| app.get_webview_window(&l)) else {
+  let Some(window) = resolve_menu_target_label(app).and_then(|l| app.get_window(&l)) else {
     return;
   };
   let _ = window.unminimize();
@@ -259,7 +213,7 @@ fn focus_target_window(app: &AppHandle) {
 ///
 /// Guarded the same way as "Open in New Window": a macOS File-menu
 /// redelivery must not be able to stack a second directory picker on top of
-/// one already showing. The target webview is resolved and retained before
+/// one already showing. The target window is resolved and retained before
 /// the picker steals window focus, and the picker itself is shown after
 /// leaving the AppKit menu-tracking loop.
 #[cfg(feature = "gui")]
@@ -306,18 +260,7 @@ fn pick_folder_and_notify(app: AppHandle, label: String) {
           return;
         }
       };
-      if !gpui_menu_event(
-        &app,
-        &label,
-        "menu-repository-path-selected",
-        Some(path.clone()),
-      ) {
-        let _ = app.emit_to(
-          EventTarget::webview_window(&label),
-          "menu-repository-path-selected",
-          path,
-        );
-      }
+      gpui_menu_event(&app, &label, "menu-repository-path-selected", Some(path));
       open_new_window::OPEN_REPO_GATE.end();
     });
 }
@@ -392,9 +335,8 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
     });
 }
 
-/// Opens a window on repository `repo` (`None`: the start screen): inside
-/// the GPUI shell when it is on (see `gpui_shell`), else as a plain
-/// webview window showing the React app.
+/// Opens a window on repository `repo` (`None`: the start screen) in the
+/// GPUI shell (see `gpui_shell`).
 #[cfg(feature = "gui")]
 fn open_repo_window(
   app: &AppHandle,
@@ -404,15 +346,30 @@ fn open_repo_window(
 ) -> Result<(), Box<dyn std::error::Error>> {
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
-  if gpui_shell::is_enabled(app) {
-    return gpui_shell::open_window(app, label, repo, title);
+  return gpui_shell::open_window(app, label, repo, title);
+  #[cfg(not(all(feature = "gpui-shell", desktop)))]
+  {
+    let _ = (app, label, repo, title);
+    Err("built without the GPUI shell".into())
   }
-  let url = open_new_window::window_url(repo.as_deref());
-  tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(url.into()))
-    .title(title)
-    .inner_size(1400.0, 900.0)
-    .build()?;
-  Ok(())
+}
+
+/// GPUI could not start, so no window can open: says why in a native
+/// dialog, then quits once it is closed.
+#[cfg(feature = "gpui-shell")]
+#[cfg(desktop)]
+fn quit_without_gpui(app: &AppHandle, error: &dyn std::fmt::Display) {
+  use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+  log::error!("GPUI failed to start: {error}");
+  let handle = app.clone();
+  app
+    .dialog()
+    .message(format!(
+      "Treq could not start its renderer, so it has to quit.\n\n{error}"
+    ))
+    .title("Treq could not start")
+    .kind(MessageDialogKind::Error)
+    .show(move |_| handle.exit(1));
 }
 
 /// Web page a menu item opens in the browser, on every desktop platform.
@@ -497,7 +454,7 @@ pub fn run() {
       // native ones would; its toasts follow it as it moves or resizes.
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
-      if !window.label().starts_with("gpui-popup-") && gpui_shell::is_enabled(window.app_handle()) {
+      if !window.label().starts_with("gpui-popup-") {
         match event {
           tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
           tauri::WindowEvent::Focused(true) => {
@@ -549,6 +506,9 @@ pub fn run() {
 
       // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
+      // The e2e suite opens its fixture repository instead.
+      #[cfg(feature = "e2e")]
+      let saved_repo_path = gpui_shell::e2e::repo().or(saved_repo_path);
 
       // Load cached binary paths and initialize in-memory cache
       let binary_paths = commands::load_cached_binary_paths(&db);
@@ -560,27 +520,17 @@ pub fn run() {
 
       let pty_manager = PtyManager::new();
 
-      // Initialize file watcher
-      let watcher_manager = WatcherManager::new();
-      watcher_manager.set_app_handle(app.handle().clone());
-
       // Background PR-status poller (sidebar reads from its cache)
       crate::pr_status::set_app_handle(app.handle().clone());
 
-      // Automatic reviews: jj operations signal, the frontend launches
-      // the review terminal.
+      // Automatic reviews: jj operations signal, the window launches the
+      // review terminal.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
       {
-        use tauri::Emitter;
         let review_app = app.handle().clone();
         crate::auto_review::set_emitter(Box::new(move |event| {
-          // Shell windows start the review from Rust.
-          #[cfg(feature = "gpui-shell")]
-          #[cfg(desktop)]
-          if gpui_shell::is_enabled(&review_app) {
-            gpui_shell::launch::auto_review(&review_app, event);
-            return;
-          }
-          let _ = review_app.emit("auto-review-triggered", event);
+          gpui_shell::launch::auto_review(&review_app, event);
         }));
       }
 
@@ -590,7 +540,6 @@ pub fn run() {
       let app_state = AppState::new(
         db,
         pty_manager,
-        watcher_manager,
         dispatch_instance_id,
         dispatch_started_at,
         dispatch_endpoint,
@@ -613,33 +562,28 @@ pub fn run() {
         &remote_exec_state,
       ));
       app.manage(remote_exec_state);
-      // Only now: a shell window's model reads the database and the binary
+      // Only now: a window's model reads the database and the binary
       // caches as soon as the window is made.
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
-      if let Err(err) = gpui_shell::init(app) {
-        log::error!("GPUI shell unavailable, using the webview window: {err}");
+      match gpui_shell::init(app) {
+        Ok(()) => open_repo_window(
+          app.handle(),
+          "main",
+          saved_repo_path.clone(),
+          "Treq - Stacking ADE",
+        )?,
+        Err(err) => quit_without_gpui(app.handle(), &err),
       }
-      open_repo_window(
-        app.handle(),
-        "main",
-        saved_repo_path.clone(),
-        "Treq - Stacking ADE",
-      )?;
-      // GPUI shell windows draw the account from Rust, which owns the
-      // Supabase session; without the shell the webview keeps it.
-      #[cfg(feature = "gpui-shell")]
-      #[cfg(desktop)]
-      if gpui_shell::is_enabled(app.handle()) {
-        commands::cloud::start(app.handle());
-      }
+      // Rust owns the Supabase session; the windows draw the account.
+      commands::cloud::start(app.handle());
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
       crate::core::app_setup_script::spawn_run_if_needed(
         crate::core::app_setup_script::Trigger::Startup,
       );
 
-      // Listen for deep-link events and forward to frontend
+      // Deep links: sign-in callbacks and agent starts.
       #[cfg(desktop)]
       {
         use tauri_plugin_deep_link::DeepLinkExt;
@@ -655,11 +599,7 @@ pub fn run() {
           for url in urls {
             match classify_deep_link(&url) {
               // One window only: the sign-in token can be exchanged once.
-              DeepLinkKind::AuthCallback => {
-                if !commands::cloud::handle_auth_callback(&handle, &url) {
-                  emit_to_focused(&handle, "deep-link-received", vec![url]);
-                }
-              }
+              DeepLinkKind::AuthCallback => commands::cloud::handle_auth_callback(&handle, &url),
               DeepLinkKind::Agent => {
                 if let Some(request) = parse_agent_request_from_url(&url) {
                   let response = route_agent_dispatch_request(&handle, &request);
@@ -759,11 +699,6 @@ pub fn run() {
           // Developer menu (only in debug mode)
           #[cfg(debug_assertions)]
           let developer_menu = {
-            let open_web_inspector =
-              MenuItemBuilder::with_id("open_web_inspector", "Open Web Inspector")
-                .accelerator("CmdOrCtrl+Shift+I")
-                .build(app)?;
-
             let force_rebase_item =
               MenuItemBuilder::with_id("force_rebase_workspace", "Force Rebase Workspace")
                 .accelerator("CmdOrCtrl+Shift+R")
@@ -773,8 +708,6 @@ pub fn run() {
               MenuItemBuilder::with_id("factory_reset", "Factory Reset").build(app)?;
 
             SubmenuBuilder::new(app, "Developer")
-              .item(&open_web_inspector)
-              .separator()
               .item(&force_rebase_item)
               .separator()
               .item(&factory_reset_item)
@@ -784,7 +717,7 @@ pub fn run() {
           // Window menu
           //
           // Close Window intentionally has no keyboard accelerator: the OS-default
-          // Cmd+W is repurposed in the frontend to close the selected terminal (or
+          // Cmd+W is repurposed in the window to close the selected terminal (or
           // do nothing) instead of closing the whole treq window. The menu item is
           // still clickable and closes the focused window via the handler below.
           let close_window_item =
@@ -871,11 +804,6 @@ pub fn run() {
           // Developer menu (only in debug mode)
           #[cfg(debug_assertions)]
           let developer_menu = {
-            let open_web_inspector =
-              MenuItemBuilder::with_id("open_web_inspector", "Open Web Inspector")
-                .accelerator("CmdOrCtrl+Shift+I")
-                .build(app)?;
-
             let force_rebase_item =
               MenuItemBuilder::with_id("force_rebase_workspace", "Force Rebase Workspace")
                 .accelerator("CmdOrCtrl+Shift+R")
@@ -885,8 +813,6 @@ pub fn run() {
               MenuItemBuilder::with_id("factory_reset", "Factory Reset").build(app)?;
 
             SubmenuBuilder::new(app, "Developer")
-              .item(&open_web_inspector)
-              .separator()
               .item(&force_rebase_item)
               .separator()
               .item(&factory_reset_item)
@@ -918,7 +844,7 @@ pub fn run() {
           app.set_menu(menu)?;
         }
 
-        // Handle menu events - emit only to focused window
+        // Handle menu events: only the focused window's
         app.on_menu_event(move |app, event| match event.id().as_ref() {
           "dashboard" => menu_to_focused(app, "navigate-to-dashboard"),
           "settings" => menu_to_focused(app, "navigate-to-settings"),
@@ -926,15 +852,8 @@ pub fn run() {
           "open_new_window" => schedule_open_repo_in_new_window(app.clone()),
           "open_ssh" => menu_to_focused(app, "menu-open-ssh"),
           "add_repository" => menu_to_focused(app, "menu-add-repository"),
-          "open_web_inspector" =>
-          {
-            #[cfg(debug_assertions)]
-            if let Some(w) = app.get_webview_window("main") {
-              w.open_devtools();
-            }
-          }
           "close_window" => {
-            for (_, window) in app.webview_windows() {
+            for (_, window) in repo_windows(app) {
               if window.is_focused().unwrap_or(false) {
                 let _ = window.close();
                 break;
@@ -955,232 +874,6 @@ pub fn run() {
 
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![
-      commands::gpui_sidebar_update,
-      commands::gpui_screen_update,
-      commands::gpui_modal_update,
-      commands::gpui_overlay_update,
-      commands::gpui_menu_show,
-      commands::gpui_menu_hide,
-      commands::gpui_toasts_update,
-      commands::gpui_toast_action,
-      commands::acknowledge_agent_dispatch,
-      commands::detect_editor_apps,
-      commands::get_treq_bin_dir,
-      commands::check_prerequisites,
-      commands::get_workspaces,
-      commands::create_workspace,
-      commands::open_or_create_workspace_from_pr,
-      commands::delete_workspace,
-      commands::archive_workspace,
-      commands::get_repo_default_branch,
-      commands::push_workspace_to_remote,
-      commands::pull_workspace_from_remote,
-      commands::merge_workspace,
-      commands::move_workspace_changes,
-      commands::abandon_commit,
-      commands::undo_commit,
-      commands::revert_commit,
-      commands::rename_workspace,
-      commands::list_workspace_statuses,
-      commands::get_workspace_status,
-      commands::update_workspace,
-      commands::set_workspace_target_branch,
-      commands::check_and_rebase_workspaces,
-      commands::ensure_workspace_indexed,
-      commands::get_setting,
-      commands::get_settings_batch,
-      commands::set_setting,
-      commands::get_app_setup_script_status,
-      commands::save_app_setup_script,
-      commands::run_app_setup_script,
-      commands::get_app_setup_logs,
-      commands::get_system_logs,
-      commands::open_system_log_dir,
-      commands::get_repo_setting,
-      commands::set_repo_setting,
-      commands::list_skill_catalog,
-      commands::list_installed_skills,
-      commands::install_skill,
-      commands::uninstall_skill,
-      commands::set_skill_install_scope,
-      commands::get_workspace_file_hunks,
-      commands::get_workspace_file_hunks_batch,
-      commands::get_workspace_file_lines,
-      commands::jj_restore_file,
-      commands::jj_restore_all,
-      commands::jj_snapshot_working_copy,
-      commands::jj_restore_snapshot,
-      commands::undo_repo_operation,
-      commands::create_commit,
-      commands::list_commits,
-      commands::jj_split,
-      commands::get_repo_current_branch,
-      commands::get_workspace_changed_files,
-      commands::set_git_submodule_synced,
-      commands::init_repo,
-      commands::jj_git_fetch_background,
-      commands::jj_get_commits_ahead,
-      commands::get_workspace_diff,
-      commands::get_commit_diff,
-      commands::get_commit_file_diff,
-      commands::jj_check_branch_exists,
-      commands::list_repo_branches,
-      commands::switch_repo_branch,
-      commands::get_commit_description,
-      commands::describe_commit,
-      commands::shift_commit_timestamp,
-      commands::shift_mutable_commits_to_now,
-      commands::start_resolve_conflicts,
-      commands::build_resolve_agent_prompt,
-      commands::resolve_commit,
-      commands::pty_create_session,
-      commands::devcontainer_status,
-      commands::devcontainer_up,
-      commands::pty_session_exists,
-      commands::pty_write,
-      commands::pty_write_suppress_echo,
-      commands::pty_resize,
-      commands::pty_close,
-      commands::remote_pty_create,
-      commands::remote_pty_write,
-      commands::remote_pty_resize,
-      commands::remote_pty_close,
-      commands::remote_pty_session_exists,
-      commands::remote_pty_list_persistent_sessions,
-      commands::remote_pty_reattach,
-      commands::read_file,
-      commands::write_send_review_image,
-      commands::write_agent_cli_files,
-      commands::get_file_modified_at,
-      commands::list_directory,
-      commands::list_directories_batch,
-      commands::ls_workspace_with_status,
-      commands::list_gitignored_path_suggestions,
-      commands::get_workspace_readme,
-      commands::search_workspace_files,
-      commands::create_session,
-      commands::get_sessions,
-      commands::update_session_access,
-      commands::get_session_model,
-      commands::add_prompt_history,
-      commands::get_prompt_history,
-      commands::get_workspace_starting_prompt,
-      commands::stash_workspace_changes,
-      commands::stash_commit,
-      commands::list_stashes,
-      commands::delete_stash,
-      commands::apply_stash,
-      commands::get_stash_diff,
-      commands::export_stash_git_patch,
-      commands::mark_file_viewed,
-      commands::unmark_file_viewed,
-      commands::start_file_watcher,
-      commands::stop_file_watcher,
-      commands::load_pending_review,
-      commands::save_pending_review,
-      commands::clear_pending_review,
-      commands::list_agent_review_comments,
-      commands::create_review_draft,
-      commands::update_agent_review_comment,
-      commands::resolve_agent_review_comment,
-      commands::delete_agent_review_comment,
-      commands::apply_agent_review_suggestion,
-      commands::load_file_browser_review,
-      commands::save_file_browser_review,
-      commands::clear_file_browser_review,
-      commands::open_browser_webview,
-      commands::navigate_browser_webview,
-      commands::close_browser_webview,
-      commands::sync_browser_webview_bounds,
-      commands::list_ssh_hosts,
-      commands::list_local_ssh_identities,
-      commands::read_local_ssh_public_key,
-      commands::resolve_ssh_config_alias,
-      commands::probe_ssh_host_key,
-      commands::remote_dispatch_local,
-      commands::remote_dispatch_over_ssh,
-      commands::remote_dispatch_mutation_over_ssh,
-      commands::remote_force_cutoff,
-      commands::remote_clear_cutoff,
-      commands::remote_cut_off_managed,
-      commands::cloud_account,
-      commands::cloud_sign_out,
-      commands::cloud_exchange_token,
-      commands::cloud_refresh_subscription,
-      commands::cloud_workspace_action,
-      commands::remote_set_relay_access_token,
-      commands::set_window_repo_path,
-      commands::set_window_supporting_repo_paths,
-      commands::list_supporting_repos,
-      commands::add_supporting_repo,
-      commands::remove_supporting_repo,
-      commands::rebase_home_repo_branch,
-      commands::dry_run_home_repo_rebase,
-      commands::get_git_remote_url,
-      commands::get_pr_info_via_gh,
-      commands::start_pr_status_polling,
-      commands::stop_pr_status_polling,
-      commands::list_cached_pr_statuses,
-      commands::get_cached_pr_info,
-      commands::list_cached_pr_ci_statuses,
-      commands::get_cached_pr_ci_status,
-      commands::refresh_pr_statuses,
-      commands::refresh_pr_branch_status,
-      commands::get_pr_checks_via_gh,
-      commands::get_pr_checks_for_pr,
-      commands::gh_list_issues,
-      commands::gh_view_issue,
-      commands::github_open_or_create_workspace_from_issue,
-      commands::gh_create_issue,
-      commands::gh_create_issue_comment,
-      commands::gh_close_issue,
-      commands::gh_reopen_issue,
-      commands::gh_edit_issue,
-      commands::gh_delete_issue,
-      commands::gh_list_prs,
-      commands::gh_view_pr,
-      commands::gh_create_pr_comment,
-      commands::gh_close_pr,
-      commands::gh_reopen_pr,
-      commands::gh_set_pr_draft,
-      commands::gh_current_user,
-      commands::gh_pr_diff,
-      commands::gh_reply_pr_review_thread,
-      commands::gh_submit_pr_review,
-      commands::gh_create_pr,
-      commands::gh_list_pr_review_threads,
-      commands::linear_list_teams,
-      commands::linear_list_issues,
-      commands::linear_open_or_create_workspace_from_issue,
-      commands::linear_get_viewer,
-      commands::linear_set_proxy_session,
-      commands::linear_list_projects,
-      commands::linear_list_project_documents,
-      commands::linear_list_issue_comments,
-      commands::linear_list_project_comments,
-      commands::linear_list_document_comments,
-      commands::linear_prepare_review,
-      commands::linear_apply_review_suggestion,
-      commands::load_repo_yaml_config,
-      commands::list_workflows,
-      commands::run_workflow_job,
-      commands::run_workflow,
-      commands::is_repo_trusted,
-      commands::trust_repo,
-      commands::list_workflow_runs,
-      commands::get_workspace_setup_status,
-      commands::rerun_workspace_setup_script,
-      commands::get_run_logs,
-      commands::get_repo_logs,
-      commands::run_logs_sql,
-      commands::get_log_timeseries,
-      commands::register_agent_chat,
-      commands::record_agent_chat_user_message,
-      commands::record_agent_chat_screen,
-      commands::list_agent_chats,
-      commands::get_agent_chat,
-    ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app_handle, event| {

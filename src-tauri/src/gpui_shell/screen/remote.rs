@@ -9,8 +9,7 @@
 //! an endpoint, opening a terminal session, and the mutation feedback store.
 //!
 //! The dialogs cover the whole window, sidebar included, as `ui/dialog.tsx`
-//! does. While one is open the screen under it does not frame the webview,
-//! which would paint over them.
+//! did.
 
 use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};

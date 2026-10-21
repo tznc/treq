@@ -8,9 +8,10 @@
 use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, AnyElement, Context, FontWeight, SharedString, Window,
+  self, div, prelude::*, AnyElement, Context, FontWeight, Role, SharedString, Window,
 };
 
 pub(super) mod account;
@@ -238,7 +239,8 @@ fn options(pairs: &[(&str, &str)]) -> Vec<SelectOption> {
     .collect()
 }
 
-/// `AGENTS` in `src/lib/agents.ts`, after a first "default" option.
+/// The launchable agents (`core::agent_launch::AGENTS`), after a first
+/// "default" option.
 fn agent_options(default: &str) -> Vec<SelectOption> {
   options(&[
     ("", default),
@@ -1241,6 +1243,10 @@ impl Render for SettingsView {
         ui::text(div(), TextSize::Sm)
           .id(id)
           .debug_selector(move || selector)
+          .role(Role::Tab)
+          .aria_label(tab.label())
+          .aria_selected(active)
+          .test_support()
           .flex()
           .items_center()
           .gap_2()
@@ -1507,7 +1513,8 @@ impl SettingsView {
             false,
             p,
             self.field("app.notifyAgentFinished"),
-          ))),
+          )
+          .aria_label("Notify when an agent finishes"))),
       )
       .child(
         div()
@@ -1534,7 +1541,8 @@ impl SettingsView {
                 setup.loading,
                 p,
                 self.field("app.setupScriptAlwaysRun"),
-              ))
+              )
+              .aria_label("Run on every app startup"))
               .child(label("Run on every app startup")),
           )
           .child(
@@ -1730,7 +1738,8 @@ impl SettingsView {
         .child(switch_row(
           "Auto-push to remote",
           "Automatically push to the remote after every commit in this repository",
-          form::switch("settings-auto-push", f.auto_push, false, p, self.field("repo.autoPush")),
+          form::switch("settings-auto-push", f.auto_push, false, p, self.field("repo.autoPush"))
+            .aria_label("Auto-push to remote"),
           p,
         ))
         .child(switch_row(
@@ -1742,7 +1751,8 @@ impl SettingsView {
             false,
             p,
             self.field("repo.ignoreGeneratedAgentFiles"),
-          ),
+          )
+          .aria_label("Ignore generated Treq paths"),
           p,
         ))
         .child(
@@ -1859,7 +1869,8 @@ impl SettingsView {
                 false,
                 p,
                 self.field(&format!("preview.{}", feature.id)),
-              ))
+              )
+              .aria_label(feature.title.clone()))
           })),
       )
   }

@@ -11,7 +11,7 @@ use crate::gpui_shell::{
 /// A shortcut's keys and what it does.
 type Shortcut = (&'static [&'static str], &'static str);
 
-/// `KEYBOARD_SHORTCUT_SECTIONS` in src/lib/keyboard-shortcuts.ts.
+/// The shortcut sheet: each section's title and its shortcuts.
 pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Global",
@@ -130,6 +130,8 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
   div()
     .id("keyboard-shortcuts-modal")
     .debug_selector(|| "keyboard-shortcuts-modal".into())
+    .role(gpui::Role::Dialog)
+    .aria_label("Keyboard shortcuts")
     .w_full()
     .max_w(zpx(672.))
     .max_h(viewport.height * 0.85)
@@ -149,27 +151,4 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
         .child("Keyboard shortcuts"),
     )
     .child(grid)
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn matches_the_react_reference() {
-    let source = include_str!("../../../../src/lib/keyboard-shortcuts.ts");
-    let actions = SECTIONS.iter().flat_map(|(_, s)| s.iter()).count();
-    assert_eq!(source.matches("action: \"").count(), actions);
-    for (title, shortcuts) in SECTIONS {
-      assert!(source.contains(&format!("title: \"{title}\"")), "{title}");
-      for (keys, action) in *shortcuts {
-        let keys: Vec<String> = keys
-          .iter()
-          .map(|k| format!("\"{}\"", k.replace('\\', "\\\\")))
-          .collect();
-        let entry = format!("{{ keys: [{}], action: \"{action}\" }}", keys.join(", "));
-        assert!(source.contains(&entry), "{entry}");
-      }
-    }
-  }
 }

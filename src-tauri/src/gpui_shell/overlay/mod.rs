@@ -1,17 +1,17 @@
-//! Dashboard's window-wide dialogs, drawn by GPUI over the whole window
-//! (sidebar, GPUI screen and webview alike): `CommandPalette`,
-//! `KeyboardShortcutsModal`, `WorkspacePicker` and `BranchSwitcher`.
+//! The window-wide dialogs, drawn over the whole window, sidebar included:
+//! the command palette, the keyboard shortcuts sheet, the workspace picker
+//! and the branch switcher.
 //!
-//! React keeps which one is open (Dashboard state) and pushes it with
-//! `gpui_overlay_update`; GPUI shows it in a modal window over the shell
-//! window (see `modal`). The dialogs read and switch branches through the
-//! backend themselves. What runs a Dashboard handler (a palette command,
-//! the picked workspace, closing) goes back to the webview as a
-//! `gpui-overlay-action` event, and React pushes what shows next.
+//! The window model keeps which one is open and pushes it; GPUI shows it in
+//! a modal window over the shell window (see `modal`). The dialogs read and
+//! switch branches through the backend themselves. What the model decides
+//! (a palette command, the picked workspace, closing) goes back to it as a
+//! screen action, and the model pushes what shows next.
 
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{
   InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
 };
@@ -38,9 +38,6 @@ mod tests;
 
 pub use data::OverlayHost;
 use data::{PaletteChecks, PrLink, WorkspaceRow};
-
-/// Event React listens to on its own webview window.
-pub const ACTION_EVENT: &str = "gpui-overlay-action";
 
 /// Which dialog shows, and the theme to draw it in.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -627,9 +624,27 @@ impl Overlay {
   ) -> gpui::Stateful<gpui::Div> {
     let id = SharedString::from(format!("overlay-item-{index}"));
     let selector = id.to_string();
+    // cmdk's `[cmdk-item]` is an option named by its label.
+    let description = match &self.body {
+      Body::Palette { commands, .. } => commands[index].description.clone(),
+      _ => None,
+    };
+    let name: Option<SharedString> = match &self.body {
+      Body::Palette { commands, .. } => Some(commands[index].label.clone().into()),
+      Body::Workspaces(Some(rows)) => Some(rows[index].branch_name.clone().into()),
+      Body::Branches {
+        branches: Some(list),
+        ..
+      } => Some(list[index].0.name.clone().into()),
+      _ => None,
+    };
     let base = div()
       .id(id)
       .debug_selector(move || selector)
+      .role(gpui::Role::ListBoxOption)
+      .aria_selected(selected)
+      .when_some(name, |this, name| this.aria_label(name))
+      .when_some(description, |this, d| this.aria_description(d))
       .flex()
       .items_center()
       .gap_3()
@@ -786,13 +801,23 @@ impl Overlay {
               .into_any_element(),
           );
           let selected = self.selected == Some(index);
-          children.push(self.row(p, index, selected, cx).into_any_element());
+          children.push(
+            self
+              .row(p, index, selected, cx)
+              .test_support()
+              .into_any_element(),
+          );
           continue;
         }
       }
       self.rows.push((index, children.len()));
       let selected = self.selected == Some(index);
-      children.push(self.row(p, index, selected, cx).into_any_element());
+      children.push(
+        self
+          .row(p, index, selected, cx)
+          .test_support()
+          .into_any_element(),
+      );
     }
     children
   }
@@ -817,7 +842,9 @@ impl Render for Overlay {
       self.focus.focus(window, cx);
     }
     let dialog = if shortcuts {
-      shortcuts::render(&p, viewport).into_any_element()
+      shortcuts::render(&p, viewport)
+        .test_support()
+        .into_any_element()
     } else {
       let input = self.input(window, cx);
       let palette = matches!(self.body, Body::Palette { .. });
@@ -847,6 +874,8 @@ impl Render for Overlay {
           div()
             .id("overlay-dialog")
             .debug_selector(|| "overlay-dialog".into())
+            .role(gpui::Role::Dialog)
+            .test_support()
             .w(viewport.width * 0.4)
             .rounded(zpx(16.))
             .border_1()

@@ -1,70 +1,8 @@
 use crate::local_db;
 
-#[tauri::command]
-pub fn list_agent_review_comments(
-  repo_path: String,
-  target_type: String,
-  target_id: String,
-) -> Result<Vec<local_db::AgentReviewComment>, String> {
-  local_db::list_agent_review_comments(&repo_path, &target_type, &target_id)
-}
-
-#[tauri::command]
-pub fn resolve_agent_review_comment(repo_path: String, comment_id: String) -> Result<(), String> {
-  local_db::resolve_agent_review_comment(&repo_path, &comment_id)
-}
-
-/// Save a draft comment the user wrote on a reviewed target (a PR review).
-#[allow(clippy::too_many_arguments)]
-#[tauri::command]
-pub fn create_review_draft(
-  repo_path: String,
-  target_type: String,
-  target_id: String,
-  file_path: String,
-  start_line: i64,
-  end_line: i64,
-  side: Option<String>,
-  comment_text: String,
-  line_hash: Option<String>,
-) -> Result<local_db::AgentReviewComment, String> {
-  let draft = crate::core::review_drafts::NewReviewDraft {
-    target_type,
-    target_id,
-    file_path,
-    start_line,
-    end_line,
-    side,
-    comment_text,
-    line_hash,
-  };
-  crate::core::review_drafts::create_review_draft(&repo_path, &draft)
-}
-
-#[tauri::command]
-pub fn update_agent_review_comment(
-  repo_path: String,
-  comment_id: String,
-  comment_text: Option<String>,
-  line_hash: Option<String>,
-) -> Result<(), String> {
-  local_db::update_agent_review_comment(
-    &repo_path,
-    &comment_id,
-    comment_text.as_deref(),
-    line_hash.as_deref(),
-  )
-}
-
-#[tauri::command]
-pub fn delete_agent_review_comment(repo_path: String, comment_id: String) -> Result<(), String> {
-  local_db::delete_agent_review_comment(&repo_path, &comment_id)
-}
-
 /// Replace `start_line..=end_line` of the comment's file with its suggested
 /// text. Deliberately not the generic patch-file path: a suggestion already
 /// carries an exact line range, so applying it is a splice, not a diff apply.
-#[tauri::command]
 pub fn apply_agent_review_suggestion(repo_path: String, comment_id: String) -> Result<(), String> {
   let comment = local_db::get_agent_review_comment(&repo_path, &comment_id)?
     .ok_or_else(|| format!("Review comment '{}' not found", comment_id))?;

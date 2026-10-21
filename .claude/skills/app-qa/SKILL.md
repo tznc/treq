@@ -1,218 +1,145 @@
 ---
 name: app-qa
 description: >-
-  Screenshot-verify treq UI and interaction changes by driving the real app
-  (real jj repo via NAPI, jsdom React) with userEvent through
-  scripts/screenshot/. Use on /app-qa, when asked to QA or screenshot a
-  behavior, and proactively after changing UI-affecting code, before reporting
-  done.
+  Screenshot-verify treq desktop UI and interaction changes by driving the
+  real GPUI app with Playwright through gpui-playwright (e2e/desktop/qa), and
+  fuzz screens headlessly with gpui-testing-library. Use on /app-qa, when asked
+  to QA, screenshot or chaos-test a behavior, and proactively after changing
+  src-tauri/src/gpui_shell/** or code a screen reads, before reporting done.
 ---
 
 # App QA (screenshot-verified behavior checks)
 
+The desktop app is Rust: GPUI draws every window (`src-tauri/src/gpui_shell/`),
+and there is no webview. QA has three layers. Pick the lightest one that
+proves the change, and always look at the pixels for anything visual.
+
+| Layer | Tool | Runs | Use for |
+|---|---|---|---|
+| Screen tests and fuzzing | gpui-testing-library (`#[gpui::test]`) | headless, parallel, in `cargo test --lib` | one screen's behavior, invariants under random input |
+| Screenshot QA | gpui-playwright, `e2e/desktop/qa/` (`npm run qa`) | the real binary under Xvfb, one app | what a change looks like, before/after captures |
+| Chaos QA | gpui-playwright monkey script | the real binary under Xvfb | crashes, hangs and stale state across the whole app |
+
 ## When to use
 
-- User invokes `/app-qa`, optionally naming a flow or component ("app-qa the workspace
-  picker", "app-qa the merge conflict banner").
-- Proactively, immediately after an Edit/Write/MultiEdit that changes UI-affecting
-  code — don't wait to be asked. If you see `additionalContext` from
-  `post-edit-app-qa.sh` naming a changed file, that *is* the request.
+- The user invokes `/app-qa`, optionally naming a flow ("app-qa the merge
+  preview").
+- Proactively, right after an edit to `src-tauri/src/gpui_shell/**`, or to a
+  `core/` function a screen reads, before telling the user the change is done.
 
-## Delegate grunt work and discovery to cheaper subagents
+## Delegate the legwork
 
-Most of the cost of an app-qa run is search and mechanical legwork, not judgement. Push
-that to subagents on a cheaper model (`Agent` with `model: "haiku"`, or `"sonnet"` when
-the answer needs some reasoning) and keep the expensive context for the parts that
-actually need it. Run independent delegations in parallel in a single message.
+Hand discovery to cheaper subagents (`Agent` with `model: "haiku"`, or
+`"sonnet"` when it needs reasoning), in parallel where independent: which spec
+or `tests.rs` already sets up the state you need, which role and accessible
+name an element has, which `*Host` method backs a screen. Ask for the specific
+fact. Keep for yourself: deciding what to verify, writing the expectations,
+reading the PNGs (step 5), and the report.
 
-Good candidates — hand these off:
+## Making elements findable
 
-- **Finding prior art.** Which `test/integration/**` or `test/*.test.tsx` scenario
-  already builds the repo/workspace state this spec needs; whether a spec under
-  `scripts/screenshot/specs/` already covers this flow; which spec is the closest
-  shape to copy. Use `Explore` — it's read-only and returns the conclusion instead of
-  dumping files.
-- **Locating selectors and wiring.** The `data-testid`, accessible role, or button
-  label to drive; which component renders a given piece of copy; which UI flow a
-  changed `src-tauri/` or `src/lib/` file actually backs.
-- **Tracing command gaps.** When a flow fails inside `invoke`, have a subagent
-  find the corresponding `#[tauri::command]` and `core::*` function. `tauri-test`
-  dispatches the real command; there is no separate `dispatch.rs` match table.
-- **Mechanical sweeps.** Reading a batch of `<name>.json` manifests, chasing down
-  which spec produced which capture, diffing a spec against the one you're copying.
+Both tools find elements the way gpui-kit observes them: an element id, a role
+and an accessible name, then `.test_support()` (`gpui_kit::base::TestSupportExt`).
+`ui::Button` does this for every button, named by its label. If a control has
+no role or name, add them rather than querying by position. Observations are
+only recorded in test builds.
 
-Ask for the specific fact you need ("which test file creates a repo with a conflicted
-merge, and what does the setup look like") rather than "look into the test setup" —
-a subagent starts cold and pays to re-derive whatever you don't tell it.
+## Layer 1: screen tests and fuzzing (gpui-testing-library)
 
-Keep these yourself — they are the skill, not the legwork:
+- Write behavior tests in the `tests.rs` (or `tests/*.rs`) next to the screen,
+  with the `Harness`/`FakeHost` patterns in
+  `src-tauri/src/gpui_shell/screen/tests/testing_library.rs`: build a
+  `Screen`, act with `screen.user()` (`click`, `type`, `keyboard`), assert with
+  `expect(...)`. These go through GPUI's real pointer and keyboard dispatch, so
+  never call a view's handler directly to drive a scenario.
+- Fuzz with property tests in the same suites: generate random action
+  sequences (clicks on visible controls by role, typed text with unicode and
+  very long strings, Esc/Enter/Tab/arrows and the app's shortcuts) and check
+  invariants after every step: no panic, at most one modal, Esc closes the top
+  overlay, the route and selection stay valid, `FakeHost` receives no write the
+  user didn't confirm. Keep case counts small so the lib tests stay fast;
+  raise them for a hunting session with `PROPTEST_CASES=5000`. A failure prints
+  its seed and shrunk action list: turn it into a plain regression test.
+- Run only what you touched:
+  `CARGO_INCREMENTAL=0 cargo test --features gpui-shell --lib gpui_shell::<module>`
+  from `src-tauri/`.
 
-- Deciding what behavior to verify and what the `expectations` should claim.
-- Writing the spec and driving the flow with `userEvent`.
-- **Step 5 verification.** Read the PNGs yourself. The whole point is that the agent
-  shipping the change looks at the pixels; a subagent's "looks fine" is not that.
-- The final report to the user.
+## Layer 2: screenshot QA (gpui-playwright)
 
-## Ground rule: userEvent only, never fireEvent
+1. **Build the app with the Playwright server** (once per Rust change):
+   `cargo build --manifest-path src-tauri/Cargo.toml --features e2e --bin treq`.
+   Then `cd e2e/desktop && npm ci`.
+2. **Pick or write a spec** in `e2e/desktop/qa/<area>.spec.ts`. One file per
+   area; extend an existing file instead of duplicating its setup. The QA
+   launcher seeds the demo repository (`landing/seed.ts`: stacked workspaces,
+   a rebase conflict), a fake `gh` with fixture PRs, issues and checks
+   (`landing/fake-gh.mjs`, no network or token) and a fake `claude`. Drive the
+   app only through Playwright's user actions (`click`, `fill`, `press`,
+   `keyboard.type`) on `getByRole`/`getByLabel`/`getByText`/`getByTestId`
+   locators. If creating or renaming a workspace is part of the scenario,
+   do it through the real dialog; seed only incidental background state.
+3. **Capture with expectations.** `capture(page, { name, expectations })`
+   (`qa/capture.ts`) writes `<name>-<theme>.png` and a `.json` with the
+   expectations to `e2e/desktop/qa/.shots/` (or `QA_OUT`). `qa/helpers.ts`
+   has the shared steps (`ready`, `home`, `openWorkspace`, `openTab`,
+   `overlay`, `focusMain`, `dismissPopover`). Name captures `<area>-<NN>-<what-it-shows>`. `expectations` are
+   at most three plain-English claims about what the picture should show;
+   keep real `expect(...)` assertions in the spec too, since they prove the
+   state before the capture.
+   - The palette and other overlays open in one shared dialog window:
+     `overlay()` returns its page. Don't call `context.newPage()` twice.
+   - Toasts, tooltips and menus are popup windows Playwright can't reach.
+     Capture the whole X screen for those (`capture` with `screen: true`) and
+     assert on what they change.
+   - Check both themes for visual changes, and one non-default zoom when sizes
+     changed.
+4. **Run it** under Xvfb, from `e2e/desktop`:
+   `xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run qa -- --grep <area>`
+   (or `DISPLAY=:98 npm run qa` on a running Xvfb). `QA_THEME=light|dark`
+   picks the theme (run both for visual changes), `QA_REUSE=1` drives an app
+   that is already running, `TREQ_E2E_BIN` picks
+   another binary and `TREQ_E2E_PORT` another server port, so two runs can
+   share a machine on different displays and ports.
+5. **Verify every capture against its expectations.** Read each
+   `<name>.json`, then open `<name>.png` with the Read tool and confirm or
+   refute each claim. A spec whose assertions passed can still render a broken
+   layout, clipped text, the wrong theme colors or a stuck loading state; that
+   is a bug to fix.
+6. **Show the result.** Publish the before/after PNGs as an Artifact (a simple
+   gallery: each image with its name and expectations) and give the user the
+   link, calling out any expectation that didn't hold.
 
-Every interaction inside a spec must go through `@testing-library/user-event`
-(`userEvent.setup()`, then `user.click`, `user.type`, `user.keyboard`, `user.hover`,
-`user.tab`, ...). Never use `fireEvent` for driving the scenario.
+## Layer 3: chaos QA
 
-`fireEvent` dispatches one synthetic DOM event. `userEvent` replays the sequence a
-real user actually produces — pointerdown, focus, pointerup, click; or a real
-per-character sequence of keydown/input/keyup for typing. Radix components, cmdk,
-and treq's own focus/keyboard-shortcut handling key off that full sequence. A spec
-that drives state with `fireEvent.click` can look green while the real app is broken
-for a real user clicking the same button — it defeats the point of this skill.
+For "chaos QA", or before landing a large UI change: write a seeded monkey
+script on the same harness that repeatedly picks a visible control by role or
+a shortcut from the keymap (Ctrl+K, Ctrl+P, Ctrl+N, Ctrl+Shift+N, Ctrl+I,
+Ctrl+J, Ctrl+], Ctrl+\, ?, Esc, Tab, Enter, Ctrl+=/-/0), types random text,
+and after each step checks the app process is alive, Playwright still answers,
+and the app log has no `panicked`. Log the seed and the action trail so any
+failure replays. Add targeted scenarios: double-submits, dialogs over dialogs,
+fast switching while reads are in flight, the repo changing on disk behind the
+app (new commits, a deleted workspace dir, a conflict), tiny and huge windows,
+zoom extremes, 50+ workspaces, an empty repo, a non-git folder. Report each
+bug with its repro, log excerpt and a screenshot, and pin it with a layer 1
+test when it reproduces headlessly.
 
-This extends to *setup*, not just the behavior under test: if the scenario's
-narrative includes "the user creates a workspace" (or renames one, deletes one,
-etc.) as a step, create it by clicking through the real dialog (the "Stack" button
-on the home repo header, or hover an existing workspace's sidebar row and click its
-"Stack a workspace" button to create a stacked child -- workspace headers have no
-"Stack" button) rather than calling `createWorkspace()` from `src/lib/api` directly.
-The API helper is still fine for *incidental background state* a spec needs but
-isn't itself testing (e.g. two throwaway workspaces just so a branch-switcher
-dropdown has something to list). `scripts/screenshot/specs/commits-tab-after-push.spec.tsx`
-is the worked example: it drives the whole "Stack" dialog (open it, type a branch
-name, submit) with `userEvent`, not the API helper, because workspace creation is
-part of the scenario being verified.
+## Linux and Xvfb notes
 
-## Agent sessions need the fake agent
+- No window manager runs under Xvfb, so focus follows the pointer and a new
+  dialog window may not get keyboard focus. `focusMain()` (called by
+  `ready()`) runs `xdotool windowfocus` on the repo window.
+- Without a compositor, transparent windows (the palette and popover
+  backdrops) can paint the app black in screenshots. That is the
+  environment, not a bug, unless it reproduces on a desktop.
+- `page.mouse` reaches only the repo window. Popups, menus and native dialogs
+  need real X clicks (`xPointer`, `dismissPopover`).
+- `GDK_SCALE=2` gives crisp 2x PNGs; the QA launcher sets it.
+- jj-backed tests need a `jj` binary on `PATH`.
 
-A spec that starts an agent session (Edit/Run/Plan, sidebar agent buttons,
-Cmd+]) must call `installFakeAgents()` from `test/fake-agent.ts`, e.g.
-`onTestFinished(installFakeAgents())`. Without it no PTY spawns and the
-terminal shows an error card. With it, the fake agent's `fake-agent:`,
-`mode:`, `model:` and `prompt:` lines render in the terminal, so assert on
-them with `within(pane).findByText(...)` before capturing. See
-`test/AGENTS.md` ("Fake agent terminals").
+## Finish
 
-## References
-
-- `references/setup.md`: first-time environment setup for a fresh sandbox (npm deps, GTK/webkit packages, proxy CA trust). Read it only when `npm run build:napi` or `npm run screenshot` fails on a missing dependency.
-- `references/harness.md`: how `createTestRepo`, `render(<Dashboard/>)`, and `captureDocument` fit together, and why `setup.screenshot.ts` tolerates un-migrated `jj_*` commands. Read it when a spec fails inside the harness or you hit an unknown command.
-
-## Steps
-
-1. **Identify the behavior to verify.** From the user's ask, or from the changed
-   file(s) named in the hook's `additionalContext`, work out which user-facing flow
-   changed. Search `test/integration/**` and `test/*.test.tsx` for a scenario that
-   already sets up the right repo/workspace state (`createTestRepo`, `commitRepoFile`,
-   etc.) and reuse that setup instead of inventing your own — it's already proven to
-   work against the real backend. Delegate that search to an `Explore` subagent per the
-   section above; do the "which behavior matters" call yourself. Remember the rule
-   above: if workspace creation is part of the scenario, drive it through the real UI,
-   not `createWorkspace()`.
-
-2. **Write or extend a spec** under `scripts/screenshot/specs/<slug>.spec.tsx`. One
-   spec per behavior/flow. If an existing spec already covers this flow, add capture
-   steps to it rather than duplicating the repo setup in a new file. Shape:
-
-   ```tsx
-   import * as React from "react";
-   import { it } from "vitest";
-   import userEvent from "@testing-library/user-event";
-   import { createTestRepo, openRepo } from "../../../test/utils";
-   import { render, screen, within } from "../../../test/test-utils";
-   import { Dashboard } from "../../../src/components/Dashboard";
-   import { captureDocument } from "../capture";
-
-   it("captures <the behavior>", async () => {
-     const { repoPath } = createTestRepo(false);
-     openRepo(repoPath);
-     // ... real repo setup via test/utils + src/lib/api; drive workspace
-     // creation/deletion/etc. through the real UI if it's part of the scenario ...
-
-     const user = userEvent.setup();
-     render(<Dashboard />);
-
-     // Real DOM assertions -- these prove the state is correct BEFORE capturing.
-     // Separate from `expectations` below, which are about the picture, not the DOM.
-     await screen.findByTestId("show-workspace-header");
-     await captureDocument(document, {
-       name: "<slug>-01-before",
-       expectations: [
-         "Plain-English claim about what this screenshot should show visually.",
-         "A second claim, if there's more than one thing worth checking in the image.",
-       ],
-     });
-
-     // Drive the flow -- ONLY user.* calls, never fireEvent.
-     await user.click(await screen.findByRole("button", { name: "..." }));
-     await screen.findByText("..."); // wait for the resulting DOM change
-     await captureDocument(document, {
-       name: "<slug>-02-after",
-       expectations: ["What changed, stated as a visual claim about the after image."],
-     });
-   }, 60000);
-   ```
-
-   `scripts/screenshot/specs/workspace-branch-switch.spec.tsx` is a worked example of
-   the userEvent + multi-step-capture shape. `commits-tab-after-push.spec.tsx` is the
-   worked example of driving workspace creation through the real "Stack" dialog. Copy
-   whichever shape fits.
-
-   Give every capture a numbered, descriptive `name` — that string becomes the PNG
-   (and manifest JSON) filename, so name it as `<slug>-<NN>-<what-it-shows>`.
-
-3. **`expectations` are for the picture, not the DOM.** `captureDocument` requires a
-   non-empty `expectations: string[]` — plain-English claims about what a viewer
-   should be able to confirm by *looking at the screenshot* (colors, layout, which
-   button is visible, what a toast says, whether a list has the right items). These
-   are not code assertions and `captureDocument` does not execute them; they're
-   written to `<name>.json` next to the PNG specifically so that step 5 has a
-   concrete, per-screenshot checklist instead of "eyeball it and hope you notice
-   something wrong." Keep the real `screen.findBy*`/`expect` calls in the spec body
-   too (still required, still what proves the DOM reached that state) — the two are
-   complementary, not a replacement for each other.
-
-   **At most 3 expectations per capture** — enforced by the
-   `max-3-capture-document-expectations` ast-grep rule. Three claims is what a
-   reviewer actually re-reads against an image; a list of eight gets skimmed. If a
-   screenshot genuinely needs more than three, that is a sign it is showing more
-   than one thing: take a second capture with its own `name` and split the claims
-   across the two.
-
-4. **Run it.** If this is a fresh environment (no `node_modules/`, or `cargo build`
-   fails on GTK/webkit headers), follow `references/setup.md`
-   above first.
-   - First run in a session, or after touching `src-tauri`, or
-     adding new Tailwind classes: `npm run screenshot` (rebuilds the NAPI addon,
-     recompiles CSS, runs every spec — slow but complete).
-   - Fast iteration on one spec once the addon/CSS are already built:
-     `npx vitest run --config vitest.screenshot.config.ts scripts/screenshot/specs/<slug>.spec.tsx`
-   - If only Tailwind classes changed (no Rust change): `npm run screenshot:css` first,
-     then the targeted vitest run above.
-
-5. **Verify each screenshot against its expectations before saying the task is done.**
-   For every capture: read `scripts/screenshot/.generated/<name>.json` for its
-   expectations list, then read `scripts/screenshot/.generated/<name>.png` (multimodal
-   Read) and go through the list confirming or refuting each one against what the
-   image actually shows. A spec whose `expect`/`findBy*` calls all passed can still
-   render a visibly broken layout, a missing state, or wrong copy — that's a real bug
-   to fix, not a false alarm, and the expectations checklist is what catches it
-   instead of a cursory glance.
-
-6. **Show the result.** Use SendUserFile to deliver the before/after PNGs together,
-   with a short caption naming what changed and what to look at, and call out any
-   expectation that didn't hold.
-
-7. **Lint, format, and typecheck the whole change, last.** Only after the behavior is
-   visually verified and shown, run:
-   - `npm run format` — Biome (`./src ./test`) + `cargo fmt`, auto-fixes what it can.
-   - `npm run lint` — oxlint + eslint over `./src ./test/integration`, plus
-     `ast-grep scan --warning`.
-   - `npm run check` — `tsc` (typecheck) + `ast-grep test`.
-
-   Fix everything these flag — including in any spec file you added or extended in
-   step 2. Doing this last, after all edits (source and spec) have settled, catches
-   what an earlier check-then-edit ordering would miss and leaves the working tree in
-   a genuinely clean state before you tell the user the task is done.
-
-## Keep specs around
-
-`scripts/screenshot/specs/` is a growing visual-regression library, not a scratch
-directory. Don't delete a spec after using it — if a later change touches the same
-flow, extend its capture steps instead of writing a near-duplicate file.
+After the behavior is verified and shown: `cargo fmt`, `cargo clippy
+--features gpui-shell --lib --tests -- -D warnings`, and in `e2e/desktop`
+`npm run typecheck`. Keep the QA specs: `e2e/desktop/qa/` is a growing
+visual-regression library, not scratch.

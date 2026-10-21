@@ -2,8 +2,8 @@
 //! toasts, drawn like the React app's `TooltipContent`, `ContextMenuContent`
 //! and `ToastItem`.
 //!
-//! GPUI cannot paint over the webview (a native child window), so each popup
-//! is a small borderless, unfocusable Tauri window with GPUI attached. One
+//! Each popup is a small borderless, unfocusable Tauri window with GPUI
+//! attached, so it can reach past the edge of the shell window. One
 //! window per [`Slot`] (per shell window, for toasts) is built on first use,
 //! then moved and resized.
 
@@ -15,7 +15,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Wry};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Wry};
 use tauri_plugin_gpui::{
   gpui::{
     self, div, prelude::*, px, svg, App, Bounds, Context, Hsla, Pixels, Point, SharedString,
@@ -61,10 +61,6 @@ const DETAIL_GAP: f32 = 8.;
 /// The menu box: `p-1 border min-w-[8rem]`.
 const MENU_PADDING: f32 = 4.;
 const MENU_MIN_WIDTH: f32 = 128.;
-/// Sent to the menu's webview when an item is picked.
-pub const MENU_SELECT_EVENT: &str = "gpui-menu-select";
-/// Sent to a toast's webview when its action or close button is clicked.
-pub const TOAST_EVENT: &str = "gpui-toast";
 /// The toast stack's corner: `fixed bottom-4 left-4`, and its `gap-2`.
 const TOAST_INSET: f32 = 16.;
 const TOAST_GAP: f32 = 8.;
@@ -436,7 +432,7 @@ struct PopupView {
   slot: Slot,
   content: Content,
   palette: Palette,
-  /// The window the menu belongs to, for sending picks to its webview.
+  /// The window the popup belongs to.
   owner: String,
   /// The popup's box on screen, for placing a submenu beside an item.
   frame: Bounds<Pixels>,
@@ -875,12 +871,11 @@ impl PopupView {
                 this.set_open_submenu(None, cx);
               }
             }))
-            .on_click(cx.listener(move |this, _, _, cx| match native_pick(id) {
-              Some(pick) => {
-                this.close();
+            .on_click(cx.listener(move |this, _, _, cx| {
+              this.close();
+              if let Some(pick) = native_pick(id) {
                 pick(cx);
               }
-              None => this.pick(id),
             }))
             .into_any_element()
         }
@@ -977,31 +972,6 @@ impl PopupView {
       hide(Slot::Menu);
     });
   }
-
-  /// Sends a picked item to the menu's webview and closes the menus.
-  fn pick(&self, id: u32) {
-    let owner = self.owner.clone();
-    defer_main(&self.app, move |app| {
-      hide(Slot::Submenu);
-      hide(Slot::Menu);
-      let target = tauri::EventTarget::webview_window(&owner);
-      if let Err(err) = app.emit_to(target, MENU_SELECT_EVENT, MenuSelect { id }) {
-        log::warn!("failed to send a GPUI menu pick: {err}");
-      }
-    });
-  }
-}
-
-#[derive(Clone, Serialize)]
-struct MenuSelect {
-  id: u32,
-}
-
-/// A click on a toast's action (`action: true`) or close button.
-#[derive(Clone, Serialize)]
-struct ToastClick {
-  id: String,
-  action: bool,
 }
 
 impl PopupView {
@@ -1100,21 +1070,11 @@ impl PopupView {
     stack.into_any_element()
   }
 
-  /// Sends a toast click to the toast's webview.
+  /// Runs a toast click: its action or close button.
   fn click_toast(&self, id: &str, action: bool) {
-    let owner = self.owner.clone();
-    let click = ToastClick {
-      id: id.to_string(),
-      action,
-    };
+    let (owner, id) = (self.owner.clone(), id.to_string());
     defer_main(&self.app, move |app| {
-      if super::toasts::click(app, &owner, &click.id, click.action) {
-        return;
-      }
-      let target = tauri::EventTarget::webview_window(&owner);
-      if let Err(err) = app.emit_to(target, TOAST_EVENT, click) {
-        log::warn!("failed to send a GPUI toast click: {err}");
-      }
+      super::toasts::click(app, &owner, &id, action)
     });
   }
 }
@@ -1255,27 +1215,6 @@ thread_local! {
   static WINDOWS: RefCell<HashMap<String, PopupWindow>> = RefCell::default();
   /// A menu is open, so tooltips stay hidden, as under a React context menu.
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
-  /// The screen button a dropdown menu opens below, and when it was pressed.
-  static DROPDOWN_ANCHOR: Cell<Option<(Bounds<Pixels>, std::time::Instant)>> =
-    const { Cell::new(None) };
-}
-
-/// How long after its button's press React may open the dropdown.
-const DROPDOWN_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// Records `anchor` (window coordinates) as the button whose press asks
-/// React for a menu, so the menu opens below it, as `DropdownMenuContent
-/// align="end"` does, instead of at the pointer.
-pub fn set_dropdown_anchor(anchor: Bounds<Pixels>) {
-  DROPDOWN_ANCHOR.with(|cell| cell.set(Some((anchor, std::time::Instant::now()))));
-}
-
-/// The button of a dropdown pressed just now, consumed by the menu it opens.
-pub fn take_dropdown_anchor() -> Option<Bounds<Pixels>> {
-  DROPDOWN_ANCHOR
-    .with(Cell::take)
-    .filter(|(_, at)| at.elapsed() < DROPDOWN_WINDOW)
-    .map(|(anchor, _)| anchor)
 }
 
 /// A dropdown's box below `anchor` with their right edges lined up (screen
@@ -1849,8 +1788,8 @@ mod tests {
   }
 
   #[test]
-  fn reads_every_menu_icon_react_sends() {
-    // `MenuIcon` in src/lib/native-context-menu.ts.
+  fn reads_every_menu_icon() {
+    // Every icon a menu item can name.
     let names = [
       "archive",
       "copy",

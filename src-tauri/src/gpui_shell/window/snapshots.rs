@@ -183,14 +183,10 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     "setupRerunning": false,
     "mergeQueue": null,
     "revision": data.revision,
-    "code": true,
-    "frameHeight": null,
     "scrollToCommit": view.scroll_to_commit.as_ref().filter(|_| view.tab == Tab::Commits),
     "showCommitted": committed_toggle.then_some(view.show_committed),
     "moveTargets": move_targets,
     "changesRevision": view.changes_revision,
-    "reviewSwitcher": false,
-    "browser": null,
     "logsSource": (view.tab == Tab::Logs).then_some(&view.logs_source),
     "logsKey": view.logs_key,
     "terminal": {
@@ -416,7 +412,6 @@ mod tests {
     };
     assert_eq!(route.workspace_id, Some(2));
     assert_eq!(route.home_branch, "main");
-    assert!(route.code);
     assert_eq!(route.scroll_to_commit.as_deref(), Some("abc"));
     assert_eq!(route.show_committed, Some(true));
     let targets: Vec<_> = route

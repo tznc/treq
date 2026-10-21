@@ -10,6 +10,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::collections::HashMap;
 
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::{
   input::{InputEvent, InputState, Textarea, TextareaState},
   searchable_list::SearchableListItem,
@@ -19,7 +20,8 @@ use gpui_kit::component::{
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, App, Context, Entity, Focusable as _, SharedString, Subscription, Window,
+  accesskit::Toggled, div, prelude::*, App, Context, Div, Entity, Focusable as _, Role,
+  SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -325,6 +327,10 @@ pub fn slider_field(state: &Entity<SliderState>) -> impl IntoElement {
   Slider::new(state)
 }
 
+/// A switch, observed for UI tests. Name it with `.aria_label(..)`, as
+/// React's `<Switch aria-label>` or its `<Label htmlFor>` does.
+pub type Switch = ObservedElement<Stateful<Div>>;
+
 /// `ui/switch.tsx`: a 36×20 pill with a 16px thumb.
 pub fn switch(
   id: impl Into<SharedString>,
@@ -332,7 +338,7 @@ pub fn switch(
   disabled: bool,
   palette: &Palette,
   on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+) -> Switch {
   switch_sized(
     id,
     checked,
@@ -351,12 +357,18 @@ pub fn switch_sized(
   palette: &Palette,
   (width, height, thumb): (f32, f32, f32),
   on_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+) -> Switch {
   let id: SharedString = id.into();
   let selector = id.to_string();
   div()
     .id(id)
     .debug_selector(move || selector)
+    .role(Role::Switch)
+    .aria_toggled(if checked {
+      Toggled::True
+    } else {
+      Toggled::False
+    })
     .flex()
     .flex_none()
     .items_center()
@@ -385,4 +397,5 @@ pub fn switch_sized(
         .cursor_pointer()
         .on_click(move |_, window, cx| on_change(&!checked, window, cx))
     })
+    .test_support()
 }

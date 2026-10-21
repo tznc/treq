@@ -4873,12 +4873,11 @@ mod tests {
     }
   }
 
-  // -- Real repository round trips (need the tauri-test helpers) ---------------
+  // -- Real repository round trips ---------------------------------------------
 
-  #[cfg(feature = "tauri-test")]
   mod real_repo {
     use super::super::*;
-    use crate::e2e_test_helpers::TestRepo;
+    use crate::test_repo::TestRepo;
 
     fn key(tag: &str) -> String {
       format!("{tag}-{}", super::uuid_like())

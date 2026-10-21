@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PostToolUse hook (Write|Edit|MultiEdit): after any edit to UI-affecting source,
-# nudge Claude to run the /app-qa skill (napi+jsdom+Chromium screenshot harness)
-# before reporting the change as done.
+# nudge Claude to run the /app-qa skill (gpui-playwright screenshot QA and
+# gpui-testing-library screen tests) before reporting the change as done.
 set -euo pipefail
 
 input="$(cat)"
@@ -12,7 +12,7 @@ if [ -z "$file_path" ]; then
 fi
 
 case "$file_path" in
-*src/components/* | *src/hooks/* | *src/lib/* | *src-tauri/src/commands/* | *src-tauri/src/core/*)
+*src-tauri/src/gpui_shell/* | *src-tauri/src/core/*)
 	;;
 *)
 	exit 0
@@ -32,6 +32,6 @@ if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
 	rel_path="${file_path#"$CLAUDE_PROJECT_DIR"/}"
 fi
 
-context="UI-affecting file changed: ${rel_path}. Before telling the user this change is done, use the /app-qa skill to drive the affected behavior with @testing-library/user-event (never fireEvent) through the napi+jsdom+Chromium screenshot harness in scripts/screenshot/, and visually confirm the before/after result."
+context="UI-affecting file changed: ${rel_path}. Before telling the user this change is done, use the /app-qa skill: cover the behavior with a gpui-testing-library screen test, drive it in the real app with gpui-playwright (e2e/desktop/qa), and visually confirm the before/after screenshots."
 
 jq -n --arg ctx "$context" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'

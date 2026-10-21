@@ -1,10 +1,10 @@
 # Backend Guide (Rust)
 
-- **Commands** (`src/commands/`) are thin handlers: validate input, acquire state locks, delegate to `core/`.
+- **GPUI shell** (`src/gpui_shell/`) draws every window; each window's model (`gpui_shell/window/`) reads and changes state through `core/`.
+- **Commands** (`src/commands/`) hold the app-state glue (PTYs, cloud, remote control) that GPUI and the CLI share; keep them thin and delegate to `core/`.
 - **Core** (`src/core/`) holds all business logic (workspaces, commits, repo, changes, remote, ...).
 - **Infrastructure:** `jj.rs` (all Jujutsu calls), `db.rs` / `local_db.rs` (SQLite), `pty.rs` (embedded terminal).
 - **Thread safety:** `AppState` (`src/lib.rs`) wraps shared mutable resources in `Mutex`.
-- **NAPI bridge:** the lib compiles with the `tauri-test` feature to a native addon (`src/tauri_test_bridge.rs`). Frontend tests `require` it so `invoke` runs real Rust commands without a desktop window. Run `npm run build:napi` after any Rust change.
 
 ## Rust tests
 

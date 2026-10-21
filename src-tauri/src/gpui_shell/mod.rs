@@ -1,36 +1,28 @@
 //! GPUI window shell for desktop repo windows.
 //!
-//! A repo window is a plain Tauri window with GPUI
-//! attached as its renderer, and the React app runs in a child webview that
-//! GPUI places with `webview_frame`. This is the first step of moving the
-//! desktop UI to GPUI one piece at a time: GPUI owns the window, and every
-//! screen that is still web UI lives in the webview.
-//!
-//! The workspace sidebar is the first screen drawn by GPUI (see `sidebar`).
-//! Its tooltips and menus, and the app's toasts, open in popup windows of
-//! their own (see `popup`), since GPUI cannot paint over the webview.
-//!
-//! The child webview has the same label as its window. Tauri treats a window
-//! whose only webview shares its label as a webview window, so
-//! `get_webview_window`, `emit_to` and the `WebviewWindow` command extractor
-//! keep working as they do for a window built with `WebviewWindowBuilder`.
+//! A repo window is a plain Tauri window with GPUI attached as its renderer.
+//! Its window model (`window`) owns the route, the selection, the dialogs
+//! and the data, and builds what the shell draws: the workspace sidebar
+//! (`sidebar`), a screen (`screen`) and the dialogs over them. Tooltips,
+//! menus and toasts open in popup windows of their own (see `popup`).
 
 use std::{
   collections::{HashMap, VecDeque},
   sync::Mutex,
 };
 
-use tauri::{
-  AppHandle, LogicalPosition, LogicalSize, Manager, Runtime, Webview, WebviewBuilder, WebviewUrl,
-  Wry,
-};
+use tauri::{AppHandle, Wry};
 use tauri_plugin_gpui::{
   gpui::{self, prelude::*, Global, SharedString, WeakEntity},
-  webview_frame, GpuiConfig, GpuiWindowExt,
+  GpuiConfig, GpuiWindowExt,
 };
 
 mod checks_run;
+#[cfg(feature = "e2e")]
+pub mod e2e;
 mod form;
+#[cfg(test)]
+mod fuzz;
 mod keys;
 pub mod launch;
 mod menus;
@@ -53,20 +45,15 @@ mod window;
 
 pub use overlay::OverlaySnapshot;
 pub use popup::{MenuEntry, Toast};
+use screen::Screen;
 pub use screen::{Modal, ScreenSnapshot};
-use screen::{Screen, ScreenAction};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
 
-/// Set on `window` in the webview so the React app knows GPUI hosts it.
-const HOSTED_FLAG_SCRIPT: &str = "window.__TREQ_GPUI_SHELL__ = true;";
-
-/// Tells React that `TREQ_WEB_UI` keeps its screens, so it draws them whole.
-const WEB_UI_FLAG_SCRIPT: &str = "window.__TREQ_WEB_UI__ = true;";
-
-/// tauri-plugin-gpui stacks the webview above GPUI with an X11 child window
-/// on Linux, so a Wayland session runs GTK through XWayland. Call before GTK
-/// starts, while the process is still single-threaded.
+/// Tooltips, menus, toasts and the modal window are windows of their own,
+/// placed at screen positions (`popup`, `modal`), which a Wayland client
+/// cannot choose, so a Wayland session runs GTK through XWayland. Call
+/// before GTK starts, while the process is still single-threaded.
 pub fn force_x11_on_wayland() {
   if cfg!(target_os = "linux")
     && std::env::var_os("WAYLAND_DISPLAY").is_some()
@@ -92,53 +79,41 @@ pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiErro
           }
         })
         .detach();
+        #[cfg(feature = "e2e")]
+        e2e::start(cx);
       }),
   )?;
-  app.manage(ShellEnabled);
   window::listen(app.handle());
   Ok(())
 }
 
-/// Managed once `init` succeeds.
-struct ShellEnabled;
-
-/// Whether `init` ran, so new windows should open in the shell.
-pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
-  app.try_state::<ShellEnabled>().is_some()
-}
-
-/// Root view of a shell window: the GPUI sidebar, once React sends it,
-/// next to the webview, or next to a GPUI screen that takes the webview's
-/// place.
+/// Root view of a shell window: the sidebar next to a screen, as the
+/// window model presents them.
 struct Shell {
   app: AppHandle,
   label: SharedString,
-  webview: Option<Webview<Wry>>,
   sidebar: Option<gpui::Entity<Sidebar>>,
-  /// The screen GPUI draws instead of the webview, while React sends one.
   screen: Option<gpui::Entity<Screen>>,
-  /// The dialog React asked for, drawn over the screen once there is one.
+  /// The dialog drawn over the screen once there is one.
   modal: Option<Modal>,
-  /// The window model, which draws the window unless `TREQ_WEB_UI` is set
-  /// (see `window`).
+  /// The window model, which draws the window (see `window`).
   window: Option<gpui::Entity<window::WindowController>>,
   /// What the model last presented.
   presented: Option<window::Presentation>,
   /// The OS appearance last rendered under.
   os_dark: Option<bool>,
-  /// Sends Dashboard's shortcuts pressed in this window to React.
+  /// Hands the window's shortcuts to its model.
   shortcuts: Option<gpui::Subscription>,
 }
 
 impl Shell {
-  /// Dashboard's shortcuts pressed in GPUI (the webview's keys reach React
-  /// directly) go back to it, as `shortcuts` says. An interceptor sees every
-  /// key, focused element or not, before a text field takes it.
+  /// The app's shortcuts pressed in this window go to the window model, as
+  /// `shortcuts` and `window::window_shortcut` say. An interceptor sees
+  /// every key, focused element or not, before a text field takes it.
   fn watch_shortcuts(&mut self, window: &gpui::Window, cx: &mut gpui::Context<Self>) {
     if self.shortcuts.is_some() {
       return;
     }
-    let sink = overlay_sink(self.app.clone(), self.label.to_string());
     let label = self.label.to_string();
     let handle = window.window_handle();
     self.shortcuts = Some(cx.intercept_keystrokes(move |event, window, cx| {
@@ -157,34 +132,17 @@ impl Shell {
         within("Input"),
         within(screen::TERMINAL_CONTEXT),
       );
-      // The window model answers them itself, with the terminal pane's
-      // and the zoom keys.
-      if window::drives(&label) {
-        let shortcut = found
-          .map(window::from_app)
-          .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
-        if let Some(shortcut) = shortcut {
-          // An open dialog still takes its Escape.
-          if shortcut != window::Shortcut::Escape {
-            cx.stop_propagation();
-          }
-          window::shortcut(&label, shortcut, cx);
+      // With the terminal pane's and the zoom keys.
+      let shortcut = found
+        .map(window::from_app)
+        .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
+      if let Some(shortcut) = shortcut {
+        // An open dialog still takes its Escape.
+        if shortcut != window::Shortcut::Escape {
+          cx.stop_propagation();
         }
-        return;
+        window::shortcut(&label, shortcut, cx);
       }
-      let action = match found {
-        Some(shortcuts::AppShortcut::Palette) => ScreenAction::Press {
-          id: "overlay.commandPalette".into(),
-        },
-        Some(shortcuts::AppShortcut::Key(key)) => ScreenAction::Field {
-          field: "overlay.shortcut".into(),
-          value: key.into(),
-        },
-        None => return,
-      };
-      // React's handlers take the key, so a text field does not type it.
-      cx.stop_propagation();
-      sink(action, cx);
     }));
   }
 }
@@ -195,12 +153,14 @@ impl Render for Shell {
     window: &mut gpui::Window,
     cx: &mut gpui::Context<Self>,
   ) -> impl IntoElement {
+    #[cfg(feature = "e2e")]
+    e2e::shell_window(window.window_handle());
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
     );
     window::follow_appearance(self, os_dark, cx);
-    // Until React sends its theme, follow the OS.
+    // Until the model presents its theme, follow the OS.
     let dark = self
       .sidebar
       .as_ref()
@@ -221,8 +181,6 @@ impl Render for Shell {
         window.blur(cx);
         defer_main(&app, |_| popup::hide_menus())
       })
-      // Shown only until the webview's first frame, so opening a window
-      // does not flash.
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
         // The cut-off overlay spans the sidebar too; the workspace view
@@ -253,19 +211,12 @@ impl Render for Shell {
           .flex_1()
           .min_w_0()
           .h_full()
-          // Leaving the frame out hides the webview; React keeps running.
-          .when_some(self.screen.clone(), |this, screen| this.child(screen))
-          .when(self.screen.is_none(), |this| {
-            this.when_some(self.webview.as_ref(), |this, webview| {
-              this.child(webview_frame(webview))
-            })
-          }),
+          .when_some(self.screen.clone(), |this, screen| this.child(screen)),
       )
   }
 }
 
-/// Shell views by window label, so the webview can be handed to its shell
-/// once it exists.
+/// Shell views by window label.
 #[derive(Default)]
 struct Shells(HashMap<String, WeakEntity<Shell>>);
 
@@ -279,7 +230,6 @@ pub fn open_window(
   repo: Option<String>,
   title: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-  let url = crate::open_new_window::window_url(repo.as_deref());
   let window = tauri::WindowBuilder::new(app, label)
     .title(title)
     .inner_size(1400.0, 900.0)
@@ -293,7 +243,6 @@ pub fn open_window(
     let shell = cx.new(|_| Shell {
       app: shell_app,
       label: shell_label.clone().into(),
-      webview: None,
       sidebar: None,
       screen: None,
       modal: None,
@@ -308,25 +257,7 @@ pub fn open_window(
     shell
   })?;
 
-  // Same label as the window; see the module docs.
-  let webview = window.add_child(
-    WebviewBuilder::new(label, WebviewUrl::App(url.into()))
-      .initialization_script(HOSTED_FLAG_SCRIPT)
-      .initialization_script(if std::env::var_os(screen::WEB_UI_ENV).is_some() {
-        WEB_UI_FLAG_SCRIPT
-      } else {
-        ""
-      }),
-    LogicalPosition::new(0., 0.),
-    LogicalSize::new(1., 1.),
-  )?;
-  // `webview_frame` shows it from its first frame.
-  webview.hide()?;
-
-  update_shell(label, move |shell, _| shell.webview = Some(webview))?;
-  if std::env::var_os(screen::WEB_UI_ENV).is_none() {
-    window::start(app, label, repo)?;
-  }
+  window::start(app, label, repo)?;
   Ok(())
 }
 
@@ -386,64 +317,7 @@ fn update_shell(
   })
 }
 
-/// Shows `snapshot` in the GPUI sidebar of window `label`, or removes the
-/// sidebar for `None`. A window the model drives ignores React's.
-pub fn update_sidebar(app: &AppHandle, label: &str, snapshot: Option<SidebarSnapshot>) {
-  let label = label.to_string();
-  let _ = app.run_on_main_thread(move || {
-    let result = update_shell(&label, move |shell, cx| {
-      if shell.react_draws() {
-        shell.show_sidebar(snapshot, cx);
-      }
-    });
-    if let Err(err) = result {
-      log::warn!("failed to update the GPUI sidebar: {err}");
-    }
-  });
-}
-
-/// Draws `snapshot` in place of window `label`'s webview, or brings the
-/// webview back for `None`. `TREQ_WEB_UI` keeps the webview, so React's
-/// screens can be compared with GPUI's.
-pub fn update_screen(app: &AppHandle, label: &str, snapshot: Option<ScreenSnapshot>) {
-  let snapshot = snapshot.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
-  let label = label.to_string();
-  let _ = app.run_on_main_thread(move || {
-    let result = update_shell(&label, move |shell, cx| {
-      if shell.react_draws() {
-        shell.show_screen(snapshot, cx);
-      }
-    });
-    if let Err(err) = result {
-      log::warn!("failed to update the GPUI screen: {err}");
-    }
-  });
-}
-
-/// Draws `modal` over window `label`'s screen, or closes the open dialog for
-/// `None`. A dialog React asks for while no screen is drawn waits for one.
-pub fn update_modal(app: &AppHandle, label: &str, modal: Option<Modal>) {
-  let modal = modal.filter(|_| std::env::var_os(screen::WEB_UI_ENV).is_none());
-  let label = label.to_string();
-  let _ = app.run_on_main_thread(move || {
-    let result = update_shell(&label, move |shell, cx| {
-      if shell.react_draws() {
-        shell.show_modal(modal, cx);
-      }
-    });
-    if let Err(err) = result {
-      log::warn!("failed to update the GPUI modal: {err}");
-    }
-  });
-}
-
 impl Shell {
-  /// Whether React's pushes are drawn: only without the window model
-  /// (`TREQ_WEB_UI`).
-  fn react_draws(&self) -> bool {
-    self.window.is_none()
-  }
-
   /// Draws what the window model presents.
   fn present(&mut self, next: window::Presentation, cx: &mut gpui::Context<Self>) {
     let before = self.presented.take();
@@ -499,7 +373,6 @@ impl Shell {
       None => {
         // A tooltip the screen showed would outlive it.
         if self.screen.take().is_some() {
-          cx.set_global(screen::ModalOpen::default());
           defer_main(&self.app, |_| popup::hide_tooltip());
         }
       }
@@ -508,15 +381,14 @@ impl Shell {
         match &self.screen {
           Some(screen) => screen.update(cx, |screen, cx| screen.set_snapshot(snapshot, cx)),
           None => {
-            let sink = screen_sink(self.app.clone(), self.label.to_string());
+            let sink = screen_sink(self.label.to_string());
             let popups = popup_sink(self.app.clone(), self.label.to_string());
-            let webview = self.webview.clone();
             let host = std::sync::Arc::new(native::Backend::new(
               self.app.clone(),
               self.label.to_string(),
             ));
             let modal = self.modal.clone();
-            let screen = cx.new(|cx| Screen::new(snapshot, sink, popups, webview, host, cx));
+            let screen = cx.new(|cx| Screen::new(snapshot, sink, popups, host, cx));
             screen.update(cx, |screen, cx| screen.set_modal(modal, cx));
             self.screen = Some(screen);
           }
@@ -536,7 +408,7 @@ impl Shell {
     let label = self.label.to_string();
     defer_main(&self.app, move |app| {
       let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
-      let sink = overlay_sink(app.clone(), label.clone());
+      let sink = overlay_sink(label.clone());
       modal::update(app, &label, snapshot, host, sink);
     });
   }
@@ -552,74 +424,26 @@ impl Shell {
   }
 }
 
-/// Sends screen actions to the webview of window `label`, as
-/// [`action_sink`] does for the sidebar.
-fn screen_sink(app: AppHandle, label: String) -> screen::ActionSink {
-  window::routed(app, label, screen::ACTION_EVENT, window::screen_action)
+/// Hands screen actions to window `label`'s model.
+fn screen_sink(label: String) -> screen::ActionSink {
+  window::routed(label, window::screen_action)
 }
 
-/// Shows `snapshot`'s dialog over the whole of window `label` (see
-/// `overlay`), or closes it for `None`.
-pub fn update_overlay(app: &AppHandle, label: &str, snapshot: Option<OverlaySnapshot>) {
-  let label = label.to_string();
-  defer_main(app, move |app| {
-    if !window::react_overlay(&label, snapshot.clone()) {
-      return;
-    }
-    let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
-    let sink = overlay_sink(app.clone(), label.clone());
-    modal::update(app, &label, snapshot, host, sink);
-  });
+/// Hands overlay actions to window `label`'s model, as [`screen_sink`]
+/// does for screens.
+fn overlay_sink(label: String) -> screen::ActionSink {
+  window::routed(label, window::overlay_action)
 }
 
-/// Sends overlay actions to the webview of window `label`, as
-/// [`screen_sink`] does for screens.
-fn overlay_sink(app: AppHandle, label: String) -> screen::ActionSink {
-  window::routed(app, label, overlay::ACTION_EVENT, window::overlay_action)
-}
-
-/// Sends `payload` as event `event` to the webview of window `label`.
-/// Callable inside a GPUI update.
-fn emit_to_webview<S: serde::Serialize + Clone + Send + 'static>(
-  app: &AppHandle,
-  label: &str,
-  event: &'static str,
-  payload: S,
-) {
-  let (app, label) = (app.clone(), label.to_string());
-  tauri::async_runtime::spawn(async move {
-    let target = tauri::EventTarget::webview_window(&label);
-    if let Err(err) = tauri::Emitter::emit_to(&app, target, event, payload) {
-      log::warn!("failed to send {event}: {err}");
-    }
-  });
-}
-
-/// Runs the sidebar actions GPUI handles itself ([`sidebar_actions`]) and
-/// sends the rest to the webview of window `label`. Tauri calls must not
-/// run inside a GPUI update, so each send runs in a task.
+/// Hands sidebar actions to window `label`'s model, and runs those it
+/// leaves to GPUI ([`sidebar_actions`]).
 fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
-  fn send(app: AppHandle, label: String, action: SidebarAction) {
-    tauri::async_runtime::spawn(async move {
-      let target = tauri::EventTarget::webview_window(&label);
-      if let Err(err) = tauri::Emitter::emit_to(&app, target, sidebar::ACTION_EVENT, action) {
-        log::warn!("failed to send GPUI sidebar action: {err}");
-      }
-    });
-  }
   std::rc::Rc::new(move |action: SidebarAction, cx| {
     let (app, label) = (app.clone(), label.clone());
-    let driven = window::drives(&label);
-    if !driven && !sidebar_actions::handles(&action) {
-      return send(app, label, action);
-    }
     // The sidebar is mid-update while it sends; read it once it is done.
     cx.defer(move |cx| {
-      if driven && window::sidebar_action(&label, &action, cx) {
+      if window::sidebar_action(&label, &action, cx) || !sidebar_actions::handles(&action) {
         return;
-      }
-      if !sidebar_actions::handles(&action) {
-        return send(app, label, action);
       }
       let snapshot = cx
         .try_global::<Shells>()
@@ -627,10 +451,8 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
         .and_then(WeakEntity::upgrade)
         .and_then(|shell| shell.read(cx).sidebar.clone())
         .map(|sidebar| sidebar.read(cx).snapshot().clone());
-      let handled = snapshot
-        .is_some_and(|snapshot| sidebar_actions::handle(&app, &label, &snapshot, &action, cx));
-      if !handled && !driven {
-        send(app, label, action);
+      if let Some(snapshot) = snapshot {
+        sidebar_actions::handle(&app, &label, &snapshot, &action, cx);
       }
     });
   })
@@ -716,24 +538,6 @@ pub fn account_changed(app: &AppHandle, snapshot: crate::core::cloud::AccountSna
 pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
   let label = label.to_string();
   defer_main(app, move |app| {
-    // A screen's dropdown button asked React for this menu.
-    if let Some(anchor) = popup::take_dropdown_anchor() {
-      let dark = tauri_plugin_gpui::with_app({
-        let label = label.clone();
-        move |cx| {
-          let screen = cx
-            .try_global::<Shells>()
-            .and_then(|shells| shells.0.get(&label))
-            .and_then(WeakEntity::upgrade)
-            .and_then(|shell| shell.read(cx).screen.clone())?;
-          Some(screen.read(cx).snapshot().dark)
-        }
-      });
-      if let Ok(Some(dark)) = dark {
-        popup::show_dropdown(app, &label, entries, anchor, dark);
-        return;
-      }
-    }
     let anchor = tauri_plugin_gpui::with_app({
       let label = label.clone();
       move |cx| {
@@ -752,20 +556,9 @@ pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
   });
 }
 
-/// Closes an open menu.
-pub fn hide_menus(app: &AppHandle) {
-  defer_main(app, |_| popup::hide_menus());
-}
-
 /// Closes every popup, as when a shell window loses focus.
 pub fn hide_popups(app: &AppHandle) {
   defer_main(app, |_| popup::hide_all());
-}
-
-/// Shows React's toasts in window `label`, with the app's own
-/// ([`toasts`]).
-pub fn update_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
-  toasts::set_react(app, label, toasts);
 }
 
 /// Draws window `label`'s toasts, in its sidebar's theme.
@@ -798,8 +591,8 @@ pub fn place_toasts(app: &AppHandle, label: &str) {
   });
 }
 
-/// A menu bar item for window `label`, sent to React as `event` with
-/// `payload`. True when the window model handles it instead.
+/// A menu bar item for window `label`, named by `event`, with `payload`.
+/// True when the window model handles it.
 pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<String>) -> bool {
   window::menu_event(app, label, event, payload)
 }
@@ -810,17 +603,13 @@ pub fn window_focused(app: &AppHandle, label: &str) {
 }
 
 /// The cloud workspace connected (for window `label`, which asked) or its
-/// certificate renewed. True when the window models take it.
+/// certificate renewed.
 pub fn managed_endpoint(
   app: &AppHandle,
   label: Option<&str>,
   event: crate::core::cloud::ManagedEndpointEvent,
-) -> bool {
-  if std::env::var_os(screen::WEB_UI_ENV).is_some() {
-    return false;
-  }
+) {
   window::managed_endpoint(app, label, event);
-  true
 }
 
 /// An endpoint was reauthenticated: its cutoff is lifted everywhere.

@@ -1,6 +1,5 @@
-//! Building blocks shared by GPUI screens, drawn to match the React app's
-//! `src/components/ui` primitives (sizes and colors from its Tailwind
-//! classes).
+//! Building blocks shared by GPUI screens: the sizes and colors the React
+//! app's UI primitives had, from their Tailwind classes.
 
 use std::{rc::Rc, time::Duration};
 
@@ -9,7 +8,10 @@ use tauri_plugin_gpui::gpui::{
   SharedString, StyleRefinement, Transformation, Window,
 };
 
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::{
+  base::TestSupportExt as _,
+  component::input::{Input, InputState},
+};
 
 use super::theme::{self, Palette};
 
@@ -49,8 +51,8 @@ pub fn apply_zoom(window: &mut Window, cx: &App) {
 /// A click handler that GPUI elements can share.
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// Tailwind's text scale as `tailwind.config.js` overrides it: size and line
-/// height in pixels.
+/// The app's text scale (Tailwind's names, as the React UI overrode them):
+/// size and line height in pixels.
 #[derive(Clone, Copy)]
 pub enum TextSize {
   Xs,
@@ -142,6 +144,8 @@ pub struct Button {
   on_click: Option<OnClick>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
+  /// The accessible name: the first label, unless set with `aria_label`.
+  name: Option<SharedString>,
 }
 
 impl Button {
@@ -156,6 +160,7 @@ impl Button {
       on_click: None,
       style: StyleRefinement::default(),
       hover_bg: None,
+      name: None,
     }
   }
 
@@ -181,9 +186,17 @@ impl Button {
   }
 
   /// Text in the button's own color.
-  pub fn label(self, label: impl Into<SharedString>) -> Self {
+  pub fn label(mut self, label: impl Into<SharedString>) -> Self {
     let label: SharedString = label.into();
+    self.name.get_or_insert_with(|| label.clone());
     self.child(label)
+  }
+
+  /// The accessible name, for an icon button or one whose label is not its
+  /// first text (React's `aria-label`).
+  pub fn aria_label(mut self, name: impl Into<SharedString>) -> Self {
+    self.name = Some(name.into());
+    self
   }
 
   /// A Lucide icon in the button's text color.
@@ -261,7 +274,11 @@ impl RenderOnce for Button {
     });
     let link = self.variant == Variant::Link;
     let selector = self.id.to_string();
-    let mut el = base.id(self.id).debug_selector(move || selector);
+    let mut el = base
+      .id(self.id)
+      .debug_selector(move || selector)
+      .role(gpui::Role::Button)
+      .when_some(self.name, |b, name| b.aria_label(name));
     el.style().refine(&self.style);
     // GPUI has no text decoration on hover for a whole subtree, so a link
     // keeps its color and only underlines its text.
@@ -277,6 +294,7 @@ impl RenderOnce for Button {
       b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
     })
     .children(self.children)
+    .test_support()
   }
 }
 

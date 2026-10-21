@@ -354,11 +354,6 @@ impl FileBrowserView {
     self.parent.working_directory()
   }
 
-  /// A dialog covers the whole window.
-  pub(super) fn covers_window(&self) -> bool {
-    self.discard_dialog
-  }
-
   /// Runs `work` off the main thread, then `apply`s it unless the browser
   /// moved to another workspace meanwhile.
   fn run<T: Send + 'static>(

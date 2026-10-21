@@ -23,7 +23,8 @@ if (!fs.existsSync(heroPath)) {
 
 if (missing.length > 0) {
   console.error(
-    `Missing ${missing.length} landing screenshot(s) in ${landingDir}:\n  ${missing.join("\n  ")}`,
+    `Missing ${missing.length} landing screenshot(s) in ${landingDir}:\n  ${missing.join("\n  ")}\n` +
+      "Generate them with `npm run landing` in e2e/desktop (see its README).",
   );
   process.exit(1);
 }

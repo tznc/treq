@@ -1,7 +1,6 @@
 //! The command an agent terminal runs on start: the agent CLI with Treq's
 //! system prompt, filesystem settings and skills, wrapped so its temp files
-//! are removed and Treq hears when it exits. Mirrors `src/lib/agentCommand.ts`
-//! and `src/lib/prepareAgentAutoCommand.ts`.
+//! are removed and Treq hears when it exits.
 
 use super::agent_cli::{write_agent_cli_files, AgentCliFiles};
 use super::remote::shell_quote;

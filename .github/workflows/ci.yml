@@ -9,9 +9,8 @@ env:
   CARGO_INCREMENTAL: 0
   # Skip debug info for test binaries: faster builds, smaller artifacts
   CARGO_PROFILE_TEST_DEBUG: 0
-  # The NAPI addon builds with the dev profile, which keeps full debug info
-  # for workspace crates. Line tables keep backtraces readable for less
-  # compile and link time.
+  # Line tables keep backtraces readable for less compile and link time.
+  # warm-caches.yml sets the same env, so its cache keys match.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 on:
@@ -34,6 +33,7 @@ jobs:
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
       js_changed: ${{ steps.filter.outputs.js }}
+      e2e_changed: ${{ steps.filter.outputs.e2e }}
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
@@ -46,7 +46,6 @@ jobs:
           filters: |
             rust:
               - "src-tauri/**"
-              - "crates/tauri-test-macros/**"
               - "Cargo.toml"
               - "Cargo.lock"
               - ".config/nextest.toml"
@@ -54,18 +53,15 @@ jobs:
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
-              - "src/**"
               - "test/**"
-              - "eslint-rules/**"
               - "package.json"
               - "package-lock.json"
-              - "tsconfig*.json"
               - "biome.json"
-              - ".oxlintrc.json"
-              - "knip.json"
               - "sgconfig.yml"
               - ".tool-versions"
               - ".github/workflows/ci.yml"
+            e2e:
+              - "e2e/desktop/**"
 
   # One job for the quick lint/format/type checks and the unit tests. Each
   # check takes seconds; as separate jobs each one paid ~30s of setup and its
@@ -106,15 +102,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm run lint
 
-      - name: knip
+      # The Supabase-side unit tests (billing, merge queue, Linear proxy).
+      # They share this job's npm ci instead of paying for their own runner.
+      - name: test
         if: ${{ !cancelled() && env.JS == 'true' }}
-        run: npm run knip
-
-      # Unit tests: mocked Tauri, no NAPI/jj, about 2 min. They share this
-      # job's npm ci instead of paying for their own runner.
-      - name: test:unit
-        if: ${{ !cancelled() && env.JS == 'true' }}
-        run: npm run test:unit
+        run: npm test
 
       - name: Install rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
@@ -128,178 +120,82 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --check
 
-  # Heavy jobs (test-js, test-rust) skip draft PRs; marking the
-  # PR ready for review runs them.
-  test-js:
-    # test:integration drives the Rust commands via NAPI, so it also runs on
-    # Rust changes.
+  # Heavy jobs skip draft PRs; marking the PR ready for review runs them.
+  #
+  # The end-to-end suite (e2e/desktop): the app built with the `e2e`
+  # feature, which embeds a Playwright server (gpui-playwright), driven by
+  # stock @playwright/test under Xvfb on a fixture repository. The desktop
+  # UI tests (gpui-testing-library) are lib tests, so test-rust's nextest
+  # run covers them.
+  test-desktop-e2e:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.js_changed == 'true' || needs.detect-changes.outputs.rust_changed == 'true') }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Unit tests run in the verify job.
-          # Integration tests: NAPI + real jj repos. Serial file execution.
-          - platform: ubuntu-22.04
-            task: test:integration
-            rust: true
-    name: test-js / ${{ matrix.task }} / ${{ matrix.platform }}
-    runs-on: ${{ matrix.platform }}
-    env:
-      # Matrix entries flagged rust: true also run on Rust-only changes.
-      RUN_TASK: ${{ needs.detect-changes.outputs.js_changed == 'true' || matrix.rust == true }}
+    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true') }}
+    timeout-minutes: 20
+    name: test-desktop-e2e / playwright / ubuntu-22.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
-        if: env.RUN_TASK == 'true'
 
-      - name: Setup Node.js
-        if: env.RUN_TASK == 'true'
-        id: setup-node
-        uses: actions/setup-node@v5
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
-          # Pin major so NAPI cache keys stay stable across LTS patch bumps.
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
+          toolchain: stable
 
-      # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
-      # cache on subsequent runs. execute_install_scripts is required so dpkg
-      # postinst (ldconfig, alternatives) still runs on restore.
+      - name: Use mold linker
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+
+      # test-rust's packages, plus Xvfb and Mesa's software Vulkan
+      # (lavapipe), which GPUI renders with on a runner without a GPU.
       - name: install dependencies (ubuntu only)
-        # WebKit/GTK is needed to *dlopen* libtreq_lib.so in integration tests
-        # even on a NAPI cache hit.
-        if: env.RUN_TASK == 'true' && (matrix.platform == 'ubuntu-22.04' && matrix.task == 'test:integration')
         uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: webkit-4.1-1
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers
+          version: webkit-4.1-gpui-e2e-1
           execute_install_scripts: true
 
-      # Runners already ship git + gh. Only jj needs installing; cache the
-      # release binary (macOS brew of git/jj/gh was ~40s every run).
-      - name: Resolve jj release tag
-        id: jj
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          tag=$(curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/jj-vcs/jj/releases/latest | jq -r .tag_name)
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Restore jj CLI cache
-        id: jj-cache
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: actions/cache/restore@v5
+      # Reads test-rust's cache (warm-caches.yml saves it on main); the
+      # dependencies build the same, only treq itself differs.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          path: .ci-bin
-          key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
+          shared-key: test
+          save-if: false
+          workspaces: |
+            . -> target
 
-      - name: Install jj CLI
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration' && steps.jj-cache.outputs.cache-hit != 'true')
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          JJ_TAG: ${{ steps.jj.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p .ci-bin
-          case "${{ runner.os }}-${{ runner.arch }}" in
-            Linux-X64)   target=x86_64-unknown-linux-musl ;;
-            macOS-ARM64) target=aarch64-apple-darwin ;;
-            macOS-X64)   target=x86_64-apple-darwin ;;
-            Windows-X64) target=x86_64-pc-windows-msvc ;;
-            *)
-              echo "unsupported runner: ${{ runner.os }}-${{ runner.arch }}"
-              exit 1
-              ;;
-          esac
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            asset="jj-${JJ_TAG}-${target}.zip"
-            tmp=$(mktemp -d)
-            curl -fsSL \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/${asset}" \
-              -o "$tmp/jj.zip"
-            unzip -q "$tmp/jj.zip" -d "$tmp"
-            jj_bin=$(find "$tmp" -type f -name jj.exe | head -n 1)
-            test -n "$jj_bin"
-            install -m 755 "$jj_bin" .ci-bin/jj.exe
-          else
-            asset="jj-${JJ_TAG}-${target}.tar.gz"
-            tmp=$(mktemp -d)
-            curl -fsSL \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/${asset}" \
-              | tar -xz -C "$tmp"
-            # tarball may nest the binary; find it
-            jj_bin=$(find "$tmp" -type f -name jj | head -n 1)
-            test -n "$jj_bin"
-            install -m 755 "$jj_bin" .ci-bin/jj
-          fi
+      - name: Build the app with the e2e feature
+        working-directory: src-tauri
+        run: cargo build --locked --features e2e --bin treq
 
-      - name: Save jj CLI cache
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration' && steps.jj-cache.outputs.cache-hit != 'true')
-        continue-on-error: true
-        uses: actions/cache/save@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
         with:
-          path: .ci-bin
-          key: ${{ steps.jj-cache.outputs.cache-primary-key }}
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/desktop/package-lock.json
 
-      - name: Add jj to PATH
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        run: echo "$GITHUB_WORKSPACE/.ci-bin" >> "$GITHUB_PATH"
-
-      - name: Verify tool versions
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        run: |
-          git --version
-          jj --version
-          gh --version
-
-      # Integration suite time varies about 1.8x between hosted runners for
-      # the same commit. Log the hardware so a slow run can be told apart
-      # from a code regression.
-      - name: Runner hardware
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        run: |
-          nproc
-          grep -m1 'model name' /proc/cpuinfo || true
-          free -m
-
-      - name: Install dependencies
-        if: env.RUN_TASK == 'true'
+      - name: Install the suite
+        working-directory: e2e/desktop
         run: npm ci
 
-      # Vitest's on-disk module cache (experimental.fsModuleCache in
-      # vitest.integration.base.ts). Restored after `npm ci`, which empties
-      # node_modules. Entries are keyed by file content, so a cache from an
-      # older commit is safe to reuse; the key only picks the newest one.
-      - name: Vitest module cache
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: actions/cache@v5
+      - name: Type-check the suite
+        working-directory: e2e/desktop
+        run: npm run -s typecheck
+
+      - name: Run the e2e suite under Xvfb
+        working-directory: e2e/desktop
+        env:
+          TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm test
+
+      - name: Upload the report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
         with:
-          path: node_modules/.experimental-vitest-cache
-          key: vitest-fsmc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
-          restore-keys: |
-            vitest-fsmc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
-
-      # Restores the addon built on main (warm-caches.yml) or builds it.
-      - name: NAPI addon
-        if: env.RUN_TASK == 'true' && (matrix.task == 'test:integration')
-        uses: ./.github/actions/napi-addon
-
-      - name: Run JS task
-        if: env.RUN_TASK == 'true'
-        run: |
-          if [ "${{ matrix.task }}" = "test:integration" ]; then
-            npm run test:integration:run
-          else
-            npm run ${{ matrix.task }}
-          fi
+          name: desktop-e2e-report
+          path: |
+            e2e/desktop/playwright-report
+            e2e/desktop/test-results
+          retention-days: 7
 
   # clippy and the Rust tests share one job: each takes 1-2 min on a warm
   # cache, so a second job only paid for another runner and setup.
@@ -333,8 +229,7 @@ jobs:
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
       - name: install dependencies (ubuntu only)
-        # WebKit/GTK is needed to *link* treq/tauri and to *dlopen*
-        # libtreq_lib.so in tests.
+        # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
         uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev

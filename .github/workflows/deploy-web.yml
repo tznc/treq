@@ -2,13 +2,13 @@ name: Deploy Web
 
 on:
   workflow_dispatch:
-  # Only Docusaurus site changes. App changes reach the landing screenshots on
-  # the next site change, release or nightly run.
+  # Only Docusaurus site changes.
   push:
     branches:
       - main
     paths:
       - "web/**"
+      - "e2e/desktop/landing/**"
       - ".github/workflows/deploy-web.yml"
   # Rebuild so /version and the download links pick up the new release.
   release:
@@ -36,12 +36,14 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Production builds only. PR previews reuse main's latest screenshots (see
-  # the build job), which saves the NAPI build and capture on every PR.
+  # Captures the landing screenshots from the real app (e2e/desktop/landing,
+  # gpui-playwright). Production builds only: PR previews reuse main's latest
+  # artifact (see the build job), which saves the app build and capture on
+  # every PR.
   landing-screenshots:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -50,76 +52,53 @@ jobs:
           # tag never rolls the site back.
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
 
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
+
+      - name: Use mold linker
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+
+      # The same packages and cache entry as ci.yml's test-desktop-e2e: the
+      # app's build dependencies, Xvfb, and Mesa's software Vulkan.
+      - name: Install system packages
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers
+          version: webkit-4.1-gpui-e2e-1
+          execute_install_scripts: true
+
+      # Reads test-rust's cache (warm-caches.yml saves it on main).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: test
+          save-if: false
+          workspaces: |
+            . -> target
+
+      - name: Build the app with the e2e feature
+        working-directory: src-tauri
+        run: cargo build --locked --features e2e --bin treq
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: e2e/desktop/package-lock.json
 
-      - name: Restore NAPI addon cache
-        id: napi-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: crates/treq-napi/treq-napi.linux-x64-gnu.node
-          key: napi-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src-tauri/Cargo.toml', 'src-tauri/build.rs', 'src-tauri/src/**', 'src-tauri/tests/**', 'crates/treq-napi/Cargo.toml', 'crates/treq-napi/build.rs', 'crates/treq-napi/src/**', 'crates/treq-napi/package.json', 'crates/treq-napi/package-lock.json') }}
-
-      - name: Install Rust stable
-        if: steps.napi-cache.outputs.cache-hit != 'true'
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
-        with:
-          toolchain: stable
-
-      - name: Install WebKit GTK headers
-        if: steps.napi-cache.outputs.cache-hit != 'true'
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
-        with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: webkit-4.1-1
-          execute_install_scripts: true
-
-      - name: Install npm dependencies
+      - name: Install the capture suite
+        working-directory: e2e/desktop
         run: npm ci
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.napi-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        with:
-          cache-on-failure: true
-          workspaces: |
-            . -> target
-
-      - name: Build NAPI addon
-        if: steps.napi-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        run: |
-          ls -la crates || true
-          ls -la crates/treq-napi || true
-          npm run build:napi
-          test -f crates/treq-napi/treq-napi.linux-x64-gnu.node
-
-      - name: Save NAPI addon cache
-        if: steps.napi-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: crates/treq-napi/treq-napi.linux-x64-gnu.node
-          key: ${{ steps.napi-cache.outputs.cache-primary-key }}
-
-      - name: Compile screenshot CSS
-        continue-on-error: true
-        run: npm run screenshot:css
-
-      - name: Install Playwright Chromium
-        continue-on-error: true
-        run: npx playwright-core install --with-deps chromium
-
+      # The window renders at GDK_SCALE=2 (2800x1800), so the screen is larger
+      # than the e2e job's.
       - name: Capture landing screenshots
-        continue-on-error: true
-        run: |
-          CHROME=$(node -p "require('playwright-core').chromium.executablePath()")
-          test -x "$CHROME"
-          PLAYWRIGHT_CHROMIUM_PATH="$CHROME" npx vitest run --config vitest.screenshot.config.ts scripts/screenshot/specs/readme-*.spec.tsx
+        working-directory: e2e/desktop
+        env:
+          TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
+        run: xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run landing
 
       - name: Stage landing screenshots
         run: node web/scripts/stage-landing-screenshots.mjs
@@ -136,6 +115,14 @@ jobs:
             web/static/img/landing
           if-no-files-found: error
           retention-days: 3
+
+      - name: Upload the capture report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: landing-screenshots-report
+          path: e2e/desktop/test-results
+          retention-days: 7
 
   build:
     timeout-minutes: 15
@@ -199,6 +186,8 @@ jobs:
           run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow deploy-web.yml \
             --branch main --status success --limit 1 --json databaseId -q '.[0].databaseId')
           echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+      # A missing artifact leaves the PNGs absent, and the build below fails
+      # in assert-landing-screenshots.
       - name: Download landing screenshots
         continue-on-error: true
         uses: actions/download-artifact@v7

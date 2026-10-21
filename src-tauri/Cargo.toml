@@ -32,16 +32,17 @@ gui = [
   "dep:tauri-plugin-single-instance",
 ]
 # Desktop repo windows open in a GPUI shell, which draws the workspace sidebar.
-# Left out of the NAPI test addon, which has no windows.
 gpui-shell = ["gui", "dep:tauri-plugin-gpui", "dep:gpui-kit", "dep:syntect", "dep:two-face", "dep:alacritty_terminal", "dep:image"]
-tauri-test = ["gui", "dep:tauri-test", "dep:napi", "dep:napi-derive", "dep:tempfile"]
 # Linked into another Tauri app as a library (mobile-gpui): leaves out the
 # mobile entry point, whose JNI symbols would clash with the host app's.
 embed = []
+# Embeds a Playwright server (gpui-playwright) in the GPUI app so the
+# e2e/desktop suite can drive it. It only listens when `GPUI_PLAYWRIGHT` is
+# set, and release builds leave the feature out.
+e2e = ["gpui-shell", "dep:gpui-playwright"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
-napi-build = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -65,6 +66,10 @@ tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "mai
 # diffs and code views. The
 # fork mobile-gpui uses, on the same GPUI as tauri-plugin-gpui.
 gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component"], optional = true }
+# Playwright protocol server inside the GPUI app (the `e2e` feature). It
+# reads the elements gpui-kit observes; `painted-text` adds their text. The
+# branch adds `Server::on_adopt_page` (not in 0.1.0 yet).
+gpui-playwright = { git = "https://github.com/Ziinc/gpui-playwright", branch = "claude/project-thread-yruhjk", features = ["painted-text"], optional = true }
 # Syntax highlighting for GPUI diffs, the same syntect set gpui-kit uses.
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"], optional = true }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"], optional = true }
@@ -74,10 +79,7 @@ alacritty_terminal = { version = "0.26", default-features = false, optional = tr
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [dependencies]
-tauri = { version = "2.12", features = ["protocol-asset", "unstable"], optional = true }
-tauri-test = { version = "0.2.1", optional = true }
-napi = { version = "2", default-features = false, features = ["napi8", "async", "serde-json"], optional = true }
-napi-derive = { version = "2", optional = true }
+tauri = { version = "2.12", features = ["unstable"], optional = true }
 tauri-plugin-opener = { version = "2.5.2", optional = true }
 tauri-plugin-dialog = { version = "2.7.0", optional = true }
 tauri-plugin-log = { version = "2.8.0", optional = true }
@@ -94,8 +96,6 @@ sha2 = "0.11"
 ignore = "0.4"
 jj-lib = "0.40.0"
 futures = "0.3"
-notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
-notify-debouncer-full = "0.7"
 log = "0.4"
 regex = "1"
 rayon = "1.10"
@@ -108,7 +108,6 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["registry", "env-filter"] }
 
-tempfile = { version = "3", optional = true }
 async-trait = "0.1.92"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util", "net", "sync"] }
@@ -135,6 +134,9 @@ wiremock = "0.6"
 # tauri-plugin-gpui renders with, plus its test platform.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
+# Testing Library queries, user events and matchers for the GPUI screens. Its
+# `gpui-kit` feature reads what `.test_support()` observes.
+gpui-testing-library = { version = "=0.1.0", features = ["gpui-kit"] }
 
 [[bench]]
 name = "commit_workspace"

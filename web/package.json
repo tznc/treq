@@ -10,7 +10,6 @@
     "build": "node scripts/build-search-index.mjs && docusaurus build",
     "assert:landing-screenshots": "node scripts/assert-landing-screenshots.mjs",
     "assert:build-landing-screenshots": "node scripts/assert-build-landing-screenshots.mjs",
-    "place:landing-screenshots": "node scripts/stage-landing-screenshots.mjs",
     "stage:landing-screenshots": "node scripts/stage-landing-screenshots.mjs",
     "ci:deploy-web-build": "bash scripts/ci-deploy-web-build.sh",
     "swizzle": "docusaurus swizzle",

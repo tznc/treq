@@ -35,15 +35,6 @@ pub static OPEN_NEW_WINDOW_GATE: OpenNewWindowGate = OpenNewWindowGate::new();
 /// is already showing.
 pub static OPEN_REPO_GATE: OpenNewWindowGate = OpenNewWindowGate::new();
 
-pub fn new_repo_window_url(repo_path: &str) -> String {
-  format!("index.html?repo={}", urlencoding::encode(repo_path))
-}
-
-/// The React app's page for a window on `repo` (`None`: the start screen).
-pub fn window_url(repo: Option<&str>) -> String {
-  repo.map_or_else(|| "index.html".to_string(), new_repo_window_url)
-}
-
 pub fn new_repo_window_title(repo_path: &str) -> String {
   let name = Path::new(repo_path)
     .file_name()
@@ -60,7 +51,7 @@ pub fn new_repo_window_label() -> String {
   format!("treq-{millis}")
 }
 
-/// Pick which webview should receive a menu event.
+/// Pick which window should receive a menu event.
 /// Never falls back to a global broadcast: on macOS the menu bar unfocuses
 /// every window, and a broadcast would run the folder picker in all of them.
 pub fn resolve_menu_event_window_label(
@@ -111,14 +102,6 @@ mod tests {
     gate.end();
     assert!(gate.try_begin());
     gate.end();
-  }
-
-  #[test]
-  fn encodes_repo_path_in_window_url() {
-    assert_eq!(
-      new_repo_window_url("/Users/me/My Repo"),
-      "index.html?repo=%2FUsers%2Fme%2FMy%20Repo"
-    );
   }
 
   #[test]

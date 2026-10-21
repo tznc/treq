@@ -293,11 +293,6 @@ impl ChangesView {
     self.show_file(path, cx);
   }
 
-  /// A dialog covers the whole window.
-  pub(super) fn covers_window(&self) -> bool {
-    self.discard_dialog || self.review.discard_dialog
-  }
-
   /// Runs `work` off the main thread, then `apply`s it unless the tab moved
   /// to another workspace meanwhile.
   fn run<T: Send + 'static>(
@@ -1457,6 +1452,7 @@ impl ChangesView {
       .flex()
       .child(
         Button::new("commit-options", p)
+          .aria_label("More commit options")
           .size(Size::Sm)
           .h_auto()
           .py(zpx(6.))

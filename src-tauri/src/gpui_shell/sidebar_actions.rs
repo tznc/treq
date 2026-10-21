@@ -2,7 +2,7 @@
 //! Dashboard's handlers ran: the home and workspace row menus, archiving
 //! one or several workspaces, and dropping a row onto another to stack it.
 //! A remote repository's are read and changed over SSH, off the main
-//! thread. The rest go to the window model (or React under `TREQ_WEB_UI`).
+//! thread. The rest go to the window model.
 
 use std::sync::Arc;
 
@@ -40,7 +40,7 @@ pub fn handles(action: &SidebarAction) -> bool {
 }
 
 /// Runs `action` for window `label`, whose sidebar shows `snapshot`.
-/// False when it is not for anything GPUI finds (React takes it under `TREQ_WEB_UI`). Main thread only.
+/// False when it is not for anything GPUI finds. Main thread only.
 pub fn handle(
   app: &AppHandle,
   label: &str,

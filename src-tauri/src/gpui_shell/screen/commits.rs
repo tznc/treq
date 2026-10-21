@@ -253,11 +253,6 @@ impl CommitsView {
     cx.notify();
   }
 
-  /// A dialog covers the whole window.
-  pub(super) fn covers_window(&self) -> bool {
-    self.dialog.is_some()
-  }
-
   fn home(&self) -> bool {
     self.parent.workspace.is_none()
   }

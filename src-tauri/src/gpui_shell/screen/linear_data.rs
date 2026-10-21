@@ -582,7 +582,7 @@ pub fn review_snapshot(
   }
 }
 
-/// `DEFAULT_LINEAR_REVIEW_PROMPT` in `src/lib/agent-review-prompt.ts`.
+/// The prompt a Linear review starts from.
 const LINEAR_REVIEW_PROMPT: &str = include_str!("linear_review_prompt.txt");
 
 /// `prepareLinearReview`'s prompt (`buildLinearReviewPrompt`).

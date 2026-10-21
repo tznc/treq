@@ -1,7 +1,6 @@
 //! Each shell window's toasts ([`ToastQueue`]), drawn by `popup` over the
-//! window. The app's own toasts (`Backend::toast`, `NativeEvent::Toast`)
-//! go straight in, with their timers here; React's toast store still sends
-//! its own list (`gpui_toasts_update`), shown with them.
+//! window. Toasts (`Backend::toast`, `NativeEvent::Toast`) go straight in,
+//! with their timers here.
 
 use std::{
   collections::HashMap,
@@ -57,21 +56,6 @@ fn to_popup(toast: QueuedToast) -> Toast {
   }
 }
 
-fn from_popup(toast: Toast) -> QueuedToast {
-  QueuedToast {
-    id: toast.id,
-    title: toast.title,
-    description: toast.description,
-    kind: match toast.kind {
-      ToastKind::Success => toast_queue::ToastKind::Success,
-      ToastKind::Error => toast_queue::ToastKind::Error,
-      ToastKind::Info => toast_queue::ToastKind::Info,
-      ToastKind::Warning => toast_queue::ToastKind::Warning,
-    },
-    action: toast.action,
-  }
-}
-
 /// Shows a toast in window `label` until it expires or is closed. Callable
 /// from any thread.
 pub fn push(
@@ -106,17 +90,6 @@ pub fn push(
   });
 }
 
-/// React's toast store changed: its whole list for window `label`.
-pub fn set_react(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
-  windows()
-    .lock_or_recover()
-    .entry(label.to_string())
-    .or_default()
-    .queue
-    .set_react(toasts.into_iter().map(from_popup).collect());
-  redraw(app, label);
-}
-
 fn remove(label: &str, id: &str) -> bool {
   let mut windows = windows().lock_or_recover();
   let Some(window) = windows.get_mut(label) else {
@@ -126,16 +99,12 @@ fn remove(label: &str, id: &str) -> bool {
   window.queue.remove(id)
 }
 
-/// A click on one of the app's own toasts: its action (`action: true`) or
-/// close button. False for React's toasts, which React handles.
-pub fn click(app: &AppHandle, label: &str, id: &str, action: bool) -> bool {
-  if !toast_queue::is_own(id) {
-    return false;
-  }
+/// A click on a toast: its action (`action: true`) or close button.
+pub fn click(app: &AppHandle, label: &str, id: &str, action: bool) {
   let run = {
     let mut windows = windows().lock_or_recover();
     let Some(window) = windows.get_mut(label) else {
-      return true;
+      return;
     };
     window.queue.remove(id);
     window.actions.remove(id)
@@ -144,7 +113,6 @@ pub fn click(app: &AppHandle, label: &str, id: &str, action: bool) -> bool {
   if let Some(run) = run.filter(|_| action) {
     tauri::async_runtime::spawn_blocking(run);
   }
-  true
 }
 
 fn redraw(app: &AppHandle, label: &str) {

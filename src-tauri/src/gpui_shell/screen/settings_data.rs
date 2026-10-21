@@ -211,9 +211,8 @@ pub fn parse_scope(value: &str) -> Option<SkillInstallScope> {
 
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
 
-/// `PREVIEW_FEATURES` in `src/lib/features.ts`: each feature's title and
-/// its page on the website.
-pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 6] = [
+/// Each preview feature's title and its page on the website.
+pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
   (
     PreviewFeature::SkillsInstallation,
     "Skills installation",
@@ -230,7 +229,6 @@ pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 6] = [
     "/docs/concepts/linear-integration",
   ),
   (PreviewFeature::Logs, "Logs", "/docs/concepts/logs"),
-  (PreviewFeature::Browser, "Browser", "/docs/concepts/browser"),
   (
     PreviewFeature::Devcontainers,
     "Devcontainer environments",

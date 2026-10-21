@@ -1,10 +1,7 @@
 //! The workspace sidebar, drawn by GPUI.
 //!
-//! React still owns the sidebar's data: it builds a [`SidebarSnapshot`] from
-//! the same queries the rest of the app uses and pushes it with the
-//! `gpui_sidebar_update` command. GPUI draws it, and sends every click back
-//! to the window's webview as a `gpui-sidebar-action` event, which React
-//! carries out with the app's own handlers.
+//! The window model builds its [`SidebarSnapshot`] and carries out every
+//! click the sidebar sends back as a [`SidebarAction`].
 
 use crate::gpui_shell::ui::zpx;
 use std::{
@@ -13,10 +10,11 @@ use std::{
   time::Duration,
 };
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, rgb, svg, Animation, AnimationExt as _, App, ClickEvent, Context, Hsla,
-  MouseButton, MouseDownEvent, Pixels, Point, SharedString, Transformation, Window,
+  MouseButton, MouseDownEvent, Pixels, Point, Role, SharedString, Transformation, Window,
 };
 
 use super::{
@@ -26,9 +24,6 @@ use super::{
 
 #[cfg(test)]
 mod tests;
-
-/// Event React listens to on its own webview window.
-pub const ACTION_EVENT: &str = "gpui-sidebar-action";
 
 /// How long the pointer rests on an element before its tooltip shows, as in
 /// the React app's `TooltipProvider`.
@@ -270,8 +265,8 @@ impl Render for ResizeDrag {
   }
 }
 
-/// Where the sidebar's actions go: the window's webview in the app, a list
-/// in tests.
+/// Where the sidebar's actions go: the window model in the app, a list in
+/// tests.
 pub type ActionSink = Rc<dyn Fn(SidebarAction, &mut App)>;
 
 /// The sidebar view of one window.
@@ -590,6 +585,9 @@ impl Render for Sidebar {
         div()
           .id("command-palette")
           .debug_selector(|| "command-palette".into())
+          .role(Role::Button)
+          .aria_label("Command palette")
+          .test_support()
           .flex()
           .flex_1()
           .min_w_0()
@@ -803,6 +801,9 @@ impl Sidebar {
     div()
       .id(id)
       .debug_selector(move || id.into())
+      .role(Role::Button)
+      .aria_label(tooltip)
+      .test_support()
       .relative()
       .flex()
       .flex_none()
@@ -861,6 +862,9 @@ impl Sidebar {
     div()
       .id(id.clone())
       .debug_selector(move || selector)
+      .role(Role::Button)
+      .aria_label(tooltip)
+      .test_support()
       .relative()
       .flex()
       .flex_none()
@@ -1000,6 +1004,10 @@ impl Sidebar {
         };
         move || selector.clone()
       })
+      .role(Role::Button)
+      .aria_label(label.clone())
+      .aria_selected(repo.home_selected)
+      .test_support()
       .relative()
       .flex()
       .items_center()
@@ -1063,6 +1071,10 @@ impl Sidebar {
     div()
       .id(id)
       .debug_selector(move || id.into())
+      .role(Role::Button)
+      .aria_label(text)
+      .aria_selected(active)
+      .test_support()
       .flex()
       .items_center()
       .gap(zpx(6.))
@@ -1089,7 +1101,7 @@ impl Sidebar {
       .absolute()
       .top_0()
       .bottom_0()
-      // Inside the sidebar: the webview takes every click right of it.
+      // Inside the sidebar, so the screen keeps every click right of it.
       .right_0()
       .w(zpx(4.))
       .cursor_ew_resize()
@@ -1227,6 +1239,10 @@ impl Sidebar {
     let row_el = div()
       .id(("workspace", id as u64))
       .debug_selector(move || selector.clone())
+      .role(Role::Button)
+      .aria_label(row.title.clone())
+      .aria_selected(row.selected)
+      .test_support()
       .group(group.clone())
       .relative()
       .flex()

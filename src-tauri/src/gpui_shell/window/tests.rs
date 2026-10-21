@@ -40,6 +40,8 @@ use crate::{
   local_db::{Session, Workspace},
 };
 
+mod fuzz;
+
 #[derive(Default)]
 struct FakeHost {
   workspaces: Mutex<HashMap<String, Vec<Workspace>>>,
@@ -55,6 +57,9 @@ struct FakeHost {
   /// The next workspaces read panics, as a backend read before the app's
   /// state is managed did.
   panic_once: std::sync::atomic::AtomicBool,
+  /// The next branch read fails, as one before `prepare_repo`'s jj init
+  /// does.
+  no_branch_once: std::sync::atomic::AtomicBool,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
 }
@@ -118,6 +123,12 @@ impl WindowHost for FakeHost {
   }
 
   fn branch(&self, _: &str) -> Option<RepoBranch> {
+    if self
+      .no_branch_once
+      .swap(false, std::sync::atomic::Ordering::SeqCst)
+    {
+      return None;
+    }
     Some(RepoBranch {
       current_branch: Some("main".into()),
       display_ref: "main".into(),
@@ -485,6 +496,23 @@ fn follows_the_theme_zoom_and_sidebar_width_settings(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_sidebar_width_that_is_not_a_number_keeps_the_sidebar_drawable(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("workspace_sidebar_width".into(), "NaN".into());
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  assert_eq!(window.last().sidebar.unwrap().width, 280.);
+  window.sidebar(cx, SidebarAction::ResizeSidebar { width: f32::NAN });
+  assert_eq!(window.last().sidebar.unwrap().width, 280.);
+  assert!(host
+    .calls()
+    .contains(&"save workspace_sidebar_width=280".to_string()));
+}
+
+#[gpui::test]
 fn follows_the_system_appearance_on_the_system_theme(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
   assert!(!window.last().dark);
@@ -505,6 +533,17 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);
+}
+
+#[gpui::test]
+fn reads_the_branch_again_when_the_first_read_raced_the_repo_init(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .no_branch_once
+    .store(true, std::sync::atomic::Ordering::SeqCst);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let repos = window.last().sidebar.unwrap().repos;
+  assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
 }
 
 #[gpui::test]
@@ -1181,6 +1220,22 @@ fn a_workspace_removed_outside_the_app_leaves_the_view(cx: &mut TestAppContext) 
   cx.run_until_parked();
   assert!(!window.sidebar_ids().contains(&3));
   assert_eq!(window.route_workspace(), None, "home, not the parent");
+}
+
+/// Found by the fuzzer: a row removed elsewhere stayed in the
+/// multi-selection, and in Bulk Archive's count.
+#[gpui::test]
+fn a_workspace_removed_elsewhere_leaves_the_multi_selection(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 1, true);
+  select(&window, cx, 2, true);
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(2));
+  remove(&host, 1);
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert!(!window.sidebar_ids().contains(&1));
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(1));
 }
 
 /// Bulk Archive with one failure: only the archived row leaves.

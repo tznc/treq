@@ -53,6 +53,9 @@ pub struct WindowController {
   /// A read in flight, and what to read once it returns.
   reading: bool,
   queued: Option<Read>,
+  /// `prepare_repo` finished while a read was in flight: once it returns,
+  /// read again if it found no branch.
+  recheck_branch: bool,
   _pollers: Vec<Task<()>>,
 }
 
@@ -79,6 +82,7 @@ impl WindowController {
       shown: None,
       reading: false,
       queued: None,
+      recheck_branch: false,
       _pollers: pollers,
     };
     let host = this.host.clone();
@@ -86,11 +90,21 @@ impl WindowController {
       .detach();
     let mut effects = vec![Effect::ReadPrefs, Effect::Refresh { revision: false }];
     match repo {
-      Some(repo) => {
-        let host = this.host.clone();
-        cx.background_spawn(async move { host.prepare_repo(&repo) })
-          .detach();
-      }
+      // The first read races `prepare_repo`'s jj init: a branch read before
+      // `.jj` exists fails, and only a refresh reads the branch again. So
+      // once the repository is prepared, read again if the branch is still
+      // unknown, waiting for a read in flight to tell.
+      Some(repo) => this.background(
+        move |host| host.prepare_repo(&repo),
+        |this, (), cx| {
+          if this.reading {
+            this.recheck_branch = true;
+          } else {
+            this.reread_missing_branch(cx);
+          }
+        },
+        cx,
+      ),
       None => effects.push(Effect::from(RemoteEffect::RestoreLast)),
     }
     this.run(effects, cx);
@@ -605,6 +619,13 @@ impl WindowController {
     }
   }
 
+  /// Reads everything again when the main repository's branch is unknown.
+  fn reread_missing_branch(&mut self, cx: &mut Context<Self>) {
+    if self.data.home_ref(&self.model.main_repo).is_none() {
+      self.read(Read::ALL, cx);
+    }
+  }
+
   /// Reads what `read` asks of the window's repositories, once any read in
   /// flight returns.
   fn read(&mut self, read: Read, cx: &mut Context<Self>) {
@@ -646,6 +667,9 @@ impl WindowController {
           // A repository opened while reading the one before.
           Ok((main, supporting, reads)) if main == this.model.main_repo => {
             this.apply(supporting, reads, cx);
+            if std::mem::take(&mut this.recheck_branch) {
+              this.reread_missing_branch(cx);
+            }
           }
           Ok(_) => {}
           Err(_) => log::error!("reading the window's repositories panicked"),
