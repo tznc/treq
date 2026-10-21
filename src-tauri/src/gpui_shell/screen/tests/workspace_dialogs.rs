@@ -431,6 +431,25 @@ fn the_dialog_opens_over_the_screen_and_closes_through_react(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+fn opening_advanced_only_makes_the_dialog_taller(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    suggestions: (0..12)
+      .map(|i| format!("a-long-gitignored-directory-{i}"))
+      .collect(),
+    ..host()
+  });
+  let mut h = Harness::with_host(cx, dialog(serde_json::json!({})), host);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  h.cx.run_until_parked();
+  let closed = h.cx.debug_bounds("workspace-dialog").expect("dialog");
+  h.click("workspace-dialog-advanced");
+  let open = h.cx.debug_bounds("workspace-dialog").expect("dialog");
+  assert_eq!(open.size.width, closed.size.width);
+  assert!(open.size.height > closed.size.height);
+}
+
+#[gpui::test]
 fn the_title_names_the_branch_and_creates(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     branches: vec![branch("main"), branch("release")],
