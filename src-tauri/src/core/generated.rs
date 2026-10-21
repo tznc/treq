@@ -98,7 +98,7 @@ impl GeneratedFiles {
         if pattern.starts_with('!') {
           return None;
         }
-        let generated = parts.filter_map(attribute).last()?;
+        let generated = parts.filter_map(attribute).next_back()?;
         let mut builder = GitignoreBuilder::new("");
         builder.add_line(None, pattern).ok()?;
         Some(Rule {
