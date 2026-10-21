@@ -115,3 +115,33 @@ test("terminal: tooltip, maximize, collapse", async ({ page }) => {
   });
   await expect(page.getByRole("tab", { name: "Commits", selected: true })).toBeVisible();
 });
+
+// The fake agent draws a rule as wide as its PTY and redraws it in place
+// on a resize, as a prompt or a TUI does. Narrowing its column must not
+// leave the old rule's head behind.
+test("terminal: a narrower column redraws in place", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Commits");
+  await row(page, BRANCH).hover();
+  await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
+  await settle(page, 2500);
+  await page.mouse.click(1000, 780);
+  await page.keyboard.type("clear; claude\n");
+  await settle(page, 2000);
+  await capture(page, {
+    name: "07-terminal-redraw-wide",
+    title: "Terminal pane: a program drawing a full-width rule",
+    expectations: ["The dimmed ==== rule is one line ending at the right edge"],
+  });
+  await row(page, BRANCH).hover();
+  await row(page, BRANCH).getByRole("button", { name: "Start agent" }).click();
+  await settle(page, 3000);
+  await capture(page, {
+    name: "07-terminal-redraw-narrow",
+    title: "Terminal pane: the same program after an agent opens beside it",
+    expectations: [
+      "In the narrowed column the rule is one line ending at the column's edge",
+      "No leftover rule fragment sits above it",
+    ],
+  });
+});
