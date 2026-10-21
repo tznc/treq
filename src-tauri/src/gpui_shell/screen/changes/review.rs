@@ -4,7 +4,7 @@
 //! agent through React.
 
 use crate::gpui_shell::ui::zpx;
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 
 use super::*;
 use crate::gpui_shell::screen::{
@@ -792,6 +792,7 @@ impl ChangesView {
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    changed: &[Range<usize>],
     language: Option<&'static str>,
     conflicted: bool,
     p: &Palette,
@@ -815,6 +816,13 @@ impl ChangesView {
         LineKind::Context => None,
       }
     };
+    // The characters this line changed against its pair, a shade deeper.
+    let mark = match kind {
+      LineKind::Removed => tw::color(tw::RED_500),
+      _ => tw::color(tw::EMERALD_500),
+    }
+    .opacity(0.45);
+    let changed: Vec<(Range<usize>, Hsla)> = changed.iter().map(|r| (r.clone(), mark)).collect();
     let marker = match kind {
       LineKind::Added => "+",
       LineKind::Removed => "-",
@@ -948,6 +956,7 @@ impl ChangesView {
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
             language,
+            &changed,
           )),
       )
   }
