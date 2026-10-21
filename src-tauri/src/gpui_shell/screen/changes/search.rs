@@ -252,6 +252,8 @@ impl ChangesView {
         collapsed: self.collapsed_files.contains(path),
         comment_activity: self.file_comment_activity(path),
         expanded_large: self.expanded_large.contains(path),
+        generated: self.is_generated(path),
+        loaded_generated: self.loaded_generated.contains(path),
       };
       if body(&input) != Body::Hunks {
         continue;

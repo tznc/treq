@@ -243,3 +243,26 @@ test("changes: Escape closes the discard all confirmation", async ({ page }) => 
   });
   await expect(confirm).toHaveCount(0);
 });
+
+test("changes: generated files wait behind Load diff", async ({ page }) => {
+  await openWorkspace(page, "feat/event-ingest");
+  await openTab(page, "Changes");
+  const load = page.getByRole("button", { name: "Load diff" });
+  await expect(load).toHaveCount(2);
+  await capture(page, {
+    name: "05-changes-generated-deferred",
+    title: "Generated files' diffs wait behind Load diff",
+    expectations: [
+      "package-lock.json and generated/schema.ts cards say the file is generated, with a Load diff button",
+      "retry.ts and .gitattributes show their diffs as usual",
+    ],
+  });
+  await load.first().click();
+  await expect(load).toHaveCount(1);
+  await settle(page, 800);
+  await capture(page, {
+    name: "05-changes-generated-loaded",
+    title: "A generated file's diff after Load diff",
+    expectations: ["The clicked generated file's diff renders in place of the placeholder"],
+  });
+});
