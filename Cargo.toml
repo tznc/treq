@@ -24,7 +24,7 @@ split-debuginfo = "unpacked" # Skip dsymutil on macOS (faster linking)
 # Compile dependencies with higher optimization in dev mode
 # This makes dev builds faster by optimizing slow dependencies once
 [profile.dev.package."*"]
-opt-level = 3           # Optimize dependencies more aggressively
+opt-level = 1           # Optimize dependencies more aggressively
 debug = false           # Strip debug info from dependencies
 
 # Release profile - optimized for size and performance

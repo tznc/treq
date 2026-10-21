@@ -10,6 +10,7 @@ profile.json.gz
 
 # Build outputs
 /dist
+/src/dist/
 *.log
 
 # IDE
@@ -62,6 +63,7 @@ web/static/img/landing/
 
 # service-qa harness output (outcome manifests)
 scripts/service-qa/.generated/
+scripts/screenshot/.generated/
 .cursor-artifacts/
 .jj*/
 .agents/skills/treq*/
