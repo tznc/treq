@@ -513,6 +513,9 @@ pub fn run() {
       // Load cached binary paths and initialize in-memory cache
       let binary_paths = commands::load_cached_binary_paths(&db);
       binary_paths::init_binary_paths_cache(binary_paths);
+      // Resolve the login-shell PATH off the main thread so the first terminal
+      // doesn't wait on shell startup.
+      std::thread::spawn(binary_paths::get_extended_path);
 
       // Load cached editor apps and initialize in-memory cache
       let editor_apps = commands::load_cached_editor_apps(&db);
