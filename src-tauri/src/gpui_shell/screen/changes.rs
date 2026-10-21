@@ -34,8 +34,8 @@ use super::{
     diff_summary, discarded, full_path, hunks_hash, is_collapsed, line_counts, new_lines,
     pending_label, review_prompt, section_label, select_all_label, split_path, stashed,
     total_lines, visible_committed, Body, BodyInput, ChangedFile, ChangesHost, CommitAction,
-    Conflict, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH, FIRST_BATCH,
-    HOME_ENDPOINT, LARGE_CHANGESET_LINES,
+    Conflict, ContextReads, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH,
+    FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
@@ -965,12 +965,7 @@ impl ChangesView {
 
   /// `handleExpandContext`: twenty more lines above or below a hunk.
   /// [`context_ranges`] for hunk `h` of `path`, from the lines read so far.
-  fn context_ranges(
-    &self,
-    path: &str,
-    hunks: &[JjDiffHunk],
-    h: usize,
-  ) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
+  fn context_ranges(&self, path: &str, hunks: &[JjDiffHunk], h: usize) -> ContextReads {
     let read = |i: usize, dir: Dir| {
       self
         .context

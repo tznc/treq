@@ -808,6 +808,10 @@ fn trailing_context(hunk: &JjDiffHunk) -> usize {
     .count()
 }
 
+/// The lines `first..=last` "Show more lines" reads next above and below a
+/// hunk, `None` on a side with nothing hidden.
+pub type ContextReads = (Option<(usize, usize)>, Option<(usize, usize)>);
+
 /// The lines "Show more lines" reads next above and below hunk `h`, or
 /// `None` on a side where nothing is hidden: the file's start or end, or the
 /// lines shown for the neighbouring hunk. `loaded(i)` is the lines read so
@@ -818,7 +822,7 @@ pub fn context_ranges(
   h: usize,
   loaded: impl Fn(usize) -> (usize, usize),
   ended: bool,
-) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
+) -> ContextReads {
   let (first, last) = new_lines(&hunks[h].header);
   let (above, below) = loaded(h);
   let floor = match h.checked_sub(1) {
