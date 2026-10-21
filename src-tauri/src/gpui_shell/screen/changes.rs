@@ -1888,15 +1888,24 @@ impl ChangesView {
         .hover(move |s| s.bg(hover_bg))
         .child(ui::icon(icon, 12., fg))
     };
-    let red = if self.dark {
+    // Selected rows sit on a saturated blue, so their status and actions
+    // switch to white and stay visible without hovering.
+    let red = if selected {
+      white
+    } else if self.dark {
       tw::color(tw::RED_400)
     } else {
       tw::color(tw::RED_600)
     };
+    let status_color = if selected {
+      white.opacity(0.85)
+    } else {
+      p.muted_foreground
+    };
     let mut actions = div().flex().items_center().gap_1().flex_none().child(
       div()
         .min_w(zpx(8.))
-        .text_color(p.muted_foreground)
+        .text_color(status_color)
         .child(file.status.clone()),
     );
     if last && selected && !staged {
@@ -1921,7 +1930,7 @@ impl ChangesView {
         theme::ICON_PLUS,
         name_color,
         p.accent,
-        true,
+        false,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -1937,7 +1946,7 @@ impl ChangesView {
         theme::ICON_MINUS,
         name_color,
         p.accent,
-        true,
+        !selected,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
