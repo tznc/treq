@@ -4,13 +4,13 @@ import userEvent from "@testing-library/user-event";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import * as api from "../../../src/lib/api";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 import { captureDocument } from "../capture";
 
 // gh is an external service: the PR, remote and repo merge settings are
@@ -71,7 +71,7 @@ it("captures the merge landing plan locally and on GitHub", async () => {
 
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement("feat/stack-b"));
+  await clickGpuiRow("feat/stack-b");
   const header = await screen.findByTestId("show-workspace-header");
   const merge = await within(header).findByRole("button", {
     name: /^merge\.\.\.$/i,
@@ -150,7 +150,7 @@ it("captures syncing a PR that was already merged on GitHub", async () => {
 
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement("feat/landed"));
+  await clickGpuiRow("feat/landed");
   const header = await screen.findByTestId("show-workspace-header");
   const merge = await within(header).findByRole("button", {
     name: /^merge\.\.\.$/i,

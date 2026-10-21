@@ -7,7 +7,7 @@ import { commitWorkspaceFile, createTestRepo, openRepo } from "../utils";
 import { createWorkspace, getWorkspaces } from "../../src/lib/api";
 import { fireEvent, render, screen, waitFor, within } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
-import { clickGpuiRow } from "../gpui-sidebar";
+import { clickGpuiRow, findGpuiToast } from "../gpui-sidebar";
 
 vi.mock("../../src/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/lib/api")>();
@@ -413,7 +413,7 @@ describe("MergePreviewPage integration", () => {
       await waitFor(() => {
         expect(screen.queryByText("Merge Preview")).not.toBeInTheDocument();
       });
-      await screen.findByText(/moved pr #8 \(feat\/mp-gh-child\) onto main/i);
+      await findGpuiToast(/moved pr #8 \(feat\/mp-gh-child\) onto main/i);
     });
 
     it("syncs a PR that was already merged on GitHub", async () => {
@@ -479,9 +479,7 @@ describe("MergePreviewPage integration", () => {
       await waitFor(() => expect(mergeButton).not.toBeDisabled());
       await user.click(mergeButton);
 
-      expect(
-        await screen.findByText(/required checks are failing: ci/i),
-      ).toBeInTheDocument();
+      await findGpuiToast(/required checks are failing: ci/i);
       await screen.findByText("Merge Preview");
     });
   });
