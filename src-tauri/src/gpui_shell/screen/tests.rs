@@ -4155,8 +4155,14 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   );
   h.cx.simulate_keystrokes("cmd-enter");
   assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
+  // The write changes a.rs on disk; that read is not stale.
+  let mut applied = host.working.clone().expect("working");
+  applied.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+B".into()];
+  *host.edited.lock().unwrap() = Some(applied);
   h.click("apply-suggestion");
   h.cx.run_until_parked();
+  assert!(!h.drawn("stale-banner"), "its own write shows at once");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+B"]);
   assert!(
     host
       .calls()

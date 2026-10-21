@@ -61,6 +61,9 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub head_drawn: Rc<RefCell<Option<DrawnLine>>>,
   /// A comment box closed: the diff takes the keyboard back.
   pub refocus: bool,
+  /// The next read shows as is: it follows this view's own write to the
+  /// checkout, which must not wait behind the stale banner.
+  pub apply_next: bool,
   pub comments: Vec<LineComment>,
   /// Where the comment box is open.
   pub draft: Option<Pending>,
@@ -364,6 +367,7 @@ impl ChangesView {
         Ok(()) => {
           view.delete_comment(&id, cx);
           view.toast(ToastTone::Success, "Suggestion applied", "");
+          view.review.apply_next = true;
           view.load(cx);
         }
         Err(err) => view.toast(ToastTone::Error, "Could not apply suggestion", err),

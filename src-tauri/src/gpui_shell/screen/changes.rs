@@ -418,6 +418,11 @@ impl ChangesView {
         view.loading = false;
         view.field("changes.refreshing", false.into(), cx);
         match result {
+          Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
+            view.review.stale.clear();
+            view.review.parked = None;
+            view.apply(snapshot, cx)
+          }
           Ok(snapshot) if view.park(&snapshot) => {}
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
           Ok(snapshot) => view.apply(snapshot, cx),
