@@ -808,6 +808,20 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(())
   }
 
+  fn apply_suggestion(
+    &self,
+    workspace_path: &str,
+    path: &str,
+    (start, end): (u32, u32),
+    original: &[String],
+    suggested: &str,
+  ) -> Result<(), String> {
+    self.record(format!(
+      "apply suggestion {workspace_path} {path} {start}..{end} {original:?} -> {suggested:?}"
+    ));
+    Ok(())
+  }
+
   fn apply_agent_suggestion(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("apply agent suggestion {id}"));
     Ok(())
@@ -4123,6 +4137,38 @@ fn left_comments_the_selected_lines(cx: &mut TestAppContext) {
   // The diff has the keyboard again.
   h.cx.simulate_keystrokes("down");
   assert!(selected_lines(&mut h).is_some());
+}
+
+#[gpui::test]
+fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  h.click("suggest-change");
+  assert_eq!(
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      changes.review.draft_text.clone()
+    }),
+    "```suggestion\nb\nc\n```\n"
+  );
+  h.cx.simulate_keystrokes("cmd-enter");
+  assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
+  h.click("apply-suggestion");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.contains("apply suggestion") && c.contains("a.rs 2..3 [\"b\", \"c\"]")),
+    "{:?}",
+    host.calls()
+  );
+  assert!(
+    !h.drawn("inline-comment-card"),
+    "the applied comment is done"
+  );
 }
 
 /// Comments line `+b` of a.rs with `text`.
