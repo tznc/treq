@@ -25,6 +25,8 @@ pub const LARGE_FILE_LINES: usize = 250;
 pub const LARGE_CHANGESET_LINES: usize = 1000;
 /// Lines each "Show more lines" click reads.
 pub const CONTEXT_STEP: usize = 20;
+/// Unchanged lines the backend's diff keeps around each change.
+const DIFF_CONTEXT: usize = 3;
 /// The first files read before the rest (`INITIAL_FILE_BATCH`).
 pub const FIRST_BATCH: usize = 2;
 /// Files read per batch after the first.
@@ -785,27 +787,58 @@ pub fn new_range(header: &str) -> (usize, usize) {
     .unwrap_or((1, 1))
 }
 
-/// The lines "Show more lines above" reads next, if any.
-pub fn before_range(header: &str, loaded: usize) -> Option<(usize, usize)> {
-  let (start, _) = new_range(header);
-  let end = (start as i64) - 1 - loaded as i64;
-  if end < 1 {
-    return None;
+/// The new-side lines a hunk shows, `first..=last`; one that only removes
+/// lines shows none (`last == first - 1`).
+pub fn new_lines(header: &str) -> (usize, usize) {
+  match new_range(header) {
+    (start, 0) => (start + 1, start),
+    (start, count) => (start, start + count - 1),
   }
-  let end = end as usize;
-  Some(((end + 1).saturating_sub(CONTEXT_STEP).max(1), end))
 }
 
-/// The lines "Show more lines below" reads next.
-pub fn after_range(header: &str, loaded: usize) -> (usize, usize) {
-  let (start, count) = new_range(header);
-  let first = start + count + loaded;
-  (first, first + CONTEXT_STEP - 1)
+/// Unchanged lines closing the hunk. The backend's diff keeps
+/// [`DIFF_CONTEXT`] of them unless the file ends first.
+fn trailing_context(hunk: &JjDiffHunk) -> usize {
+  hunk
+    .lines
+    .iter()
+    .rev()
+    .filter(|l| !l.starts_with('\\'))
+    .take_while(|l| !l.starts_with('+') && !l.starts_with('-'))
+    .count()
 }
 
-/// Above a hunk there is more to show.
-pub fn can_expand_before(header: &str, loaded: usize) -> bool {
-  new_range(header).0 > 1 || loaded > 0
+/// The lines "Show more lines" reads next above and below hunk `h`, or
+/// `None` on a side where nothing is hidden: the file's start or end, or the
+/// lines shown for the neighbouring hunk. `loaded(i)` is the lines read so
+/// far above and below hunk `i`; `ended` means a read below `h` came back
+/// short.
+pub fn context_ranges(
+  hunks: &[JjDiffHunk],
+  h: usize,
+  loaded: impl Fn(usize) -> (usize, usize),
+  ended: bool,
+) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
+  let (first, last) = new_lines(&hunks[h].header);
+  let (above, below) = loaded(h);
+  let floor = match h.checked_sub(1) {
+    Some(prev) => new_lines(&hunks[prev].header).1 + loaded(prev).1,
+    None => 0,
+  };
+  let before = (first - 1)
+    .checked_sub(above)
+    .filter(|end| *end > floor)
+    .map(|end| ((end + 1).saturating_sub(CONTEXT_STEP).max(floor + 1), end));
+  let start = last + 1 + below;
+  let after = match hunks.get(h + 1) {
+    Some(next) => {
+      let ceiling = new_lines(&next.header).0.saturating_sub(loaded(h + 1).0);
+      (start < ceiling).then(|| (start, (start + CONTEXT_STEP - 1).min(ceiling - 1)))
+    }
+    None if ended || (below == 0 && trailing_context(&hunks[h]) < DIFF_CONTEXT) => None,
+    None => Some((start, start + CONTEXT_STEP - 1)),
+  };
+  (before, after)
 }
 
 /// A conflict region as the tab numbers it (`useConflicts`).
@@ -1078,12 +1111,56 @@ mod tests {
 
   #[test]
   fn context_ranges_step_twenty_lines() {
-    assert_eq!(before_range("@@ -30,4 +30,4 @@", 0), Some((10, 29)));
-    assert_eq!(before_range("@@ -30,4 +30,4 @@", 20), Some((1, 9)));
-    assert_eq!(before_range("@@ -1,4 +1,4 @@", 0), None);
-    assert_eq!(after_range("@@ -30,4 +30,4 @@", 0), (34, 53));
-    assert_eq!(after_range("@@ -30,4 +30,4 @@", 20), (54, 73));
-    assert!(!can_expand_before("@@ -1,4 +1,4 @@", 0));
+    let mid = [hunk(
+      "@@ -30,4 +30,4 @@",
+      &[" a", "-b", "+b", " c", " d", " e"],
+    )];
+    let ranges = |before, after| context_ranges(&mid, 0, |_| (before, after), false);
+    assert_eq!(ranges(0, 0), (Some((10, 29)), Some((34, 53))));
+    assert_eq!(ranges(20, 20), (Some((1, 9)), Some((54, 73))));
+    assert_eq!(ranges(29, 20).0, None);
+    // A read below that came back short reached the end of the file.
+    assert_eq!(context_ranges(&mid, 0, |_| (0, 5), true).1, None);
+  }
+
+  #[test]
+  fn context_ranges_stop_at_the_file_ends() {
+    // `.gitignore`: lines 9-13, two of them added at the end of the file.
+    let tail = [hunk(
+      "@@ -9,3 +9,5 @@",
+      &[" a", " b", " c", "+d", "+e", "\\ No newline at end of file"],
+    )];
+    assert_eq!(
+      context_ranges(&tail, 0, |_| (0, 0), false),
+      (Some((1, 8)), None)
+    );
+    assert_eq!(context_ranges(&tail, 0, |_| (8, 0), false), (None, None));
+    let head = [hunk("@@ -1,4 +1,4 @@", &[" a", "-b", "+b", " c", " d"])];
+    assert_eq!(context_ranges(&head, 0, |_| (0, 0), false).0, None);
+  }
+
+  #[test]
+  fn context_ranges_stop_at_the_neighbouring_hunk() {
+    let hunks = [
+      hunk("@@ -1,4 +1,4 @@", &["-a", "+a", " b", " c", " d"]),
+      hunk("@@ -30,4 +30,4 @@", &[" a", " b", " c", "-d", "+d"]),
+    ];
+    // Lines 5-29 are hidden between the hunks.
+    assert_eq!(
+      context_ranges(&hunks, 0, |_| (0, 0), false).1,
+      Some((5, 24))
+    );
+    assert_eq!(
+      context_ranges(&hunks, 1, |_| (0, 0), false).0,
+      Some((10, 29))
+    );
+    // Twenty read below the first leave five above the second.
+    let loaded = |i| if i == 0 { (0, 20) } else { (0, 0) };
+    assert_eq!(context_ranges(&hunks, 0, loaded, false).1, Some((25, 29)));
+    assert_eq!(context_ranges(&hunks, 1, loaded, false).0, Some((25, 29)));
+    let loaded = |i| if i == 0 { (0, 20) } else { (5, 0) };
+    assert_eq!(context_ranges(&hunks, 0, loaded, false).1, None);
+    assert_eq!(context_ranges(&hunks, 1, loaded, false).0, None);
   }
 
   #[test]
