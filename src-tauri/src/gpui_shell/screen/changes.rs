@@ -39,7 +39,7 @@ use super::{
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
-  highlight, ActionSink, ScreenAction,
+  highlight, intraline, ActionSink, ScreenAction,
 };
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
@@ -2849,6 +2849,7 @@ impl ChangesView {
         el = el.child(context_row(n, line, language, p));
       }
       let numbers = line_numbers(hunk);
+      let changed = intraline::changed_ranges(&hunk.lines);
       for l in 0..hunk.lines.len() {
         let new = numbers.get(l).and_then(|n| n.1);
         if let Some(region) = new.and_then(|n| in_region.get(&(n as usize)).copied()) {
@@ -2861,7 +2862,17 @@ impl ChangesView {
         }
         el = el.child(
           self
-            .diff_line(path, hunks, h, l, language, conflicted, p, cx)
+            .diff_line(
+              path,
+              hunks,
+              h,
+              l,
+              changed.get(&l).map_or(&[], Vec::as_slice),
+              language,
+              conflicted,
+              p,
+              cx,
+            )
             .on_mouse_down(
               MouseButton::Right,
               cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
@@ -3014,6 +3025,7 @@ impl ChangesView {
             search::MatchKey::Conflict(conflict.id.clone(), i),
             &raw,
             None,
+            &[],
           ))),
       );
       let deleted_notice = |side: &'static str, fg: Hsla, border: Hsla, bg: Hsla| {
