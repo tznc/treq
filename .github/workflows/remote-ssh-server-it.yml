@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Restrict test private key permissions
         run: chmod 600 src-tauri/tests/fixtures/remote_ssh_it/id_ed25519
@@ -243,7 +243,7 @@ jobs:
           ssh "${ssh_opts[@]}" 'treq --version'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
@@ -256,7 +256,7 @@ jobs:
       # Needed to link `treq` at all (see ci.yml's identical step) - not
       # needed to run it, since the real binary never leaves this runner.
       - name: install dependencies (ubuntu only)
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
           version: webkit-4.1-gpui-1

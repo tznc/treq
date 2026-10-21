@@ -23,7 +23,7 @@ jobs:
           labels: codex
 
       - name: Remove chatgpt.com link and divider
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -43,7 +43,7 @@ jobs:
             }
 
       - name: Add docs prefix if only web/ changes
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -69,7 +69,7 @@ jobs:
             });
 
       - name: Enforce conventional commit title
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             // Re-fetch the PR so we see any title edits made by earlier jobs

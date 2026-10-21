@@ -36,7 +36,7 @@ jobs:
     # The soak waits up to six hours for a Sprite to go cold.
     timeout-minutes: ${{ github.event.inputs.soak == 'true' && 420 || 90 }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Skip when dedicated credentials are absent
         id: gate
         env:
@@ -54,7 +54,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         with:
           deno-version: v2.x
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         if: steps.gate.outputs.run == 'true'
         with:
           toolchain: stable
