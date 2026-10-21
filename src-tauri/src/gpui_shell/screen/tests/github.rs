@@ -21,14 +21,14 @@ use crate::{
 #[derive(Default)]
 pub(super) struct Fake {
   /// `None`: the repository has no GitHub remote.
-  remote: Option<GitRemoteInfo>,
+  pub(super) remote: Option<GitRemoteInfo>,
   /// Pages by number, from 1.
   issue_pages: Vec<GhListPage<GhIssue>>,
   pr_pages: Vec<GhListPage<GhPullRequest>>,
   issue: Option<GhIssue>,
-  pr: Option<GhPullRequest>,
+  pub(super) pr: Option<GhPullRequest>,
   checks: Option<PrCiStatus>,
-  workspaces: Vec<crate::local_db::Workspace>,
+  pub(super) workspaces: Vec<crate::local_db::Workspace>,
   statuses: HashMap<String, Option<PrInfo>>,
   default_branch: Option<String>,
   treq: TreqChecks,
@@ -68,7 +68,7 @@ fn issue(number: u64, title: &str) -> GhIssue {
   }
 }
 
-fn pr(number: u64, head: &str, base: &str) -> GhPullRequest {
+pub(super) fn pr(number: u64, head: &str, base: &str) -> GhPullRequest {
   GhPullRequest {
     number,
     title: format!("Change {number}"),
@@ -95,7 +95,7 @@ fn page<T>(items: Vec<T>, more: bool, cursor: Option<&str>) -> GhListPage<T> {
   }
 }
 
-fn acme() -> Option<GitRemoteInfo> {
+pub(super) fn acme() -> Option<GitRemoteInfo> {
   Some(GitRemoteInfo {
     owner: "acme".into(),
     repo: "treq".into(),

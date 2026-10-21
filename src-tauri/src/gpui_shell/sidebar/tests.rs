@@ -287,6 +287,13 @@ fn header_buttons_open_the_palette_and_settings(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_open_button_opens_workspaces(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.click("open-workspaces");
+  assert_eq!(h.sent(), vec![SidebarAction::OpenWorkspaces]);
+}
+
+#[gpui::test]
 fn nav_rows_open_github_and_linear(cx: &mut TestAppContext) {
   let mut s = snapshot(vec![]);
   s.linear = Some(false);

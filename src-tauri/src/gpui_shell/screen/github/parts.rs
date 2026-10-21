@@ -8,7 +8,7 @@ use tauri_plugin_gpui::gpui::{
 
 use super::super::github_data::{self as data, CiState};
 use crate::{
-  github::{GhLabel, PrCheckEntry},
+  github::{GhLabel, GhPullRequest, PrCheckEntry},
   gpui_shell::{
     theme::{self, tw, Palette},
     ui::{self, Button, Size, TextSize, Variant},
@@ -364,4 +364,84 @@ pub fn menu_item(
     .hover(move |s| s.bg(accent))
     .on_click(on_click)
     .child(label.to_string())
+}
+
+/// A list row's title and number.
+pub fn row_title(title: &str, number: u64, p: &Palette) -> Div {
+  div()
+    .flex()
+    .items_center()
+    .gap_2()
+    .min_w_0()
+    .child(
+      ui::text(div(), TextSize::Lg)
+        .font_weight(FontWeight::MEDIUM)
+        .min_w_0()
+        .truncate()
+        .child(title.to_string()),
+    )
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .flex_none()
+        .text_color(p.muted_foreground)
+        .child(format!("#{number}")),
+    )
+}
+
+/// A list row's second line: `flex items-center gap-2 mt-1 text-base`.
+pub fn row_meta(p: &Palette) -> Div {
+  ui::text(div(), TextSize::Sm)
+    .flex()
+    .items_center()
+    .gap_2()
+    .mt_1()
+    .min_w_0()
+    .text_color(p.muted_foreground)
+}
+
+/// `PrListItem`'s text: the title and number, then the state, author,
+/// branches (when `branches`) and creation date.
+pub fn pr_list_item(pr: &GhPullRequest, branches: bool, p: &Palette) -> Div {
+  div()
+    .flex_1()
+    .min_w_0()
+    .child(row_title(&pr.title, pr.number, p))
+    .child(
+      row_meta(p)
+        .child(state_chip(&pr.state, pr.is_draft, p))
+        .child(
+          div()
+            .max_w(zpx(160.))
+            .truncate()
+            .child(pr.author.login.clone()),
+        )
+        .when(branches, |d| {
+          d.child(
+            div()
+              .flex()
+              .items_center()
+              .gap_1()
+              .min_w_0()
+              .font_family(theme::MONO_FONT)
+              .child(
+                div()
+                  .max_w(zpx(256.))
+                  .truncate()
+                  .child(pr.head_ref_name.clone()),
+              )
+              .child(div().flex_none().child("→"))
+              .child(
+                div()
+                  .max_w(zpx(256.))
+                  .truncate()
+                  .child(pr.base_ref_name.clone()),
+              ),
+          )
+        })
+        .child(
+          div()
+            .flex_none()
+            .child(crate::gpui_shell::time::date(&pr.created_at)),
+        ),
+    )
 }

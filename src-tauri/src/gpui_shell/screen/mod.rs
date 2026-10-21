@@ -50,6 +50,8 @@ mod merge_queue;
 mod merge_queue_data;
 mod modal;
 mod onboarding;
+mod open_workspaces;
+mod open_workspaces_data;
 pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;
@@ -159,6 +161,7 @@ pub trait Host:
   + workspace_dialog_data::WorkspaceDialogHost
   + linear_data::LinearHost
   + github_data::GithubHost
+  + open_workspaces_data::OpenWorkspacesHost
 {
 }
 
@@ -174,6 +177,7 @@ impl<T> Host for T where
     + workspace_dialog_data::WorkspaceDialogHost
     + linear_data::LinearHost
     + github_data::GithubHost
+    + open_workspaces_data::OpenWorkspacesHost
 {
 }
 
@@ -447,10 +451,9 @@ impl Render for Screen {
       Some(route) => match &self.workspace_modal {
         Some(open) if open.is_for(route) => open.update(route, dark, cx),
         _ => {
-          let host: Arc<dyn workspace_dialog_data::WorkspaceDialogHost> = self.host.clone();
           self.workspace_modal = Some(workspace_modal::OpenModal::open(
             route,
-            host,
+            self.host.clone(),
             self.sink.clone(),
             dark,
             cx,

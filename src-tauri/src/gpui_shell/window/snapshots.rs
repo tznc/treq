@@ -225,6 +225,23 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "defaults": defaults,
     }));
   }
+  if dialogs.open_workspaces && !repo.is_empty() {
+    // Every repository the sidebar shows, whose links the dialog opens.
+    let repos: Vec<&str> = std::iter::once(repo)
+      .chain(
+        data
+          .supporting()
+          .iter()
+          .filter(|r| r.exists && r.path != repo)
+          .map(|r| r.path.as_str()),
+      )
+      .collect();
+    return Some(json!({
+      "kind": "openWorkspaces",
+      "repoPath": repo,
+      "repos": repos,
+    }));
+  }
   if let Some((repo_path, id, branch)) = &dialogs.rename {
     return Some(json!({
       "kind": "renameWorkspace",

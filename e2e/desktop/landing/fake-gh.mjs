@@ -221,6 +221,13 @@ if (group === "pr" && command === "list") {
         : pr.state === state.toUpperCase(),
   );
   if (has("--draft")) list = list.filter((pr) => pr.isDraft);
+  // The signed-in user is octocat.
+  if (after("--author") === "@me") list = list.filter((pr) => pr.author.login === "octocat");
+  const words = (has("--search") ? after("--search") : "")
+    .split(/\s+/)
+    .filter((word) => word && !word.includes(":"))
+    .map((word) => word.toLowerCase());
+  list = list.filter((pr) => words.every((word) => pr.title.toLowerCase().includes(word)));
   out(list.map((pr) => pick(pr, after("--json"))));
 }
 if (group === "pr" && command === "view") {

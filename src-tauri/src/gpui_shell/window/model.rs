@@ -169,6 +169,8 @@ pub struct Dialogs {
   pub workspace_dialog_key: u64,
   /// `renameTarget`: repository, workspace id and branch.
   pub rename: Option<(String, i64, String)>,
+  /// The sidebar's Open Workspaces dialog.
+  pub open_workspaces: bool,
   pub deletion: bool,
   pub change_move: Option<ChangeMove>,
   pub agent_prompt: Option<AgentPrompt>,

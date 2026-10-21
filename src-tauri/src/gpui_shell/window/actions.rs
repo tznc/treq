@@ -168,6 +168,12 @@ impl Model {
         self.open_github();
         done()
       }
+      SidebarAction::OpenWorkspaces => {
+        if !repo.is_empty() {
+          self.dialogs.open_workspaces = true;
+        }
+        done()
+      }
       SidebarAction::OpenLinear => {
         self.open_linear();
         done()
@@ -244,6 +250,7 @@ impl Model {
       // The dialogs.
       "workspaceDialog.close" => self.dialogs.workspace_dialog = None,
       "renameWorkspace.close" => self.dialogs.rename = None,
+      "openWorkspaces.close" => self.dialogs.open_workspaces = false,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
       "changeMove.done" => {
         self.dialogs.change_move = None;
@@ -407,6 +414,21 @@ impl Model {
       "changes.showCommitted" => self.view.show_committed = value.as_bool().unwrap_or(true),
       field if field.starts_with("terminal.") => return self.terminal_field(field, value, data),
       // The dialogs.
+      "openWorkspaces.opened" => {
+        self.dialogs.open_workspaces = false;
+        let (Some(repo_path), Some(id)) = (value["repoPath"].as_str(), value["id"].as_i64()) else {
+          return done();
+        };
+        return Some(self.select_when_listed(
+          PendingSelect {
+            repo_path: repo_path.to_string(),
+            id,
+            page: false,
+            logs: false,
+          },
+          data,
+        ));
+      }
       "workspaceDialog.created" => {
         self.dialogs.workspace_dialog = None;
         let Some(id) = value.as_i64() else {

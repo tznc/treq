@@ -47,7 +47,7 @@ use crate::{
 
 mod detail;
 mod new_pr;
-mod parts;
+pub(super) mod parts;
 
 use parts::named;
 
@@ -1497,9 +1497,9 @@ impl GithubView {
                 div()
                   .flex_1()
                   .min_w_0()
-                  .child(row_title(&issue.title, n, p))
+                  .child(parts::row_title(&issue.title, n, p))
                   .child(
-                    row_meta(p)
+                    parts::row_meta(p)
                       .child(parts::state_chip(&issue.state, false, p))
                       .child(
                         div()
@@ -1561,50 +1561,7 @@ impl GithubView {
                 cx,
                 move |view, cx| view.press(format!("github.select:{n}"), cx),
               )
-              .child(
-                div()
-                  .flex_1()
-                  .min_w_0()
-                  .child(row_title(&pr.title, n, p))
-                  .child(
-                    row_meta(p)
-                      .child(parts::state_chip(&pr.state, pr.is_draft, p))
-                      .child(
-                        div()
-                          .max_w(zpx(160.))
-                          .truncate()
-                          .child(pr.author.login.clone()),
-                      )
-                      .when(!show_detail, |d| {
-                        d.child(
-                          div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .min_w_0()
-                            .font_family(theme::MONO_FONT)
-                            .child(
-                              div()
-                                .max_w(zpx(256.))
-                                .truncate()
-                                .child(pr.head_ref_name.clone()),
-                            )
-                            .child(div().flex_none().child("→"))
-                            .child(
-                              div()
-                                .max_w(zpx(256.))
-                                .truncate()
-                                .child(pr.base_ref_name.clone()),
-                            ),
-                        )
-                      })
-                      .child(
-                        div()
-                          .flex_none()
-                          .child(crate::gpui_shell::time::date(&pr.created_at)),
-                      ),
-                  ),
-              )
+              .child(parts::pr_list_item(pr, !show_detail, p))
               .child(chevron(p))
           }))
           .when(has_next, |d| {
@@ -1720,39 +1677,6 @@ impl GithubView {
           .child(err)
       }))
   }
-}
-
-/// A list row's title and number.
-fn row_title(title: &str, number: u64, p: &Palette) -> Div {
-  div()
-    .flex()
-    .items_center()
-    .gap_2()
-    .min_w_0()
-    .child(
-      ui::text(div(), TextSize::Lg)
-        .font_weight(FontWeight::MEDIUM)
-        .min_w_0()
-        .truncate()
-        .child(title.to_string()),
-    )
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .flex_none()
-        .text_color(p.muted_foreground)
-        .child(format!("#{number}")),
-    )
-}
-
-/// A list row's second line: `flex items-center gap-2 mt-1 text-base`.
-fn row_meta(p: &Palette) -> Div {
-  ui::text(div(), TextSize::Sm)
-    .flex()
-    .items_center()
-    .gap_2()
-    .mt_1()
-    .min_w_0()
-    .text_color(p.muted_foreground)
 }
 
 fn chevron(p: &Palette) -> impl IntoElement {

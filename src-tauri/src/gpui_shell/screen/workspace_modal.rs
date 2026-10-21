@@ -18,11 +18,13 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   change_move::{ChangeMoveDialog, ChangeMoveRoute},
+  open_workspaces::OpenWorkspacesDialog,
+  open_workspaces_data,
   rename_dialog::{RenameDialog, RenameRoute},
   workspace_deletion::{DeletionRoute, WorkspaceDeletion},
   workspace_dialog::WorkspaceDialog,
   workspace_dialog_data::{self, WorkspaceDialogHost},
-  ActionSink, ScreenAction,
+  ActionSink, Host, ScreenAction,
 };
 use crate::gpui_shell::{
   theme::{self, Palette},
@@ -41,6 +43,8 @@ pub enum ModalRoute {
   WorkspaceDeletion(DeletionRoute),
   /// The `AlertDialog` that confirms moving dropped files.
   ConfirmChangeMove(ChangeMoveRoute),
+  /// The sidebar's Open Workspaces dialog.
+  OpenWorkspaces(open_workspaces_data::Route),
 }
 
 impl ModalRoute {
@@ -52,6 +56,7 @@ impl ModalRoute {
       ModalRoute::RenameWorkspace(route) => (1, route.workspace_id.to_string()),
       ModalRoute::WorkspaceDeletion(_) => (2, String::new()),
       ModalRoute::ConfirmChangeMove(route) => (3, route.files.join("\0")),
+      ModalRoute::OpenWorkspaces(route) => (4, route.repo_path.clone()),
     }
   }
 }
@@ -62,6 +67,7 @@ pub enum Modal {
   RenameWorkspace(Entity<RenameDialog>),
   WorkspaceDeletion(Entity<WorkspaceDeletion>),
   ConfirmChangeMove(Entity<ChangeMoveDialog>),
+  OpenWorkspaces(Entity<OpenWorkspacesDialog>),
 }
 
 /// A dialog and the route it was opened for.
@@ -73,23 +79,27 @@ pub struct OpenModal {
 impl OpenModal {
   pub fn open<V: 'static>(
     route: &ModalRoute,
-    host: Arc<dyn WorkspaceDialogHost>,
+    host: Arc<dyn Host>,
     sink: ActionSink,
     dark: bool,
     cx: &mut Context<V>,
   ) -> Self {
+    let dialogs: Arc<dyn WorkspaceDialogHost> = host.clone();
     let modal = match route.clone() {
+      ModalRoute::OpenWorkspaces(route) => {
+        Modal::OpenWorkspaces(cx.new(|cx| OpenWorkspacesDialog::new(route, host, sink, dark, cx)))
+      }
       ModalRoute::WorkspaceDialog(route) => {
-        Modal::WorkspaceDialog(cx.new(|cx| WorkspaceDialog::new(*route, host, sink, dark, cx)))
+        Modal::WorkspaceDialog(cx.new(|cx| WorkspaceDialog::new(*route, dialogs, sink, dark, cx)))
       }
       ModalRoute::RenameWorkspace(route) => {
-        Modal::RenameWorkspace(cx.new(|cx| RenameDialog::new(route, host, sink, dark, cx)))
+        Modal::RenameWorkspace(cx.new(|cx| RenameDialog::new(route, dialogs, sink, dark, cx)))
       }
       ModalRoute::WorkspaceDeletion(route) => {
         Modal::WorkspaceDeletion(cx.new(|cx| WorkspaceDeletion::new(route, sink, dark, cx)))
       }
       ModalRoute::ConfirmChangeMove(route) => {
-        Modal::ConfirmChangeMove(cx.new(|cx| ChangeMoveDialog::new(route, host, sink, dark, cx)))
+        Modal::ConfirmChangeMove(cx.new(|cx| ChangeMoveDialog::new(route, dialogs, sink, dark, cx)))
       }
     };
     Self {
@@ -118,6 +128,9 @@ impl OpenModal {
       (Modal::ConfirmChangeMove(view), ModalRoute::ConfirmChangeMove(route)) => {
         view.update(cx, |view, cx| view.set_route(route, dark, cx))
       }
+      (Modal::OpenWorkspaces(view), ModalRoute::OpenWorkspaces(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
       _ => {}
     }
   }
@@ -130,6 +143,7 @@ impl OpenModal {
       Modal::RenameWorkspace(view) => !view.read(cx).dismissed,
       Modal::WorkspaceDeletion(view) => !view.read(cx).dismissed,
       Modal::ConfirmChangeMove(view) => !view.read(cx).dismissed,
+      Modal::OpenWorkspaces(view) => !view.read(cx).dismissed,
     }
   }
 
@@ -139,6 +153,7 @@ impl OpenModal {
       Modal::RenameWorkspace(view) => view.clone().into_any_element(),
       Modal::WorkspaceDeletion(view) => view.clone().into_any_element(),
       Modal::ConfirmChangeMove(view) => view.clone().into_any_element(),
+      Modal::OpenWorkspaces(view) => view.clone().into_any_element(),
     }
   }
 }

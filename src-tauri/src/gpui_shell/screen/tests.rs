@@ -116,6 +116,8 @@ struct FakeHost {
   browser_review: Mutex<Option<String>>,
   /// What the GitHub view reads.
   github: github::Fake,
+  /// What the Open Workspaces dialog reads.
+  open_workspaces: open_workspaces::Fake,
   /// What the account reads: the GitHub repositories and Linear's OAuth
   /// page (`Err` refuses it), and the merge queue (opt-in and entries).
   github_repos: Option<Result<Vec<crate::core::account::GithubRepository>, String>>,
@@ -6585,6 +6587,7 @@ mod github;
 mod linear_view;
 mod logs_explorer;
 mod merge_queue;
+mod open_workspaces;
 mod pr_review;
 mod review_comments;
 mod stack_panel;

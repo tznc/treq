@@ -70,6 +70,12 @@ export function formatError(line: string): string {
 );
 writeFileSync(join(alerting, "packages/api/src/levels.ts"), 'export const LEVELS = ["info", "warn", "error"] as const;\n');
 
+// Branches with no workspace yet, for the Open Workspaces dialog: PR #421's
+// and #409's heads, and a plain branch.
+for (const branch of ["fix/slack-retry", "docs/ingest-runbook", "chore/bump-deps"]) {
+  gitIn(repo, home, "branch", branch, "main");
+}
+
 // A supporting repository: the sidebar's second repo.
 const docs = join(fixture.root, "docs-site");
 mkdirSync(docs, { recursive: true });

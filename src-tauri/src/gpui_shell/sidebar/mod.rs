@@ -177,6 +177,9 @@ pub enum SidebarAction {
   OpenCommandPalette,
   OpenGithub,
   OpenLinear,
+  /// The Open button beside WORKSPACES: opens workspaces from branches,
+  /// links and pull requests.
+  OpenWorkspaces,
   StartAgent {
     id: Option<i64>,
   },
@@ -725,13 +728,23 @@ impl Render for Sidebar {
       )
       .child(
         div()
-          .px_4()
+          .flex()
+          .items_center()
+          .justify_between()
+          .pl_4()
+          .pr_2()
           .pt_3()
           .pb_1()
-          .text_size(zpx(12.))
-          .font_weight(gpui::FontWeight::MEDIUM)
-          .text_color(palette.sidebar_foreground.opacity(0.7))
-          .child("WORKSPACES"),
+          .child(
+            div()
+              .text_size(zpx(12.))
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(palette.sidebar_foreground.opacity(0.7))
+              .child("WORKSPACES"),
+          )
+          .when(snapshot.repos.iter().any(|r| r.active), |this| {
+            this.child(self.open_workspaces_button(&palette))
+          }),
       )
       .child(list)
       .child(
@@ -782,6 +795,33 @@ fn modal_backdrop(opacity: f32) -> gpui::Stateful<gpui::Div> {
 }
 
 impl Sidebar {
+  /// The WORKSPACES heading's Open button.
+  fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
+    div()
+      .id("open-workspaces")
+      .debug_selector(|| "open-workspaces".into())
+      .role(Role::Button)
+      .aria_label("Open workspaces")
+      .test_support()
+      .flex()
+      .flex_none()
+      .items_center()
+      .gap_1()
+      .px(zpx(6.))
+      .h(zpx(22.))
+      .rounded_md()
+      .text_size(zpx(12.))
+      .text_color(palette.sidebar_foreground.opacity(0.7))
+      .hover(|style| style.bg(palette.accent))
+      .child(icon(
+        theme::ICON_PLUS,
+        12.,
+        palette.sidebar_foreground.opacity(0.7),
+      ))
+      .child("Open")
+      .on_click(self.on_action(SidebarAction::OpenWorkspaces))
+  }
+
   /// A square header button with a tooltip below it.
   #[allow(clippy::too_many_arguments)]
   fn icon_button(
