@@ -36,6 +36,15 @@ test("terminal: shell and agent sessions", async ({ page }) => {
       "Cursor visible; no stray characters",
     ],
   });
+  await capture(page, {
+    name: "07-terminal-shell-header-selected",
+    title: "Terminal pane: the selected shell's header",
+    clip: { x: 0, y: 575, width: 1400, height: 90 },
+    expectations: [
+      "The selected Shell header's title, terminal icon and close × read clearly on its blue fill",
+      "The workspace badge's text is legible against its chip",
+    ],
+  });
 
   await row(page, BRANCH).hover();
   await row(page, BRANCH).getByRole("button", { name: "Start agent" }).click();
