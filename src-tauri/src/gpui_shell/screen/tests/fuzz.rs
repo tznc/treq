@@ -570,7 +570,8 @@ fn workspace_dialogs_survive_random_input() {
     (vec(step(), 1..20), 0u8..3),
     |cx, (steps, which)| {
       let run = fuzz(cx, dialog_scenario(which), &steps);
-      // Only a valid branch name is created or renamed to.
+      // Only a valid branch name is created, or renamed to once the dry
+      // run accepts it.
       let workspaces = workspace_host().workspaces;
       for call in effects(&run.host) {
         let branch = call
