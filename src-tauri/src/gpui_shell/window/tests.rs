@@ -40,6 +40,8 @@ use crate::{
   local_db::{Session, Workspace},
 };
 
+mod fuzz;
+
 #[derive(Default)]
 struct FakeHost {
   workspaces: Mutex<HashMap<String, Vec<Workspace>>>,
@@ -491,6 +493,23 @@ fn follows_the_theme_zoom_and_sidebar_width_settings(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .contains(&"save workspace_sidebar_width=333".to_string()));
+}
+
+#[gpui::test]
+fn a_sidebar_width_that_is_not_a_number_keeps_the_sidebar_drawable(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("workspace_sidebar_width".into(), "NaN".into());
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  assert_eq!(window.last().sidebar.unwrap().width, 280.);
+  window.sidebar(cx, SidebarAction::ResizeSidebar { width: f32::NAN });
+  assert_eq!(window.last().sidebar.unwrap().width, 280.);
+  assert!(host
+    .calls()
+    .contains(&"save workspace_sidebar_width=280".to_string()));
 }
 
 #[gpui::test]

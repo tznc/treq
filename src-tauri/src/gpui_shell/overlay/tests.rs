@@ -4,6 +4,8 @@ use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
 
 use super::*;
 
+mod fuzz;
+
 #[derive(Default)]
 struct FakeHost {
   checks: PaletteChecks,

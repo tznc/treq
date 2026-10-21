@@ -390,7 +390,7 @@ fn with_modal(modal: serde_json::Value) -> ScreenSnapshot {
   .expect("snapshot")
 }
 
-fn dialog(defaults: serde_json::Value) -> ScreenSnapshot {
+pub(super) fn dialog(defaults: serde_json::Value) -> ScreenSnapshot {
   with_modal(serde_json::json!({
     "kind": "workspaceDialog",
     "repoPath": "/repo",
@@ -630,7 +630,7 @@ fn moves_picked_hunks_to_an_existing_workspace(cx: &mut TestAppContext) {
   );
 }
 
-fn rename() -> ScreenSnapshot {
+pub(super) fn rename() -> ScreenSnapshot {
   with_modal(serde_json::json!({
     "kind": "renameWorkspace",
     "repoPath": "/repo",

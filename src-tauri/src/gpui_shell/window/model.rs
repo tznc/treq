@@ -810,6 +810,7 @@ impl Model {
   /// The resize handle let go at `width`, or reset with `None`.
   pub fn resize_sidebar(&mut self, width: Option<f32>) -> Effect {
     let width = width
+      .filter(|w| w.is_finite())
       .unwrap_or(DEFAULT_SIDEBAR_WIDTH)
       .round()
       .clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
@@ -843,7 +844,10 @@ impl Model {
         self.prefs.zoom = zoom;
       }
     }
-    if let Some(width) = get("workspace_sidebar_width").and_then(|w| w.parse::<f32>().ok()) {
+    if let Some(width) = get("workspace_sidebar_width")
+      .and_then(|w| w.parse::<f32>().ok())
+      .filter(|w| w.is_finite())
+    {
       self.prefs.sidebar_width = width.round().clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
     }
     self.prefs.default_agent = get("default_agent").filter(|a| !a.is_empty());

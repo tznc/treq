@@ -1,0 +1,700 @@
+//! Property tests: random clicks, typing and keys on the screens, found the
+//! way a user finds them (gpui-testing-library's roles and names, plus the
+//! screens' debug selectors), with invariants checked after every step.
+//!
+//! Each case opens a fresh test app. `PROPTEST_CASES` sets how many cases
+//! run and `SEED` the run; a failure prints the shrunk step list.
+
+use gpui::{
+  proptest::{collection::vec, prelude::*, sample::Index},
+  Role,
+};
+use gpui_testing_library::{prelude::*, Node, Snapshot};
+
+use super::*;
+use crate::gpui_shell::fuzz;
+
+/// One thing the user does.
+#[derive(Debug, Clone)]
+enum Step {
+  /// Clicks one of the controls on screen, by its index among them.
+  Click(Index),
+  /// Clicks one of the text fields on screen, then types.
+  Type(Index, String),
+  /// Types at the focus (user-event keyboard syntax).
+  Key(&'static str),
+  /// Time passes: debounced checks and saves run.
+  Advance(u64),
+}
+
+const KEYS: &[&str] = &[
+  "{Escape}",
+  "{Enter}",
+  "{Tab}",
+  "{Shift>}{Tab}{/Shift}",
+  "{ArrowUp}",
+  "{ArrowDown}",
+  "{ArrowLeft}",
+  "{ArrowRight}",
+  "{Backspace}",
+  "{Delete}",
+  "{Home}",
+  "{End}",
+  "{Space}",
+  "{Control>}a{/Control}",
+  "{Meta>}a{/Meta}",
+  "{Control>}z{/Control}",
+];
+
+/// Text a user might type or paste: names, unicode, emoji, path tricks,
+/// branch-name edge cases and very long strings.
+fn text() -> impl Strategy<Value = String> {
+  prop_oneof![
+    3 => "[a-zA-Z0-9 /._-]{0,12}",
+    2 => "\\PC{0,8}",
+    1 => gpui::proptest::sample::select(vec![
+      "🚀", "👩‍👩‍👧", "é\u{301}", "日本語", "\u{202e}rtl", "\u{200b}", "@{", "..", "a b",
+      "/", "-", "~^:?*[", "main", "treq/login", "  ", "\t",
+    ])
+    .prop_map(str::to_string),
+    1 => (1usize..600).prop_map(|n| "x".repeat(n)),
+    1 => (1usize..60).prop_map(|n| "🦀".repeat(n)),
+  ]
+}
+
+fn step() -> impl Strategy<Value = Step> {
+  prop_oneof![
+    6 => any::<Index>().prop_map(Step::Click),
+    3 => (any::<Index>(), text()).prop_map(|(i, t)| Step::Type(i, t)),
+    3 => gpui::proptest::sample::select(KEYS).prop_map(Step::Key),
+    1 => (0u64..1500).prop_map(Step::Advance),
+  ]
+}
+
+/// The typed text in user-event syntax: braces and brackets doubled.
+fn literal(text: &str) -> String {
+  text.replace('{', "{{").replace('[', "[[")
+}
+
+/// A screen to fuzz: what it opens on, and the debug selectors of its
+/// controls that are not observed by role.
+struct Scenario {
+  snapshot: ScreenSnapshot,
+  host: FakeHost,
+  wide: bool,
+  clicks: &'static [&'static str],
+  fields: &'static [&'static str],
+  /// Debug selectors of layers drawn over the screen, which Escape closes.
+  layers: &'static [&'static str],
+}
+
+const CLICK_ROLES: &[Role] = &[
+  Role::Button,
+  Role::Switch,
+  Role::Tab,
+  Role::CheckBox,
+  Role::MenuItem,
+  Role::ListBoxOption,
+  Role::ComboBox,
+  Role::RadioButton,
+  Role::Link,
+];
+
+const TEXT_ROLES: &[Role] = &[Role::TextInput, Role::MultilineTextInput, Role::SearchInput];
+
+/// A control on screen: an observed element or a debug selector.
+#[derive(Debug, Clone)]
+enum Target {
+  Node(Node),
+  Selector(&'static str),
+}
+
+impl Target {
+  fn describe(&self) -> String {
+    match self {
+      Target::Node(node) => {
+        let snapshot = node.initial_snapshot();
+        format!(
+          "{:?} {:?}",
+          snapshot.role(),
+          snapshot.name().unwrap_or_default()
+        )
+      }
+      Target::Selector(s) => format!("#{s}"),
+    }
+  }
+}
+
+struct Run {
+  h: Harness,
+  host: Arc<FakeHost>,
+  screen: gpui_testing_library::Screen,
+  scenario_clicks: &'static [&'static str],
+  scenario_fields: &'static [&'static str],
+  layers: &'static [&'static str],
+  /// What the steps did, for failure messages.
+  log: Vec<String>,
+}
+
+impl Run {
+  fn open(cx: &mut TestAppContext, scenario: Scenario) -> Self {
+    let host = Arc::new(scenario.host);
+    let mut h = Harness::with_host(cx, scenario.snapshot, host.clone());
+    if scenario.wide {
+      h.cx
+        .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+    }
+    h.cx.run_until_parked();
+    let window = h.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&h.cx, window);
+    screen.redraw();
+    Self {
+      h,
+      host,
+      screen,
+      scenario_clicks: scenario.clicks,
+      scenario_fields: scenario.fields,
+      layers: scenario.layers,
+      log: Vec::new(),
+    }
+  }
+
+  fn settle(&mut self) {
+    self.h.cx.run_until_parked();
+    self.screen.redraw();
+  }
+
+  /// Reads the snapshot taken with the query: every live `Node` accessor
+  /// draws a frame.
+  fn usable(node: &Node) -> bool {
+    let snapshot = node.initial_snapshot();
+    snapshot.is_visible() && !snapshot.is_disabled()
+  }
+
+  fn targets(&mut self, roles: &[Role], selectors: &'static [&'static str]) -> Vec<Target> {
+    let mut targets: Vec<Target> = self
+      .screen
+      .elements()
+      .into_iter()
+      .filter(|n| {
+        n.initial_snapshot()
+          .role()
+          .is_some_and(|r| roles.contains(&r))
+          && Self::usable(n)
+      })
+      .map(Target::Node)
+      .collect();
+    for selector in selectors {
+      if self.h.cx.debug_bounds(selector).is_some() {
+        targets.push(Target::Selector(selector));
+      }
+    }
+    targets
+  }
+
+  fn click(&mut self, target: &Target) {
+    match target {
+      Target::Node(node) => self.screen.user().click(node),
+      Target::Selector(selector) => {
+        if let Some(bounds) = self.h.cx.debug_bounds(selector) {
+          self
+            .h
+            .cx
+            .simulate_click(bounds.center(), gpui::Modifiers::none());
+        }
+      }
+    }
+  }
+
+  /// Does `step`, returning what it did.
+  fn step(&mut self, step: &Step) -> String {
+    let done = match step {
+      Step::Click(i) => {
+        let targets = self.targets(CLICK_ROLES, self.scenario_clicks);
+        if targets.is_empty() {
+          return "click: nothing to click".into();
+        }
+        let target = &targets[i.index(targets.len())];
+        self.click(target);
+        format!("click {}", target.describe())
+      }
+      Step::Type(i, text) => {
+        let targets = self.targets(TEXT_ROLES, self.scenario_fields);
+        if targets.is_empty() {
+          self.screen.user().keyboard(&literal(text));
+          self.settle();
+          return format!("type {text:?} at the focus");
+        }
+        let target = targets[i.index(targets.len())].clone();
+        self.click(&target);
+        self.settle();
+        self.screen.user().keyboard(&literal(text));
+        format!("type {text:?} into {}", target.describe())
+      }
+      Step::Key(keys) => {
+        self.screen.user().keyboard(keys);
+        format!("key {keys}")
+      }
+      Step::Advance(ms) => {
+        self
+          .h
+          .cx
+          .executor()
+          .advance_clock(std::time::Duration::from_millis(*ms));
+        format!("wait {ms}ms")
+      }
+    };
+    self.settle();
+    done
+  }
+
+  /// The open dialogs, and the focused element.
+  fn dialogs(&self) -> (Vec<Snapshot>, Option<Snapshot>) {
+    let all: Vec<Snapshot> = self
+      .screen
+      .elements()
+      .iter()
+      .map(|n| n.initial_snapshot().clone())
+      .collect();
+    let focused = all.iter().find(|s| s.focused() == Some(true)).cloned();
+    let dialogs = all
+      .into_iter()
+      .filter(|s| s.role() == Some(Role::Dialog) && s.is_visible())
+      .collect();
+    (dialogs, focused)
+  }
+
+  fn drawn_layers(&mut self) -> Vec<&'static str> {
+    let layers = self.layers;
+    layers
+      .iter()
+      .copied()
+      .filter(|l| self.h.cx.debug_bounds(l).is_some())
+      .collect()
+  }
+
+  fn context(&self) -> String {
+    format!("after {:#?}", self.log)
+  }
+}
+
+/// The calls that change something: not reads, checks, dry runs or the
+/// notices the screens post.
+fn effects(host: &FakeHost) -> Vec<String> {
+  host
+    .writes()
+    .into_iter()
+    .filter(|c| {
+      !c.contains("(dry run)")
+        && !c.starts_with("notify ")
+        && !c.starts_with("list ")
+        && c != "fetch"
+    })
+    .collect()
+}
+
+/// Steps that cannot confirm anything: typing and moving around.
+fn confirms_nothing(step: &Step) -> bool {
+  match step {
+    Step::Type(..) => true,
+    Step::Key(keys) => !matches!(*keys, "{Enter}" | "{Space}"),
+    Step::Click(_) | Step::Advance(_) => false,
+  }
+}
+
+/// Runs `steps` on `scenario`, checking after each that:
+/// - at most one dialog is open;
+/// - the focus is inside the dialog while one is open;
+/// - Escape closes an open dialog;
+/// - typing and moving around write nothing to the backend.
+fn fuzz(cx: &mut TestAppContext, scenario: Scenario, steps: &[Step]) -> Run {
+  fuzz_from(Run::open(cx, scenario), steps)
+}
+
+fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
+  for step in steps {
+    let before = effects(&run.host).len();
+    let dialogs_before = run.dialogs().0.len();
+    let layers_before = run.drawn_layers();
+    let sent_before = run.h.sent().len();
+    let done = run.step(step);
+    run.log.push(done);
+
+    let (dialogs, focused) = run.dialogs();
+    assert!(
+      dialogs.len() <= 1,
+      "{} dialogs open: {:?} {}",
+      dialogs.len(),
+      dialogs.iter().map(|d| d.name()).collect::<Vec<_>>(),
+      run.context()
+    );
+    if let Some(dialog) = dialogs.first() {
+      if let Some(focused) = focused {
+        assert!(
+          dialog.contains(&focused),
+          "focus {:?} {:?} is outside dialog {:?} {}",
+          focused.role(),
+          focused.name(),
+          dialog.name(),
+          run.context()
+        );
+      }
+    }
+    if matches!(step, Step::Key("{Escape}")) && dialogs_before == 1 {
+      assert!(
+        dialogs.is_empty(),
+        "Escape left dialog {:?} open {}",
+        dialogs[0].name(),
+        run.context()
+      );
+    }
+    let layers = run.drawn_layers();
+    assert!(
+      layers.len() <= 1,
+      "{layers:?} are open together {}",
+      run.context()
+    );
+    if matches!(step, Step::Key("{Escape}")) && layers_before.len() == 1 {
+      let closed = run.h.sent()[sent_before..].iter().any(
+        |a| matches!(a, ScreenAction::Press { id } if id.ends_with(".close") || id.ends_with(".cancel")),
+      );
+      assert!(
+        closed || layers.is_empty(),
+        "Escape left {:?} open {}",
+        layers_before[0],
+        run.context()
+      );
+    }
+    let writes = effects(&run.host);
+    if confirms_nothing(step) {
+      assert_eq!(
+        writes.len(),
+        before,
+        "{:?} wrote {:?} {}",
+        step,
+        &writes[before..],
+        run.context()
+      );
+    }
+  }
+  run
+}
+
+fn workspace_host() -> FakeHost {
+  FakeHost {
+    workspaces: vec![
+      workspace_dialogs::workspace(7, "treq/login", Some("main")),
+      workspace_dialogs::workspace(8, "treq/login-2", Some("treq/login")),
+    ],
+    branches: ["main", "release"]
+      .map(|name| crate::jj::JjBranch {
+        name: name.into(),
+        is_current: false,
+      })
+      .to_vec(),
+    local_branches: vec!["taken".into()],
+    ..FakeHost::default()
+  }
+}
+
+// Settings: toggles back and forth, typed values, save and reset.
+
+const SETTINGS_CLICKS: &[&str] = &[
+  "settings-tab-application",
+  "settings-tab-repository",
+  "settings-auto-push",
+  "settings-ignore-generated",
+  "settings-save",
+  "settings-close",
+];
+
+const SETTINGS_FIELDS: &[&str] = &["settings-branch-pattern"];
+
+fn settings_scenario(tab: &str) -> Scenario {
+  Scenario {
+    snapshot: settings_route(tab),
+    host: FakeHost::with_settings(&[("/repo:auto_review_trigger", "on-push")]),
+    wide: false,
+    clicks: SETTINGS_CLICKS,
+    fields: SETTINGS_FIELDS,
+    layers: &[],
+  }
+}
+
+/// What a reopened settings screen must draw again.
+fn saved_fields(
+  s: &settings::Settings,
+) -> (
+  Option<settings::RepositoryFields>,
+  Option<(String, f32, String, String, String, String, bool)>,
+) {
+  (
+    s.repository.as_ref().map(|r| r.fields.clone()),
+    s.application.as_ref().map(|a| {
+      (
+        a.theme.clone(),
+        a.zoom,
+        a.font_size.clone(),
+        a.default_model.clone(),
+        a.default_agent.clone(),
+        a.conflict_marker_style.clone(),
+        a.notify_agent_finished,
+      )
+    }),
+  )
+}
+
+#[test]
+fn settings_survive_random_edits() {
+  fuzz::check(
+    "settings_survive_random_edits",
+    12,
+    (vec(step(), 1..30), any::<bool>()),
+    |cx, (steps, repository_tab)| {
+      let tab = if repository_tab {
+        "repository"
+      } else {
+        "application"
+      };
+      let mut run = fuzz(cx, settings_scenario(tab), &steps);
+      // Whatever was edited, saving it reads back the same in a reopened screen.
+      run.settle();
+      if !run.h.drawn("settings-save") {
+        return;
+      }
+      run.h.click("settings-save");
+      run.settle();
+      let saved = drawn_settings(&mut run.h);
+      if saved.save.as_ref().is_some_and(|s| !s.disabled) {
+        // Nothing to compare: the save did not go through.
+        return;
+      }
+      let mut reopened = Harness::with_host(cx, settings_route(tab), run.host.clone());
+      let again = drawn_settings(&mut reopened);
+      assert_eq!(
+        saved_fields(&again),
+        saved_fields(&saved),
+        "settings round-trip {}",
+        run.context()
+      );
+    },
+  );
+}
+
+// The workspace dialogs: create, stack and rename, and their validation.
+
+const DIALOG_CLICKS: &[&str] = &[
+  "workspace-dialog-cancel",
+  "workspace-dialog-submit",
+  "workspace-dialog-target",
+  "position-before",
+  "move-to-existing",
+  "dialog-commit-0",
+  "dialog-commits-clear",
+  "dialog-file-path-0",
+  "rename-submit",
+];
+
+const DIALOG_FIELDS: &[&str] = &[
+  "workspace-dialog-title",
+  "workspace-dialog-branch",
+  "workspace-dialog-description",
+  "workspace-dialog-sparse",
+  "workspace-dialog-symlinks",
+  "rename-branch-name",
+];
+
+fn dialog_scenario(which: u8) -> Scenario {
+  let snapshot = match which % 3 {
+    0 => workspace_dialogs::dialog(serde_json::json!({})),
+    1 => workspace_dialogs::dialog(serde_json::json!({
+      "sourceBranch": "treq/login",
+      "targetBranch": "treq/login",
+    })),
+    _ => workspace_dialogs::rename(),
+  };
+  Scenario {
+    snapshot,
+    host: workspace_host(),
+    wide: false,
+    clicks: DIALOG_CLICKS,
+    fields: DIALOG_FIELDS,
+    layers: &["workspace-dialog", "rename-workspace-dialog"],
+  }
+}
+
+#[test]
+fn workspace_dialogs_survive_random_input() {
+  fuzz::check(
+    "workspace_dialogs_survive_random_input",
+    16,
+    (vec(step(), 1..30), 0u8..3),
+    |cx, (steps, which)| {
+      let run = fuzz(cx, dialog_scenario(which), &steps);
+      // Only a valid branch name is created or renamed to.
+      let workspaces = workspace_host().workspaces;
+      for call in effects(&run.host) {
+        let branch = call
+          .strip_prefix("create ")
+          .and_then(|rest| rest.split_whitespace().next())
+          .or_else(|| call.strip_prefix("rename 7 -> "));
+        if let Some(branch) = branch {
+          assert_eq!(
+            workspace_dialog_data::branch_name_error(branch, &workspaces),
+            None,
+            "{call} {}",
+            run.context()
+          );
+        }
+      }
+    },
+  );
+}
+
+// The Changes tab: review comments (add, edit, cancel, discard), the commit
+// box, staging and discarding.
+
+const CHANGES_CLICKS: &[&str] = &[
+  "add-comment-a.rs-0-1",
+  "add-comment-a.rs-0-2",
+  "add-file-comment-button",
+  "comment-input",
+  "comment-submit",
+  "inline-comment-card",
+  "comment-edit",
+  "comment-save",
+  "comment-edit-cancel",
+  "comment-discard",
+  "delete-comment",
+  "discard-review",
+  "confirm-discard-review",
+  "finish-review",
+  "commit-message",
+  "commit-button",
+  "file-row-a.rs",
+  "file-row-b.rs",
+  "stage-a.rs",
+  "unstage-a.rs",
+  "viewed-a.rs",
+  "discard-all-changes",
+  "discard-all-confirm",
+  "show-committed-toggle",
+];
+
+const CHANGES_FIELDS: &[&str] = &["comment-input", "comment-edit", "commit-message"];
+
+#[test]
+fn the_changes_tab_survives_random_review() {
+  fuzz::check(
+    "the_changes_tab_survives_random_review",
+    12,
+    vec(step(), 1..30),
+    |cx, steps| {
+      let scenario = Scenario {
+        snapshot: changes_route(),
+        host: changes_host(),
+        wide: true,
+        clicks: CHANGES_CLICKS,
+        fields: CHANGES_FIELDS,
+        layers: &["discard-all-dialog"],
+      };
+      let run = fuzz(cx, scenario, &steps);
+      let log = run.log.join("\n");
+      for call in effects(&run.host) {
+        // Discarding everything needs its confirmation.
+        if call.starts_with("discard /") {
+          assert!(
+            log.contains("#discard-all-confirm") || log.contains("\"Discard all changes\""),
+            "{call} {}",
+            run.context()
+          );
+        }
+        // Commits carry a message.
+        if let Some(message) = call.strip_prefix("commit Some(7) ") {
+          assert!(
+            message.trim_matches('"').trim() != "",
+            "{call} {}",
+            run.context()
+          );
+        }
+      }
+    },
+  );
+}
+
+// The Logs tab: its filters, explorer and query input.
+
+const LOGS_CLICKS: &[&str] = &[
+  "log-level-filter",
+  "log-level-option-error",
+  "multi-select-toggle",
+  "repo-log-line",
+  "logs-explorer-view",
+  "template-menu",
+  "sql-template-Errors by job",
+  "sql-template-Recent lines",
+  "run-query",
+  "log-source",
+];
+
+const LOGS_FIELDS: &[&str] = &["sql-editor", "logs-find", "system-logs-search"];
+
+#[test]
+fn the_logs_tab_survives_random_queries() {
+  fuzz::check(
+    "the_logs_tab_survives_random_queries",
+    12,
+    (vec(step(), 1..30), any::<bool>()),
+    |cx, (steps, system)| {
+      let scenario = Scenario {
+        snapshot: logs_route(system.then_some("system")),
+        host: logs_host(),
+        wide: true,
+        clicks: LOGS_CLICKS,
+        fields: LOGS_FIELDS,
+        layers: &[],
+      };
+      let run = fuzz(cx, scenario, &steps);
+      // The Logs tab only ever reads (the header may open the pull request).
+      let changed: Vec<String> = effects(&run.host)
+        .into_iter()
+        .filter(|c| !c.starts_with("open https://"))
+        .collect();
+      assert_eq!(changed, Vec::<String>::new(), "{}", run.context());
+    },
+  );
+}
+
+// The file picker: its search, list and Escape.
+
+const PICKER_CLICKS: &[&str] = &[
+  "task-add",
+  "task-add-file",
+  "file-picker-item-0",
+  "file-picker-item-1",
+  "file-picker-item-2",
+];
+
+#[test]
+fn the_file_picker_survives_random_searches() {
+  fuzz::check(
+    "the_file_picker_survives_random_searches",
+    12,
+    vec(step(), 1..30),
+    |cx, steps| {
+      let scenario = Scenario {
+        snapshot: code_route(),
+        host: code_host(),
+        wide: true,
+        clicks: PICKER_CLICKS,
+        fields: &[],
+        layers: &["file-picker"],
+      };
+      let mut run = Run::open(cx, scenario);
+      run.h.click("task-add");
+      run.h.click("task-add-file");
+      run.settle();
+      fuzz_from(run, &steps);
+    },
+  );
+}
