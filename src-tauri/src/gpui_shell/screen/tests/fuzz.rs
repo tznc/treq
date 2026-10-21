@@ -27,11 +27,11 @@ enum Step {
   Advance(u64),
 }
 
+/// No Tab: unhandled, gpui-testing-library moves the focus as a browser
+/// does, but the shell's windows have no Tab navigation to emulate.
 const KEYS: &[&str] = &[
   "{Escape}",
   "{Enter}",
-  "{Tab}",
-  "{Shift>}{Tab}{/Shift}",
   "{ArrowUp}",
   "{ArrowDown}",
   "{ArrowLeft}",
@@ -122,6 +122,38 @@ impl Target {
       }
       Target::Selector(s) => format!("#{s}"),
     }
+  }
+}
+
+struct Frame {
+  elements: Vec<Snapshot>,
+  layers: Vec<(&'static str, gpui::Bounds<gpui::Pixels>)>,
+}
+
+impl Frame {
+  fn dialogs(&self) -> Vec<&Snapshot> {
+    self
+      .elements
+      .iter()
+      .filter(|s| s.role() == Some(Role::Dialog) && s.is_visible())
+      .collect()
+  }
+
+  fn focused(&self) -> Option<&Snapshot> {
+    self.elements.iter().find(|s| s.focused() == Some(true))
+  }
+
+  /// Something on screen: a dialog or a layer.
+  fn covered(&self) -> bool {
+    !self.dialogs().is_empty() || !self.layers.is_empty()
+  }
+
+  /// Whether an element `before` showed is gone, as a closed popup is.
+  fn lost_any_of(&self, before: &Frame) -> bool {
+    before
+      .elements
+      .iter()
+      .any(|b| !self.elements.iter().any(|a| a.path() == b.path()))
   }
 }
 
@@ -248,29 +280,21 @@ impl Run {
     done
   }
 
-  /// The open dialogs, and the focused element.
-  fn dialogs(&self) -> (Vec<Snapshot>, Option<Snapshot>) {
-    let all: Vec<Snapshot> = self
+  /// What is on screen: every observed element (one frame), and the
+  /// layers drawn over the screen with their bounds.
+  fn frame(&mut self) -> Frame {
+    let elements = self
       .screen
       .elements()
       .iter()
       .map(|n| n.initial_snapshot().clone())
       .collect();
-    let focused = all.iter().find(|s| s.focused() == Some(true)).cloned();
-    let dialogs = all
-      .into_iter()
-      .filter(|s| s.role() == Some(Role::Dialog) && s.is_visible())
-      .collect();
-    (dialogs, focused)
-  }
-
-  fn drawn_layers(&mut self) -> Vec<&'static str> {
-    let layers = self.layers;
-    layers
+    let layers = self
+      .layers
       .iter()
-      .copied()
-      .filter(|l| self.h.cx.debug_bounds(l).is_some())
-      .collect()
+      .filter_map(|l| Some((*l, self.h.cx.debug_bounds(l)?)))
+      .collect();
+    Frame { elements, layers }
   }
 
   fn context(&self) -> String {
@@ -307,35 +331,34 @@ fn confirms_nothing(step: &Step, done: &str) -> bool {
 /// Runs `steps` on `scenario`, checking after each that:
 /// - at most one dialog is open;
 /// - the focus is inside the dialog while one is open;
-/// - Escape closes an open dialog;
+/// - Escape closes the dialog, or a popup inside it;
 /// - typing and moving around write nothing to the backend.
 fn fuzz(cx: &mut TestAppContext, scenario: Scenario, steps: &[Step]) -> Run {
   fuzz_from(Run::open(cx, scenario), steps)
 }
 
 fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
-  let mut dialogs_before = run.dialogs().0.len();
+  let mut before = run.frame();
   for step in steps {
-    let before = effects(&run.host).len();
-    let layers_before = run.drawn_layers();
-    let sent_before = run.h.sent().len();
+    let written = effects(&run.host).len();
+    let sent = run.h.sent().len();
     let done = run.step(step);
     let quiet = confirms_nothing(step, &done);
     run.log.push(done);
+    let after = run.frame();
 
-    let (dialogs, focused) = run.dialogs();
-    let open = dialogs.len();
+    let dialogs = after.dialogs();
     assert!(
-      dialogs.len() <= 1,
-      "{} dialogs open: {:?} {}",
-      dialogs.len(),
+      dialogs.len() <= 1 && after.layers.len() <= 1,
+      "{:?} and {:?} are open together {}",
       dialogs.iter().map(|d| d.name()).collect::<Vec<_>>(),
+      after.layers,
       run.context()
     );
-    if let Some(dialog) = dialogs.first() {
-      if let Some(focused) = focused {
+    if let Some(focused) = after.focused() {
+      if let Some(dialog) = dialogs.first() {
         assert!(
-          dialog.contains(&focused),
+          dialog.contains(focused),
           "focus {:?} {:?} is outside dialog {:?} {}",
           focused.role(),
           focused.name(),
@@ -343,29 +366,29 @@ fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
           run.context()
         );
       }
+      if let Some((layer, bounds)) = after.layers.first() {
+        assert!(
+          bounds.contains(&focused.bounds().center()),
+          "focus {:?} {:?} is outside {layer} {}",
+          focused.role(),
+          focused.name(),
+          run.context()
+        );
+      }
     }
-    if matches!(step, Step::Key("{Escape}")) && dialogs_before == 1 {
-      assert!(
-        dialogs.is_empty(),
-        "Escape left dialog {:?} open {}",
-        dialogs[0].name(),
-        run.context()
-      );
-    }
-    let layers = run.drawn_layers();
-    assert!(
-      layers.len() <= 1,
-      "{layers:?} are open together {}",
-      run.context()
-    );
-    if matches!(step, Step::Key("{Escape}")) && layers_before.len() == 1 {
-      let closed = run.h.sent()[sent_before..].iter().any(
+    if matches!(step, Step::Key("{Escape}")) && before.covered() {
+      let closed = run.h.sent()[sent..].iter().any(
         |a| matches!(a, ScreenAction::Press { id } if id.ends_with(".close") || id.ends_with(".cancel")),
       );
       assert!(
-        closed || layers.is_empty(),
-        "Escape left {:?} open {}",
-        layers_before[0],
+        closed || after.lost_any_of(&before),
+        "Escape closed nothing: {:?} {:?} {}",
+        before
+          .dialogs()
+          .iter()
+          .map(|d| d.name())
+          .collect::<Vec<_>>(),
+        before.layers,
         run.context()
       );
     }
@@ -373,14 +396,14 @@ fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
     if quiet {
       assert_eq!(
         writes.len(),
-        before,
+        written,
         "{:?} wrote {:?} {}",
         step,
-        &writes[before..],
+        &writes[written..],
         run.context()
       );
     }
-    dialogs_before = open;
+    before = after;
   }
   run
 }
