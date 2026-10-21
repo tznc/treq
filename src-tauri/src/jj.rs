@@ -7127,15 +7127,14 @@ pub fn jj_git_fetch(repo_path: &str) -> Result<String, JjError> {
   Ok(String::new())
 }
 
-/// Git subprocess options for jj-lib fetch/push, using the resolved `git`
-/// binary so GUI launches with a minimal PATH still find it.
+/// Git subprocess options for jj-lib fetch/push, resolving a compatible Git
+/// even when GUI launches find an older system Git first.
 fn git_subprocess_options(settings: &UserSettings) -> Result<git::GitSubprocessOptions, JjError> {
   let mut options = git::GitSettings::from_settings(settings)
     .map_err(|e| JjError::IoError(format!("Failed to load git settings: {}", e)))?
     .to_subprocess_options();
-  if let Some(path) = binary_paths::get_binary_path("git") {
-    options.executable_path = PathBuf::from(path);
-  }
+  options.executable_path =
+    PathBuf::from(binary_paths::resolve_remote_git().map_err(JjError::IoError)?);
   Ok(options)
 }
 

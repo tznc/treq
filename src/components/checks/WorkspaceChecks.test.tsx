@@ -2,7 +2,12 @@ import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import * as api from "../../lib/api";
-import type { RunSummary, Workspace, WorkflowInfo } from "../../lib/api-types";
+import type {
+  PrCiStatus,
+  RunSummary,
+  Workspace,
+  WorkflowInfo,
+} from "../../lib/api-types";
 import { useWorkspaceChecks } from "../../hooks/useWorkspaceChecks";
 import { useOpenLogsRequest } from "../../lib/open-logs-request";
 import { useFeaturePreviewStore } from "../../stores/featurePreviewStore";
@@ -62,11 +67,21 @@ const WORKSPACE = {
   branch_name: "feat/x",
 } as Workspace;
 
-function Harness({ indicator }: { indicator?: () => void }) {
+function Harness({
+  indicator,
+  ciStatus,
+}: {
+  indicator?: () => void;
+  ciStatus?: PrCiStatus;
+}) {
   const checks = useWorkspaceChecks(TARGET);
   return (
     <>
-      <ChecksPopover checks={checks} onOpenLogs={indicator} />
+      <ChecksPopover
+        checks={checks}
+        ciStatus={ciStatus}
+        onOpenLogs={indicator}
+      />
       <WorkspaceChecksPanel checks={checks} />
     </>
   );
@@ -164,6 +179,45 @@ describe("WorkspaceChecksPanel", () => {
 });
 
 describe("ChecksPopover", () => {
+  it.each([
+    "passed",
+    "failed",
+    "running",
+    "not-run",
+  ] as const)("combines GitHub and Treq counts when Treq checks are %s", async (status) => {
+    const workflows = Array.from({ length: 5 }, (_, index) => ({
+      ...CI,
+      filename: `check-${index}.yaml`,
+    }));
+    vi.mocked(api.listWorkflows).mockResolvedValue(workflows);
+    vi.mocked(api.listWorkflowRuns).mockImplementation(
+      async (_r, _w, filename) =>
+        status === "not-run" ? [] : [{ ...CI_FAILED, filename, status }],
+    );
+    render(
+      <Harness
+        ciStatus={{
+          state: "success",
+          passed: 5,
+          total: 5,
+          failed: 0,
+          pending: 0,
+          checks: [],
+        }}
+      />,
+    );
+    const trigger = await screen.findByTestId("workspace-checks-button");
+    await waitFor(() => expect(trigger.dataset.checksState).toBe(status));
+    expect(trigger).toHaveTextContent(
+      status === "passed" ? /^10\/10$/ : /^5\/10$/,
+    );
+    expect(
+      within(trigger).getByTestId(
+        `run-status-${status === "not-run" ? "none" : status}`,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("summarizes the latest runs, runs all and opens logs", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();

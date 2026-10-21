@@ -2,7 +2,6 @@ import { type ReactNode, useState } from "react";
 import { Loader2, Play, RotateCw, ShieldCheck } from "lucide-react";
 import type { PrCiStatus, WorkflowInfo } from "../../lib/api-types";
 import type { ChecksSummary } from "../../lib/checks-summary";
-import { ciStatusStyle } from "../../lib/ci-status";
 import type { WorkspaceChecks } from "../../hooks/useWorkspaceChecks";
 import { cn } from "../../lib/utils";
 import { useGpuiPart } from "../../lib/gpui-parts";
@@ -110,21 +109,10 @@ export function ChecksPopover({
           aria-label={`Checks: ${parts.join(", ")}`}
         >
           <ChecksStatusIcon status={status} className="h-3.5 w-3.5" />
-          Checks
-          {hasTreq && (
-            <span className="text-muted-foreground">{treqLabel(summary)}</span>
-          )}
-          {ci && (
-            <span
-              className={cn(
-                "border-l pl-1.5",
-                ciStatusStyle(ci.state).textClassName,
-              )}
-              title="GitHub checks"
-            >
-              GH {ci.passed}/{ci.total}
-            </span>
-          )}
+          <span className="text-muted-foreground">
+            {summary.passed + (ci?.passed ?? 0)}/
+            {summary.total + (ci?.total ?? 0)}
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
