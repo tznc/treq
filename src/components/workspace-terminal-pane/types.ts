@@ -34,6 +34,8 @@ export interface WorkspaceTerminalPaneProps {
   workspaceBranchByPath?: Map<string, string>;
   /** Reports the up-to-date list of terminal sessions for the sidebar's terminal list. */
   onTerminalsChange?: (summaries: TerminalSessionSummary[]) => void;
+  /** Whether the pane is open and maximized, covering the workspace view. */
+  onMaximizedChange?: (maximized: boolean) => void;
   /**
    * Set while a remote repository is active. New shells are opened on the
    * remote host in the session this returns, never as a local PTY. Returning

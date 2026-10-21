@@ -1,6 +1,6 @@
 use std::path::Path;
 
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct GitRemoteInfo {
   pub owner: String,
   pub repo: String,

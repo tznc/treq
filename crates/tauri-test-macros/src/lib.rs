@@ -610,7 +610,7 @@ fn scan_module_file(
 
     scan_items(
         &file.items,
-        canonical.parent().unwrap_or(module_dir),
+        module_dir,
         module_path,
         visited,
         commands,
@@ -683,10 +683,10 @@ fn scan_nested_module(
         )
     } else {
         let file_path = resolve_module_file(current_dir, &item_mod.ident)?;
-        let next_dir = file_path.parent().unwrap_or(current_dir);
+        let next_dir = child_dir(&file_path, current_dir);
         scan_module_file(
             &file_path,
-            next_dir,
+            &next_dir,
             module_path,
             visited,
             commands,
@@ -696,6 +696,16 @@ fn scan_nested_module(
 
     module_path.pop();
     result
+}
+
+/// Where a module file's own `mod x;` items live: beside a `mod.rs`,
+/// else in the directory named after the file (`a.rs` -> `a/`).
+fn child_dir(file_path: &Path, current_dir: &Path) -> PathBuf {
+    let parent = file_path.parent().unwrap_or(current_dir);
+    match file_path.file_stem().and_then(|s| s.to_str()) {
+        Some("mod") | None => parent.to_path_buf(),
+        Some(stem) => parent.join(stem),
+    }
 }
 
 fn resolve_module_file(current_dir: &Path, ident: &Ident) -> Result<PathBuf, String> {

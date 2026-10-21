@@ -3,6 +3,7 @@ import { Check, ChevronDown, GitBranch, Loader2 } from "lucide-react";
 import { Command } from "cmdk";
 import { Button } from "./ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { useGpuiPart } from "../lib/gpui-parts";
 
 // Define BranchListItem locally since git API was removed
 export interface BranchListItem {
@@ -29,15 +30,18 @@ export const TargetBranchSelector: React.FC<TargetBranchSelectorProps> = ({
   disabled,
 }) => {
   const [open, setOpen] = useState(false);
+  const changeOpen = (value: boolean) => {
+    setOpen(value);
+    onOpenChange?.(value);
+  };
+  useGpuiPart(
+    "target",
+    { open, branch: targetBranch, loading, disabled: !!disabled || loading },
+    { open: () => changeOpen(true) },
+  );
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(value) => {
-        setOpen(value);
-        onOpenChange?.(value);
-      }}
-    >
+    <Popover open={open} onOpenChange={changeOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"

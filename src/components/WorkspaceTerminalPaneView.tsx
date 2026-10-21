@@ -108,6 +108,7 @@ export const WorkspaceTerminalPaneView: React.FC<
 
     <div
       data-testid="workspace-terminal-pane"
+      data-collapsed={collapsed}
       className={cn(
         "relative flex flex-col flex-shrink-0",
         collapsed

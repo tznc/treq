@@ -28,25 +28,17 @@ pub fn create_review_draft(
   comment_text: String,
   line_hash: Option<String>,
 ) -> Result<local_db::AgentReviewComment, String> {
-  let mut comment = local_db::create_agent_review_comment(
-    &repo_path,
-    &target_type,
-    &target_id,
-    &file_path,
-    None,
+  let draft = crate::core::review_drafts::NewReviewDraft {
+    target_type,
+    target_id,
+    file_path,
     start_line,
     end_line,
-    side.as_deref(),
-    &comment_text,
-    None,
-    crate::review_aggregate::SOURCE_LOCAL_HUMAN,
-    None,
-  )?;
-  if let Some(hash) = line_hash.as_deref() {
-    local_db::update_agent_review_comment(&repo_path, &comment.id, None, Some(hash))?;
-    comment.line_hash = line_hash;
-  }
-  Ok(comment)
+    side,
+    comment_text,
+    line_hash,
+  };
+  crate::core::review_drafts::create_review_draft(&repo_path, &draft)
 }
 
 #[tauri::command]

@@ -42,49 +42,17 @@ pub fn load_cached_binary_paths(db: &Database) -> HashMap<String, String> {
 /// Detect and cache editor applications (Cursor, VSCode, Zed)
 #[tauri::command]
 pub fn detect_editor_apps(state: State<'_, AppState>) -> Result<EditorAppsResponse, String> {
-  if let Some(cached_apps) = binary_paths::get_editor_apps_cache() {
-    return Ok(EditorAppsResponse {
-      cursor: *cached_apps.get("cursor").unwrap_or(&false),
-      vscode: *cached_apps.get("vscode").unwrap_or(&false),
-      zed: *cached_apps.get("zed").unwrap_or(&false),
-    });
-  }
-
-  let db = state.db.lock().map_err(|e| e.to_string())?;
-
-  let editors = vec![
-    ("Cursor", "cursor"),
-    ("Visual Studio Code", "vscode"),
-    ("Zed", "zed"),
-  ];
-
-  let mut detected_apps = HashMap::new();
-
-  for (app_name, key) in &editors {
-    let is_installed = binary_paths::detect_editor_app(app_name);
-    log::debug!(
-      "Editor app {}: {}",
-      app_name,
-      if is_installed { "found" } else { "not found" }
-    );
-
-    detected_apps.insert(key.to_string(), is_installed);
-
-    // Store in database
-    let db_key = format!("editor_app_{}", key);
-    let value = if is_installed { "true" } else { "false" };
-    if let Err(e) = db.set_setting(&db_key, value) {
-      log::warn!("Failed to cache {} in database: {}", key, e);
+  let apps = match binary_paths::get_editor_apps_cache() {
+    Some(cached) => cached,
+    None => {
+      let db = state.db.lock().map_err(|e| e.to_string())?;
+      crate::core::editor_apps::detect(&db)
     }
-  }
-
-  // Initialize in-memory cache
-  binary_paths::init_editor_apps_cache(detected_apps.clone());
-
+  };
   Ok(EditorAppsResponse {
-    cursor: *detected_apps.get("cursor").unwrap_or(&false),
-    vscode: *detected_apps.get("vscode").unwrap_or(&false),
-    zed: *detected_apps.get("zed").unwrap_or(&false),
+    cursor: *apps.get("cursor").unwrap_or(&false),
+    vscode: *apps.get("vscode").unwrap_or(&false),
+    zed: *apps.get("zed").unwrap_or(&false),
   })
 }
 

@@ -7,6 +7,7 @@
 //! window per [`Slot`] (per shell window, for toasts) is built on first use,
 //! then moved and resized.
 
+use crate::gpui_shell::ui::zpx;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -29,6 +30,8 @@ use super::{
   theme::{self, Palette},
 };
 
+/// A dropdown's gap below its button: `sideOffset={4}`.
+const DROPDOWN_OFFSET: f32 = 4.;
 /// Room around a popup's box for its shadow.
 const SHADOW_MARGIN: f32 = 8.;
 /// Gap between a tooltip and its element: base-ui's `sideOffset` in
@@ -40,6 +43,9 @@ const EDGE_PADDING: f32 = 5.;
 /// `text-sm`: 14px on a 20px line.
 const TEXT_SIZE: f32 = 14.;
 const LINE_HEIGHT: f32 = 20.;
+/// A [`TooltipContent::List`] row: `text-xs`.
+const LIST_ITEM_SIZE: f32 = 11.;
+const LIST_ITEM_LINE: f32 = 16.;
 /// A menu row: `px-2 py-1.5 text-sm`.
 const ITEM_HEIGHT: f32 = 32.;
 const ITEM_PADDING_X: f32 = 8.;
@@ -48,6 +54,10 @@ const ITEM_ICON: f32 = 16.;
 const ITEM_ICON_GAP: f32 = 8.;
 /// `my-1 h-px`.
 const SEPARATOR_HEIGHT: f32 = 9.;
+/// A radio item's `pl-8`, with its dot in a `left-2 h-4 w-4` box.
+const RADIO_INSET: f32 = 32.;
+/// `ml-2` before a submenu row's detail.
+const DETAIL_GAP: f32 = 8.;
 /// The menu box: `p-1 border min-w-[8rem]`.
 const MENU_PADDING: f32 = 4.;
 const MENU_MIN_WIDTH: f32 = 128.;
@@ -76,6 +86,29 @@ pub enum TooltipContent {
     conflicted: bool,
     pr: Option<PrState>,
   },
+  /// A heading over a list of paths: `font-medium mb-1`, then `text-xs
+  /// font-mono` rows `space-y-0.5`, as the header's conflict warning.
+  List {
+    title: SharedString,
+    items: Vec<SharedString>,
+  },
+  /// Text and its shortcut in a `Kbd` chip: `flex items-center gap-1.5`,
+  /// as the terminal pane's control tooltips.
+  Shortcut {
+    text: SharedString,
+    keys: SharedString,
+  },
+}
+
+/// `ui/kbd.tsx`'s `Kbd`: `h-5 min-w-5 px-1 rounded-sm text-xs font-medium`.
+const KBD_HEIGHT: f32 = 20.;
+const KBD_PADDING_X: f32 = 4.;
+/// `gap-1.5` between a [`TooltipContent::Shortcut`]'s text and its chip.
+const KBD_GAP: f32 = 6.;
+
+/// A [`TooltipContent::Shortcut`]'s chip width for `keys`.
+fn kbd_width(keys_width: f32) -> f32 {
+  (keys_width + 2. * KBD_PADDING_X).max(KBD_HEIGHT)
 }
 
 /// Which side of its element a tooltip sits on.
@@ -83,6 +116,7 @@ pub enum TooltipContent {
 pub enum Side {
   Right,
   Bottom,
+  Top,
 }
 
 /// A tooltip change from a sidebar. `anchor` is in the window's coordinates.
@@ -95,6 +129,170 @@ pub enum PopupRequest {
     dark: bool,
   },
   HideTooltip,
+  /// A menu of `entries` with its corner at `at`, for a right-click.
+  ShowMenu {
+    entries: Vec<MenuEntry>,
+    at: Point<Pixels>,
+    dark: bool,
+  },
+  /// A menu of `entries` below the button at `anchor`.
+  ShowDropdown {
+    entries: Vec<MenuEntry>,
+    anchor: Bounds<Pixels>,
+    dark: bool,
+  },
+  /// A header popover, drawn in the modal window over the whole shell
+  /// window (see `popover`).
+  ShowPopover {
+    popover: gpui::Entity<super::popover::Popover>,
+    dark: bool,
+  },
+  HidePopover,
+}
+
+/// Item ids at and above this run a GPUI screen's own handler instead of
+/// going to React.
+const NATIVE_ID_BASE: u32 = 1 << 30;
+
+type Pick = Rc<dyn Fn(&mut App)>;
+
+thread_local! {
+  /// The handlers of the native menu last built.
+  static NATIVE_PICKS: RefCell<HashMap<u32, Pick>> = RefCell::new(HashMap::new());
+}
+
+/// A menu entry whose pick runs a handler on the main thread.
+pub enum NativeMenuItem {
+  Item {
+    text: String,
+    icon: Option<MenuIcon>,
+    destructive: bool,
+    /// A `DropdownMenuRadioItem`, picked or not.
+    radio: Option<bool>,
+    on_select: Pick,
+  },
+  Separator,
+  Submenu {
+    text: String,
+    icon: Option<MenuIcon>,
+    /// Muted text after `text`, such as the value a filter is set to.
+    detail: Option<String>,
+    items: Vec<NativeMenuItem>,
+  },
+  /// `DropdownMenuLabel`: a heading row nothing picks.
+  Label(String),
+}
+
+impl NativeMenuItem {
+  pub fn item(text: impl Into<String>, on_select: impl Fn(&mut App) + 'static) -> Self {
+    NativeMenuItem::Item {
+      text: text.into(),
+      icon: None,
+      destructive: false,
+      radio: None,
+      on_select: Rc::new(on_select),
+    }
+  }
+
+  /// A `DropdownMenuSub`: `items` open beside a row reading `text`, then
+  /// `detail` muted.
+  pub fn submenu(
+    text: impl Into<String>,
+    detail: Option<String>,
+    items: Vec<NativeMenuItem>,
+  ) -> Self {
+    NativeMenuItem::Submenu {
+      text: text.into(),
+      icon: None,
+      detail,
+      items,
+    }
+  }
+
+  /// Draws the item as a radio item, with its dot when `checked`.
+  pub fn radio(mut self, checked: bool) -> Self {
+    if let NativeMenuItem::Item { radio, .. } = &mut self {
+      *radio = Some(checked);
+    }
+    self
+  }
+
+  pub fn icon(mut self, value: MenuIcon) -> Self {
+    match &mut self {
+      NativeMenuItem::Item { icon, .. } | NativeMenuItem::Submenu { icon, .. } => {
+        *icon = Some(value)
+      }
+      NativeMenuItem::Separator | NativeMenuItem::Label(_) => {}
+    }
+    self
+  }
+
+  pub fn destructive(mut self) -> Self {
+    if let NativeMenuItem::Item { destructive, .. } = &mut self {
+      *destructive = true;
+    }
+    self
+  }
+}
+
+/// `items` as menu entries, their handlers kept for the pick. Building a
+/// menu drops the previous one's handlers.
+pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
+  NATIVE_PICKS.with(|picks| picks.borrow_mut().clear());
+  let mut next = NATIVE_ID_BASE;
+  fn build(items: Vec<NativeMenuItem>, next: &mut u32) -> Vec<MenuEntry> {
+    items
+      .into_iter()
+      .map(|item| match item {
+        NativeMenuItem::Item {
+          text,
+          icon,
+          destructive,
+          radio,
+          on_select,
+        } => {
+          let id = *next;
+          *next += 1;
+          NATIVE_PICKS.with(|picks| picks.borrow_mut().insert(id, on_select));
+          MenuEntry::Item {
+            id,
+            text,
+            icon,
+            destructive,
+            radio,
+          }
+        }
+        NativeMenuItem::Separator => MenuEntry::Separator,
+        NativeMenuItem::Label(text) => MenuEntry::Label { text },
+        NativeMenuItem::Submenu {
+          text,
+          icon,
+          detail,
+          items,
+        } => MenuEntry::Submenu {
+          text,
+          icon,
+          detail,
+          items: build(items, next),
+        },
+      })
+      .collect()
+  }
+  build(items, &mut next)
+}
+
+/// Picks native menu item `id`, as a click on it would.
+#[cfg(test)]
+pub fn pick_native(id: u32, cx: &mut App) {
+  if let Some(pick) = native_pick(id) {
+    pick(cx);
+  }
+}
+
+fn native_pick(id: u32) -> Option<Pick> {
+  (id >= NATIVE_ID_BASE)
+    .then(|| NATIVE_PICKS.with(|picks| picks.borrow().get(&id).cloned()))
+    .flatten()
 }
 
 /// Where a sidebar's popup requests go: popup windows in the app, a list in
@@ -106,7 +304,11 @@ pub type PopupSink = Rc<dyn Fn(PopupRequest, &mut App)>;
 #[serde(rename_all = "kebab-case")]
 pub enum MenuIcon {
   Archive,
+  ArrowRightLeft,
   Copy,
+  FileDiff,
+  Globe,
+  MessageSquare,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -126,6 +328,10 @@ impl MenuIcon {
       MenuIcon::FolderOpen => theme::ICON_FOLDER_OPEN,
       MenuIcon::FolderPlus => theme::ICON_FOLDER_PLUS,
       MenuIcon::FolderSearch => theme::ICON_FOLDER_SEARCH,
+      MenuIcon::ArrowRightLeft => theme::ICON_ARROW_RIGHT_LEFT,
+      MenuIcon::FileDiff => theme::ICON_FILE_DIFF,
+      MenuIcon::Globe => theme::ICON_GLOBE,
+      MenuIcon::MessageSquare => theme::ICON_MESSAGE,
       MenuIcon::GitBranch => theme::ICON_BRANCH,
       MenuIcon::Link => theme::ICON_LINK,
       MenuIcon::Pencil => theme::ICON_PENCIL,
@@ -147,13 +353,23 @@ pub enum MenuEntry {
     icon: Option<MenuIcon>,
     #[serde(default)]
     destructive: bool,
+    /// A radio item (`pl-8`, its dot drawn when `true`).
+    #[serde(default)]
+    radio: Option<bool>,
   },
   Separator,
   Submenu {
     text: String,
     #[serde(default)]
     icon: Option<MenuIcon>,
+    /// Muted `text-xs` after the text (`ml-2`).
+    #[serde(default)]
+    detail: Option<String>,
     items: Vec<MenuEntry>,
+  },
+  /// `DropdownMenuLabel`: `px-2 py-1.5 text-sm font-semibold`.
+  Label {
+    text: String,
   },
 }
 
@@ -228,9 +444,14 @@ struct PopupView {
 
 /// The width of `text` in `family` at `text-sm`, without kerning.
 fn text_width(cx: &App, text: &str, family: &'static str) -> f32 {
+  text_width_at(cx, text, family, TEXT_SIZE)
+}
+
+/// The width of `text` in `family` at `size` px, without kerning.
+fn text_width_at(cx: &App, text: &str, family: &'static str, size: f32) -> f32 {
   let system = cx.text_system();
   let font = system.resolve_font(&gpui::font(family));
-  let size = px(TEXT_SIZE);
+  let size = px(size);
   text
     .chars()
     .map(|ch| {
@@ -246,6 +467,14 @@ fn text_width(cx: &App, text: &str, family: &'static str) -> f32 {
 fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
   let (width, lines) = match content {
     TooltipContent::Text(text) => (text_width(cx, text, theme::SANS_FONT), 1),
+    TooltipContent::Shortcut { text, keys } => {
+      // The chip's `font-medium` is a little wider than the regular face.
+      let keys = text_width_at(cx, keys, theme::SANS_FONT, LIST_ITEM_SIZE) * 1.03;
+      (
+        text_width(cx, text, theme::SANS_FONT) + KBD_GAP + kbd_width(keys),
+        1,
+      )
+    }
     TooltipContent::Branch {
       title,
       conflicted,
@@ -264,6 +493,16 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
       }
       (width, lines)
     }
+    TooltipContent::List { title, items } => {
+      // The title is `font-medium`, a little wider than the regular face.
+      let width = items
+        .iter()
+        .map(|item| text_width_at(cx, item, theme::MONO_FONT, LIST_ITEM_SIZE))
+        .fold(text_width(cx, title, theme::SANS_FONT) * 1.03, f32::max);
+      let items = items.len() as f32;
+      let height = LINE_HEIGHT + 4. + items * LIST_ITEM_LINE + (items - 1.).max(0.) * 2.;
+      return ((width + 24. + 2.).ceil(), height + 12. + 2.);
+    }
   };
   let lines = lines as f32;
   (
@@ -275,12 +514,25 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
 fn entry_width(cx: &App, entry: &MenuEntry) -> f32 {
   let (text, icon, submenu) = match entry {
     MenuEntry::Separator => return 0.,
+    MenuEntry::Label { text } => {
+      return ITEM_PADDING_X * 2. + weighted_text_width(cx, text, gpui::FontWeight::SEMIBOLD)
+    }
     MenuEntry::Item { text, icon, .. } => (text, icon, false),
     MenuEntry::Submenu { text, icon, .. } => (text, icon, true),
   };
   let mut width = ITEM_PADDING_X * 2. + text_width(cx, text, theme::SANS_FONT);
   if icon.is_some() {
     width += ITEM_ICON + ITEM_ICON_GAP;
+  }
+  if let MenuEntry::Item { radio: Some(_), .. } = entry {
+    width += RADIO_INSET - ITEM_PADDING_X;
+  }
+  if let MenuEntry::Submenu {
+    detail: Some(detail),
+    ..
+  } = entry
+  {
+    width += DETAIL_GAP + text_width_at(cx, detail, theme::SANS_FONT, LIST_ITEM_SIZE);
   }
   if submenu {
     width += text_width(cx, "›", theme::SANS_FONT);
@@ -424,6 +676,10 @@ pub fn place_tooltip(
       anchor_left + (f32::from(anchor.size.width) - width) / 2.,
       f32::from(anchor.bottom()) + TOOLTIP_OFFSET,
     ),
+    Side::Top => (
+      anchor_left + (f32::from(anchor.size.width) - width) / 2.,
+      anchor_top - TOOLTIP_OFFSET - height,
+    ),
   };
   let min_x = f32::from(viewport.left()) + EDGE_PADDING;
   let max_x = f32::from(viewport.right()) - EDGE_PADDING - width;
@@ -474,6 +730,29 @@ impl PopupView {
     let palette = &self.palette;
     match content {
       TooltipContent::Text(text) => div().child(text.clone()).into_any_element(),
+      TooltipContent::Shortcut { text, keys } => div()
+        .flex()
+        .items_center()
+        .gap(zpx(KBD_GAP))
+        .child(text.clone())
+        .child(
+          div()
+            .debug_selector(|| "tooltip-kbd".into())
+            .h(zpx(KBD_HEIGHT))
+            .min_w(zpx(KBD_HEIGHT))
+            .px(zpx(KBD_PADDING_X))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(zpx(6.))
+            .bg(palette.muted)
+            .text_color(palette.muted_foreground)
+            .text_size(zpx(LIST_ITEM_SIZE))
+            .line_height(zpx(LIST_ITEM_LINE))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(keys.clone()),
+        )
+        .into_any_element(),
       TooltipContent::Branch {
         title,
         conflicted,
@@ -486,12 +765,12 @@ impl PopupView {
           div()
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(zpx(6.))
             .font_family(theme::MONO_FONT)
             .child(
               svg()
                 .path(theme::ICON_BRANCH)
-                .size(px(12.))
+                .size(zpx(12.))
                 .flex_none()
                 .text_color(palette.popover_foreground),
             )
@@ -512,6 +791,26 @@ impl PopupView {
           )
         })
         .into_any_element(),
+      TooltipContent::List { title, items } => div()
+        .flex()
+        .flex_col()
+        .child(
+          div()
+            .mb_1()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(title.clone()),
+        )
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .gap(zpx(2.))
+            .font_family(theme::MONO_FONT)
+            .text_size(zpx(LIST_ITEM_SIZE))
+            .line_height(zpx(LIST_ITEM_LINE))
+            .children(items.iter().cloned()),
+        )
+        .into_any_element(),
     }
   }
 
@@ -527,16 +826,27 @@ impl PopupView {
       let row = match entry {
         MenuEntry::Separator => div()
           // `-mx-1` cancels the box's padding.
-          .mx(px(-MENU_PADDING))
+          .mx(zpx(-MENU_PADDING))
           .my_1()
           .h_px()
           .bg(palette.muted)
+          .into_any_element(),
+        MenuEntry::Label { text } => div()
+          .flex()
+          .flex_none()
+          .items_center()
+          .h(zpx(ITEM_HEIGHT))
+          .px(zpx(ITEM_PADDING_X))
+          .font_weight(gpui::FontWeight::SEMIBOLD)
+          .whitespace_nowrap()
+          .child(SharedString::from(text.clone()))
           .into_any_element(),
         MenuEntry::Item {
           id,
           text,
           icon,
           destructive,
+          radio,
         } => {
           let id = *id;
           let color = if *destructive {
@@ -546,15 +856,40 @@ impl PopupView {
           };
           menu_row(("item", index), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
+            .when_some(*radio, |row, checked| {
+              row.relative().pl(zpx(RADIO_INSET)).child(
+                div()
+                  .absolute()
+                  .left(zpx(ITEM_PADDING_X))
+                  .size_4()
+                  .flex()
+                  .items_center()
+                  .justify_center()
+                  .when(checked, |this| {
+                    this.child(div().size_2().rounded_full().bg(color))
+                  }),
+              )
+            })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
               if *hovered {
                 this.set_open_submenu(None, cx);
               }
             }))
-            .on_click(cx.listener(move |this, _, _, _| this.pick(id)))
+            .on_click(cx.listener(move |this, _, _, cx| match native_pick(id) {
+              Some(pick) => {
+                this.close();
+                pick(cx);
+              }
+              None => this.pick(id),
+            }))
             .into_any_element()
         }
-        MenuEntry::Submenu { text, icon, items } => {
+        MenuEntry::Submenu {
+          text,
+          icon,
+          detail,
+          items,
+        } => {
           let items = items.clone();
           menu_row(
             ("submenu", index),
@@ -565,11 +900,21 @@ impl PopupView {
             open_submenu == Some(index),
           )
           .debug_selector(move || format!("menu-submenu-{index}"))
+          .when_some(detail.clone(), |row, detail| {
+            row.child(
+              div()
+                .ml(zpx(DETAIL_GAP))
+                .text_size(zpx(LIST_ITEM_SIZE))
+                .text_color(palette.muted_foreground)
+                .whitespace_nowrap()
+                .child(detail),
+            )
+          })
           .child(div().ml_auto().child("›"))
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             if *hovered && this.content_open_submenu() != Some(index) {
               this.set_open_submenu(Some(index), cx);
-              this.open_submenu_window(index, items.clone());
+              this.open_submenu_window(index, items.clone(), super::ui::zoom_factor(cx));
             }
           }))
           .into_any_element()
@@ -601,16 +946,16 @@ impl PopupView {
   }
 
   /// Opens the submenu of row `index` beside it.
-  fn open_submenu_window(&self, index: usize, items: Vec<MenuEntry>) {
+  fn open_submenu_window(&self, index: usize, items: Vec<MenuEntry>, zoom: f32) {
     let Content::Menu { entries, .. } = &self.content else {
       return;
     };
     // The trigger row, inside the box's border and padding.
-    let inset = px(1. + MENU_PADDING);
-    let top = self.frame.origin.y + px(entry_top(entries, index));
+    let inset = px((1. + MENU_PADDING) * zoom);
+    let top = self.frame.origin.y + px(entry_top(entries, index) * zoom);
     let trigger = Bounds::new(
       gpui::point(self.frame.origin.x + inset, top),
-      gpui::size(self.frame.size.width - inset * 2., px(ITEM_HEIGHT)),
+      gpui::size(self.frame.size.width - inset * 2., px(ITEM_HEIGHT * zoom)),
     );
     let (palette, owner) = (self.palette, self.owner.clone());
     defer_main(&self.app, move |app| {
@@ -622,6 +967,14 @@ impl PopupView {
         palette,
         move |size, screen| place_submenu(trigger, size, screen),
       );
+    });
+  }
+
+  /// Closes the menus.
+  fn close(&self) {
+    defer_main(&self.app, |_| {
+      hide(Slot::Submenu);
+      hide(Slot::Menu);
     });
   }
 
@@ -656,7 +1009,7 @@ impl PopupView {
   fn render_toasts(&self, toasts: &[Toast], cx: &mut Context<Self>) -> gpui::AnyElement {
     let palette = self.palette;
     let composited = composited();
-    let mut stack = div().flex().flex_col().gap(px(TOAST_GAP));
+    let mut stack = div().flex().flex_col().gap(zpx(TOAST_GAP));
     for toast in toasts {
       let (icon, icon_color) = match toast.kind {
         ToastKind::Error => (theme::ICON_CIRCLE_ALERT, palette.destructive),
@@ -681,8 +1034,8 @@ impl PopupView {
         .child(
           svg()
             .path(icon)
-            .size(px(16.))
-            .mt(px(2.))
+            .size(zpx(16.))
+            .mt(zpx(2.))
             .flex_none()
             .text_color(icon_color),
         )
@@ -696,7 +1049,7 @@ impl PopupView {
             .child(
               div()
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .line_height(px(TEXT_SIZE))
+                .line_height(zpx(TEXT_SIZE))
                 .child(SharedString::from(toast.title.clone())),
             )
             .when_some(toast.description.clone(), |this, description| {
@@ -736,7 +1089,7 @@ impl PopupView {
             .child(
               svg()
                 .path(theme::ICON_X)
-                .size(px(16.))
+                .size(zpx(16.))
                 .text_color(palette.muted_foreground.opacity(0.7))
                 .group_hover("close", |style| style.text_color(palette.foreground)),
             )
@@ -755,6 +1108,9 @@ impl PopupView {
       action,
     };
     defer_main(&self.app, move |app| {
+      if super::toasts::click(app, &owner, &click.id, click.action) {
+        return;
+      }
       let target = tauri::EventTarget::webview_window(&owner);
       if let Err(err) = app.emit_to(target, TOAST_EVENT, click) {
         log::warn!("failed to send a GPUI toast click: {err}");
@@ -778,8 +1134,8 @@ fn menu_row(
     .flex()
     .flex_none()
     .items_center()
-    .h(px(ITEM_HEIGHT))
-    .px(px(ITEM_PADDING_X))
+    .h(zpx(ITEM_HEIGHT))
+    .px(zpx(ITEM_PADDING_X))
     .rounded_sm()
     .text_color(color)
     .when(highlighted, |this| this.bg(hover_bg))
@@ -788,9 +1144,9 @@ fn menu_row(
       this.child(
         svg()
           .path(icon.path())
-          .size(px(ITEM_ICON))
+          .size(zpx(ITEM_ICON))
           .flex_none()
-          .mr(px(ITEM_ICON_GAP))
+          .mr(zpx(ITEM_ICON_GAP))
           .text_color(color),
       )
     })
@@ -802,24 +1158,25 @@ fn menu_row(
 }
 
 impl Render for PopupView {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    super::ui::apply_zoom(window, cx);
     let palette = self.palette;
     let body = match self.content.clone() {
       Content::Empty => None,
       Content::Toasts(toasts) => {
         return div()
           .size_full()
-          .p(px(shadow_margin()))
+          .p(zpx(shadow_margin()))
           .font_family(theme::SANS_FONT)
-          .text_size(px(TEXT_SIZE))
-          .line_height(px(LINE_HEIGHT))
+          .text_size(zpx(TEXT_SIZE))
+          .line_height(zpx(LINE_HEIGHT))
           .child(self.render_toasts(&toasts, cx));
       }
       // `px-3 py-1.5 shadow-md`
       Content::Tooltip(content) => Some(
         div()
           .px_3()
-          .py(px(6.))
+          .py(zpx(6.))
           .shadow_md()
           .child(self.render_tooltip(&content)),
       ),
@@ -829,7 +1186,7 @@ impl Render for PopupView {
         open_submenu,
       } => Some(
         div()
-          .p(px(MENU_PADDING))
+          .p(zpx(MENU_PADDING))
           .when(self.slot == Slot::Menu, |this| this.shadow_md())
           .when(self.slot == Slot::Submenu, |this| this.shadow_lg())
           .child(self.render_menu(&entries, open_submenu, cx)),
@@ -839,10 +1196,10 @@ impl Render for PopupView {
     let body = body.map(|body| if composited { body } else { body.shadow_none() });
     div()
       .size_full()
-      .p(px(shadow_margin()))
+      .p(zpx(shadow_margin()))
       .font_family(theme::SANS_FONT)
-      .text_size(px(TEXT_SIZE))
-      .line_height(px(LINE_HEIGHT))
+      .text_size(zpx(TEXT_SIZE))
+      .line_height(zpx(LINE_HEIGHT))
       .when_some(body, |this, body| {
         // `rounded-md border bg-popover text-popover-foreground`
         this.child(
@@ -898,6 +1255,44 @@ thread_local! {
   static WINDOWS: RefCell<HashMap<String, PopupWindow>> = RefCell::default();
   /// A menu is open, so tooltips stay hidden, as under a React context menu.
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
+  /// The screen button a dropdown menu opens below, and when it was pressed.
+  static DROPDOWN_ANCHOR: Cell<Option<(Bounds<Pixels>, std::time::Instant)>> =
+    const { Cell::new(None) };
+}
+
+/// How long after its button's press React may open the dropdown.
+const DROPDOWN_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Records `anchor` (window coordinates) as the button whose press asks
+/// React for a menu, so the menu opens below it, as `DropdownMenuContent
+/// align="end"` does, instead of at the pointer.
+pub fn set_dropdown_anchor(anchor: Bounds<Pixels>) {
+  DROPDOWN_ANCHOR.with(|cell| cell.set(Some((anchor, std::time::Instant::now()))));
+}
+
+/// The button of a dropdown pressed just now, consumed by the menu it opens.
+pub fn take_dropdown_anchor() -> Option<Bounds<Pixels>> {
+  DROPDOWN_ANCHOR
+    .with(Cell::take)
+    .filter(|(_, at)| at.elapsed() < DROPDOWN_WINDOW)
+    .map(|(anchor, _)| anchor)
+}
+
+/// A dropdown's box below `anchor` with their right edges lined up (screen
+/// coordinates), `sideOffset={4}` away, flipped above where it would leave
+/// `screen`.
+pub fn place_dropdown(
+  anchor: Bounds<Pixels>,
+  size: (f32, f32),
+  screen: Bounds<Pixels>,
+) -> Point<Pixels> {
+  let (width, height) = size;
+  let x = (f32::from(anchor.right()) - width).max(f32::from(screen.left()));
+  let mut y = f32::from(anchor.bottom()) + DROPDOWN_OFFSET;
+  if y + height > f32::from(screen.bottom()) {
+    y = f32::from(anchor.top()) - DROPDOWN_OFFSET - height;
+  }
+  gpui::point(px(x), px(y))
 }
 
 /// The popup window for `slot` of window `owner`, built on first use. Main
@@ -979,6 +1374,15 @@ fn popup_window(
     return None;
   }
   let view = view.borrow_mut().take()?;
+  // An X11 compositor (xcompmgr, picom) decides at a window's first map
+  // whether it is translucent, before GPUI has drawn into it, and shadows it
+  // as opaque: a dark box around the first menu shown. Mapping it once while
+  // it is still 1x1 settles that, so the first real show draws like the rest.
+  #[cfg(target_os = "linux")]
+  {
+    let _ = window.show();
+    let _ = window.hide();
+  }
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
       label,
@@ -990,6 +1394,9 @@ fn popup_window(
   });
   Some((window, view))
 }
+
+/// A popup's box on screen, and the zoom it was measured at.
+type Placed = (Bounds<Pixels>, f32);
 
 /// Shows `content` in the popup for `slot`, sized by `measure` and placed
 /// by `place` (screen coordinates, logical pixels). Main thread only.
@@ -1005,16 +1412,19 @@ fn show(
   let Some((window, view)) = popup_window(app, slot, owner) else {
     return;
   };
-  let frame: Rc<RefCell<Option<Bounds<Pixels>>>> = Rc::default();
+  let frame: Rc<RefCell<Option<Placed>>> = Rc::default();
   let placed = frame.clone();
   let owner = owner.to_string();
   let updated = tauri_plugin_gpui::with_app(move |cx| {
+    // Measured at 100%; the view draws at the app's zoom.
+    let zoom = super::ui::zoom_factor(cx);
     let size = measure(cx, &content);
+    let size = (size.0 * zoom, size.1 * zoom);
     let Some(origin) = place(size) else {
       return;
     };
     let bounds = Bounds::new(origin, gpui::size(px(size.0), px(size.1)));
-    *placed.borrow_mut() = Some(bounds);
+    *placed.borrow_mut() = Some((bounds, zoom));
     let _ = view.update(cx, |view, cx| {
       view.content = content;
       view.palette = palette;
@@ -1023,10 +1433,10 @@ fn show(
       cx.notify();
     });
   });
-  let Some(bounds) = frame.borrow_mut().take().filter(|_| updated.is_ok()) else {
+  let Some((bounds, zoom)) = frame.borrow_mut().take().filter(|_| updated.is_ok()) else {
     return;
   };
-  let margin = px(shadow_margin());
+  let margin = px(shadow_margin() * zoom);
   let size = LogicalSize::new(
     f32::from(bounds.size.width + margin * 2.),
     f32::from(bounds.size.height + margin * 2.),
@@ -1069,6 +1479,11 @@ pub fn hide_all() {
   hide(Slot::Menu);
 }
 
+/// Hides the tooltip. Main thread only.
+pub fn hide_tooltip() {
+  hide(Slot::Tooltip);
+}
+
 /// Hides the menus, as a click elsewhere does. Main thread only.
 pub fn hide_menus() {
   hide(Slot::Submenu);
@@ -1076,7 +1491,7 @@ pub fn hide_menus() {
 }
 
 /// The client area of `window` on screen, in logical pixels.
-fn client_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
+pub(super) fn client_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
   let scale = window.scale_factor().ok()? as f32;
   let position = window.inner_position().ok()?;
   let size = window.inner_size().ok()?;
@@ -1111,6 +1526,17 @@ fn screen_bounds(window: &tauri::Window<Wry>) -> Option<Bounds<Pixels>> {
 pub fn handle(app: &AppHandle, owner: &str, request: PopupRequest) {
   match request {
     PopupRequest::HideTooltip => hide(Slot::Tooltip),
+    PopupRequest::ShowPopover { popover, dark } => {
+      hide(Slot::Tooltip);
+      super::modal::show_popover(app, owner, popover, dark);
+    }
+    PopupRequest::HidePopover => super::modal::hide_popover(app, owner),
+    PopupRequest::ShowMenu { entries, at, dark } => show_menu(app, owner, entries, at, dark),
+    PopupRequest::ShowDropdown {
+      entries,
+      anchor,
+      dark,
+    } => show_dropdown(app, owner, entries, anchor, dark),
     PopupRequest::ShowTooltip {
       anchor,
       side,
@@ -1206,6 +1632,35 @@ pub fn show_menu(
   );
 }
 
+/// Opens a menu of `entries` for window `owner` below `anchor`, a button in
+/// the window's coordinates. Main thread only.
+pub fn show_dropdown(
+  app: &AppHandle,
+  owner: &str,
+  entries: Vec<MenuEntry>,
+  anchor: Bounds<Pixels>,
+  dark: bool,
+) {
+  let Some(client) = tauri::Manager::get_window(app, owner)
+    .as_ref()
+    .and_then(client_bounds)
+  else {
+    return;
+  };
+  MENU_OPEN.with(|open| open.set(true));
+  hide(Slot::Tooltip);
+  hide(Slot::Submenu);
+  let anchor = Bounds::new(anchor.origin + client.origin, anchor.size);
+  show_menu_at(
+    app,
+    Slot::Menu,
+    owner,
+    entries,
+    theme::palette(dark),
+    move |size, screen| place_dropdown(anchor, size, screen),
+  );
+}
+
 /// Shows window `owner`'s `toasts` in its bottom-left corner, or hides them
 /// when there are none. Main thread only.
 pub fn show_toasts(app: &AppHandle, owner: &str, toasts: Vec<Toast>, dark: bool) {
@@ -1254,11 +1709,14 @@ pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
   else {
     return;
   };
-  let frame = tauri_plugin_gpui::with_app(move |cx| view.read_with(cx, |view, _| view.frame).ok());
-  if let Ok(Some(frame)) = frame {
+  let frame = tauri_plugin_gpui::with_app(move |cx| {
+    let zoom = super::ui::zoom_factor(cx);
+    view.read_with(cx, |view, _| (view.frame, zoom)).ok()
+  });
+  if let Ok(Some((frame, zoom))) = frame {
     let size = (f32::from(frame.size.width), f32::from(frame.size.height));
     let origin = place_toasts(size, client);
-    let margin = px(shadow_margin());
+    let margin = px(shadow_margin() * zoom);
     let _ = window.set_position(LogicalPosition::new(
       f32::from(origin.x - margin),
       f32::from(origin.y - margin),
@@ -1429,14 +1887,51 @@ mod tests {
       MenuEntry::Submenu {
         text: "Open in...".into(),
         icon: Some(MenuIcon::FolderOpen),
+        detail: None,
         items: vec![MenuEntry::Item {
           id: 2,
           text: "Open in Zed".into(),
           icon: None,
           destructive: false,
+          radio: None,
         }],
       }
     );
+    assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
+  }
+
+  #[test]
+  fn builds_labels_radio_items_and_submenu_details() {
+    let entries = native_entries(vec![
+      NativeMenuItem::Label("Filter by".into()),
+      NativeMenuItem::Separator,
+      NativeMenuItem::submenu(
+        "Assignee",
+        Some("Ada".into()),
+        vec![
+          NativeMenuItem::item("Any", |_| {}).radio(false),
+          NativeMenuItem::item("Ada", |_| {}).radio(true),
+        ],
+      ),
+    ]);
+    assert_eq!(
+      entries[0],
+      MenuEntry::Label {
+        text: "Filter by".into()
+      }
+    );
+    let MenuEntry::Submenu { detail, items, .. } = &entries[2] else {
+      panic!("a submenu");
+    };
+    assert_eq!(detail.as_deref(), Some("Ada"));
+    let radios: Vec<_> = items
+      .iter()
+      .map(|item| match item {
+        MenuEntry::Item { radio, .. } => *radio,
+        _ => None,
+      })
+      .collect();
+    assert_eq!(radios, [Some(false), Some(true)]);
     assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
   }
 }

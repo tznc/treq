@@ -57,6 +57,8 @@ vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
 }));
 beforeEach(() => {
   window.__TREQ_GPUI_SHELL__ = true;
+  // React's own Supabase account (same as test/setup.integration.ts).
+  window.__TREQ_REACT_SUPABASE__ = true;
 });
 
 const jjCalls: string[] = [];
@@ -65,7 +67,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn((cmd: string, args?: Record<string, unknown>) => {
     trackPtyInvoke(cmd, args);
     // No native shell in jsdom; the call is only recorded for test/gpui-sidebar.ts.
-    if (cmd === "gpui_sidebar_update") return Promise.resolve();
+    if (
+      cmd === "gpui_sidebar_update" ||
+      cmd === "gpui_screen_update" ||
+      cmd === "gpui_overlay_update"
+    )
+      return Promise.resolve();
     if (cmd.startsWith("jj_")) {
       jjCalls.push(cmd);
     }

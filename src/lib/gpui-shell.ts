@@ -12,6 +12,26 @@ import type { FlattenedWorkspaceNode } from "./workspace-tree";
 declare global {
   interface Window {
     __TREQ_GPUI_SHELL__?: boolean;
+    /** `TREQ_WEB_UI` is set: React draws every screen, for comparison. */
+    __TREQ_WEB_UI__?: boolean;
+    /** React draws the terminal pane; tests of that pane set it. */
+    __TREQ_REACT_TERMINAL__?: boolean;
+    /** React draws the Code tab's file browser; tests of it set it. */
+    __TREQ_REACT_FILE_BROWSER__?: boolean;
+    /** React draws the agent prompt, prompt history and stash dialogs; tests of those set it. */
+    __TREQ_REACT_MODALS__?: boolean;
+    /** React draws Dashboard's palette and pickers; tests of them set it. */
+    __TREQ_REACT_OVERLAYS__?: boolean;
+    /** React draws the remote repository dialogs; tests of those dialogs set it. */
+    __TREQ_REACT_REMOTE_DIALOGS__?: boolean;
+    /** React draws Dashboard's workspace dialogs; tests of them set it. */
+    __TREQ_REACT_WORKSPACE_DIALOGS__?: boolean;
+    /** React draws the GitHub view's Issues and Pull Requests tabs; tests of them set it. */
+    __TREQ_REACT_GITHUB__?: boolean;
+    /** React draws a remote repository's workspace view; tests of it set it. */
+    __TREQ_REACT_REMOTE_WORKSPACE__?: boolean;
+    /** React restores the last remote repository; tests of its remote flows set it. */
+    __TREQ_REACT_REMOTE__?: boolean;
   }
 }
 

@@ -8,15 +8,15 @@ import {
   openBrowserWebview,
   syncBrowserWebviewBounds,
 } from "../../lib/api";
+import { useGpuiPart } from "../../lib/gpui-parts";
 import { useToast } from "../ui/toast";
 import { AddressBar } from "./AddressBar";
 import type { BrowserPanelProps } from "./types";
-
-const DEFAULT_URL = "http://localhost:3000";
+import { DEFAULT_BROWSER_URL } from "./utils";
 
 export function BrowserPanel({ openRequest, toolbarSlot }: BrowserPanelProps) {
   const { addToast } = useToast();
-  const [url, setUrl] = useState(DEFAULT_URL);
+  const [url, setUrl] = useState(DEFAULT_BROWSER_URL);
   const [webviewOpen, setWebviewOpen] = useState(false);
   const previewRef = useRef<HTMLDivElement | null>(null);
   // Outside a real Tauri window (dev preview in a plain browser, or the
@@ -110,6 +110,14 @@ export function BrowserPanel({ openRequest, toolbarSlot }: BrowserPanelProps) {
   const handleReload = useCallback(() => {
     handleNavigate(url);
   }, [handleNavigate, url]);
+
+  // GPUI draws the address bar in the tab row: it shows this url, and asks
+  // for the navigations and reloads this panel runs.
+  useGpuiPart(
+    "browser",
+    { url },
+    { navigate: handleNavigate, reload: handleReload },
+  );
 
   // External navigation requests, e.g. from `treq send --browser`.
   useEffect(() => {

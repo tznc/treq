@@ -14,7 +14,7 @@ static INDEXED_WORKSPACES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 /// created workspace, in the background so workspace creation itself isn't
 /// slowed down. Checks are blocked for the workspace until this finishes —
 /// see `core::checks::ensure_setup_script_complete`.
-fn spawn_setup_script_if_configured(workspace: &Workspace) {
+pub(crate) fn spawn_setup_script_if_configured(workspace: &Workspace) {
   let script = match crate::core::configured_setup_script(&workspace.repo_path) {
     Ok(Some(script)) => script,
     Ok(None) => return,
@@ -205,18 +205,11 @@ pub async fn delete_workspace(repo_path: String, id: i64) -> Result<(), String> 
 pub async fn archive_workspace(repo_path: String, id: i64) -> Result<(), String> {
   let started_at = Instant::now();
   let repo_path_for_task = repo_path.clone();
-  let leftover = tauri::async_runtime::spawn_blocking(move || {
-    crate::core::archive_workspace_leaving_directory(&repo_path_for_task, &id)
+  tauri::async_runtime::spawn_blocking(move || {
+    crate::core::archive_workspace_removing_directory_later(&repo_path_for_task, id)
   })
   .await
   .map_err(|e| format!("Failed to join archive_workspace task: {}", e))??;
-  if let Some(path) = leftover {
-    tauri::async_runtime::spawn_blocking(move || {
-      if let Err(e) = crate::jj::remove_workspace_directory_only(&path) {
-        tracing::warn!("Background workspace directory removal failed: {}", e);
-      }
-    });
-  }
   log::debug!(
     "archive_workspace(repo_path={}, id={}) archived in {:?}",
     repo_path,
@@ -545,7 +538,7 @@ pub async fn abandon_commit(
   let result = tauri::async_runtime::spawn_blocking(move || {
     crate::core::abandon_commit(
       &repo_path_for_task,
-      workspace_id,
+      Some(workspace_id),
       &commit_change_id_for_task,
     )
   })
@@ -605,7 +598,7 @@ pub async fn revert_commit(
   let result = tauri::async_runtime::spawn_blocking(move || {
     crate::core::revert_commit(
       &repo_path_for_task,
-      workspace_id,
+      Some(workspace_id),
       &commit_change_id_for_task,
     )
   })

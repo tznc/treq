@@ -53,6 +53,33 @@ async fn download_skill_files(entry: &SkillCatalogEntry) -> Result<Vec<(String, 
   Ok(files)
 }
 
+/// The registry's skills, each with its install state for `repo_path`.
+pub async fn catalog_view(
+  repo_path: Option<&str>,
+  catalog_url: Option<&str>,
+) -> Result<SkillCatalogView, String> {
+  let catalog = load_catalog(catalog_url).await?;
+  merge_catalog_with_installed(catalog, repo_path)
+}
+
+/// Downloads `skill_id` from the registry and installs it at `scope`.
+/// Callers then record the app index (`persist_app_index_setting`).
+pub async fn download_and_install(
+  skill_id: &str,
+  scope: SkillInstallScope,
+  repo_path: Option<&str>,
+  catalog_url: Option<&str>,
+) -> Result<InstalledSkill, String> {
+  let catalog = load_catalog(catalog_url).await?;
+  let entry = catalog
+    .skills
+    .into_iter()
+    .find(|skill| skill.id == skill_id)
+    .ok_or_else(|| format!("Skill '{skill_id}' was not found in the catalog"))?;
+  let files = download_skill_files(&entry).await?;
+  install_skill_files(&entry, &files, scope, repo_path)
+}
+
 #[tauri::command]
 pub async fn list_skill_catalog(
   state: State<'_, AppState>,
@@ -63,8 +90,7 @@ pub async fn list_skill_catalog(
     &state,
     crate::core::feature_preview::PreviewFeature::SkillsInstallation,
   )?;
-  let catalog = load_catalog(catalog_url.as_deref()).await?;
-  merge_catalog_with_installed(catalog, repo_path.as_deref())
+  catalog_view(repo_path.as_deref(), catalog_url.as_deref()).await
 }
 
 #[tauri::command]
@@ -91,14 +117,13 @@ pub async fn install_skill(
     &state,
     crate::core::feature_preview::PreviewFeature::SkillsInstallation,
   )?;
-  let catalog = load_catalog(catalog_url.as_deref()).await?;
-  let entry = catalog
-    .skills
-    .into_iter()
-    .find(|skill| skill.id == skill_id)
-    .ok_or_else(|| format!("Skill '{skill_id}' was not found in the catalog"))?;
-  let files = download_skill_files(&entry).await?;
-  let installed = install_skill_files(&entry, &files, scope, repo_path.as_deref())?;
+  let installed = download_and_install(
+    &skill_id,
+    scope,
+    repo_path.as_deref(),
+    catalog_url.as_deref(),
+  )
+  .await?;
   let db = state.db.lock_or_recover();
   persist_app_index_setting(&db)?;
   Ok(installed)

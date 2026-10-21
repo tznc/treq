@@ -1,0 +1,271 @@
+//! The workspace header's actions GPUI runs itself (`workspace/actions.rs`):
+//! checks, pull requests, retargeting, the merge queue and Delete Workspace.
+
+use gpui::TestAppContext;
+
+use super::*;
+
+/// A feature workspace with no pull request yet, so Create PR shows.
+fn no_pr_host() -> FakeHost {
+  FakeHost {
+    loaded: feature_loaded(),
+    pr: workspace_data::PrCache {
+      pr: Some(None),
+      ci: None,
+    },
+    workspaces: vec![serde_json::from_value(workspace_row("feature/login")).expect("workspace")],
+    ..FakeHost::default()
+  }
+}
+
+fn act(h: &mut Harness, action: ScreenAction) {
+  h.screen.update(&mut h.cx, |screen, cx| {
+    let view = screen.workspace.clone().expect("workspace view");
+    view.update(cx, |view, cx| view.handle(action, cx));
+  });
+  h.cx.run_until_parked();
+}
+
+fn calls_starting(host: &FakeHost, prefixes: &[&str]) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| prefixes.iter().any(|p| c.starts_with(p)))
+    .collect()
+}
+
+#[gpui::test]
+fn runs_every_workflow_and_the_setup_script(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.cx.run_until_parked();
+  act(&mut h, press("workspace.checksRunAll"));
+  act(
+    &mut h,
+    ScreenAction::Field {
+      field: "workspace.checksRun".into(),
+      value: "b.yml".into(),
+    },
+  );
+  act(&mut h, press("workspace.checksRerunSetup"));
+  act(&mut h, press("workspace.checksTrust"));
+  assert!(h.sent().is_empty(), "React runs none of them");
+  let path = "/repo/.treq/workspaces/login";
+  let mut calls = calls_starting(&host, &["run ", "trust "]);
+  // Run All starts the three at once.
+  calls[..3].sort();
+  assert_eq!(
+    calls,
+    [
+      format!("run 7:a.yml in {path}"),
+      format!("run 7:b.yml in {path}"),
+      format!("run 7:c.yml in {path}"),
+      format!("run 7:b.yml in {path}"),
+      format!("run 7:<setup> in {path}"),
+      "trust /repo".to_string(),
+    ]
+  );
+  assert!(host
+    .calls()
+    .contains(&"notify workspaceChanged".to_string()));
+}
+
+#[gpui::test]
+fn draws_checks_running_anywhere_in_the_app(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  h.cx.update(|_, cx| {
+    let mut running = crate::gpui_shell::checks_run::Running::default();
+    for key in ["7:a.yml", "7:b.yml:test", "7:<setup>", "8:c.yml"] {
+      running.0.start("/repo", key);
+    }
+    cx.set_global(running);
+  });
+  h.cx.run_until_parked();
+  let route = h.screen.read_with(&h.cx, |screen, cx| {
+    let view = screen.workspace.as_ref().expect("workspace view").read(cx);
+    view.drawn_route(cx)
+  });
+  assert_eq!(route.running_checks, ["a.yml", "b.yml"]);
+  assert_eq!(route.running_workflows, ["a.yml"]);
+  assert!(route.setup_rerunning);
+}
+
+#[gpui::test]
+fn creates_a_pull_request_pushing_first(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, no_pr_host(), workspace_route());
+  h.click("workspace-create-pr");
+  h.cx.run_until_parked();
+  assert!(h.sent().is_empty());
+  assert_eq!(
+    calls_starting(&host, &["push ", "create pr", "refresh pr", "notify toast"]),
+    [
+      "push 7",
+      "create pr tznc/treq \"feat: Add login\" \"\" feature/login->main draft=false",
+      "refresh pr status feature/login",
+      "notify toast Pull request created",
+    ]
+  );
+}
+
+#[gpui::test]
+fn creates_a_draft_or_manual_pull_request_from_the_menu(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, no_pr_host(), workspace_route());
+  h.click("workspace-create-pr-menu");
+  h.pick("Create draft PR");
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("create pr") && c.ends_with("draft=true")));
+  assert!(host
+    .calls()
+    .contains(&"notify toast Draft PR created".to_string()));
+
+  h.click("workspace-create-pr-menu");
+  h.pick("Create PR manually");
+  let open = calls_starting(&host, &["open https://github.com/tznc/treq/compare"]);
+  assert_eq!(
+    open,
+    ["open https://github.com/tznc/treq/compare/main...feature%2Flogin?expand=1&title=feat%3A+Add+login&body="]
+  );
+}
+
+#[gpui::test]
+fn a_failed_pull_request_toasts(cx: &mut TestAppContext) {
+  let mut host = no_pr_host();
+  host.github.fail = vec!["create_pr"];
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  act(&mut h, press("workspace.createPr"));
+  assert!(host
+    .calls()
+    .contains(&"notify toast Failed to create PR".to_string()));
+}
+
+#[gpui::test]
+fn views_the_pull_request_in_treq(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-view-pr");
+  h.cx.run_until_parked();
+  assert!(h.sent().is_empty());
+  assert!(host.calls().contains(&"notify open".to_string()));
+}
+
+#[gpui::test]
+fn deletes_the_workspace_from_the_more_menu(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-more");
+  h.pick("Delete Workspace");
+  assert_eq!(
+    calls_starting(&host, &["ask", "delete workspace", "notify"]),
+    [
+      "ask Delete workspace feature/login?",
+      "delete workspace 7",
+      "notify workspaceChanged",
+      "notify workspacesRemoved",
+      "notify toast Workspace Deleted",
+    ]
+  );
+}
+
+#[gpui::test]
+fn keeps_the_workspace_when_delete_is_declined(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    decline: true,
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-more");
+  h.pick("Delete Workspace");
+  assert!(!host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("delete workspace")));
+}
+
+#[gpui::test]
+fn retargets_onto_another_branch(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.cx.run_until_parked();
+  let target = |branch: &str| ScreenAction::Field {
+    field: "workspace.target".into(),
+    value: branch.into(),
+  };
+  // The branch it already targets does nothing.
+  act(&mut h, target("main"));
+  act(&mut h, target("develop"));
+  assert!(h.sent().is_empty());
+  assert_eq!(
+    calls_starting(&host, &["retarget", "notify toast"]),
+    [
+      "retarget feature/login -> develop",
+      "notify toast Rebased successfully",
+    ]
+  );
+}
+
+fn queue_route(label: &str) -> ScreenSnapshot {
+  let mut json = route_json(Some(7), "main");
+  json["mergeQueue"] = serde_json::json!({
+    "label": label,
+    "secondary": false,
+    "disabled": false,
+    "tooltip": "Add this branch to the merge queue",
+  });
+  serde_json::from_value(json).expect("route")
+}
+
+#[gpui::test]
+fn adds_to_and_removes_from_the_merge_queue(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), queue_route("Add to Queue"));
+  h.cx.run_until_parked();
+  act(&mut h, press("workspace.mergeQueue"));
+  h.update(|s| *s = queue_route("Queued"));
+  act(&mut h, press("workspace.mergeQueue"));
+  assert_eq!(
+    calls_starting(&host, &["queue", "notify toast"]),
+    [
+      "queue tznc/treq feature/login Enqueue",
+      "notify toast Added to merge queue",
+      "queue tznc/treq feature/login Dequeue",
+      "notify toast Removed from merge queue",
+    ]
+  );
+}
+
+#[gpui::test]
+fn offers_pro_when_the_queue_needs_it(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    failing: vec!["queue_pro"],
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, queue_route("Add to Queue"));
+  h.cx.run_until_parked();
+  act(&mut h, press("workspace.mergeQueue"));
+  assert!(host
+    .calls()
+    .contains(&"notify toast The merge queue needs Pro".to_string()));
+}
+
+#[gpui::test]
+fn hands_a_remote_repositorys_actions_to_react(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    react_actions: true,
+    ..no_pr_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.cx.run_until_parked();
+  for id in [
+    "workspace.checksRunAll",
+    "workspace.createPr",
+    "workspace.mergeQueue",
+  ] {
+    act(&mut h, press(id));
+  }
+  assert_eq!(
+    h.sent(),
+    [
+      press("workspace.checksRunAll"),
+      press("workspace.createPr"),
+      press("workspace.mergeQueue"),
+    ]
+  );
+  assert!(calls_starting(&host, &["run ", "create pr", "queue"]).is_empty());
+}

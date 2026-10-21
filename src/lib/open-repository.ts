@@ -34,6 +34,23 @@ export async function openRepositoryAtPath(
 
   await setSetting("last_opened_repo_path", path);
   await setWindowRepoPath(path);
+  showOpenedRepository(path, onOpened);
+
+  addToast({
+    title: "Repository Opened",
+    description: `Now viewing ${path.split("/").pop() || path}`,
+    type: "success",
+  });
+}
+
+/**
+ * Switches to `path` once the backend has it open: from
+ * `openRepositoryAtPath`, or after GPUI's onboarding opened it natively.
+ */
+export function showOpenedRepository(
+  path: string,
+  onOpened: (path: string) => void,
+): void {
   onOpened(path);
 
   void invalidateQueries(["workspaces"]);
@@ -41,10 +58,4 @@ export async function openRepositoryAtPath(
   void invalidateQueries(["sessions"]);
   void invalidateQueries(["repo-status"]);
   void invalidateQueries(["repo-branch"]);
-
-  addToast({
-    title: "Repository Opened",
-    description: `Now viewing ${path.split("/").pop() || path}`,
-    type: "success",
-  });
 }

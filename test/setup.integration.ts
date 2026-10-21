@@ -59,6 +59,35 @@ vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
   popupNativeMenu: vi.fn(),
 }));
 beforeEach(() => {
+  // React's terminal pane, which most tests drive; gpui-terminal.test.tsx
+  // turns GPUI's on.
+  window.__TREQ_REACT_TERMINAL__ = true;
+  // React's agent prompt, prompt history and stash dialogs, which most tests
+  // drive; gpui-modals.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_MODALS__ = true;
+  // React's palette and pickers, which most tests drive;
+  // gpui-overlays.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_OVERLAYS__ = true;
+  // Likewise React's remote dialogs; gpui-remote.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_REMOTE_DIALOGS__ = true;
+  // React's workspace dialogs, which most tests drive;
+  // gpui-workspace-dialogs.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_WORKSPACE_DIALOGS__ = true;
+  // React's file browser in the Code tab, which most tests drive;
+  // gpui-workspace.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_FILE_BROWSER__ = true;
+  // React's GitHub Issues and Pull Requests tabs, which most tests drive;
+  // gpui-github.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_GITHUB__ = true;
+  // React's remote workspace view, which most remote tests drive;
+  // gpui-remote-workspace.test.tsx turns GPUI's on.
+  window.__TREQ_REACT_REMOTE_WORKSPACE__ = true;
+  // React's remote flows (restoring the last remote repository), which
+  // the remote tests drive; Rust runs them in the app.
+  window.__TREQ_REACT_REMOTE__ = true;
+  // React's own Supabase account, which the tests sign in with; Rust owns
+  // it in the app (src/lib/rust-account.ts).
+  window.__TREQ_REACT_SUPABASE__ = true;
   window.__TREQ_GPUI_SHELL__ = true;
 });
 afterEach(() => closeTestPtys(tauriTest.invoke));

@@ -10,6 +10,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePrInfoViaGh, useGitRemoteInfo } from "../hooks/useMergeQueueStatus";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
+import { useGpuiPart } from "../lib/gpui-parts";
+import type { GpuiPrState } from "../lib/gpui-screen";
 import {
   Tooltip,
   TooltipContent,
@@ -54,8 +56,28 @@ export function ViewPrButton({
 }: ViewPrButtonProps) {
   const { data: remoteInfo } = useGitRemoteInfo(repoPath);
   const { data: prInfo, isLoading } = usePrInfoViaGh(repoPath, branchName);
+  const shown = remoteInfo && !isLoading && prInfo ? prInfo : null;
+  const viewInApp = () => {
+    if (!shown) return;
+    if (onViewInApp) {
+      onViewInApp(shown.number, shown.state);
+    } else {
+      openUrl(shown.url);
+    }
+  };
+  useGpuiPart(
+    "viewPr",
+    shown && {
+      number: shown.number,
+      state: (shown.state in PR_STATUS_STYLES
+        ? shown.state
+        : "OPEN") as GpuiPrState,
+      draft: shown.is_draft,
+    },
+    { view: viewInApp, web: () => shown && openUrl(shown.url) },
+  );
 
-  if (!remoteInfo || isLoading || !prInfo) {
+  if (!shown || !prInfo) {
     return null;
   }
 
@@ -72,13 +94,7 @@ export function ViewPrButton({
               variant="outline"
               size="sm"
               className={cn("gap-1 rounded-r-none", style.className)}
-              onClick={() => {
-                if (onViewInApp) {
-                  onViewInApp(prInfo.number, prInfo.state);
-                } else {
-                  openUrl(prInfo.url);
-                }
-              }}
+              onClick={viewInApp}
               aria-label={`View PR (#${prInfo.number}, ${statusLabel})`}
             >
               <Icon className="w-4 h-4" />

@@ -1,7 +1,9 @@
 //! Colors, fonts and icons for GPUI views, matching the React app's theme
 //! tokens in `src/index.css`.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, rc::Rc};
+
+use gpui_kit::component as kit;
 
 use tauri_plugin_gpui::gpui::{self, hsla, rgb, App, AssetSource, Hsla, SharedString};
 
@@ -17,31 +19,115 @@ macro_rules! icons {
 }
 
 icons! {
+  ICON_AGENT_CLAUDE => "agent-claude",
+  ICON_AGENT_CODEX => "agent-codex",
+  ICON_AGENT_COPILOT => "agent-copilot",
+  ICON_AGENT_CURSOR => "agent-cursor",
   ICON_ARCHIVE => "archive",
+  ICON_ARROW_DOWN => "arrow-down",
+  ICON_ARROW_LEFT => "arrow-left",
+  ICON_ARROW_RIGHT => "arrow-right",
+  ICON_ARROW_RIGHT_LEFT => "arrow-right-left",
+  ICON_BOOK_OPEN => "book-open",
   ICON_BOT => "bot",
+  ICON_BOX => "box",
   ICON_BRANCH => "git-branch",
+  ICON_CHECK => "check",
+  // At lucide's default stroke, as React's header draws it; the sidebar's
+  // is thinner.
+  ICON_BRANCH_BOLD => "git-branch-bold",
+  ICON_CHEVRON_DOWN => "chevron-down",
+  ICON_CHEVRON_LEFT => "chevron-left",
+  ICON_CHEVRONS_UP_DOWN => "chevrons-up-down",
+  ICON_CHEVRON_RIGHT => "chevron-right",
+  ICON_CIRCLE => "circle",
   ICON_CIRCLE_ALERT => "circle-alert",
   ICON_CIRCLE_CHECK => "circle-check",
-  ICON_CHEVRON_DOWN => "chevron-down",
-  ICON_CHEVRON_RIGHT => "chevron-right",
+  ICON_CIRCLE_DOT => "circle-dot",
+  ICON_CIRCLE_HELP => "circle-help",
+  ICON_CIRCLE_X => "circle-x",
+  ICON_CLOCK => "clock",
+  ICON_CODE => "code-xml",
+  ICON_COMMIT => "git-commit-horizontal",
+  ICON_COMPARE => "git-compare-arrows",
   ICON_COPY => "copy",
+  ICON_DATABASE => "database",
+  ICON_EXTERNAL_LINK => "external-link",
+  ICON_FILE => "file",
+  ICON_FILE_DIFF => "file-diff",
+  ICON_FILE_TEXT => "file-text",
+  ICON_FLASK => "flask-conical",
+  ICON_FILTER => "funnel",
+  ICON_FOLDER => "folder",
+  ICON_FOLDER_GIT => "folder-git-2",
   ICON_FOLDER_OPEN => "folder-open",
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
+  ICON_HISTORY => "history",
   ICON_HOUSE => "house",
   ICON_INFO => "info",
+  ICON_LAPTOP => "laptop",
   ICON_LAYERS => "layers-2",
   ICON_LINEAR => "list-todo",
   ICON_LINK => "link",
+  ICON_MERGE => "git-merge",
+  ICON_MORE => "ellipsis-vertical",
+  ICON_PAPERCLIP => "paperclip",
   ICON_PENCIL => "pencil",
+  ICON_PLAY => "play",
+  ICON_PLUG => "plug",
+  ICON_PLUS => "plus",
+  ICON_PR => "git-pull-request",
+  ICON_PR_CLOSED => "git-pull-request-closed",
+  ICON_PR_DRAFT => "git-pull-request-draft",
+  ICON_REFRESH => "refresh-cw",
+  ICON_ROTATE_CCW => "rotate-ccw",
   ICON_SEARCH => "search",
+  ICON_SERVER => "server",
   ICON_SETTINGS => "settings",
   ICON_SPINNER => "loader-circle",
   ICON_TERMINAL => "terminal",
+  ICON_TERMINAL_SQUARE => "terminal-square",
   ICON_TRASH => "trash-2",
   ICON_TRIANGLE_ALERT => "triangle-alert",
+  ICON_UNDO => "undo-2",
+  ICON_UPLOAD => "upload",
+  ICON_USER => "user",
   ICON_X => "x",
+  ICON_ZAP => "zap",
+  ICON_ZOOM_IN => "zoom-in",
+  ICON_ZOOM_OUT => "zoom-out",
+  ICON_MINUS => "minus",
+  ICON_EYE => "eye",
+  ICON_EYE_OFF => "eye-off",
+  ICON_CHEVRON_UP => "chevron-up",
+  ICON_SQUARE => "square",
+  ICON_MESSAGE => "message-square",
+  ICON_MESSAGE_PLUS => "message-square-plus",
+  ICON_SEND => "send",
+  ICON_WAND => "wand-sparkles",
+  ICON_QUOTE => "quote",
+  ICON_GLOBE => "globe",
+  ICON_TABLE => "table-2",
+  ICON_FILE_CODE => "file-code-2",
+  ICON_SQUARE_CHECK => "square-check-big",
+  ICON_MAXIMIZE => "maximize-2",
+  ICON_MINIMIZE => "minimize-2",
+  ICON_CLOUD => "cloud",
+  ICON_CREDIT_CARD => "credit-card",
+  ICON_CROWN => "crown",
+  ICON_LOG_OUT => "log-out",
+  ICON_WRENCH => "wrench",
+  ICON_APP_WINDOW => "app-window",
+  ICON_FILE_SEARCH => "file-search",
+  ICON_LIST_CHECKS => "list-checks",
+  ICON_SHIELD_CHECK => "shield-check",
+  ICON_ROTATE_CW => "rotate-cw",
+  ICON_LIST_FILTER => "list-filter",
+  ICON_SPARKLES => "sparkles",
+  ICON_SCROLL_TEXT => "scroll-text",
+  ICON_ROCKET => "rocket",
 }
 
 // Inter, as in the React app. The TTFs are shared with mobile-gpui.
@@ -54,6 +140,10 @@ const INTER_SEMIBOLD: &[u8] =
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
 const JETBRAINS_MONO_REGULAR: &[u8] =
   include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+/// For `font-mono font-semibold` text. The web app ships no bolder mono
+/// face, so the webview synthesizes one from Regular; JetBrains' Bold (same
+/// subset), registered as weight 600, looks closest to that.
+const JETBRAINS_MONO_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf");
 
 pub const MONO_FONT: &str = "JetBrains Mono";
 
@@ -81,16 +171,63 @@ impl AssetSource for Assets {
   }
 }
 
-/// App-level GPUI setup: fonts and the default text style.
+/// gpui-kit's theme in the React app's colors, light and dark (generated
+/// from its default theme with the tokens of `src/index.css`).
+const KIT_THEME: &str = include_str!("../../assets/gpui-theme.json");
+
+/// App-level GPUI setup: fonts, the default text style, and gpui-kit with
+/// the app's theme.
 pub fn init(cx: &mut App) {
   let fonts = vec![
     Cow::Borrowed(INTER_REGULAR),
     Cow::Borrowed(INTER_MEDIUM),
     Cow::Borrowed(INTER_SEMIBOLD),
     Cow::Borrowed(JETBRAINS_MONO_REGULAR),
+    Cow::Borrowed(JETBRAINS_MONO_SEMIBOLD),
   ];
   if let Err(err) = cx.text_system().add_fonts(fonts) {
     log::error!("failed to load bundled fonts: {err:#}");
+  }
+  gpui_kit::init(cx);
+  init_kit_theme(cx);
+}
+
+fn init_kit_theme(cx: &mut App) {
+  let set: kit::ThemeSet = match serde_json::from_str(KIT_THEME) {
+    Ok(set) => set,
+    Err(err) => {
+      log::error!("invalid gpui-kit theme: {err}");
+      return;
+    }
+  };
+  kit::Theme::change(kit::ThemeMode::Light, None, cx);
+  let theme = kit::Theme::global_mut(cx);
+  for config in set.themes {
+    if config.mode.is_dark() {
+      theme.dark_theme = Rc::new(config);
+    } else {
+      theme.light_theme = Rc::new(config);
+    }
+  }
+  kit::Theme::change(kit::ThemeMode::Light, None, cx);
+  let theme = kit::Theme::global_mut(cx);
+  theme.font_family = SANS_FONT.into();
+  theme.font_size = gpui::px(13.);
+  theme.mono_font_family = MONO_FONT.into();
+  theme.mono_font_size = gpui::px(13.);
+  theme.radius = gpui::px(8.);
+  theme.radius_lg = gpui::px(12.);
+}
+
+/// Puts gpui-kit's widgets in React's light or dark theme.
+pub fn set_kit_dark(dark: bool, cx: &mut App) {
+  let mode = if dark {
+    kit::ThemeMode::Dark
+  } else {
+    kit::ThemeMode::Light
+  };
+  if kit::Theme::global(cx).mode != mode {
+    kit::Theme::change(mode, None, cx);
   }
 }
 
@@ -125,6 +262,21 @@ pub struct Palette {
   /// Toast icons: `text-green-500`, and `text-yellow-600 dark:text-yellow-400`.
   pub toast_success: Hsla,
   pub toast_warning: Hsla,
+  pub card: Hsla,
+  pub card_foreground: Hsla,
+  pub primary_foreground: Hsla,
+  pub secondary: Hsla,
+  pub secondary_foreground: Hsla,
+  pub destructive_foreground: Hsla,
+  /// `--input`, the border of outline buttons and text fields.
+  pub input: Hsla,
+  /// `--ring`, the focus outline.
+  #[allow(dead_code)]
+  pub ring: Hsla,
+  /// Tailwind green-500, a passed check.
+  pub success: Hsla,
+  /// Picks the Prism theme for highlighted code: vsc-dark-plus or vs.
+  pub dark: bool,
 }
 
 /// A CSS `hsl(h s% l%)` token.
@@ -155,6 +307,16 @@ pub fn palette(dark: bool) -> Palette {
       stack_guide: rgb(0x93c5fd).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xfacc15).into(),
+      card: token(0., 0., 20.),
+      card_foreground: token(0., 0., 95.),
+      primary_foreground: token(0., 0., 100.),
+      secondary: token(0., 0., 25.),
+      secondary_foreground: token(0., 0., 95.),
+      destructive_foreground: token(0., 0., 100.),
+      input: token(0., 0., 25.),
+      ring: token(211., 100., 55.),
+      success: rgb(0x22c55e).into(),
+      dark: true,
     }
   } else {
     Palette {
@@ -178,6 +340,16 @@ pub fn palette(dark: bool) -> Palette {
       stack_guide: rgb(0x1e3a8a).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xca8a04).into(),
+      card: token(0., 0., 100.),
+      card_foreground: token(0., 0., 13.),
+      primary_foreground: token(0., 0., 100.),
+      secondary: token(220., 13., 95.),
+      secondary_foreground: token(0., 0., 13.),
+      destructive_foreground: token(0., 0., 100.),
+      input: token(220., 13., 91.),
+      ring: token(211., 100., 50.),
+      success: rgb(0x22c55e).into(),
+      dark: false,
     }
   }
 }
@@ -199,6 +371,14 @@ mod tests {
   }
 
   #[test]
+  fn kit_theme_has_a_light_and_a_dark_theme() {
+    let set: kit::ThemeSet = serde_json::from_str(KIT_THEME).expect("parse");
+    let modes: Vec<bool> = set.themes.iter().map(|t| t.mode.is_dark()).collect();
+    assert_eq!(modes.len(), 2);
+    assert!(modes.contains(&true) && modes.contains(&false));
+  }
+
+  #[test]
   fn bundles_the_mono_face_by_its_family_name() {
     // TrueType, with MONO_FONT in its (UTF-16BE) name table.
     assert_eq!(&JETBRAINS_MONO_REGULAR[..4], &[0, 1, 0, 0]);
@@ -210,4 +390,61 @@ mod tests {
       .windows(family.len())
       .any(|w| w == family.as_slice()));
   }
+}
+
+/// Tailwind palette colors views use outside the theme tokens.
+pub mod tw {
+  use super::{rgb, Hsla};
+
+  pub fn color(hex: u32) -> Hsla {
+    rgb(hex).into()
+  }
+
+  pub const BLUE_500: u32 = 0x3b82f6;
+  pub const BLUE_600: u32 = 0x2563eb;
+  pub const EMERALD_500: u32 = 0x10b981;
+  pub const AMBER_200: u32 = 0xfde68a;
+  pub const AMBER_300: u32 = 0xfcd34d;
+  pub const AMBER_500: u32 = 0xf59e0b;
+  pub const AMBER_700: u32 = 0xb45309;
+  pub const AMBER_800: u32 = 0x92400e;
+  pub const BLUE_300: u32 = 0x93c5fd;
+  pub const BLUE_400: u32 = 0x60a5fa;
+  pub const BLUE_700: u32 = 0x1d4ed8;
+  pub const EMERALD_300: u32 = 0x6ee7b7;
+  pub const EMERALD_700: u32 = 0x047857;
+  pub const RED_300: u32 = 0xfca5a5;
+  pub const RED_400: u32 = 0xf87171;
+  pub const RED_700: u32 = 0xb91c1c;
+  pub const SKY_300: u32 = 0x7dd3fc;
+  pub const SKY_400: u32 = 0x38bdf8;
+  pub const SKY_500: u32 = 0x0ea5e9;
+  pub const SKY_600: u32 = 0x0284c7;
+  pub const SKY_700: u32 = 0x0369a1;
+  pub const VIOLET_400: u32 = 0xa78bfa;
+  pub const VIOLET_500: u32 = 0x8b5cf6;
+  pub const VIOLET_600: u32 = 0x7c3aed;
+  pub const ZINC_300: u32 = 0xd4d4d8;
+  pub const ZINC_500: u32 = 0x71717a;
+  pub const ZINC_700: u32 = 0x3f3f46;
+  pub const GREEN_500: u32 = 0x22c55e;
+  pub const GREEN_600: u32 = 0x16a34a;
+  pub const RED_500: u32 = 0xef4444;
+  pub const RED_600: u32 = 0xdc2626;
+  pub const YELLOW_50: u32 = 0xfefce8;
+  pub const YELLOW_100: u32 = 0xfef9c3;
+  pub const YELLOW_500: u32 = 0xeab308;
+  pub const YELLOW_300: u32 = 0xfde047;
+  pub const AMBER_400: u32 = 0xfbbf24;
+  pub const AMBER_600: u32 = 0xd97706;
+  pub const RED_50: u32 = 0xfef2f2;
+  pub const RED_200: u32 = 0xfecaca;
+  pub const RED_900: u32 = 0x7f1d1d;
+  pub const RED_950: u32 = 0x450a0a;
+  pub const YELLOW_950: u32 = 0x422006;
+  pub const GREEN_400: u32 = 0x4ade80;
+  pub const GREEN_700: u32 = 0x15803d;
+  pub const YELLOW_400: u32 = 0xfacc15;
+  pub const YELLOW_700: u32 = 0xa16207;
+  pub const YELLOW_600: u32 = 0xca8a04;
 }

@@ -1,0 +1,1867 @@
+//! The Changes tab's review (`useLineSelection`, `useComments`, `useReview`,
+//! `ReviewActionBar`): selecting diff lines, comments on lines, files and
+//! conflicts, the pending review the backend keeps, and sending it to an
+//! agent through React.
+
+use crate::gpui_shell::ui::zpx;
+use std::time::Duration;
+
+use super::*;
+use crate::gpui_shell::screen::{
+  changes_review::{
+    comments_under, count_label, is_outdated, line_has_comment, line_location, outdated_label,
+    outdated_markdown, pending_for_line, pending_for_selection, review_markdown, stale_names,
+    ConflictNote, LineComment, Pending, Stored, FILE_HUNK,
+  },
+  commits_data::{selection, LineRef},
+};
+use gpui::{MouseDownEvent, MouseMoveEvent, Task};
+
+/// How long edits wait before the review is written (`useDebounce(…, 500)`).
+const SAVE_DELAY: Duration = Duration::from_millis(500);
+/// How long "Copied" shows on the review popover's Copy button.
+const COPIED_FOR: Duration = Duration::from_millis(2000);
+
+/// The diff lines picked by dragging in the gutter (`diffLineSelection`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::gpui_shell::screen) struct LineSelection {
+  pub path: String,
+  pub anchor: LineRef,
+  pub lines: Vec<LineRef>,
+  pub dragging: bool,
+}
+
+/// A text box and the subscription that keeps its text.
+pub(in crate::gpui_shell::screen) struct Input {
+  pub state: Entity<TextareaState>,
+  _changes: Subscription,
+}
+
+/// Which box an input belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+  Draft,
+  Edit,
+  Note,
+  Summary,
+}
+
+#[derive(Default)]
+pub(in crate::gpui_shell::screen) struct Review {
+  pub selection: Option<LineSelection>,
+  pub comments: Vec<LineComment>,
+  /// Where the comment box is open.
+  pub draft: Option<Pending>,
+  pub draft_text: String,
+  pub(super) draft_input: Option<Input>,
+  /// The comment, or the conflict's note, being edited.
+  pub editing: Option<String>,
+  pub edit_text: String,
+  pub(super) edit_input: Option<Input>,
+  pub notes: Vec<ConflictNote>,
+  /// The conflict whose note box is open.
+  pub note_open: Option<String>,
+  pub note_text: String,
+  note_input: Option<Input>,
+  pub summary: String,
+  summary_input: Option<Input>,
+  pub finish_open: bool,
+  pub use_idle: bool,
+  pub sending: bool,
+  pub copied: bool,
+  pub discard_dialog: bool,
+  /// `hasUserAddedComments`.
+  pub user_added: bool,
+  /// Files that changed since the review started, and the read parked
+  /// until Reload.
+  pub stale: Vec<String>,
+  pub parked: Option<Snapshot>,
+  /// Drop comments whose lines are gone once the reloaded diffs are read.
+  pub prune: bool,
+  /// The workspace whose kept review was read.
+  hydrated: Option<(String, i64)>,
+  save: Option<Task<()>>,
+  copied_reset: Option<Task<()>>,
+}
+
+impl Review {
+  fn stored(&self) -> Stored {
+    Stored {
+      comments: self.comments.clone(),
+      summary: self.summary.clone(),
+      notes: self.notes.clone(),
+    }
+  }
+}
+
+fn now() -> String {
+  chrono::Utc::now().to_rfc3339()
+}
+
+fn new_id() -> String {
+  uuid::Uuid::new_v4().to_string()
+}
+
+impl ChangesView {
+  /// Reads the kept review once per workspace.
+  pub(super) fn hydrate_review(&mut self, cx: &mut Context<Self>) {
+    let Some(id) = self.parent.workspace_id() else {
+      return;
+    };
+    let key = (self.parent.repo_path.clone(), id);
+    if self.review.hydrated.as_ref() == Some(&key) {
+      return;
+    }
+    self.review.hydrated = Some(key);
+    self.run(
+      move |host, parent| host.load_review(&parent.repo_path, id),
+      |view, result, _| match result {
+        Ok(Some(review)) => {
+          let stored = Stored::parse(&review);
+          if !stored.is_empty() {
+            view.review.comments = stored.comments;
+            view.review.summary = stored.summary;
+            view.review.notes = stored.notes;
+            view.review.user_added = true;
+          }
+        }
+        Ok(None) => {}
+        Err(err) => log::warn!("Failed to load pending review: {err}"),
+      },
+      cx,
+    );
+  }
+
+  /// `isInReviewMode`: a refreshed file list waits behind the stale banner.
+  pub(super) fn in_review(&self) -> bool {
+    self.review.user_added
+      || self.review.draft.is_some()
+      || self.review.finish_open
+      || !self.review.summary.trim().is_empty()
+  }
+
+  /// Writes the review after edits settle, or forgets it once empty.
+  fn save_review(&mut self, cx: &mut Context<Self>) {
+    if self.read_only() {
+      return;
+    }
+    let Some(id) = self.parent.workspace_id() else {
+      return;
+    };
+    let stored = self.review.stored();
+    if stored.is_empty() {
+      self.review.save = None;
+      self.run(
+        move |host, parent| host.clear_review(&parent.repo_path, id),
+        |_, result, _| {
+          if let Err(err) = result {
+            log::warn!("Failed to clear pending review: {err}");
+          }
+        },
+        cx,
+      );
+      return;
+    }
+    self.review.save = Some(cx.spawn(async move |this, cx| {
+      cx.background_executor().timer(SAVE_DELAY).await;
+      let _ = this.update(cx, |view, cx| {
+        let (comments, summary, notes) = stored.to_save();
+        view.run(
+          move |host, parent| {
+            host.save_review(
+              &parent.repo_path,
+              id,
+              &comments,
+              summary.as_deref(),
+              notes.as_deref(),
+            )
+          },
+          |_, result, _| {
+            if let Err(err) = result {
+              log::warn!("Failed to save pending review: {err}");
+            }
+          },
+          cx,
+        );
+      });
+    }));
+  }
+
+  // Line selection.
+
+  pub(super) fn press_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    self.review.selection = Some(LineSelection {
+      path: path.into(),
+      anchor: at,
+      lines: vec![at],
+      dragging: true,
+    });
+    cx.notify();
+  }
+
+  pub(super) fn drag_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    let Some(s) = self.review.selection.as_ref() else {
+      return;
+    };
+    if !s.dragging || s.path != path {
+      return;
+    }
+    let anchor = s.anchor;
+    let Some(hunks) = self.file_hunks(path).map(|d| d.hunks) else {
+      return;
+    };
+    let lines = selection(&hunks, anchor, at);
+    if let Some(s) = self.review.selection.as_mut() {
+      if s.lines != lines {
+        s.lines = lines;
+        cx.notify();
+      }
+    }
+  }
+
+  pub(super) fn end_drag(&mut self, cx: &mut Context<Self>) {
+    if let Some(s) = self.review.selection.as_mut().filter(|s| s.dragging) {
+      s.dragging = false;
+      cx.notify();
+    }
+  }
+
+  pub(super) fn clear_selection(&mut self, cx: &mut Context<Self>) {
+    if self.review.selection.take().is_some() {
+      cx.notify();
+    }
+  }
+
+  /// The selection's comment target, `None` when it mixes sides.
+  fn selection_target(&self) -> Option<Pending> {
+    let s = self
+      .review
+      .selection
+      .as_ref()
+      .filter(|s| !s.lines.is_empty())?;
+    let hunks = self.file_hunks(&s.path)?.hunks;
+    pending_for_selection(&s.path, &hunks, &s.lines)
+  }
+
+  /// The + button: the selection when there is one, else this line.
+  pub(super) fn add_line_comment(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    let has_selection = self
+      .review
+      .selection
+      .as_ref()
+      .is_some_and(|s| !s.lines.is_empty());
+    let draft = if has_selection {
+      self.selection_target()
+    } else {
+      self
+        .file_hunks(path)
+        .and_then(|d| pending_for_line(path, &d.hunks, at))
+    };
+    if let Some(draft) = draft {
+      self.open_draft(draft, cx);
+    }
+  }
+
+  pub(super) fn open_draft(&mut self, draft: Pending, cx: &mut Context<Self>) {
+    self.review.draft = Some(draft);
+    self.review.draft_text.clear();
+    self.review.draft_input = None;
+    cx.notify();
+  }
+
+  /// The file header's comment button.
+  pub(super) fn add_file_comment(&mut self, path: &str, cx: &mut Context<Self>) {
+    self.collapsed_files.remove(path);
+    self.open_draft(Pending::file(path), cx);
+  }
+
+  fn submit_draft(&mut self, cx: &mut Context<Self>) {
+    let text = self.review.draft_text.trim().to_string();
+    if text.is_empty() {
+      return;
+    }
+    if self.read_only() {
+      if let Some(draft) = self.review.draft.clone() {
+        self.submit_pr_draft(draft, text, cx);
+      }
+      return;
+    }
+    let Some(draft) = self.review.draft.take() else {
+      return;
+    };
+    self
+      .review
+      .comments
+      .push(draft.comment(&text, new_id(), now()));
+    self.review.user_added = true;
+    self.review.draft_input = None;
+    self.review.draft_text.clear();
+    self.review.selection = None;
+    self.save_review(cx);
+    cx.notify();
+  }
+
+  fn cancel_draft(&mut self, cx: &mut Context<Self>) {
+    self.review.draft = None;
+    self.review.draft_input = None;
+    self.review.draft_text.clear();
+    cx.notify();
+  }
+
+  fn delete_comment(&mut self, id: &str, cx: &mut Context<Self>) {
+    if self.read_only() {
+      if self.review.editing.as_deref() == Some(id) {
+        self.cancel_edit(cx);
+      }
+      self.delete_pr_draft(id.to_string(), cx);
+      return;
+    }
+    self.review.comments.retain(|c| c.id != id);
+    if self.review.editing.as_deref() == Some(id) {
+      self.cancel_edit(cx);
+    }
+    self.save_review(cx);
+    cx.notify();
+  }
+
+  fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
+    self.review.editing = Some(id.into());
+    self.review.edit_text = text.into();
+    self.review.edit_input = None;
+    cx.notify();
+  }
+
+  fn save_edit(&mut self, cx: &mut Context<Self>) {
+    let text = self.review.edit_text.trim().to_string();
+    if text.is_empty() {
+      return;
+    }
+    if self.read_only() {
+      if let Some(id) = self.review.editing.clone() {
+        self.save_pr_edit(id, text, cx);
+      }
+      return;
+    }
+    let Some(id) = self.review.editing.take() else {
+      return;
+    };
+    if let Some(c) = self.review.comments.iter_mut().find(|c| c.id == id) {
+      c.text = text;
+    } else if let Some(n) = self.review.notes.iter_mut().find(|n| n.conflict_id == id) {
+      n.text = text;
+    }
+    self.review.edit_input = None;
+    self.save_review(cx);
+    cx.notify();
+  }
+
+  fn cancel_edit(&mut self, cx: &mut Context<Self>) {
+    self.review.editing = None;
+    self.review.edit_input = None;
+    cx.notify();
+  }
+
+  // Conflict notes.
+
+  /// The conflict card's "Add comment": one note box open at a time.
+  pub(super) fn toggle_note(&mut self, conflict_id: &str, cx: &mut Context<Self>) {
+    if self.review.note_open.as_deref() == Some(conflict_id) {
+      self.review.note_open = None;
+    } else {
+      self.review.note_open = Some(conflict_id.into());
+      self.review.note_text = self
+        .review
+        .notes
+        .iter()
+        .find(|n| n.conflict_id == conflict_id)
+        .map(|n| n.text.clone())
+        .unwrap_or_default();
+    }
+    self.review.note_input = None;
+    cx.notify();
+  }
+
+  fn save_note(&mut self, conflict: &Conflict, cx: &mut Context<Self>) {
+    let text = self.review.note_text.trim().to_string();
+    if text.is_empty() {
+      return;
+    }
+    let path = conflict
+      .id
+      .rsplit_once("-conflict-")
+      .map_or(conflict.id.as_str(), |(p, _)| p)
+      .to_string();
+    let note = ConflictNote {
+      id: new_id(),
+      conflict_id: conflict.id.clone(),
+      file_path: path,
+      conflict_number: conflict.number,
+      text,
+      created_at: now(),
+    };
+    match self
+      .review
+      .notes
+      .iter_mut()
+      .find(|n| n.conflict_id == conflict.id)
+    {
+      Some(existing) => *existing = note,
+      None => self.review.notes.push(note),
+    }
+    self.review.note_open = None;
+    self.review.note_input = None;
+    self.save_review(cx);
+    cx.notify();
+  }
+
+  /// Cancel clears the note too (`onClear`).
+  fn clear_note(&mut self, conflict_id: &str, cx: &mut Context<Self>) {
+    self.review.notes.retain(|n| n.conflict_id != conflict_id);
+    if self.review.note_open.as_deref() == Some(conflict_id) {
+      self.review.note_open = None;
+      self.review.note_input = None;
+    }
+    if self.review.editing.as_deref() == Some(conflict_id) {
+      self.review.editing = None;
+      self.review.edit_input = None;
+    }
+    self.save_review(cx);
+    cx.notify();
+  }
+
+  // The review.
+
+  /// `hasConflicts || comments.length>0`.
+  pub(super) fn show_review_bar(&self) -> bool {
+    !self.read_only() && !self.conflicted().is_empty() || !self.review.comments.is_empty()
+  }
+
+  fn all_conflicts(&self) -> Vec<Conflict> {
+    self
+      .conflicted()
+      .iter()
+      .filter_map(|path| self.file_hunks(path).map(|d| conflicts(path, &d.hunks)))
+      .flatten()
+      .collect()
+  }
+
+  fn markdown(&self) -> String {
+    review_markdown(
+      &self.review.comments,
+      &self.review.summary,
+      &self.review.notes,
+      &self.all_conflicts(),
+      &self.conflicted(),
+    )
+  }
+
+  fn copy_review(&mut self, cx: &mut Context<Self>) {
+    cx.write_to_clipboard(ClipboardItem::new_string(self.markdown()));
+    self.review.copied = true;
+    self.review.copied_reset = Some(cx.spawn(async move |this, cx| {
+      cx.background_executor().timer(COPIED_FOR).await;
+      let _ = this.update(cx, |view, cx| {
+        view.review.copied = false;
+        cx.notify();
+      });
+    }));
+    cx.notify();
+  }
+
+  /// Plan or Edit: React starts the agent with the review.
+  fn send_review(&mut self, plan: bool, cx: &mut Context<Self>) {
+    if self.review.sending {
+      return;
+    }
+    let markdown = self.markdown();
+    self.field(
+      "changes.review",
+      json!({
+        "markdown": markdown,
+        "mode": if plan { "plan" } else { "acceptEdits" },
+        "useIdleAgent": self.review.use_idle,
+      }),
+      cx,
+    );
+    if self.review.parked.is_some() {
+      self.reload_stale(cx);
+    }
+    self.reset_review(cx);
+  }
+
+  /// Clears everything and the kept review.
+  fn reset_review(&mut self, cx: &mut Context<Self>) {
+    let hydrated = self.review.hydrated.take();
+    let use_idle = self.review.use_idle;
+    self.review = Review {
+      hydrated,
+      use_idle,
+      ..Review::default()
+    };
+    self.save_review(cx);
+    cx.notify();
+  }
+
+  fn discard_review(&mut self, cx: &mut Context<Self>) {
+    self.reset_review(cx);
+    self.toast(
+      ToastTone::Success,
+      "Review canceled",
+      "All comments have been discarded",
+    );
+  }
+
+  /// A refreshed list that adds, removes or changes a file waits while a
+  /// review is open; `true` when `snapshot` was parked.
+  pub(super) fn park(&mut self, snapshot: &Snapshot) -> bool {
+    let Some(current) = self.snapshot.as_ref().filter(|_| self.in_review()) else {
+      self.review.stale.clear();
+      self.review.parked = None;
+      return false;
+    };
+    let mut stale: Vec<String> = Vec::new();
+    for file in &snapshot.files {
+      match current.files.iter().find(|f| f.path == file.path) {
+        Some(old) if old.status == file.status => {}
+        _ => stale.push(file.path.clone()),
+      }
+    }
+    for file in &current.files {
+      if !snapshot.files.iter().any(|f| f.path == file.path) {
+        stale.push(file.path.clone());
+      }
+    }
+    if stale.is_empty() {
+      return false;
+    }
+    for path in stale {
+      if !self.review.stale.contains(&path) {
+        self.review.stale.push(path);
+      }
+    }
+    self.review.parked = Some(snapshot.clone());
+    true
+  }
+
+  /// The stale banner's Reload.
+  fn reload_stale(&mut self, cx: &mut Context<Self>) {
+    let Some(snapshot) = self.review.parked.take() else {
+      return;
+    };
+    self.review.stale.clear();
+    self.review.prune = true;
+    self.apply(snapshot, cx);
+  }
+
+  /// After a Reload's diffs are read: comments whose file or hunk is gone.
+  pub(super) fn prune_comments(&mut self, cx: &mut Context<Self>) {
+    if !std::mem::take(&mut self.review.prune) {
+      return;
+    }
+    let listed: HashSet<String> = self.files().iter().map(|f| f.path.clone()).collect();
+    let before = self.review.comments.len();
+    let hunks = self.hunks.clone();
+    self.review.comments.retain(|c| {
+      listed.contains(&c.file_path)
+        && (c.is_file()
+          || hunks
+            .get(&c.file_path)
+            .is_some_and(|d| d.hunks.iter().any(|h| h.id == c.hunk_id)))
+    });
+    let dropped = before - self.review.comments.len();
+    if dropped > 0 {
+      self.toast(
+        ToastTone::Warning,
+        "Comments discarded",
+        format!(
+          "{} discarded (lines changed)",
+          count_label(dropped, "outdated comment")
+        ),
+      );
+      self.save_review(cx);
+    }
+  }
+
+  fn outdated(&self, path: &str) -> Vec<&LineComment> {
+    let data = self.file_hunks(path).filter(|d| !d.loading);
+    self
+      .review
+      .comments
+      .iter()
+      .filter(|c| c.file_path == path)
+      .filter(|c| is_outdated(c, data.as_ref().map(|d| d.hunks.as_slice())))
+      .collect()
+  }
+
+  fn copy_outdated(&self, cx: &mut App) {
+    let all: Vec<&LineComment> = self
+      .review
+      .comments
+      .iter()
+      .filter(|c| {
+        is_outdated(
+          c,
+          self
+            .file_hunks(&c.file_path)
+            .filter(|d| !d.loading)
+            .as_ref()
+            .map(|d| d.hunks.as_slice()),
+        )
+      })
+      .collect();
+    cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
+    self.toast(
+      ToastTone::Success,
+      "Copied",
+      format!(
+        "{} copied to clipboard",
+        count_label(all.len(), "outdated comment")
+      ),
+    );
+  }
+
+  /// Right-click with lines selected (`ContextMenu`).
+  pub(super) fn line_menu(&self, at: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+    let Some(target) = self.selection_target() else {
+      return;
+    };
+    let entity = cx.entity().downgrade();
+    let add = {
+      let (entity, target) = (entity.clone(), target.clone());
+      move |cx: &mut App| {
+        let _ = entity.update(cx, |view, cx| view.open_draft(target.clone(), cx));
+      }
+    };
+    let location = line_location(&target);
+    let lines = target.line_content.join("\n");
+    let copy = |text: String, description: &'static str| {
+      let entity = entity.clone();
+      move |cx: &mut App| {
+        let _ = entity.update(cx, |view, cx| {
+          view.copy(text.clone(), description.into(), cx)
+        });
+      }
+    };
+    let items = vec![
+      NativeMenuItem::item("Add comment", add).icon(MenuIcon::MessageSquare),
+      NativeMenuItem::item(
+        "Copy line location",
+        copy(location, "Line location copied to clipboard"),
+      )
+      .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy lines", copy(lines, "Lines copied to clipboard"))
+        .icon(MenuIcon::Copy),
+    ];
+    self.popup(
+      PopupRequest::ShowMenu {
+        entries: crate::gpui_shell::popup::native_entries(items),
+        at,
+        dark: self.dark,
+      },
+      cx,
+    );
+  }
+
+  // Inputs.
+
+  fn input_for(
+    &mut self,
+    field: Field,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<Entity<TextareaState>> {
+    let (slot, text, placeholder, rows) = match field {
+      Field::Draft if self.review.draft.is_some() => (
+        &self.review.draft_input,
+        self.review.draft_text.clone(),
+        "Add a comment...",
+        3,
+      ),
+      Field::Edit if self.review.editing.is_some() => (
+        &self.review.edit_input,
+        self.review.edit_text.clone(),
+        "",
+        3,
+      ),
+      Field::Note if self.review.note_open.is_some() => (
+        &self.review.note_input,
+        self.review.note_text.clone(),
+        "Add a comment...",
+        3,
+      ),
+      Field::Summary if self.review.finish_open => (
+        &self.review.summary_input,
+        self.review.summary.clone(),
+        "Add a summary comment (optional)...",
+        3,
+      ),
+      _ => return None,
+    };
+    if let Some(input) = slot {
+      return Some(input.state.clone());
+    }
+    let state = cx.new(|cx| {
+      TextareaState::new(window, cx)
+        .rows(rows)
+        .placeholder(placeholder)
+        .default_value(text)
+    });
+    let changes = cx.subscribe(&state, move |view, state, event: &InputEvent, cx| {
+      if let InputEvent::Change = event {
+        let value = state.read(cx).value().to_string();
+        match field {
+          Field::Draft => view.review.draft_text = value,
+          Field::Edit => view.review.edit_text = value,
+          Field::Note => view.review.note_text = value,
+          Field::Summary => {
+            view.review.summary = value;
+            view.save_review(cx);
+          }
+        }
+        cx.notify();
+      }
+    });
+    if field != Field::Summary {
+      state.update(cx, |s, cx| s.focus(window, cx));
+    }
+    let input = Input {
+      state: state.clone(),
+      _changes: changes,
+    };
+    match field {
+      Field::Draft => self.review.draft_input = Some(input),
+      Field::Edit => self.review.edit_input = Some(input),
+      Field::Note => self.review.note_input = Some(input),
+      Field::Summary => self.review.summary_input = Some(input),
+    }
+    Some(state)
+  }
+
+  /// Builds the boxes that are open, so render can draw them.
+  pub(super) fn ensure_review_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    for field in [Field::Draft, Field::Edit, Field::Note, Field::Summary] {
+      self.input_for(field, window, cx);
+    }
+    if !self.review.finish_open {
+      self.review.summary_input = None;
+    }
+  }
+
+  // Drawing.
+
+  /// `HunkDiffLine`'s row.
+  #[allow(clippy::too_many_arguments)]
+  pub(super) fn diff_line(
+    &self,
+    path: &str,
+    hunks: &[JjDiffHunk],
+    h: usize,
+    l: usize,
+    language: Option<&'static str>,
+    conflicted: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Stateful<Div> {
+    let hunk = &hunks[h];
+    let line = &hunk.lines[l];
+    let (old, new) = line_numbers(hunk).get(l).copied().unwrap_or((None, None));
+    let selected = self
+      .review
+      .selection
+      .as_ref()
+      .is_some_and(|s| s.path == path && s.lines.contains(&(h, l)));
+    let kind = line_kind(line);
+    let bg = if selected {
+      Some(tw::color(tw::BLUE_500).opacity(if self.dark { 0.25 } else { 0.1 }))
+    } else {
+      match kind {
+        LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
+        LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
+        LineKind::Context => None,
+      }
+    };
+    let marker = match kind {
+      LineKind::Added => "+",
+      LineKind::Removed => "-",
+      LineKind::Context => " ",
+    };
+    let multi = self
+      .review
+      .selection
+      .as_ref()
+      .is_some_and(|s| s.lines.len() > 1);
+    let has_comment = line_has_comment(&self.review.comments, path, hunk, l, hunks);
+    let border = p.border.opacity(0.4);
+    let gutter_hover = p.muted.opacity(0.5);
+    let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
+    let at = (h, l);
+    let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
+    let primary = p.primary;
+    div()
+      .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
+      .group("diff-line")
+      .flex()
+      .when_some(bg, |this, bg| this.bg(bg))
+      .when(!conflicted, |this| {
+        this.on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
+          view.drag_line(&drag, at, cx);
+        }))
+      })
+      .child(
+        div()
+          .id(SharedString::from(format!("gutter-{path}-{h}-{l}")))
+          .debug_selector({
+            let id = format!("gutter-{path}-{h}-{l}");
+            move || id
+          })
+          .w_24()
+          .flex_none()
+          .flex()
+          .items_center()
+          .gap_1()
+          .border_r_1()
+          .border_color(border)
+          .text_color(p.muted_foreground)
+          .cursor_pointer()
+          .hover(move |s| s.bg(gutter_hover))
+          .when(!conflicted, |this| {
+            this.on_mouse_down(
+              MouseButton::Left,
+              cx.listener(move |view, _: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                view.press_line(&press, at, cx);
+              }),
+            )
+          })
+          .when(has_comment, |this| {
+            this.child(
+              div()
+                .ml_1()
+                .child(ui::icon(theme::ICON_MESSAGE, 12., primary)),
+            )
+          })
+          .child(
+            div()
+              .w_10()
+              .mr_1()
+              .flex()
+              .justify_end()
+              .child(old.map(|n| n.to_string()).unwrap_or_default()),
+          )
+          .child(
+            div()
+              .w_10()
+              .flex()
+              .justify_end()
+              .child(new.map(|n| n.to_string()).unwrap_or_default()),
+          ),
+      )
+      .child(
+        div()
+          .w_6()
+          .flex_none()
+          .flex()
+          .items_center()
+          .justify_center()
+          .when(!conflicted, |this| {
+            this.child(
+              self.tip(
+                format!("add-comment-tip-{path}-{h}-{l}"),
+                if multi {
+                  "Add comment to selected lines"
+                } else {
+                  "Add comment"
+                },
+                div()
+                  .id(SharedString::from(format!("add-comment-{path}-{h}-{l}")))
+                  .debug_selector({
+                    let id = format!("add-comment-{path}-{h}-{l}");
+                    move || id
+                  })
+                  .p(zpx(2.))
+                  .rounded(zpx(4.))
+                  .bg(p.primary)
+                  .cursor_pointer()
+                  .opacity(0.)
+                  .group_hover("diff-line", |s| s.opacity(1.))
+                  .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+                  .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    cx.stop_propagation();
+                    view.add_line_comment(&add, at, cx);
+                  })),
+                cx,
+              ),
+            )
+          }),
+      )
+      .child(
+        div()
+          .w_5()
+          .flex_none()
+          .flex()
+          .justify_center()
+          .child(marker),
+      )
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .px_2()
+          .py(zpx(2.))
+          .child(self.marked_text(
+            super::search::MatchKey::Line(path.to_string(), h, l),
+            text,
+            language,
+          )),
+      )
+  }
+
+  /// What follows a diff line: its comments and the comment box.
+  pub(super) fn line_extras(
+    &self,
+    path: &str,
+    hunks: &[JjDiffHunk],
+    h: usize,
+    l: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Vec<gpui::AnyElement> {
+    let mut out = Vec::new();
+    let under = comments_under(&self.review.comments, path, &hunks[h], l, hunks);
+    if !under.is_empty() {
+      let mut list = div()
+        .bg(p.muted.opacity(0.6))
+        .border_y_1()
+        .border_color(p.border.opacity(0.4))
+        .px_4()
+        .py_2()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .font_family(theme::SANS_FONT);
+      for c in under {
+        list = list.child(self.comment_card(&c.id, &c.text, "inline-comment-card", p, cx));
+      }
+      out.push(list.into_any_element());
+    }
+    out.extend(self.line_threads(path, hunks, h, l, p, cx));
+    let here = self
+      .review
+      .draft
+      .as_ref()
+      .is_some_and(|d| d.file_path == path && d.at == Some((h, l)) && d.hunk_id == hunks[h].id);
+    if here {
+      out.push(self.comment_input(p, cx).into_any_element());
+    }
+    out
+  }
+
+  /// A comment, or its edit box (`inline-comment-card`, `file-comment-card`).
+  fn comment_card(
+    &self,
+    id: &str,
+    text: &str,
+    selector: &'static str,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
+    let box_ = || {
+      div()
+        .bg(p.background)
+        .rounded(zpx(8.))
+        .p_3()
+        .border_1()
+        .border_color(p.border.opacity(0.6))
+    };
+    if self.review.editing.as_deref() == Some(id) {
+      let discard = id.to_string();
+      return box_()
+        .child(self.edit_box(
+          p,
+          cx.listener(move |view, _, _, cx| {
+            if view.review.notes.iter().any(|n| n.conflict_id == discard) {
+              view.clear_note(&discard, cx);
+            } else {
+              view.delete_comment(&discard, cx);
+            }
+          }),
+          cx,
+        ))
+        .into_any_element();
+    }
+    let (edit, delete, body) = (id.to_string(), id.to_string(), text.to_string());
+    let muted = p.muted_foreground;
+    let accent = p.accent;
+    let card = box_()
+      .id(SharedString::from(format!("comment-{id}")))
+      .debug_selector(move || selector.into())
+      .group("comment-card")
+      .cursor_pointer()
+      .hover(|s| s.shadow_md())
+      .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
+      .child(
+        div()
+          .flex()
+          .items_start()
+          .gap_2()
+          .child(
+            div()
+              .mt(zpx(2.))
+              .flex_none()
+              .opacity(0.)
+              .group_hover("comment-card", |s| s.opacity(1.))
+              .child(ui::icon(theme::ICON_PENCIL, 12., muted)),
+          )
+          .child(div().flex_1().whitespace_normal().child(text.to_string()))
+          .child(
+            self.tip(
+              format!("delete-comment-tip-{id}"),
+              "Delete comment",
+              div()
+                .id(SharedString::from(format!("delete-comment-{id}")))
+                .debug_selector(|| "delete-comment".into())
+                .flex_none()
+                .p_1()
+                .rounded(zpx(4.))
+                .hover(move |s| s.bg(accent))
+                .child(ui::icon(theme::ICON_X, 12., muted))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  cx.stop_propagation();
+                  if view.review.notes.iter().any(|n| n.conflict_id == delete) {
+                    view.clear_note(&delete, cx);
+                  } else {
+                    view.delete_comment(&delete, cx);
+                  }
+                })),
+              cx,
+            ),
+          ),
+      );
+    self
+      .tip(format!("edit-comment-tip-{id}"), "Click to edit", card, cx)
+      .into_any_element()
+  }
+
+  /// `CommentEditInput`: Discard, Cancel, Save.
+  fn edit_box(
+    &self,
+    p: &Palette,
+    on_discard: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let empty = self.review.edit_text.trim().is_empty();
+    div()
+      .debug_selector(|| "comment-edit".into())
+      .flex()
+      .flex_col()
+      .gap_2()
+      .font_family(theme::SANS_FONT)
+      .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+        let k = &e.keystroke;
+        if k.key == "escape" {
+          cx.stop_propagation();
+          view.cancel_edit(cx);
+        } else if k.key == "enter"
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+        {
+          cx.stop_propagation();
+          view.save_edit(cx);
+        }
+      }))
+      .children(
+        self
+          .review
+          .edit_input
+          .as_ref()
+          .map(|i| Textarea::new(&i.state)),
+      )
+      .child(
+        div()
+          .flex()
+          .justify_between()
+          .gap_2()
+          .child(
+            Button::new("comment-discard", p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .text_color(p.destructive)
+              .label("Discard")
+              .on_click(on_discard),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_2()
+              .child(
+                Button::new("comment-edit-cancel", p)
+                  .variant(Variant::Ghost)
+                  .size(Size::Sm)
+                  .label("Cancel")
+                  .on_click(cx.listener(|view, _, _, cx| view.cancel_edit(cx))),
+              )
+              .child(
+                Button::new("comment-save", p)
+                  .size(Size::Sm)
+                  .disabled(empty)
+                  .label("Save")
+                  .on_click(cx.listener(|view, _, _, cx| view.save_edit(cx))),
+              ),
+          ),
+      )
+  }
+
+  /// `CommentInput`.
+  pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let empty = self.review.draft_text.trim().is_empty();
+    let label = self.review.draft.as_ref().and_then(|d| d.label());
+    div()
+      .debug_selector(|| "comment-input".into())
+      .bg(p.muted)
+      .border_1()
+      .border_color(p.border)
+      .rounded(zpx(8.))
+      .mx_2()
+      .my_1()
+      .px_4()
+      .py_3()
+      .font_family(theme::SANS_FONT)
+      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+      .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+        let k = &e.keystroke;
+        if k.key == "escape" {
+          cx.stop_propagation();
+          view.cancel_draft(cx);
+        } else if k.key == "enter"
+          && (crate::gpui_shell::keys::held(k.modifiers).platform
+            || crate::gpui_shell::keys::held(k.modifiers).control)
+        {
+          cx.stop_propagation();
+          view.submit_draft(cx);
+        }
+      }))
+      .children(label.map(|label| div().mb_2().text_color(p.muted_foreground).child(label)))
+      .children(self.review.draft.as_ref().and_then(|d| {
+        let quote = d.quote.as_ref()?;
+        Some(
+          div()
+            .mb_2()
+            .border_l_2()
+            .border_color(tw::color(tw::SKY_500).opacity(0.5))
+            .pl_3()
+            .italic()
+            .text_color(p.muted_foreground)
+            .child(
+              ui::text(div(), TextSize::Xs)
+                .font_weight(FontWeight::MEDIUM)
+                .not_italic()
+                .mb(zpx(2.))
+                .child(format!("Quoting @{}", quote.author)),
+            )
+            .child(d.line_content.join(" ")),
+        )
+      }))
+      .children(
+        self
+          .review
+          .draft_input
+          .as_ref()
+          .map(|i| div().mb_2().child(Textarea::new(&i.state))),
+      )
+      .child(
+        div()
+          .flex()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("comment-cancel", p)
+              .variant(Variant::Ghost)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.cancel_draft(cx))),
+          )
+          .child(
+            Button::new("comment-submit", p)
+              .disabled(empty)
+              .label("Add Comment")
+              .on_click(cx.listener(|view, _, _, cx| view.submit_draft(cx))),
+          ),
+      )
+  }
+
+  /// Whether `path` shows its file comments section.
+  pub(super) fn file_comment_activity(&self, path: &str) -> bool {
+    self
+      .review
+      .comments
+      .iter()
+      .any(|c| c.file_path == path && c.is_file())
+      || self
+        .review
+        .draft
+        .as_ref()
+        .is_some_and(|d| d.file_path == path && d.hunk_id == FILE_HUNK)
+  }
+
+  /// `FileCommentSection`.
+  pub(super) fn file_comments(
+    &self,
+    path: &str,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    if !self.file_comment_activity(path) {
+      return None;
+    }
+    let mut section = div()
+      .border_b_1()
+      .border_color(p.border)
+      .bg(p.muted.opacity(0.2))
+      .px_4()
+      .py_3()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .font_family(theme::SANS_FONT);
+    for c in self
+      .review
+      .comments
+      .iter()
+      .filter(|c| c.file_path == path && c.is_file())
+    {
+      section = section.child(self.comment_card(&c.id, &c.text, "file-comment-card", p, cx));
+    }
+    if self
+      .review
+      .draft
+      .as_ref()
+      .is_some_and(|d| d.file_path == path && d.hunk_id == FILE_HUNK)
+    {
+      section = section.child(self.comment_input(p, cx));
+    }
+    Some(section)
+  }
+
+  /// The amber "Outdated" block at the top of a file's diff.
+  pub(super) fn outdated_comments(
+    &self,
+    path: &str,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    let outdated = self.outdated(path);
+    if outdated.is_empty() {
+      return None;
+    }
+    let shade = |light: u32, dark: u32| tw::color(if self.dark { dark } else { light });
+    let amber = tw::color(tw::AMBER_500);
+    let mut section = div()
+      .debug_selector(|| "outdated-comments".into())
+      .border_b_1()
+      .border_color(amber.opacity(0.4))
+      .bg(amber.opacity(0.05))
+      .px_4()
+      .py_3()
+      .flex()
+      .flex_col()
+      .gap_3();
+    let accent = p.accent;
+    for c in outdated {
+      let id = c.id.clone();
+      section = section.child(
+        div()
+          .bg(p.background)
+          .rounded(zpx(8.))
+          .p_3()
+          .border_1()
+          .border_color(amber.opacity(0.3))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .justify_between()
+              .mb_2()
+              .font_family(theme::SANS_FONT)
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .child(
+                    ui::text(div(), TextSize::Xs)
+                      .px(zpx(6.))
+                      .py(zpx(2.))
+                      .rounded(zpx(4.))
+                      .bg(amber.opacity(0.25))
+                      .text_color(shade(tw::AMBER_700, tw::AMBER_300))
+                      .font_weight(FontWeight::MEDIUM)
+                      .child("Outdated"),
+                  )
+                  .child(
+                    ui::text(div(), TextSize::Xs)
+                      .text_color(p.muted_foreground)
+                      .child(outdated_label(c)),
+                  ),
+              )
+              .child(
+                div()
+                  .id(SharedString::from(format!("delete-outdated-{id}")))
+                  .p_1()
+                  .rounded(zpx(4.))
+                  .cursor_pointer()
+                  .hover(move |s| s.bg(accent))
+                  .child(ui::icon(theme::ICON_X, 12., p.muted_foreground))
+                  .on_click(cx.listener(move |view, _, _, cx| view.delete_comment(&id, cx))),
+              ),
+          )
+          .when(!c.line_content.is_empty(), |this| {
+            this.child(
+              ui::text(div(), TextSize::Xs)
+                .bg(p.muted.opacity(0.6))
+                .rounded(zpx(4.))
+                .px_2()
+                .py_1()
+                .mb_2()
+                .font_family(theme::MONO_FONT)
+                .children(c.line_content.iter().map(|l| div().child(l.clone()))),
+            )
+          })
+          .child(div().font_family(theme::SANS_FONT).child(c.text.clone())),
+      );
+    }
+    Some(section)
+  }
+
+  /// The conflict card's resolution note and its box.
+  pub(super) fn note_section(
+    &self,
+    conflict: &Conflict,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Vec<gpui::AnyElement> {
+    let mut out = Vec::new();
+    let id = conflict.id.clone();
+    out.push(
+      div()
+        .mt_2()
+        .flex()
+        .justify_end()
+        .child(
+          Button::new(SharedString::from(format!("conflict-comment-{id}")), p)
+            .variant(Variant::Secondary)
+            .size(Size::Sm)
+            .label("Add comment")
+            .on_click(cx.listener(move |view, _, _, cx| view.toggle_note(&id, cx))),
+        )
+        .into_any_element(),
+    );
+    if let Some(note) = self
+      .review
+      .notes
+      .iter()
+      .find(|n| n.conflict_id == conflict.id)
+    {
+      out.push(
+        div()
+          .px_3()
+          .py_2()
+          .bg(p.muted.opacity(0.4))
+          .border_t_1()
+          .border_color(p.border)
+          .font_family(theme::SANS_FONT)
+          .child(
+            div()
+              .text_color(p.muted_foreground)
+              .mb_1()
+              .child("Resolution note:"),
+          )
+          .child(self.comment_card(&note.conflict_id, &note.text, "conflict-note-card", p, cx))
+          .into_any_element(),
+      );
+    }
+    if self.review.note_open.as_deref() == Some(conflict.id.as_str()) {
+      let empty = self.review.note_text.trim().is_empty();
+      let path = conflict
+        .id
+        .rsplit_once("-conflict-")
+        .map_or(conflict.id.as_str(), |(p, _)| p);
+      let region = &conflict.region;
+      let label = if region.start_line == region.end_line {
+        format!("{path}:L{}", region.start_line)
+      } else {
+        format!("{path}:L{}-{}", region.start_line, region.end_line)
+      };
+      let (save, clear) = (conflict.clone(), conflict.id.clone());
+      out.push(
+        div()
+          .debug_selector(|| "conflict-comment-input".into())
+          .bg(p.muted.opacity(0.6))
+          .border_y_1()
+          .border_color(p.border.opacity(0.4))
+          .px_4()
+          .py_3()
+          .font_family(theme::SANS_FONT)
+          .child(div().mb_2().text_color(p.muted_foreground).child(label))
+          .children(
+            self
+              .review
+              .note_input
+              .as_ref()
+              .map(|i| div().mb_2().child(Textarea::new(&i.state))),
+          )
+          .child(
+            div()
+              .flex()
+              .justify_end()
+              .gap_2()
+              .child(
+                Button::new("conflict-comment-cancel", p)
+                  .variant(Variant::Ghost)
+                  .size(Size::Sm)
+                  .label("Cancel")
+                  .on_click(cx.listener(move |view, _, _, cx| view.clear_note(&clear, cx))),
+              )
+              .child(
+                Button::new("conflict-comment-save", p)
+                  .size(Size::Sm)
+                  .disabled(empty)
+                  .label("Add Comment")
+                  .on_click(cx.listener(move |view, _, _, cx| view.save_note(&save, cx))),
+              ),
+          )
+          .into_any_element(),
+      );
+    }
+    out
+  }
+
+  /// `ReviewActionBar` B: the pending count, Start Review, Discard and
+  /// Finish review.
+  pub(super) fn review_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let conflicts = !self.conflicted().is_empty();
+    let total = self.review.comments.len() + self.review.notes.len();
+    let send_bg = if conflicts { p.destructive } else { p.primary };
+    div()
+      .debug_selector(|| "review-action-bar".into())
+      .flex()
+      .items_center()
+      .justify_between()
+      .px_4()
+      .py_2()
+      .bg(p.muted.opacity(0.8))
+      .border_b_1()
+      .border_color(p.border)
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(ui::icon(
+            theme::ICON_MESSAGE,
+            16.,
+            if conflicts { p.destructive } else { p.primary },
+          ))
+          .child(
+            div()
+              .text_color(p.muted_foreground)
+              .child(format!("{} pending", count_label(total, "comment"))),
+          )
+          .children(self.agent_count()),
+      )
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(self.start_review_button(p, cx))
+          .child(
+            Button::new("discard-review", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label(if conflicts { "Reset" } else { "Discard" })
+              .on_click(cx.listener(|view, _, _, cx| {
+                view.review.discard_dialog = true;
+                cx.notify();
+              })),
+          )
+          .child(
+            div()
+              .relative()
+              .child(
+                Button::new("finish-review", p)
+                  .size(Size::Sm)
+                  .gap_2()
+                  .bg(send_bg)
+                  .icon(theme::ICON_SEND, 12.)
+                  .label(if conflicts {
+                    "Resolve conflicts..."
+                  } else {
+                    "Finish review"
+                  })
+                  .on_click(cx.listener(|view, _, _, cx| {
+                    view.review.finish_open = !view.review.finish_open;
+                    cx.notify();
+                  })),
+              )
+              .child(self.anchor("finish-review".into())),
+          ),
+      )
+  }
+
+  pub(super) fn start_review_button(&self, p: &Palette, cx: &mut Context<Self>) -> Button {
+    Button::new("start-agent-review", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_2()
+      .disabled(self.starting_review)
+      .icon(theme::ICON_BOT, 12.)
+      .label("Start Review")
+      .on_click(cx.listener(|view, _, _, cx| view.start_review(cx)))
+  }
+
+  /// `ReviewActionBar` D.
+  pub(super) fn stale_banner(
+    &self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    if self.review.stale.is_empty() {
+      return None;
+    }
+    let shade = |light: u32, dark: u32| tw::color(if self.dark { dark } else { light });
+    let amber = tw::color(tw::AMBER_500);
+    let n = self.review.stale.len();
+    let outdated = self
+      .review
+      .comments
+      .iter()
+      .filter(|c| {
+        is_outdated(
+          c,
+          self
+            .file_hunks(&c.file_path)
+            .filter(|d| !d.loading)
+            .as_ref()
+            .map(|d| d.hunks.as_slice()),
+        )
+      })
+      .count();
+    let fg = shade(tw::AMBER_800, tw::AMBER_200);
+    let button = |id: &'static str, icon: &'static str, label: String| {
+      Button::new(id, p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .gap(zpx(6.))
+        .border_color(amber.opacity(0.6))
+        .text_color(fg)
+        .icon(icon, 12.)
+        .label(label)
+    };
+    Some(
+      div()
+        .debug_selector(|| "stale-banner".into())
+        .flex()
+        .items_center()
+        .justify_between()
+        .px_4()
+        .py_2()
+        .bg(amber.opacity(0.15))
+        .border_b_1()
+        .border_color(amber.opacity(0.4))
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(ui::icon(
+              theme::ICON_TRIANGLE_ALERT,
+              16.,
+              shade(tw::AMBER_700, tw::AMBER_300),
+            ))
+            .child(div().text_color(fg).child(format!(
+              "{} changed since you started reviewing",
+              count_label(n, "file")
+            )))
+            .child(
+              div()
+                .text_color(shade(tw::AMBER_700, tw::AMBER_300).opacity(0.8))
+                .child(stale_names(&self.review.stale)),
+            ),
+        )
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .when(outdated > 0, |this| {
+              this.child(
+                button(
+                  "copy-outdated",
+                  theme::ICON_COPY,
+                  format!("Copy Outdated ({outdated})"),
+                )
+                .on_click(cx.listener(|view, _, _, cx| view.copy_outdated(cx))),
+              )
+            })
+            .child(
+              button("reload-stale", theme::ICON_REFRESH, "Reload".into())
+                .on_click(cx.listener(|view, _, _, cx| view.reload_stale(cx))),
+            ),
+        ),
+    )
+  }
+
+  /// The Finish review popover, under its button.
+  pub(super) fn finish_popover(
+    &self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    if !self.review.finish_open {
+      return None;
+    }
+    let anchor = self.anchors.borrow().get("finish-review").copied()?;
+    let conflicts = !self.conflicted().is_empty();
+    let total = self.review.comments.len() + self.review.notes.len();
+    let sending = self.review.sending;
+    let width = 320.;
+    let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
+    let checkbox = {
+      let checked = self.review.use_idle;
+      div()
+        .id("use-idle-agent")
+        .debug_selector(|| "use-idle-agent".into())
+        .flex()
+        .items_center()
+        .gap(zpx(6.))
+        .cursor_pointer()
+        .child(
+          div()
+            .size(zpx(14.))
+            .rounded(zpx(3.))
+            .border_1()
+            .border_color(if checked { p.primary } else { p.border })
+            .bg(if checked { p.primary } else { p.background })
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(checked, |this| {
+              this.child(ui::icon(theme::ICON_CHECK, 10., p.primary_foreground))
+            }),
+        )
+        .child(
+          ui::text(div(), TextSize::Xs)
+            .text_color(p.muted_foreground)
+            .child("Send to idle agent if one is available"),
+        )
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.review.use_idle = !view.review.use_idle;
+          cx.notify();
+        }))
+    };
+    let panel = div()
+      .id("finish-review-popover")
+      .debug_selector(|| "finish-review-popover".into())
+      .w(zpx(width))
+      .relative()
+      .p_4()
+      .rounded(zpx(8.))
+      .border_1()
+      .border_color(p.border)
+      .bg(p.popover)
+      .text_color(p.popover_foreground)
+      .shadow_md()
+      .occlude()
+      .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+        view.review.finish_open = false;
+        cx.notify();
+      }))
+      .child(
+        div().absolute().top_2().right_2().child(
+          Button::new("finish-review-close", p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .px_1()
+            .disabled(sending)
+            .icon(theme::ICON_X, 16.)
+            .on_click(cx.listener(|view, _, _, cx| {
+              view.review.finish_open = false;
+              cx.notify();
+            })),
+        ),
+      )
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap_3()
+          .child(
+            div()
+              .child(
+                div()
+                  .font_weight(FontWeight::MEDIUM)
+                  .mb_1()
+                  .child(if conflicts {
+                    "Resolve conflicts"
+                  } else {
+                    "Finish your review"
+                  }),
+              )
+              .child(div().text_color(p.muted_foreground).child(format!(
+                "{} will be submitted.",
+                count_label(total, "comment")
+              ))),
+          )
+          .children(
+            self
+              .review
+              .summary_input
+              .as_ref()
+              .map(|i| Textarea::new(&i.state)),
+          )
+          .child(checkbox)
+          .child(
+            div()
+              .flex()
+              .justify_between()
+              .gap_2()
+              .child(
+                Button::new("copy-review", p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .gap_2()
+                  .disabled(sending)
+                  .icon(
+                    if self.review.copied {
+                      theme::ICON_CHECK
+                    } else {
+                      theme::ICON_COPY
+                    },
+                    12.,
+                  )
+                  .label(if self.review.copied { "Copied" } else { "Copy" })
+                  .on_click(cx.listener(|view, _, _, cx| view.copy_review(cx))),
+              )
+              .child(
+                div()
+                  .flex()
+                  .gap_2()
+                  .child(
+                    Button::new("review-plan", p)
+                      .variant(Variant::Secondary)
+                      .size(Size::Sm)
+                      .disabled(sending)
+                      .label("Plan")
+                      .on_click(cx.listener(|view, _, _, cx| view.send_review(true, cx))),
+                  )
+                  .child(
+                    Button::new("review-edit", p)
+                      .size(Size::Sm)
+                      .disabled(sending)
+                      .label("Edit")
+                      .on_click(cx.listener(|view, _, _, cx| view.send_review(false, cx))),
+                  ),
+              ),
+          ),
+      );
+    Some(deferred(anchored().position(at).child(panel)).with_priority(1))
+  }
+
+  /// `ReviewActionBar` C: "Discard review?".
+  pub(super) fn review_dialog(
+    &self,
+    window: &mut Window,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    if !self.review.discard_dialog {
+      return None;
+    }
+    let viewport = window.viewport_size();
+    let n = self.review.comments.len();
+    let close = |view: &mut Self, cx: &mut Context<Self>| {
+      view.review.discard_dialog = false;
+      cx.notify();
+    };
+    let panel = div()
+      .id("discard-review-dialog")
+      .debug_selector(|| "discard-review-dialog".into())
+      .w_full()
+      .max_w(zpx(512.))
+      .p_6()
+      .rounded(zpx(16.))
+      .border_1()
+      .border_color(p.border.opacity(0.5))
+      .bg(p.popover)
+      .text_color(p.popover_foreground)
+      .shadow_2xl()
+      .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
+        if e.keystroke.key == "escape" {
+          cx.stop_propagation();
+          close(view, cx);
+        }
+      }))
+      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap(zpx(6.))
+          .child(
+            ui::text(div(), TextSize::Lg)
+              .line_height(zpx(15.))
+              .font_weight(FontWeight::SEMIBOLD)
+              .child("Discard review?"),
+          )
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child(format!(
+                "This will discard all {n} pending {}. This action cannot be undone.",
+                if n == 1 { "comment" } else { "comments" }
+              )),
+          ),
+      )
+      .child(
+        div()
+          .mt_4()
+          .flex()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("keep-reviewing", p)
+              .variant(Variant::Ghost)
+              .label("Keep reviewing")
+              .on_click(cx.listener(move |view, _, _, cx| close(view, cx))),
+          )
+          .child(
+            Button::new("confirm-discard-review", p)
+              .variant(Variant::Destructive)
+              .label("Discard")
+              .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx))),
+          ),
+      );
+    Some(
+      deferred(
+        anchored().position(point(px(0.), px(0.))).child(
+          div()
+            .id("discard-review-backdrop")
+            .w(viewport.width)
+            .h(viewport.height)
+            .p_4()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::black().opacity(0.4))
+            .occlude()
+            .on_mouse_down(
+              MouseButton::Left,
+              cx.listener(move |view, _, _, cx| close(view, cx)),
+            )
+            .child(panel),
+        ),
+      )
+      .with_priority(2),
+    )
+  }
+}

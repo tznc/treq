@@ -28,6 +28,7 @@ import {
   GitMerge,
   Loader2,
 } from "lucide-react";
+import { useGpuiScreen } from "../lib/gpui-screen";
 import { cn, getFullWorkspacePath } from "../lib/utils";
 
 export interface MergePreviewPageProps {
@@ -35,14 +36,31 @@ export interface MergePreviewPageProps {
   repoPath: string;
   onCancel: () => void;
   onMergeComplete: () => Promise<void>;
+  /** GPUI draws the page and merges itself (local workspaces). */
+  gpui?: boolean;
 }
 
 export const MergePreviewPage = ({
   workspace,
   onCancel,
   onMergeComplete,
+  gpui = false,
 }: MergePreviewPageProps) => {
   const { addToast } = useToast();
+  useGpuiScreen(
+    gpui
+      ? {
+          kind: "mergePreview",
+          repoPath: workspace.repo_path,
+          workspaceId: workspace.id,
+        }
+      : null,
+    (action) => {
+      if (action.kind !== "press") return;
+      if (action.id === "mergePreview.cancel") onCancel();
+      if (action.id === "mergePreview.merged") void onMergeComplete();
+    },
+  );
 
   // State
   const [commitDraft, setCommitDraft] = useState<string | null>(null);

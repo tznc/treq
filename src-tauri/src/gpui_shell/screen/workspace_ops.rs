@@ -1,0 +1,223 @@
+//! What GPUI does itself that React's Dashboard and `ShowWorkspace`
+//! handlers did: run checks, create pull requests, retarget, queue for the
+//! merge queue, and delete or archive workspaces. Each reports with a toast
+//! and tells React which caches to refresh (`NativeEvent`).
+
+use super::{
+  github_data::GithubHost, merge_queue_data::MergeQueueHost, workspace_data::WorkspaceHost,
+};
+use crate::{
+  core::{
+    self,
+    account::{self, QueueAction},
+    supabase::ApiError,
+  },
+  gpui_shell::native::{Backend, NativeEvent, ToastTone},
+};
+
+/// What the workspace actions ask of the backend; faked in tests. All but
+/// the `WorkspaceHost` methods block, so they are called off the main
+/// thread.
+pub trait WorkspaceActionsHost: GithubHost + MergeQueueHost {
+  /// Adds the branch to, or takes it off, the merge queue.
+  fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError>;
+  fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// A Yes/No question in a native dialog.
+  fn ask(&self, title: &str, message: &str) -> bool;
+}
+
+impl WorkspaceActionsHost for Backend {
+  fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError> {
+    let cloud = crate::commands::cloud::owned_cloud(self.app())
+      .ok_or_else(|| ApiError::new("no_account", "The account is not available in this window."))?;
+    tauri::async_runtime::block_on(account::enqueue(&cloud.supabase, full_name, branch, action))
+  }
+
+  fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote.delete_workspace(workspace_id);
+    }
+    core::delete_workspace(repo_path, &workspace_id).map(drop)
+  }
+
+  fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote.archive_workspace(workspace_id);
+    }
+    core::archive_workspace_removing_directory_later(repo_path, workspace_id)
+  }
+
+  fn ask(&self, title: &str, message: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let (tx, rx) = std::sync::mpsc::channel();
+    let app = self.app().clone();
+    let (title, message) = (title.to_string(), message.to_string());
+    // The dialog opens from the main thread; this waits off it.
+    let _ = self.app().run_on_main_thread(move || {
+      app
+        .dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::YesNo)
+        .show(move |yes| {
+          let _ = tx.send(yes);
+        });
+    });
+    rx.recv().unwrap_or(false)
+  }
+}
+
+pub fn toast(host: &dyn WorkspaceHost, tone: ToastTone, title: &str, description: &str) {
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::Toast {
+      title: title.into(),
+      description: description.into(),
+      tone,
+      action: None,
+    },
+  );
+}
+
+/// The workspace a removal is for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Removed {
+  pub repo_path: String,
+  pub id: i64,
+  pub branch: String,
+  /// Its full path, whose terminals close.
+  pub path: String,
+}
+
+impl Removed {
+  pub fn of(workspace: &crate::local_db::Workspace) -> Self {
+    Self {
+      repo_path: workspace.repo_path.clone(),
+      id: workspace.id,
+      branch: workspace.branch_name.clone(),
+      path: core::context_menu::full_workspace_path(workspace),
+    }
+  }
+}
+
+/// `handleDelete`: asks first, then deletes, toasts and tells React.
+/// Returns whether the workspace went, so its terminals close.
+pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
+  if !host.ask(
+    "Delete Workspace",
+    &format!("Delete workspace {}?", workspace.branch),
+  ) {
+    return false;
+  }
+  match host.delete_workspace(&workspace.repo_path, workspace.id) {
+    Ok(()) => {
+      removed(host, &workspace.repo_path, vec![workspace.id]);
+      toast(
+        host,
+        ToastTone::Success,
+        "Workspace Deleted",
+        "Workspace has been deleted",
+      );
+      true
+    }
+    Err(err) => {
+      toast(host, ToastTone::Error, "Delete Failed", &err);
+      false
+    }
+  }
+}
+
+/// `archiveWorkspaceMutation`: archives, toasts and tells React.
+pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
+  match host.archive_workspace(&workspace.repo_path, workspace.id) {
+    Ok(()) => {
+      removed(host, &workspace.repo_path, vec![workspace.id]);
+      toast(
+        host,
+        ToastTone::Success,
+        "Workspace Archived",
+        "Workspace directory removed; record kept",
+      );
+      true
+    }
+    Err(err) => {
+      toast(host, ToastTone::Error, "Archive Failed", &err);
+      false
+    }
+  }
+}
+
+/// `handleBulkArchive`: archives every workspace, even after one fails,
+/// and toasts once for those archived and once for the failures. Returns
+/// the ones archived.
+pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> Vec<Removed> {
+  let mut archived = Vec::new();
+  let mut failures = Vec::new();
+  for workspace in workspaces {
+    match host.archive_workspace(&workspace.repo_path, workspace.id) {
+      Ok(()) => archived.push(workspace.clone()),
+      Err(err) => failures.push(err),
+    }
+  }
+  if let Some(first) = archived.first() {
+    let n = archived.len();
+    let s = if n > 1 { "s" } else { "" };
+    toast(
+      host,
+      ToastTone::Success,
+      &format!("{n} Workspace{s} Archived"),
+      &format!("Successfully archived {n} workspace{s}"),
+    );
+    removed(
+      host,
+      &first.repo_path,
+      archived.iter().map(|w| w.id).collect(),
+    );
+  }
+  if !failures.is_empty() {
+    toast(
+      host,
+      ToastTone::Error,
+      "Archive Failed",
+      &failures.join("\n"),
+    );
+  }
+  archived
+}
+
+/// The workspaces went: React refreshes and leaves them.
+fn removed(host: &dyn WorkspaceActionsHost, repo_path: &str, ids: Vec<i64>) {
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::WorkspaceChanged {
+      repo_path: repo_path.into(),
+    },
+  );
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::WorkspacesRemoved {
+      repo_path: repo_path.into(),
+      ids,
+    },
+  );
+}
+
+/// `handleMoveWorkspace`: stacks the workspace on `target`.
+pub fn move_workspace(
+  host: &dyn WorkspaceActionsHost,
+  repo_path: &str,
+  workspace: &crate::local_db::Workspace,
+  target: &str,
+) {
+  match host.retarget(repo_path, workspace, target) {
+    Ok(()) => WorkspaceHost::notify(
+      host,
+      NativeEvent::WorkspaceChanged {
+        repo_path: repo_path.into(),
+      },
+    ),
+    Err(err) => toast(host, ToastTone::Error, "Failed to move workspace", &err),
+  }
+}

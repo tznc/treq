@@ -48,6 +48,7 @@ import { PrerequisiteChecklist } from "./PrerequisiteChecklist";
 const NOTIFY_AGENT_FINISHED_SETTING = "notify_agent_finished";
 import { AppSetupScriptSettings } from "./AppSetupScriptSettings";
 import { useAppSetupScript } from "./useAppSetupScript";
+import { useGpuiSettingsScreen } from "./useGpuiSettingsScreen";
 
 type TabValue =
   | "application"
@@ -158,6 +159,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const handleSaveRepositorySettings = async () => {
     await repositorySettingsRef.current?.save();
   };
+
+  useGpuiSettingsScreen({
+    currentTab,
+    setCurrentTab,
+    repoPath,
+    currentBranch: currentBranch ?? null,
+    onClose,
+    cloudWorkspace,
+  });
 
   return (
     <>

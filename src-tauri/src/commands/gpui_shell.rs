@@ -72,3 +72,95 @@ pub fn gpui_toasts_update(app: AppHandle, window_label: String, toasts: serde_js
   #[cfg(not(all(desktop, feature = "gpui-shell")))]
   let _ = (app, window_label, toasts);
 }
+
+/// Draws React's screen snapshot in GPUI in place of the webview of window
+/// `window_label`, or shows the webview again for `null`. A no-op outside
+/// the GPUI shell.
+#[tauri::command]
+pub fn gpui_screen_update(
+  app: AppHandle,
+  window_label: String,
+  snapshot: Option<serde_json::Value>,
+) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    if !crate::gpui_shell::is_enabled(&app) {
+      return;
+    }
+    let snapshot = match snapshot.map(serde_json::from_value).transpose() {
+      Ok(snapshot) => snapshot,
+      Err(err) => {
+        log::warn!("invalid GPUI screen snapshot: {err}");
+        return;
+      }
+    };
+    crate::gpui_shell::update_screen(&app, &window_label, snapshot);
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = (app, window_label, snapshot);
+}
+
+/// Draws React's dialog in GPUI over the screen of window `window_label`
+/// (the agent prompt, prompt history or stash list), or closes it for `null`.
+/// A no-op outside the GPUI shell.
+#[tauri::command]
+pub fn gpui_modal_update(app: AppHandle, window_label: String, modal: Option<serde_json::Value>) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    if !crate::gpui_shell::is_enabled(&app) {
+      return;
+    }
+    let modal = match modal.map(serde_json::from_value).transpose() {
+      Ok(modal) => modal,
+      Err(err) => {
+        log::warn!("invalid GPUI modal: {err}");
+        return;
+      }
+    };
+    crate::gpui_shell::update_modal(&app, &window_label, modal);
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = (app, window_label, modal);
+}
+
+/// Shows Dashboard's open window-wide dialog (command palette, keyboard
+/// shortcuts, workspace picker, branch switcher) in GPUI over the whole of
+/// window `window_label`, or closes it for `null`. A no-op outside the GPUI
+/// shell.
+#[tauri::command]
+pub fn gpui_overlay_update(
+  app: AppHandle,
+  window_label: String,
+  snapshot: Option<serde_json::Value>,
+) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    if !crate::gpui_shell::is_enabled(&app) {
+      return;
+    }
+    let snapshot = match snapshot.map(serde_json::from_value).transpose() {
+      Ok(snapshot) => snapshot,
+      Err(err) => {
+        log::warn!("invalid GPUI overlay snapshot: {err}");
+        return;
+      }
+    };
+    crate::gpui_shell::update_overlay(&app, &window_label, snapshot);
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = (app, window_label, snapshot);
+}
+
+/// Runs the action of a GPUI screen's toast button (`NativeEvent::Toast`'s
+/// `action`), once. A no-op for an unknown or used id.
+#[tauri::command]
+pub async fn gpui_toast_action(id: u64) {
+  #[cfg(all(desktop, feature = "gpui-shell"))]
+  {
+    let _ =
+      tauri::async_runtime::spawn_blocking(move || crate::gpui_shell::native::run_toast_action(id))
+        .await;
+  }
+  #[cfg(not(all(desktop, feature = "gpui-shell")))]
+  let _ = id;
+}

@@ -225,6 +225,29 @@ pub fn move_commit_to_existing_workspace(
   Ok(())
 }
 
+/// The directory jj runs in for `workspace_id`, plus the workspace row.
+/// `None` is the home repository: the repo root itself, with no workspace
+/// lineage to guard.
+fn workspace_target(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+) -> Result<(String, Option<local_db::Workspace>), String> {
+  let Some(id) = workspace_id else {
+    return Ok((repo_path.to_string(), None));
+  };
+  let workspace = local_db::get_workspace_by_id(repo_path, id)
+    .map_err(|e| format!("Failed to get workspace: {}", e))?
+    .ok_or_else(|| format!("Workspace not found: {}", id))?;
+  let dir = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path)
+    .to_str()
+    .ok_or("Failed to convert workspace path to string")?
+    .to_string();
+  Ok((dir, Some(workspace)))
+}
+
 /// Abandons a specific commit from a workspace by change-id.
 ///
 /// # Arguments
@@ -236,22 +259,15 @@ pub fn move_commit_to_existing_workspace(
 /// The operation id of the abandon, for toast undo.
 pub fn abandon_commit(
   repo_path: &str,
-  workspace_id: i64,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
 ) -> Result<String, String> {
-  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-    .map_err(|e| format!("Failed to get workspace: {}", e))?
-    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
+  let workspace_dir_str = workspace_dir.as_str();
 
-  let workspace_dir = Path::new(repo_path)
-    .join(".treq")
-    .join("workspaces")
-    .join(&workspace.workspace_path);
-  let workspace_dir_str = workspace_dir
-    .to_str()
-    .ok_or("Failed to convert workspace path to string")?;
-
-  ensure_rewritable(repo_path, &workspace, commit_change_id)?;
+  if let Some(workspace) = &workspace {
+    ensure_rewritable(repo_path, workspace, commit_change_id)?;
+  }
 
   let op_id = jj::jj_abandon(workspace_dir_str, commit_change_id)
     .map_err(|e| format!("Failed to abandon commit: {}", e))?;
@@ -370,20 +386,11 @@ pub fn undo_commit(
 /// `Ok(())` on success, or an error string.
 pub fn revert_commit(
   repo_path: &str,
-  workspace_id: i64,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
 ) -> Result<(), String> {
-  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-    .map_err(|e| format!("Failed to get workspace: {}", e))?
-    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
-
-  let workspace_dir = Path::new(repo_path)
-    .join(".treq")
-    .join("workspaces")
-    .join(&workspace.workspace_path);
-  let workspace_dir_str = workspace_dir
-    .to_str()
-    .ok_or("Failed to convert workspace path to string")?;
+  let (workspace_dir, _) = workspace_target(repo_path, workspace_id.into())?;
+  let workspace_dir_str = workspace_dir.as_str();
 
   jj::jj_revert_commit(workspace_dir_str, commit_change_id)
     .map_err(|e| format!("Failed to revert commit: {}", e))?;
@@ -405,20 +412,11 @@ pub fn revert_commit(
 /// The commit's full description on success, or an error string.
 pub fn get_commit_description(
   repo_path: &str,
-  workspace_id: i64,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
 ) -> Result<String, String> {
-  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-    .map_err(|e| format!("Failed to get workspace: {}", e))?
-    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
-
-  let workspace_dir = Path::new(repo_path)
-    .join(".treq")
-    .join("workspaces")
-    .join(&workspace.workspace_path);
-  let workspace_dir_str = workspace_dir
-    .to_str()
-    .ok_or("Failed to convert workspace path to string")?;
+  let (workspace_dir, _) = workspace_target(repo_path, workspace_id.into())?;
+  let workspace_dir_str = workspace_dir.as_str();
 
   jj::jj_get_commit_description(workspace_dir_str, commit_change_id)
     .map_err(|e| format!("Failed to get commit description: {}", e))
@@ -436,23 +434,16 @@ pub fn get_commit_description(
 /// `Ok(())` on success, or an error string.
 pub fn describe_commit(
   repo_path: &str,
-  workspace_id: i64,
+  workspace_id: impl Into<Option<i64>>,
   commit_change_id: &str,
   description: &str,
 ) -> Result<(), String> {
-  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-    .map_err(|e| format!("Failed to get workspace: {}", e))?
-    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
+  let workspace_dir_str = workspace_dir.as_str();
 
-  let workspace_dir = Path::new(repo_path)
-    .join(".treq")
-    .join("workspaces")
-    .join(&workspace.workspace_path);
-  let workspace_dir_str = workspace_dir
-    .to_str()
-    .ok_or("Failed to convert workspace path to string")?;
-
-  ensure_rewritable(repo_path, &workspace, commit_change_id)?;
+  if let Some(workspace) = &workspace {
+    ensure_rewritable(repo_path, workspace, commit_change_id)?;
+  }
 
   jj::jj_describe(workspace_dir_str, commit_change_id, description)
     .map_err(|e| format!("Failed to describe commit: {}", e))?;

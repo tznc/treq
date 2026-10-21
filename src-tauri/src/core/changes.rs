@@ -141,6 +141,23 @@ pub fn discard_file_changes(workspace_path: &str, file_path: &str) -> Result<Str
     .map_err(|e| format!("Failed to discard file changes: {}", e))
 }
 
+/// Commits only `file_paths` of the working copy (`jj split`), then rebases
+/// the branch's stack onto it so jj is settled when this returns.
+pub fn split_working_copy(
+  workspace_path: &str,
+  message: &str,
+  file_paths: Vec<String>,
+) -> Result<String, String> {
+  let result = jj::jj_split(workspace_path, message, file_paths).map_err(|e| e.to_string())?;
+  if let Some(repo_path) = jj::derive_repo_path_from_workspace(workspace_path) {
+    if let Ok(branch) = jj::get_workspace_branch(workspace_path) {
+      log::debug!("jj_split auto_rebase: repo_path={repo_path}, branch={branch}");
+      let _ = crate::auto_rebase::rebase_after_commit(&repo_path, &branch);
+    }
+  }
+  Ok(result)
+}
+
 #[cfg(test)]
 mod batch_tests {
   use super::*;

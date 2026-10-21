@@ -1,4 +1,10 @@
-import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { mutate as defaultMutate, type Key, useSWRConfig } from "swr";
 
 type ScopedMutate = typeof defaultMutate;
@@ -53,8 +59,38 @@ export function useInfiniteQueryInvalidation(
   }, [serializedKey]);
 }
 
+let revision = 0;
+const revisionListeners = new Set<() => void>();
+
+function bumpRevision() {
+  revision++;
+  for (const listener of revisionListeners) listener();
+}
+
+function subscribeRevision(listener: () => void) {
+  revisionListeners.add(listener);
+  return () => {
+    revisionListeners.delete(listener);
+  };
+}
+
+const ignoreRevision = () => () => {};
+
+/**
+ * A count of cache refreshes (`invalidateQueries`, `revalidateKeys`), for
+ * views that read the backend themselves to read it again. Stays put while
+ * `active` is false, so inactive callers do not re-render.
+ */
+export function useCacheRevision(active: boolean): number {
+  return useSyncExternalStore(
+    active ? subscribeRevision : ignoreRevision,
+    () => revision,
+  );
+}
+
 /** Revalidate SWR keys whose array form starts with `prefix`. Omit prefix to revalidate all. */
 export function invalidateQueries(prefix?: readonly unknown[]) {
+  bumpRevision();
   const infinite = [...infiniteQueries]
     .filter((q) => !prefix || keyMatchesPrefix(q.key as unknown[], prefix))
     .map((q) => q.revalidate());
@@ -62,6 +98,12 @@ export function invalidateQueries(prefix?: readonly unknown[]) {
     ? scopedMutate((key) => keyMatchesPrefix(key, prefix))
     : scopedMutate(() => true);
   return Promise.all([regular, ...infinite]);
+}
+
+/** Revalidate the SWR keys that are one of `keys`, which `invalidateQueries` cannot match. */
+export function revalidateKeys(keys: readonly string[]) {
+  bumpRevision();
+  return scopedMutate((key) => typeof key === "string" && keys.includes(key));
 }
 
 export function setQueryData<T>(key: unknown[], data: T) {

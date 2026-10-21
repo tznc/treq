@@ -304,13 +304,22 @@ pub fn write_send_review_image(
   contents_base64: &str,
 ) -> Result<PathBuf, String> {
   let bytes = decode_base64(contents_base64.trim())?;
+  write_send_review_image_bytes(repo_path, suggested_name, &bytes)
+}
+
+/// [`write_send_review_image`] for a PNG already in memory.
+pub fn write_send_review_image_bytes(
+  repo_path: &str,
+  suggested_name: &str,
+  bytes: &[u8],
+) -> Result<PathBuf, String> {
   if bytes.is_empty() {
     return Err("image data is empty".to_string());
   }
   let dir = send_staging_dir(repo_path)?;
   let filename = sanitize_review_image_name(suggested_name);
   let path = dir.join(filename);
-  std::fs::write(&path, &bytes).map_err(|e| format!("failed to write review image: {e}"))?;
+  std::fs::write(&path, bytes).map_err(|e| format!("failed to write review image: {e}"))?;
   Ok(path)
 }
 
@@ -489,6 +498,16 @@ mod tests {
       std::fs::read(&path).unwrap(),
       [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
     );
+  }
+
+  #[test]
+  fn writes_review_png_bytes() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let repo = temp.path().to_string_lossy().to_string();
+    let path = write_send_review_image_bytes(&repo, "a b.png", b"png").expect("write");
+    assert_eq!(path, temp.path().join(".treq").join("send").join("a-b.png"));
+    assert_eq!(std::fs::read(&path).unwrap(), b"png");
+    assert!(write_send_review_image_bytes(&repo, "a.png", b"").is_err());
   }
 
   #[test]

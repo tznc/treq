@@ -63,9 +63,12 @@ import {
 } from "../lib/git-utils";
 import { reviewChangeCountQueryKey } from "../lib/review-change-count";
 import {
+  HOME_MOVE_ENDPOINT,
   REFRESH_WORKSPACE_CHANGES_EVENT,
   scheduleRefreshWorkspaceChanges,
 } from "../lib/change-file-drag";
+import { useChangeFilesMove } from "./ChangeFilesMoveContext";
+import { useChangesRevision } from "./useChangesRevision";
 import {
   type WorkspaceChangesRefreshDetail,
   visibleWorkspaceRefreshTarget,
@@ -106,6 +109,14 @@ import {
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { WorkspaceDescription } from "./WorkspaceDescription";
+import { useGpuiWorkspaceScreen } from "./useGpuiWorkspaceScreen";
+import { GpuiPartsProvider, useGpuiPartsHost } from "../lib/gpui-parts";
+import type { GpuiRemoteChrome } from "../lib/gpui-remote-types";
+import {
+  type GpuiTerminalRoute,
+  type GpuiWorkspaceTab,
+  gpuiDrawsFileBrowser,
+} from "../lib/gpui-screen";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { useToast } from "./ui/toast";
 import {
@@ -171,6 +182,30 @@ interface ShowWorkspaceProps {
   availableBranches?: BranchListItem[];
   branchesLoading?: boolean;
   onLoadAvailableBranches?: () => void | Promise<void>;
+  /**
+   * Under the GPUI shell, draw the header and tab row in GPUI. Off while
+   * another page covers the workspace or the terminal pane fills it.
+   */
+  gpuiActive?: boolean;
+  /** Under GPUI's Code tab: how tall the terminal pane it frames below is. */
+  gpuiFrameHeight?: number | null;
+  /**
+   * The height GPUI's Code tab takes, which the terminal pane's layer spans
+   * so the pane sits in GPUI's frame; null while React draws the tab.
+   */
+  onGpuiContentHeight?: (height: number | null) => void;
+  /** GPUI's terminal pane: its route, and what its `terminal.*` fields do. */
+  gpuiTerminal?: {
+    route: GpuiTerminalRoute | null;
+    field: (field: string, value: unknown) => void;
+  };
+  /** Whether GPUI draws the header and tab row now. */
+  onGpuiFramedChange?: (framed: boolean) => void;
+  /** A remote repository's strip above the header, which GPUI draws. */
+  gpuiRemote?: {
+    chrome: GpuiRemoteChrome | null;
+    press: (id: string) => void;
+  };
 }
 
 const StatusPip = ({ status }: { status?: string }) =>
@@ -224,6 +259,12 @@ export const ShowWorkspace = ({
   availableBranches = [],
   branchesLoading = false,
   onLoadAvailableBranches,
+  gpuiActive = false,
+  gpuiFrameHeight = null,
+  onGpuiContentHeight,
+  gpuiTerminal,
+  gpuiRemote,
+  onGpuiFramedChange,
 }: ShowWorkspaceProps) => {
   const workingDirectory = workspace
     ? getFullWorkspacePath(workspace)
@@ -233,6 +274,7 @@ export const ShowWorkspace = ({
 
   const { addToast } = useToast();
   const logsEnabled = usePreviewFeature("logs");
+  const gpuiParts = useGpuiPartsHost();
   const checksTarget = checksTargetOf(workspace);
   const { fontSize } = useTerminalSettingsStore();
 
@@ -283,8 +325,16 @@ export const ShowWorkspace = ({
     treqSendAssets: useTreqSendStore((s) => s.assets),
     dismissTreqSendAsset: useTreqSendStore((s) => s.dismissAsset),
   });
-  const [scrollToCommitId, setScrollToCommitId] = useState<string | null>(null);
+  const changeFilesMove = useChangeFilesMove();
   const [showFileBrowserInCode, setShowFileBrowserInCode] = useState(false);
+  // GPUI draws the Code tab's file browser too, reading the files itself.
+  const gpuiFileBrowser =
+    activeTab === "overview" && showFileBrowserInCode && gpuiDrawsFileBrowser();
+  const changesRevision = useChangesRevision(
+    workspace?.id,
+    gpuiActive && (activeTab === "changes" || gpuiFileBrowser),
+  );
+  const [scrollToCommitId, setScrollToCommitId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!logsEnabled && activeTab === "logs") {
@@ -1102,11 +1152,135 @@ export const ShowWorkspace = ({
   const handleStartAgentReview = (prompt: string, agent?: string) =>
     createAgentWithReview(prompt, "acceptEdits", "AI Review", agent);
 
+  // Display branch name as title: workspace branch if available, otherwise main repo branch
+  const branchTitle = workspace?.branch_name || mainRepoBranch || "main";
+  const hasSyncChanges =
+    !!syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0);
+  const homeRebaseTooltip = homeRebasing
+    ? "Rebasing..."
+    : `Rebase ${branchTitle} onto ${defaultBranch} (${homeRepoTargetAheadCount} new commit${
+        homeRepoTargetAheadCount === 1 ? "" : "s"
+      })`;
+  const mergeBlocked = rebasing || conflictCount > 0;
+  const mergeBlockedTooltip = rebasing
+    ? "Rebasing in progress..."
+    : `Cannot merge: ${conflictCount} conflict${
+        conflictCount === 1 ? "" : "s"
+      } detected`;
+  // GPUI draws the Code, Commits, Changes and Logs tabs, with the terminal
+  // pane below them.
+  const gpuiCode =
+    (activeTab === "overview" &&
+      (!showFileBrowserInCode || gpuiDrawsFileBrowser())) ||
+    activeTab === "commits" ||
+    (activeTab === "changes" && !reviewSubView.showBrowser) ||
+    activeTab === "logs";
+  const committedToggle =
+    !!workspace && workspace.branch_name !== defaultTargetBranch;
+  const sourceBranch = workspace?.branch_name ?? HOME_MOVE_ENDPOINT;
+  const gpuiFramed = useGpuiWorkspaceScreen({
+    active: gpuiActive && !!workingDirectory && !!effectiveRepoPath,
+    parts: gpuiParts,
+    route: {
+      repoPath: effectiveRepoPath,
+      workspaceId: workspace?.id ?? null,
+      homeBranch: mainRepoBranch ?? "",
+      tab: activeTab as GpuiWorkspaceTab,
+      showBrowser: reviewSubView.showBrowser,
+      retargeting: rebasing,
+      refreshing: refreshingFiles,
+      code: gpuiCode,
+      scrollToCommit: activeTab === "commits" ? scrollToCommitId : null,
+      frameHeight: gpuiFrameHeight,
+      showCommitted: committedToggle ? showCommittedChanges : null,
+      moveTargets:
+        changeFilesMove?.targets.filter((t) => t.branch !== sourceBranch) ?? [],
+      changesRevision,
+      reviewSwitcher: reviewSubView.switcherEnabled,
+      logsSource: activeTab === "logs" ? logsSource : null,
+      logsKey,
+      terminal: gpuiTerminal?.route ?? null,
+      fileBrowser:
+        activeTab === "overview" &&
+        showFileBrowserInCode &&
+        gpuiDrawsFileBrowser()
+          ? {
+              selectedFile: initialSelectedFileForBrowser,
+              expandedDir: initialExpandedDir,
+            }
+          : null,
+      remoteChrome: gpuiRemote?.chrome ?? null,
+    },
+    handlers: {
+      setTab: setActiveTab,
+      contentHeight: (height) => onGpuiContentHeight?.(height),
+      openEntry: ({ name, isDirectory }) =>
+        handleOverviewEntryClick({
+          name,
+          is_directory: isDirectory,
+        } as DirectoryEntry),
+      openFilePicker: onOpenFilePicker,
+      openCommit: (changeId) => {
+        setScrollToCommitId(changeId);
+        setActiveTab("commits");
+      },
+      navigateToWorkspace: onNavigateToWorkspace,
+      sessionCreated: onSessionCreated,
+      commitScrolled: () => setScrollToCommitId(null),
+      moveCommitToNew: onMoveCommitToNewWorkspace
+        ? (commit) => onMoveCommitToNewWorkspace(commit, workspace)
+        : undefined,
+      moveCommitToExisting: onMoveCommitToExistingWorkspace
+        ? (commit) => onMoveCommitToExistingWorkspace(commit, workspace)
+        : undefined,
+      commitStashed: onCommitStashed,
+      changedFiles: handleChangedFilesUpdate,
+      changesRefreshing: handleRefreshingChange,
+      moveFiles: changeFilesMove?.requestMove,
+      moveFilesToNew: onMoveFilesToNewWorkspace
+        ? (files) => onMoveFilesToNewWorkspace(files, workspace)
+        : undefined,
+      showCommitted: committedToggle ? setShowCommittedChanges : undefined,
+      startReview: handleStartAgentReview,
+      sendReview: handleCreateAgentWithReview,
+      closeFileBrowser: () => setShowFileBrowserInCode(false),
+      sendAgentComment: handleSendAgentReviewCommentToAgent,
+      sendLogsToAgent: handleSendLogsToAgent,
+      terminal: gpuiTerminal?.field,
+      remote: gpuiRemote?.press,
+      reviewSubView: reviewSubView.select,
+      openBranchSwitcher: onOpenBranchSwitcher,
+      stack: onCreateStackedWorkspace,
+      merge: onOpenMergePreview,
+      selectTarget: (branch) => void handleTargetBranchSelect(branch),
+      viewFullPrompt: (promptId) => onViewFullPrompt?.(promptId),
+      deleteWorkspace:
+        workspace && onDeleteWorkspace
+          ? () => onDeleteWorkspace(workspace)
+          : undefined,
+    },
+  });
+  useEffect(() => {
+    onGpuiFramedChange?.(gpuiFramed);
+  }, [gpuiFramed, onGpuiFramedChange]);
+  useEffect(() => () => onGpuiFramedChange?.(false), [onGpuiFramedChange]);
+  const gpuiDrawsCode = gpuiFramed && gpuiCode;
+  useEffect(() => {
+    if (!gpuiDrawsCode) onGpuiContentHeight?.(null);
+  }, [gpuiDrawsCode, onGpuiContentHeight]);
+  // GPUI draws the header and tab row (the Browser view's address bar
+  // included); React keeps them mounted but hidden, so the parts they
+  // publish stay current.
+  const gpuiTabRow = gpuiFramed;
+
   const executionPanel = workingDirectory ? (
     <div className="flex flex-col h-full">
       <div
         data-testid="workspace-tab-row"
-        className="flex-shrink-0 bg-background px-4 py-2 border-b border-border flex items-center gap-3"
+        className={cn(
+          "flex-shrink-0 bg-background px-4 py-2 border-b border-border flex items-center gap-3",
+          gpuiTabRow && "hidden",
+        )}
       >
         <div className="flex items-center gap-2 flex-shrink-0">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1191,14 +1365,17 @@ export const ShowWorkspace = ({
       <div className="flex-1 overflow-auto">
         {activeTab === "overview" ? (
           showFileBrowserInCode ? (
-            <FileBrowser
-              workspace={workspace}
-              repoPath={effectiveRepoPath}
-              initialSelectedFile={initialSelectedFileForBrowser}
-              initialExpandedDir={initialExpandedDir}
-              onBack={() => setShowFileBrowserInCode(false)}
-              onCreateAgentWithReview={handleCreateAgentWithReview}
-            />
+            // GPUI draws it; React's would save a stale review behind it.
+            !gpuiDrawsCode && (
+              <FileBrowser
+                workspace={workspace}
+                repoPath={effectiveRepoPath}
+                initialSelectedFile={initialSelectedFileForBrowser}
+                initialExpandedDir={initialExpandedDir}
+                onBack={() => setShowFileBrowserInCode(false)}
+                onCreateAgentWithReview={handleCreateAgentWithReview}
+              />
+            )
           ) : (
             <div className="flex h-full">
               {/* LEFT: Files + README */}
@@ -1490,16 +1667,14 @@ export const ShowWorkspace = ({
     </div>
   );
 
-  // Display branch name as title: workspace branch if available, otherwise main repo branch
-  const branchTitle = workspace?.branch_name || mainRepoBranch || "main";
-  const hasSyncChanges =
-    !!syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0);
-
   return (
-    <>
+    <GpuiPartsProvider registry={gpuiParts.registry}>
       <div className="h-full w-full flex flex-col bg-background">
         <div
-          className="border-b p-2 flex flex-col gap-1 flex-shrink-0"
+          className={cn(
+            "border-b p-2 flex flex-col gap-1 flex-shrink-0",
+            gpuiFramed && "hidden",
+          )}
           data-testid="show-workspace-header"
         >
           {/* Row 1: Branch name. Wraps so the actions drop to a second row
@@ -1605,11 +1780,7 @@ export const ShowWorkspace = ({
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {homeRebasing
-                                  ? "Rebasing..."
-                                  : `Rebase ${branchTitle} onto ${defaultBranch} (${homeRepoTargetAheadCount} new commit${
-                                      homeRepoTargetAheadCount === 1 ? "" : "s"
-                                    })`}
+                                {homeRebaseTooltip}
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -1795,14 +1966,8 @@ export const ShowWorkspace = ({
                         </Button>
                       </div>
                     </TooltipTrigger>
-                    {(rebasing || conflictCount > 0) && (
-                      <TooltipContent>
-                        {rebasing
-                          ? "Rebasing in progress..."
-                          : `Cannot merge: ${conflictCount} conflict${
-                              conflictCount === 1 ? "" : "s"
-                            } detected`}
-                      </TooltipContent>
+                    {mergeBlocked && (
+                      <TooltipContent>{mergeBlockedTooltip}</TooltipContent>
                     )}
                   </Tooltip>
                 </TooltipProvider>
@@ -1944,6 +2109,6 @@ export const ShowWorkspace = ({
           </div>
         </div>
       </div>
-    </>
+    </GpuiPartsProvider>
   );
 };

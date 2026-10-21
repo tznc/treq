@@ -1,0 +1,737 @@
+//! Full-window screens drawn by GPUI in place of the webview.
+//!
+//! Each screen reads and changes the app's state through the backend itself
+//! (a [`Host`], faked in tests). React only routes: it pushes a
+//! [`ScreenSnapshot`] with the `gpui_screen_update` command saying which
+//! screen shows and for what (a tab, a repository, a workspace), and GPUI
+//! draws it where the webview would be, leaving the webview out of the frame
+//! (hidden, with React still running in it). What a screen leaves to React
+//! (closing it, flows not ported yet) goes back to the window's webview as
+//! `gpui-screen-action` events; what it changed itself goes as native events
+//! (`native::NativeEvent`), so React's caches follow.
+//!
+//! React keeps drawing its UI too, so pushing `null` (for a screen or dialog
+//! GPUI does not draw yet) brings the webview back with React's version.
+
+use std::{rc::Rc, sync::Arc};
+
+use serde::{Deserialize, Serialize};
+use tauri::{Webview, Wry};
+use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Entity, Window};
+
+pub(super) use changes_data::ChangesHost;
+pub use modal::Modal;
+pub(super) use modal::ModalOpen;
+pub use terminal::TERMINAL_CONTEXT;
+pub(super) use workspace_data::WorkspaceHost;
+
+use super::{
+  popup::{PopupRequest, PopupSink},
+  theme,
+};
+
+pub mod account_data;
+mod change_move;
+mod changes;
+mod changes_data;
+mod changes_review;
+mod changes_threads;
+pub(super) mod checklist;
+mod code;
+mod code_data;
+mod commits;
+mod commits_data;
+mod environment;
+mod file_browser;
+mod file_browser_data;
+pub(super) mod file_picker;
+mod github;
+mod github_data;
+mod highlight;
+pub(super) mod launch_data;
+mod linear;
+mod linear_data;
+mod logs;
+mod logs_data;
+mod merge;
+mod merge_queue;
+mod merge_queue_data;
+mod modal;
+mod onboarding;
+pub(super) use onboarding::open_repo_at;
+mod onboarding_remote;
+mod pr_review;
+mod pr_review_data;
+mod remote;
+pub(super) mod remote_chrome;
+mod remote_data;
+mod rename_dialog;
+mod settings;
+mod settings_data;
+mod terminal;
+mod terminal_data;
+mod terminal_emu;
+mod terminal_lightbox;
+mod terminal_send;
+mod workspace;
+pub(super) mod workspace_data;
+mod workspace_deletion;
+mod workspace_dialog;
+mod workspace_dialog_data;
+mod workspace_modal;
+pub(super) mod workspace_ops;
+
+#[cfg(test)]
+mod tests;
+
+/// Event React listens to on its own webview window.
+pub const ACTION_EVENT: &str = "gpui-screen-action";
+
+/// Set to show React's screens instead of GPUI's, to compare the two.
+pub const WEB_UI_ENV: &str = "TREQ_WEB_UI";
+
+/// What the screen shows, and the theme to draw it in.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenSnapshot {
+  /// React's resolved theme, which can differ from the OS appearance.
+  pub dark: bool,
+  /// The remote dialogs open over the screen.
+  #[serde(default)]
+  pub remote: remote::Route,
+  #[serde(flatten)]
+  pub view: View,
+  /// The Dashboard dialog open over the screen.
+  #[serde(default)]
+  pub modal: Option<workspace_modal::ModalRoute>,
+  /// The remote repository the window shows; absent for a local one. The
+  /// backend sends what the screens read and change in it over SSH.
+  #[serde(default)]
+  pub repository: Option<super::remote_repo::RemoteRepository>,
+}
+
+/// One screen's data, tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum View {
+  /// No repository open: open one, or check the required tools.
+  Onboarding(onboarding::Route),
+  Settings(settings::Route),
+  /// The workspace view's header and tab row, with the webview below.
+  Workspace(Box<workspace_data::Route>),
+  /// The commits and files a workspace merges, and the merge.
+  MergePreview(merge::Route),
+  /// The repository's Linear issues and projects.
+  Linear(linear_data::Route),
+  /// `GitHubPanel`'s issues and pull requests.
+  Github(github_data::Route),
+  /// A GitHub pull request's diff, reviewed and submitted to GitHub.
+  PrReview(pr_review::Route),
+  /// The GitHub panel on its Merge Queue tab.
+  MergeQueue(merge_queue::Route),
+}
+
+/// What a click on a screen asks React to do, tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ScreenAction {
+  OpenRepo,
+  OpenRemote,
+  RecheckPrerequisites,
+  OpenUrl {
+    url: String,
+  },
+  /// A control's new value; `field` names it, as in `"app.theme"`.
+  Field {
+    field: String,
+    value: serde_json::Value,
+  },
+  /// A slider released at `value`.
+  Commit {
+    field: String,
+    value: serde_json::Value,
+  },
+  /// A button; `id` names it, as in `"settings.save"`.
+  Press {
+    id: String,
+  },
+}
+
+/// Where a screen sends its actions.
+pub type ActionSink = Rc<dyn Fn(ScreenAction, &mut App)>;
+
+/// Everything the screens drawn from the backend ask of it; faked in tests.
+pub trait Host:
+  onboarding::OnboardingHost
+  + settings_data::SettingsHost
+  + merge::MergeHost
+  + merge_queue_data::MergeQueueHost
+  + pr_review_data::PrReviewHost
+  + terminal_data::TerminalHost
+  + modal::ModalsHost
+  + remote_data::RemoteHost
+  + workspace_dialog_data::WorkspaceDialogHost
+  + linear_data::LinearHost
+  + github_data::GithubHost
+{
+}
+
+impl<T> Host for T where
+  T: onboarding::OnboardingHost
+    + settings_data::SettingsHost
+    + merge::MergeHost
+    + merge_queue_data::MergeQueueHost
+    + pr_review_data::PrReviewHost
+    + terminal_data::TerminalHost
+    + modal::ModalsHost
+    + remote_data::RemoteHost
+    + workspace_dialog_data::WorkspaceDialogHost
+    + linear_data::LinearHost
+    + github_data::GithubHost
+{
+}
+
+/// The GPUI view for whichever screen React pushed last.
+pub struct Screen {
+  snapshot: ScreenSnapshot,
+  sink: ActionSink,
+  /// React, for what the screen does not run itself.
+  react: ActionSink,
+  popups: PopupSink,
+  /// The window's webview, which a screen may frame part of itself around.
+  webview: Option<Webview<Wry>>,
+  host: Arc<dyn Host>,
+  /// Screens with state of their own (text being edited, open dropdowns),
+  /// kept while React keeps sending them.
+  onboarding: Option<Entity<onboarding::OnboardingView>>,
+  settings: Option<Entity<settings::SettingsView>>,
+  workspace: Option<Entity<workspace::WorkspaceView>>,
+  merge: Option<Entity<merge::MergeView>>,
+  linear: Option<Entity<linear::LinearView>>,
+  github: Option<Entity<github::GithubView>>,
+  pr_review: Option<Entity<pr_review::PrReviewView>>,
+  merge_queue: Option<Entity<merge_queue::MergeQueueView>>,
+  /// The dialog drawn over the screen, whichever it is, and its views.
+  modal: Option<Modal>,
+  agent_prompt: Option<Entity<modal::agent_prompt::AgentPromptView>>,
+  prompt_history: Option<Entity<modal::prompt_history::PromptHistoryView>>,
+  stash: Option<Entity<modal::stash::StashView>>,
+  /// The remote dialogs, while one is open.
+  remote: Option<Entity<remote::RemoteView>>,
+  /// The dialog drawn over the screen, while React keeps it open.
+  workspace_modal: Option<workspace_modal::OpenModal>,
+  /// Cmd+P's "Jump to File", while the window model keeps it open.
+  file_picker: Option<(file_picker::Scope, Entity<file_picker::FilePicker>)>,
+  _file_picker: Option<gpui::Subscription>,
+}
+
+impl Screen {
+  pub fn new(
+    snapshot: ScreenSnapshot,
+    react: ActionSink,
+    popups: PopupSink,
+    webview: Option<Webview<Wry>>,
+    host: Arc<dyn Host>,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    // What the screen runs itself, the rest going on to React.
+    let react_for_self = react.clone();
+    let screen = cx.weak_entity();
+    let sink: ActionSink = Rc::new(move |action, cx| {
+      if !Screen::runs(&action) {
+        return react(action, cx);
+      }
+      let (screen, react) = (screen.clone(), react.clone());
+      cx.defer(move |cx| {
+        let ran = screen
+          .update(cx, |screen, cx| screen.run(&action, cx))
+          .unwrap_or(false);
+        if !ran {
+          react(action, cx);
+        }
+      });
+    });
+    Self {
+      snapshot,
+      sink,
+      react: react_for_self,
+      popups,
+      webview,
+      host,
+      onboarding: None,
+      settings: None,
+      workspace: None,
+      merge: None,
+      linear: None,
+      github: None,
+      pr_review: None,
+      merge_queue: None,
+      modal: None,
+      agent_prompt: None,
+      prompt_history: None,
+      stash: None,
+      remote: None,
+      workspace_modal: None,
+      file_picker: None,
+      _file_picker: None,
+    }
+  }
+
+  /// Opens "Jump to File" on `scope`, or closes it for `None`. A pick goes
+  /// out as `filePicker.select` with the checkout-relative path, a dismissal
+  /// as `filePicker.close`.
+  pub fn set_file_picker(&mut self, scope: Option<file_picker::Scope>, cx: &mut Context<Self>) {
+    if self.file_picker.as_ref().map(|(s, _)| s) == scope.as_ref() {
+      return;
+    }
+    self._file_picker = None;
+    self.file_picker = scope.map(|scope| {
+      let host: Arc<dyn code_data::CodeHost> = self.host.clone();
+      let dark = self.snapshot.dark;
+      let picker = cx.new(|cx| file_picker::FilePicker::new(host, scope.clone(), dark, cx));
+      let sink = self.sink.clone();
+      self._file_picker = Some(cx.subscribe(
+        &picker,
+        move |_, _, event: &file_picker::FilePickerEvent, cx| {
+          let action = match event {
+            file_picker::FilePickerEvent::Selected(path) => ScreenAction::Field {
+              field: "filePicker.select".into(),
+              value: path.clone().into(),
+            },
+            file_picker::FilePickerEvent::Dismissed => ScreenAction::Press {
+              id: "filePicker.close".into(),
+            },
+          };
+          sink(action, cx);
+        },
+      ));
+      (scope, picker)
+    });
+    cx.notify();
+  }
+
+  /// Draws `modal` over the screen, or closes the open one for `None`. The
+  /// dialog's own state (typed text, the selection) lasts while React keeps
+  /// sending the same kind of dialog.
+  pub fn set_modal(&mut self, modal: Option<Modal>, cx: &mut Context<Self>) {
+    if self.modal == modal {
+      return;
+    }
+    cx.set_global(ModalOpen(modal.is_some()));
+    self.modal = modal;
+    cx.notify();
+  }
+
+  pub fn snapshot(&self) -> &ScreenSnapshot {
+    &self.snapshot
+  }
+
+  /// Whether the screen may run `action` itself ([`Screen::run`]).
+  fn runs(action: &ScreenAction) -> bool {
+    matches!(action, ScreenAction::Field { field, .. } if field == "workspaceDeletion.delete")
+  }
+
+  /// Runs what Dashboard's handlers ran for the screen's dialogs; false
+  /// leaves `action` to React.
+  fn run(&mut self, action: &ScreenAction, cx: &mut Context<Self>) -> bool {
+    let ScreenAction::Field { field, value } = action else {
+      return false;
+    };
+    match (field.as_str(), value.as_i64(), &self.snapshot.modal) {
+      (
+        "workspaceDeletion.delete",
+        Some(id),
+        Some(workspace_modal::ModalRoute::WorkspaceDeletion(route)),
+      ) if self.host.acts_locally(&route.repo_path) => {
+        // The dialog closes first, as `handleDelete` runs after it.
+        (self.react_sink())(
+          ScreenAction::Press {
+            id: "workspaceDeletion.close".into(),
+          },
+          cx,
+        );
+        self.delete_workspace(route.repo_path.clone(), id, cx);
+        true
+      }
+      _ => false,
+    }
+  }
+
+  /// `handleDelete`: asks, deletes and closes the workspace's terminals.
+  fn delete_workspace(&mut self, repo_path: String, id: i64, cx: &mut Context<Self>) {
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let removed = cx
+        .background_spawn(async move {
+          let workspace = code_data::CodeHost::workspaces(&*host, &repo_path)
+            .ok()?
+            .into_iter()
+            .find(|w| w.id == id)?;
+          let workspace = workspace_ops::Removed::of(&workspace);
+          workspace_ops::delete(&*host, &workspace).then_some(workspace)
+        })
+        .await;
+      if let Some(workspace) = removed {
+        let _ = this.update(cx, |screen, cx| screen.close_terminals(workspace.path, cx));
+      }
+    })
+    .detach();
+  }
+
+  /// Closes the terminals of a workspace GPUI removed.
+  pub fn close_terminals(&mut self, path: String, cx: &mut Context<Self>) {
+    self.terminal_command("closeWorkspace", Some(path), cx);
+  }
+
+  /// Gives the workspace's terminal pane a command of kind `kind`, as
+  /// React's `terminalPane()` handle does.
+  pub fn terminal_command(&mut self, kind: &str, dir: Option<String>, cx: &mut Context<Self>) {
+    if let Some(workspace) = &self.workspace {
+      workspace.update(cx, |workspace, cx| {
+        workspace.terminal_command(kind, dir, cx)
+      });
+    }
+  }
+
+  /// Where the screen's own actions go: through [`Screen::run`] to React.
+  fn react_sink(&self) -> ActionSink {
+    self.react.clone()
+  }
+
+  /// The remote repository's access is cut off: the window dims behind
+  /// `remote-cutoff-overlay`.
+  pub fn cut_off(&self) -> bool {
+    match &self.snapshot.view {
+      View::Workspace(route) => route.remote_chrome.as_ref().is_some_and(|r| r.cut_off),
+      _ => false,
+    }
+  }
+
+  pub fn palette(&self) -> super::theme::Palette {
+    super::theme::palette(self.snapshot.dark)
+  }
+
+  pub fn set_snapshot(&mut self, snapshot: ScreenSnapshot, cx: &mut Context<Self>) {
+    if self.snapshot != snapshot {
+      self.snapshot = snapshot;
+      cx.notify();
+    }
+  }
+}
+
+/// Context every screen draws with.
+pub struct Ctx<'a> {
+  pub palette: theme::Palette,
+  pub sink: &'a ActionSink,
+}
+
+impl Ctx<'_> {
+  /// A click handler that sends `action`.
+  pub fn send(&self, action: ScreenAction) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) {
+    let sink = self.sink.clone();
+    move |_, _, cx| sink(action.clone(), cx)
+  }
+}
+
+impl Render for Screen {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let dark = self.snapshot.dark;
+    if !matches!(self.snapshot.view, View::Onboarding(_)) {
+      self.onboarding = None;
+    }
+    if !matches!(self.snapshot.view, View::Settings(_)) {
+      self.settings = None;
+    }
+    if !matches!(self.snapshot.view, View::Workspace(_)) {
+      self.workspace = None;
+    }
+    if !matches!(self.snapshot.view, View::MergePreview(_)) {
+      self.merge = None;
+    }
+    if !matches!(self.snapshot.view, View::Linear(_)) {
+      self.linear = None;
+    }
+    if !matches!(self.snapshot.view, View::Github(_)) && self.github.take().is_some() {
+      // A tooltip the view showed would outlive it.
+      (self.popups)(PopupRequest::HideTooltip, cx);
+    }
+    if !matches!(self.snapshot.view, View::PrReview(_)) {
+      self.pr_review = None;
+    }
+    if !matches!(self.snapshot.view, View::MergeQueue(_)) {
+      self.merge_queue = None;
+    }
+    match &self.snapshot.modal {
+      None => self.workspace_modal = None,
+      Some(route) => match &self.workspace_modal {
+        Some(open) if open.is_for(route) => open.update(route, dark, cx),
+        _ => {
+          let host: Arc<dyn workspace_dialog_data::WorkspaceDialogHost> = self.host.clone();
+          self.workspace_modal = Some(workspace_modal::OpenModal::open(
+            route,
+            host,
+            self.sink.clone(),
+            dark,
+            cx,
+          ));
+        }
+      },
+    }
+    let workspace_modal = self.workspace_modal.as_ref().filter(|open| open.shown(cx));
+    // The webview is a window of its own; a dialog over it must hide it.
+    let covered = workspace_modal.is_some() || self.file_picker.is_some();
+    let workspace_modal = workspace_modal.map(workspace_modal::OpenModal::element);
+    let modal = self.modal_view(dark, cx);
+    let ctx = Ctx {
+      palette: theme::palette(dark),
+      sink: &self.sink,
+    };
+    let body = match &self.snapshot.view {
+      View::Onboarding(route) => {
+        let route = route.clone();
+        match &self.onboarding {
+          Some(view) => {
+            view.update(cx, |view, cx| {
+              view.set_dark(dark, cx);
+              view.set_route(route, cx);
+            });
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink) = (self.host.clone(), self.sink.clone());
+            let view = cx.new(|cx| {
+              let mut view = onboarding::OnboardingView::new(host, sink, dark, cx);
+              view.set_route(route, cx);
+              view
+            });
+            self.onboarding = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Settings(route) => {
+        let route = route.clone();
+        match &self.settings {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view =
+              cx.new(|cx| settings::SettingsView::new(route, host, sink, dark, popups, cx));
+            self.settings = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Workspace(route) => {
+        let route = (**route).clone();
+        match &self.workspace {
+          Some(view) => {
+            view.update(cx, |view, cx| {
+              view.set_covered(covered, cx);
+              view.set_route(route, dark, cx)
+            });
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let webview = self.webview.clone();
+            let view = cx.new(|cx| {
+              workspace::WorkspaceView::new(route, host, sink, dark, popups, webview, cx)
+            });
+            view.update(cx, |view, cx| view.set_covered(covered, cx));
+            self.workspace = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::MergePreview(route) => {
+        let route = route.clone();
+        match &self.merge {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink) = (self.host.clone(), self.sink.clone());
+            let view = cx.new(|cx| merge::MergeView::new(route, host, sink, dark, cx));
+            self.merge = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Linear(route) => {
+        let route = route.clone();
+        match &self.linear {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view = cx.new(|cx| linear::LinearView::new(route, host, sink, dark, popups, cx));
+            self.linear = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::Github(route) => {
+        let route = route.clone();
+        match &self.github {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let host: Arc<dyn github_data::GithubHost> = self.host.clone();
+            let (sink, popups) = (self.sink.clone(), self.popups.clone());
+            let view = cx.new(|cx| github::GithubView::new(route, host, sink, dark, popups, cx));
+            self.github = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::PrReview(route) => {
+        let route = route.clone();
+        match &self.pr_review {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view =
+              cx.new(|cx| pr_review::PrReviewView::new(route, host, sink, dark, popups, cx));
+            self.pr_review = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+      View::MergeQueue(route) => {
+        let route = route.clone();
+        match &self.merge_queue {
+          Some(view) => {
+            view.update(cx, |view, cx| view.set_route(route, dark, cx));
+            view.clone().into_any_element()
+          }
+          None => {
+            let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+            let view =
+              cx.new(|cx| merge_queue::MergeQueueView::new(route, host, sink, dark, popups, cx));
+            self.merge_queue = Some(view.clone());
+            view.into_any_element()
+          }
+        }
+      }
+    };
+    // A dialog over the whole window would leave the webview on top, so the
+    // workspace stops framing it.
+    let remote_open = self.snapshot.remote.is_open();
+    if let Some(workspace) = &self.workspace {
+      workspace.update(cx, |workspace, cx| {
+        workspace.set_covered(remote_open || covered, cx)
+      });
+    }
+    let remote = if remote_open {
+      let route = self.snapshot.remote.clone();
+      Some(match &self.remote {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone()
+        }
+        None => {
+          let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
+          let view = cx.new(|cx| {
+            let mut view = remote::RemoteView::new(host, sink, popups, dark);
+            // The cloud card draws Rust's account.
+            cx.observe_global::<account_data::Account>(|_, cx| cx.notify())
+              .detach();
+            view.set_route(route, dark, cx);
+            view
+          });
+          self.remote = Some(view.clone());
+          view
+        }
+      })
+    } else {
+      self.remote = None;
+      None
+    };
+    div()
+      .size_full()
+      .bg(ctx.palette.background)
+      .text_color(ctx.palette.foreground)
+      .font_family(theme::SANS_FONT)
+      // A mouse-down blurs the focused input, as in a browser; an input
+      // under the pointer takes focus again in the bubble phase.
+      .capture_any_mouse_down(|_, window, cx| window.blur(cx))
+      .child(body)
+      .children(remote)
+      .children(workspace_modal)
+      .children(modal)
+      .children(self.file_picker.as_ref().map(|(_, picker)| picker.clone()))
+  }
+}
+
+impl Screen {
+  /// The open dialog's view, kept while the same kind stays open.
+  fn modal_view(&mut self, dark: bool, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    let env = || modal::Env {
+      host: self.host.clone(),
+      react: self.sink.clone(),
+      popups: self.popups.clone(),
+    };
+    let route = self.modal.clone();
+    if !matches!(route, Some(Modal::AgentPrompt(_))) && self.agent_prompt.take().is_some() {
+      // A tooltip the dialog showed would outlive it.
+      (self.popups)(PopupRequest::HideTooltip, cx);
+    }
+    if !matches!(route, Some(Modal::PromptHistory(_))) {
+      self.prompt_history = None;
+    }
+    if !matches!(route, Some(Modal::Stash(_))) {
+      self.stash = None;
+    }
+    match route? {
+      Modal::AgentPrompt(route) => Some(match &self.agent_prompt {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let env = env();
+          let view = cx.new(|cx| modal::agent_prompt::AgentPromptView::new(env, route, dark, cx));
+          self.agent_prompt = Some(view.clone());
+          view.into_any_element()
+        }
+      }),
+      Modal::PromptHistory(route) => Some(match &self.prompt_history {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let env = env();
+          let view =
+            cx.new(|cx| modal::prompt_history::PromptHistoryView::new(env, route, dark, cx));
+          self.prompt_history = Some(view.clone());
+          view.into_any_element()
+        }
+      }),
+      Modal::Stash(route) => Some(match &self.stash {
+        Some(view) => {
+          view.update(cx, |view, cx| view.set_route(route, dark, cx));
+          view.clone().into_any_element()
+        }
+        None => {
+          let env = env();
+          let view = cx.new(|cx| modal::stash::StashView::new(env, route, dark, cx));
+          self.stash = Some(view.clone());
+          view.into_any_element()
+        }
+      }),
+    }
+  }
+}

@@ -28,7 +28,7 @@ pub mod local_db;
 pub mod lock_ext;
 pub mod notify_dispatch;
 #[cfg(feature = "gui")]
-mod open_new_window;
+pub(crate) mod open_new_window;
 #[cfg(feature = "gui")]
 pub mod pr_status;
 pub mod pty;
@@ -78,6 +78,9 @@ mod tauri_test_bridge;
 #[cfg(feature = "tauri-test")]
 pub(crate) mod test_pty_events;
 
+#[cfg(feature = "gui")]
+#[cfg(feature = "tauri-test")]
+use crate::commands::CloudAction;
 #[cfg(feature = "gui")]
 #[cfg(feature = "tauri-test")]
 use crate::commands::CutoffReasonDto;
@@ -169,6 +172,31 @@ fn resolve_menu_target_label(app: &AppHandle) -> Option<String> {
     .and_then(|state| state.window_last_focused_at.lock().ok().map(|g| g.clone()))
     .unwrap_or_default();
   open_new_window::resolve_menu_event_window_label(&focused, &last_focused, &existing)
+}
+
+/// Hands a menu event for window `label` to its GPUI window model; false
+/// when React handles it.
+#[cfg(feature = "gui")]
+fn gpui_menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<String>) -> bool {
+  #[cfg(feature = "gpui-shell")]
+  #[cfg(desktop)]
+  if gpui_shell::is_enabled(app) {
+    return gpui_shell::menu_event(app, label, event, payload);
+  }
+  let _ = (app, label, event, payload);
+  false
+}
+
+/// A menu event for the focused window: its GPUI window model's, else
+/// React's (`emit_to_focused`).
+#[cfg(feature = "gui")]
+fn menu_to_focused(app: &AppHandle, event: &str) {
+  let Some(label) = resolve_menu_target_label(app) else {
+    return;
+  };
+  if !gpui_menu_event(app, &label, event, None) {
+    let _ = app.emit_to(EventTarget::webview_window(&label), event, ());
+  }
 }
 
 /// Emits an event only to the focused webview window.
@@ -278,11 +306,18 @@ fn pick_folder_and_notify(app: AppHandle, label: String) {
           return;
         }
       };
-      let _ = app.emit_to(
-        EventTarget::webview_window(&label),
+      if !gpui_menu_event(
+        &app,
+        &label,
         "menu-repository-path-selected",
-        path,
-      );
+        Some(path.clone()),
+      ) {
+        let _ = app.emit_to(
+          EventTarget::webview_window(&label),
+          "menu-repository-path-selected",
+          path,
+        );
+      }
       open_new_window::OPEN_REPO_GATE.end();
     });
 }
@@ -339,17 +374,16 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
           .and_then(Result::ok)
           .unwrap_or(false);
         if !init_ok {
-          emit_to_focused(&app_for_init, "menu-open-in-new-window-invalid", ());
+          menu_to_focused(&app_for_init, "menu-open-in-new-window-invalid");
           open_new_window::OPEN_NEW_WINDOW_GATE.end();
           return;
         }
         let label = open_new_window::new_repo_window_label();
-        let url = open_new_window::new_repo_window_url(&path);
         let title = open_new_window::new_repo_window_title(&path);
         let app_for_window = app_for_init.clone();
         // The GPUI shell builds windows on the main thread.
         let _ = app_for_init.run_on_main_thread(move || {
-          if let Err(err) = open_repo_window(&app_for_window, &label, url, &title) {
+          if let Err(err) = open_repo_window(&app_for_window, &label, Some(path), &title) {
             log::error!("failed to open repo window: {err}");
           }
         });
@@ -358,20 +392,22 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
     });
 }
 
-/// Opens a window showing the React app at `url`: inside the GPUI shell
-/// when it is on (see `gpui_shell`), else as a plain webview window.
+/// Opens a window on repository `repo` (`None`: the start screen): inside
+/// the GPUI shell when it is on (see `gpui_shell`), else as a plain
+/// webview window showing the React app.
 #[cfg(feature = "gui")]
 fn open_repo_window(
   app: &AppHandle,
   label: &str,
-  url: String,
+  repo: Option<String>,
   title: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
   if gpui_shell::is_enabled(app) {
-    return gpui_shell::open_window(app, label, url, title);
+    return gpui_shell::open_window(app, label, repo, title);
   }
+  let url = open_new_window::window_url(repo.as_deref());
   tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(url.into()))
     .title(title)
     .inner_size(1400.0, 900.0)
@@ -464,6 +500,10 @@ pub fn run() {
       if !window.label().starts_with("gpui-popup-") && gpui_shell::is_enabled(window.app_handle()) {
         match event {
           tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
+          tauri::WindowEvent::Focused(true) => {
+            commands::cloud::window_focused(window.app_handle());
+            gpui_shell::window_focused(window.app_handle(), window.label());
+          }
           tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             gpui_shell::place_toasts(window.app_handle(), window.label())
           }
@@ -507,21 +547,8 @@ pub fn run() {
       let db = Database::new(db_path).expect("Failed to open database");
       db.init().expect("Failed to initialize database");
 
-      // Read saved repo path to embed in the window URL (avoids Onboarding flash)
+      // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
-      let window_url = if let Some(ref path) = saved_repo_path {
-        let encoded = urlencoding::encode(path).into_owned();
-        format!("index.html?repo={}", encoded)
-      } else {
-        "index.html".to_string()
-      };
-
-      #[cfg(feature = "gpui-shell")]
-      #[cfg(desktop)]
-      if let Err(err) = gpui_shell::init(app) {
-        log::error!("GPUI shell unavailable, using the webview window: {err}");
-      }
-      open_repo_window(app.handle(), "main", window_url, "Treq - Stacking ADE")?;
 
       // Load cached binary paths and initialize in-memory cache
       let binary_paths = commands::load_cached_binary_paths(&db);
@@ -546,6 +573,13 @@ pub fn run() {
         use tauri::Emitter;
         let review_app = app.handle().clone();
         crate::auto_review::set_emitter(Box::new(move |event| {
+          // Shell windows start the review from Rust.
+          #[cfg(feature = "gpui-shell")]
+          #[cfg(desktop)]
+          if gpui_shell::is_enabled(&review_app) {
+            gpui_shell::launch::auto_review(&review_app, event);
+            return;
+          }
           let _ = review_app.emit("auto-review-triggered", event);
         }));
       }
@@ -579,6 +613,26 @@ pub fn run() {
         &remote_exec_state,
       ));
       app.manage(remote_exec_state);
+      // Only now: a shell window's model reads the database and the binary
+      // caches as soon as the window is made.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if let Err(err) = gpui_shell::init(app) {
+        log::error!("GPUI shell unavailable, using the webview window: {err}");
+      }
+      open_repo_window(
+        app.handle(),
+        "main",
+        saved_repo_path.clone(),
+        "Treq - Stacking ADE",
+      )?;
+      // GPUI shell windows draw the account from Rust, which owns the
+      // Supabase session; without the shell the webview keeps it.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if gpui_shell::is_enabled(app.handle()) {
+        commands::cloud::start(app.handle());
+      }
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
       crate::core::app_setup_script::spawn_run_if_needed(
@@ -602,12 +656,16 @@ pub fn run() {
             match classify_deep_link(&url) {
               // One window only: the sign-in token can be exchanged once.
               DeepLinkKind::AuthCallback => {
-                emit_to_focused(&handle, "deep-link-received", vec![url]);
+                if !commands::cloud::handle_auth_callback(&handle, &url) {
+                  emit_to_focused(&handle, "deep-link-received", vec![url]);
+                }
               }
               DeepLinkKind::Agent => {
                 if let Some(request) = parse_agent_request_from_url(&url) {
                   let response = route_agent_dispatch_request(&handle, &request);
-                  if response.status != "handled" {
+                  if response.status != "handled"
+                    && !agent_runtime::open_window_for_agent_link(&handle, &url)
+                  {
                     log::info!(
                       "agent deep link unmatched repo={} request_id={}",
                       request.repo,
@@ -862,12 +920,12 @@ pub fn run() {
 
         // Handle menu events - emit only to focused window
         app.on_menu_event(move |app, event| match event.id().as_ref() {
-          "dashboard" => emit_to_focused(app, "navigate-to-dashboard", ()),
-          "settings" => emit_to_focused(app, "navigate-to-settings", ()),
+          "dashboard" => menu_to_focused(app, "navigate-to-dashboard"),
+          "settings" => menu_to_focused(app, "navigate-to-settings"),
           "open" => schedule_open_repo(app.clone()),
           "open_new_window" => schedule_open_repo_in_new_window(app.clone()),
-          "open_ssh" => emit_to_focused(app, "menu-open-ssh", ()),
-          "add_repository" => emit_to_focused(app, "menu-add-repository", ()),
+          "open_ssh" => menu_to_focused(app, "menu-open-ssh"),
+          "add_repository" => menu_to_focused(app, "menu-add-repository"),
           "open_web_inspector" =>
           {
             #[cfg(debug_assertions)]
@@ -883,9 +941,9 @@ pub fn run() {
               }
             }
           }
-          "force_rebase_workspace" => emit_to_focused(app, "menu-force-rebase-workspace", ()),
-          "factory_reset" => emit_to_focused(app, "menu-factory-reset", ()),
-          "view_logs" => emit_to_focused(app, "menu-view-logs", ()),
+          "force_rebase_workspace" => menu_to_focused(app, "menu-force-rebase-workspace"),
+          "factory_reset" => menu_to_focused(app, "menu-factory-reset"),
+          "view_logs" => menu_to_focused(app, "menu-view-logs"),
           id => {
             if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
@@ -899,9 +957,13 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       commands::gpui_sidebar_update,
+      commands::gpui_screen_update,
+      commands::gpui_modal_update,
+      commands::gpui_overlay_update,
       commands::gpui_menu_show,
       commands::gpui_menu_hide,
       commands::gpui_toasts_update,
+      commands::gpui_toast_action,
       commands::acknowledge_agent_dispatch,
       commands::detect_editor_apps,
       commands::get_treq_bin_dir,
@@ -1042,6 +1104,11 @@ pub fn run() {
       commands::remote_force_cutoff,
       commands::remote_clear_cutoff,
       commands::remote_cut_off_managed,
+      commands::cloud_account,
+      commands::cloud_sign_out,
+      commands::cloud_exchange_token,
+      commands::cloud_refresh_subscription,
+      commands::cloud_workspace_action,
       commands::remote_set_relay_access_token,
       commands::set_window_repo_path,
       commands::set_window_supporting_repo_paths,

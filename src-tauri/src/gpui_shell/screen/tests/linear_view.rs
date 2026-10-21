@@ -1,0 +1,521 @@
+//! The Linear view (`LinearPanel`) drawn from a faked Linear backend.
+
+use std::sync::Arc;
+
+use gpui::TestAppContext;
+
+use super::*;
+use crate::{
+  gpui_shell::popup::{MenuEntry, PopupRequest},
+  linear::{LinearComment, LinearDocument, LinearIssue, LinearProject, LinearTeam, LinearUser},
+};
+
+/// What the faked Linear API returns.
+#[derive(Default)]
+pub(super) struct Fixture {
+  teams: Vec<LinearTeam>,
+  issues: Vec<LinearIssue>,
+  viewer: Option<LinearUser>,
+  projects: Vec<LinearProject>,
+  documents: Vec<LinearDocument>,
+  /// Comments, by the id of what they are on.
+  comments: Vec<(String, LinearComment)>,
+  /// Whether reading issues fails.
+  failing: bool,
+}
+
+impl linear_data::LinearHost for FakeHost {
+  fn linear_teams(&self, _: &str) -> Result<Vec<LinearTeam>, String> {
+    self.record("read linear teams".into());
+    Ok(self.linear.teams.clone())
+  }
+
+  fn linear_issues(&self, _: &str, team: Option<&str>) -> Result<Vec<LinearIssue>, String> {
+    self.record(format!("read linear issues {team:?}"));
+    if self.linear.failing {
+      return Err("Linear API key is not set".into());
+    }
+    Ok(self.linear.issues.clone())
+  }
+
+  fn linear_viewer(&self, _: &str) -> Result<LinearUser, String> {
+    self.linear.viewer.clone().ok_or_else(|| "no viewer".into())
+  }
+
+  fn linear_projects(&self, _: &str) -> Result<Vec<LinearProject>, String> {
+    self.record("read linear projects".into());
+    Ok(self.linear.projects.clone())
+  }
+
+  fn linear_documents(&self, _: &str, project_id: &str) -> Result<Vec<LinearDocument>, String> {
+    self.record(format!("read linear documents {project_id}"));
+    Ok(self.linear.documents.clone())
+  }
+
+  fn linear_comments(
+    &self,
+    _: &str,
+    of: &linear_data::Commented,
+  ) -> Result<Vec<LinearComment>, String> {
+    self.record(format!("read linear comments {}", of.id()));
+    Ok(
+      self
+        .linear
+        .comments
+        .iter()
+        .filter(|(on, _)| on == of.id())
+        .map(|(_, c)| c.clone())
+        .collect(),
+    )
+  }
+
+  fn linear_prepare_review(
+    &self,
+    _: &str,
+    of: &linear_data::Commented,
+    snapshot: &crate::core::linear_review::LinearReviewSnapshot,
+  ) -> Result<String, String> {
+    self.record(format!(
+      "prepare review {} {} {:?} {} comments",
+      of.target_type(),
+      of.id(),
+      snapshot.title,
+      snapshot.comments.len()
+    ));
+    Ok(format!("/repo/.treq/linear-review/{}", of.id()))
+  }
+
+  fn linear_review_comments(
+    &self,
+    _: &str,
+    of: &linear_data::Commented,
+  ) -> Result<Vec<crate::local_db::AgentReviewComment>, String> {
+    Ok(
+      self
+        .agent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c.target_type == of.target_type() && c.target_id == of.id())
+        .cloned()
+        .collect(),
+    )
+  }
+
+  fn linear_apply_suggestion(&self, _: &str, comment_id: &str) -> Result<(), String> {
+    self.record(format!("apply linear suggestion {comment_id}"));
+    Ok(())
+  }
+}
+
+fn user(id: &str, name: &str) -> LinearUser {
+  LinearUser {
+    id: id.into(),
+    name: name.into(),
+  }
+}
+
+fn issue(id: &str, state: (&str, &str), assignee: Option<LinearUser>) -> LinearIssue {
+  serde_json::from_value(serde_json::json!({
+    "id": id,
+    "identifier": format!("ENG-{id}"),
+    "title": format!("Issue {id}"),
+    "description": "Ship the API.",
+    "state": {"name": state.0, "type": state.1},
+    "labels": ["bug"],
+    "branch_name": format!("eng-{id}"),
+    "parent_id": null,
+    "sub_issue_ids": [],
+    "url": format!("https://linear.app/x/ENG-{id}"),
+    "assignee": assignee,
+    "priority": 2,
+    "priority_label": "High",
+    "project": null,
+  }))
+  .expect("issue")
+}
+
+fn project(id: &str, state: &str) -> LinearProject {
+  serde_json::from_value(serde_json::json!({
+    "id": id,
+    "name": format!("Project {id}"),
+    "description": "The plan.",
+    "state": state,
+    "target_date": "2026-12-01",
+    "progress": 0.25,
+    "url": format!("https://linear.app/p/{id}"),
+    "lead": {"id": "u1", "name": "Ada"},
+  }))
+  .expect("project")
+}
+
+fn comment(id: &str, quote: Option<&str>) -> LinearComment {
+  LinearComment {
+    id: id.into(),
+    body: "Why the API?".into(),
+    user: Some(user("u2", "Bo")),
+    created_at: "2026-10-19T10:00:00Z".into(),
+    quoted_text: quote.map(str::to_string),
+  }
+}
+
+fn review_comment(
+  id: &str,
+  target: (&str, &str),
+  file: &str,
+) -> crate::local_db::AgentReviewComment {
+  serde_json::from_value(serde_json::json!({
+    "id": id, "repo_path": "/repo", "target_type": target.0, "target_id": target.1,
+    "file_path": file, "hunk_id": null, "start_line": 1, "end_line": 1, "side": null,
+    "comment_text": "Say which API", "suggested_replacement": "Ship the REST API.",
+    "status": "open", "source": "local-agent", "created_at": "", "resolved_at": null,
+    "quoted_text": "Ship the API."
+  }))
+  .expect("review comment")
+}
+
+fn linear_route() -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "linear",
+    "dark": false,
+    "repoPath": "/repo",
+  }))
+  .expect("parse")
+}
+
+fn fixture() -> Fixture {
+  Fixture {
+    teams: vec![LinearTeam {
+      id: "t1".into(),
+      name: "Backend".into(),
+      key: "BE".into(),
+    }],
+    issues: vec![
+      issue("1", ("Todo", "unstarted"), Some(user("u1", "Ada"))),
+      issue("2", ("Backlog", "backlog"), Some(user("u2", "Bo"))),
+    ],
+    viewer: Some(user("u1", "Ada")),
+    projects: vec![project("p1", "started"), project("p2", "planned")],
+    documents: vec![LinearDocument {
+      id: "d1".into(),
+      title: "Spec".into(),
+      content: Some("The spec.".into()),
+      url: "https://linear.app/d/d1".into(),
+      updated_at: "2026-10-19T00:00:00Z".into(),
+    }],
+    comments: vec![("1".into(), comment("c1", Some("the API")))],
+    failing: false,
+  }
+}
+
+fn linear_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
+  let host = Arc::new(host);
+  let mut h = Harness::with_host(cx, linear_route(), host.clone());
+  assert!(h.drawn("linear-panel"));
+  (h, host)
+}
+
+fn linear_host() -> FakeHost {
+  FakeHost {
+    linear: fixture(),
+    ..FakeHost::default()
+  }
+}
+
+fn view<T>(h: &mut Harness, f: impl FnOnce(&linear::LinearView) -> T) -> T {
+  h.screen.read_with(&h.cx, |screen, cx| {
+    f(screen.linear.as_ref().expect("linear view").read(cx))
+  })
+}
+
+/// The entries of the menu shown last.
+fn menu(h: &mut Harness) -> Vec<MenuEntry> {
+  h.cx.run_until_parked();
+  match h.popups.borrow().last() {
+    Some(PopupRequest::ShowDropdown { entries, .. } | PopupRequest::ShowMenu { entries, .. }) => {
+      entries.clone()
+    }
+    _ => panic!("no menu is shown"),
+  }
+}
+
+/// Picks `text` in the submenu `submenu` of the menu shown last.
+fn pick_in(h: &mut Harness, submenu: &str, text: &str) {
+  let id = menu(h)
+    .iter()
+    .find_map(|e| match e {
+      MenuEntry::Submenu { text: t, items, .. } if t == submenu => {
+        items.iter().find_map(|i| match i {
+          MenuEntry::Item { id, text: t, .. } if t == text => Some(*id),
+          _ => None,
+        })
+      }
+      _ => None,
+    })
+    .unwrap_or_else(|| panic!("{submenu} › {text} is not in the menu"));
+  h.cx
+    .update(|_, cx| crate::gpui_shell::popup::pick_native(id, cx));
+  h.cx.run_until_parked();
+}
+
+fn field(name: &str, value: serde_json::Value) -> ScreenAction {
+  ScreenAction::Field {
+    field: name.into(),
+    value,
+  }
+}
+
+#[gpui::test]
+fn linear_lists_issues_and_kicks_one_off(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  assert!(host
+    .calls()
+    .contains(&"read linear issues None".to_string()));
+  assert!(host.calls().contains(&"read linear teams".to_string()));
+  assert!(h.drawn("linear-issue-1"));
+  assert!(h.drawn("linear-issue-2"));
+  h.click("linear-kickoff-1");
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent(),
+    [field(
+      "linear.kickoff",
+      serde_json::json!({
+        "id": "1",
+        "identifier": "ENG-1",
+        "url": "https://linear.app/x/ENG-1",
+        "title": "Issue 1",
+        "includeSubissues": false,
+        "sub_issue_ids": [],
+      })
+    )]
+  );
+  // The identifier opens the issue in Linear without expanding the row.
+  h.click("linear-issue-link-1");
+  assert!(host
+    .calls()
+    .contains(&"open https://linear.app/x/ENG-1".to_string()));
+  assert!(view(&mut h, |v| v.expanded.is_empty()));
+}
+
+#[gpui::test]
+fn linear_standard_views_and_filters_narrow_the_list(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, linear_host());
+  h.click("linear-view-my-issues");
+  assert!(h.drawn("linear-issue-1"));
+  assert!(!h.drawn("linear-issue-2"));
+  h.click("linear-view-backlog");
+  assert!(!h.drawn("linear-issue-1"));
+  assert!(h.drawn("linear-issue-2"));
+  h.click("linear-view-all");
+
+  h.click("linear-issues-filter-trigger");
+  let entries = menu(&mut h);
+  assert_eq!(
+    entries[0],
+    MenuEntry::Label {
+      text: "Filter by".into()
+    }
+  );
+  let submenus: Vec<_> = entries
+    .iter()
+    .filter_map(|e| match e {
+      MenuEntry::Submenu { text, .. } => Some(text.as_str()),
+      _ => None,
+    })
+    .collect();
+  assert_eq!(submenus, ["Assignee", "Priority", "Label", "Project"]);
+  pick_in(&mut h, "Assignee", "Bo");
+  assert!(h.drawn("linear-filter-chip-assignee"));
+  assert!(!h.drawn("linear-issue-1"));
+  assert!(h.drawn("linear-issue-2"));
+
+  // The menu shows what is picked.
+  h.click("linear-issues-filter-trigger");
+  let detail = menu(&mut h).iter().find_map(|e| match e {
+    MenuEntry::Submenu { text, detail, .. } if text == "Assignee" => detail.clone(),
+    _ => None,
+  });
+  assert_eq!(detail.as_deref(), Some("Bo"));
+
+  h.click("linear-filter-clear-assignee");
+  assert!(!h.drawn("linear-filter-chip-assignee"));
+  assert!(h.drawn("linear-issue-1"));
+
+  // A filter that matches nothing.
+  h.click("linear-view-my-issues");
+  h.click("linear-issues-filter-trigger");
+  pick_in(&mut h, "Label", "bug");
+  assert!(h.drawn("linear-issue-1"));
+}
+
+#[gpui::test]
+fn linear_team_selector_reads_that_teams_issues(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-team-selector");
+  let entries = menu(&mut h);
+  assert_eq!(
+    entries[0],
+    MenuEntry::Label {
+      text: "Teams".into()
+    }
+  );
+  assert!(matches!(
+    &entries[2],
+    MenuEntry::Item { text, radio: Some(true), .. } if text == "All Teams"
+  ));
+  h.pick("Backend");
+  assert!(host
+    .calls()
+    .contains(&"read linear issues Some(\"BE\")".to_string()));
+  assert_eq!(view(&mut h, |v| v.team.clone()), Some("BE".into()));
+}
+
+#[gpui::test]
+fn linear_kanban_groups_issues_by_state(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, linear_host());
+  h.click("linear-mode-kanban");
+  assert!(h.drawn("linear-kanban-column-Backlog"));
+  assert!(h.drawn("linear-kanban-column-Todo"));
+  assert!(!h.drawn("linear-issue-1"));
+  h.click("linear-kanban-kickoff-2");
+  h.cx.run_until_parked();
+  assert!(matches!(
+    &h.sent()[..],
+    [ScreenAction::Field { field, value }] if field == "linear.kickoff" && value["id"] == "2"
+  ));
+}
+
+#[gpui::test]
+fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.settings = std::sync::Mutex::new(
+    [("/repo:review_agent".to_string(), Some("codex".to_string()))]
+      .into_iter()
+      .collect(),
+  );
+  let (mut h, host) = linear_harness(cx, host);
+  h.click("linear-issue-1");
+  assert!(h.drawn("linear-issue-expanded-1"));
+  assert!(host.calls().contains(&"read linear comments 1".to_string()));
+  assert!(h.drawn("linear-comment-c1"));
+  h.click("linear-start-review-linear_issue-1");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"prepare review linear_issue 1 \"ENG-1 Issue 1\" 1 comments".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  // The review starts in the home repository; React only shows it.
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
+  let launches = host.launches.lock().unwrap().clone();
+  let [(request, true)] = &launches[..] else {
+    panic!("one selected launch: {launches:?}");
+  };
+  assert_eq!(request.workspace_id, None);
+  assert_eq!(request.agent.as_deref(), Some("codex"));
+  assert_eq!(request.session_name.as_deref(), Some("AI Review"));
+  assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
+  let prompt = request.prompt.as_deref().expect("prompt");
+  assert!(prompt.contains("the Linear issue \"ENG-1 Issue 1\" and its 1 comment."));
+  assert!(prompt.contains("/repo/.treq/linear-review/1"));
+  assert!(!view(&mut h, |v| v
+    .starting
+    .contains(&linear_data::Commented::Issue("1".into()))));
+  // Folding it closes the comments.
+  h.click("linear-issue-1");
+  assert!(!h.drawn("linear-issue-expanded-1"));
+}
+
+#[gpui::test]
+fn linear_agent_review_cards_apply_and_resolve(cx: &mut TestAppContext) {
+  let host = linear_host();
+  *host.agent.lock().unwrap() = vec![
+    review_comment("r1", ("linear_issue", "1"), "body.md"),
+    review_comment("r2", ("linear_issue", "1"), "comments/c1.md"),
+  ];
+  let (mut h, host) = linear_harness(cx, host);
+  h.click("linear-issue-1");
+  assert!(h.drawn("linear-agent-review-body"));
+  assert!(h.drawn("linear-agent-apply-r1"));
+  assert!(h.drawn("linear-agent-apply-r2"));
+  h.click("linear-agent-apply-r1");
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let applied = calls
+    .iter()
+    .position(|c| c == "apply linear suggestion r1")
+    .expect("applied");
+  // The issue is read again so the new text shows.
+  assert!(calls[applied..].contains(&"read linear issues None".to_string()));
+  h.click("linear-agent-resolve-r2");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"resolve agent comment r2".to_string()));
+  assert!(!h.drawn("linear-agent-resolve-r2"));
+}
+
+#[gpui::test]
+fn linear_projects_show_details_and_documents(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, linear_host());
+  h.click("linear-section-projects");
+  assert!(h.drawn("linear-projects-section"));
+  assert!(host.calls().contains(&"read linear projects".to_string()));
+  // The first project shows until another is picked.
+  assert!(h.drawn("linear-project-detail"));
+  assert!(host
+    .calls()
+    .contains(&"read linear documents p1".to_string()));
+  assert!(host
+    .calls()
+    .contains(&"read linear comments p1".to_string()));
+  h.click("linear-project-item-p2");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"read linear documents p2".to_string()));
+
+  h.click("linear-project-view-active");
+  assert!(h.drawn("linear-project-item-p1"));
+  assert!(!h.drawn("linear-project-item-p2"));
+
+  h.click("linear-document-item-d1");
+  assert!(h.drawn("linear-document-dialog"));
+  assert!(host
+    .calls()
+    .contains(&"read linear comments d1".to_string()));
+  h.click_backdrop();
+  assert!(!h.drawn("linear-document-dialog"));
+
+  h.click("linear-project-open");
+  assert!(host
+    .calls()
+    .contains(&"open https://linear.app/p/p1".to_string()));
+}
+
+#[gpui::test]
+fn linear_shows_why_issues_did_not_load(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.failing = true;
+  let (mut h, _) = linear_harness(cx, host);
+  assert!(h.drawn("linear-issues-error"));
+  assert!(!h.drawn("linear-no-issues"));
+}
+
+#[gpui::test]
+fn linear_shows_when_no_issues_match(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.linear.issues.clear();
+  let (mut h, _) = linear_harness(cx, host);
+  assert!(h.drawn("linear-no-issues"));
+}
+
+#[test]
+fn linear_capitalizes_project_states() {
+  assert_eq!(linear::capitalize("started"), "Started");
+  assert_eq!(linear::capitalize("in progress"), "In Progress");
+  assert_eq!(linear::capitalize(""), "");
+}

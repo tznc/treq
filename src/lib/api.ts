@@ -1,6 +1,7 @@
 /* eslint-disable max-lines */
 import { invoke } from "@tauri-apps/api/core";
 import type { InstalledSkill, RepoYamlConfig } from "./api-extra";
+import type { RustAccount, RustCloudAction } from "./rust-account";
 import type {
   BranchStatus,
   EditorAppsResponse,
@@ -95,6 +96,33 @@ export const gpuiSidebarUpdate = (
     snapshot,
   });
 
+/** Draws a screen in GPUI in place of this webview; null shows the webview. */
+export const gpuiScreenUpdate = (
+  snapshot: import("./gpui-screen").GpuiScreenSnapshot | null,
+): Promise<void> =>
+  invoke("gpui_screen_update", {
+    windowLabel: currentWindowLabel(),
+    snapshot,
+  });
+
+/** Draws a dialog in GPUI over this window's screen; null closes it. */
+export const gpuiModalUpdate = (
+  modal: import("./gpui-screen").GpuiModal | null,
+): Promise<void> =>
+  invoke("gpui_modal_update", {
+    windowLabel: currentWindowLabel(),
+    modal,
+  });
+
+/** Shows a dialog in GPUI over this whole window; null closes it. */
+export const gpuiOverlayUpdate = (
+  snapshot: import("./gpui-overlay").GpuiOverlaySnapshot | null,
+): Promise<void> =>
+  invoke("gpui_overlay_update", {
+    windowLabel: currentWindowLabel(),
+    snapshot,
+  });
+
 /** Opens a GPUI menu at the last right-click in this window's sidebar. */
 export const gpuiMenuShow = (
   entries: import("./native-context-menu").GpuiMenuEntry[],
@@ -108,6 +136,10 @@ export const gpuiToastsUpdate = (
   toasts: import("../stores/toastStore").GpuiToast[],
 ): Promise<void> =>
   invoke("gpui_toasts_update", { windowLabel: currentWindowLabel(), toasts });
+
+/** Runs the GPUI toast button `id`, once. */
+export const gpuiToastAction = (id: number): Promise<void> =>
+  invoke("gpui_toast_action", { id });
 
 // Database API
 export const getWorkspaces = (repoPath: string): Promise<Workspace[]> =>
@@ -844,3 +876,21 @@ export const listInstalledSkills = (
   repoPath?: string | null,
 ): Promise<InstalledSkill[]> =>
   invoke("list_installed_skills", { repoPath: localRepoPathOrNull(repoPath) });
+
+// The Supabase account Rust owns in the desktop app (`rust-account.ts`).
+
+/** The account, or null when Rust does not own it in this window. */
+export const cloudAccount = (): Promise<RustAccount | null> =>
+  invoke("cloud_account");
+
+export const cloudSignOut = (): Promise<void> => invoke("cloud_sign_out");
+
+export const cloudExchangeToken = (token: string): Promise<void> =>
+  invoke("cloud_exchange_token", { token });
+
+export const cloudRefreshSubscription = (): Promise<void> =>
+  invoke("cloud_refresh_subscription");
+
+/** Runs a cloud workspace action; an endpoint it connects comes back as `managed-endpoint`. */
+export const cloudWorkspaceAction = (action: RustCloudAction): Promise<void> =>
+  invoke("cloud_workspace_action", { action });

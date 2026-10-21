@@ -12,6 +12,18 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+/**
+ * Sends `read()`'s token with every request instead of supabase-js's own
+ * session, which stays empty: the session is Rust's (`rust-account.ts`), so
+ * supabase-js never refreshes or rotates it. A null token sends the anon key.
+ */
+export function sendAccessTokenFrom(read: () => string | null): void {
+  // `SupabaseClient` reads its `accessToken` option on each request.
+  (
+    supabase as unknown as { accessToken?: () => Promise<string | null> }
+  ).accessToken = async () => read();
+}
+
 const WEB_URL = environment.webUrl;
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY, WEB_URL };

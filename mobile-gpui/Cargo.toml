@@ -25,10 +25,10 @@ gpui-kit = "0.7.1"
 tauri-plugin-deep-link = "2.4.7"
 tauri-plugin-opener = "2.5.2"
 anyhow = "1"
+async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 log = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Only here to turn on `debug-embed`, so gpui-kit's icons are compiled into debug builds (a phone cannot read the build machine's files).
 rust-embed = { version = "8.13", features = ["debug-embed"] }
 serde = { version = "1", features = ["derive"] }

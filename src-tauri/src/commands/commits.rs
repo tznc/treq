@@ -149,28 +149,7 @@ pub async fn jj_split(
   file_paths: Vec<String>,
 ) -> Result<String, String> {
   tauri::async_runtime::spawn_blocking(move || {
-    log::debug!("jj_split start: workspace_path={}", workspace_path);
-    let result = jj::jj_split(&workspace_path, &message, file_paths).map_err(|e| e.to_string())?;
-
-    // Run auto-rebase synchronously so jj state is settled before returning
-    if let Some(repo_path) = jj::derive_repo_path_from_workspace(&workspace_path) {
-      if let Ok(branch) = jj::get_workspace_branch(&workspace_path) {
-        log::debug!(
-          "jj_split auto_rebase start: repo_path={}, branch={}",
-          repo_path,
-          branch
-        );
-        let _ = crate::auto_rebase::rebase_after_commit(&repo_path, &branch);
-        log::debug!(
-          "jj_split auto_rebase end: repo_path={}, branch={}",
-          repo_path,
-          branch
-        );
-      }
-    }
-
-    log::debug!("jj_split end: workspace_path={}", workspace_path);
-    Ok(result)
+    crate::core::split_working_copy(&workspace_path, &message, file_paths)
   })
   .await
   .map_err(|e| format!("Failed to join jj_split task: {}", e))?
@@ -293,7 +272,7 @@ pub async fn get_commit_description(
   commit_change_id: String,
 ) -> Result<String, String> {
   tauri::async_runtime::spawn_blocking(move || {
-    core::get_commit_description(&repo_path, workspace_id, &commit_change_id)
+    core::get_commit_description(&repo_path, Some(workspace_id), &commit_change_id)
   })
   .await
   .map_err(|e| format!("Failed to join get_commit_description task: {}", e))?
@@ -311,7 +290,14 @@ pub async fn describe_commit(
   let result = tauri::async_runtime::spawn_blocking({
     let repo_path = repo_path.clone();
     let commit_change_id = commit_change_id.clone();
-    move || core::describe_commit(&repo_path, workspace_id, &commit_change_id, &description)
+    move || {
+      core::describe_commit(
+        &repo_path,
+        Some(workspace_id),
+        &commit_change_id,
+        &description,
+      )
+    }
   })
   .await
   .map_err(|e| format!("Failed to join describe_commit task: {}", e))?;

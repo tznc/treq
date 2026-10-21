@@ -4,6 +4,7 @@ import type { PrCiStatus, WorkflowInfo } from "../../lib/api-types";
 import type { ChecksSummary } from "../../lib/checks-summary";
 import type { WorkspaceChecks } from "../../hooks/useWorkspaceChecks";
 import { cn } from "../../lib/utils";
+import { useGpuiPart } from "../../lib/gpui-parts";
 import { CiChecksList } from "../CiStatusButton";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -61,9 +62,36 @@ export function ChecksPopover({
   const { summary } = checks;
   const ci = ciStatus && ciStatus.total > 0 ? ciStatus : null;
   const hasTreq = summary.state !== "none";
+  const status = combinedStatus(summary, ci);
+  useGpuiPart(
+    "checks",
+    hasTreq || ci
+      ? {
+          open,
+          status: status ?? null,
+          treq: hasTreq ? treqLabel(summary) : null,
+          github: ci
+            ? { label: `GH ${ci.passed}/${ci.total}`, state: ci.state }
+            : null,
+        }
+      : null,
+    {
+      open: () => setOpen(true),
+      // GPUI draws the popover and asks for the flows React still runs.
+      run: (filename: string) => {
+        const workflow = checks.workflows.find(
+          (wf) => wf.filename === filename,
+        );
+        if (workflow) void checks.runWorkflow(workflow).catch(() => undefined);
+      },
+      runAll: () => void checks.runAll().catch(() => undefined),
+      trust: () => void checks.trust(),
+      rerunSetup: () => void checks.rerunSetup(),
+      viewLogs: () => onOpenLogs?.(),
+    },
+  );
   if (!hasTreq && !ci) return null;
 
-  const status = combinedStatus(summary, ci);
   const parts = [
     hasTreq && `Treq ${treqLabel(summary)}`,
     ci && `GitHub ${ci.passed}/${ci.total}`,

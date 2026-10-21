@@ -56,8 +56,12 @@ import {
   removeSupportingRepo,
   updateSessionAccess,
   openSystemLogDir,
+  gpuiToastAction,
+  cloudWorkspaceAction,
+  type StashEntry,
   type Workspace,
 } from "../lib/api";
+import { useAuthStore } from "../stores/authStore";
 import { requestOpenSystemLogs } from "../lib/open-logs-request";
 import type { RemoteRepository } from "../lib/api-types";
 import type {
@@ -77,8 +81,14 @@ import {
   type PersistedRemoteRepository,
 } from "../lib/active-repository";
 import { ActiveRepositoryProvider } from "../lib/active-repository-context";
-import { capabilitiesFor } from "../lib/remote-capabilities";
-import { invalidateRemoteRepositoryData } from "../lib/remote-mutation-ui";
+import {
+  capabilitiesFor,
+  capabilityNoticeMessages,
+} from "../lib/remote-capabilities";
+import {
+  invalidateRemoteRepositoryData,
+  useRemoteMutationFeedback,
+} from "../lib/remote-mutation-ui";
 import {
   useRemoteAgentRefresh,
   useRemoteChangeMarkerWatch,
@@ -102,7 +112,12 @@ import {
   type AutoReviewEvent,
 } from "../lib/agent-review-launch";
 import { LINEAR_BASE_PATH } from "../lib/linearRoutes";
-import { openRepositoryAtPath as openRepositoryAtPathShared } from "../lib/open-repository";
+import { type GpuiOpenRequest, useGpuiNativeEvents } from "../lib/gpui-native";
+import type { SessionCreationInfo } from "../types/sessions";
+import {
+  openRepositoryAtPath as openRepositoryAtPathShared,
+  showOpenedRepository,
+} from "../lib/open-repository";
 import {
   issueFromGitHub,
   issueFromLinear,
@@ -151,6 +166,11 @@ import {
 import { startManagedCertificateRenewal } from "../lib/remote-cert-lifecycle";
 import { ensureRelayAccessTokenSync } from "../lib/remote-relay-auth";
 import {
+  listenManagedEndpoint,
+  type RustCloudAction,
+  rustOwnsAccount,
+} from "../lib/rust-account";
+import {
   newRemoteSessionLabel,
   remoteAgentIdFor,
   remoteLaunchFor,
@@ -161,11 +181,17 @@ import { useRemoteCutoffStore } from "../stores/remoteCutoffStore";
 import { remoteForceCutoff } from "../lib/api-extra";
 import { RemoteRepositorySelector } from "./remote/RemoteRepositorySelector";
 import { RemoteTerminalDialog } from "./RemoteTerminalDialog";
+import { useGpuiRemoteDialogs } from "./useGpuiRemoteDialogs";
+import {
+  gpuiDrawsRemoteWorkspace,
+  rustRunsRemote,
+} from "../lib/gpui-remote-types";
 import { invalidateReviewChangeCount } from "../lib/review-change-count";
 import {
   clearSWRCache,
   fetchAndCache,
   invalidateQueries,
+  revalidateKeys,
   pollMs,
 } from "../lib/swr-cache";
 import { getFullWorkspacePath } from "../lib/utils";
@@ -179,10 +205,12 @@ import {
 } from "../stores/featurePreviewStore";
 import { useGpuiSidebar } from "../hooks/useGpuiSidebar";
 import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
+import { useGpuiWorkspaceDialogs } from "./useGpuiWorkspaceDialogs";
 import {
   type ChangeFilesMoveTarget,
   ChangeFilesMoveProvider,
 } from "./ChangeFilesMoveContext";
+import { useTreqSendStore } from "../stores/treqSendStore";
 import { useThemeStore } from "../stores/themeStore";
 import {
   DEFAULT_SIDEBAR_WIDTH,
@@ -208,6 +236,7 @@ import {
 } from "./remote/RemoteStatusBanner";
 import { SettingsPage } from "./SettingsPage";
 import { ShowWorkspace } from "./ShowWorkspace";
+import { useGpuiTerminalFrame } from "./useGpuiTerminalFrame";
 import { StashModal } from "./StashModal";
 import type { BranchListItem } from "./TargetBranchSelector";
 import type {
@@ -232,10 +261,18 @@ import { Button } from "./ui/button";
 import { TooltipProvider } from "./ui/tooltip";
 import { useToast } from "./ui/toast";
 import { WorkspacePicker } from "./WorkspacePicker";
+import { useGpuiOverlays } from "./useGpuiOverlays";
 import {
   WorkspaceTerminalPane,
   type WorkspaceTerminalPaneHandle,
 } from "./WorkspaceTerminalPane";
+import { useGpuiAgentModals } from "./useGpuiAgentModals";
+import { useGpuiTerminalPane } from "./useGpuiTerminalPane";
+import { startAgentTask } from "../lib/startAgentTask";
+import {
+  type GpuiAgentPromptStart,
+  gpuiDrawsTerminalPane,
+} from "../lib/gpui-screen";
 import {
   agentInfo,
   DEFAULT_AGENT,
@@ -271,6 +308,16 @@ type SessionOpenOptions = {
 interface DashboardProps {
   initialViewMode?: ViewMode;
 }
+/** A number that changes when the pane's agent sessions do. */
+function revisionOf(sessions: AgentSessionData[]): number {
+  const text = JSON.stringify(sessions);
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 31 + text.charCodeAt(i)) % 2_147_483_647;
+  }
+  return hash;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({
   initialViewMode = "show-workspace",
 }) => {
@@ -329,6 +376,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     number | null
   >(null);
   const [showStashModal, setShowStashModal] = useState(false);
+  // GPUI's prompt dialog handed a prompt over, and React is starting it.
+  const [agentPromptStarting, setAgentPromptStarting] = useState(false);
   const [runPromptRequest, setRunPromptRequest] = useState<{
     prompt?: string;
     workspaceId: number | null;
@@ -381,12 +430,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // -- Remote setup flow (managed + user-owned endpoints) ------------------
   const [showRemoteSetupDialog, setShowRemoteSetupDialog] = useState(false);
-  const [instanceStatus, setInstanceStatus] =
+  const [ownInstanceStatus, setInstanceStatus] =
     useState<InstanceStatusResponse | null>(null);
-  const [provisioningStage, setProvisioningStage] = useState<string>();
-  const [provisioningError, setProvisioningError] = useState<string>();
-  const [cloudUsage, setCloudUsage] = useState<MachineUsageReport>();
-  const [cloudUsageError, setCloudUsageError] = useState<string>();
+  const [ownProvisioningStage, setProvisioningStage] = useState<string>();
+  const [ownProvisioningError, setProvisioningError] = useState<string>();
+  const [ownCloudUsage, setCloudUsage] = useState<MachineUsageReport>();
+  const [ownCloudUsageError, setCloudUsageError] = useState<string>();
+  // Rust's cloud workspace, when Rust owns the account and runs its flows.
+  const rustCloud = useAuthStore((s) => s.cloudWorkspace);
+  const instanceStatus = rustCloud
+    ? rustCloud.instanceStatus
+    : ownInstanceStatus;
+  const provisioningStage = rustCloud
+    ? (rustCloud.provisioningStage ?? undefined)
+    : ownProvisioningStage;
+  const provisioningError = rustCloud
+    ? (rustCloud.provisioningError ?? undefined)
+    : ownProvisioningError;
+  const cloudUsage = rustCloud ? (rustCloud.usage ?? undefined) : ownCloudUsage;
+  const cloudUsageError = rustCloud
+    ? (rustCloud.usageError ?? undefined)
+    : ownCloudUsageError;
+  /** Hands a cloud workspace flow to Rust; true when Rust owns them. */
+  const ranInRust = (action: RustCloudAction): boolean => {
+    if (!rustCloud) return false;
+    void cloudWorkspaceAction(action).catch((error: unknown) => {
+      addToast({
+        title: "Cloud workspace action failed",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    });
+    return true;
+  };
   // Explicit user-managed or managed endpoints carry a native SSH identity.
   // Alias-backed repositories still use the same workspace tree; they
   // dispatch through `remote_dispatch_local` until an endpoint with a
@@ -528,6 +604,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     void useRemoteCutoffStore.getState().startListening();
     return () => useRemoteCutoffStore.getState().stopListening();
+  }, []);
+
+  // Rust runs the cloud workspace flows when it owns the account: a managed
+  // endpoint it connects becomes the active one, as `activateEndpoint` and
+  // `adoptManagedConnection` make it here, and its renewals swap the
+  // certificate.
+  useEffect(() => {
+    if (!rustOwnsAccount()) return;
+    let unlisten: (() => void) | undefined;
+    let stopped = false;
+    void listenManagedEndpoint((event) => {
+      if (event.kind === "renewed") {
+        setActiveSshEndpoint((current) =>
+          current?.id === event.endpoint.id ? event.endpoint : current,
+        );
+        return;
+      }
+      renewalRef.current?.controller.stop();
+      renewalRef.current = null;
+      setActiveSshEndpoint(event.endpoint);
+      setActiveEndpointGeneration(event.generation);
+      if (!event.openRepositories) return;
+      setExplicitEndpointRepoConnected(false);
+      setShowRemoteSetupDialog(false);
+      void refreshSavedRemoteRepos(event.endpoint.id, event.generation).catch(
+        () => undefined,
+      );
+    }).then((fn) => {
+      if (stopped) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
   }, []);
 
   // Stop renewal on disconnect or endpoint replacement (PRD "Stop renewal on
@@ -794,17 +905,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleOpenRemoteSetup = async () => {
     setProvisioningError(undefined);
+    // Rust rereads the cloud workspace, and its usage, for its own dialog.
+    const rustReads = ranInRust({ action: "refresh" });
     try {
       const [hosts, status] = await Promise.all([
         // ~/.ssh/config discovery only feeds the user-managed form.
         useFeaturePreviewStore.getState().flags.remoteSsh
           ? listSshHosts().catch(() => [])
           : Promise.resolve([]),
-        getInstanceStatus().catch(() => null),
+        rustReads ? null : getInstanceStatus().catch(() => null),
       ]);
       setRemoteSshHosts(hosts.map((h) => h.alias));
-      setInstanceStatus(status);
-      void loadCloudUsage(status);
+      if (!rustReads) {
+        setInstanceStatus(status);
+        void loadCloudUsage(status);
+      }
     } catch {
       // Best-effort: the dialog still opens and shows what it could load.
     }
@@ -850,6 +965,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const refreshCloudWorkspace = async () => {
+    if (ranInRust({ action: "refresh" })) return;
     setProvisioningError(undefined);
     const status = await getInstanceStatus().catch(() => null);
     if (status) setInstanceStatus(status);
@@ -900,6 +1016,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // "Managed VM certificate flow"), plus the initial silent-renewal start.
   // See `src/lib/managed-ssh-connection.ts` for the state machine itself.
   const handleProvisionManaged = async () => {
+    if (ranInRust({ action: "provision" })) return;
     setProvisioningError(undefined);
     setProvisioningStage("Requesting provisioning...");
     try {
@@ -953,6 +1070,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // skips provisioning/readiness polling since the instance is already
   // `ready`.
   const handleConnectManaged = async () => {
+    if (ranInRust({ action: "openRepositories" })) return;
     setProvisioningError(undefined);
     try {
       const keyReference = await resolveManagedKeyReference();
@@ -980,6 +1098,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // (via `activateEndpoint` replacing the endpoint), reconnect - only then is
   // interaction restored (the new `activeSshEndpoint` is what gates it).
   const handleWakeManaged = async () => {
+    if (ranInRust({ action: "wake" })) return;
     const instanceId = instanceStatus?.instance?.instance_id;
     if (!instanceId) return;
     setProvisioningError(undefined);
@@ -1005,6 +1124,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // `reauthenticateManagedInstance` confirms fresh certificate issuance
   // succeeded.
   const handleReauthenticateManaged = async (keyReference?: string) => {
+    if (
+      activeSshEndpoint &&
+      ranInRust({ action: "reauthenticate", endpointId: activeSshEndpoint.id })
+    )
+      return;
     const resolvedKeyReference = keyReference ?? selectedKeyReference;
     if (
       !activeSshEndpoint ||
@@ -1033,6 +1157,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleReprovisionManaged = async () => {
+    if (ranInRust({ action: "repair" })) return;
     const instanceId = instanceStatus?.instance?.instance_id;
     if (!instanceId) return;
     setProvisioningError(undefined);
@@ -1050,6 +1175,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleDeleteManagedInstance = async () => {
+    if (ranInRust({ action: "delete" })) return;
     const instanceId = instanceStatus?.instance?.instance_id;
     if (!instanceId) return;
     setProvisioningError(undefined);
@@ -1073,6 +1199,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // blocked right away rather than only after the current certificate would
   // otherwise have been silently renewed.
   const handleRevokeKey = async (keyReference: string) => {
+    if (ranInRust({ action: "revokeKey", keyReference })) return;
     setProvisioningError(undefined);
     const keyId = managedKeyId ?? keyReference;
     try {
@@ -1113,6 +1240,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleOpenManagedRepositories = () => {
+    if (ranInRust({ action: "openRepositories" })) return;
     const serverEndpoint = instanceStatus?.endpoint;
     if (!serverEndpoint) return;
     // The control plane's endpoint names its own key id, which the native
@@ -1141,6 +1269,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const terminalPaneRef = useRef<WorkspaceTerminalPaneHandle>(null);
+  const [terminalMaximized, setTerminalMaximized] = useState(false);
+  // While GPUI draws the Code tab: its height, and the terminal pane's frame.
+  const [gpuiContentHeight, setGpuiContentHeight] = useState<number | null>(
+    null,
+  );
+  const sessionLayerRef = useRef<HTMLDivElement>(null);
+  const gpuiFrameHeight = useGpuiTerminalFrame(
+    sessionLayerRef,
+    gpuiContentHeight,
+  );
 
   const { addToast } = useToast();
   const handleReturnToDashboard = () => {
@@ -1580,7 +1718,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await deleteWorkspace(workspace.repo_path, workspace.id);
     },
     onSuccess: (_data, workspace) => {
-      terminalPaneRef.current?.closeTerminalsForWorkspace(
+      terminalPane()?.closeTerminalsForWorkspace(
         getFullWorkspacePath(workspace),
       );
       void invalidateQueries(["workspaces", queryRepoKey]);
@@ -1606,7 +1744,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await archiveWorkspace(workspace.repo_path, workspace.id);
     },
     onSuccess: (_data, workspace) => {
-      terminalPaneRef.current?.closeTerminalsForWorkspace(
+      terminalPane()?.closeTerminalsForWorkspace(
         getFullWorkspacePath(workspace),
       );
       void invalidateQueries(["workspaces", queryRepoKey]);
@@ -1627,16 +1765,124 @@ export const Dashboard: React.FC<DashboardProps> = ({
     },
   });
 
+  const onRepositoryOpened = (path: string) => {
+    setRepoPath(path);
+    setSelectedWorkspace(null);
+    setActiveSessionId(null);
+    setSessionSelectedFile(null);
+  };
+
   const openRepositoryAtPath = (selected: string) =>
     openRepositoryAtPathShared(selected, {
       addToast,
-      onOpened: (path) => {
-        setRepoPath(path);
-        setSelectedWorkspace(null);
-        setActiveSessionId(null);
-        setSessionSelectedFile(null);
-      },
+      onOpened: onRepositoryOpened,
     });
+
+  // GPUI screens act through the backend; follow what they changed.
+  useGpuiNativeEvents((event) => {
+    switch (event.kind) {
+      case "repoOpened":
+        showOpenedRepository(event.path, onRepositoryOpened);
+        break;
+      case "settingsChanged":
+        void revalidateKeys([
+          "settings-batch-hydrate",
+          "app-setup-script-status",
+        ]);
+        void invalidateQueries(["setting"]);
+        break;
+      case "repoSettingsChanged":
+        void invalidateQueries(["repo-settings", event.repoPath]);
+        break;
+      case "workspaceChanged":
+        void invalidateQueries();
+        break;
+      case "toast": {
+        const { action } = event;
+        addToast({
+          title: event.title,
+          description: event.description,
+          type: event.tone,
+          ...(action
+            ? {
+                action: {
+                  label: action.label,
+                  onClick: () => void gpuiToastAction(action.id),
+                },
+              }
+            : {}),
+        });
+        break;
+      }
+      // A change GPUI sent over SSH, reported as `applyMutationDispatchResult` does.
+      case "remoteMutation":
+        useRemoteMutationFeedback
+          .getState()
+          .report(
+            event.status === "ambiguous"
+              ? { status: "ambiguous", reason: event.reason ?? "" }
+              : event.status === "applied"
+                ? { status: "applied", value: null }
+                : { status: "already_applied" },
+          );
+        break;
+      case "remoteCutoff":
+        useRemoteCutoffStore
+          .getState()
+          .recordCutoff(event.endpointId, event.reason);
+        break;
+      case "agentSessionStarted":
+        void showBackendSession(
+          event.session,
+          event.paneSessionId,
+          event.select,
+        );
+        break;
+      case "workspacesRemoved": {
+        const removed = new Set(event.ids);
+        setSelectedWorkspaceIds((ids) => {
+          const kept = new Set([...ids].filter((id) => !removed.has(id)));
+          return kept.size === ids.size ? ids : kept;
+        });
+        if (event.repoPath === dataRepoPath) leaveRemovedWorkspaces(removed);
+        break;
+      }
+      case "open":
+        openGpuiRequest(event.what);
+        break;
+      default:
+    }
+  });
+
+  /** What a GPUI menu or button asks to open. */
+  const openGpuiRequest = (what: GpuiOpenRequest) => {
+    switch (what.kind) {
+      case "branchSwitcher":
+        return setShowBranchSwitcher(true);
+      case "addRepository":
+        if (mainRepoPath && !isRemoteActive) void handleAddSupportingRepo();
+        return;
+      case "repoSettings":
+        return handleOpenRepoSettings(what.repoPath);
+      case "locateRepo":
+        return void handleLocateSupportingRepo(what.repoPath);
+      case "removeRepo":
+        return void handleRemoveSupportingRepo(what.repoPath);
+      case "renameWorkspace": {
+        const list =
+          linkedRepoSessions.find((entry) => entry.repoPath === what.repoPath)
+            ?.workspaces ?? workspaces;
+        const workspace = list.find((w) => w.id === what.workspaceId);
+        if (workspace) {
+          setRenameTarget({ workspace, repoPath: what.repoPath });
+        }
+        return;
+      }
+      case "prReview":
+        return openGitHubPr(what.number, what.state);
+      default:
+    }
+  };
 
   const addSupportingRepoAtPath = async (selected: string) => {
     if (!mainRepoPath) return;
@@ -1731,8 +1977,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Restore the last-opened remote SSH repository only after reconnect and
   // trust validation. A stored blob or descriptor is not enough on its own.
+  // In a GPUI window Rust restores it.
   useEffect(() => {
-    if (repoPath) {
+    if (repoPath || rustRunsRemote()) {
       return;
     }
     let cancelled = false;
@@ -2088,6 +2335,59 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (!open) setRunPromptRequest(null);
   };
 
+  // GPUI's prompt dialog hands the prompt over; React starts the session.
+  const handleGpuiAgentPromptStart = async (
+    start: GpuiAgentPromptStart,
+  ): Promise<void> => {
+    const agent = toAgentKind(start.agent);
+    if (!agent || agentPromptStarting) return;
+    setAgentPromptStarting(true);
+    try {
+      const session = await startAgentTask({
+        repoPath: dataRepoPath,
+        workspaceId: start.workspaceId,
+        text: start.prompt,
+        issue: start.issue ? (runPromptRequest?.issue ?? null) : null,
+        agent,
+        mode: start.mode,
+        saveAsRepoDefault: start.saveAsRepoDefault,
+        addToast,
+      });
+      if (!session) return;
+      handleSessionCreated(session);
+      handleAgentPromptDialogOpenChange(false);
+    } catch (error) {
+      addToast({
+        title: "Failed to create task",
+        description: error instanceof Error ? error.message : String(error),
+        type: "error",
+      });
+    } finally {
+      setAgentPromptStarting(false);
+    }
+  };
+
+  const handleStashApplyToNewWorkspace = (entry: StashEntry) => {
+    setShowStashModal(false);
+    const source =
+      entry.workspace_id != null
+        ? (workspaces.find((w) => w.id === entry.workspace_id) ?? null)
+        : null;
+    setUnifiedDialogDefaults({
+      sourceWorkspace: source,
+      targetBranch: source?.branch_name,
+      applyStashId: entry.id,
+      applyStashCommit: {
+        hash: entry.short_commit_id,
+        message: `Stash from ${entry.workspace_label}`,
+        timestamp: entry.created_at,
+      },
+      preSelectedCommits: [entry.short_commit_id],
+      activeTab: "commits",
+      description: `Apply stash ${entry.short_commit_id} (${entry.files_changed.length} files, +${entry.additions}/-${entry.deletions})`,
+    });
+  };
+
   const handleStartDefaultAgent = async () => {
     const configuredAgent =
       (await getRepoSetting(repoPath, "default_agent")) ||
@@ -2166,6 +2466,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setPendingChangeMove(request);
   };
 
+  /** The confirmed files moved: close the confirmation and refresh. */
+  const handleChangeMoved = async () => {
+    setPendingChangeMove(null);
+    await invalidateQueries(["workspaces", queryRepoKey]);
+    await invalidateQueries(["workspace-statuses", queryRepoKey]);
+    if (repoPath) {
+      await invalidateReviewChangeCount(
+        repoPath,
+        selectedWorkspace?.id ?? null,
+      );
+    }
+    dispatchRefreshWorkspaceChanges();
+  };
+
   const handleConfirmChangeMove = async () => {
     if (!pendingChangeMove || !repoPath) return;
     setChangeMovePending(true);
@@ -2185,14 +2499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         description: `Moved ${pendingChangeMove.files.length} file(s) to ${pendingChangeMove.destinationLabel}`,
         type: "success",
       });
-      setPendingChangeMove(null);
-      await invalidateQueries(["workspaces", queryRepoKey]);
-      await invalidateQueries(["workspace-statuses", queryRepoKey]);
-      await invalidateReviewChangeCount(
-        repoPath,
-        selectedWorkspace?.id ?? null,
-      );
-      dispatchRefreshWorkspaceChanges();
+      await handleChangeMoved();
     } catch (error) {
       addToast({
         title: "Failed to move files",
@@ -2250,7 +2557,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   ) => {
     const scope = remoteSessionScope(workspace);
     if (!scope) return;
-    terminalPaneRef.current?.openRemoteSession({
+    terminalPane()?.openRemoteSession({
       ...scope,
       label: newRemoteSessionLabel(agent),
       launch: remoteLaunchFor(agent),
@@ -2378,6 +2685,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
     void refreshInstanceStatus();
   };
 
+  // The strip GPUI draws above a remote repository's workspace view.
+  const gpuiRemoteChrome = isRemoteActive
+    ? {
+        displayName: activeRepository?.displayName ?? "",
+        terminal: Boolean(activeSshEndpoint),
+        state: remoteConnectionState,
+        cutOff: Boolean(cutoffReason),
+        notices: capabilityNoticeMessages(remoteCaps),
+      }
+    : null;
+  const handleGpuiRemotePress = (id: string) => {
+    switch (id) {
+      case "remote.terminal":
+        if (!cutoffReason) setShowRemoteTerminalDialog(true);
+        return;
+      case "remote.refresh":
+        return handleRefreshRemote();
+      case "remote.wake":
+        return void handleWakeManaged();
+      case "remote.reconnect":
+        return void refreshInstanceStatus();
+      default:
+    }
+  };
+
   const handleStartShellFromSidebar = (workspace: Workspace) => {
     if (!remoteCaps.shell.supported) {
       addToast({
@@ -2388,9 +2720,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return;
     }
     setSelectedWorkspace(workspace);
-    terminalPaneRef.current?.createShellSession(
-      getFullWorkspacePath(workspace),
-    );
+    terminalPane()?.createShellSession(getFullWorkspacePath(workspace));
   };
 
   const handleStartHomeShellFromSidebar = () => {
@@ -2404,7 +2734,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     setSelectedWorkspace(null);
     if (dataRepoPath) {
-      terminalPaneRef.current?.createShellSession(dataRepoPath);
+      terminalPane()?.createShellSession(dataRepoPath);
     }
   };
 
@@ -2479,6 +2809,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
     }
     return sessionId;
+  };
+
+  /**
+   * A session the backend started for GPUI (the prompt dialog, a review,
+   * a deep link): it created the session and recorded its prompt, so React
+   * only shows it, as `handleSessionCreated` and `launchAgentSession` do.
+   */
+  const showBackendSession = async (
+    session: SessionCreationInfo,
+    paneSessionId: number,
+    select: boolean,
+  ) => {
+    void invalidateQueries(["sessions"]);
+    void invalidateQueries(["prompt-history"]);
+    invalidateQueries(["workspace-starting-prompt"]);
+    const known =
+      session.workspaceId == null ||
+      workspaces.some((ws) => ws.id === session.workspaceId);
+    if (!known) {
+      void invalidateQueries(["workspaces", queryRepoKey]);
+      invalidateQueries(["workspace-statuses", queryRepoKey]);
+    }
+    setActiveSessionId(paneSessionId);
+    if (!select) return;
+    const sessionWorkspaces =
+      session.repoPath === repoPath
+        ? workspaces
+        : await getWorkspaces(session.repoPath).catch(() => []);
+    activateRepo(session.repoPath);
+    setSelectedWorkspace(
+      sessionWorkspaces.find((ws) => ws.id === session.workspaceId) ?? null,
+    );
+    setViewMode("show-workspace");
   };
 
   const handleStartAgentRequest = async (request: AgentDeepLinkRequest) => {
@@ -2726,7 +3089,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         : [],
     );
     for (const workspace of archived) {
-      terminalPaneRef.current?.closeTerminalsForWorkspace(
+      terminalPane()?.closeTerminalsForWorkspace(
         getFullWorkspacePath(workspace),
       );
     }
@@ -2787,6 +3150,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
     void invalidateQueries(["workspace-review-change-count", repoPath]);
     dispatchRefreshWorkspaceChanges();
   };
+
+  /** `UnifiedWorkspaceDialog` made or filled `workspaceId`: open it. */
+  const handleWorkspaceCreated = async (workspaceId: number) => {
+    await invalidateQueries(["workspaces", queryRepoKey]);
+    invalidateQueries(["workspace-statuses", queryRepoKey]);
+    const updatedWorkspaces = await fetchAndCache(
+      ["workspaces", queryRepoKey],
+      () => getWorkspaces(dataRepoPath),
+    );
+    const newWorkspace = updatedWorkspaces.find((w) => w.id === workspaceId);
+    if (newWorkspace) {
+      handleOpenSession(newWorkspace);
+    }
+  };
+
+  // GPUI draws these dialogs over its screens; React draws the rest.
+  const gpuiDialog = useGpuiWorkspaceDialogs({
+    enabled: !isRemoteActive,
+    repoPath: dataRepoPath,
+    changeMoveRepoPath: repoPath ?? "",
+    workspaces,
+    currentWorkspace: selectedWorkspace,
+    workspaceDialog: unifiedDialogDefaults,
+    rename: renameTarget,
+    deletion: showWorkspaceDeletion,
+    changeMove: pendingChangeMove,
+    handlers: {
+      closeWorkspaceDialog: () => setUnifiedDialogDefaults(null),
+      workspaceCreated: (id) => void handleWorkspaceCreated(id),
+      closeRename: () => setRenameTarget(null),
+      closeDeletion: () => setShowWorkspaceDeletion(false),
+      deleteWorkspace: (workspace) => void handleDelete(workspace),
+      changeMoved: () => void handleChangeMoved(),
+      cancelChangeMove: () => setPendingChangeMove(null),
+    },
+  });
 
   const isSessionView = viewMode === "session" || viewMode === "show-workspace";
   const sidebarWidth = useSidebarWidthStore((s) => s.width);
@@ -2891,15 +3290,272 @@ export const Dashboard: React.FC<DashboardProps> = ({
     },
   );
 
+  // GPUI draws the terminal pane with the workspace screen, for local
+  // repositories; React's pane steps in while GPUI steps aside.
+  const [gpuiFramed, setGpuiFramed] = useState(false);
+  const gpuiDrawsWorkspace = !isRemoteActive || gpuiDrawsRemoteWorkspace();
+  const gpuiTerminalEnabled =
+    gpuiFramed && gpuiDrawsWorkspace && gpuiDrawsTerminalPane();
+  // React's pane is gone while GPUI draws it, so its maximize no longer
+  // covers the tab.
+  useEffect(() => {
+    if (gpuiTerminalEnabled) setTerminalMaximized(false);
+  }, [gpuiTerminalEnabled]);
+  const gpuiTerminalPending = useMemo(
+    () =>
+      Array.from(pendingSessionData, ([sessionId, data]) => ({
+        sessionId,
+        pendingPrompt: data.pendingPrompt ?? null,
+        permissionMode: data.permissionMode ?? null,
+        agent: data.agent ?? null,
+        workspacePath: data.workspacePath ?? null,
+      })),
+    [pendingSessionData],
+  );
+  const gpuiTerminalRevision = useMemo(
+    () => revisionOf(agentSessionsForPane),
+    [agentSessionsForPane],
+  );
+  const gpuiTerminal = useGpuiTerminalPane({
+    enabled: gpuiTerminalEnabled,
+    activeSessionId: isSessionView ? activeSessionId : null,
+    pending: gpuiTerminalPending,
+    sessionsRevision: gpuiTerminalRevision,
+    remoteShell: Boolean(isRemoteActive),
+    onNewAgent: () =>
+      handleCreateSessionFromSidebar(selectedWorkspace?.id ?? null),
+  });
+  const terminalPane = (): WorkspaceTerminalPaneHandle | null =>
+    gpuiTerminalEnabled ? gpuiTerminal.handle : terminalPaneRef.current;
+
+  // GPUI draws the agent prompt, prompt history and stash dialogs over its
+  // screen; React's own stay closed meanwhile.
+  const gpuiModals = useGpuiAgentModals({
+    repoPath: dataRepoPath,
+    agentPrompt: {
+      open: showAgentPromptDialog,
+      defaultBranch: effectiveDefaultBranch,
+      workspaces,
+      initialPrompt: runPromptRequest?.prompt,
+      initialWorkspaceId: runPromptRequest?.workspaceId ?? null,
+      issue: runPromptRequest?.issue ?? null,
+      starting: agentPromptStarting,
+    },
+    promptHistory: { open: showPromptHistory, focusId: promptHistoryFocusId },
+    stash: { open: showStashModal, workspaces: visibleWorkspaces },
+    handlers: {
+      closeAgentPrompt: () => handleAgentPromptDialogOpenChange(false),
+      startAgent: (start) => void handleGpuiAgentPromptStart(start),
+      closePromptHistory: () => handlePromptHistoryOpenChange(false),
+      runPrompt: handleRunPrompt,
+      closeStash: () => setShowStashModal(false),
+      applyStashToNew: handleStashApplyToNewWorkspace,
+    },
+  });
+
+  // The terminal pane's callbacks, shared by React's pane and GPUI's.
+  const handleTerminalActiveSessionChange = (sessionId: number | null) => {
+    if (sessionId === null) {
+      setActiveSessionId(null);
+      return;
+    }
+    setActiveSessionId(sessionId);
+    // Find the session to determine view mode
+    const linked = linkedRepoSessions.find((entry) =>
+      entry.sessions.some(
+        (s) => toPaneSessionId(entry.repoPath, s.id) === sessionId,
+      ),
+    );
+    const session = linked?.sessions.find(
+      (s) => toPaneSessionId(linked.repoPath, s.id) === sessionId,
+    );
+    if (linked && session) {
+      activateRepo(linked.repoPath);
+      setViewMode(session.workspace_id ? "show-workspace" : "session");
+      if (session.workspace_id) {
+        const ws = linked.workspaces.find((w) => w.id === session.workspace_id);
+        if (ws) setSelectedWorkspace(ws);
+      }
+    }
+  };
+  const handleTerminalCloseSession = (sessionId: number) => {
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(null);
+    }
+  };
+  const handleTerminalNewSession = (activeWorkspacePath?: string | null) => {
+    if (activeWorkspacePath) {
+      const ws = linkedRepoSessions
+        .flatMap((entry) => entry.workspaces)
+        .find((w) => getFullWorkspacePath(w) === activeWorkspacePath);
+      if (ws && ws.repo_path !== repoPath) {
+        void launchAgentSession({ workspace: ws });
+        return;
+      }
+      handleCreateSessionFromSidebar(ws?.id ?? null);
+    } else {
+      handleCreateSessionFromSidebar(selectedWorkspace?.id ?? null);
+    }
+  };
+  const handleTerminalNavigate = (
+    workspaceKey: string,
+    isMainRepo: boolean,
+  ) => {
+    if (isMainRepo) {
+      // Agent terminals pass their repository path.
+      if (linkedRepoSessions.some((entry) => entry.repoPath === workspaceKey)) {
+        handleSelectRepoHome(workspaceKey);
+      } else {
+        handleSelectWorkspace(null);
+      }
+    } else {
+      const ws = linkedRepoSessions
+        .flatMap((entry) => entry.workspaces)
+        .find(
+          (w) =>
+            w.workspace_path === workspaceKey ||
+            getFullWorkspacePath(w) === workspaceKey,
+        );
+      if (ws) {
+        handleSelectWorkspace(ws);
+      }
+    }
+  };
+
+  const handleGpuiTerminalField = (field: string, value: unknown) => {
+    switch (field) {
+      case "terminal.activeSession":
+        return handleTerminalActiveSessionChange(value as number | null);
+      case "terminal.closeSession":
+        return handleTerminalCloseSession(value as number);
+      case "terminal.newAgent":
+        return handleTerminalNewSession(value as string | null);
+      case "terminal.newRemoteShell": {
+        const target = resolveRemoteShell(value as string);
+        if (target) gpuiTerminal.handle.openRemoteSession(target);
+        return;
+      }
+      case "terminal.navigate": {
+        const { key, isMainRepo } = value as {
+          key: string;
+          isMainRepo: boolean;
+        };
+        return handleTerminalNavigate(key, isMainRepo);
+      }
+      case "terminal.summaries":
+        return setTerminalSessionSummaries(value as TerminalSessionSummary[]);
+      case "terminal.dismissAsset":
+        return useTreqSendStore.getState().dismissAsset(value as string);
+      default:
+        return;
+    }
+  };
+
+  // The palette's commands, shared by React's CommandPalette and GPUI's.
+  const paletteCommands: Record<string, () => void> = {
+    dashboard: handleReturnToDashboard,
+    settings: () => openSettings(),
+    "open-repository": () => void handleOpenRepository(),
+    "open-repository-new-window": () => void handleOpenRepositoryInNewWindow(),
+    "switch-branch": () => setShowBranchSwitcher(true),
+    "search-files": () => setShowFilePicker(true),
+    "go-to-workspace": () => setShowWorkspacePicker(true),
+    "create-workspace": handleCreateStackedWorkspace,
+    "delete-workspace": () => setShowWorkspaceDeletion(true),
+    "start-agent-with-prompt": () => setShowAgentPromptDialog(true),
+    "start-agent-terminal": () => void handleStartDefaultAgent(),
+    "open-prompt-history": () => {
+      setPromptHistoryFocusId(null);
+      setShowPromptHistory(true);
+    },
+    "open-stash": () => setShowStashModal(true),
+    "toggle-terminal": () => terminalPane()?.toggleCollapse(),
+    "maximize-terminal": () => terminalPane()?.toggleMaximize(),
+    "new-shell-terminal": () => terminalPane()?.createShellSession(),
+  };
+
+  // GPUI draws the palette and pickers over the whole window.
+  const gpuiOverlays = useGpuiOverlays({
+    enabled: !isRemoteActive,
+    palette: { open: showCommandPalette, setOpen: setShowCommandPalette },
+    shortcuts: {
+      open: showKeyboardShortcuts,
+      setOpen: setShowKeyboardShortcuts,
+    },
+    workspacePicker: {
+      open: showWorkspacePicker,
+      setOpen: setShowWorkspacePicker,
+    },
+    branchSwitcher: {
+      open: showBranchSwitcher,
+      setOpen: setShowBranchSwitcher,
+    },
+    repoPath: dataRepoPath,
+    // Hidden for remote repositories until the stash modal is routed.
+    stash: !isRemoteActive,
+    selectedWorkspace,
+    workspaces,
+    commands: paletteCommands,
+    onSelectWorkspace: (workspace) => void handleOpenSession(workspace),
+    onBranchChanged: handleBranchChanged,
+  });
+
   const sessionLayerStyle: CSSProperties = {
     visibility: isSessionView ? "visible" : "hidden",
     zIndex: isSessionView ? 10 : 0,
     pointerEvents: isSessionView ? "auto" : "none",
+    // GPUI's Code tab: the layer keeps the tab's height, so the pane keeps
+    // its size, and the webview shows only the pane at its bottom.
+    ...(gpuiContentHeight !== null && {
+      top: "auto",
+      height: gpuiContentHeight,
+    }),
   };
+
+  // The dialog GPUI draws over its screens, and what it hands back.
+  const remoteTerminalDialog =
+    showRemoteTerminalDialog &&
+    activeSshEndpoint &&
+    activeRepository?.canonicalPath
+      ? {
+          endpoint: activeSshEndpoint,
+          repositoryId: activeRepository.canonicalPath,
+          ...resolveRemoteTerminalTarget(
+            activeRepository.canonicalPath,
+            isRemoteActive && selectedWorkspace
+              ? {
+                  workspace_name: selectedWorkspace.workspace_name,
+                  workspace_path: getFullWorkspacePath(selectedWorkspace),
+                }
+              : null,
+          ),
+        }
+      : null;
+  const gpuiDrawsRemote = useGpuiRemoteDialogs({
+    setupOpen: showRemoteSetupDialog,
+    allowUserManaged: remoteSshEnabled,
+    cloudWorkspace: {
+      instanceStatus,
+      provisioningStage,
+      provisioningError,
+      usage: cloudUsage,
+      usageError: cloudUsageError,
+      onProvision: handleProvisionManaged,
+      onWake: handleWakeManaged,
+      onRepair: handleReprovisionManaged,
+      onDelete: handleDeleteManagedInstance,
+      onOpenRepositories: handleOpenManagedRepositories,
+    },
+    onCloseSetup: () => setShowRemoteSetupDialog(false),
+    onRegisterUserManaged: handleRegisterUserManaged,
+    terminal: remoteTerminalDialog,
+    onCloseTerminal: () => setShowRemoteTerminalDialog(false),
+    onOpenTerminalTarget: (target) => terminalPane()?.openRemoteSession(target),
+  });
 
   const remoteSetupDialog = (
     <RemoteSetupDialog
-      open={showRemoteSetupDialog}
+      open={showRemoteSetupDialog && !gpuiDrawsRemote}
       onOpenChange={setShowRemoteSetupDialog}
       sshConfigAliasSuggestions={remoteSshHosts}
       allowUserManaged={remoteSshEnabled}
@@ -2968,6 +3624,57 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
     ) : null;
 
+  // The same form, drawn by GPUI under its onboarding card.
+  const gpuiRemoteRepo =
+    activeSshEndpoint && !activeRemoteRepo && !dataRepoPath
+      ? {
+          form: {
+            cutoff: cutoffs[activeSshEndpoint.id] ?? null,
+            selector: !explicitEndpointRepoConnected,
+            saved: savedRemoteRepos,
+            selectedId: selectedSavedRepoId,
+            path: explicitEndpointRepoPath,
+            probe: explicitEndpointProbe,
+            cloneUrl: explicitEndpointCloneUrl,
+            confirmInit: confirmInitRemoteRepo,
+            busy: remoteRepoBusy,
+            error: explicitEndpointError || null,
+          },
+          press: (id: string) => {
+            switch (id) {
+              case "remoteRepo.reauthenticate":
+                return void handleReauthenticateManaged();
+              case "remoteRepo.probe":
+                return void handleProbeExplicitEndpointRepo();
+              case "remoteRepo.open":
+                return void handleConnectExplicitEndpointRepo();
+              case "remoteRepo.clone":
+                return void handleCloneExplicitEndpointRepo();
+              case "remoteRepo.init":
+                return void handleInitExplicitEndpointRepo();
+              default:
+            }
+          },
+          field: (name: string, value: unknown) => {
+            switch (name) {
+              case "remoteRepo.select":
+                return void handleSelectSavedRemoteRepo(value as string);
+              case "remoteRepo.path":
+                setExplicitEndpointRepoPath(value as string);
+                setSelectedSavedRepoId(null);
+                setExplicitEndpointProbe(null);
+                setExplicitEndpointRepoConnected(false);
+                return;
+              case "remoteRepo.cloneUrl":
+                return setExplicitEndpointCloneUrl(value as string);
+              case "remoteRepo.confirmInit":
+                return setConfirmInitRemoteRepo(value as boolean);
+              default:
+            }
+          },
+        }
+      : null;
+
   // Review-tab files can move to the home repository or any workspace.
   const changeFilesMove = {
     targets: [
@@ -2993,6 +3700,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               remoteLabel={
                 remoteSshEnabled ? "Open via SSH" : "Open cloud workspace"
               }
+              gpuiRemoteRepo={gpuiRemoteRepo}
             />
             {explicitEndpointPathForm}
             {remoteSetupDialog}
@@ -3009,7 +3717,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 />
               )}
               {gpuiSidebarSources}
-              {renameTarget && (
+              {renameTarget && gpuiDialog !== "renameWorkspace" && (
                 <RenameWorkspaceDialog
                   open
                   onOpenChange={(open) => {
@@ -3023,6 +3731,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <main className="relative flex w-full min-w-0 flex-1 flex-col bg-background">
                 {/* Sessions Layer - ALWAYS RENDERED ONCE */}
                 <div
+                  ref={sessionLayerRef}
                   className="absolute inset-0 flex flex-col workspace-terminal-container overflow-hidden"
                   style={sessionLayerStyle}
                 >
@@ -3139,118 +3848,67 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               !session.isStreaming,
                           )}
                           onSendToIdleAgent={(sessionId, prompt) => {
-                            terminalPaneRef.current?.sendToTerminal(
+                            terminalPane()?.sendToTerminal(
                               agentTerminalId(sessionId),
                               prompt,
                             );
                           }}
                           onViewFullPrompt={handleViewFullPrompt}
+                          gpuiActive={
+                            isSessionView &&
+                            gpuiDrawsWorkspace &&
+                            // A maximized React pane covers the tab; GPUI's
+                            // own pane maximizes over its screen.
+                            !(terminalMaximized && !gpuiDrawsTerminalPane())
+                          }
+                          gpuiFrameHeight={gpuiFrameHeight}
+                          onGpuiContentHeight={setGpuiContentHeight}
+                          gpuiTerminal={{
+                            route: gpuiTerminal.route,
+                            field: handleGpuiTerminalField,
+                          }}
+                          onGpuiFramedChange={setGpuiFramed}
+                          gpuiRemote={{
+                            chrome: gpuiRemoteChrome,
+                            press: handleGpuiRemotePress,
+                          }}
                         />
                       </ErrorBoundary>
                     </div>
                   )}
-                  {/* Shared workspace terminal pane - always rendered to preserve state */}
-                  <WorkspaceTerminalPane
-                    ref={terminalPaneRef}
-                    // One pane for the window: it shows supporting-repository
-                    // agents too, so switching repositories keeps it mounted.
-                    key={activeSupportingRepoPath ? mainRepoPath : queryRepoKey}
-                    workingDirectory={
-                      selectedWorkspace
-                        ? getFullWorkspacePath(selectedWorkspace)
-                        : dataRepoPath
-                    }
-                    repoPath={isRemoteActive ? undefined : dataRepoPath}
-                    currentBranch={effectiveDefaultBranch}
-                    agentSessions={agentSessionsForPane}
-                    activeAgentSessionId={
-                      isSessionView ? activeSessionId : null
-                    }
-                    workspaceBranchByPath={workspaceBranchByPath}
-                    onTerminalsChange={setTerminalSessionSummaries}
-                    resolveRemoteShell={
-                      isRemoteActive ? resolveRemoteShell : undefined
-                    }
-                    onActiveSessionChange={(sessionId) => {
-                      if (sessionId === null) {
-                        setActiveSessionId(null);
-                        return;
+                  {/* Shared workspace terminal pane, unless GPUI draws it; the
+                      PTYs outlive either pane. */}
+                  {!gpuiTerminalEnabled && (
+                    <WorkspaceTerminalPane
+                      ref={terminalPaneRef}
+                      // One pane for the window: it shows supporting-repository
+                      // agents too, so switching repositories keeps it mounted.
+                      key={
+                        activeSupportingRepoPath ? mainRepoPath : queryRepoKey
                       }
-                      setActiveSessionId(sessionId);
-                      // Find the session to determine view mode
-                      const linked = linkedRepoSessions.find((entry) =>
-                        entry.sessions.some(
-                          (s) =>
-                            toPaneSessionId(entry.repoPath, s.id) === sessionId,
-                        ),
-                      );
-                      const session = linked?.sessions.find(
-                        (s) =>
-                          toPaneSessionId(linked.repoPath, s.id) === sessionId,
-                      );
-                      if (linked && session) {
-                        activateRepo(linked.repoPath);
-                        setViewMode(
-                          session.workspace_id ? "show-workspace" : "session",
-                        );
-                        if (session.workspace_id) {
-                          const ws = linked.workspaces.find(
-                            (w) => w.id === session.workspace_id,
-                          );
-                          if (ws) setSelectedWorkspace(ws);
-                        }
+                      workingDirectory={
+                        selectedWorkspace
+                          ? getFullWorkspacePath(selectedWorkspace)
+                          : dataRepoPath
                       }
-                    }}
-                    onCloseSession={(sessionId) => {
-                      if (activeSessionId === sessionId) {
-                        setActiveSessionId(null);
+                      repoPath={isRemoteActive ? undefined : dataRepoPath}
+                      currentBranch={effectiveDefaultBranch}
+                      agentSessions={agentSessionsForPane}
+                      activeAgentSessionId={
+                        isSessionView ? activeSessionId : null
                       }
-                    }}
-                    onCreateNewSession={(activeWorkspacePath) => {
-                      if (activeWorkspacePath) {
-                        const ws = linkedRepoSessions
-                          .flatMap((entry) => entry.workspaces)
-                          .find(
-                            (w) =>
-                              getFullWorkspacePath(w) === activeWorkspacePath,
-                          );
-                        if (ws && ws.repo_path !== repoPath) {
-                          void launchAgentSession({ workspace: ws });
-                          return;
-                        }
-                        handleCreateSessionFromSidebar(ws?.id ?? null);
-                      } else {
-                        handleCreateSessionFromSidebar(
-                          selectedWorkspace?.id ?? null,
-                        );
+                      workspaceBranchByPath={workspaceBranchByPath}
+                      onTerminalsChange={setTerminalSessionSummaries}
+                      onMaximizedChange={setTerminalMaximized}
+                      resolveRemoteShell={
+                        isRemoteActive ? resolveRemoteShell : undefined
                       }
-                    }}
-                    onNavigateToWorkspace={(workspaceKey, isMainRepo) => {
-                      if (isMainRepo) {
-                        // Agent terminals pass their repository path.
-                        if (
-                          linkedRepoSessions.some(
-                            (entry) => entry.repoPath === workspaceKey,
-                          )
-                        ) {
-                          handleSelectRepoHome(workspaceKey);
-                        } else {
-                          handleSelectWorkspace(null);
-                        }
-                      } else {
-                        const ws = linkedRepoSessions
-                          .flatMap((entry) => entry.workspaces)
-                          .find(
-                            (w) =>
-                              w.workspace_path === workspaceKey ||
-                              getFullWorkspacePath(w) === workspaceKey,
-                          );
-                        if (ws) {
-                          handleSelectWorkspace(ws);
-                        }
-                      }
-                    }}
-                  />
+                      onActiveSessionChange={handleTerminalActiveSessionChange}
+                      onCloseSession={handleTerminalCloseSession}
+                      onCreateNewSession={handleTerminalNewSession}
+                      onNavigateToWorkspace={handleTerminalNavigate}
+                    />
+                  )}
                 </div>
 
                 {/* Content Layer - Dashboard, Settings, Merge-Review, Workspace-Edit */}
@@ -3291,6 +3949,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {viewMode === "github" && prReviewRoute && (
                     <PrReviewScreen
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       prNumber={prReviewRoute.number}
                       onClose={() =>
                         navigate(
@@ -3318,6 +3977,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {viewMode === "github" && !prReviewRoute && (
                     <GitHubPanel
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       onOpenSettings={openSettings}
                       onStartPromptFromIssue={(issue) =>
                         handleStartPromptFromIssue(issueFromGitHub(issue))
@@ -3343,6 +4003,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {viewMode === "linear" && linearIntegrationEnabled && (
                     <LinearPanel
                       repoPath={dataRepoPath}
+                      gpui={!isRemoteActive}
                       onStartPromptFromIssue={(issue) =>
                         handleStartPromptFromIssue(issueFromLinear(issue))
                       }
@@ -3369,6 +4030,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <MergePreviewPage
                       workspace={mergeWorkspace}
                       repoPath={dataRepoPath}
+                      gpui={gpuiDrawsWorkspace}
                       onCancel={() => {
                         setMergeWorkspace(null);
                         setViewMode("show-workspace");
@@ -3412,7 +4074,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {/* Note: MergeDialog removed - git-specific feature */}
 
               <AlertDialog
-                open={pendingChangeMove !== null}
+                open={
+                  pendingChangeMove !== null &&
+                  gpuiDialog !== "confirmChangeMove"
+                }
                 onOpenChange={(open) => {
                   if (!open && !changeMovePending) setPendingChangeMove(null);
                 }}
@@ -3456,67 +4121,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </AlertDialog>
 
               <UnifiedWorkspaceDialog
-                open={unifiedDialogDefaults !== null}
+                open={
+                  unifiedDialogDefaults !== null &&
+                  gpuiDialog !== "workspaceDialog"
+                }
                 onOpenChange={(open) => {
                   if (!open) setUnifiedDialogDefaults(null);
                 }}
                 repoPath={dataRepoPath}
                 defaults={unifiedDialogDefaults ?? {}}
-                onSuccess={async (workspaceId) => {
-                  await invalidateQueries(["workspaces", queryRepoKey]);
-                  invalidateQueries(["workspace-statuses", queryRepoKey]);
-                  const updatedWorkspaces = await fetchAndCache(
-                    ["workspaces", queryRepoKey],
-                    () => getWorkspaces(dataRepoPath),
-                  );
-                  const newWorkspace = updatedWorkspaces.find(
-                    (w) => w.id === workspaceId,
-                  );
-                  if (newWorkspace) {
-                    handleOpenSession(newWorkspace);
-                  }
-                }}
+                onSuccess={handleWorkspaceCreated}
               />
 
               <CommandPalette
-                showCommandPalette={showCommandPalette}
+                showCommandPalette={showCommandPalette && !gpuiOverlays}
                 onCommandPaletteChange={setShowCommandPalette}
                 workspaces={workspaces}
-                onNavigateToDashboard={handleReturnToDashboard}
-                onNavigateToSettings={openSettings}
-                onOpenRepository={() => void handleOpenRepository()}
-                onOpenRepositoryInNewWindow={() =>
-                  void handleOpenRepositoryInNewWindow()
+                onNavigateToDashboard={paletteCommands.dashboard}
+                onNavigateToSettings={paletteCommands.settings}
+                onOpenRepository={paletteCommands["open-repository"]}
+                onOpenRepositoryInNewWindow={
+                  paletteCommands["open-repository-new-window"]
                 }
-                onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
-                onOpenFilePicker={() => setShowFilePicker(true)}
-                onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
-                onOpenWorkspaceDeletion={() => setShowWorkspaceDeletion(true)}
-                onCreateStackedWorkspace={handleCreateStackedWorkspace}
-                onToggleTerminal={() =>
-                  terminalPaneRef.current?.toggleCollapse()
+                onOpenBranchSwitcher={paletteCommands["switch-branch"]}
+                onOpenFilePicker={paletteCommands["search-files"]}
+                onOpenWorkspacePicker={paletteCommands["go-to-workspace"]}
+                onOpenWorkspaceDeletion={paletteCommands["delete-workspace"]}
+                onCreateStackedWorkspace={paletteCommands["create-workspace"]}
+                onToggleTerminal={paletteCommands["toggle-terminal"]}
+                onMaximizeTerminal={paletteCommands["maximize-terminal"]}
+                onStartAgentWithPrompt={
+                  paletteCommands["start-agent-with-prompt"]
                 }
-                onMaximizeTerminal={() =>
-                  terminalPaneRef.current?.toggleMaximize()
-                }
-                onStartAgentWithPrompt={() => setShowAgentPromptDialog(true)}
-                onStartAgentTerminal={() => void handleStartDefaultAgent()}
-                onOpenPromptHistory={() => {
-                  setPromptHistoryFocusId(null);
-                  setShowPromptHistory(true);
-                }}
+                onStartAgentTerminal={paletteCommands["start-agent-terminal"]}
+                onOpenPromptHistory={paletteCommands["open-prompt-history"]}
                 // Hidden for remote repositories until the stash modal is routed.
                 onOpenStash={
-                  isRemoteActive ? undefined : () => setShowStashModal(true)
+                  isRemoteActive ? undefined : paletteCommands["open-stash"]
                 }
-                onCreateShellTerminal={() =>
-                  terminalPaneRef.current?.createShellSession()
-                }
+                onCreateShellTerminal={paletteCommands["new-shell-terminal"]}
                 hasSelectedWorkspace={!!selectedWorkspace}
-                showBranchSwitcher={showBranchSwitcher}
+                showBranchSwitcher={showBranchSwitcher && !gpuiOverlays}
                 onBranchSwitcherChange={setShowBranchSwitcher}
                 onBranchChanged={handleBranchChanged}
-                showWorkspaceDeletion={showWorkspaceDeletion}
+                showWorkspaceDeletion={
+                  showWorkspaceDeletion && gpuiDialog !== "workspaceDeletion"
+                }
                 onWorkspaceDeletionChange={setShowWorkspaceDeletion}
                 currentWorkspace={selectedWorkspace}
                 onDeleteWorkspace={handleDelete}
@@ -3528,7 +4178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <AgentPromptDialog
-                open={showAgentPromptDialog}
+                open={showAgentPromptDialog && !gpuiModals}
                 onOpenChange={handleAgentPromptDialogOpenChange}
                 repoPath={dataRepoPath}
                 defaultBranch={effectiveDefaultBranch}
@@ -3540,7 +4190,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <PromptHistoryModal
-                open={showPromptHistory}
+                open={showPromptHistory && !gpuiModals}
                 onOpenChange={handlePromptHistoryOpenChange}
                 repoPath={dataRepoPath}
                 initialSelectedId={promptHistoryFocusId}
@@ -3548,12 +4198,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
               />
 
               <KeyboardShortcutsModal
-                open={showKeyboardShortcuts}
+                open={showKeyboardShortcuts && !gpuiOverlays}
                 onOpenChange={setShowKeyboardShortcuts}
               />
 
               <StashModal
-                open={showStashModal}
+                open={showStashModal && !gpuiModals}
                 onOpenChange={setShowStashModal}
                 repoPath={dataRepoPath}
                 workspaces={visibleWorkspaces}
@@ -3561,31 +4211,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   void invalidateQueries(["workspace-changed-files"]);
                   void invalidateQueries(["workspace-diff"]);
                 }}
-                onApplyToNewWorkspace={(entry) => {
-                  setShowStashModal(false);
-                  const source =
-                    entry.workspace_id != null
-                      ? (workspaces.find((w) => w.id === entry.workspace_id) ??
-                        null)
-                      : null;
-                  setUnifiedDialogDefaults({
-                    sourceWorkspace: source,
-                    targetBranch: source?.branch_name,
-                    applyStashId: entry.id,
-                    applyStashCommit: {
-                      hash: entry.short_commit_id,
-                      message: `Stash from ${entry.workspace_label}`,
-                      timestamp: entry.created_at,
-                    },
-                    preSelectedCommits: [entry.short_commit_id],
-                    activeTab: "commits",
-                    description: `Apply stash ${entry.short_commit_id} (${entry.files_changed.length} files, +${entry.additions}/-${entry.deletions})`,
-                  });
-                }}
+                onApplyToNewWorkspace={handleStashApplyToNewWorkspace}
               />
 
               <WorkspacePicker
-                open={showWorkspacePicker}
+                open={showWorkspacePicker && !gpuiOverlays}
                 onOpenChange={setShowWorkspacePicker}
                 workspaces={workspaces}
                 sessions={sessions}
@@ -3596,7 +4226,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <RemoteAmbiguousMutationDialog />
               {activeSshEndpoint && activeRepository?.canonicalPath && (
                 <RemoteTerminalDialog
-                  open={showRemoteTerminalDialog}
+                  open={showRemoteTerminalDialog && !gpuiDrawsRemote}
                   onOpenChange={setShowRemoteTerminalDialog}
                   endpoint={activeSshEndpoint}
                   repositoryId={activeRepository.canonicalPath}
@@ -3611,7 +4241,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       : null,
                   )}
                   onOpenTarget={(target) =>
-                    terminalPaneRef.current?.openRemoteSession(target)
+                    terminalPane()?.openRemoteSession(target)
                   }
                 />
               )}

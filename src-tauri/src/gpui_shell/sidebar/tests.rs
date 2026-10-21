@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui::{px, Entity, Modifiers, TestAppContext, VisualTestContext};
 
 use super::*;
 

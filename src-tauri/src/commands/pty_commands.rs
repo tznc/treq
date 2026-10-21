@@ -35,7 +35,7 @@ fn resolve_local_working_dir(
 /// repository's devcontainer, or `None` to run it on the host. The repo's
 /// `environment` setting decides, and only while the preview is on.
 fn devcontainer_repo(
-  state: &State<'_, AppState>,
+  state: &AppState,
   repo_path: Option<&str>,
   working_dir: Option<&str>,
 ) -> Option<(String, String)> {
@@ -56,6 +56,64 @@ fn devcontainer_repo(
   }
   let environment = db.get_repo_setting(&repo, ENVIRONMENT_SETTING).ok()??;
   (environment == ENVIRONMENT_DEVCONTAINER).then_some((repo, dir))
+}
+
+/// What a PTY session runs and where.
+pub(crate) struct Launch {
+  pub shell: Option<String>,
+  pub shell_args: Vec<String>,
+  pub working_dir: Option<String>,
+  pub initial_command: Option<String>,
+}
+
+/// Resolves a session's shell and directory: over ssh for a remote host, in
+/// the repo's devcontainer when it uses one, else on the host in the
+/// workspace's directory.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch(
+  state: &AppState,
+  session_id: &str,
+  remote_host: Option<&str>,
+  repo_path: Option<&str>,
+  workspace_id: Option<i64>,
+  working_dir: Option<String>,
+  shell: Option<String>,
+  initial_command: Option<String>,
+) -> Result<Launch, String> {
+  if let Some(host) = remote_host {
+    let (program, args) = crate::core::remote::build_ssh_shell_command(
+      host,
+      working_dir.as_deref(),
+      initial_command.as_deref(),
+    )?;
+    return Ok(Launch {
+      shell: Some(program),
+      shell_args: args,
+      working_dir: None,
+      initial_command: None,
+    });
+  }
+  let working_dir = resolve_local_working_dir(repo_path, workspace_id, working_dir)?;
+  Ok(
+    match devcontainer_repo(state, repo_path, working_dir.as_deref()) {
+      Some((repo, dir)) => {
+        let (program, args) =
+          crate::core::devcontainer::exec_shell_command(&repo, &dir, session_id);
+        Launch {
+          shell: Some(program),
+          shell_args: args,
+          working_dir: None,
+          initial_command,
+        }
+      }
+      None => Launch {
+        shell,
+        shell_args: Vec::new(),
+        working_dir,
+        initial_command,
+      },
+    },
+  )
 }
 
 #[tauri::command]
@@ -104,24 +162,21 @@ pub async fn pty_create_session(
       None => return Ok(()),
     };
 
-  let (shell, shell_args, working_dir, initial_command) = if let Some(host) = remote_host {
-    let (program, args) = crate::core::remote::build_ssh_shell_command(
-      &host,
-      working_dir.as_deref(),
-      initial_command.as_deref(),
-    )?;
-    (Some(program), args, None, None)
-  } else {
-    let working_dir = resolve_local_working_dir(repo_path.as_deref(), workspace_id, working_dir)?;
-    match devcontainer_repo(&state, repo_path.as_deref(), working_dir.as_deref()) {
-      Some((repo, dir)) => {
-        let (program, args) =
-          crate::core::devcontainer::exec_shell_command(&repo, &dir, &session_id);
-        (Some(program), args, None, initial_command)
-      }
-      None => (shell, Vec::new(), working_dir, initial_command),
-    }
-  };
+  let Launch {
+    shell,
+    shell_args,
+    working_dir,
+    initial_command,
+  } = launch(
+    &state,
+    &session_id,
+    remote_host.as_deref(),
+    repo_path.as_deref(),
+    workspace_id,
+    working_dir,
+    shell,
+    initial_command,
+  )?;
 
   tauri::async_runtime::spawn_blocking(move || {
     pty_manager.create_session(

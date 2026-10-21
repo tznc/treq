@@ -213,3 +213,33 @@ fn create_workspace_can_copy_and_symlink_together() {
     "node_modules should be a symlink"
   );
 }
+
+/// The create-workspace metadata JSON the app sends carries `symlinked_dirs`.
+#[test]
+fn create_new_workspace_symlinks_dirs_named_in_metadata() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  repo
+    .commit_file(".gitignore", "node_modules/\n", "add gitignore")
+    .expect("Failed to commit .gitignore");
+  TestRepo::write_path(
+    Path::new(&repo.repo_path).join("node_modules/pkg/index.js"),
+    "module.exports = 1;\n",
+  )
+  .expect("write package");
+
+  let metadata =
+    treq_lib::core::parse_workspace_metadata(Some(r#"{"symlinked_dirs":["node_modules"]}"#));
+  let workspace =
+    treq_lib::core::create_new_workspace(&repo.repo_path, "feat/symlink-int", None, metadata, None)
+      .expect("Failed to create workspace");
+
+  let link = repo
+    .workspaces_dir()
+    .join(&workspace.workspace_path)
+    .join("node_modules");
+  assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+  assert_eq!(
+    fs::canonicalize(&link).unwrap(),
+    fs::canonicalize(Path::new(&repo.repo_path).join("node_modules")).unwrap()
+  );
+}
