@@ -1,7 +1,7 @@
 // @include-parallel
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { createTestRepo, openRepo } from "../utils";
 import {
   createWorkspace,
   getSetting,
@@ -15,6 +15,19 @@ import { AGENTS } from "../../src/lib/agents";
 import userEvent from "@testing-library/user-event";
 import fs from "node:fs";
 import path from "node:path";
+
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import {
+  clickGpuiRow,
+  findGpuiToast,
+  gpuiSnapshot,
+  sendGpuiAction,
+} from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
 
 describe("default agent configuration", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -39,7 +52,7 @@ describe("default agent configuration", () => {
       agentValues(await screen.findByRole("combobox", { name: "Agent" })),
     ).toEqual(everyAgent);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     expect(agentValues(await screen.findByLabelText("Default Agent"))).toEqual(
       everyAgent,
     );
@@ -56,7 +69,7 @@ describe("default agent configuration", () => {
   it("saves app-level default_agent via Application settings tab", async () => {
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await screen.findByText("Settings");
 
     const applicationTab = await screen.findByRole("tab", {
@@ -70,7 +83,7 @@ describe("default agent configuration", () => {
     await user.click(
       await screen.findByRole("button", { name: /save settings/i }),
     );
-    await screen.findByText("Settings Saved");
+    await findGpuiToast("Settings Saved");
 
     const saved = await getSetting("default_agent");
     expect(saved).toBe("codex");
@@ -83,7 +96,7 @@ describe("default agent configuration", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await screen.findByText("Settings");
 
     const repositoryTab = await screen.findByRole("tab", {
@@ -97,16 +110,14 @@ describe("default agent configuration", () => {
     await user.click(
       await screen.findByRole("button", { name: /save settings/i }),
     );
-    await screen.findByText("Settings saved");
+    await findGpuiToast("Settings saved");
 
     const savedRepo = await getRepoSetting(repoPath, "default_agent");
     expect(savedRepo).toBe("claude");
 
     await user.click(await screen.findByRole("button", { name: "Close" }));
 
-    await user.click(
-      await findSidebarBranchElement("feat/agent-settings-test"),
-    );
+    await clickGpuiRow("feat/agent-settings-test");
 
     const agentPicker = await screen.findByLabelText("Agent");
     await waitFor(() => expect(agentPicker).toHaveValue("claude"));
@@ -114,7 +125,7 @@ describe("default agent configuration", () => {
 
   it("only adds optional Treq gitignore entries after repository opt-in", async () => {
     render(<Dashboard />);
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
 
     const gitignorePath = path.join(repoPath, ".gitignore");
     await waitFor(
@@ -131,7 +142,7 @@ describe("default agent configuration", () => {
     await user.click(
       await screen.findByRole("button", { name: /save settings/i }),
     );
-    await screen.findByText("Settings saved");
+    await findGpuiToast("Settings saved");
 
     const gitignore = fs.readFileSync(gitignorePath, "utf8");
     expect(gitignore).toContain(".jj*/");
@@ -146,7 +157,7 @@ describe("default agent configuration", () => {
 
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/agent-switch-test"));
+    await clickGpuiRow("feat/agent-switch-test");
 
     const agentPicker = await screen.findByLabelText("Agent");
     await waitFor(() => expect(agentPicker).toHaveValue("codex"));
@@ -193,7 +204,7 @@ describe("default agent configuration", () => {
 
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/agent-cursor-test"));
+    await clickGpuiRow("feat/agent-cursor-test");
 
     const agentPicker = await screen.findByLabelText("Agent");
     await waitFor(() => expect(agentPicker).toHaveValue("cursor"));
@@ -206,9 +217,7 @@ describe("default agent configuration", () => {
 
     render(<Dashboard />);
 
-    await user.click(
-      await findSidebarBranchElement("feat/agent-terminal-default-test"),
-    );
+    await clickGpuiRow("feat/agent-terminal-default-test");
 
     await user.keyboard("{Meta>}k{/Meta}");
     await user.click(
@@ -258,9 +267,7 @@ describe("default agent configuration", () => {
 
     render(<Dashboard />);
 
-    await user.click(
-      await findSidebarBranchElement("feat/agent-pane-button-test"),
-    );
+    await clickGpuiRow("feat/agent-pane-button-test");
 
     await screen.findByTestId("workspace-terminal-pane");
     await user.keyboard("{Meta>}]{/Meta}");

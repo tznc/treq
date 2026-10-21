@@ -5,6 +5,7 @@ import { createTestRepo, openRepo } from "../../../test/utils";
 import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 it("captures repository tab saving via the shared header button", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -13,7 +14,7 @@ it("captures repository tab saving via the shared header button", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByLabelText("Settings"));
+	sendGpuiAction({ kind: "openSettings" });
 	await screen.findByRole("tab", { name: /repository/i, selected: true });
 
 	const branchPatternInput = await screen.findByLabelText(/branch name pattern/i);

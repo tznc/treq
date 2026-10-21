@@ -1,11 +1,8 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
@@ -34,7 +31,7 @@ describe("WorkspaceTerminalPane integration", () => {
     const { workspace } = await setupWorkspace("feat/terminal-shortcuts");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     await screen.findByTestId("workspace-terminal-pane");
     expect(screen.queryByText("Terminals")).not.toBeInTheDocument();
     expect(screen.getByTestId("terminal-pane-controls")).toBeInTheDocument();
@@ -59,7 +56,7 @@ describe("WorkspaceTerminalPane integration", () => {
     const { workspace } = await setupWorkspace("feat/terminal-resize");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     await screen.findByTestId("workspace-terminal-pane");
 
     await user.keyboard("{Meta>}]{/Meta}");
@@ -102,7 +99,7 @@ describe("WorkspaceTerminalPane integration", () => {
     const { workspace } = await setupWorkspace("feat/terminal-close");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     await screen.findByTestId("workspace-terminal-pane");
 
     await user.keyboard("{Meta>}]{/Meta}");
@@ -127,7 +124,7 @@ describe("WorkspaceTerminalPane integration", () => {
     const { workspace } = await setupWorkspace("feat/terminal-dblclick-scroll");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     await screen.findByTestId("workspace-terminal-pane");
 
     await user.keyboard("{Meta>}]{/Meta}");
@@ -180,7 +177,7 @@ describe("WorkspaceTerminalPane integration", () => {
     const { workspace } = await setupWorkspace("feat/terminal-header-label");
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     await screen.findByTestId("workspace-terminal-pane");
 
     await user.keyboard("{Meta>}]{/Meta}");
@@ -213,7 +210,7 @@ describe("WorkspaceTerminalPane integration", () => {
     await useZoomSettingsStore.getState().setZoom(150);
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     await screen.findByTestId("workspace-terminal-pane");
 
     await user.keyboard("{Meta>}\\{/Meta}");

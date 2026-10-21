@@ -1,15 +1,12 @@
 // @include-parallel
+import { clickGpuiHome, findGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 
 describe("create dialog branch name", { timeout: 15_000 }, () => {
   let repoPath: string;
@@ -22,7 +19,7 @@ describe("create dialog branch name", { timeout: 15_000 }, () => {
   });
 
   async function openStackDialog() {
-    await user.click(await screen.findByTestId("home-repo-row"));
+    await clickGpuiHome();
     await screen.findByTestId("show-workspace-header");
     await user.click(await screen.findByRole("button", { name: "Stack" }));
     return screen.findByTestId("modal");
@@ -48,7 +45,7 @@ describe("create dialog branch name", { timeout: 15_000 }, () => {
   it("rejects a name an existing workspace already owns", async () => {
     await createWorkspace(repoPath, "feat/taken");
     render(<Dashboard />);
-    await findSidebarBranchElement("feat/taken");
+    await findGpuiRow("feat/taken");
     const dialog = await openStackDialog();
 
     await user.type(
@@ -66,7 +63,7 @@ describe("create dialog branch name", { timeout: 15_000 }, () => {
 
   it("creates the workspace with the trimmed branch name", async () => {
     render(<Dashboard />);
-    await user.click(await screen.findByTestId("home-repo-row"));
+    await clickGpuiHome();
     await screen.findByTestId("show-workspace-header");
     await user.click(await screen.findByRole("button", { name: "Stack" }));
     const dialog = await screen.findByTestId("modal");
@@ -79,7 +76,7 @@ describe("create dialog branch name", { timeout: 15_000 }, () => {
       within(dialog).getByRole("button", { name: "Create Workspace" }),
     );
 
-    await findSidebarBranchElement("feat/trim");
+    await findGpuiRow("feat/trim");
     await waitFor(async () =>
       expect((await getWorkspaces(repoPath)).map((w) => w.branch_name)).toEqual(
         ["feat/trim"],

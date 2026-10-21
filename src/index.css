@@ -259,7 +259,8 @@
 [cmdk-dialog] {
   z-index: 51;
   position: fixed;
-  left: 50%;
+  /* Centred in the window, which can extend left of the webview. */
+  left: calc(50% - var(--window-offset-left, 0px) / 2);
   top: 50%;
   transform: translate(-50%, -50%);
 }

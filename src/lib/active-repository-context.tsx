@@ -2,7 +2,6 @@ import {
   createContext,
   useContext,
   useLayoutEffect,
-  useMemo,
   type ReactNode,
 } from "react";
 import {
@@ -10,10 +9,6 @@ import {
   repositoryCacheKey,
   setActiveRepositorySingleton,
 } from "./active-repository";
-import {
-  capabilitiesFor,
-  type RemoteCapabilities,
-} from "./remote-capabilities";
 
 const ActiveRepositoryContext = createContext<ActiveRepository | null>(null);
 
@@ -46,9 +41,4 @@ export function useRepositoryCacheKey(
   const repo = useActiveRepository();
   if (repo) return repositoryCacheKey(repo);
   return fallbackPath;
-}
-
-export function useRemoteCapabilities(): RemoteCapabilities {
-  const repo = useActiveRepository();
-  return useMemo(() => capabilitiesFor(repo?.location.type === "ssh"), [repo]);
 }

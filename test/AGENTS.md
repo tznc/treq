@@ -28,7 +28,7 @@ describe("workspace header", () => {
   it("switches branch on click", async () => {
     await createWorkspace(repoPath, "feat/thing");
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/thing"));
+    await clickGpuiRow("feat/thing");
     expect(await screen.findByText("feat/thing")).toBeTruthy();
   });
 });
@@ -38,6 +38,7 @@ describe("workspace header", () => {
 
 - Start every test from `createTestRepo()`; never share repo state between tests
 - Render `<Dashboard />`, not individual components, so the full provider tree runs
+- The workspace sidebar is native (GPUI). Drive it with `test/gpui-sidebar.ts`, which reads the snapshot React pushes and emits sidebar actions
 - Use `userEvent`, never `fireEvent`
 - Prefer `screen.findBy*` over `getBy*` for elements that appear after Rust calls resolve
 - Assert visible text or ARIA roles, not internal state or which private functions ran

@@ -50,6 +50,17 @@ const tauriTest = require("../src-tauri/target") as {
 };
 
 setTestEventSource(() => tauriTest.drainTestEvents());
+
+// The desktop app draws its workspace sidebar natively (GPUI); tests drive
+// it through test/gpui-sidebar.ts. Its context menus are native too, so they
+// are recorded here instead of opened.
+vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/native-context-menu")>()),
+  popupNativeMenu: vi.fn(),
+}));
+beforeEach(() => {
+  window.__TREQ_GPUI_SHELL__ = true;
+});
 afterEach(() => closeTestPtys(tauriTest.invoke));
 
 // Tracks NAPI invoke() calls still in flight. Some UI polling (e.g. the

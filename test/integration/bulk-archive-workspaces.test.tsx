@@ -1,22 +1,27 @@
 // @include-parallel
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { render, screen, waitFor } from "../test-utils";
-import userEvent from "@testing-library/user-event";
+import { render, waitFor } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 import { createWorkspace } from "../../src/lib/api";
 import { Dashboard } from "../../src/components/Dashboard";
+import {
+  clickGpuiRow,
+  findGpuiRow,
+  findGpuiToast,
+  gpuiSnapshot,
+  sendGpuiAction,
+  waitForNoGpuiRow,
+} from "../gpui-sidebar";
 
 describe("bulk archive workspaces", () => {
   let repoPath: string;
-  let user: ReturnType<typeof userEvent.setup>;
 
   beforeEach(async () => {
     ({ repoPath } = createTestRepo(false));
     openRepo(repoPath);
     await createWorkspace(repoPath, "feat/alpha");
     await createWorkspace(repoPath, "feat/beta");
-    user = userEvent.setup();
   });
 
   it("greys out selected workspaces with spinners while bulk archive runs", async () => {
@@ -36,47 +41,26 @@ describe("bulk archive workspaces", () => {
     try {
       render(<Dashboard />);
 
-      const alpha = await screen.findByTestId(
-        "workspace-sidebar-item-feat/alpha",
-      );
-      const beta = await screen.findByTestId(
-        "workspace-sidebar-item-feat/beta",
-      );
+      await findGpuiRow("feat/alpha");
+      await findGpuiRow("feat/beta");
 
-      await user.keyboard("{Meta>}");
-      await user.click(alpha);
-      await user.click(beta);
-      await user.keyboard("{/Meta}");
+      await clickGpuiRow("feat/alpha", { toggle: true });
+      await clickGpuiRow("feat/beta", { toggle: true });
 
-      await user.click(await screen.findByText(/archive 2 workspaces/i));
+      await waitFor(() => expect(gpuiSnapshot()?.bulkArchive).toBe(2));
+      sendGpuiAction({ kind: "bulkArchive" });
 
-      await waitFor(() => {
-        expect(alpha).toHaveAttribute("aria-busy", "true");
-        expect(beta).toHaveAttribute("aria-busy", "true");
+      await waitFor(async () => {
+        expect((await findGpuiRow("feat/alpha")).archiving).toBe(true);
+        expect((await findGpuiRow("feat/beta")).archiving).toBe(true);
       });
-      expect(
-        screen.queryByText(/archive 2 workspaces/i),
-      ).not.toBeInTheDocument();
-      expect(alpha).toHaveAttribute("aria-disabled", "true");
-      expect(beta).toHaveAttribute("aria-disabled", "true");
-      expect(
-        alpha.querySelector('[data-testid="workspace-archive-spinner"]'),
-      ).toBeTruthy();
-      expect(
-        beta.querySelector('[data-testid="workspace-archive-spinner"]'),
-      ).toBeTruthy();
+      expect(gpuiSnapshot()?.bulkArchive).toBeNull();
 
       releaseArchives!();
 
-      await screen.findByText(/2 workspaces archived/i);
-      await waitFor(() => {
-        expect(
-          screen.queryByTestId("workspace-sidebar-item-feat/alpha"),
-        ).toBeNull();
-        expect(
-          screen.queryByTestId("workspace-sidebar-item-feat/beta"),
-        ).toBeNull();
-      });
+      await findGpuiToast(/2 workspaces archived/i);
+      await waitForNoGpuiRow("feat/alpha");
+      await waitForNoGpuiRow("feat/beta");
     } finally {
       vi.mocked(invoke).mockImplementation(originalInvoke!);
     }

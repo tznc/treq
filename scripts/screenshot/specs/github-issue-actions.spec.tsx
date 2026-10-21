@@ -13,6 +13,7 @@ import { ghListIssues, ghViewIssue } from "../../../src/lib/api";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { render, screen, within } from "../../../test/test-utils";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 vi.mock("../../../src/lib/api", async (importOriginal) => {
 	const original =
@@ -71,7 +72,7 @@ it("captures the issue close options, editor, and delete confirmation", async ()
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByRole("button", { name: "Github" }));
+	sendGpuiAction({ kind: "openGithub" });
 	await user.click(await screen.findByText("Fix the login redirect"));
 	await screen.findByText("Issue #42");
 	await screen.findByRole("button", { name: "Edit issue" });

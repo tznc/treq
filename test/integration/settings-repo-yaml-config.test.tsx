@@ -6,6 +6,14 @@ import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
+
 describe("Repository YAML config sync", () => {
   let user: ReturnType<typeof userEvent.setup>;
 
@@ -24,7 +32,7 @@ describe("Repository YAML config sync", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
 
     await screen.findByText(/synced from \.treq\/config\.yaml/i);
@@ -48,7 +56,7 @@ describe("Repository YAML config sync", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
 
     expect(
@@ -73,7 +81,7 @@ describe("Repository YAML config sync", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
 
     const includedFilesTextarea =
@@ -88,7 +96,7 @@ describe("Repository YAML config sync", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
     expect(
       await screen.findByLabelText(/branch name pattern/i),
@@ -101,7 +109,7 @@ describe("Repository YAML config sync", () => {
       'branch_name_pattern: "release/{name}"\n',
     );
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
 
     const branchPatternInput =
@@ -117,7 +125,7 @@ describe("Repository YAML config sync", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
 
     await screen.findByText(/synced from \.treq\/config\.yaml/i);
@@ -148,7 +156,7 @@ describe("Repository YAML config sync", () => {
 
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /repository/i }));
 
     expect(await screen.findByLabelText(/claude code model/i)).toBeDisabled();

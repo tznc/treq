@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
@@ -12,13 +11,14 @@ import { getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
 
 import { appendFileSync } from "node:fs";
+import { clickGpuiHome, clickGpuiRow, pickGpuiRowMenuItem, stackGpui, waitForNoGpuiRow } from "../../../test/gpui-sidebar";
 const chaosLog = (...a: unknown[]) =>
   appendFileSync("/tmp/claude-0/chaos.log", `${a.join(" ")}\n`);
 
 type User = ReturnType<typeof userEvent.setup>;
 
 async function stackFromHome(user: User, branchName: string) {
-  await user.click(await screen.findByTestId("home-repo-row"));
+  await clickGpuiHome();
   await screen.findByTestId("show-workspace-header");
   await user.click(await screen.findByRole("button", { name: "Stack" }));
   const dialog = await screen.findByTestId("modal");
@@ -37,12 +37,7 @@ async function stackOn(
   branchName: string,
   position: "after" | "before" = "after",
 ) {
-  const label = await findSidebarBranchElement(parentBranch);
-  const row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui(parentBranch);
   const dialog = await screen.findByTestId("modal");
   if (position === "before") {
     await user.click(within(dialog).getByRole("button", { name: /^before$/i }));
@@ -73,12 +68,7 @@ it("stack chaos: double-click and escape mid-create", async () => {
   await stackFromHome(user, "tm/base");
 
   // Double-click the submit button.
-  let label = await findSidebarBranchElement("tm/base");
-  let row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui("tm/base");
   let dialog = await screen.findByTestId("modal");
   await user.type(within(dialog).getByLabelText("Branch Name"), "tm/dbl");
   await user.dblClick(
@@ -100,12 +90,7 @@ it("stack chaos: double-click and escape mid-create", async () => {
   });
 
   // Escape while "Creating..." is showing.
-  label = await findSidebarBranchElement("tm/base");
-  row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui("tm/base");
   dialog = await screen.findByTestId("modal");
   await user.type(within(dialog).getByLabelText("Branch Name"), "tm/esc");
   await user.click(
@@ -140,24 +125,14 @@ it("stack chaos: reuse an archived name in a stack", async () => {
   await stackFromHome(user, "re/base");
   await stackOn(user, "re/base", "re/child");
 
-  const child = await findSidebarBranchElement("re/child");
-  await user.pointer({ keys: "[MouseRight]", target: child });
-  await user.click(await screen.findByText("Archive Workspace"));
-  const sidebar = await screen.findByTestId("workspace-sidebar");
-  await waitFor(() =>
-    expect(within(sidebar).queryByText("re/child")).not.toBeInTheDocument(),
-  );
+  await pickGpuiRowMenuItem("re/child", "Archive Workspace");
+  await waitForNoGpuiRow("re/child");
   // Archiving the workspace on screen lands on its stack parent.
   await within(await screen.findByTestId("show-workspace-header")).findByText(
     "re/base",
   );
 
-  const label = await findSidebarBranchElement("re/base");
-  const row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui("re/base");
   const dialog = await screen.findByTestId("modal");
   await user.type(within(dialog).getByLabelText("Branch Name"), "re/child");
   await settle(800);
@@ -204,7 +179,7 @@ it("stack chaos: deep stack with long names", async () => {
       (await getWorkspaces(repoPath)).map((w) => [w.branch_name.slice(-2), (w as unknown as Record<string, unknown>).description]),
     ),
   );
-  await user.click(await findSidebarBranchElement(`${long}-4`));
+  await clickGpuiRow(`${long}-4`);
   await screen.findByTestId("workspace-stack-panel");
   await settle();
   await captureDocument(document, {
@@ -215,12 +190,7 @@ it("stack chaos: deep stack with long names", async () => {
     ],
   });
 
-  const label = await findSidebarBranchElement(`${long}-7`);
-  const row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui(`${long}-7`);
   await screen.findByTestId("new-workspace-stack-card");
   await settle();
   await captureDocument(document, {

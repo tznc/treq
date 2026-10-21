@@ -4,17 +4,16 @@ import userEvent from "@testing-library/user-event";
 import { listen } from "@tauri-apps/api/event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
-  findSidebarWorkspaceRow,
   openRepo,
 } from "../../../test/utils";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { TREQ_SEND_EVENT } from "../../../src/lib/treqSend";
 import { captureDocument } from "../capture";
 import fs from "node:fs";
 import path from "node:path";
+import { clickGpuiRow, openGpuiShell } from "../../../test/gpui-sidebar";
 
 type SendPayload = {
   kind: string;
@@ -60,11 +59,9 @@ it("captures treq send attachment thumbs and lightbox carousel previews", async 
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement("feat/treq-send"));
+  await clickGpuiRow("feat/treq-send");
   await screen.findByTestId("workspace-terminal-pane");
-  await user.click(
-    within(await findSidebarWorkspaceRow("feat/treq-send")).getByRole("button", { name: "Open shell" }),
-  );
+  await openGpuiShell("feat/treq-send");
 
   await waitFor(() => {
     expect(

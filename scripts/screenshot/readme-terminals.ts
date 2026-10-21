@@ -1,7 +1,7 @@
 import { expect } from "vitest";
-import { screen, waitFor, within } from "../../test/test-utils";
-import { findSidebarWorkspaceRow } from "../../test/utils";
+import { screen, waitFor } from "../../test/test-utils";
 import { setRepoSetting } from "../../src/lib/api";
+import { startGpuiAgent } from "../../test/gpui-sidebar";
 
 type UserEvent = {
   click: (element: Element) => Promise<void>;
@@ -91,18 +91,13 @@ function tuiForHeader(text: string): string | null {
  * "Start agent" sidebar button, which starts the repo's default agent.
  */
 export async function openMarketingAgentTerminals(
-  user: UserEvent,
   repoPath: string,
   branch: string,
 ): Promise<void> {
   const agents = ["claude", "codex", "cursor"] as const;
   for (const [index, agent] of agents.entries()) {
     await setRepoSetting(repoPath, "default_agent", agent);
-    await user.click(
-      within(await findSidebarWorkspaceRow(branch)).getByRole("button", {
-        name: "Start agent",
-      }),
-    );
+    await startGpuiAgent(branch);
     await waitFor(() => {
       expect(
         document.querySelectorAll('[data-terminal-id^="agent-"]').length,

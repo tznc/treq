@@ -1,4 +1,5 @@
 // @include-serial
+import { clickGpuiRow, findGpuiToast } from "../../gpui-sidebar";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
@@ -7,7 +8,6 @@ import {
   commitRepoFile,
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -34,7 +34,7 @@ async function openWorkspaceCommitsTab(
   branchName: string,
 ) {
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
 }
 
@@ -291,9 +291,7 @@ describe("ShowWorkspace - Commits tab tentative working copy", () => {
 
     const dirtyUser = userEvent.setup();
     render(<Dashboard />);
-    await dirtyUser.click(
-      await findSidebarBranchElement("feat/tentative-sidebar-click"),
-    );
+    await clickGpuiRow("feat/tentative-sidebar-click");
 
     await dirtyUser.click(await screen.findByText("Working copy"));
 
@@ -345,7 +343,7 @@ describe("ShowWorkspace - Commits tab timestamp edit", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
     });
-    await screen.findByText("Timestamp updated");
+    await findGpuiToast("Timestamp updated");
     const logs = await api.listCommits(repoPath, workspace.id);
     const older = logs.commits.find(
       (commit) => commit.description === "Timestamp commit A",
@@ -391,7 +389,7 @@ describe("ShowWorkspace - Commits tab timestamp edit", () => {
 
     await openWorkspaceCommitsTab(user, "feat/shift-to-now");
     await user.click(await screen.findByTestId("shift-commits-to-now"));
-    await screen.findByText("Timestamps updated");
+    await findGpuiToast("Timestamps updated");
 
     const after = await api.listCommits(repoPath, workspace.id);
     const newer = after.commits.find(

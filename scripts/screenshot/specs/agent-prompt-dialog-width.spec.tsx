@@ -6,6 +6,7 @@ import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 it("captures the agent prompt dialog at cmdk-matching width", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -15,7 +16,7 @@ it("captures the agent prompt dialog at cmdk-matching width", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByText("feat/agent-prompt-width"));
+	await clickGpuiRow("feat/agent-prompt-width");
 	await screen.findByTestId("show-workspace-header");
 
 	await user.keyboard("{Meta>}k{/Meta}");

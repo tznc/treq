@@ -7,7 +7,6 @@ import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
 	getOriginUrl,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -22,6 +21,7 @@ import {
 } from "../../../src/lib/api";
 import { invalidateQueries } from "../../../src/lib/swr-cache";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, gpuiRows } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/sync-remote-conflict";
 
@@ -115,7 +115,7 @@ it("captures Sync completing while remote conflicts remain for local resolve", a
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 
 	// Opening the workspace fetches/auto-rebases divergent remote tips, which
@@ -131,9 +131,9 @@ it("captures Sync completing while remote conflicts remain for local resolve", a
 			expect(screen.getByRole("alert")).toHaveTextContent(
 				/1 conflict detected/i,
 			);
-			expect(
-				screen.getByTestId(`workspace-conflict-indicator-${workspaceId}`),
-			).toBeInTheDocument();
+			expect(gpuiRows().find((r) => r.id === workspaceId)?.conflicted).toBe(
+				true,
+			);
 		},
 		{ timeout: 20000, interval: 1000 },
 	);

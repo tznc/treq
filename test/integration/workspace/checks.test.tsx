@@ -1,15 +1,11 @@
 // @include-parallel
+import { clickGpuiRow } from "../../gpui-sidebar";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, isRepoTrusted } from "../../../src/lib/api";
 import { render, screen, waitFor, within } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-  writeRepoFile,
-} from "../../utils";
+import { createTestRepo, openRepo, writeRepoFile } from "../../utils";
 
 const WORKFLOW = `
 name: Logging CI
@@ -46,7 +42,7 @@ async function openWorkspace(branch: string, extraWorkflows = false) {
   openRepo(repoPath);
   await createWorkspace(repoPath, branch);
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branch));
+  await clickGpuiRow(branch);
   return repoPath;
 }
 

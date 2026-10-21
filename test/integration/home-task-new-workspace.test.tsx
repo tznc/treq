@@ -11,7 +11,8 @@ import {
   setRepoSetting,
 } from "../../src/lib/api";
 import { render, screen, waitFor } from "../test-utils";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { createTestRepo, openRepo } from "../utils";
+import { clickGpuiRow, findGpuiRow } from "../gpui-sidebar";
 
 describe("home-view task input", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -40,9 +41,7 @@ describe("home-view task input", () => {
 
     await submitTask("Fix the login redirect");
 
-    expect(
-      await findSidebarBranchElement("treq/fix-the-login-redirect"),
-    ).toBeTruthy();
+    await findGpuiRow("treq/fix-the-login-redirect");
     await waitFor(async () => {
       const workspace = (await getWorkspaces(repoPath)).find(
         (ws) => ws.branch_name === "treq/fix-the-login-redirect",
@@ -62,7 +61,7 @@ describe("home-view task input", () => {
 
     await submitTask("Fix bug");
 
-    expect(await findSidebarBranchElement("team/fix-bug-3")).toBeTruthy();
+    await findGpuiRow("team/fix-bug-3");
     await waitFor(async () => {
       const workspace = (await getWorkspaces(repoPath)).find(
         (ws) => ws.branch_name === "team/fix-bug-3",
@@ -102,7 +101,7 @@ describe("home-view task input", () => {
     render(<Dashboard />);
     await findToggle();
 
-    await user.click(await findSidebarBranchElement("feat/existing"));
+    await clickGpuiRow("feat/existing");
 
     await screen.findByPlaceholderText("Describe a task...");
     await waitFor(() =>

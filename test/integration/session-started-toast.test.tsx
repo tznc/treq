@@ -7,6 +7,7 @@ import type { LinearIssue } from "../../src/lib/api-linear";
 import { installFakeAgents } from "../fake-agent";
 import { render, screen, waitFor, within } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
+import { clickGpuiRow, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
 
 const linearApi = vi.hoisted(() => ({
   linearListIssues: vi.fn(),
@@ -67,7 +68,8 @@ describe("session started feedback", () => {
 
   it("starts a Linear session without showing a toast", async () => {
     render(<Dashboard />);
-    await user.click(await screen.findByTestId("linear-sidebar-item"));
+    await waitFor(() => expect(gpuiSnapshot()?.linear).not.toBeNull());
+    sendGpuiAction({ kind: "openLinear" });
     await user.click(await screen.findByRole("button", { name: "Kick off" }));
     const dialog = await openPromptDialog();
     await user.type(
@@ -79,9 +81,7 @@ describe("session started feedback", () => {
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(screen.getByTestId("linear-panel")).toBeInTheDocument();
     expect(screen.queryByText("Session started")).not.toBeInTheDocument();
-    await user.click(
-      await screen.findByTestId(`workspace-sidebar-item-${ISSUE.branch_name}`),
-    );
+    await clickGpuiRow(ISSUE.branch_name);
     const pane = await screen.findByTestId("workspace-terminal-pane");
     expect(
       await within(pane).findByText(
@@ -112,9 +112,7 @@ describe("session started feedback", () => {
 
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(screen.queryByText("Session started")).not.toBeInTheDocument();
-    await user.click(
-      await screen.findByTestId("workspace-sidebar-item-feat/elsewhere"),
-    );
+    await clickGpuiRow("feat/elsewhere");
     const pane = await screen.findByTestId("workspace-terminal-pane");
     expect(
       await within(pane).findByText(

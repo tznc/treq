@@ -214,9 +214,16 @@ vi.mock("@tauri-apps/api/window", () => ({
   WebviewWindow: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/webviewWindow", () => ({
-  WebviewWindow: vi.fn(),
-}));
+vi.mock("@tauri-apps/api/webviewWindow", async () => {
+  const { listenOnTestBus } = await import("./test-event-bus");
+  return {
+    WebviewWindow: vi.fn(),
+    getCurrentWebviewWindow: vi.fn(() => ({
+      label: "main",
+      listen: vi.fn(listenOnTestBus),
+    })),
+  };
+});
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   selectFolder: vi.fn(),

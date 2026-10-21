@@ -2,7 +2,6 @@ import * as React from "react";
 import { expect } from "vitest";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -15,6 +14,7 @@ import {
 import { fireEvent, render, screen, waitFor } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
+import { clickGpuiRow } from "../../gpui-sidebar";
 
 export async function setupWorkspaceWithDiff(
   branchName: string,
@@ -40,7 +40,7 @@ export async function openReviewTab(
   branchName: string,
 ) {
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await screen.findByRole("tab", { name: /^Changes/, selected: true });

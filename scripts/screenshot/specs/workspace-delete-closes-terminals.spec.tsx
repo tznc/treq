@@ -10,14 +10,13 @@ import userEvent from "@testing-library/user-event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
-  findSidebarWorkspaceRow,
 	openRepo,
 } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, openGpuiShell, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/terminal-cleanup";
 
@@ -35,22 +34,18 @@ it("deleting a workspace closes its shell and agent terminals", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(workspace.branch_name));
+	await clickGpuiRow(workspace.branch_name);
 	await screen.findByTestId("show-workspace-header");
 
 	// Open an agent terminal and a shell terminal in this workspace.
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", { name: "Start agent" }),
-	);
+	await startGpuiAgent(BRANCH_NAME);
 	await waitFor(() => {
 		expect(
 			document.querySelector('[data-terminal-id^="agent-"]'),
 		).not.toBeNull();
 	});
 
-	await user.click(
-		within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", { name: "Open shell" }),
-	);
+	await openGpuiShell(BRANCH_NAME);
 	await waitFor(() => {
 		expect(
 			document.querySelector('[data-terminal-id^="shell-"]'),

@@ -5,32 +5,78 @@ import {
   Info,
   X,
 } from "lucide-react";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { useEffect } from "react";
+import { gpuiToastsUpdate } from "../../lib/api";
+import { isGpuiShellHost } from "../../lib/gpui-shell";
 import { cn } from "../../lib/utils";
 import {
-  useToastStore,
   type Toast,
   type ToastType,
+  toGpuiToasts,
+  useToastStore,
 } from "../../stores/toastStore";
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const toasts = useToastStore((s) => s.toasts);
   const removeToast = useToastStore((s) => s.removeToast);
+  const gpuiHost = isGpuiShellHost();
+  useGpuiToasts(gpuiHost);
 
   return (
     <>
       {children}
-      <div className="fixed bottom-4 left-4 z-[60] flex flex-col gap-2">
-        {toasts.map((toast) => (
-          <ToastItem
-            key={toast.id}
-            toast={toast}
-            onClose={() => removeToast(toast.id)}
-          />
-        ))}
-      </div>
+      {/* Under the GPUI shell, GPUI draws the toasts over the webview. */}
+      {!gpuiHost && (
+        <div className="fixed bottom-4 left-4 z-[60] flex flex-col gap-2">
+          {toasts.map((toast) => (
+            <ToastItem
+              key={toast.id}
+              toast={toast}
+              onClose={() => removeToast(toast.id)}
+            />
+          ))}
+        </div>
+      )}
     </>
   );
 }
+
+/**
+ * Mirrors the toast store into the GPUI shell, and runs the action and close
+ * clicks it sends back.
+ */
+function useGpuiToasts(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const push = (toasts: Toast[]) => {
+      gpuiToastsUpdate(toGpuiToasts(toasts)).catch((error) =>
+        console.error("gpui_toasts_update failed:", error),
+      );
+    };
+    push(useToastStore.getState().toasts);
+    const unsubscribe = useToastStore.subscribe((state, previous) => {
+      if (state.toasts !== previous.toasts) push(state.toasts);
+    });
+    const unlisten = getCurrentWebviewWindow().listen<{
+      id: string;
+      action: boolean;
+    }>(GPUI_TOAST_EVENT, ({ payload }) => {
+      const { toasts, removeToast } = useToastStore.getState();
+      const toast = toasts.find((item) => item.id === payload.id);
+      if (!toast) return;
+      if (payload.action) toast.action?.onClick();
+      removeToast(toast.id);
+    });
+    return () => {
+      unsubscribe();
+      unlisten.then((stop) => stop()).catch(() => {});
+      push([]);
+    };
+  }, [enabled]);
+}
+
+const GPUI_TOAST_EVENT = "gpui-toast";
 
 const toastIcons: Record<ToastType, typeof CheckCircle2> = {
   error: AlertCircle,

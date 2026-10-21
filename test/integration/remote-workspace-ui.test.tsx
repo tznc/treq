@@ -16,13 +16,13 @@ import { useRemoteCutoffStore } from "../../src/stores/remoteCutoffStore";
 import { act, render, screen, waitFor, within } from "../test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   newCommitWithParents,
   resolveChangeId,
   resolveWorkspacePath,
   writeWorkspaceFile,
 } from "../utils";
 import { openSavedRemoteRepo } from "../remote-repo";
+import { clickGpuiRow, findGpuiRow, gpuiSnapshot } from "../gpui-sidebar";
 
 describe("remote workspace UI", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -48,7 +48,7 @@ describe("remote workspace UI", () => {
     expect(await screen.findByTestId("show-workspace-header")).toBeTruthy();
     expect(screen.queryByText("Remote repository connected")).toBeNull();
     expect(screen.queryByText("Remote review")).toBeNull();
-    expect(await findSidebarBranchElement("feat/remote-ui")).toBeTruthy();
+    expect(await findGpuiRow("feat/remote-ui")).toBeTruthy();
     expect(
       await within(
         await screen.findByTestId("show-workspace-header"),
@@ -66,7 +66,7 @@ describe("remote workspace UI", () => {
     await openSavedRemoteRepo(repoPath);
 
     render(React.createElement(Dashboard));
-    await user.click(await findSidebarBranchElement("feat/select-me"));
+    await clickGpuiRow("feat/select-me");
 
     const header = await screen.findByTestId("show-workspace-header");
     expect(await within(header).findByText("feat/select-me")).toBeTruthy();
@@ -87,7 +87,7 @@ describe("remote workspace UI", () => {
     await openSavedRemoteRepo(repoPath);
 
     render(React.createElement(Dashboard));
-    await user.click(await findSidebarBranchElement("feat/changes"));
+    await clickGpuiRow("feat/changes");
     await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
 
     expect(
@@ -126,7 +126,7 @@ describe("remote workspace UI", () => {
     await openSavedRemoteRepo(repoPath);
 
     render(React.createElement(Dashboard));
-    await user.click(await findSidebarBranchElement("feat/conflict"));
+    await clickGpuiRow("feat/conflict");
     await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
 
     expect(
@@ -143,14 +143,11 @@ describe("remote workspace UI", () => {
     await openSavedRemoteRepo(repoPath);
 
     render(React.createElement(Dashboard));
-    const row = (await findSidebarBranchElement("feat/caps")).closest(
-      "div",
-    ) as HTMLElement;
-    const shell = within(row).getByRole("button", { name: "Open shell" });
-    expect(shell).toBeEnabled();
-    expect(shell).not.toHaveAttribute("title");
-    const agent = within(row).getByRole("button", { name: "Start agent" });
-    expect(agent).toBeEnabled();
+    await findGpuiRow("feat/caps");
+    await waitFor(() => {
+      expect(gpuiSnapshot()?.shellUnavailable).toBeNull();
+      expect(gpuiSnapshot()?.agentUnavailable).toBeNull();
+    });
     const notice = screen.getByTestId("remote-capability-notice");
     expect(notice).toHaveTextContent("Merging a remote workspace");
     expect(notice).not.toHaveTextContent("native SSH PTY");
@@ -212,7 +209,7 @@ describe("remote workspace UI", () => {
     await openSavedRemoteRepo(repoPath);
 
     render(React.createElement(Dashboard));
-    await user.click(await findSidebarBranchElement("feat/marker"));
+    await clickGpuiRow("feat/marker");
     await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
     await screen.findByText("No changes to review");
 

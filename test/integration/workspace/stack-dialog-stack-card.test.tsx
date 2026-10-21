@@ -1,13 +1,10 @@
 // @include-parallel
+import { stackGpui } from "../../gpui-sidebar";
 import * as React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor, within } from "../../test-utils";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import {
   createWorkspace,
@@ -64,12 +61,7 @@ describe("Stack dialog - stack card", () => {
       "feat/base",
     );
     render(<Dashboard />);
-    const label = await findSidebarBranchElement("feat/parent");
-    const row = label.closest("div") as HTMLElement;
-    await user.hover(row);
-    await user.click(
-      await within(row).findByRole("button", { name: "Stack a workspace" }),
-    );
+    await stackGpui("feat/parent");
     const dialog = await screen.findByTestId("modal");
     const card = await within(dialog).findByTestId("new-workspace-stack-card");
 

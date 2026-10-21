@@ -11,6 +11,7 @@ import type { LinearIssue } from "../../../src/lib/api-linear";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { render, screen, within } from "../../../test/test-utils";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 const ISSUE: LinearIssue = vi.hoisted(() => ({
 	id: "issue-id",
@@ -39,7 +40,7 @@ it("opens the agent prompt dialog with a Linear issue chip from Kick off", async
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByTestId("linear-sidebar-item"));
+	sendGpuiAction({ kind: "openLinear" });
 	await user.click(await screen.findByRole("tab", { name: "Kanban" }));
 	const kickoff = await screen.findByRole("button", { name: "Kick off" });
 

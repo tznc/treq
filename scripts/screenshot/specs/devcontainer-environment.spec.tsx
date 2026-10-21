@@ -14,6 +14,7 @@ import { installFakeAgents } from "../../../test/fake-agent";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { openGpuiShell } from "../../../test/gpui-sidebar";
 
 const PROMPT = "Run the test suite inside the container";
 const FAKE_AGENT_DIR = path.resolve(__dirname, "../../../test/fake-agent");
@@ -36,14 +37,7 @@ const removeContainer = (repoPath: string) => {
   );
 };
 
-const openNewShell = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.hover(screen.getByTestId("home-repo-row"));
-  await user.click(
-    await within(screen.getByTestId("home-repo-row")).findByRole("button", {
-      name: "Open shell",
-    }),
-  );
-};
+const openNewShell = () => openGpuiShell(null);
 
 it.skipIf(!hasDevcontainerTooling)(
   "captures switching agents and terminals into the devcontainer",
@@ -110,7 +104,7 @@ it.skipIf(!hasDevcontainerTooling)(
       { timeout: 30000 },
     );
 
-    await openNewShell(user);
+    await openNewShell();
     await waitFor(
       () =>
         expect(
@@ -142,7 +136,7 @@ it.skipIf(!hasDevcontainerTooling)(
     );
     await user.click(await screen.findByRole("menuitem", { name: /^Local/ }));
     await within(pane()).findByRole("button", { name: "Environment: Local" });
-    await openNewShell(user);
+    await openNewShell();
     await waitFor(
       () =>
         expect(

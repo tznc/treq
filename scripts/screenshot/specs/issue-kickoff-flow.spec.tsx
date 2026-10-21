@@ -18,10 +18,10 @@ import { installFakeAgents } from "../../../test/fake-agent";
 import { captureDocument } from "../capture";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   setOriginUrl,
 } from "../../../test/utils";
+import { findGpuiRow, sendGpuiAction } from "../../../test/gpui-sidebar";
 
 // Only the external tracker APIs are stubbed. Workspaces are created by the
 // real backend: GitHub through its own command, the others through
@@ -102,7 +102,7 @@ const CASES: Case[] = [
       external.ghViewIssue.mockResolvedValue(GITHUB_ISSUE);
     },
     open: async (user) => {
-      await user.click(await screen.findByTestId("github-sidebar-item"));
+      sendGpuiAction({ kind: "openGithub" });
       await user.click(await screen.findByText(GITHUB_ISSUE.title));
       await user.click(await screen.findByRole("button", { name: /^agent/i }));
     },
@@ -125,7 +125,7 @@ const CASES: Case[] = [
       );
     },
     open: async (user) => {
-      await user.click(await screen.findByTestId("linear-sidebar-item"));
+      sendGpuiAction({ kind: "openLinear" });
       await user.click(await screen.findByRole("button", { name: "Kick off" }));
     },
   },
@@ -162,7 +162,7 @@ for (const c of CASES) {
       "Implement it",
     );
     await user.click(within(dialog).getByRole("button", { name: /^edit$/i }));
-    await findSidebarBranchElement(c.branch);
+    await findGpuiRow(c.branch);
     await waitFor(async () => {
       const workspace = (await getWorkspaces(repoPath)).find(
         (ws) => ws.branch_name === c.branch,

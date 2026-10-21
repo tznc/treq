@@ -1,9 +1,7 @@
 import * as React from "react";
 import { expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
 import {
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -16,6 +14,7 @@ import {
 import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 it("captures the Gerrit-style LOC marker on the workspace tab row", async () => {
 	const { repoPath } = createTestRepo(false);
@@ -52,10 +51,9 @@ it("captures the Gerrit-style LOC marker on the workspace tab row", async () => 
 		"one\ntwo\nthree\nfour\nfive\n",
 	);
 
-	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(branchName));
+	await clickGpuiRow(branchName);
 	await screen.findByTestId("show-workspace-header");
 
 	const marker = await screen.findByTestId("loc-diff-marker", {}, { timeout: 15000 });

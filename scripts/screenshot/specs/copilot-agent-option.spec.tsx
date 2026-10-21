@@ -1,11 +1,12 @@
 import * as React from "react";
 import { it } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../../../test/utils";
+import { createTestRepo, openRepo } from "../../../test/utils";
 import { createWorkspace } from "../../../src/lib/api";
 import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, sendGpuiAction } from "../../../test/gpui-sidebar";
 
 it("captures Copilot as a selectable agent in settings and the task input toolbar", async () => {
   const { repoPath } = createTestRepo(false);
@@ -15,7 +16,7 @@ it("captures Copilot as a selectable agent in settings and the task input toolba
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await screen.findByText("Settings");
   const applicationTab = await screen.findByRole("tab", { name: /application/i });
   await user.click(applicationTab);
@@ -39,7 +40,7 @@ it("captures Copilot as a selectable agent in settings and the task input toolba
 
   await user.click(await screen.findByRole("button", { name: "Close" }));
 
-  await user.click(await findSidebarBranchElement("feat/copilot-agent-option"));
+  await clickGpuiRow("feat/copilot-agent-option");
   const agentPicker = await screen.findByLabelText("Agent");
   await waitFor(() => expect(agentPicker).toHaveValue("copilot"));
 

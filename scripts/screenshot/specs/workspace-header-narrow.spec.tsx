@@ -4,13 +4,13 @@
  * must not overlap the branch name or target branch selector on the left.
  */
 
-import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { render, screen, within } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/narrow-header-demo";
 
@@ -48,9 +48,8 @@ it("keeps the workspace header actions clear of the branch controls when narrow"
   openRepo(repoPath);
   await createWorkspace(repoPath, BRANCH_NAME);
 
-  const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await screen.findByText(BRANCH_NAME));
+  await clickGpuiRow(BRANCH_NAME);
   const header = await screen.findByTestId("show-workspace-header");
   expect(
     await within(header).findByRole("button", { name: /^push$/i }),

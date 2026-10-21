@@ -1,10 +1,7 @@
 import * as React from "react";
 import { expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
-  findSidebarWorkspaceRow,
   openRepo,
 } from "../../../test/utils";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
@@ -12,6 +9,7 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { useTerminalSettingsStore } from "../../../src/stores/terminalSettingsStore";
 import { captureDocument } from "../capture";
+import { clickGpuiRow, openGpuiShell } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/terminal-font-size";
 
@@ -24,17 +22,12 @@ it("renders the terminal pane at the default 14px font size", async () => {
   const workspace = workspaces.find((w) => w.branch_name === BRANCH_NAME);
   if (!workspace) throw new Error(`workspace ${BRANCH_NAME} not found`);
 
-  const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(workspace.branch_name));
+  await clickGpuiRow(workspace.branch_name);
   await screen.findByTestId("show-workspace-header");
 
-  await user.click(
-    within(await findSidebarWorkspaceRow(BRANCH_NAME)).getByRole("button", {
-      name: "Open shell",
-    }),
-  );
+  await openGpuiShell(BRANCH_NAME);
 
   const terminalPanel = await waitFor(() => {
     const el = document.querySelector('[data-terminal-id^="shell-"]');

@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   newCommitWithParents,
   openRepo,
   resolveChangeId,
@@ -21,6 +20,8 @@ import {
   getWorkspaces,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 type ConflictFixture = {
   slug: string;
@@ -60,7 +61,7 @@ async function navigateToReview(
   user: ReturnType<typeof userEvent.setup>,
   branchName: string,
 ) {
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await screen.findByRole("tab", { name: /^Changes/, selected: true });
@@ -99,13 +100,7 @@ async function assertConflictsCleared(fixture: ConflictFixture) {
     expect(status.conflicted_files).toEqual([]);
   });
 
-  await waitFor(() => {
-    expect(
-      document.querySelector(
-        `[data-testid="workspace-conflict-indicator-${fixture.workspaceId}"]`,
-      ),
-    ).toBeNull();
-  });
+  await waitForGpuiConflict(fixture.workspaceId, false);
 
   await waitFor(() => {
     expect(
@@ -120,9 +115,7 @@ async function captureBeforeAfter(
   message: string,
 ) {
   render(<Dashboard />);
-  await screen.findByTestId(
-    `workspace-conflict-indicator-${fixture.workspaceId}`,
-  );
+  await waitForGpuiConflict(fixture.workspaceId);
   await navigateToReview(user, fixture.branchName);
   await screen.findByRole("button", { name: "Conflicts" });
 
@@ -215,7 +208,7 @@ it("clears a second conflict that appears after the first was resolved", async (
 
   const user = userEvent.setup();
   const firstMount = render(<Dashboard />);
-  await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+  await waitForGpuiConflict(workspaceId);
   await navigateToReview(user, branchName);
   await screen.findByRole("button", { name: "Conflicts" });
   await captureDocument(document, {
@@ -263,7 +256,7 @@ it("clears a second conflict that appears after the first was resolved", async (
   firstMount.unmount();
   render(<Dashboard />);
 
-  await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+  await waitForGpuiConflict(workspaceId);
   await navigateToReview(user, branchName);
   await screen.findByRole("button", { name: "Conflicts" });
   await captureDocument(document, {

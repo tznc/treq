@@ -1,5 +1,6 @@
 import { Minus, Plus, Undo2 } from "lucide-react";
 import { cn } from "../lib/utils";
+import type { ChangeFilesMoveTarget } from "./ChangeFilesMoveContext";
 import { FileContextMenu } from "./FileContextMenu";
 
 interface JjFileChange {
@@ -20,8 +21,8 @@ export interface GitFileRowProps {
   onUnstage?: (path: string) => void;
   isStaged?: boolean;
   workspacePath?: string;
-  /** Enables HTML5 drag of this file (or the current selection) onto a workspace. */
-  onFileDragStart?: (path: string, event: React.DragEvent) => void;
+  moveTargets?: ChangeFilesMoveTarget[];
+  onMoveFile?: (path: string, target: ChangeFilesMoveTarget) => void;
 }
 
 function formatFileLabel(filePath: string) {
@@ -43,14 +44,23 @@ export const GitFileRow = ({
   onUnstage,
   isStaged = false,
   workspacePath,
-  onFileDragStart,
+  moveTargets,
+  onMoveFile,
 }: GitFileRowProps) => {
   const label = formatFileLabel(file.path);
   const { status } = file;
-  const canDrag = !readOnly && !!onFileDragStart;
 
   return (
-    <FileContextMenu filePath={file.path} workspacePath={workspacePath || ""}>
+    <FileContextMenu
+      filePath={file.path}
+      workspacePath={workspacePath || ""}
+      moveTargets={moveTargets}
+      onMoveTo={
+        !readOnly && onMoveFile
+          ? (target) => onMoveFile(file.path, target)
+          : undefined
+      }
+    >
       <div
         className={cn(
           "group/row relative min-w-0 py-1 text-sm flex items-center gap-1 cursor-pointer border-l-2",
@@ -58,14 +68,6 @@ export const GitFileRow = ({
             ? "bg-blue-500/60 border-blue-600 font-semibold text-white"
             : "border-transparent hover:bg-accent/20",
         )}
-        draggable={canDrag}
-        onDragStart={
-          canDrag
-            ? (e) => {
-                onFileDragStart(file.path, e);
-              }
-            : undefined
-        }
         onClick={(e) => {
           onFileClick?.(file.path, e);
         }}

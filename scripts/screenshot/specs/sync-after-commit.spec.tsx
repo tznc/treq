@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import {
 	commitRepoFile,
 	createTestRepo,
-	findSidebarBranchElement,
 	openRepo,
 	resolveWorkspacePath,
 	writeWorkspaceFile,
@@ -13,6 +12,7 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiHome, clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/sync-after-commit";
 
@@ -25,7 +25,7 @@ const BRANCH_NAME = "feat/sync-after-commit";
 // commit vanished, and an empty commit was pushed to the remote. The captures
 // below are before/after the Sync click so that regression is visible.
 it("captures workspace state before and after syncing a fresh commit", async () => {
-	const { repoPath, defaultBranch } = createTestRepo(true); // withRemote: real bare remote to sync against
+	const { repoPath } = createTestRepo(true); // withRemote: real bare remote to sync against
 	openRepo(repoPath);
 
 	await commitRepoFile(
@@ -102,8 +102,8 @@ it("captures workspace state before and after syncing a fresh commit", async () 
 
 	// Visit the home repo and come back so the workspace-status query refetches
 	// and the header reflects the new ahead-of-remote count.
-	await user.click(await findSidebarBranchElement(defaultBranch));
-	await user.click(await findSidebarBranchElement(BRANCH_NAME));
+	await clickGpuiHome();
+	await clickGpuiRow(BRANCH_NAME);
 	await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
 	await screen.findByText("Commit that must survive sync");
 

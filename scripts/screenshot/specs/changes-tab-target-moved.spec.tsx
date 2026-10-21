@@ -7,7 +7,6 @@ import userEvent from "@testing-library/user-event";
 import {
 	commitWorkspaceFile,
 	createTestRepo,
-	findSidebarBranchElement,
 	getOriginUrl,
 	notifyWorkspaceChanged,
 	openRepo,
@@ -21,6 +20,7 @@ import {
 	jjGitFetchBackground,
 } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/target-moved";
 
@@ -73,7 +73,7 @@ it("keeps target-branch merges out of the Committed section", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await findSidebarBranchElement(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 	await user.click(await screen.findByRole("tab", { name: /Changes/ }));
 	await screen.findAllByText("workspace-change.txt");

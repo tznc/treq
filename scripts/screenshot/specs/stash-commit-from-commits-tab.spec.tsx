@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import {
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import {
@@ -15,6 +14,7 @@ import {
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 it("stashes a commit from the Commits tab and applies it onto another workspace", async () => {
   const sourceBranch = "feat/stash-commit-src";
@@ -39,7 +39,7 @@ it("stashes a commit from the Commits tab and applies it onto another workspace"
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(sourceBranch));
+  await clickGpuiRow(sourceBranch);
   await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
 
   const commitHeadline = await screen.findByText("Park me for stash");
@@ -92,7 +92,7 @@ it("stashes a commit from the Commits tab and applies it onto another workspace"
     expect(screen.queryByTestId("stash-modal")).not.toBeInTheDocument(),
   );
 
-  await user.click(await findSidebarBranchElement(targetBranch));
+  await clickGpuiRow(targetBranch);
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await waitFor(() =>

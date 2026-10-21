@@ -24,11 +24,11 @@ import {
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { installFakeAgents } from "../../../test/fake-agent";
 import { captureDocument } from "../capture";
+import { findGpuiRow, sendGpuiAction } from "../../../test/gpui-sidebar";
 
 const {
   mockLinearListTeams,
@@ -120,7 +120,7 @@ it("kicks off an agent prompt from a Linear issue in Kanban view", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByTestId("linear-sidebar-item"));
+  sendGpuiAction({ kind: "openLinear" });
   await screen.findByText("Rework the ranking pipeline");
   expect(
     await screen.findAllByRole("button", { name: "Kick off" }),
@@ -181,7 +181,7 @@ async function openKickoffDialog(
   user: ReturnType<typeof userEvent.setup>,
   issueTitle: string,
 ) {
-  await user.click(await screen.findByTestId("linear-sidebar-item"));
+  sendGpuiAction({ kind: "openLinear" });
   await user.click(await screen.findByRole("tab", { name: "Kanban" }));
   const card = (await screen.findByText(issueTitle)).closest(
     "div",
@@ -235,7 +235,7 @@ it("starts an agent session in the Linear issue's workspace on submit", async ()
     expect(
       (await getWorkspaces(repoPath)).some((w) => w.branch_name === "eng-103"),
     ).toBe(true);
-    await findSidebarBranchElement("eng-103");
+    await findGpuiRow("eng-103");
 
     await captureDocument(document, {
       name: "linear-kickoff-05-submitted",

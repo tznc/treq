@@ -420,10 +420,12 @@ export function SendAssetLightbox({
   return createPortal(
     <div
       data-testid="treq-send-preview-lightbox"
+      data-window-modal
       className="fixed inset-0 z-50 flex items-center justify-center"
     >
       <button
         type="button"
+        data-window-modal-backdrop
         aria-label="Close preview backdrop"
         className="absolute inset-0 cursor-default bg-black/55 backdrop-blur-md"
         onClick={requestClose}

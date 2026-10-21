@@ -4,7 +4,10 @@ import type { JjFileChange } from "../../lib/api";
 import type { ParsedFileChange } from "../../lib/git-utils";
 import { isRemoteRepository } from "../../lib/active-repository";
 import { useActiveRepository } from "../../lib/active-repository-context";
-import { setChangeFilesDragData } from "../../lib/change-file-drag";
+import {
+  type ChangeFilesMoveTarget,
+  useChangeFilesMove,
+} from "../ChangeFilesMoveContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -122,14 +125,21 @@ export function FileSidebar({
   // Hidden for remote repositories until the stash modal (list/apply/delete) is routed.
   const isRemote = isRemoteRepository(useActiveRepository());
 
-  const handleFileDragStart = (path: string, event: React.DragEvent) => {
-    const files =
-      selectedUnstagedFiles.has(path) && selectedUnstagedFiles.size > 0
-        ? Array.from(selectedUnstagedFiles)
-        : [path];
-    setChangeFilesDragData(event.dataTransfer, {
-      files,
+  const move = useChangeFilesMove();
+
+  // A selected file carries the whole selection with it.
+  const filesFor = (path: string) =>
+    selectedUnstagedFiles.has(path) && selectedUnstagedFiles.size > 0
+      ? Array.from(selectedUnstagedFiles)
+      : [path];
+
+  const moveTargets = move?.targets.filter((t) => t.branch !== sourceBranch);
+  const handleMoveFile = (path: string, target: ChangeFilesMoveTarget) => {
+    move?.requestMove({
+      files: filesFor(path),
       sourceBranch,
+      destinationBranch: target.branch,
+      destinationLabel: target.label,
     });
   };
 
@@ -226,7 +236,8 @@ export function FileSidebar({
                   onStage={handleStageFile}
                   onStageAll={handleStageAllFiles}
                   workspacePath={workspacePath}
-                  onFileDragStart={handleFileDragStart}
+                  moveTargets={moveTargets}
+                  onMoveFile={move ? handleMoveFile : undefined}
                 />
               </>
             ) : null}

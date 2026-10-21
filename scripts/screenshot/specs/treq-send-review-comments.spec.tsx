@@ -9,17 +9,16 @@ import userEvent from "@testing-library/user-event";
 import { listen } from "@tauri-apps/api/event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
-  findSidebarWorkspaceRow,
   openRepo,
 } from "../../../test/utils";
-import { render, screen, waitFor, within } from "../../../test/test-utils";
+import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace } from "../../../src/lib/api";
 import { TREQ_SEND_EVENT } from "../../../src/lib/treqSend";
 import { captureDocument } from "../capture";
 import fs from "node:fs";
 import path from "node:path";
+import { clickGpuiRow, startGpuiAgent } from "../../../test/gpui-sidebar";
 
 type SendPayload = {
   kind: string;
@@ -55,14 +54,9 @@ it("captures attachment review comments in the send lightbox", async () => {
   }
 
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement("feat/send-review"));
+  await clickGpuiRow("feat/send-review");
   await screen.findByTestId("workspace-terminal-pane");
-  await user.click(
-    within(await findSidebarWorkspaceRow("feat/send-review")).getByRole(
-      "button",
-      { name: "Start agent" },
-    ),
-  );
+  await startGpuiAgent("feat/send-review");
 
   const terminalEl = await waitFor(() => {
     const el = document.querySelector(

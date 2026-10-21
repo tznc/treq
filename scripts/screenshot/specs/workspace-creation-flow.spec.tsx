@@ -5,7 +5,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../../../test/utils";
 import { render, screen, waitFor, within } from "../../../test/test-utils";
@@ -17,6 +16,7 @@ import {
 } from "../../../src/lib/api";
 import { getFullWorkspacePath } from "../../../src/lib/utils";
 import { captureDocument } from "../capture";
+import { stackGpui } from "../../../test/gpui-sidebar";
 
 const EXISTING_BRANCH = "treq/existing-work";
 const TITLE = "Settings Dark Mode";
@@ -179,12 +179,7 @@ it("captures the stack card before/after positions in the stack dialog", async (
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  const label = await findSidebarBranchElement("feat/api");
-  const row = label.closest("div") as HTMLElement;
-  await user.hover(row);
-  await user.click(
-    await within(row).findByRole("button", { name: "Stack a workspace" }),
-  );
+  await stackGpui("feat/api");
   const dialog = await screen.findByTestId("modal");
   const card = await within(dialog).findByTestId("new-workspace-stack-card");
   await within(card).findByText("feat/base");

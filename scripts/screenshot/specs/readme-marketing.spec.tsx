@@ -27,7 +27,6 @@ import { getFullWorkspacePath } from "../../../src/lib/utils";
 import {
   createTestRepo,
   commitWorkspaceFile,
-  findSidebarBranchElement,
   notifyWorkspaceChanged,
   openRepo,
   resolveWorkspacePath,
@@ -38,7 +37,6 @@ import {
   README_SCREENSHOTS_DIR,
   LANDING_SCREENSHOTS_DIR,
   SIBLING_BRANCHES,
-  STACK_PARENT_BRANCH,
   seedReadmeMarketingRepo,
 } from "../readme-fixture";
 import { captureDocument } from "../capture";
@@ -58,6 +56,8 @@ import {
   injectMarketingTuiOverlays,
   openMarketingAgentTerminals,
 } from "../readme-terminals";
+import { waitForGpuiConflict } from "../gpui-wait";
+import { clickGpuiRow, openGpuiShell, sendGpuiAction } from "../../../test/gpui-sidebar";
 
 vi.mock("../../../src/lib/features", async (importOriginal) => {
   const actual =
@@ -177,7 +177,7 @@ async function prepareWorkspace(branch = MARKETING_BRANCH) {
   const fixture = await seedReadmeMarketingRepo();
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(branch));
+  await clickGpuiRow(branch);
   await screen.findByTestId("show-workspace-header");
   hideMarketingTerminalPane();
   document.documentElement.classList.add("dark");
@@ -191,11 +191,11 @@ async function prepareMarketingView() {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(MARKETING_BRANCH));
+  await clickGpuiRow(MARKETING_BRANCH);
   await screen.findByTestId("show-workspace-header");
   await screen.findByRole("tab", { name: /^Code/, selected: true });
 
-  await openMarketingAgentTerminals(user, repoPath, MARKETING_BRANCH);
+  await openMarketingAgentTerminals(repoPath, MARKETING_BRANCH);
   expandMarketingTerminalPane();
   injectMarketingTuiOverlays();
 
@@ -216,7 +216,7 @@ it("captures the Code Overview for the README", async () => {
   await prepareMarketingView();
 
   await screen.findByRole("button", { name: /view pr/i });
-  await screen.findByRole("button", { name: /ci /i });
+  await screen.findByRole("button", { name: /^Checks:/ });
 
   await captureDocument(document, {
     name: "readme-code",
@@ -331,8 +331,8 @@ it("captures inplace conflict resolution on the Commits tab", async () => {
   await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement("feat/landing-inplace"));
-  await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+  await clickGpuiRow("feat/landing-inplace");
+  await waitForGpuiConflict(workspaceId);
 
   await user.click(await screen.findByRole("tab", { name: /^Commits/ }));
   await user.click(await screen.findByTestId("resolve-conflicts-button"));
@@ -383,28 +383,6 @@ it("captures the Commits tab for the README", async () => {
   });
 }, 120000);
 
-it("captures the workspace list for landing isolation copy", async () => {
-  stubGithub();
-  await seedReadmeMarketingRepo();
-  render(<Dashboard />);
-
-  await findSidebarBranchElement(MARKETING_BRANCH);
-  await findSidebarBranchElement(STACK_PARENT_BRANCH);
-  document.documentElement.classList.add("dark");
-  await new Promise((resolve) => setTimeout(resolve, 400));
-
-  await captureDocument(document, {
-    name: "readme-sidebar",
-    deviceScaleFactor: 2,
-    clipSelector: '[data-testid="workspace-sidebar"]',
-    publishTo: path.join(LANDING_SCREENSHOTS_DIR, "sidebar.png"),
-    expectations: [
-      "The sidebar is cropped and lists stacked workspaces, including feat/empty-event-message under feat/event-ingest.",
-      "Sibling workspaces feat/keyvalues-cache and feat/alerting-logs are visible.",
-    ],
-  });
-}, 120000);
-
 it("captures two working copies side by side for isolation copy", async () => {
   const { user, repoPath } = await prepareWorkspace();
 
@@ -424,7 +402,7 @@ it("captures two working copies side by side for isolation copy", async () => {
     "export default function Home() { return <h1>Local feed</h1>; }\n",
   );
 
-  await user.click(await findSidebarBranchElement(SIBLING_BRANCHES[0]));
+  await clickGpuiRow(SIBLING_BRANCHES[0]);
   await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
   hideMarketingTerminalPane();
   await screen.findByTestId("changes-diff-viewer");
@@ -441,7 +419,7 @@ it("captures two working copies side by side for isolation copy", async () => {
     ],
   });
 
-  await user.click(await findSidebarBranchElement(MARKETING_BRANCH));
+  await clickGpuiRow(MARKETING_BRANCH);
   await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
   hideMarketingTerminalPane();
   await screen.findByTestId("changes-diff-viewer");
@@ -484,7 +462,7 @@ export function miss(): string {
   );
   const user = userEvent.setup();
   render(<Dashboard />);
-  await user.click(await findSidebarBranchElement(MARKETING_BRANCH));
+  await clickGpuiRow(MARKETING_BRANCH);
   await screen.findByTestId("show-workspace-header");
   hideMarketingTerminalPane();
   document.documentElement.classList.add("dark");
@@ -495,7 +473,7 @@ export function miss(): string {
     "export const CACHE_TTL = 30;\n",
   );
 
-  await user.click(await findSidebarBranchElement("feat/keyvalues-cache"));
+  await clickGpuiRow("feat/keyvalues-cache");
   await screen.findByTestId("show-workspace-header");
 
   await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
@@ -615,42 +593,6 @@ it("captures an agent splitting work across three workspaces", async () => {
       "The agent prompt asks to split the work across 3 agents in 3 different workspaces.",
     ],
   });
-
-  for (const branch of [
-    "feat/agent-one",
-    "feat/agent-two",
-    "feat/agent-three",
-  ] as const) {
-    const parent = await findSidebarBranchElement("feat/keyvalues-cache");
-    const row = parent.closest("[data-rfd-draggable-id]") as HTMLElement;
-    await user.click(
-      within(row).getByRole("button", { name: "Stack a workspace" }),
-    );
-    const dialog = await screen.findByTestId("modal");
-    await user.type(within(dialog).getByLabelText("Branch Name"), branch);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create Workspace" }),
-    );
-    await waitFor(() => {
-      expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
-    });
-    await findSidebarBranchElement(branch);
-  }
-
-  await user.click(await findSidebarBranchElement("feat/agent-one"));
-  await screen.findByTestId("show-workspace-header");
-  document.documentElement.classList.add("dark");
-  await new Promise((resolve) => setTimeout(resolve, 400));
-
-  await captureDocument(document, {
-    name: "readme-spawn-after",
-    deviceScaleFactor: 2,
-    clipSelector: '[data-testid="workspace-sidebar"]',
-    publishTo: path.join(LANDING_SCREENSHOTS_DIR, "spawn-after.png"),
-    expectations: [
-      "The sidebar lists feat/agent-one, feat/agent-two, and feat/agent-three after the split.",
-    ],
-  });
 }, 120000);
 
 it("captures treq send thumbnail and lightbox for landing copy", async () => {
@@ -666,12 +608,8 @@ it("captures treq send thumbnail and lightbox for landing copy", async () => {
 `,
   );
 
-  const workspaceLabel = await findSidebarBranchElement(MARKETING_BRANCH);
-  const workspaceRow = workspaceLabel.closest(
-    "[data-rfd-draggable-id]",
-  ) as HTMLElement;
   showMarketingTerminalPane();
-  await user.click(within(workspaceRow).getByRole("button", { name: "Open shell" }));
+  await openGpuiShell(MARKETING_BRANCH);
   expandMarketingTerminalPane();
   await waitFor(() => {
     expect(document.querySelector('[data-terminal-id^="shell-"]')).not.toBeNull();
@@ -750,7 +688,7 @@ it("captures GitHub pull requests for landing GitHub copy", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByRole("button", { name: "Github" }));
+  sendGpuiAction({ kind: "openGithub" });
   await user.click(await screen.findByRole("tab", { name: /pull requests/i }));
   await screen.findByText("feat: handle empty event messages");
   document.documentElement.classList.add("dark");
@@ -774,7 +712,7 @@ it("captures GitHub issues for landing GitHub copy", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByRole("button", { name: "Github" }));
+  sendGpuiAction({ kind: "openGithub" });
   await user.click(await screen.findByRole("tab", { name: /issues/i }));
   await screen.findByText("Empty event payloads drop the Discord body");
   document.documentElement.classList.add("dark");

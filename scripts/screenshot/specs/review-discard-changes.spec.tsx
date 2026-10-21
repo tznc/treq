@@ -18,6 +18,7 @@ import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
 import fs from "node:fs";
 import path from "node:path";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/discard-qa";
 const FILE_NAME = "discard-me.txt";
@@ -40,7 +41,7 @@ it("captures Changes tab discard-all clearing the changes list", async () => {
 	const user = userEvent.setup();
 	render(<Dashboard />);
 
-	await user.click(await screen.findByText(BRANCH_NAME));
+	await clickGpuiRow(BRANCH_NAME);
 	await screen.findByTestId("show-workspace-header");
 	await user.click(await screen.findByRole("tab", { name: /^Changes/i }));
 	await screen.findAllByText(FILE_NAME);

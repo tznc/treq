@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { fireEvent } from "@testing-library/react";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -13,6 +12,7 @@ import { render, screen, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 // NOTE: FileBrowser's per-line "Add comment" button is only mounted when JS
 // hoveredLine state matches (virtualized rows, not CSS
@@ -53,7 +53,7 @@ it("captures adding review comments across two files in the FileBrowser", async 
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(branchName));
+  await clickGpuiRow(branchName);
   await user.click(await screen.findByRole("button", { name: "app.ts" }));
   const fileBrowser = within(await screen.findByTestId("file-browser"));
 

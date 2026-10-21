@@ -1,3 +1,4 @@
+import type { ChangeFilesMoveTarget } from "./ChangeFilesMoveContext";
 import {
   Archive,
   ArrowRight,
@@ -41,7 +42,8 @@ export interface ChangesSectionProps {
   onUnstageAll?: () => void;
   isStaged?: boolean;
   workspacePath?: string;
-  onFileDragStart?: (path: string, event: React.DragEvent) => void;
+  moveTargets?: ChangeFilesMoveTarget[];
+  onMoveFile?: (path: string, target: ChangeFilesMoveTarget) => void;
 }
 
 export const ChangesSection = ({
@@ -66,14 +68,11 @@ export const ChangesSection = ({
   onUnstageAll,
   isStaged = false,
   workspacePath,
-  onFileDragStart,
+  moveTargets,
+  onMoveFile,
 }: ChangesSectionProps) => {
   const hasFiles = files.length > 0;
   const hasSelectedFiles = selectedFiles && selectedFiles.size > 0;
-
-  const handleFileDragStart = (path: string, event: React.DragEvent) => {
-    onFileDragStart?.(path, event);
-  };
 
   return (
     <div
@@ -245,11 +244,8 @@ export const ChangesSection = ({
               onUnstage={onUnstage}
               isStaged={isStaged}
               workspacePath={workspacePath}
-              onFileDragStart={
-                !readOnly && !isStaged && onFileDragStart
-                  ? handleFileDragStart
-                  : undefined
-              }
+              moveTargets={moveTargets}
+              onMoveFile={!readOnly && !isStaged ? onMoveFile : undefined}
             />
           ))}
         </div>

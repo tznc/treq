@@ -42,7 +42,7 @@
     "clean": "cd src-tauri && cargo clean",
     "test:run": "npm run test:unit && npm run test:integration",
     "test:ui": "vitest --ui",
-    "build:napi": "cargo build --manifest-path src-tauri/Cargo.toml --lib --features tauri-test",
+    "build:napi": "cargo build --manifest-path src-tauri/Cargo.toml --lib --no-default-features --features tauri-test",
     "test:unit": "vitest run --config vitest.unit.config.ts --silent=passed-only",
     "test:integration:run": "DEBUG_PRINT_LIMIT=10 vitest run --config vitest.integration.config.ts --silent=passed-only",
     "test:integration": "npm run build:napi --silent && npm run test:integration:run",
@@ -71,7 +71,6 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "@hello-pangea/dnd": "^18.0.1",
     "@monaco-editor/react": "^4.6.0",
     "@supabase/supabase-js": "^2.95.3",
     "@tauri-apps/api": "^2.12.3",

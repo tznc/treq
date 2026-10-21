@@ -82,8 +82,8 @@ const Dialog: React.FC<CommandDialogProps> = ({
   if (!open) return null;
   return (
     <div className={className}>
-      <div onClick={() => onOpenChange?.(false)} />
-      <div>{children}</div>
+      <div cmdk-overlay="" onClick={() => onOpenChange?.(false)} />
+      <div cmdk-dialog="">{children}</div>
     </div>
   );
 };

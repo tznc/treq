@@ -86,6 +86,29 @@ export const initRepo = async (repoPath: string): Promise<boolean> => {
   return invoke("init_repo", { repoPath });
 };
 
+/** Push the GPUI sidebar snapshot to the native shell; null hides it. */
+export const gpuiSidebarUpdate = (
+  snapshot: import("./gpui-shell").GpuiSidebarSnapshot | null,
+): Promise<void> =>
+  invoke("gpui_sidebar_update", {
+    windowLabel: currentWindowLabel(),
+    snapshot,
+  });
+
+/** Opens a GPUI menu at the last right-click in this window's sidebar. */
+export const gpuiMenuShow = (
+  entries: import("./native-context-menu").GpuiMenuEntry[],
+): Promise<void> =>
+  invoke("gpui_menu_show", { windowLabel: currentWindowLabel(), entries });
+
+export const gpuiMenuHide = (): Promise<void> => invoke("gpui_menu_hide");
+
+/** Shows this window's toasts in GPUI, above the webview. */
+export const gpuiToastsUpdate = (
+  toasts: import("../stores/toastStore").GpuiToast[],
+): Promise<void> =>
+  invoke("gpui_toasts_update", { windowLabel: currentWindowLabel(), toasts });
+
 // Database API
 export const getWorkspaces = (repoPath: string): Promise<Workspace[]> =>
   transportGetWorkspaces(repoPath, () =>

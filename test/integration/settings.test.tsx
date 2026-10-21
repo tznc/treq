@@ -6,6 +6,14 @@ import { render, screen } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
 
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { findGpuiToast, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
+
 describe("Settings integration", () => {
   let user: ReturnType<typeof userEvent.setup>;
 
@@ -18,8 +26,7 @@ describe("Settings integration", () => {
   it("opens settings page, switches between tabs, and saves application settings", async () => {
     render(<Dashboard />);
 
-    const settingsButton = await screen.findByLabelText("Settings");
-    await user.click(settingsButton);
+    await openGpuiSettings();
 
     await screen.findByText("Settings");
     await screen.findByRole("button", { name: /save settings/i });
@@ -48,8 +55,8 @@ describe("Settings integration", () => {
 
     await user.selectOptions(fontSizeSelect, "Large");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
-    await screen.findByText("Settings Saved");
-    await screen.findByText(/application settings updated successfully/i);
+    await findGpuiToast("Settings Saved");
+    await findGpuiToast(/application settings updated successfully/i);
 
     await user.click(repositoryTab);
     await screen.findByLabelText(/branch name pattern/i);
@@ -63,7 +70,7 @@ describe("Settings integration", () => {
   it("returns to the previous page when settings is closed", async () => {
     render(<Dashboard />);
 
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     expect(
       await screen.findByRole("heading", { name: "Settings" }),
     ).toBeVisible();

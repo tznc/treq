@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -17,6 +16,7 @@ import {
 import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 it("applies a stash onto an existing workspace via the Apply popover", async () => {
   const sourceBranch = "feat/stash-apply-src";
@@ -41,7 +41,7 @@ it("applies a stash onto an existing workspace via the Apply popover", async () 
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(sourceBranch));
+  await clickGpuiRow(sourceBranch);
   await screen.findByTestId("show-workspace-header");
 
   await user.keyboard("{Meta>}k{/Meta}");
@@ -85,7 +85,7 @@ it("applies a stash onto an existing workspace via the Apply popover", async () 
   await waitFor(() =>
     expect(screen.queryByTestId("stash-modal")).not.toBeInTheDocument(),
   );
-  await user.click(await findSidebarBranchElement(targetBranch));
+  await clickGpuiRow(targetBranch);
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await waitFor(() =>

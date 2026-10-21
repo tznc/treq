@@ -5,21 +5,14 @@ import * as api from "../../../src/lib/api";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { render, screen, waitFor } from "../../test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
-import userEvent from "@testing-library/user-event";
-import {
-  createTestRepo,
-  findSidebarBranchElement,
-  openRepo,
-} from "../../utils";
+import { createTestRepo, openRepo } from "../../utils";
 import { TREQ_SEND_EVENT } from "../../../src/lib/treqSend";
 import { useFeaturePreviewStore } from "../../../src/stores/featurePreviewStore";
 import { useTreqSendStore } from "../../../src/stores/treqSendStore";
+import { clickGpuiRow } from "../../gpui-sidebar";
 
 describe("treq send --browser integration", () => {
-  let user: ReturnType<typeof userEvent.setup>;
-
   beforeEach(() => {
-    user = userEvent.setup();
     useFeaturePreviewStore.setState({
       flags: {
         ...useFeaturePreviewStore.getState().flags,
@@ -47,7 +40,7 @@ describe("treq send --browser integration", () => {
     );
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
 
     const listenMock = vi.mocked(listen);
     const call = listenMock.mock.calls.find(
@@ -94,7 +87,7 @@ describe("treq send --browser integration", () => {
     vi.spyOn(api, "openBrowserWebview").mockResolvedValue(undefined);
     vi.mocked(api.openBrowserWebview).mockClear();
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement(workspace.branch_name));
+    await clickGpuiRow(workspace.branch_name);
     const listenMock = vi.mocked(listen);
     const call = listenMock.mock.calls.find(
       ([eventName]) => eventName === TREQ_SEND_EVENT,

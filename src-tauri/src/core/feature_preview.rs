@@ -48,6 +48,7 @@ fn package_flag(id: &str) -> bool {
 }
 
 pub fn compile_default(feature: PreviewFeature) -> bool {
+  // Dev builds turn every preview on.
   if cfg!(debug_assertions) {
     true
   } else {

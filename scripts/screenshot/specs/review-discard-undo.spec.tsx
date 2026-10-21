@@ -12,7 +12,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -21,6 +20,7 @@ import { render, screen, waitFor, within } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { createWorkspace, getWorkspaces } from "../../../src/lib/api";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
 
 const BRANCH_NAME = "feat/discard-undo";
 const FILE_CONTENT =
@@ -42,7 +42,7 @@ it("captures Undo on the discard-all toast restoring the change", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await findSidebarBranchElement(BRANCH_NAME));
+  await clickGpuiRow(BRANCH_NAME);
   await screen.findByTestId("show-workspace-header");
   await user.click(await screen.findByRole("tab", { name: /^Changes/i }));
   await screen.findAllByText("example.ts");

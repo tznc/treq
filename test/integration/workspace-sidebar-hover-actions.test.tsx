@@ -1,10 +1,16 @@
 // @include-parallel
 import { beforeEach, describe, expect, it } from "vitest";
-import { render } from "../test-utils";
-import { createTestRepo, findSidebarBranchElement, openRepo } from "../utils";
+import { render, waitFor } from "../test-utils";
+import { createTestRepo, openRepo } from "../utils";
 import { createWorkspace } from "../../src/lib/api";
 import { Dashboard } from "../../src/components/Dashboard";
-import { within } from "@testing-library/react";
+import {
+  findGpuiRow,
+  gpuiSnapshot,
+  openGpuiShell,
+  stackGpui,
+} from "../gpui-sidebar";
+import { screen } from "@testing-library/react";
 
 describe("workspace sidebar row actions", () => {
   beforeEach(async () => {
@@ -15,18 +21,20 @@ describe("workspace sidebar row actions", () => {
 
   it("offers agent, shell and stack actions on a workspace row", async () => {
     render(<Dashboard />);
+    await findGpuiRow("feat/alpha");
 
-    const alphaLabel = await findSidebarBranchElement("feat/alpha");
-    const alphaRow = alphaLabel.closest("div") as HTMLElement;
+    await waitFor(() => {
+      expect(gpuiSnapshot()?.agentUnavailable).toBeNull();
+      expect(gpuiSnapshot()?.shellUnavailable).toBeNull();
+    });
 
-    expect(
-      within(alphaRow).getByRole("button", { name: "Start agent" }),
-    ).toBeTruthy();
-    expect(
-      within(alphaRow).getByRole("button", { name: "Open shell" }),
-    ).toBeTruthy();
-    expect(
-      within(alphaRow).getByRole("button", { name: "Stack a workspace" }),
-    ).toBeTruthy();
+    await stackGpui("feat/alpha");
+    expect(await screen.findByTestId("modal")).toBeTruthy();
+    await openGpuiShell("feat/alpha");
+    await waitFor(() =>
+      expect(screen.getByTestId("show-workspace-header")).toHaveTextContent(
+        "feat/alpha",
+      ),
+    );
   });
 });

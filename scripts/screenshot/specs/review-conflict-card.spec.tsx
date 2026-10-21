@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveWorkspacePath,
   writeWorkspaceFile,
@@ -19,6 +18,8 @@ import {
 } from "../../../src/lib/api";
 import { loadPendingReview } from "../../../src/lib/api-extra";
 import { captureDocument } from "../capture";
+import { clickGpuiRow } from "../../../test/gpui-sidebar";
+import { waitForGpuiConflict } from "../gpui-wait";
 
 // The inline conflict card only appears once the backend's conflict regions
 // survive the trip to the frontend. This drives the real flow -- treq's own
@@ -52,9 +53,9 @@ it("captures the inline conflict card in the Changes tab", async () => {
   await ensureWorkspaceIndexed(repoPath, workspaceId, workspacePath);
 
   const mount = render(<Dashboard />);
-  await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+  await waitForGpuiConflict(workspaceId);
 
-  await user.click(await findSidebarBranchElement("feat/conflict-card"));
+  await clickGpuiRow("feat/conflict-card");
   const reviewTab = await screen.findByRole("tab", { name: /^Changes/ });
   await user.click(reviewTab);
   await screen.findByRole("tab", { name: /^Changes/, selected: true });
@@ -110,9 +111,9 @@ it("captures the inline conflict card in the Changes tab", async () => {
   // like a real reload would force a new loadPendingReview fetch.
   mount.unmount();
   render(<Dashboard />);
-  await screen.findByTestId(`workspace-conflict-indicator-${workspaceId}`);
+  await waitForGpuiConflict(workspaceId);
 
-  await user.click(await findSidebarBranchElement("feat/conflict-card"));
+  await clickGpuiRow("feat/conflict-card");
   await user.click(await screen.findByRole("tab", { name: /^Changes/ }));
   await screen.findByRole("tab", { name: /^Changes/, selected: true });
 

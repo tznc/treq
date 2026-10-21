@@ -61,9 +61,12 @@ src-tauri/target/index.js
 scripts/screenshot/.generated/
 
 # Working copies of marketing recaptures. Committed README hero: assets/screenshots/code.png
-# Site crops are generated in Deploy Web CI, not committed.
+# Site crops are generated in Deploy Web CI, not committed, except native GPUI
+# sidebar captures under assets/screenshots/landing/ (browser capture cannot
+# draw the sidebar).
 assets/screenshots/*
 !assets/screenshots/code.png
+!assets/screenshots/landing/
 web/static/img/code.png
 web/static/img/landing/*.png
 

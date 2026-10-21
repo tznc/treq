@@ -17,7 +17,7 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import { createRequire } from "node:module";
-import { afterAll, afterEach, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, vi } from "vitest";
 
 import "./setup.common";
 import { routeLoopbackSsh } from "./loopback-ssh";
@@ -41,11 +41,31 @@ const tauriTest = require("../src-tauri/target") as {
 setTestEventSource(() => tauriTest.drainTestEvents());
 afterEach(() => closeTestPtys(tauriTest.invoke));
 
+// test/utils.tsx imports waitForPendingInvokes from setup.integration.ts, which
+// would run that whole setup (a second @tauri-apps/api/core mock among other
+// things) inside screenshot runs. Stub it so this file is the only setup.
+vi.mock("./setup.integration", () => ({
+  waitForPendingInvokes: () => Promise.resolve(),
+}));
+
+// The desktop app draws its workspace sidebar natively (GPUI); specs drive it
+// through test/gpui-sidebar.ts. Its context menus are native too, so they are
+// recorded here instead of opened (same as test/setup.integration.ts).
+vi.mock("../src/lib/native-context-menu", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/native-context-menu")>()),
+  popupNativeMenu: vi.fn(),
+}));
+beforeEach(() => {
+  window.__TREQ_GPUI_SHELL__ = true;
+});
+
 const jjCalls: string[] = [];
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn((cmd: string, args?: Record<string, unknown>) => {
     trackPtyInvoke(cmd, args);
+    // No native shell in jsdom; the call is only recorded for test/gpui-sidebar.ts.
+    if (cmd === "gpui_sidebar_update") return Promise.resolve();
     if (cmd.startsWith("jj_")) {
       jjCalls.push(cmd);
     }

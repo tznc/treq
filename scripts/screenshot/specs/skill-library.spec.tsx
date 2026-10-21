@@ -10,6 +10,7 @@ import { render, screen } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { captureDocument } from "../capture";
 import { uninstallSkill } from "../../../src/lib/api";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 function skillChecksum(files: { path: string; content: Buffer }[]): string {
   const hash = crypto.createHash("sha256");
@@ -70,7 +71,7 @@ it("captures skill library browse and install", async () => {
   const user = userEvent.setup();
   render(<Dashboard />);
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(await screen.findByRole("tab", { name: /skills/i }));
   expect(await screen.findByText("demo skill")).toBeTruthy();
   expect(await screen.findByText("0 installed")).toBeTruthy();

@@ -86,7 +86,9 @@ import {
 import {
   type ChangeFilesMoveRequest,
   dispatchRefreshWorkspaceChanges,
+  HOME_MOVE_ENDPOINT,
 } from "../lib/change-file-drag";
+import { getWorkspaceTitle } from "../lib/workspace-utils";
 import {
   GITHUB_BASE_PATH,
   githubDetailPath,
@@ -175,7 +177,17 @@ import {
   useFeaturePreviewStore,
   usePreviewFeature,
 } from "../stores/featurePreviewStore";
-import { useSidebarWidthStore } from "../stores/sidebarWidthStore";
+import { useGpuiSidebar } from "../hooks/useGpuiSidebar";
+import { RenameWorkspaceDialog } from "./RenameWorkspaceDialog";
+import {
+  type ChangeFilesMoveTarget,
+  ChangeFilesMoveProvider,
+} from "./ChangeFilesMoveContext";
+import { useThemeStore } from "../stores/themeStore";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  useSidebarWidthStore,
+} from "../stores/sidebarWidthStore";
 import { AgentPromptDialog } from "./AgentPromptDialog";
 import { CommandPalette } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -217,10 +229,9 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
-import { SidebarInset, SidebarProvider } from "./ui/sidebar";
+import { TooltipProvider } from "./ui/tooltip";
 import { useToast } from "./ui/toast";
 import { WorkspacePicker } from "./WorkspacePicker";
-import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   WorkspaceTerminalPane,
   type WorkspaceTerminalPaneHandle,
@@ -324,6 +335,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     issue?: IssueAttachment | null;
   } | null>(null);
   const [showBranchSwitcher, setShowBranchSwitcher] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<{
+    workspace: Workspace;
+    repoPath: string;
+  } | null>(null);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
@@ -2126,13 +2141,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
   };
 
-  const handleAddBefore = (workspace: Workspace) => {
-    setUnifiedDialogDefaults({
-      targetBranch: workspace.branch_name,
-      sourceWorkspace: workspace,
-    });
-  };
-
   const handleMoveWorkspace = async (
     workspace: Workspace,
     targetBranch: string | null,
@@ -2633,7 +2641,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleWorkspaceMultiSelect = (
     workspace: Workspace | null,
-    event: React.MouseEvent,
+    event: Pick<React.MouseEvent, "metaKey" | "ctrlKey" | "shiftKey">,
   ) => {
     // Handle clicking away to clear selection
     if (workspace === null) {
@@ -2781,16 +2789,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const isSessionView = viewMode === "session" || viewMode === "show-workspace";
-  const showSidebar = true;
   const sidebarWidth = useSidebarWidthStore((s) => s.width);
-  const sidebarWidthStyle = {
-    "--sidebar-width": `${sidebarWidth}px`,
-  } as CSSProperties;
-
-  const mainContentStyle = {
-    width: showSidebar ? `calc(100vw - ${sidebarWidth}px)` : "100%",
-  };
-
+  const dark = useThemeStore((s) => s.actualTheme()) === "dark";
+  const currentPage =
+    viewMode === "settings"
+      ? "settings"
+      : viewMode === "github"
+        ? "github"
+        : viewMode === "linear"
+          ? viewMode
+          : viewMode === "session" || viewMode === "show-workspace"
+            ? "session"
+            : undefined;
+  // The workspace sidebar is drawn natively by the GPUI shell; this hook feeds
+  // it snapshots and handles its callbacks.
+  const { sources: gpuiSidebarSources } = useGpuiSidebar({
+    supported: Boolean(dataRepoPath),
+    repoPath: isRemoteActive ? dataRepoPath : repoPath,
+    mainRepoPath: isRemoteActive ? undefined : mainRepoPath,
+    supportingRepos: isRemoteActive ? [] : supportingRepos,
+    cacheKey: queryRepoKey,
+    terminalSessions: terminalSessionSummaries,
+    selectedWorkspaceId: selectedWorkspace?.id ?? null,
+    selectedWorkspaceIds,
+    archivingWorkspaceIds,
+    exitingWorkspaceIds,
+    currentPage,
+    homeRef: homeRepoDisplayRef,
+    linearEnabled: linearIntegrationEnabled,
+    dark,
+    width: sidebarWidth,
+    capabilities: remoteCaps,
+    onSelectWorkspace: handleSelectWorkspace,
+    onWorkspaceMultiSelect: handleWorkspaceMultiSelect,
+    onSelectStack: handleSelectStack,
+    onMoveWorkspace: (workspace, targetBranch) =>
+      void handleMoveWorkspace(workspace, targetBranch),
+    onResizeSidebar: (width) => {
+      useSidebarWidthStore.getState().setWidth(width);
+      void useSidebarWidthStore.getState().persistWidth();
+    },
+    onResetSidebarWidth: () => {
+      useSidebarWidthStore.getState().setWidth(DEFAULT_SIDEBAR_WIDTH);
+      void useSidebarWidthStore.getState().persistWidth();
+    },
+    onSelectRepoHome: handleSelectRepoHome,
+    onOpenSettings: () => openSettings("application"),
+    onOpenCommandPalette: () => setShowCommandPalette(true),
+    onOpenGithub: openGitHub,
+    onOpenLinear: openLinear,
+    onStartAgent: (id) => void handleCreateSessionFromSidebar(id),
+    onOpenShell: (workspace) =>
+      workspace
+        ? handleStartShellFromSidebar(workspace)
+        : handleStartHomeShellFromSidebar(),
+    onStack: (workspace) =>
+      workspace ? handleAddAfter(workspace) : handleStackHomeFromSidebar(),
+    onBulkArchive: () => void handleBulkArchive(),
+    onOpenBranchSwitcher: () => setShowBranchSwitcher(true),
+    onAddRepository:
+      mainRepoPath && !isRemoteActive
+        ? () => void handleAddSupportingRepo()
+        : undefined,
+    onRenameWorkspace: (workspace, path) =>
+      setRenameTarget({ workspace, repoPath: path }),
+    onArchiveWorkspace: handleArchive,
+    onOpenRepoSettings: handleOpenRepoSettings,
+    onLocateRepo: (path) => void handleLocateSupportingRepo(path),
+    onRemoveRepo: (path) => void handleRemoveSupportingRepo(path),
+  });
   // Build agent session data for the terminal pane
   const agentSessionsForPane = linkedRepoSessions.flatMap(
     (linked): AgentSessionData[] => {
@@ -2901,669 +2968,657 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
     ) : null;
 
+  // Review-tab files can move to the home repository or any workspace.
+  const changeFilesMove = {
+    targets: [
+      { branch: HOME_MOVE_ENDPOINT, label: homeRepoDisplayRef || "home" },
+      ...workspaces.map(
+        (workspace): ChangeFilesMoveTarget => ({
+          branch: workspace.branch_name,
+          label: getWorkspaceTitle(workspace),
+        }),
+      ),
+    ],
+    requestMove: handleDropChangeFiles,
+  };
+
   return (
     <ActiveRepositoryProvider repository={activeRepository}>
-      {!dataRepoPath ? (
-        <>
-          <Onboarding
-            onOpenRepo={handleOpenRepository}
-            onOpenRemoteSsh={handleOpenRemoteSetup}
-            remoteLabel={
-              remoteSshEnabled ? "Open via SSH" : "Open cloud workspace"
-            }
-          />
-          {explicitEndpointPathForm}
-          {remoteSetupDialog}
-          <RemoteAmbiguousMutationDialog />
-        </>
-      ) : (
-        <SidebarProvider
-          className="relative h-screen bg-background"
-          style={sidebarWidthStyle}
-        >
-          {cutoffReason && (
-            <div
-              data-testid="remote-cutoff-overlay"
-              className="absolute inset-0 z-40 bg-background/40"
-              aria-hidden
+      <ChangeFilesMoveProvider value={changeFilesMove}>
+        {!dataRepoPath ? (
+          <>
+            <Onboarding
+              onOpenRepo={handleOpenRepository}
+              onOpenRemoteSsh={handleOpenRemoteSetup}
+              remoteLabel={
+                remoteSshEnabled ? "Open via SSH" : "Open cloud workspace"
+              }
             />
-          )}
-          <WorkspaceSidebar
-            repoPath={dataRepoPath}
-            mainRepoPath={isRemoteActive ? undefined : mainRepoPath}
-            supportingRepos={isRemoteActive ? [] : supportingRepos}
-            onSelectRepoHome={handleSelectRepoHome}
-            onAddRepository={
-              mainRepoPath && !isRemoteActive
-                ? () => void handleAddSupportingRepo()
-                : undefined
-            }
-            onRemoveSupportingRepo={(path) =>
-              void handleRemoveSupportingRepo(path)
-            }
-            onLocateSupportingRepo={(path) =>
-              void handleLocateSupportingRepo(path)
-            }
-            onOpenRepoSettings={handleOpenRepoSettings}
-            homeRepoDisplayRef={homeRepoDisplayRef}
-            selectedWorkspaceId={selectedWorkspace?.id ?? null}
-            selectedWorkspaceIds={selectedWorkspaceIds}
-            archivingWorkspaceIds={archivingWorkspaceIds}
-            exitingWorkspaceIds={exitingWorkspaceIds}
-            onWorkspaceClick={(workspace) => handleSelectWorkspace(workspace)}
-            onWorkspaceMultiSelect={handleWorkspaceMultiSelect}
-            onBulkArchive={handleBulkArchive}
-            onArchiveWorkspace={handleArchive}
-            openSettings={openSettings}
-            navigateToDashboard={handleReturnToDashboard}
-            onOpenCommandPalette={() => setShowCommandPalette(true)}
-            onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
-            onAddBefore={handleAddBefore}
-            onAddAfter={handleAddAfter}
-            onMoveWorkspace={handleMoveWorkspace}
-            onSelectStack={handleSelectStack}
-            onStartAgent={(workspace) =>
-              handleCreateSessionFromSidebar(workspace.id)
-            }
-            onStartShell={handleStartShellFromSidebar}
-            onStartHomeAgent={() => handleCreateSessionFromSidebar(null)}
-            onStartHomeShell={handleStartHomeShellFromSidebar}
-            onStackHome={handleStackHomeFromSidebar}
-            terminalSessions={terminalSessionSummaries}
-            onDropChangeFiles={handleDropChangeFiles}
-            onOpenGitHub={openGitHub}
-            onOpenLinear={linearIntegrationEnabled ? openLinear : undefined}
-            currentPage={
-              viewMode === "settings"
-                ? "settings"
-                : viewMode === "github"
-                  ? "github"
-                  : viewMode === "linear"
-                    ? viewMode
-                    : viewMode === "session" || viewMode === "show-workspace"
-                      ? "session"
-                      : undefined
-            }
-          />
-
-          <SidebarInset
-            className="flex-1 relative min-w-0"
-            style={mainContentStyle}
-          >
-            {/* Sessions Layer - ALWAYS RENDERED ONCE */}
-            <div
-              className="absolute inset-0 flex flex-col workspace-terminal-container overflow-hidden"
-              style={sessionLayerStyle}
-            >
-              {isRemoteActive && (
-                <div className="relative z-50 shrink-0 border-b bg-background">
-                  <div className="flex items-center justify-between px-4 py-1 text-xs text-muted-foreground">
-                    <span>{activeRepository?.displayName}</span>
-                    <div className="flex items-center gap-3">
-                      {activeSshEndpoint && (
-                        <button
-                          type="button"
-                          className="underline underline-offset-2"
-                          onClick={() => setShowRemoteTerminalDialog(true)}
-                          disabled={Boolean(cutoffReason)}
-                        >
-                          Terminal
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="underline underline-offset-2"
-                        onClick={handleRefreshRemote}
-                        disabled={Boolean(cutoffReason)}
-                      >
-                        Refresh
-                      </button>
+            {explicitEndpointPathForm}
+            {remoteSetupDialog}
+            <RemoteAmbiguousMutationDialog />
+          </>
+        ) : (
+          <TooltipProvider delay={0}>
+            <div className="relative flex h-screen w-full bg-background">
+              {cutoffReason && (
+                <div
+                  data-testid="remote-cutoff-overlay"
+                  className="absolute inset-0 z-40 bg-background/40"
+                  aria-hidden
+                />
+              )}
+              {gpuiSidebarSources}
+              {renameTarget && (
+                <RenameWorkspaceDialog
+                  open
+                  onOpenChange={(open) => {
+                    if (!open) setRenameTarget(null);
+                  }}
+                  repoPath={renameTarget.repoPath}
+                  workspace={renameTarget.workspace}
+                  onSuccess={() => setRenameTarget(null)}
+                />
+              )}
+              <main className="relative flex w-full min-w-0 flex-1 flex-col bg-background">
+                {/* Sessions Layer - ALWAYS RENDERED ONCE */}
+                <div
+                  className="absolute inset-0 flex flex-col workspace-terminal-container overflow-hidden"
+                  style={sessionLayerStyle}
+                >
+                  {isRemoteActive && (
+                    <div className="relative z-50 shrink-0 border-b bg-background">
+                      <div className="flex items-center justify-between px-4 py-1 text-xs text-muted-foreground">
+                        <span>{activeRepository?.displayName}</span>
+                        <div className="flex items-center gap-3">
+                          {activeSshEndpoint && (
+                            <button
+                              type="button"
+                              className="underline underline-offset-2"
+                              onClick={() => setShowRemoteTerminalDialog(true)}
+                              disabled={Boolean(cutoffReason)}
+                            >
+                              Terminal
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="underline underline-offset-2"
+                            onClick={handleRefreshRemote}
+                            disabled={Boolean(cutoffReason)}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                      </div>
+                      <div className="px-4 pb-1.5">
+                        <RemoteStatusBanner
+                          state={remoteConnectionState}
+                          detail={
+                            cutoffReason
+                              ? "Access is blocked until you reauthenticate."
+                              : undefined
+                          }
+                          onRefresh={
+                            cutoffReason ? undefined : handleRefreshRemote
+                          }
+                          onWake={() => void handleWakeManaged()}
+                          onReconnect={() => void refreshInstanceStatus()}
+                        />
+                      </div>
+                      <RemoteCapabilityNotice capabilities={remoteCaps} />
                     </div>
-                  </div>
-                  <div className="px-4 pb-1.5">
-                    <RemoteStatusBanner
-                      state={remoteConnectionState}
-                      detail={
-                        cutoffReason
-                          ? "Access is blocked until you reauthenticate."
-                          : undefined
+                  )}
+                  {/* Show workspace views take up remaining space */}
+                  {dataRepoPath && (
+                    <div className="flex-1 min-h-0 overflow-hidden relative">
+                      <ErrorBoundary
+                        fallbackTitle="Workspace error"
+                        resetKeys={[selectedWorkspace?.id]}
+                        onReset={handleReturnToDashboard}
+                      >
+                        <ShowWorkspace
+                          repositoryPath={dataRepoPath}
+                          workspace={selectedWorkspace}
+                          onActiveTabChange={setShowWorkspaceActiveTab}
+                          mainRepoBranch={effectiveDefaultBranch}
+                          initialSelectedFile={sessionSelectedFile}
+                          availableBranches={availableBranches}
+                          branchesLoading={branchesLoading}
+                          onLoadAvailableBranches={handleLoadAvailableBranches}
+                          onDeleteWorkspace={handleDelete}
+                          onOpenFilePicker={() => setShowFilePicker(true)}
+                          onOpenMergePreview={handleOpenMergePreview}
+                          onViewPrInApp={openGitHubPr}
+                          onOpenBranchSwitcher={() =>
+                            setShowBranchSwitcher(true)
+                          }
+                          onCreateStackedWorkspace={
+                            handleCreateStackedWorkspace
+                          }
+                          onNavigateToWorkspace={handleSelectWorkspace}
+                          onMoveCommitToNewWorkspace={(commit, workspace) => {
+                            const firstLine =
+                              commit.description.split("\n")[0] || undefined;
+                            setUnifiedDialogDefaults({
+                              targetBranch: workspace?.branch_name,
+                              sourceWorkspace: workspace ?? null,
+                              preSelectedCommits: [commit.change_id],
+                              description: firstLine,
+                              activeTab: "commits",
+                            });
+                          }}
+                          onMoveCommitToExistingWorkspace={(
+                            commit,
+                            workspace,
+                          ) => {
+                            setUnifiedDialogDefaults({
+                              targetBranch: workspace?.branch_name,
+                              sourceWorkspace: workspace ?? null,
+                              preSelectedCommits: [commit.change_id],
+                              activeTab: "commits",
+                            });
+                            // Note: dialog will open in "move to existing" mode via defaults
+                          }}
+                          onCommitStashed={() => setShowStashModal(true)}
+                          onMoveFilesToNewWorkspace={(files, workspace) => {
+                            setUnifiedDialogDefaults({
+                              targetBranch: workspace?.branch_name,
+                              sourceWorkspace: workspace ?? null,
+                              preSelectedFiles: files,
+                              activeTab: "changes",
+                            });
+                          }}
+                          onSessionCreated={handleSessionCreated}
+                          idleAgentSession={terminalSessionSummaries.find(
+                            (session) =>
+                              session.kind === "agent" &&
+                              session.repoPath === repoPath &&
+                              session.branchName ===
+                                selectedWorkspace?.branch_name &&
+                              !session.isStreaming,
+                          )}
+                          onSendToIdleAgent={(sessionId, prompt) => {
+                            terminalPaneRef.current?.sendToTerminal(
+                              agentTerminalId(sessionId),
+                              prompt,
+                            );
+                          }}
+                          onViewFullPrompt={handleViewFullPrompt}
+                        />
+                      </ErrorBoundary>
+                    </div>
+                  )}
+                  {/* Shared workspace terminal pane - always rendered to preserve state */}
+                  <WorkspaceTerminalPane
+                    ref={terminalPaneRef}
+                    // One pane for the window: it shows supporting-repository
+                    // agents too, so switching repositories keeps it mounted.
+                    key={activeSupportingRepoPath ? mainRepoPath : queryRepoKey}
+                    workingDirectory={
+                      selectedWorkspace
+                        ? getFullWorkspacePath(selectedWorkspace)
+                        : dataRepoPath
+                    }
+                    repoPath={isRemoteActive ? undefined : dataRepoPath}
+                    currentBranch={effectiveDefaultBranch}
+                    agentSessions={agentSessionsForPane}
+                    activeAgentSessionId={
+                      isSessionView ? activeSessionId : null
+                    }
+                    workspaceBranchByPath={workspaceBranchByPath}
+                    onTerminalsChange={setTerminalSessionSummaries}
+                    resolveRemoteShell={
+                      isRemoteActive ? resolveRemoteShell : undefined
+                    }
+                    onActiveSessionChange={(sessionId) => {
+                      if (sessionId === null) {
+                        setActiveSessionId(null);
+                        return;
                       }
-                      onRefresh={cutoffReason ? undefined : handleRefreshRemote}
-                      onWake={() => void handleWakeManaged()}
-                      onReconnect={() => void refreshInstanceStatus()}
-                    />
-                  </div>
-                  <RemoteCapabilityNotice capabilities={remoteCaps} />
-                </div>
-              )}
-              {/* Show workspace views take up remaining space */}
-              {dataRepoPath && (
-                <div className="flex-1 min-h-0 overflow-hidden relative">
-                  <ErrorBoundary
-                    fallbackTitle="Workspace error"
-                    resetKeys={[selectedWorkspace?.id]}
-                    onReset={handleReturnToDashboard}
-                  >
-                    <ShowWorkspace
-                      repositoryPath={dataRepoPath}
-                      workspace={selectedWorkspace}
-                      onActiveTabChange={setShowWorkspaceActiveTab}
-                      mainRepoBranch={effectiveDefaultBranch}
-                      initialSelectedFile={sessionSelectedFile}
-                      availableBranches={availableBranches}
-                      branchesLoading={branchesLoading}
-                      onLoadAvailableBranches={handleLoadAvailableBranches}
-                      onDeleteWorkspace={handleDelete}
-                      onOpenFilePicker={() => setShowFilePicker(true)}
-                      onOpenMergePreview={handleOpenMergePreview}
-                      onViewPrInApp={openGitHubPr}
-                      onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
-                      onCreateStackedWorkspace={handleCreateStackedWorkspace}
-                      onNavigateToWorkspace={handleSelectWorkspace}
-                      onMoveCommitToNewWorkspace={(commit, workspace) => {
-                        const firstLine =
-                          commit.description.split("\n")[0] || undefined;
-                        setUnifiedDialogDefaults({
-                          targetBranch: workspace?.branch_name,
-                          sourceWorkspace: workspace ?? null,
-                          preSelectedCommits: [commit.change_id],
-                          description: firstLine,
-                          activeTab: "commits",
-                        });
-                      }}
-                      onMoveCommitToExistingWorkspace={(commit, workspace) => {
-                        setUnifiedDialogDefaults({
-                          targetBranch: workspace?.branch_name,
-                          sourceWorkspace: workspace ?? null,
-                          preSelectedCommits: [commit.change_id],
-                          activeTab: "commits",
-                        });
-                        // Note: dialog will open in "move to existing" mode via defaults
-                      }}
-                      onCommitStashed={() => setShowStashModal(true)}
-                      onMoveFilesToNewWorkspace={(files, workspace) => {
-                        setUnifiedDialogDefaults({
-                          targetBranch: workspace?.branch_name,
-                          sourceWorkspace: workspace ?? null,
-                          preSelectedFiles: files,
-                          activeTab: "changes",
-                        });
-                      }}
-                      onSessionCreated={handleSessionCreated}
-                      idleAgentSession={terminalSessionSummaries.find(
-                        (session) =>
-                          session.kind === "agent" &&
-                          session.repoPath === repoPath &&
-                          session.branchName ===
-                            selectedWorkspace?.branch_name &&
-                          !session.isStreaming,
-                      )}
-                      onSendToIdleAgent={(sessionId, prompt) => {
-                        terminalPaneRef.current?.sendToTerminal(
-                          agentTerminalId(sessionId),
-                          prompt,
+                      setActiveSessionId(sessionId);
+                      // Find the session to determine view mode
+                      const linked = linkedRepoSessions.find((entry) =>
+                        entry.sessions.some(
+                          (s) =>
+                            toPaneSessionId(entry.repoPath, s.id) === sessionId,
+                        ),
+                      );
+                      const session = linked?.sessions.find(
+                        (s) =>
+                          toPaneSessionId(linked.repoPath, s.id) === sessionId,
+                      );
+                      if (linked && session) {
+                        activateRepo(linked.repoPath);
+                        setViewMode(
+                          session.workspace_id ? "show-workspace" : "session",
                         );
-                      }}
-                      onViewFullPrompt={handleViewFullPrompt}
-                    />
-                  </ErrorBoundary>
+                        if (session.workspace_id) {
+                          const ws = linked.workspaces.find(
+                            (w) => w.id === session.workspace_id,
+                          );
+                          if (ws) setSelectedWorkspace(ws);
+                        }
+                      }
+                    }}
+                    onCloseSession={(sessionId) => {
+                      if (activeSessionId === sessionId) {
+                        setActiveSessionId(null);
+                      }
+                    }}
+                    onCreateNewSession={(activeWorkspacePath) => {
+                      if (activeWorkspacePath) {
+                        const ws = linkedRepoSessions
+                          .flatMap((entry) => entry.workspaces)
+                          .find(
+                            (w) =>
+                              getFullWorkspacePath(w) === activeWorkspacePath,
+                          );
+                        if (ws && ws.repo_path !== repoPath) {
+                          void launchAgentSession({ workspace: ws });
+                          return;
+                        }
+                        handleCreateSessionFromSidebar(ws?.id ?? null);
+                      } else {
+                        handleCreateSessionFromSidebar(
+                          selectedWorkspace?.id ?? null,
+                        );
+                      }
+                    }}
+                    onNavigateToWorkspace={(workspaceKey, isMainRepo) => {
+                      if (isMainRepo) {
+                        // Agent terminals pass their repository path.
+                        if (
+                          linkedRepoSessions.some(
+                            (entry) => entry.repoPath === workspaceKey,
+                          )
+                        ) {
+                          handleSelectRepoHome(workspaceKey);
+                        } else {
+                          handleSelectWorkspace(null);
+                        }
+                      } else {
+                        const ws = linkedRepoSessions
+                          .flatMap((entry) => entry.workspaces)
+                          .find(
+                            (w) =>
+                              w.workspace_path === workspaceKey ||
+                              getFullWorkspacePath(w) === workspaceKey,
+                          );
+                        if (ws) {
+                          handleSelectWorkspace(ws);
+                        }
+                      }
+                    }}
+                  />
                 </div>
-              )}
-              {/* Shared workspace terminal pane - always rendered to preserve state */}
-              <WorkspaceTerminalPane
-                ref={terminalPaneRef}
-                // One pane for the window: it shows supporting-repository
-                // agents too, so switching repositories keeps it mounted.
-                key={activeSupportingRepoPath ? mainRepoPath : queryRepoKey}
-                workingDirectory={
-                  selectedWorkspace
-                    ? getFullWorkspacePath(selectedWorkspace)
-                    : dataRepoPath
-                }
-                repoPath={isRemoteActive ? undefined : dataRepoPath}
-                currentBranch={effectiveDefaultBranch}
-                agentSessions={agentSessionsForPane}
-                activeAgentSessionId={isSessionView ? activeSessionId : null}
-                workspaceBranchByPath={workspaceBranchByPath}
-                onTerminalsChange={setTerminalSessionSummaries}
-                resolveRemoteShell={
-                  isRemoteActive ? resolveRemoteShell : undefined
-                }
-                onActiveSessionChange={(sessionId) => {
-                  if (sessionId === null) {
-                    setActiveSessionId(null);
-                    return;
-                  }
-                  setActiveSessionId(sessionId);
-                  // Find the session to determine view mode
-                  const linked = linkedRepoSessions.find((entry) =>
-                    entry.sessions.some(
-                      (s) =>
-                        toPaneSessionId(entry.repoPath, s.id) === sessionId,
-                    ),
+
+                {/* Content Layer - Dashboard, Settings, Merge-Review, Workspace-Edit */}
+                <div
+                  className="absolute inset-0 overflow-auto"
+                  style={{
+                    visibility: !isSessionView ? "visible" : "hidden",
+                    zIndex: !isSessionView ? 10 : 0,
+                    pointerEvents: !isSessionView ? "auto" : "none",
+                  }}
+                >
+                  {/* Settings View */}
+                  {viewMode === "settings" && (
+                    <SettingsPage
+                      repoPath={dataRepoPath}
+                      onClose={closeSettings}
+                      currentBranch={effectiveDefaultBranch}
+                      cloudWorkspace={{
+                        instanceStatus,
+                        provisioningStage,
+                        provisioningError,
+                        usage: cloudUsage,
+                        usageError: cloudUsageError,
+                        onRefreshStatus: refreshCloudWorkspace,
+                        onProvision: handleProvisionManaged,
+                        onWake: () => handleWakeManaged(),
+                        onRepair: handleReprovisionManaged,
+                        onDelete: handleDeleteManagedInstance,
+                        onOpenRepositories: () => {
+                          handleOpenManagedRepositories();
+                          closeSettings();
+                        },
+                      }}
+                    />
+                  )}
+
+                  {/* GitHub Panel */}
+                  {viewMode === "github" && prReviewRoute && (
+                    <PrReviewScreen
+                      repoPath={dataRepoPath}
+                      prNumber={prReviewRoute.number}
+                      onClose={() =>
+                        navigate(
+                          githubDetailPath(
+                            "prs",
+                            prReviewRoute.number,
+                            prReviewRoute.filter,
+                          ),
+                        )
+                      }
+                      // A PR is usually not checked out, so its review runs in
+                      // the home repository and reads the diff through gh.
+                      onStartAgentReview={async (prompt, agent) => {
+                        await launchAgentSession({
+                          workspace: null,
+                          homeRepoPath: dataRepoPath,
+                          prompt,
+                          mode: "acceptEdits",
+                          agent: toAgentKind(agent),
+                          sessionName: "AI Review",
+                        });
+                      }}
+                    />
+                  )}
+                  {viewMode === "github" && !prReviewRoute && (
+                    <GitHubPanel
+                      repoPath={dataRepoPath}
+                      onOpenSettings={openSettings}
+                      onStartPromptFromIssue={(issue) =>
+                        handleStartPromptFromIssue(issueFromGitHub(issue))
+                      }
+                      onOpenWorkspace={async (workspaceId) => {
+                        await invalidateQueries(["workspaces", queryRepoKey]);
+                        invalidateQueries(["workspace-statuses", queryRepoKey]);
+                        const updatedWorkspaces = await fetchAndCache(
+                          ["workspaces", queryRepoKey],
+                          () => getWorkspaces(dataRepoPath),
+                        );
+                        const workspace = updatedWorkspaces.find(
+                          (w) => w.id === workspaceId,
+                        );
+                        if (workspace) {
+                          handleSelectWorkspace(workspace);
+                        }
+                      }}
+                    />
+                  )}
+
+                  {/* Linear Panel */}
+                  {viewMode === "linear" && linearIntegrationEnabled && (
+                    <LinearPanel
+                      repoPath={dataRepoPath}
+                      onStartPromptFromIssue={(issue) =>
+                        handleStartPromptFromIssue(issueFromLinear(issue))
+                      }
+                      // Linear content is not tied to a workspace, so the review
+                      // runs in the home repository, where the agent can still
+                      // check the text against the code.
+                      onStartAgentReview={async ({ prompt, agent }) => {
+                        await launchAgentSession({
+                          workspace: null,
+                          // The repository the panel wrote the snapshot into,
+                          // so the agent's comments land where the panel reads.
+                          homeRepoPath: dataRepoPath,
+                          prompt,
+                          mode: "acceptEdits",
+                          agent: toAgentKind(agent),
+                          sessionName: "AI Review",
+                        });
+                      }}
+                    />
+                  )}
+
+                  {/* Merge Preview View */}
+                  {viewMode === "merge-preview" && mergeWorkspace && (
+                    <MergePreviewPage
+                      workspace={mergeWorkspace}
+                      repoPath={dataRepoPath}
+                      onCancel={() => {
+                        setMergeWorkspace(null);
+                        setViewMode("show-workspace");
+                      }}
+                      onMergeComplete={async () => {
+                        // Automatic workspace deletion on merge temporarily disabled
+                        // Delete workspace after successful merge
+                        // try {
+                        //   await deleteWorkspace(
+                        //     mergeWorkspace.repo_path,
+                        //     mergeWorkspace.workspace_path,
+                        //     mergeWorkspace.id
+                        //   );
+                        //   // Invalidate workspace queries
+                        //   void invalidateQueries(["workspaces"]);
+                        // } catch (error) {
+                        //   addToast({
+                        //     title: "Merge succeeded but workspace deletion failed",
+                        //     description: "Please manually delete the workspace from the sidebar",
+                        //     type: "warning",
+                        //   });
+                        // } finally {
+                        setMergeWorkspace(null);
+                        setViewMode("show-workspace");
+                        handleReturnToDashboard();
+                        void invalidateQueries(["repo-status", queryRepoKey]);
+                        void invalidateQueries(["repo-branch", queryRepoKey]);
+                        void invalidateQueries(["workspaces", queryRepoKey]);
+                        void invalidateQueries([
+                          "workspace-statuses",
+                          queryRepoKey,
+                        ]);
+                        // }
+                      }}
+                    />
+                  )}
+                </div>
+              </main>
+
+              {/* Global Dialogs */}
+              {/* Note: MergeDialog removed - git-specific feature */}
+
+              <AlertDialog
+                open={pendingChangeMove !== null}
+                onOpenChange={(open) => {
+                  if (!open && !changeMovePending) setPendingChangeMove(null);
+                }}
+              >
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {pendingChangeMove
+                        ? `Move ${pendingChangeMove.files.length} ${
+                            pendingChangeMove.files.length === 1
+                              ? "file"
+                              : "files"
+                          } to ${pendingChangeMove.destinationLabel}?`
+                        : "Move files?"}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This moves the selected uncommitted{" "}
+                      {pendingChangeMove?.files.length === 1
+                        ? "change"
+                        : "changes"}{" "}
+                      into the target workspace and removes{" "}
+                      {pendingChangeMove?.files.length === 1 ? "it" : "them"}{" "}
+                      from the current one.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={changeMovePending}>
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={changeMovePending}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        void handleConfirmChangeMove();
+                      }}
+                    >
+                      Move
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <UnifiedWorkspaceDialog
+                open={unifiedDialogDefaults !== null}
+                onOpenChange={(open) => {
+                  if (!open) setUnifiedDialogDefaults(null);
+                }}
+                repoPath={dataRepoPath}
+                defaults={unifiedDialogDefaults ?? {}}
+                onSuccess={async (workspaceId) => {
+                  await invalidateQueries(["workspaces", queryRepoKey]);
+                  invalidateQueries(["workspace-statuses", queryRepoKey]);
+                  const updatedWorkspaces = await fetchAndCache(
+                    ["workspaces", queryRepoKey],
+                    () => getWorkspaces(dataRepoPath),
                   );
-                  const session = linked?.sessions.find(
-                    (s) => toPaneSessionId(linked.repoPath, s.id) === sessionId,
+                  const newWorkspace = updatedWorkspaces.find(
+                    (w) => w.id === workspaceId,
                   );
-                  if (linked && session) {
-                    activateRepo(linked.repoPath);
-                    setViewMode(
-                      session.workspace_id ? "show-workspace" : "session",
-                    );
-                    if (session.workspace_id) {
-                      const ws = linked.workspaces.find(
-                        (w) => w.id === session.workspace_id,
-                      );
-                      if (ws) setSelectedWorkspace(ws);
-                    }
-                  }
-                }}
-                onCloseSession={(sessionId) => {
-                  if (activeSessionId === sessionId) {
-                    setActiveSessionId(null);
-                  }
-                }}
-                onCreateNewSession={(activeWorkspacePath) => {
-                  if (activeWorkspacePath) {
-                    const ws = linkedRepoSessions
-                      .flatMap((entry) => entry.workspaces)
-                      .find(
-                        (w) => getFullWorkspacePath(w) === activeWorkspacePath,
-                      );
-                    if (ws && ws.repo_path !== repoPath) {
-                      void launchAgentSession({ workspace: ws });
-                      return;
-                    }
-                    handleCreateSessionFromSidebar(ws?.id ?? null);
-                  } else {
-                    handleCreateSessionFromSidebar(
-                      selectedWorkspace?.id ?? null,
-                    );
-                  }
-                }}
-                onNavigateToWorkspace={(workspaceKey, isMainRepo) => {
-                  if (isMainRepo) {
-                    // Agent terminals pass their repository path.
-                    if (
-                      linkedRepoSessions.some(
-                        (entry) => entry.repoPath === workspaceKey,
-                      )
-                    ) {
-                      handleSelectRepoHome(workspaceKey);
-                    } else {
-                      handleSelectWorkspace(null);
-                    }
-                  } else {
-                    const ws = linkedRepoSessions
-                      .flatMap((entry) => entry.workspaces)
-                      .find(
-                        (w) =>
-                          w.workspace_path === workspaceKey ||
-                          getFullWorkspacePath(w) === workspaceKey,
-                      );
-                    if (ws) {
-                      handleSelectWorkspace(ws);
-                    }
+                  if (newWorkspace) {
+                    handleOpenSession(newWorkspace);
                   }
                 }}
               />
-            </div>
 
-            {/* Content Layer - Dashboard, Settings, Merge-Review, Workspace-Edit */}
-            <div
-              className="absolute inset-0 overflow-auto"
-              style={{
-                visibility: !isSessionView ? "visible" : "hidden",
-                zIndex: !isSessionView ? 10 : 0,
-                pointerEvents: !isSessionView ? "auto" : "none",
-              }}
-            >
-              {/* Settings View */}
-              {viewMode === "settings" && (
-                <SettingsPage
-                  repoPath={dataRepoPath}
-                  onClose={closeSettings}
-                  currentBranch={effectiveDefaultBranch}
-                  cloudWorkspace={{
-                    instanceStatus,
-                    provisioningStage,
-                    provisioningError,
-                    usage: cloudUsage,
-                    usageError: cloudUsageError,
-                    onRefreshStatus: refreshCloudWorkspace,
-                    onProvision: handleProvisionManaged,
-                    onWake: () => handleWakeManaged(),
-                    onRepair: handleReprovisionManaged,
-                    onDelete: handleDeleteManagedInstance,
-                    onOpenRepositories: () => {
-                      handleOpenManagedRepositories();
-                      closeSettings();
+              <CommandPalette
+                showCommandPalette={showCommandPalette}
+                onCommandPaletteChange={setShowCommandPalette}
+                workspaces={workspaces}
+                onNavigateToDashboard={handleReturnToDashboard}
+                onNavigateToSettings={openSettings}
+                onOpenRepository={() => void handleOpenRepository()}
+                onOpenRepositoryInNewWindow={() =>
+                  void handleOpenRepositoryInNewWindow()
+                }
+                onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
+                onOpenFilePicker={() => setShowFilePicker(true)}
+                onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
+                onOpenWorkspaceDeletion={() => setShowWorkspaceDeletion(true)}
+                onCreateStackedWorkspace={handleCreateStackedWorkspace}
+                onToggleTerminal={() =>
+                  terminalPaneRef.current?.toggleCollapse()
+                }
+                onMaximizeTerminal={() =>
+                  terminalPaneRef.current?.toggleMaximize()
+                }
+                onStartAgentWithPrompt={() => setShowAgentPromptDialog(true)}
+                onStartAgentTerminal={() => void handleStartDefaultAgent()}
+                onOpenPromptHistory={() => {
+                  setPromptHistoryFocusId(null);
+                  setShowPromptHistory(true);
+                }}
+                // Hidden for remote repositories until the stash modal is routed.
+                onOpenStash={
+                  isRemoteActive ? undefined : () => setShowStashModal(true)
+                }
+                onCreateShellTerminal={() =>
+                  terminalPaneRef.current?.createShellSession()
+                }
+                hasSelectedWorkspace={!!selectedWorkspace}
+                showBranchSwitcher={showBranchSwitcher}
+                onBranchSwitcherChange={setShowBranchSwitcher}
+                onBranchChanged={handleBranchChanged}
+                showWorkspaceDeletion={showWorkspaceDeletion}
+                onWorkspaceDeletionChange={setShowWorkspaceDeletion}
+                currentWorkspace={selectedWorkspace}
+                onDeleteWorkspace={handleDelete}
+                showFilePicker={showFilePicker}
+                onFilePickerChange={setShowFilePicker}
+                onFileSelected={(filePath) => setSessionSelectedFile(filePath)}
+                selectedWorkspaceId={selectedWorkspace?.id ?? null}
+                repoPath={dataRepoPath}
+              />
+
+              <AgentPromptDialog
+                open={showAgentPromptDialog}
+                onOpenChange={handleAgentPromptDialogOpenChange}
+                repoPath={dataRepoPath}
+                defaultBranch={effectiveDefaultBranch}
+                workspaces={workspaces}
+                onSessionCreated={handleSessionCreated}
+                initialPrompt={runPromptRequest?.prompt}
+                initialWorkspaceId={runPromptRequest?.workspaceId ?? null}
+                initialIssue={runPromptRequest?.issue ?? null}
+              />
+
+              <PromptHistoryModal
+                open={showPromptHistory}
+                onOpenChange={handlePromptHistoryOpenChange}
+                repoPath={dataRepoPath}
+                initialSelectedId={promptHistoryFocusId}
+                onRunPrompt={handleRunPrompt}
+              />
+
+              <KeyboardShortcutsModal
+                open={showKeyboardShortcuts}
+                onOpenChange={setShowKeyboardShortcuts}
+              />
+
+              <StashModal
+                open={showStashModal}
+                onOpenChange={setShowStashModal}
+                repoPath={dataRepoPath}
+                workspaces={visibleWorkspaces}
+                onApplied={() => {
+                  void invalidateQueries(["workspace-changed-files"]);
+                  void invalidateQueries(["workspace-diff"]);
+                }}
+                onApplyToNewWorkspace={(entry) => {
+                  setShowStashModal(false);
+                  const source =
+                    entry.workspace_id != null
+                      ? (workspaces.find((w) => w.id === entry.workspace_id) ??
+                        null)
+                      : null;
+                  setUnifiedDialogDefaults({
+                    sourceWorkspace: source,
+                    targetBranch: source?.branch_name,
+                    applyStashId: entry.id,
+                    applyStashCommit: {
+                      hash: entry.short_commit_id,
+                      message: `Stash from ${entry.workspace_label}`,
+                      timestamp: entry.created_at,
                     },
-                  }}
-                />
-              )}
+                    preSelectedCommits: [entry.short_commit_id],
+                    activeTab: "commits",
+                    description: `Apply stash ${entry.short_commit_id} (${entry.files_changed.length} files, +${entry.additions}/-${entry.deletions})`,
+                  });
+                }}
+              />
 
-              {/* GitHub Panel */}
-              {viewMode === "github" && prReviewRoute && (
-                <PrReviewScreen
-                  repoPath={dataRepoPath}
-                  prNumber={prReviewRoute.number}
-                  onClose={() =>
-                    navigate(
-                      githubDetailPath(
-                        "prs",
-                        prReviewRoute.number,
-                        prReviewRoute.filter,
-                      ),
-                    )
+              <WorkspacePicker
+                open={showWorkspacePicker}
+                onOpenChange={setShowWorkspacePicker}
+                workspaces={workspaces}
+                sessions={sessions}
+                workspaceChangeCounts={undefined}
+                onSelect={handleOpenSession}
+              />
+              {remoteSetupDialog}
+              <RemoteAmbiguousMutationDialog />
+              {activeSshEndpoint && activeRepository?.canonicalPath && (
+                <RemoteTerminalDialog
+                  open={showRemoteTerminalDialog}
+                  onOpenChange={setShowRemoteTerminalDialog}
+                  endpoint={activeSshEndpoint}
+                  repositoryId={activeRepository.canonicalPath}
+                  {...resolveRemoteTerminalTarget(
+                    activeRepository.canonicalPath,
+                    isRemoteActive && selectedWorkspace
+                      ? {
+                          workspace_name: selectedWorkspace.workspace_name,
+                          workspace_path:
+                            getFullWorkspacePath(selectedWorkspace),
+                        }
+                      : null,
+                  )}
+                  onOpenTarget={(target) =>
+                    terminalPaneRef.current?.openRemoteSession(target)
                   }
-                  // A PR is usually not checked out, so its review runs in
-                  // the home repository and reads the diff through gh.
-                  onStartAgentReview={async (prompt, agent) => {
-                    await launchAgentSession({
-                      workspace: null,
-                      homeRepoPath: dataRepoPath,
-                      prompt,
-                      mode: "acceptEdits",
-                      agent: toAgentKind(agent),
-                      sessionName: "AI Review",
-                    });
-                  }}
-                />
-              )}
-              {viewMode === "github" && !prReviewRoute && (
-                <GitHubPanel
-                  repoPath={dataRepoPath}
-                  onOpenSettings={openSettings}
-                  onStartPromptFromIssue={(issue) =>
-                    handleStartPromptFromIssue(issueFromGitHub(issue))
-                  }
-                  onOpenWorkspace={async (workspaceId) => {
-                    await invalidateQueries(["workspaces", queryRepoKey]);
-                    invalidateQueries(["workspace-statuses", queryRepoKey]);
-                    const updatedWorkspaces = await fetchAndCache(
-                      ["workspaces", queryRepoKey],
-                      () => getWorkspaces(dataRepoPath),
-                    );
-                    const workspace = updatedWorkspaces.find(
-                      (w) => w.id === workspaceId,
-                    );
-                    if (workspace) {
-                      handleSelectWorkspace(workspace);
-                    }
-                  }}
-                />
-              )}
-
-              {/* Linear Panel */}
-              {viewMode === "linear" && linearIntegrationEnabled && (
-                <LinearPanel
-                  repoPath={dataRepoPath}
-                  onStartPromptFromIssue={(issue) =>
-                    handleStartPromptFromIssue(issueFromLinear(issue))
-                  }
-                  // Linear content is not tied to a workspace, so the review
-                  // runs in the home repository, where the agent can still
-                  // check the text against the code.
-                  onStartAgentReview={async ({ prompt, agent }) => {
-                    await launchAgentSession({
-                      workspace: null,
-                      // The repository the panel wrote the snapshot into,
-                      // so the agent's comments land where the panel reads.
-                      homeRepoPath: dataRepoPath,
-                      prompt,
-                      mode: "acceptEdits",
-                      agent: toAgentKind(agent),
-                      sessionName: "AI Review",
-                    });
-                  }}
-                />
-              )}
-
-              {/* Merge Preview View */}
-              {viewMode === "merge-preview" && mergeWorkspace && (
-                <MergePreviewPage
-                  workspace={mergeWorkspace}
-                  repoPath={dataRepoPath}
-                  onCancel={() => {
-                    setMergeWorkspace(null);
-                    setViewMode("show-workspace");
-                  }}
-                  onMergeComplete={async () => {
-                    // Automatic workspace deletion on merge temporarily disabled
-                    // Delete workspace after successful merge
-                    // try {
-                    //   await deleteWorkspace(
-                    //     mergeWorkspace.repo_path,
-                    //     mergeWorkspace.workspace_path,
-                    //     mergeWorkspace.id
-                    //   );
-                    //   // Invalidate workspace queries
-                    //   void invalidateQueries(["workspaces"]);
-                    // } catch (error) {
-                    //   addToast({
-                    //     title: "Merge succeeded but workspace deletion failed",
-                    //     description: "Please manually delete the workspace from the sidebar",
-                    //     type: "warning",
-                    //   });
-                    // } finally {
-                    setMergeWorkspace(null);
-                    setViewMode("show-workspace");
-                    handleReturnToDashboard();
-                    void invalidateQueries(["repo-status", queryRepoKey]);
-                    void invalidateQueries(["repo-branch", queryRepoKey]);
-                    void invalidateQueries(["workspaces", queryRepoKey]);
-                    void invalidateQueries([
-                      "workspace-statuses",
-                      queryRepoKey,
-                    ]);
-                    // }
-                  }}
                 />
               )}
             </div>
-          </SidebarInset>
-
-          {/* Global Dialogs */}
-          {/* Note: MergeDialog removed - git-specific feature */}
-
-          <AlertDialog
-            open={pendingChangeMove !== null}
-            onOpenChange={(open) => {
-              if (!open && !changeMovePending) setPendingChangeMove(null);
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {pendingChangeMove
-                    ? `Move ${pendingChangeMove.files.length} ${
-                        pendingChangeMove.files.length === 1 ? "file" : "files"
-                      } to ${pendingChangeMove.destinationLabel}?`
-                    : "Move files?"}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  This moves the selected uncommitted{" "}
-                  {pendingChangeMove?.files.length === 1 ? "change" : "changes"}{" "}
-                  into the target workspace and removes{" "}
-                  {pendingChangeMove?.files.length === 1 ? "it" : "them"} from
-                  the current one.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={changeMovePending}>
-                  Cancel
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  disabled={changeMovePending}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    void handleConfirmChangeMove();
-                  }}
-                >
-                  Move
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          <UnifiedWorkspaceDialog
-            open={unifiedDialogDefaults !== null}
-            onOpenChange={(open) => {
-              if (!open) setUnifiedDialogDefaults(null);
-            }}
-            repoPath={dataRepoPath}
-            defaults={unifiedDialogDefaults ?? {}}
-            onSuccess={async (workspaceId) => {
-              await invalidateQueries(["workspaces", queryRepoKey]);
-              invalidateQueries(["workspace-statuses", queryRepoKey]);
-              const updatedWorkspaces = await fetchAndCache(
-                ["workspaces", queryRepoKey],
-                () => getWorkspaces(dataRepoPath),
-              );
-              const newWorkspace = updatedWorkspaces.find(
-                (w) => w.id === workspaceId,
-              );
-              if (newWorkspace) {
-                handleOpenSession(newWorkspace);
-              }
-            }}
-          />
-
-          <CommandPalette
-            showCommandPalette={showCommandPalette}
-            onCommandPaletteChange={setShowCommandPalette}
-            workspaces={workspaces}
-            onNavigateToDashboard={handleReturnToDashboard}
-            onNavigateToSettings={openSettings}
-            onOpenRepository={() => void handleOpenRepository()}
-            onOpenRepositoryInNewWindow={() =>
-              void handleOpenRepositoryInNewWindow()
-            }
-            onOpenBranchSwitcher={() => setShowBranchSwitcher(true)}
-            onOpenFilePicker={() => setShowFilePicker(true)}
-            onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
-            onOpenWorkspaceDeletion={() => setShowWorkspaceDeletion(true)}
-            onCreateStackedWorkspace={handleCreateStackedWorkspace}
-            onToggleTerminal={() => terminalPaneRef.current?.toggleCollapse()}
-            onMaximizeTerminal={() => terminalPaneRef.current?.toggleMaximize()}
-            onStartAgentWithPrompt={() => setShowAgentPromptDialog(true)}
-            onStartAgentTerminal={() => void handleStartDefaultAgent()}
-            onOpenPromptHistory={() => {
-              setPromptHistoryFocusId(null);
-              setShowPromptHistory(true);
-            }}
-            // Hidden for remote repositories until the stash modal is routed.
-            onOpenStash={
-              isRemoteActive ? undefined : () => setShowStashModal(true)
-            }
-            onCreateShellTerminal={() =>
-              terminalPaneRef.current?.createShellSession()
-            }
-            hasSelectedWorkspace={!!selectedWorkspace}
-            showBranchSwitcher={showBranchSwitcher}
-            onBranchSwitcherChange={setShowBranchSwitcher}
-            onBranchChanged={handleBranchChanged}
-            showWorkspaceDeletion={showWorkspaceDeletion}
-            onWorkspaceDeletionChange={setShowWorkspaceDeletion}
-            currentWorkspace={selectedWorkspace}
-            onDeleteWorkspace={handleDelete}
-            showFilePicker={showFilePicker}
-            onFilePickerChange={setShowFilePicker}
-            onFileSelected={(filePath) => setSessionSelectedFile(filePath)}
-            selectedWorkspaceId={selectedWorkspace?.id ?? null}
-            repoPath={dataRepoPath}
-          />
-
-          <AgentPromptDialog
-            open={showAgentPromptDialog}
-            onOpenChange={handleAgentPromptDialogOpenChange}
-            repoPath={dataRepoPath}
-            defaultBranch={effectiveDefaultBranch}
-            workspaces={workspaces}
-            onSessionCreated={handleSessionCreated}
-            initialPrompt={runPromptRequest?.prompt}
-            initialWorkspaceId={runPromptRequest?.workspaceId ?? null}
-            initialIssue={runPromptRequest?.issue ?? null}
-          />
-
-          <PromptHistoryModal
-            open={showPromptHistory}
-            onOpenChange={handlePromptHistoryOpenChange}
-            repoPath={dataRepoPath}
-            initialSelectedId={promptHistoryFocusId}
-            onRunPrompt={handleRunPrompt}
-          />
-
-          <KeyboardShortcutsModal
-            open={showKeyboardShortcuts}
-            onOpenChange={setShowKeyboardShortcuts}
-          />
-
-          <StashModal
-            open={showStashModal}
-            onOpenChange={setShowStashModal}
-            repoPath={dataRepoPath}
-            workspaces={visibleWorkspaces}
-            onApplied={() => {
-              void invalidateQueries(["workspace-changed-files"]);
-              void invalidateQueries(["workspace-diff"]);
-            }}
-            onApplyToNewWorkspace={(entry) => {
-              setShowStashModal(false);
-              const source =
-                entry.workspace_id != null
-                  ? (workspaces.find((w) => w.id === entry.workspace_id) ??
-                    null)
-                  : null;
-              setUnifiedDialogDefaults({
-                sourceWorkspace: source,
-                targetBranch: source?.branch_name,
-                applyStashId: entry.id,
-                applyStashCommit: {
-                  hash: entry.short_commit_id,
-                  message: `Stash from ${entry.workspace_label}`,
-                  timestamp: entry.created_at,
-                },
-                preSelectedCommits: [entry.short_commit_id],
-                activeTab: "commits",
-                description: `Apply stash ${entry.short_commit_id} (${entry.files_changed.length} files, +${entry.additions}/-${entry.deletions})`,
-              });
-            }}
-          />
-
-          <WorkspacePicker
-            open={showWorkspacePicker}
-            onOpenChange={setShowWorkspacePicker}
-            workspaces={workspaces}
-            sessions={sessions}
-            workspaceChangeCounts={undefined}
-            onSelect={handleOpenSession}
-          />
-          {remoteSetupDialog}
-          <RemoteAmbiguousMutationDialog />
-          {activeSshEndpoint && activeRepository?.canonicalPath && (
-            <RemoteTerminalDialog
-              open={showRemoteTerminalDialog}
-              onOpenChange={setShowRemoteTerminalDialog}
-              endpoint={activeSshEndpoint}
-              repositoryId={activeRepository.canonicalPath}
-              {...resolveRemoteTerminalTarget(
-                activeRepository.canonicalPath,
-                isRemoteActive && selectedWorkspace
-                  ? {
-                      workspace_name: selectedWorkspace.workspace_name,
-                      workspace_path: getFullWorkspacePath(selectedWorkspace),
-                    }
-                  : null,
-              )}
-              onOpenTarget={(target) =>
-                terminalPaneRef.current?.openRemoteSession(target)
-              }
-            />
-          )}
-        </SidebarProvider>
-      )}
+          </TooltipProvider>
+        )}
+      </ChangeFilesMoveProvider>
     </ActiveRepositoryProvider>
   );
 };

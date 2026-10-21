@@ -1,25 +1,18 @@
 // @include-parallel
 import * as React from "react";
-import { beforeEach, describe, expect, it } from "vitest";
-import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
 import {
   commitRepoFile,
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
 } from "../utils";
 import { createWorkspace, getWorkspaces } from "../../src/lib/api";
 import { render, screen, waitFor } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
+import { clickGpuiRow } from "../gpui-sidebar";
 
 describe("LinearCommitHistory integration", () => {
-  let user: ReturnType<typeof userEvent.setup>;
-
-  beforeEach(() => {
-    user = userEvent.setup();
-  });
-
   it("shows workspace commits in the Code tab sidebar skipping the working copy", async () => {
     const { repoPath } = createTestRepo(false);
     openRepo(repoPath);
@@ -45,7 +38,7 @@ describe("LinearCommitHistory integration", () => {
     );
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/lch-ws"));
+    await clickGpuiRow("feat/lch-ws");
 
     await screen.findByText("Beta commit");
     await screen.findByText("Alpha commit");
@@ -96,7 +89,7 @@ describe("LinearCommitHistory integration", () => {
     );
 
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/lch-no-more"));
+    await clickGpuiRow("feat/lch-no-more");
     await screen.findByText("Workspace single commit");
 
     expect(

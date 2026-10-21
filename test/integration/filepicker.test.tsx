@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   commitRepoFile,
   createTestRepo,
-  findSidebarBranchElement,
   gitCommitRepoFile,
   openRepo,
 } from "../utils";
@@ -18,6 +17,7 @@ import {
 } from "../test-utils";
 import { Dashboard } from "../../src/components/Dashboard";
 import userEvent from "@testing-library/user-event";
+import { clickGpuiRow } from "../gpui-sidebar";
 
 describe("FilePicker integration", () => {
   let user: ReturnType<typeof userEvent.setup>;
@@ -124,7 +124,7 @@ describe("FilePicker in a workspace", () => {
 
   it("lists workspace files on Cmd+P without a prior file-browser index", async () => {
     render(<Dashboard />);
-    await user.click(await findSidebarBranchElement("feat/search"));
+    await clickGpuiRow("feat/search");
     await screen.findByTestId("show-workspace-header");
     await settleReactUpdates();
 

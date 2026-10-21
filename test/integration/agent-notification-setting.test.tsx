@@ -7,6 +7,14 @@ import { getSetting, setSetting } from "../../src/lib/api";
 import { render, screen } from "../test-utils";
 import { createTestRepo, openRepo } from "../utils";
 
+import { waitFor as waitForSnapshot } from "@testing-library/react";
+import { findGpuiToast, gpuiSnapshot, sendGpuiAction } from "../gpui-sidebar";
+
+async function openGpuiSettings() {
+  await waitForSnapshot(() => expect(gpuiSnapshot()).toBeTruthy());
+  sendGpuiAction({ kind: "openSettings" });
+}
+
 describe("Notify when an agent finishes setting", () => {
   let user: ReturnType<typeof userEvent.setup>;
 
@@ -18,7 +26,7 @@ describe("Notify when an agent finishes setting", () => {
   });
 
   const openApplicationSettings = async () => {
-    await user.click(await screen.findByLabelText("Settings"));
+    await openGpuiSettings();
     await user.click(await screen.findByRole("tab", { name: /application/i }));
     return screen.findByRole("switch", {
       name: "Notify when an agent finishes",
@@ -35,7 +43,7 @@ describe("Notify when an agent finishes setting", () => {
     render(<Dashboard />);
     await user.click(await openApplicationSettings());
     await user.click(screen.getByRole("button", { name: /save settings/i }));
-    await screen.findByText("Settings Saved");
+    await findGpuiToast("Settings Saved");
 
     expect(await getSetting("notify_agent_finished")).toBe("false");
 

@@ -7,6 +7,7 @@ import { render, screen, waitFor } from "../../../test/test-utils";
 import { Dashboard } from "../../../src/components/Dashboard";
 import { AppStoreEffects } from "../../../src/stores/AppStoreEffects";
 import { captureDocument } from "../capture";
+import { sendGpuiAction } from "../../../test/gpui-sidebar";
 
 /** Delivers a `deep-link-received` event the way the desktop backend does. */
 async function openDeepLink(url: string) {
@@ -48,7 +49,7 @@ it("captures Account settings while a treq:// sign-in completes", async () => {
     </>,
   );
 
-  await user.click(await screen.findByLabelText("Settings"));
+  sendGpuiAction({ kind: "openSettings" });
   await user.click(await screen.findByRole("tab", { name: /account/i }));
   await screen.findByRole("button", { name: "Sign in with Browser" });
 

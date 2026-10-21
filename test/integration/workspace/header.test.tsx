@@ -1,4 +1,5 @@
 // @include-parallel
+import { clickGpuiRow, findGpuiToast } from "../../gpui-sidebar";
 import { execFileSync } from "node:child_process";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
@@ -10,7 +11,6 @@ import {
   commitRepoFile,
   commitWorkspaceFile,
   createTestRepo,
-  findSidebarBranchElement,
   openRepo,
   resolveRevsetCommitIds,
   resolveWorkspacePath,
@@ -64,7 +64,7 @@ describe("ShowWorkspace - header", () => {
     await createWorkspace(repoPath, "feat/beta");
     render(<Dashboard />);
 
-    await user.click(await screen.findByText("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
 
     let targetBtn: HTMLButtonElement;
     await waitFor(() => {
@@ -91,7 +91,7 @@ describe("ShowWorkspace - header", () => {
     await createWorkspace(repoPath, "feat/beta");
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
 
     const header = await screen.findByTestId("show-workspace-header");
 
@@ -112,10 +112,10 @@ describe("ShowWorkspace - header", () => {
     fireEvent.click(betaElement);
     await within(header).findByText("feat/beta", { selector: "button *" });
 
-    await user.click(await findSidebarBranchElement("feat/beta"));
+    await clickGpuiRow("feat/beta");
     await within(header).findByText(defaultBranch, { selector: "button *" });
 
-    await user.click(await findSidebarBranchElement("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
     await within(header).findByText("feat/beta", { selector: "button *" });
   });
 
@@ -124,7 +124,7 @@ describe("ShowWorkspace - header", () => {
     await createWorkspace(repoPath, "feat/beta");
     render(<Dashboard />);
 
-    await user.click(await screen.findByText("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
 
     let targetBtn: HTMLButtonElement;
     await waitFor(() => {
@@ -151,8 +151,7 @@ describe("ShowWorkspace - header", () => {
     await createWorkspace(repoPath, "feat/header-test");
     render(<Dashboard />);
 
-    const workspaceBranchName = await screen.findByText("feat/header-test");
-    fireEvent.click(workspaceBranchName);
+    await clickGpuiRow("feat/header-test");
 
     const header = await screen.findByTestId("show-workspace-header");
     expect(await within(header).findByText("feat/header-test")).toBeTruthy();
@@ -162,7 +161,7 @@ describe("ShowWorkspace - header", () => {
     await createWorkspace(repoPath, "feat/no-header-stack");
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/no-header-stack"));
+    await clickGpuiRow("feat/no-header-stack");
 
     const header = await screen.findByTestId("show-workspace-header");
     expect(
@@ -198,7 +197,7 @@ describe("ShowWorkspace - header", () => {
     );
     render(<Dashboard />);
 
-    await user.click(await screen.findByText("feat/alpha"));
+    await clickGpuiRow("feat/alpha");
 
     const header = await screen.findByTestId("show-workspace-header");
 
@@ -216,7 +215,7 @@ describe("ShowWorkspace - header", () => {
     });
     fireEvent.click(betaElement);
 
-    await screen.findByText("Rebased successfully");
+    await findGpuiToast("Rebased successfully");
     await within(header).findByText("feat/beta", { selector: "button *" });
 
     const betaWorkspacePath = resolveWorkspacePath(
@@ -254,13 +253,13 @@ describe("ShowWorkspace - header sync indicator", () => {
     expect(workspace).toBeTruthy();
     render(<Dashboard />);
 
-    await user.click(await findSidebarBranchElement("feat/sync-indicator"));
+    await clickGpuiRow("feat/sync-indicator");
 
     const header = await screen.findByTestId("show-workspace-header");
     await user.click(
       await within(header).findByRole("button", { name: /^push$/i }),
     );
-    await screen.findByText("Pushed to remote");
+    await findGpuiToast("Pushed to remote");
     await waitFor(() => {
       expect(
         screen.queryByRole("button", { name: /^push$/i }),
@@ -282,7 +281,7 @@ describe("ShowWorkspace - header sync indicator", () => {
     );
     await user.click(screen.getByRole("button", { name: "Commit" }));
 
-    await screen.findByText("Commit created");
+    await findGpuiToast("Commit created");
 
     await within(header).findByText("↑1");
   });
