@@ -8,8 +8,8 @@ use serde::Deserialize;
 use super::{
   checklist::ToolsHost,
   workspace::{
-    Checks, CommitsLabel, CreatePr, Disabled, GithubChecks, Header, HomeTarget, Linear, Loc, Merge,
-    MergeQueue, Pill, PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, MergeQueue,
+    Pill, PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -606,17 +606,22 @@ pub fn workspace_view(
     } else {
       None
     };
+    let (ci_passed, ci_total) = ci.map_or((0, 0), |ci| (ci.passed as usize, ci.total as usize));
+    let parts: Vec<String> = [
+      has_treq.then(|| match state {
+        "running" => "Treq running".to_string(),
+        "not-run" => "Treq not run".to_string(),
+        _ => format!("Treq {passed}/{total}"),
+      }),
+      ci.map(|ci| format!("GitHub {}/{}", ci.passed, ci.total)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     Some(Checks {
       status: combined.map(str::to_string),
-      treq: has_treq.then(|| match state {
-        "running" => "running".to_string(),
-        "not-run" => "not run".to_string(),
-        _ => format!("{passed}/{total}"),
-      }),
-      github: ci.map(|ci| GithubChecks {
-        label: format!("GH {}/{}", ci.passed, ci.total),
-        state: ci.state.clone(),
-      }),
+      count: format!("{}/{}", passed + ci_passed, total + ci_total),
+      name: format!("Checks: {}", parts.join(", ")),
     })
   });
 

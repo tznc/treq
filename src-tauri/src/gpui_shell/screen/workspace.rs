@@ -157,15 +157,10 @@ pub struct Sync {
 pub struct Checks {
   /// "passed", "failed" or "running"; None for nothing run yet.
   pub status: Option<String>,
-  pub treq: Option<String>,
-  pub github: Option<GithubChecks>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct GithubChecks {
-  pub label: String,
-  /// `PrCiStatus.state`: "success", "failure" or "pending".
-  pub state: String,
+  /// Treq's and GitHub's checks together, as "passed/total".
+  pub count: String,
+  /// The accessible name, naming each source ("Checks: Treq 3/3, GitHub 4/4").
+  pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -263,7 +258,6 @@ mod tw {
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_500: u32 = 0xeab308;
   pub const YELLOW_600: u32 = 0xca8a04;
-  pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_950: u32 = 0x422006;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const BLUE_700: u32 = 0x1d4ed8;
@@ -281,7 +275,6 @@ mod tw {
   pub const GREEN: [u32; 4] = [GREEN_400, GREEN_500, GREEN_600, GREEN_700];
   pub const RED: [u32; 4] = [RED_400, RED_500, RED_600, RED_700];
   pub const PURPLE: [u32; 4] = [PURPLE_400, PURPLE_500, PURPLE_600, PURPLE_700];
-  pub const YELLOW: [u32; 4] = [YELLOW_400, YELLOW_500, YELLOW_600, YELLOW_700];
 }
 
 /// How often the branch's pull request is re-read from the PR poller's
@@ -955,6 +948,15 @@ impl WorkspaceView {
         cx,
       ));
     }
+    if let Some(checks) = &h.checks {
+      right = right.child(
+        div()
+          .relative()
+          .flex_none()
+          .child(self.checks(checks, p))
+          .child(self.record_bounds("workspace-checks")),
+      );
+    }
     if let Some(pr) = &h.view_pr {
       right = right.child(self.view_pr(pr, p, cx));
     }
@@ -977,15 +979,6 @@ impl WorkspaceView {
     }
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
-    }
-    if let Some(checks) = &h.checks {
-      right = right.child(
-        div()
-          .relative()
-          .flex_none()
-          .child(self.checks(checks, p))
-          .child(self.record_bounds("workspace-checks")),
-      );
     }
     if let Some(queue) = &h.merge_queue {
       let button = Button::new("workspace-merge-queue", p)
@@ -1296,26 +1289,12 @@ impl WorkspaceView {
           b.child(icon)
         }
       })
-      .child("Checks")
-      .when_some(checks.treq.clone(), |b, treq| {
-        b.child(div().text_color(p.muted_foreground).child(treq))
-      })
-      .when_some(checks.github.clone(), |b, gh| {
-        let colors = match gh.state.as_str() {
-          "success" => tw::GREEN,
-          "failure" => tw::RED,
-          _ => tw::YELLOW,
-        };
-        let (text, _, _) = tw::state(self.dark, colors);
-        b.child(
-          div()
-            .border_l_1()
-            .border_color(p.border)
-            .pl(zpx(6.))
-            .text_color(text)
-            .child(gh.label),
-        )
-      })
+      .child(
+        div()
+          .text_color(p.muted_foreground)
+          .child(checks.count.clone()),
+      )
+      .aria_label(checks.name.clone())
       .on_click(self.press("workspace.checks"))
   }
 

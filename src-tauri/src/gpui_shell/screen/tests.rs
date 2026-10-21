@@ -1976,7 +1976,7 @@ const WORKSPACE_JSON: &str = r#"{
     "createPr": null,
     "statusLoading": false,
     "sync": {"ahead": 2, "behind": 0, "disabled": false, "spinning": false},
-    "checks": {"status": "passed", "treq": "3/3", "github": {"label": "GH 4/4", "state": "success"}},
+    "checks": {"status": "passed", "count": "7/7", "name": "Checks: Treq 3/3, GitHub 4/4"},
     "mergeQueue": null,
     "merge": {"passing": true, "disabled": false, "tooltip": null},
     "details": true,
