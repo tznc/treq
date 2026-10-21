@@ -432,6 +432,42 @@ pub fn line_location(pending: &Pending) -> String {
   }
 }
 
+/// The diff line after (`down`) or before `at`, across hunks; `None` at
+/// the file's end.
+pub fn step_line(hunks: &[JjDiffHunk], (h, l): LineRef, down: bool) -> Option<LineRef> {
+  if down {
+    if l + 1 < hunks.get(h)?.lines.len() {
+      return Some((h, l + 1));
+    }
+    (h + 1..hunks.len())
+      .find(|&n| !hunks[n].lines.is_empty())
+      .map(|n| (n, 0))
+  } else if l > 0 {
+    Some((h, l - 1))
+  } else {
+    (0..h.min(hunks.len()))
+      .rev()
+      .find(|&n| !hunks[n].lines.is_empty())
+      .map(|n| (n, hunks[n].lines.len() - 1))
+  }
+}
+
+/// Where the cursor enters a file: its first line going down, its last
+/// going up.
+pub fn edge_line(hunks: &[JjDiffHunk], down: bool) -> Option<LineRef> {
+  if down {
+    hunks
+      .iter()
+      .position(|h| !h.lines.is_empty())
+      .map(|n| (n, 0))
+  } else {
+    hunks
+      .iter()
+      .rposition(|h| !h.lines.is_empty())
+      .map(|n| (n, hunks[n].lines.len() - 1))
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -546,5 +582,22 @@ mod tests {
       .map(|s| s.to_string())
       .collect();
     assert_eq!(stale_names(&paths), "(x.rs, y.rs, z.rs +1 more)");
+  }
+
+  #[test]
+  fn the_line_cursor_steps_across_hunks() {
+    let hunks = vec![
+      hunk("a", "@@ -1,2 +1,2 @@", &[" a", "-b"]),
+      hunk("e", "@@ -9,0 +9,0 @@", &[]),
+      hunk("c", "@@ -20,1 +20,1 @@", &["+c"]),
+    ];
+    assert_eq!(step_line(&hunks, (0, 0), true), Some((0, 1)));
+    assert_eq!(step_line(&hunks, (0, 1), true), Some((2, 0)));
+    assert_eq!(step_line(&hunks, (2, 0), true), None);
+    assert_eq!(step_line(&hunks, (2, 0), false), Some((0, 1)));
+    assert_eq!(step_line(&hunks, (0, 0), false), None);
+    assert_eq!(edge_line(&hunks, true), Some((0, 0)));
+    assert_eq!(edge_line(&hunks, false), Some((2, 0)));
+    assert_eq!(edge_line(&[], true), None);
   }
 }

@@ -4061,6 +4061,70 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
 
+/// The selected lines of the Changes tab: the file, and each line.
+fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
+  h.cx.run_until_parked();
+  h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    changes
+      .review
+      .selection
+      .as_ref()
+      .map(|s| (s.path.clone(), s.lines.clone()))
+  })
+}
+
+#[gpui::test]
+fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  // a.rs: " a", "+b", "+c"; b.rs: "+d".
+  h.click("gutter-a.rs-0-0");
+  h.cx.simulate_keystrokes("down");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 1)])));
+  h.cx.simulate_keystrokes("shift-down");
+  assert_eq!(
+    selected_lines(&mut h),
+    Some(("a.rs".into(), vec![(0, 1), (0, 2)]))
+  );
+  h.cx.simulate_keystrokes("shift-down");
+  assert_eq!(
+    selected_lines(&mut h),
+    Some(("a.rs".into(), vec![(0, 1), (0, 2)])),
+    "a selection stays in its file"
+  );
+  h.cx.simulate_keystrokes("down");
+  assert_eq!(selected_lines(&mut h), Some(("b.rs".into(), vec![(0, 0)])));
+  h.cx.simulate_keystrokes("up");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 2)])));
+  h.cx.simulate_keystrokes("shift-up");
+  assert_eq!(
+    selected_lines(&mut h),
+    Some(("a.rs".into(), vec![(0, 1), (0, 2)]))
+  );
+  h.cx.simulate_keystrokes("escape");
+  assert_eq!(selected_lines(&mut h), None);
+}
+
+#[gpui::test]
+fn left_comments_the_selected_lines(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  assert!(h.drawn("comment-input"));
+  h.cx.simulate_input("Both");
+  h.cx.simulate_keystrokes("cmd-enter");
+  settle_save(&mut h);
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(
+    saved.contains("\"start_line\":2") && saved.contains("\"end_line\":3"),
+    "{saved}"
+  );
+  // The diff has the keyboard again.
+  h.cx.simulate_keystrokes("down");
+  assert!(selected_lines(&mut h).is_some());
+}
+
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
   h.click("add-comment-a.rs-0-1");

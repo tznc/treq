@@ -22,11 +22,16 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// How long "Copied" shows on the review popover's Copy button.
 const COPIED_FOR: Duration = Duration::from_millis(2000);
 
+/// A diff line as drawn: its file, place and bounds.
+pub(in crate::gpui_shell::screen) type DrawnLine = (String, LineRef, Bounds<Pixels>);
+
 /// The diff lines picked by dragging in the gutter (`diffLineSelection`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::gpui_shell::screen) struct LineSelection {
   pub path: String,
   pub anchor: LineRef,
+  /// The end that moves: the dragged-to line, or the keyboard's cursor.
+  pub head: LineRef,
   pub lines: Vec<LineRef>,
   pub dragging: bool,
 }
@@ -49,6 +54,12 @@ enum Field {
 #[derive(Default)]
 pub(in crate::gpui_shell::screen) struct Review {
   pub selection: Option<LineSelection>,
+  /// Scroll the selection's head into view, within this many frames.
+  pub reveal: u8,
+  /// Where the selection's head was last drawn.
+  pub head_drawn: Rc<RefCell<Option<DrawnLine>>>,
+  /// A comment box closed: the diff takes the keyboard back.
+  pub refocus: bool,
   pub comments: Vec<LineComment>,
   /// Where the comment box is open.
   pub draft: Option<Pending>,
@@ -193,6 +204,7 @@ impl ChangesView {
     self.review.selection = Some(LineSelection {
       path: path.into(),
       anchor: at,
+      head: at,
       lines: vec![at],
       dragging: true,
     });
@@ -213,6 +225,7 @@ impl ChangesView {
     let lines = selection(&hunks, anchor, at);
     if let Some(s) = self.review.selection.as_mut() {
       if s.lines != lines {
+        s.head = at;
         s.lines = lines;
         cx.notify();
       }
@@ -233,7 +246,7 @@ impl ChangesView {
   }
 
   /// The selection's comment target, `None` when it mixes sides.
-  fn selection_target(&self) -> Option<Pending> {
+  pub(super) fn selection_target(&self) -> Option<Pending> {
     let s = self
       .review
       .selection
@@ -297,11 +310,13 @@ impl ChangesView {
     self.review.draft_input = None;
     self.review.draft_text.clear();
     self.review.selection = None;
+    self.review.refocus = true;
     self.save_review(cx);
     cx.notify();
   }
 
   fn cancel_draft(&mut self, cx: &mut Context<Self>) {
+    self.review.refocus = true;
     self.review.draft = None;
     self.review.draft_input = None;
     self.review.draft_text.clear();
@@ -806,6 +821,11 @@ impl ChangesView {
       .selection
       .as_ref()
       .is_some_and(|s| s.path == path && s.lines.contains(&(h, l)));
+    let head = self
+      .review
+      .selection
+      .as_ref()
+      .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
     let bg = if selected {
       Some(tw::color(tw::BLUE_500).opacity(if self.dark { 0.25 } else { 0.1 }))
@@ -840,10 +860,26 @@ impl ChangesView {
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
     let primary = p.primary;
+    let head_drawn = head.then(|| (self.review.head_drawn.clone(), path.to_string()));
     div()
       .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
       .group("diff-line")
+      .relative()
       .flex()
+      .when_some(head_drawn, |this, (drawn, path)| {
+        this.child(
+          gpui::canvas(
+            move |bounds, _, _| {
+              *drawn.borrow_mut() = Some((path.clone(), (h, l), bounds));
+            },
+            |_, _, _, _| {},
+          )
+          .absolute()
+          .top_0()
+          .left_0()
+          .size_full(),
+        )
+      })
       .when_some(bg, |this, bg| this.bg(bg))
       .when(!conflicted, |this| {
         this.on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
@@ -870,8 +906,9 @@ impl ChangesView {
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
-              cx.listener(move |view, _: &MouseDownEvent, _, cx| {
+              cx.listener(move |view, _: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
+                window.focus(&view.focus, cx);
                 view.press_line(&press, at, cx);
               }),
             )
