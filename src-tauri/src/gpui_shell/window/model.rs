@@ -564,6 +564,9 @@ impl Model {
   /// A workspace removed outside this view (the CLI, another window): the
   /// view leaves it once a fresh list no longer has it.
   pub fn workspaces_listed(&mut self, repo: &str, before: &[i64], now: &[Workspace]) {
+    if repo == self.repo() {
+      self.multi.retain(|id| now.iter().any(|w| w.id == *id));
+    }
     let Some(selected) = self.selected else {
       return;
     };

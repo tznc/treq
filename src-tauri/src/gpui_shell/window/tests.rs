@@ -1222,6 +1222,22 @@ fn a_workspace_removed_outside_the_app_leaves_the_view(cx: &mut TestAppContext) 
   assert_eq!(window.route_workspace(), None, "home, not the parent");
 }
 
+/// Found by the fuzzer: a row removed elsewhere stayed in the
+/// multi-selection, and in Bulk Archive's count.
+#[gpui::test]
+fn a_workspace_removed_elsewhere_leaves_the_multi_selection(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 1, true);
+  select(&window, cx, 2, true);
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(2));
+  remove(&host, 1);
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert!(!window.sidebar_ids().contains(&1));
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(1));
+}
+
 /// Bulk Archive with one failure: only the archived row leaves.
 #[gpui::test]
 fn archiving_drops_the_removed_rows_from_the_multi_selection(cx: &mut TestAppContext) {
