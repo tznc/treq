@@ -96,6 +96,9 @@ sha2 = "0.11"
 ignore = "0.4"
 jj-lib = "0.40.0"
 futures = "0.3"
+# Watches the selected workspace so the Changes tab follows edits on disk.
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+notify-debouncer-full = "0.7"
 log = "0.4"
 regex = "1"
 rayon = "1.10"

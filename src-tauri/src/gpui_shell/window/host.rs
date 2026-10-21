@@ -5,7 +5,9 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path, time::Duration};
+
+use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 
 use tauri::Manager;
 
@@ -37,6 +39,12 @@ use crate::{
   lock_ext::LockExt,
   AppState,
 };
+
+/// A running watch: edits arrive on `changes` while `_watcher` lives.
+pub struct FileWatch {
+  pub changes: UnboundedReceiver<()>,
+  pub _watcher: Box<dyn Send>,
+}
 
 pub trait WindowHost: RemoteHost + Send + Sync {
   fn workspaces(&self, repo: &str) -> Result<Vec<Workspace>, String>;
@@ -73,6 +81,9 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn toast(&self, tone: ToastTone, title: &str, description: &str);
   fn open_url(&self, url: &str);
   fn open_log_dir(&self);
+  /// Watches a local checkout for edits on disk (an agent's, an editor's):
+  /// each settled burst sends once. `None` when there is nothing to watch.
+  fn watch_files(&self, path: &str) -> Option<FileWatch>;
   fn force_rebase(
     &self,
     repo: &str,
@@ -335,6 +346,39 @@ impl WindowHost for Backend {
     Backend::open_url(self, url);
   }
 
+  fn watch_files(&self, path: &str) -> Option<FileWatch> {
+    if self.remote(path).is_some() {
+      return None;
+    }
+    let (tx, changes) = unbounded();
+    let mut watcher = notify_debouncer_full::new_debouncer(
+      WATCH_SETTLE,
+      None,
+      move |result: notify_debouncer_full::DebounceEventResult| match result {
+        Ok(events) => {
+          if events
+            .iter()
+            .flat_map(|e| e.paths.iter())
+            .any(|p| !is_ignored(p))
+          {
+            let _ = tx.unbounded_send(());
+          }
+        }
+        Err(errors) => log::warn!("File watch errors: {errors:?}"),
+      },
+    )
+    .map_err(|err| log::warn!("Failed to create a file watcher: {err}"))
+    .ok()?;
+    watcher
+      .watch(Path::new(path), notify::RecursiveMode::Recursive)
+      .map_err(|err| log::warn!("Failed to watch {path}: {err}"))
+      .ok()?;
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(watcher),
+    })
+  }
+
   fn open_log_dir(&self) {
     use tauri_plugin_opener::OpenerExt;
     let dir = self.app().state::<AppState>().telemetry.log_dir.clone();
@@ -551,5 +595,37 @@ impl RemoteHost for Backend {
 
   fn show_remote(&self, repository: Option<RemoteRepository>) {
     remote_repo::set_window(self.label(), repository);
+  }
+}
+
+/// How long edits must settle before the Changes tab reads again.
+const WATCH_SETTLE: Duration = Duration::from_millis(500);
+
+/// Writes nobody reviews: jj's and git's own state (jj writes `.jj` on
+/// every read, so watching it would loop), dependencies and build output.
+fn is_ignored(path: &Path) -> bool {
+  path.components().any(|c| {
+    matches!(
+      c.as_os_str().to_str(),
+      Some(".jj" | ".git" | "node_modules" | "target")
+    )
+  }) || path
+    .to_str()
+    .is_some_and(|p| p.ends_with(".swp") || p.ends_with('~'))
+}
+
+#[cfg(test)]
+mod watch_tests {
+  use super::*;
+
+  #[test]
+  fn ignores_vcs_state_and_build_output() {
+    assert!(is_ignored(Path::new("/w/.jj/working_copy/checkout")));
+    assert!(is_ignored(Path::new("/w/.git/index")));
+    assert!(is_ignored(Path::new("/w/web/node_modules/a/index.js")));
+    assert!(is_ignored(Path::new("/w/src-tauri/target/debug/treq")));
+    assert!(is_ignored(Path::new("/w/src/.main.rs.swp")));
+    assert!(!is_ignored(Path::new("/w/src/main.rs")));
+    assert!(!is_ignored(Path::new("/w/src/targets.rs")));
   }
 }

@@ -51,6 +51,8 @@ struct FakeHost {
   description: String,
   /// What the Changes tab reads.
   working: Option<crate::jj::JjRevisionDiff>,
+  /// Replaces `working` once set: the files edited on disk meanwhile.
+  edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
   /// The pull request's review threads and the review agent's comments.
@@ -197,6 +199,12 @@ impl file_browser_data::FileBrowserHost for FakeHost {
 }
 
 impl FakeHost {
+  /// What the Changes tab reads now.
+  fn working(&self) -> Option<crate::jj::JjRevisionDiff> {
+    let edited = self.edited.lock().unwrap().clone();
+    edited.or_else(|| self.working.clone())
+  }
+
   fn calls(&self) -> Vec<String> {
     self.calls.lock().unwrap().clone()
   }
@@ -609,7 +617,7 @@ impl changes_data::ChangesHost for FakeHost {
     workspace_id: Option<i64>,
   ) -> Result<Vec<crate::jj::JjFileChange>, String> {
     self.record(format!("read changed files {workspace_id:?}"));
-    let working = self.working.as_ref().ok_or("no changes")?;
+    let working = self.working().ok_or("no changes")?;
     Ok(working.uncommitted_files.clone())
   }
 
@@ -619,7 +627,7 @@ impl changes_data::ChangesHost for FakeHost {
     workspace_id: i64,
   ) -> Result<crate::jj::JjRevisionDiff, String> {
     self.record(format!("read workspace diff {workspace_id}"));
-    self.working.clone().ok_or_else(|| "no changes".into())
+    self.working().ok_or_else(|| "no changes".into())
   }
 
   fn file_hunks(
@@ -629,7 +637,7 @@ impl changes_data::ChangesHost for FakeHost {
     paths: Vec<String>,
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
-    let working = self.working.as_ref().ok_or("no changes")?;
+    let working = self.working().ok_or("no changes")?;
     Ok(crate::core::WorkspaceFileHunksBatch {
       snapshot_token: "t".into(),
       files: paths
@@ -3998,6 +4006,59 @@ fn changes_tab_reads_again_only_when_files_change(cx: &mut TestAppContext) {
   });
   h.drawn("changes-diff-viewer");
   assert_eq!(reads(&host), 2);
+}
+
+/// An agent edits `a.rs` on disk: its `+c` becomes `+e`, and the watcher
+/// bumps `changesRevision`.
+fn edit_a_rs(h: &mut Harness, host: &FakeHost) {
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  *host.edited.lock().unwrap() = Some(edited);
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+}
+
+/// The diff lines the Changes tab shows for `path`.
+fn shown_lines(h: &mut Harness, path: &str) -> Vec<String> {
+  h.cx.run_until_parked();
+  h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    changes.hunks[path]
+      .hunks
+      .iter()
+      .flat_map(|h| h.lines.clone())
+      .collect()
+  })
+}
+
+#[gpui::test]
+fn changes_tab_follows_edits_on_disk_outside_a_review(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  edit_a_rs(&mut h, &host);
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+  assert!(!h.drawn("stale-banner"));
+}
+
+#[gpui::test]
+fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  edit_a_rs(&mut h, &host);
+  assert!(h.drawn("stale-banner"), "a changed diff, same file list");
+  assert_eq!(
+    shown_lines(&mut h, "a.rs"),
+    [" a", "+b", "+c"],
+    "the reviewed diff stays"
+  );
+  h.click("reload-stale");
+  assert!(!h.drawn("stale-banner"));
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
 
 /// Comments line `+b` of a.rs with `text`.

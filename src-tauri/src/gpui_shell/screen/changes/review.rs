@@ -543,6 +543,41 @@ impl ChangesView {
     true
   }
 
+  /// A refresh that lists the same files while a review is open: their
+  /// diffs are read aside, and files whose diff changed (an agent edited
+  /// them) wait behind the stale banner like added or removed ones.
+  pub(super) fn recheck(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
+    let paths: Vec<String> = snapshot.files.iter().map(|f| f.path.clone()).collect();
+    self.run(
+      move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), paths),
+      move |view, result, cx| {
+        let read = match result {
+          Ok(read) => read,
+          Err(err) => return log::warn!("Failed to recheck file hunks: {err}"),
+        };
+        let mut changed = false;
+        for file in read.files {
+          let shown = view
+            .hunks
+            .get(&file.path)
+            .filter(|d| !d.loading)
+            .map(|d| hunks_hash(&d.hunks));
+          if shown.is_some_and(|hash| hash != hunks_hash(&file.hunks)) {
+            changed = true;
+            if !view.review.stale.contains(&file.path) {
+              view.review.stale.push(file.path);
+            }
+          }
+        }
+        if changed {
+          view.review.parked = Some(snapshot);
+          cx.notify();
+        }
+      },
+      cx,
+    );
+  }
+
   /// The stale banner's Reload.
   fn reload_stale(&mut self, cx: &mut Context<Self>) {
     let Some(snapshot) = self.review.parked.take() else {
