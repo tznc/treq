@@ -384,11 +384,7 @@ impl OpenWorkspacesDialog {
     .detach();
   }
 
-  fn opened(
-    &mut self,
-    results: Vec<(Target, Opened)>,
-    cx: &mut Context<Self>,
-  ) {
+  fn opened(&mut self, results: Vec<(Target, Opened)>, cx: &mut Context<Self>) {
     self.pending = false;
     let mut repos: Vec<String> = Vec::new();
     let (mut created, mut reused, mut first) = (0, 0, None);
