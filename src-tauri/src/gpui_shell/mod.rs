@@ -38,6 +38,7 @@ mod sidebar;
 mod sidebar_actions;
 mod theme;
 mod time;
+mod title_bar;
 mod toasts;
 mod tooltips;
 mod ui;
@@ -92,6 +93,8 @@ pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiErro
 struct Shell {
   app: AppHandle,
   label: SharedString,
+  /// Drawn in the GPUI title bar on macOS (see `title_bar`).
+  title: SharedString,
   sidebar: Option<gpui::Entity<Sidebar>>,
   screen: Option<gpui::Entity<Screen>>,
   /// The dialog drawn over the screen once there is one.
@@ -170,9 +173,11 @@ impl Render for Shell {
     let app = self.app.clone();
     ui::apply_zoom(window, cx);
     self.watch_shortcuts(window, cx);
+    let palette = theme::palette(dark);
     gpui::div()
       .size_full()
       .flex()
+      .flex_col()
       .font_family(theme::SANS_FONT)
       // A click anywhere in the window closes an open menu, as one outside
       // a native menu does.
@@ -181,7 +186,27 @@ impl Render for Shell {
         window.blur(cx);
         defer_main(&app, |_| popup::hide_menus())
       })
-      .bg(theme::palette(dark).background)
+      .bg(palette.background)
+      .when(cfg!(target_os = "macos"), |this| {
+        this.child(title_bar::title_bar(
+          self.title.clone(),
+          &palette,
+          window.is_fullscreen(),
+          std::rc::Rc::new(title_bar::NativeWindow),
+        ))
+      })
+      .child(self.content(cx))
+  }
+}
+
+impl Shell {
+  /// The sidebar next to the screen, below the title bar.
+  fn content(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    gpui::div()
+      .flex_1()
+      .min_h_0()
+      .w_full()
+      .flex()
       .when_some(self.sidebar.clone(), |this, sidebar| {
         // The cut-off overlay spans the sidebar too; the workspace view
         // dims its own part below the remote strip.
@@ -232,17 +257,26 @@ pub fn open_window(
 ) -> Result<(), Box<dyn std::error::Error>> {
   let window = tauri::WindowBuilder::new(app, label)
     .title(title)
-    .inner_size(1400.0, 900.0)
-    .build()?;
+    .inner_size(1400.0, 900.0);
+  // The default style already extends the content under an opaque bar,
+  // hiding GPUI's top rows. An overlay leaves only the traffic lights, over
+  // the title bar GPUI draws (`title_bar`).
+  #[cfg(target_os = "macos")]
+  let window = window
+    .title_bar_style(tauri::TitleBarStyle::Overlay)
+    .hidden_title(true);
+  let window = window.build()?;
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;
 
   let shell_label = label.to_string();
+  let shell_title = SharedString::from(title.to_string());
   let shell_app = app.clone();
   window.attach_gpui(move |cx| {
     let shell = cx.new(|_| Shell {
       app: shell_app,
       label: shell_label.clone().into(),
+      title: shell_title.clone(),
       sidebar: None,
       screen: None,
       modal: None,
