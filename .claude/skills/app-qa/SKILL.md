@@ -79,13 +79,15 @@ only recorded in test builds.
    locators. If creating or renaming a workspace is part of the scenario,
    do it through the real dialog; seed only incidental background state.
 3. **Capture with expectations.** `capture(page, { name, expectations })`
-   writes `<name>.png` and `<name>.json` to `e2e/desktop/qa/.shots/` (or
-   `QA_OUT`). Name captures `<area>-<NN>-<what-it-shows>`. `expectations` are
+   (`qa/capture.ts`) writes `<name>-<theme>.png` and a `.json` with the
+   expectations to `e2e/desktop/qa/.shots/` (or `QA_OUT`). `qa/helpers.ts`
+   has the shared steps (`ready`, `home`, `openWorkspace`, `openTab`,
+   `overlay`, `focusMain`, `dismissPopover`). Name captures `<area>-<NN>-<what-it-shows>`. `expectations` are
    at most three plain-English claims about what the picture should show;
    keep real `expect(...)` assertions in the spec too, since they prove the
    state before the capture.
-   - The palette and other overlays open in a dialog window:
-     `dialogPage(context)` returns a page for it.
+   - The palette and other overlays open in one shared dialog window:
+     `overlay()` returns its page. Don't call `context.newPage()` twice.
    - Toasts, tooltips and menus are popup windows Playwright can't reach.
      Capture the whole X screen for those (`capture` with `screen: true`) and
      assert on what they change.
@@ -93,7 +95,9 @@ only recorded in test builds.
      changed.
 4. **Run it** under Xvfb, from `e2e/desktop`:
    `xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run qa -- --grep <area>`
-   (or `DISPLAY=:98 npm run qa` on a running Xvfb). `TREQ_E2E_BIN` picks
+   (or `DISPLAY=:98 npm run qa` on a running Xvfb). `QA_THEME=light|dark`
+   picks the theme (run both for visual changes), `QA_REUSE=1` drives an app
+   that is already running, `TREQ_E2E_BIN` picks
    another binary and `TREQ_E2E_PORT` another server port, so two runs can
    share a machine on different displays and ports.
 5. **Verify every capture against its expectations.** Read each
@@ -122,8 +126,14 @@ test when it reproduces headlessly.
 
 ## Linux and Xvfb notes
 
-- No window manager runs under Xvfb, so a newly opened dialog window may not
-  get keyboard focus; `xdotool windowfocus` fixes it.
+- No window manager runs under Xvfb, so focus follows the pointer and a new
+  dialog window may not get keyboard focus. `focusMain()` (called by
+  `ready()`) runs `xdotool windowfocus` on the repo window.
+- Without a compositor, transparent windows (the palette and popover
+  backdrops) can paint the app black in screenshots. That is the
+  environment, not a bug, unless it reproduces on a desktop.
+- `page.mouse` reaches only the repo window. Popups, menus and native dialogs
+  need real X clicks (`xPointer`, `dismissPopover`).
 - `GDK_SCALE=2` gives crisp 2x PNGs; the QA launcher sets it.
 - jj-backed tests need a `jj` binary on `PATH`.
 
