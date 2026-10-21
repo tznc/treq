@@ -266,3 +266,22 @@ test("changes: generated files wait behind Load diff", async ({ page }) => {
     expectations: ["The clicked generated file's diff renders in place of the placeholder"],
   });
 });
+
+test("changes: filter hides generated files", async ({ page }) => {
+  await openWorkspace(page, "feat/event-ingest");
+  await openTab(page, "Changes");
+  const filter = page.getByRole("button", { name: "Hide generated files" });
+  await filter.click();
+  await expect(page.getByRole("button", { name: "Load diff" })).toHaveCount(0);
+  await settle(page, 600);
+  await capture(page, {
+    name: "05-changes-generated-hidden",
+    title: "Generated files hidden by the list's filter",
+    expectations: [
+      "Changes lists only .gitattributes and retry.ts; the funnel button is highlighted",
+      "The diff shows no generated file cards",
+    ],
+  });
+  await filter.click();
+  await expect(page.getByRole("button", { name: "Load diff" })).toHaveCount(2);
+});

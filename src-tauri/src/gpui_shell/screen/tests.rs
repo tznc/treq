@@ -4145,6 +4145,41 @@ fn changes_tab_loads_a_generated_diff_on_request(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn changes_tab_hides_generated_files_from_the_list_and_diff(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_with_generated(), changes_route());
+  h.click("hide-generated-files");
+  assert!(h.drawn("file-row-a.rs"));
+  assert!(h.drawn("file-card-a.rs"));
+  for hidden in [
+    "file-row-Cargo.lock",
+    "file-card-Cargo.lock",
+    "file-row-gen/api.ts",
+  ] {
+    assert!(!h.drawn(hidden), "{hidden}");
+  }
+  h.click("hide-generated-files");
+  assert!(h.drawn("file-row-Cargo.lock"));
+  assert!(h.drawn("file-card-gen/api.ts"));
+}
+
+#[gpui::test]
+fn changes_tab_keeps_a_selected_generated_file_listed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_with_generated(), changes_route());
+  h.click("file-row-Cargo.lock");
+  h.click("stage-Cargo.lock");
+  h.click("hide-generated-files");
+  assert!(h.drawn("unstage-Cargo.lock"));
+  assert!(!h.drawn("file-row-gen/api.ts"));
+}
+
+#[gpui::test]
+fn changes_tab_offers_the_generated_filter_only_with_generated_files(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  assert!(h.drawn("file-row-a.rs"));
+  assert!(!h.drawn("hide-generated-files"));
+}
+
+#[gpui::test]
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("commit-message");

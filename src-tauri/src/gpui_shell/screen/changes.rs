@@ -21,6 +21,7 @@ use std::{
   rc::Rc,
 };
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use serde_json::json;
@@ -130,6 +131,8 @@ pub struct ChangesView {
   pub(super) expanded_large: HashSet<String>,
   /// Generated files whose diff "Load diff" read.
   pub(super) loaded_generated: HashSet<String>,
+  /// The file list's filter: generated files left out of the list and diff.
+  pub(super) hide_generated: bool,
   pub(super) changeset_expanded: bool,
   /// Files marked viewed, with the diff's hash then.
   pub(super) viewed: HashMap<String, String>,
@@ -223,6 +226,7 @@ impl ChangesView {
       collapsed_files: HashSet::new(),
       expanded_large: HashSet::new(),
       loaded_generated: HashSet::new(),
+      hide_generated: false,
       changeset_expanded: false,
       viewed: HashMap::new(),
       context: HashMap::new(),
@@ -371,6 +375,41 @@ impl ChangesView {
     self.snapshot.as_ref().map_or(&[], |s| s.files.as_slice())
   }
 
+  /// Whether the filter leaves `path` out. A file picked for the next
+  /// commit stays listed.
+  pub(super) fn hides(&self, path: &str) -> bool {
+    self.hide_generated && self.is_generated(path) && !self.staging.staged.contains(path)
+  }
+
+  /// The working-copy files the list and the diff show.
+  pub(super) fn listed(&self) -> Vec<ChangedFile> {
+    self
+      .files()
+      .iter()
+      .filter(|f| !self.hides(&f.path))
+      .cloned()
+      .collect()
+  }
+
+  /// The filter button: hiding drops hidden files from the selection.
+  fn toggle_hide_generated(&mut self, cx: &mut Context<Self>) {
+    self.hide_generated = !self.hide_generated;
+    if self.hide_generated {
+      let hidden: Vec<String> = self
+        .staging
+        .selected
+        .iter()
+        .filter(|p| self.hides(p))
+        .cloned()
+        .collect();
+      for path in hidden {
+        self.staging.selected.remove(&path);
+      }
+    }
+    self.staging.anchor = None;
+    cx.notify();
+  }
+
   /// `actualConflictedFiles`: the diff's list once read, else the status's.
   pub(super) fn conflicted(&self) -> Vec<String> {
     let list = self
@@ -404,6 +443,7 @@ impl ChangesView {
       .collect();
     visible_committed(&snapshot.committed, self.show_committed(), &always)
       .into_iter()
+      .filter(|f| !self.hides(&f.path))
       .cloned()
       .collect()
   }
@@ -642,7 +682,7 @@ impl ChangesView {
     meta: bool,
     cx: &mut Context<Self>,
   ) {
-    let files = self.files().to_vec();
+    let files = self.listed();
     self.staging.click(list, &files, path, shift, meta);
     self.show_file(path, cx);
   }
@@ -1396,7 +1436,7 @@ impl Render for ChangesView {
           && !crate::gpui_shell::keys::held(k.modifiers).shift
           && !view.read_only()
         {
-          let files = view.files().to_vec();
+          let files = view.listed();
           view.staging.select_all(&files);
           cx.notify();
         } else if k.key == "escape" && view.review.selection.is_some() {
@@ -1464,7 +1504,7 @@ impl ChangesView {
         if !conflicted.is_empty() {
           list = list.child(self.conflicts_section(&conflicted, p, cx));
         }
-        let files = self.files().to_vec();
+        let files = self.listed();
         let committed = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
         if files.is_empty() && committed == 0 {
           list = list.child(
@@ -1813,7 +1853,7 @@ impl ChangesView {
         let select = header_button("select-all-changes", theme::ICON_PLUS, muted, hover).on_click(
           cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
-            let files = view.files().to_vec();
+            let files = view.listed();
             view.staging.toggle_all_unstaged(&files);
             cx.notify();
           }),
@@ -1875,6 +1915,44 @@ impl ChangesView {
         ));
       }
     }
+    let any_generated = self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| !s.generated.is_empty());
+    if !staged && any_generated {
+      let hiding = self.hide_generated;
+      let primary = p.primary;
+      let filter = header_button(
+        "hide-generated-files",
+        theme::ICON_FILTER,
+        if hiding { primary } else { muted },
+        hover,
+      )
+      .when(hiding, |b| b.bg(primary.opacity(0.1)))
+      .role(gpui::Role::Button)
+      .aria_label("Hide generated files")
+      .on_click(cx.listener(|view, _, _, cx| {
+        cx.stop_propagation();
+        view.toggle_hide_generated(cx);
+      }))
+      .test_support();
+      buttons = buttons.child(
+        self.tips.wrap(
+          "hide-generated-tip",
+          Side::Bottom,
+          Some(TooltipContent::Text(
+            if hiding {
+              "Show generated files"
+            } else {
+              "Hide generated files"
+            }
+            .into(),
+          )),
+          filter,
+          cx,
+        ),
+      );
+    }
     buttons = buttons.child(div().ml_1().child(files.len().to_string()));
     let last = if staged {
       self
@@ -1886,7 +1964,7 @@ impl ChangesView {
       self
         .staging
         .anchor
-        .and_then(|i| self.files().get(i))
+        .and_then(|i| self.listed().get(i).cloned())
         .map(|f| f.path.clone())
     };
     let mut rows = div().mt_2().overflow_hidden();
