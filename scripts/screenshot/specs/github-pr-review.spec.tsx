@@ -1,7 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { expect, it, vi } from "vitest";
-import { Dashboard } from "../../../src/components/Dashboard";
+import { PrReviewScreen } from "../../../src/components/github-panel/PrReviewPage";
 import { render, screen, waitFor } from "../../../test/test-utils";
 import { createTestRepo, openRepo } from "../../../test/utils";
 import { invalidateQueries } from "../../../src/lib/swr-cache";
@@ -35,6 +35,25 @@ vi.mock("../../../src/lib/api", async () => ({
   startPrStatusPolling: vi.fn(async () => undefined),
   stopPrStatusPolling: vi.fn(async () => undefined),
 }));
+
+// The desktop app draws this screen in GPUI for local repos; the React
+// screen (used for remote repos) is rendered directly. "Back" leaves it and
+// "Review changes" reopens it, like the PR detail does.
+function ReviewHarness({ repoPath }: { repoPath: string }) {
+  const [open, setOpen] = React.useState(true);
+  return open ? (
+    <PrReviewScreen
+      repoPath={repoPath}
+      prNumber={42}
+      onClose={() => setOpen(false)}
+      onStartAgentReview={async () => {}}
+    />
+  ) : (
+    <button type="button" onClick={() => setOpen(true)}>
+      Review changes
+    </button>
+  );
+}
 
 const PR = {
   number: 42,
@@ -169,14 +188,7 @@ it("reviews a GitHub PR from its own screen", async () => {
   openRepo(repoPath);
 
   const user = userEvent.setup();
-  render(<Dashboard />);
-
-  await user.click(await screen.findByTestId("github-sidebar-item"));
-  await user.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
-  await user.click(await screen.findByText(PR.title));
-  await user.click(
-    await screen.findByRole("button", { name: /Review changes/ }),
-  );
+  render(<ReviewHarness repoPath={repoPath} />);
   await screen.findByTestId("pr-review-page");
   await screen.findByText("Should empty queries return everything instead?");
   await captureDocument(document, {
@@ -350,14 +362,7 @@ it("limits your own PR's review to Comment", async () => {
   const { repoPath } = createTestRepo(false);
   openRepo(repoPath);
   const user = userEvent.setup();
-  render(<Dashboard />);
-
-  await user.click(await screen.findByTestId("github-sidebar-item"));
-  await user.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
-  await user.click(await screen.findByText(PR.title));
-  await user.click(
-    await screen.findByRole("button", { name: /Review changes/ }),
-  );
+  render(<ReviewHarness repoPath={repoPath} />);
   await user.click(
     await screen.findByRole("button", { name: /Finish review/ }),
   );

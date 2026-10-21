@@ -90,6 +90,7 @@ impl PrReviewHost for FakeHost {
     row.end_line = draft.end_line;
     row.comment_text = draft.text.clone();
     row.line_hash = draft.line_hash.clone();
+    row.quoted_text = draft.quoted_text.clone();
     self.agent.lock().unwrap().push(row);
     Ok(())
   }
@@ -100,6 +101,7 @@ impl PrReviewHost for FakeHost {
     id: &str,
     text: Option<&str>,
     line_hash: Option<&str>,
+    quoted_text: Option<&str>,
   ) -> Result<(), String> {
     self.record(format!(
       "update draft {id} {text:?} {}",
@@ -111,6 +113,9 @@ impl PrReviewHost for FakeHost {
       }
       if let Some(hash) = line_hash {
         row.line_hash = Some(hash.into());
+      }
+      if let Some(quoted) = quoted_text {
+        row.quoted_text = Some(quoted.into());
       }
     }
     Ok(())
