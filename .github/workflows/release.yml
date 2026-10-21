@@ -63,6 +63,7 @@ jobs:
             target: "x86_64-pc-windows-msvc"
             args: "--target x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 20
     environment: prod
     steps:
       - uses: actions/checkout@v5
@@ -148,6 +149,7 @@ jobs:
             target: "aarch64-unknown-linux-musl"
             arch: "aarch64"
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 20
     environment: prod
     steps:
       - uses: actions/checkout@v5
