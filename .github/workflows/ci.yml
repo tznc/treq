@@ -33,6 +33,7 @@ jobs:
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust }}
       js_changed: ${{ steps.filter.outputs.js }}
+      e2e_changed: ${{ steps.filter.outputs.e2e }}
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
@@ -59,6 +60,8 @@ jobs:
               - "sgconfig.yml"
               - ".tool-versions"
               - ".github/workflows/ci.yml"
+            e2e:
+              - "e2e/desktop/**"
 
   # One job for the quick lint/format/type checks and the unit tests. Each
   # check takes seconds; as separate jobs each one paid ~30s of setup and its
@@ -119,9 +122,80 @@ jobs:
 
   # Heavy jobs skip draft PRs; marking the PR ready for review runs them.
   #
-  # The desktop UI tests (gpui-testing-library) and the end-to-end suite
-  # that drives the real app (gpui-playwright) get their own job here, next
-  # to test-rust.
+  # The end-to-end suite (e2e/desktop): the app built with the `e2e`
+  # feature, which embeds a Playwright server (gpui-playwright), driven by
+  # stock @playwright/test under Xvfb on a fixture repository. The desktop
+  # UI tests (gpui-testing-library) are lib tests, so test-rust's nextest
+  # run covers them.
+  test-desktop-e2e:
+    needs: detect-changes
+    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true') }}
+    timeout-minutes: 20
+    name: test-desktop-e2e / playwright / ubuntu-22.04
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
+
+      - name: Use mold linker
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+
+      # test-rust's packages, plus Xvfb and Mesa's software Vulkan
+      # (lavapipe), which GPUI renders with on a runner without a GPU.
+      - name: install dependencies (ubuntu only)
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers
+          version: webkit-4.1-gpui-e2e-1
+          execute_install_scripts: true
+
+      # Reads test-rust's cache (warm-caches.yml saves it on main); the
+      # dependencies build the same, only treq itself differs.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: test
+          save-if: false
+          workspaces: |
+            . -> target
+
+      - name: Build the app with the e2e feature
+        working-directory: src-tauri
+        run: cargo build --locked --features e2e --bin treq
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/desktop/package-lock.json
+
+      - name: Install the suite
+        working-directory: e2e/desktop
+        run: npm ci
+
+      - name: Type-check the suite
+        working-directory: e2e/desktop
+        run: npm run -s typecheck
+
+      - name: Run the e2e suite under Xvfb
+        working-directory: e2e/desktop
+        env:
+          TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm test
+
+      - name: Upload the report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-report
+          path: |
+            e2e/desktop/playwright-report
+            e2e/desktop/test-results
+          retention-days: 7
 
   # clippy and the Rust tests share one job: each takes 1-2 min on a warm
   # cache, so a second job only paid for another runner and setup.

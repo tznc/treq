@@ -1,31 +1,5 @@
 use crate::local_db;
 
-/// Save a draft comment the user wrote on a reviewed target (a PR review).
-#[allow(clippy::too_many_arguments)]
-pub fn create_review_draft(
-  repo_path: String,
-  target_type: String,
-  target_id: String,
-  file_path: String,
-  start_line: i64,
-  end_line: i64,
-  side: Option<String>,
-  comment_text: String,
-  line_hash: Option<String>,
-) -> Result<local_db::AgentReviewComment, String> {
-  let draft = crate::core::review_drafts::NewReviewDraft {
-    target_type,
-    target_id,
-    file_path,
-    start_line,
-    end_line,
-    side,
-    comment_text,
-    line_hash,
-  };
-  crate::core::review_drafts::create_review_draft(&repo_path, &draft)
-}
-
 /// Replace `start_line..=end_line` of the comment's file with its suggested
 /// text. Deliberately not the generic patch-file path: a suggestion already
 /// carries an exact line range, so applying it is a splice, not a diff apply.
