@@ -535,27 +535,88 @@ pub fn open_or_create_workspace_from_pr(
   title: Option<&str>,
   description: Option<&str>,
 ) -> Result<(local_db::Workspace, bool), String> {
-  let head_branch = head_branch.trim();
-  let base_branch = base_branch.trim();
-  if head_branch.is_empty() {
-    return Err("PR head branch is required".to_string());
-  }
-  if base_branch.is_empty() {
-    return Err("PR base branch is required".to_string());
-  }
+  let request = BranchWorkspaceRequest {
+    head_branch: head_branch.to_string(),
+    base_branch: base_branch.to_string(),
+    title: title.map(str::to_string),
+    description: description.map(str::to_string),
+  };
+  request.validate()?;
 
   // Prune rows whose directory or jj registration is gone first; otherwise a
   // stale row is "opened" while the sidebar, which lists jj workspaces, shows nothing.
   sync_workspaces(repo_path)?;
 
-  if let Some(existing) = local_db::get_workspace_by_branch(repo_path, head_branch)
-    .map_err(|e| format!("Failed to check existing workspace: {e}"))?
-  {
+  if let Some(existing) = existing_branch_workspace(repo_path, request.head_branch.trim())? {
     return Ok((existing, false));
   }
 
   // Ensure remote bookmarks (including the PR head) are imported before create.
   let _ = jj::jj_git_fetch(repo_path);
+  open_or_create_synced(repo_path, &request)
+}
+
+/// A branch to open a workspace for, as [`open_or_create_workspaces`] takes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchWorkspaceRequest {
+  pub head_branch: String,
+  /// The workspace's rebase target.
+  pub base_branch: String,
+  pub title: Option<String>,
+  pub description: Option<String>,
+}
+
+impl BranchWorkspaceRequest {
+  fn validate(&self) -> Result<(), String> {
+    if self.head_branch.trim().is_empty() {
+      return Err("PR head branch is required".to_string());
+    }
+    if self.base_branch.trim().is_empty() {
+      return Err("PR base branch is required".to_string());
+    }
+    Ok(())
+  }
+}
+
+/// [`open_or_create_workspace_from_pr`] for several branches of one
+/// repository, syncing and fetching once. Each request gets its own result,
+/// so one bad branch does not stop the others.
+pub fn open_or_create_workspaces(
+  repo_path: &str,
+  requests: &[BranchWorkspaceRequest],
+) -> Vec<Result<(local_db::Workspace, bool), String>> {
+  if let Err(err) = sync_workspaces(repo_path) {
+    return requests.iter().map(|_| Err(err.clone())).collect();
+  }
+  let _ = jj::jj_git_fetch(repo_path);
+  requests
+    .iter()
+    .map(|request| {
+      request.validate()?;
+      open_or_create_synced(repo_path, request)
+    })
+    .collect()
+}
+
+fn existing_branch_workspace(
+  repo_path: &str,
+  branch: &str,
+) -> Result<Option<local_db::Workspace>, String> {
+  local_db::get_workspace_by_branch(repo_path, branch)
+    .map_err(|e| format!("Failed to check existing workspace: {e}"))
+}
+
+/// Opens or creates `request`'s workspace once the repository is synced and
+/// fetched.
+fn open_or_create_synced(
+  repo_path: &str,
+  request: &BranchWorkspaceRequest,
+) -> Result<(local_db::Workspace, bool), String> {
+  let head_branch = request.head_branch.trim();
+  let base_branch = request.base_branch.trim();
+  if let Some(existing) = existing_branch_workspace(repo_path, head_branch)? {
+    return Ok((existing, false));
+  }
 
   let remote_ref = format!("{head_branch}@origin");
   let branch_status = jj::check_branch_exists(repo_path, head_branch)
@@ -575,7 +636,7 @@ pub fn open_or_create_workspace_from_pr(
   let workspace = create_workspace(
     repo_path,
     head_branch,
-    description.map(|s| s.to_string()),
+    request.description.clone(),
     None,
     source_branch,
     None,
@@ -586,7 +647,12 @@ pub fn open_or_create_workspace_from_pr(
   // onto the PR base so stacked rebases follow the PR's merge base.
   apply_workspace_target_branch(repo_path, workspace.id, base_branch)?;
 
-  if let Some(title) = title.map(str::trim).filter(|s| !s.is_empty()) {
+  if let Some(title) = request
+    .title
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+  {
     local_db::update_workspace_title(repo_path, workspace.id, title)
       .map_err(|e| format!("Failed to set workspace title: {e}"))?;
   }
@@ -2218,6 +2284,46 @@ mod tests {
     assert!(workspace_dir.exists());
     let listed = super::list_workspace_statuses(&repo_path).expect("list statuses");
     assert!(listed.iter().any(|s| s.current.id == workspace.id));
+  }
+
+  #[test]
+  fn open_or_create_workspaces_reports_each_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let existing = super::create_workspace(&repo_path, "fix/open", None, None, None, None, None)
+      .expect("create workspace");
+    crate::jj::jj_set_bookmark(&repo_path, "feat/new", "@").expect("set bookmark");
+    // Branch checks read git refs.
+    let status = Command::new("jj")
+      .current_dir(temp.path())
+      .args(["git", "export"])
+      .status()
+      .expect("jj git export");
+    assert!(status.success());
+    let request = |head: &str, title: Option<&str>| super::BranchWorkspaceRequest {
+      head_branch: head.into(),
+      base_branch: "main".into(),
+      title: title.map(str::to_string),
+      description: None,
+    };
+
+    let results = super::open_or_create_workspaces(
+      &repo_path,
+      &[
+        request("fix/open", None),
+        request("feat/new", Some("New thing")),
+        request("feat/missing", None),
+      ],
+    );
+
+    let (reused, created) = results[0].as_ref().expect("existing workspace");
+    assert_eq!((reused.id, *created), (existing.id, false));
+    let (made, created) = results[1].as_ref().expect("new workspace");
+    assert!(*created);
+    assert_eq!(made.branch_name, "feat/new");
+    assert_eq!(made.title, "New thing");
+    assert_eq!(made.target_branch.as_deref(), Some("main"));
+    assert!(results[2].as_ref().unwrap_err().contains("feat/missing"));
   }
 
   #[test]
