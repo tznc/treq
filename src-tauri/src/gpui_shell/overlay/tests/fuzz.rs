@@ -89,7 +89,7 @@ fn changes(h: &Harness) -> Vec<String> {
 fn overlays_filter_and_select_consistently() {
   fuzz::check(
     "overlays_filter_and_select_consistently",
-    24,
+    48,
     (vec(step(), 1..40), 0u8..4),
     |cx, (steps, which)| {
       let (json, host) = overlay_json(which);

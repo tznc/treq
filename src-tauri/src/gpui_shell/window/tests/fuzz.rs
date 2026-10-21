@@ -334,10 +334,11 @@ fn check(window: &Window, host: &FakeHost, decline: bool, cx: &mut TestAppContex
     }
   }
 
-  // Nothing destructive without a yes.
+  // Nothing destructive without a yes. (Force rebase is the Developer
+  // menu's own command and asks nothing, as in React.)
   let calls = host.calls();
   for (i, call) in calls.iter().enumerate() {
-    let destructive = call == "factory reset" || call.starts_with("rebase ");
+    let destructive = call == "factory reset" || call.starts_with("remove ");
     if destructive {
       assert!(!decline, "{call} although every confirmation was declined");
       assert!(
@@ -372,7 +373,7 @@ fn check_settled(window: &Window, cx: &mut TestAppContext) {
 fn the_window_survives_random_actions() {
   fuzz::check(
     "the_window_survives_random_actions",
-    24,
+    64,
     (vec(op(), 1..40), any::<bool>()),
     |cx, (ops, decline)| {
       let host = fuzz_host(decline);
