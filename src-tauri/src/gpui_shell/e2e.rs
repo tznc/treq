@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 
-use tauri_plugin_gpui::gpui::{AnyWindowHandle, App};
+use tauri_plugin_gpui::gpui::{AnyWindowHandle, App, Window};
 
 thread_local! {
   /// The windows a `Shell` draws: the repo windows.
@@ -29,6 +29,15 @@ pub(super) fn shell_window(window: AnyWindowHandle) {
   });
 }
 
+/// Forgets the text `window` painted in its previous frame. gpui-kit's
+/// `Root` does this as it renders; the app's windows have no `Root`, so
+/// each window's root view calls it at the top of `render`. Without it the
+/// painted text of every frame (a caret blink repaints twice a second) piles
+/// up, and `getByText` finds the same text many times.
+pub fn begin_frame(window: &Window) {
+  gpui_kit::base::test_support::begin_frame(window);
+}
+
 /// The repository the first window opens on, in place of the saved one.
 pub const REPO_ENV: &str = "TREQ_E2E_REPO";
 
@@ -42,6 +51,11 @@ pub fn start(cx: &mut App) {
   let Some(server) = gpui_playwright::Server::from_env() else {
     return;
   };
+  // A steady caret: under Xvfb's software rendering every blink's repaint
+  // kept an idle window at ~15% CPU.
+  gpui_kit::base::input::CursorBlinkDefaults::new()
+    .with_interval(None)
+    .install(cx);
   if let Err(err) = server.on_adopt_page(page_window).start(cx) {
     log::error!("gpui-playwright failed to start: {err}");
   }

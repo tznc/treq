@@ -294,6 +294,10 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
   const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });
   const dialog = await dialogIn(page, context, title);
   await settle(page, 1000);
+  // Opened from a workspace, the prompt targets it rather than main.
+  await expect(
+    dialog.getByRole("button", { name: "Workspace: feat/keyvalues-cache" }),
+  ).toBeVisible();
   await capture(page, {
     name: "09-agent-prompt",
     title: "Start a new agent session (Ctrl+I)",
@@ -301,6 +305,7 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
     rest: false,
     expectations: [
       "Prompt field focused; workspace and agent pickers in the footer",
+      "The workspace picker shows feat/keyvalues-cache, the open workspace",
       "Submit split button and its shortcut hint readable",
     ],
   });
@@ -324,14 +329,15 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
       title: "Agent prompt: agent picker",
       screen: true,
       rest: false,
-      expectations: ["Agents listed with icons; the current one marked; uninstalled ones flagged"],
+      expectations: [
+        "Agents listed with icons; the current one marked",
+        "Agents whose CLI isn't installed are not listed",
+      ],
     });
     await dialog.keyboard.press("Escape");
     await settle(page, 500);
   }
-  // The workspace picker's trigger (named after its target) is not
-  // observable: the select at the dialog's top left.
-  await page.mouse.click(565, 401);
+  await dialog.getByRole("button", { name: /^Workspace: / }).click();
   await settle(page, 900);
   await capture(page, {
     name: "09-agent-prompt-workspace-picker",
@@ -339,14 +345,29 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
     screen: true,
     rest: false,
     expectations: ["Workspaces searchable; 'new workspace' option distinct"],
-    issue: "Opened from feat/keyvalues-cache, the prompt targets main, not the open workspace",
   });
+  // Escape closes the picker and hands the keyboard back to the prompt, so
+  // a second Escape closes the dialog.
   await dialog.keyboard.press("Escape");
   await settle(page, 400);
-  // Closing the picker with Escape leaves no focus in the dialog, so a
-  // second Escape does nothing until the prompt field is focused again.
-  await dialog.getByRole("textbox", { name: "Describe a task..." }).last().click();
+  await capture(page, {
+    name: "09-agent-prompt-picker-escaped",
+    title: "Agent prompt after Escape in the workspace picker",
+    screen: true,
+    rest: false,
+    expectations: [
+      "The workspace picker is closed and the dialog is still open",
+      "The prompt field has focus again",
+    ],
+  });
   await dialog.keyboard.press("Escape");
   await settle(page, 600);
+  await capture(page, {
+    name: "09-agent-prompt-second-escape",
+    title: "A second Escape closes the agent prompt",
+    screen: true,
+    rest: false,
+    expectations: ["The agent prompt dialog is closed"],
+  });
   await expect(title(dialog)).toHaveCount(0);
 });

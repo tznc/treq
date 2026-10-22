@@ -69,6 +69,12 @@ const SCROLLBAR: f32 = 8.;
 /// `pt-1` above the grid.
 const TOP_PAD: f32 = 4.;
 const TERMINAL_BG: u32 = terminal_emu::BACKGROUND;
+/// Maximize/restore needs both Cmd and Ctrl: Super and Ctrl off macOS.
+const MAXIMIZE_KEYS: &str = if cfg!(target_os = "macos") {
+  "⌘ + Ctrl + J"
+} else {
+  "Super + Ctrl + J"
+};
 /// `RemoteTerminalPanel`'s xterm font size.
 const REMOTE_FONT_SIZE: f32 = 13.;
 /// `h-8`: a remote session's header.
@@ -135,6 +141,9 @@ pub struct Route {
   /// A remote repository is active: a new shell runs on the host, in the
   /// session the window resolves (`resolveRemoteShell`).
   pub remote_shell: bool,
+  /// The window's main repository, which pane session ids are relative to,
+  /// while a supporting one is on screen. Empty: the one on screen.
+  pub main_repo_path: String,
 }
 
 /// `TerminalSessionSummary`, which the sidebar spins on.
@@ -1375,15 +1384,21 @@ impl TerminalView {
           .child(ui::text(div(), TextSize::Sm).child("Preparing terminal...")),
       ),
       Status::AgentFailed(error) => Some(
-        ui::text(div(), TextSize::Sm)
+        div()
           .absolute()
           .inset_0()
+          .p_6()
           .flex()
           .items_center()
           .justify_center()
           .bg(rgb(TERMINAL_BG))
-          .text_color(p.muted_foreground)
-          .child(format!("Failed to start agent: {error}")),
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .max_w_full()
+              .text_center()
+              .text_color(p.muted_foreground)
+              .child(format!("Failed to start agent: {error}")),
+          ),
       ),
       Status::Failed(error) => {
         let error = error.clone();
@@ -1643,6 +1658,17 @@ impl TerminalPane {
       _environment_task: None,
       _keys: None,
     }
+  }
+
+  /// Hidden while another screen replaces the workspace view: the pane
+  /// keeps its terminals but takes no shortcuts until it draws again.
+  pub fn park(&mut self) {
+    self._keys = None;
+  }
+
+  /// Where the pane sends its actions: the workspace view drawing it.
+  pub fn set_react(&mut self, react: ActionSink) {
+    self.react = react;
   }
 
   /// Follows the app's theme, terminals and all.
@@ -2156,7 +2182,10 @@ impl TerminalPane {
   /// The session's column and what its terminal starts, read from the
   /// session tables of the repository and its supporting ones.
   fn agent_session(&self, pane_id: i64) -> Option<(Kind, String, Start)> {
-    let main = self.place.repo_path.clone();
+    let main = match &self.route.main_repo_path {
+      main if !main.is_empty() => main.clone(),
+      _ => self.place.repo_path.clone(),
+    };
     let mut repos = vec![main.clone()];
     repos.extend(self.host.supporting_repos(&main));
     for repo in repos {
@@ -2685,7 +2714,7 @@ impl TerminalPane {
     let tip = |text: &'static str, keys: &'static str| {
       Some(TooltipContent::Shortcut {
         text: text.into(),
-        keys: keys.into(),
+        keys: crate::gpui_shell::keys::hint(keys).into(),
       })
     };
     let mut buttons: Vec<gpui::AnyElement> = Vec::new();
@@ -2750,7 +2779,7 @@ impl TerminalPane {
             .wrap(
               "terminal-restore",
               Side::Top,
-              tip("Restore", "⌘ + Ctrl + J"),
+              tip("Restore", MAXIMIZE_KEYS),
               b,
               cx,
             )
@@ -2765,7 +2794,7 @@ impl TerminalPane {
             .wrap(
               "terminal-maximize",
               Side::Top,
-              tip("Maximize", "⌘ + Ctrl + J"),
+              tip("Maximize", MAXIMIZE_KEYS),
               b,
               cx,
             )
@@ -2913,7 +2942,9 @@ impl TerminalPane {
         let search = self.tooltips.wrap(
           format!("terminal-search-tip-{}", column.id),
           Side::Top,
-          Some(TooltipContent::Text("Search (⌘+F)".into())),
+          Some(TooltipContent::Text(
+            crate::gpui_shell::keys::hint("Search (⌘+F)").into(),
+          )),
           search,
           cx,
         );
@@ -2922,7 +2953,7 @@ impl TerminalPane {
           Side::Top,
           Some(TooltipContent::Shortcut {
             text: "Close".into(),
-            keys: "⌘ + W".into(),
+            keys: crate::gpui_shell::keys::hint("⌘ + W").into(),
           }),
           close
             .h_6()
@@ -3066,7 +3097,7 @@ impl TerminalPane {
           Side::Top,
           Some(TooltipContent::Shortcut {
             text: "Close".into(),
-            keys: "⌘ + W".into(),
+            keys: crate::gpui_shell::keys::hint("⌘ + W").into(),
           }),
           close
             .size_4()

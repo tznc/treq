@@ -7,6 +7,7 @@
 //!
 //! [`changes_data`]: super::changes_data
 
+mod keys;
 pub(in crate::gpui_shell::screen) mod pr;
 mod review;
 pub(in crate::gpui_shell::screen) mod search;
@@ -24,8 +25,8 @@ use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
-  Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle, SharedString,
-  Stateful, Subscription, Window,
+  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle,
+  SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -39,7 +40,7 @@ use super::{
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
-  highlight, ActionSink, ScreenAction,
+  highlight, intraline, ActionSink, ScreenAction,
 };
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
@@ -52,6 +53,11 @@ use crate::{
   },
   jj::{JjDiffHunk, JjFileChange},
 };
+
+/// Diff code and file paths, in pixels. JetBrains Mono's glyphs are about a
+/// fifth wider than Inter's at the same size, so 13px code read larger than
+/// the 13px UI around it; 12px matches its width, as GitHub's diffs do.
+const CODE_TEXT: f32 = 12.;
 
 /// A workspace, or the home repository, files can move to.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -134,6 +140,8 @@ pub struct ChangesView {
   /// The file a discard runs on.
   file_action: Option<String>,
   pub(super) discard_dialog: bool,
+  /// Focus moves into the open confirmation so Escape reaches it.
+  discard_focus: Option<FocusHandle>,
   starting_review: bool,
   /// The repository has a GitHub remote, and the branch's pull request.
   github: bool,
@@ -153,6 +161,8 @@ pub struct ChangesView {
   pub(super) threads: threads::Threads,
   /// The pull request reviewed instead of a workspace (`PrReviewPage`).
   pub(super) pr: Option<pr::PrMode>,
+  /// Held by the diff, so it takes the arrow keys.
+  focus: FocusHandle,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -172,7 +182,7 @@ impl ChangesView {
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
-    let mut this = Self::blank(parent, options, host, react, popups, dark);
+    let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
     this.load(cx);
     this.watch_threads(cx);
@@ -187,6 +197,7 @@ impl ChangesView {
     react: ActionSink,
     popups: PopupSink,
     dark: bool,
+    cx: &mut Context<Self>,
   ) -> Self {
     let editors = host.editor_apps();
     Self {
@@ -218,6 +229,7 @@ impl ChangesView {
       pending: None,
       file_action: None,
       discard_dialog: false,
+      discard_focus: None,
       starting_review: false,
       github: false,
       pr_state: None,
@@ -230,6 +242,7 @@ impl ChangesView {
       search: search::Search::default(),
       threads: threads::Threads::default(),
       pr: None,
+      focus: cx.focus_handle(),
       _subscriptions: Vec::new(),
     }
   }
@@ -417,6 +430,11 @@ impl ChangesView {
         view.loading = false;
         view.field("changes.refreshing", false.into(), cx);
         match result {
+          Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
+            view.review.stale.clear();
+            view.review.parked = None;
+            view.apply(snapshot, cx)
+          }
           Ok(snapshot) if view.park(&snapshot) => {}
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
           Ok(snapshot) => view.apply(snapshot, cx),
@@ -613,9 +631,12 @@ impl ChangesView {
       Some(card) => {
         let view = self.scroll.bounds();
         let offset = self.scroll.offset();
-        self
-          .scroll
-          .set_offset(point(offset.x, offset.y - (card.top() - view.top())));
+        // Keep the list's top gap above the card.
+        let gap = ui::zoomed(16., window);
+        self.scroll.set_offset(point(
+          offset.x,
+          (offset.y - (card.top() - view.top()) + gap).min(px(0.)),
+        ));
         self.scroll_to = None;
         cx.notify();
       }
@@ -1110,7 +1131,10 @@ impl ChangesView {
     };
     let mut open = vec![{
       let (host, full) = (self.host.clone(), full.clone());
-      NativeMenuItem::item("Open in Finder", move |_| host.reveal(&full)).icon(MenuIcon::FolderOpen)
+      NativeMenuItem::item(crate::core::context_menu::REVEAL_LABEL, move |_| {
+        host.reveal(&full)
+      })
+      .icon(MenuIcon::FolderOpen)
     }];
     open.extend(self.editor_items(path, cx));
     let mut items = vec![
@@ -1308,7 +1332,11 @@ impl Render for ChangesView {
     self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
+    self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
+    if std::mem::take(&mut self.review.refocus) {
+      window.focus(&self.focus, cx);
+    }
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "changes-diff-viewer".into())
@@ -1317,9 +1345,16 @@ impl Render for ChangesView {
       .overflow_hidden()
       .bg(p.background)
       .text_color(p.foreground)
-      .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+      .track_focus(&self.focus)
+      .on_key_down(cx.listener(|view, e: &KeyDownEvent, window, cx| {
         let k = &e.keystroke;
-        if k.key == "a"
+        let held = crate::gpui_shell::keys::held(k.modifiers);
+        if view.focus.is_focused(window)
+          && !(held.platform || held.control || held.alt)
+          && view.diff_key(&k.key, held.shift, cx)
+        {
+          cx.stop_propagation();
+        } else if k.key == "a"
           && (crate::gpui_shell::keys::held(k.modifiers).platform
             || crate::gpui_shell::keys::held(k.modifiers).control)
           && !crate::gpui_shell::keys::held(k.modifiers).shift
@@ -1451,6 +1486,7 @@ impl ChangesView {
   fn commit_box(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let files = self.files().len();
     let disabled = files == 0 || self.pending.is_some();
+    let empty = self.message.trim().is_empty();
     let label = match self.pending {
       Some(action) => pending_label(action).to_string(),
       None => commit_label(self.staging.staged.len()),
@@ -1464,7 +1500,7 @@ impl ChangesView {
       .py(zpx(6.))
       .gap(zpx(6.))
       .rounded_r_none()
-      .disabled(disabled)
+      .disabled(disabled || empty)
       .when(self.pending.is_some(), |b| {
         b.child(ui::spinner("commit-spin", 16., p.primary_foreground))
       })
@@ -1485,7 +1521,7 @@ impl ChangesView {
           .rounded_l_none()
           .border_l_1()
           .border_color(border)
-          .disabled(disabled)
+          .disabled(disabled || empty)
           .child(ui::icon(
             theme::ICON_CHEVRON_DOWN,
             16.,
@@ -2340,7 +2376,7 @@ impl ChangesView {
       );
     }
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
-    let mut list = div().pb_32();
+    let mut list = div().pt_4().pb_32();
     for file in &snapshot.files {
       list = list.child(self.file_card(
         &file.path,
@@ -2606,6 +2642,7 @@ impl ChangesView {
             div()
               .truncate()
               .font_family(theme::MONO_FONT)
+              .text_size(zpx(CODE_TEXT))
               .text_color(muted)
               .child(shown_path),
           )
@@ -2815,7 +2852,9 @@ impl ChangesView {
     let mut drawn_regions: HashSet<usize> = HashSet::new();
     let border = p.border.opacity(0.4);
     let muted = p.muted_foreground;
-    let mut el = div().font_family(theme::MONO_FONT);
+    let mut el = div()
+      .font_family(theme::MONO_FONT)
+      .text_size(zpx(CODE_TEXT));
     let gutter_cols = |el: Stateful<Div>| {
       el.child(div().w_24().flex_none().border_r_1().border_color(border))
         .child(div().w_6().flex_none())
@@ -2898,6 +2937,7 @@ impl ChangesView {
         el = el.child(context_row(n, line, language, p));
       }
       let numbers = line_numbers(hunk);
+      let changed = intraline::changed_ranges(&hunk.lines);
       for l in 0..hunk.lines.len() {
         let new = numbers.get(l).and_then(|n| n.1);
         if let Some(region) = new.and_then(|n| in_region.get(&(n as usize)).copied()) {
@@ -2910,7 +2950,17 @@ impl ChangesView {
         }
         el = el.child(
           self
-            .diff_line(path, hunks, h, l, language, conflicted, p, cx)
+            .diff_line(
+              path,
+              hunks,
+              h,
+              l,
+              changed.get(&l).map_or(&[], Vec::as_slice),
+              language,
+              conflicted,
+              p,
+              cx,
+            )
             .on_mouse_down(
               MouseButton::Right,
               cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
@@ -3059,6 +3109,7 @@ impl ChangesView {
             search::MatchKey::Conflict(conflict.id.clone(), i),
             &raw,
             None,
+            &[],
           ))),
       );
       let deleted_notice = |side: &'static str, fg: Hsla, border: Hsla, bg: Hsla| {
@@ -3136,13 +3187,23 @@ impl ChangesView {
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
     if !self.discard_dialog {
+      self.discard_focus = None;
       return None;
     }
+    let focus = self
+      .discard_focus
+      .get_or_insert_with(|| {
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
+        focus
+      })
+      .clone();
     let viewport = window.viewport_size();
     let n = self.staging.unstaged(self.files()).len();
     let panel = div()
       .id("discard-all-dialog")
       .debug_selector(|| "discard-all-dialog".into())
+      .track_focus(&focus)
       .w_full()
       .max_w(zpx(512.))
       .p_6()

@@ -10,7 +10,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Wry};
 use tauri_plugin_gpui::{
-  gpui::{div, prelude::*, Context, Entity, WeakEntity, Window},
+  gpui::{div, prelude::*, App, Context, Entity, WeakEntity, Window},
   GpuiOptions, GpuiWindowExt,
 };
 
@@ -30,6 +30,8 @@ struct ModalRoot {
 
 impl Render for ModalRoot {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    #[cfg(feature = "e2e")]
+    super::e2e::begin_frame(window);
     super::ui::apply_zoom(window, cx);
     div()
       .size_full()
@@ -67,6 +69,8 @@ fn modal_window(
   }
   let parent = tauri::Manager::get_window(app, owner)?;
   let window = tauri::WindowBuilder::new(app, label(owner))
+    // Unnamed, it would be listed as Tauri's default "Tauri App".
+    .title(&app.package_info().name)
     .decorations(false)
     .transparent(true)
     .shadow(false)
@@ -225,6 +229,21 @@ pub fn hide_popover(app: &AppHandle, owner: &str) {
   if popover_open(owner) {
     hide(app, owner);
   }
+}
+
+/// Closes window `owner`'s popover for an Escape the window itself took,
+/// as it does when the modal window could not take the keyboard. Whether
+/// one was open.
+pub fn escape_popover(owner: &str, cx: &mut App) -> bool {
+  let root = MODALS.with(|modals| modals.borrow().get(owner).map(|m| m.root.clone()));
+  let Some(popover) = root
+    .and_then(|root| root.upgrade())
+    .and_then(|root| root.read(cx).popover.clone())
+  else {
+    return false;
+  };
+  popover.update(cx, |popover, cx| popover.close(cx));
+  true
 }
 
 /// Whether window `owner`'s modal window shows a popover.

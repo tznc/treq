@@ -4,14 +4,15 @@
 //! agent through React.
 
 use crate::gpui_shell::ui::zpx;
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 
 use super::*;
 use crate::gpui_shell::screen::{
   changes_review::{
-    comments_under, count_label, is_outdated, line_has_comment, line_location, outdated_label,
-    outdated_markdown, pending_for_line, pending_for_selection, review_markdown, stale_names,
-    ConflictNote, LineComment, Pending, Stored, FILE_HUNK,
+    commented_text, comments_under, count_label, is_outdated, line_has_comment, line_location,
+    outdated_label, outdated_markdown, parse_suggestion, pending_for_line, pending_for_selection,
+    review_markdown, stale_names, suggestion_block, ConflictNote, LineComment, Pending, Side,
+    Stored, FILE_HUNK,
   },
   commits_data::{selection, LineRef},
 };
@@ -22,11 +23,16 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// How long "Copied" shows on the review popover's Copy button.
 const COPIED_FOR: Duration = Duration::from_millis(2000);
 
+/// A diff line as drawn: its file, place and bounds.
+pub(in crate::gpui_shell::screen) type DrawnLine = (String, LineRef, Bounds<Pixels>);
+
 /// The diff lines picked by dragging in the gutter (`diffLineSelection`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::gpui_shell::screen) struct LineSelection {
   pub path: String,
   pub anchor: LineRef,
+  /// The end that moves: the dragged-to line, or the keyboard's cursor.
+  pub head: LineRef,
   pub lines: Vec<LineRef>,
   pub dragging: bool,
 }
@@ -49,6 +55,15 @@ enum Field {
 #[derive(Default)]
 pub(in crate::gpui_shell::screen) struct Review {
   pub selection: Option<LineSelection>,
+  /// Scroll the selection's head into view, within this many frames.
+  pub reveal: u8,
+  /// Where the selection's head was last drawn.
+  pub head_drawn: Rc<RefCell<Option<DrawnLine>>>,
+  /// A comment box closed: the diff takes the keyboard back.
+  pub refocus: bool,
+  /// The next read shows as is: it follows this view's own write to the
+  /// checkout, which must not wait behind the stale banner.
+  pub apply_next: bool,
   pub comments: Vec<LineComment>,
   /// Where the comment box is open.
   pub draft: Option<Pending>,
@@ -193,6 +208,7 @@ impl ChangesView {
     self.review.selection = Some(LineSelection {
       path: path.into(),
       anchor: at,
+      head: at,
       lines: vec![at],
       dragging: true,
     });
@@ -213,6 +229,7 @@ impl ChangesView {
     let lines = selection(&hunks, anchor, at);
     if let Some(s) = self.review.selection.as_mut() {
       if s.lines != lines {
+        s.head = at;
         s.lines = lines;
         cx.notify();
       }
@@ -233,7 +250,7 @@ impl ChangesView {
   }
 
   /// The selection's comment target, `None` when it mixes sides.
-  fn selection_target(&self) -> Option<Pending> {
+  pub(super) fn selection_target(&self) -> Option<Pending> {
     let s = self
       .review
       .selection
@@ -297,11 +314,70 @@ impl ChangesView {
     self.review.draft_input = None;
     self.review.draft_text.clear();
     self.review.selection = None;
+    self.review.refocus = true;
     self.save_review(cx);
     cx.notify();
   }
 
+  /// "Suggest change": the commented lines as a suggestion block, at the
+  /// cursor, to edit into what they should read.
+  fn suggest_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(block) = self.review.draft.as_ref().and_then(suggestion_block) else {
+      return;
+    };
+    let Some(input) = self.review.draft_input.as_ref().map(|i| i.state.clone()) else {
+      return;
+    };
+    let lead = if self.review.draft_text.is_empty() || self.review.draft_text.ends_with('\n') {
+      ""
+    } else {
+      "\n"
+    };
+    input.update(cx, |s, cx| {
+      s.insert(format!("{lead}{block}"), window, cx);
+      s.focus(window, cx);
+    });
+    self.review.draft_text = input.read(cx).value().to_string();
+    cx.notify();
+  }
+
+  /// "Apply suggestion": writes the suggested lines into the file, then the
+  /// comment is done with.
+  fn apply_suggestion(&mut self, id: &str, cx: &mut Context<Self>) {
+    let Some(comment) = self.review.comments.iter().find(|c| c.id == id).cloned() else {
+      return;
+    };
+    let Some(suggestion) = parse_suggestion(&comment.text) else {
+      return;
+    };
+    let original = commented_text(&comment.line_content);
+    let workspace = self.parent.working_directory();
+    let id = id.to_string();
+    self.run(
+      move |host, _| {
+        host.apply_suggestion(
+          &workspace,
+          &comment.file_path,
+          (comment.start_line, comment.end_line),
+          &original,
+          &suggestion.suggested,
+        )
+      },
+      move |view, result, cx| match result {
+        Ok(()) => {
+          view.delete_comment(&id, cx);
+          view.toast(ToastTone::Success, "Suggestion applied", "");
+          view.review.apply_next = true;
+          view.load(cx);
+        }
+        Err(err) => view.toast(ToastTone::Error, "Could not apply suggestion", err),
+      },
+      cx,
+    );
+  }
+
   fn cancel_draft(&mut self, cx: &mut Context<Self>) {
+    self.review.refocus = true;
     self.review.draft = None;
     self.review.draft_input = None;
     self.review.draft_text.clear();
@@ -792,6 +868,7 @@ impl ChangesView {
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    changed: &[Range<usize>],
     language: Option<&'static str>,
     conflicted: bool,
     p: &Palette,
@@ -805,6 +882,11 @@ impl ChangesView {
       .selection
       .as_ref()
       .is_some_and(|s| s.path == path && s.lines.contains(&(h, l)));
+    let head = self
+      .review
+      .selection
+      .as_ref()
+      .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
     let bg = if selected {
       Some(tw::color(tw::BLUE_500).opacity(if self.dark { 0.25 } else { 0.1 }))
@@ -815,6 +897,13 @@ impl ChangesView {
         LineKind::Context => None,
       }
     };
+    // The characters this line changed against its pair, a shade deeper.
+    let mark = match kind {
+      LineKind::Removed => tw::color(tw::RED_500),
+      _ => tw::color(tw::EMERALD_500),
+    }
+    .opacity(0.45);
+    let changed: Vec<(Range<usize>, Hsla)> = changed.iter().map(|r| (r.clone(), mark)).collect();
     let marker = match kind {
       LineKind::Added => "+",
       LineKind::Removed => "-",
@@ -832,10 +921,26 @@ impl ChangesView {
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
     let primary = p.primary;
+    let head_drawn = head.then(|| (self.review.head_drawn.clone(), path.to_string()));
     div()
       .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
       .group("diff-line")
+      .relative()
       .flex()
+      .when_some(head_drawn, |this, (drawn, path)| {
+        this.child(
+          gpui::canvas(
+            move |bounds, _, _| {
+              *drawn.borrow_mut() = Some((path.clone(), (h, l), bounds));
+            },
+            |_, _, _, _| {},
+          )
+          .absolute()
+          .top_0()
+          .left_0()
+          .size_full(),
+        )
+      })
       .when_some(bg, |this, bg| this.bg(bg))
       .when(!conflicted, |this| {
         this.on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
@@ -862,8 +967,9 @@ impl ChangesView {
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
-              cx.listener(move |view, _: &MouseDownEvent, _, cx| {
+              cx.listener(move |view, _: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
+                window.focus(&view.focus, cx);
                 view.press_line(&press, at, cx);
               }),
             )
@@ -948,6 +1054,7 @@ impl ChangesView {
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
             language,
+            &changed,
           )),
       )
   }
@@ -1048,7 +1155,7 @@ impl ChangesView {
               .group_hover("comment-card", |s| s.opacity(1.))
               .child(ui::icon(theme::ICON_PENCIL, 12., muted)),
           )
-          .child(div().flex_1().whitespace_normal().child(text.to_string()))
+          .child(self.comment_body(id, text, p, cx))
           .child(
             self.tip(
               format!("delete-comment-tip-{id}"),
@@ -1076,6 +1183,53 @@ impl ChangesView {
     self
       .tip(format!("edit-comment-tip-{id}"), "Click to edit", card, cx)
       .into_any_element()
+  }
+
+  /// A comment's text, with its suggestion drawn as a diff against the
+  /// lines it replaces and an Apply button.
+  fn comment_body(&self, id: &str, text: &str, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let comment = self
+      .review
+      .comments
+      .iter()
+      .find(|c| c.id == id)
+      .filter(|c| !c.is_file() && c.line_side != Some(Side::Old));
+    let Some((comment, suggestion)) = comment.zip(parse_suggestion(text)) else {
+      return div().flex_1().whitespace_normal().child(text.to_string());
+    };
+    let original = commented_text(&comment.line_content).join("\n");
+    let apply = id.to_string();
+    div()
+      .flex_1()
+      .min_w_0()
+      .flex()
+      .flex_col()
+      .gap_2()
+      .when(!suggestion.before.is_empty(), |this| {
+        this.child(div().whitespace_normal().child(suggestion.before.clone()))
+      })
+      .child(threads::suggestion_box(
+        Some(&original),
+        &suggestion.suggested,
+        p,
+      ))
+      .when(!suggestion.after.is_empty(), |this| {
+        this.child(div().whitespace_normal().child(suggestion.after.clone()))
+      })
+      .when(!self.read_only(), |this| {
+        this.child(
+          div().flex().justify_end().child(
+            Button::new("apply-suggestion", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Apply suggestion")
+              .on_click(cx.listener(move |view, _, _, cx| {
+                cx.stop_propagation();
+                view.apply_suggestion(&apply, cx);
+              })),
+          ),
+        )
+      })
   }
 
   /// `CommentEditInput`: Discard, Cancel, Save.
@@ -1151,6 +1305,11 @@ impl ChangesView {
   pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let empty = self.review.draft_text.trim().is_empty();
     let label = self.review.draft.as_ref().and_then(|d| d.label());
+    let can_suggest = self
+      .review
+      .draft
+      .as_ref()
+      .is_some_and(|d| suggestion_block(d).is_some());
     div()
       .debug_selector(|| "comment-input".into())
       .bg(p.muted)
@@ -1209,6 +1368,17 @@ impl ChangesView {
           .flex()
           .justify_end()
           .gap_2()
+          .when(can_suggest, |this| {
+            this
+              .child(
+                Button::new("suggest-change", p)
+                  .variant(Variant::Ghost)
+                  .icon(theme::ICON_FILE_DIFF, 14.)
+                  .label("Suggest change")
+                  .on_click(cx.listener(|view, _, window, cx| view.suggest_change(window, cx))),
+              )
+              .child(div().flex_1())
+          })
           .child(
             Button::new("comment-cancel", p)
               .variant(Variant::Ghost)
@@ -1714,6 +1884,7 @@ impl ChangesView {
       .child(
         div().absolute().top_2().right_2().child(
           Button::new("finish-review-close", p)
+            .aria_label("Close")
             .variant(Variant::Ghost)
             .size(Size::Sm)
             .px_1()

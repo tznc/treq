@@ -72,6 +72,8 @@ struct FakeHost {
   sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
   /// What the terminal pane reads, and the PTYs it started.
   sessions: Vec<crate::local_db::Session>,
+  /// The supporting repositories of every repository.
+  supporting: Vec<String>,
   /// The devcontainers preview.
   devcontainers: bool,
   ptys: Mutex<Vec<String>>,
@@ -812,6 +814,20 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(())
   }
 
+  fn apply_suggestion(
+    &self,
+    workspace_path: &str,
+    path: &str,
+    (start, end): (u32, u32),
+    original: &[String],
+    suggested: &str,
+  ) -> Result<(), String> {
+    self.record(format!(
+      "apply suggestion {workspace_path} {path} {start}..{end} {original:?} -> {suggested:?}"
+    ));
+    Ok(())
+  }
+
   fn apply_agent_suggestion(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("apply agent suggestion {id}"));
     Ok(())
@@ -912,7 +928,7 @@ impl terminal_data::TerminalHost for FakeHost {
   }
 
   fn supporting_repos(&self, _: &str) -> Vec<String> {
-    Vec::new()
+    self.supporting.clone()
   }
 
   fn shell_command(&self) -> Option<String> {
@@ -1435,9 +1451,11 @@ impl Harness {
     use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
     self.cx.run_until_parked();
     let entries = match self.popups.borrow().last() {
-      Some(PopupRequest::ShowDropdown { entries, .. } | PopupRequest::ShowMenu { entries, .. }) => {
-        entries.clone()
-      }
+      Some(
+        PopupRequest::ShowDropdown { entries, .. }
+        | PopupRequest::ShowSelect { entries, .. }
+        | PopupRequest::ShowMenu { entries, .. },
+      ) => entries.clone(),
       _ => panic!("no menu is shown"),
     };
     let id = entries
@@ -3895,7 +3913,8 @@ fn changes_tab_lists_files_and_their_diffs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  h.click("commit-button");
+  h.click("commit-message");
+  h.cx.simulate_keystrokes("cmd-enter");
   h.cx.run_until_parked();
   assert!(h.drawn("commit-message-error"));
   assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
@@ -3976,9 +3995,8 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
 }
 
 /// Found by the fuzzer: the confirmation listens for Escape only while
-/// focus is inside it, and opening it leaves the focus where it was.
+/// focus is inside it, so opening it moves the focus there.
 #[gpui::test]
-#[ignore = "bug: Escape does not close the Discard all changes confirmation"]
 fn escape_closes_the_discard_all_confirmation(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
@@ -4068,6 +4086,108 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
   h.click("reload-stale");
   assert!(!h.drawn("stale-banner"));
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+/// The selected lines of the Changes tab: the file, and each line.
+fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
+  h.cx.run_until_parked();
+  h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    changes
+      .review
+      .selection
+      .as_ref()
+      .map(|s| (s.path.clone(), s.lines.clone()))
+  })
+}
+
+#[gpui::test]
+fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  // a.rs: " a", "+b", "+c"; b.rs: "+d".
+  h.click("gutter-a.rs-0-0");
+  h.cx.simulate_keystrokes("down");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 1)])));
+  h.cx.simulate_keystrokes("shift-down");
+  assert_eq!(
+    selected_lines(&mut h),
+    Some(("a.rs".into(), vec![(0, 1), (0, 2)]))
+  );
+  h.cx.simulate_keystrokes("shift-down");
+  assert_eq!(
+    selected_lines(&mut h),
+    Some(("a.rs".into(), vec![(0, 1), (0, 2)])),
+    "a selection stays in its file"
+  );
+  h.cx.simulate_keystrokes("down");
+  assert_eq!(selected_lines(&mut h), Some(("b.rs".into(), vec![(0, 0)])));
+  h.cx.simulate_keystrokes("up");
+  assert_eq!(selected_lines(&mut h), Some(("a.rs".into(), vec![(0, 2)])));
+  h.cx.simulate_keystrokes("shift-up");
+  assert_eq!(
+    selected_lines(&mut h),
+    Some(("a.rs".into(), vec![(0, 1), (0, 2)]))
+  );
+  h.cx.simulate_keystrokes("escape");
+  assert_eq!(selected_lines(&mut h), None);
+}
+
+#[gpui::test]
+fn left_comments_the_selected_lines(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  assert!(h.drawn("comment-input"));
+  h.cx.simulate_input("Both");
+  h.cx.simulate_keystrokes("cmd-enter");
+  settle_save(&mut h);
+  let saved = host.review.lock().unwrap().clone().unwrap_or_default();
+  assert!(
+    saved.contains("\"start_line\":2") && saved.contains("\"end_line\":3"),
+    "{saved}"
+  );
+  // The diff has the keyboard again.
+  h.cx.simulate_keystrokes("down");
+  assert!(selected_lines(&mut h).is_some());
+}
+
+#[gpui::test]
+fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  h.click("suggest-change");
+  assert_eq!(
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      changes.review.draft_text.clone()
+    }),
+    "```suggestion\nb\nc\n```\n"
+  );
+  h.cx.simulate_keystrokes("cmd-enter");
+  assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
+  // The write changes a.rs on disk; that read is not stale.
+  let mut applied = host.working.clone().expect("working");
+  applied.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+B".into()];
+  *host.edited.lock().unwrap() = Some(applied);
+  h.click("apply-suggestion");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("stale-banner"), "its own write shows at once");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+B"]);
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.contains("apply suggestion") && c.contains("a.rs 2..3 [\"b\", \"c\"]")),
+    "{:?}",
+    host.calls()
+  );
+  assert!(
+    !h.drawn("inline-comment-card"),
+    "the applied comment is done"
+  );
 }
 
 /// Comments line `+b` of a.rs with `text`.
@@ -4718,6 +4838,36 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
   );
 }
 
+/// A supporting repository on screen: the backend numbers its sessions
+/// relative to the window's main repository, so the pane must too.
+#[gpui::test]
+fn terminal_pane_opens_an_agent_session_of_a_supporting_repo(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    supporting: vec!["/support".into()],
+    ..terminal_host()
+  };
+  let mut route = route_json(Some(7), "main");
+  route["repoPath"] = "/support".into();
+  route["code"] = true.into();
+  route["terminal"] = serde_json::json!({});
+  let route = serde_json::from_value(route).expect("terminal route");
+  let (mut h, host) = workspace_harness(cx, host, route);
+  let pane_id = terminal_data::pane_session_id("/support", "/repo", 3);
+  set_terminal(
+    &mut h,
+    serde_json::json!({ "activeSessionId": pane_id, "mainRepoPath": "/repo" }),
+  );
+  assert!(h.drawn("terminal-column-agent"));
+  let pty = terminal_data::agent_pty_id("/support", 3);
+  let calls = host.calls();
+  assert!(
+    calls
+      .iter()
+      .any(|c| c.starts_with(&format!("spawn {pty} "))),
+    "{calls:?}"
+  );
+}
+
 #[gpui::test]
 fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
@@ -4856,6 +5006,36 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   assert!(!h.drawn("terminal-column-shell"));
   // Closing the last terminal collapses the pane.
   assert!(h.drawn("terminal-expand"));
+}
+
+#[gpui::test]
+fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.cx.simulate_keystrokes("cmd-\\");
+  assert!(h.drawn("terminal-column-shell"));
+  let workspace = h.screen.read_with(&h.cx, |s, _| s.snapshot().clone());
+  let spawns = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("spawn "))
+      .count()
+  };
+  let spawned = spawns(&host);
+
+  h.update(|s| *s = settings());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-terminal-pane"));
+  // The hidden pane takes no shortcuts.
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.update(|s| *s = workspace);
+  h.cx.run_until_parked();
+
+  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.drawn("terminal-column-shell"));
+  assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
 }
 
 #[gpui::test]
@@ -5192,7 +5372,7 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   let shown = h.popups.borrow().iter().any(|p| {
     matches!(p, PopupRequest::ShowTooltip { content: TooltipContent::Shortcut { text, keys }, .. }
-      if text == "Expand" && keys == "⌘ + J")
+      if text == "Expand" && *keys == crate::gpui_shell::keys::hint("⌘ + J"))
   });
   assert!(shown, "{:?}", h.popups.borrow());
 }
@@ -6645,9 +6825,34 @@ impl workspace_ops::WorkspaceActionsHost for FakeHost {
 }
 
 /// `open-non-git-folder.test.tsx`: `openRepositoryAtPath` on a folder
-/// without `.git` toasts, creates no `.treq` and remembers nothing.
+/// without `.git` offers to initialize one; declined, it toasts, creates no
+/// `.treq` and remembers nothing.
 #[test]
-fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
+fn declining_to_initialize_a_folder_that_is_not_a_repository_remembers_nothing() {
+  let dir = tempfile::TempDir::new().unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost {
+    decline: true,
+    ..FakeHost::default()
+  };
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(
+    host.calls(),
+    [
+      format!("ask {path} is not a Git repository. Initialize one here?"),
+      "notify toast Not a Git Repository".into(),
+    ]
+  );
+  assert!(shown.is_empty(), "not the window's repository");
+  assert!(!dir.path().join(".treq").exists());
+  assert!(!dir.path().join(".git").exists());
+}
+
+#[test]
+fn initializing_a_folder_that_is_not_a_repository_opens_it() {
   let dir = tempfile::TempDir::new().unwrap();
   let path = dir.path().to_str().unwrap();
   let host = FakeHost::default();
@@ -6655,9 +6860,17 @@ fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
 
   onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
 
-  assert_eq!(host.calls(), ["notify toast Failed to open repository"]);
-  assert!(shown.is_empty(), "not the window's repository");
-  assert!(!dir.path().join(".treq").exists());
+  assert!(gix::open(dir.path()).is_ok(), "a Git repository now");
+  assert_eq!(
+    host.calls(),
+    [
+      format!("ask {path} is not a Git repository. Initialize one here?"),
+      format!("set last_opened_repo_path={path}"),
+      "notify repoOpened".into(),
+      "notify toast Repository Opened".into(),
+    ]
+  );
+  assert_eq!(shown, [path]);
 }
 
 #[test]

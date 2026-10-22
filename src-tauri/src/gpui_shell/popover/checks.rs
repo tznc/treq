@@ -224,6 +224,11 @@ impl Popover {
             )
             .child(
               Button::new(id, &p)
+                .aria_label(format!(
+                  "{} {}",
+                  if rerun { "Re-run" } else { "Run" },
+                  wf.name
+                ))
                 .variant(Variant::Ghost)
                 .size(Size::Sm)
                 .size_6()
@@ -256,12 +261,13 @@ impl Popover {
             .border_color(amber_border)
             .text_color(amber)
             .child(ui::icon(theme::ICON_SHIELD_CHECK, 12., amber))
-            .child("Trust Repository")
+            .label("Trust Repository")
             .on_click(cx.listener(|this, _, _, cx| this.trust_repo(cx))),
         );
       }
       actions = actions.child(
         Button::new("checks-run-all", &p)
+          .aria_label("Run all checks")
           .variant(Variant::Outline)
           .size(Size::Sm)
           .gap_1()
@@ -278,6 +284,7 @@ impl Popover {
         let busy = input.setup_rerunning || setup_running;
         actions = actions.child(
           Button::new("checks-setup", &p)
+            .aria_label("Re-run setup script")
             .variant(Variant::Ghost)
             .size(Size::Sm)
             .gap_1()

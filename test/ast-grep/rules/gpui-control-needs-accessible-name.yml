@@ -1,0 +1,92 @@
+id: gpui-control-needs-accessible-name
+language: rust
+severity: error
+message: >
+  A control needs an accessible name, or screen readers and
+  gpui-testing-library's `get_by_role(..).name(..)` cannot find it. Give a
+  `Button` `.label(..)` for its text, or `.aria_label(..)` when it shows only
+  an icon or its text is not `.label`; give an element with a control role
+  `.aria_label(..)`. `.child("text")` does not name either.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  # A step of the builder chain the control is built in: a method call on
+  # it, or a plain function that takes and returns it (`ui::text(button, ..)`).
+  in-chain:
+    any:
+      - kind: field_expression
+      - kind: call_expression
+      - kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: identifier
+              - kind: scoped_identifier
+  # `.label(..)`/`.aria_label(..)`, also in a `.when(..)`-style closure.
+  names-it:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        any:
+          - regex: ^(label|aria_label)$
+          - regex: ^(when|when_some|when_none|map)$
+            inside:
+              kind: field_expression
+              inside:
+                kind: call_expression
+                has:
+                  field: arguments
+                  has:
+                    stopBy: end
+                    kind: field_identifier
+                    regex: ^(label|aria_label)$
+  named-later-in-chain:
+    inside:
+      matches: names-it
+      stopBy:
+        not:
+          matches: in-chain
+  named-earlier-in-chain:
+    has:
+      field: function
+      has:
+        field: value
+        any:
+          - matches: names-it
+          - has:
+              matches: names-it
+              stopBy:
+                not:
+                  matches: in-chain
+rule:
+  any:
+    - pattern: Button::new($$$)
+    - kind: call_expression
+      all:
+        - has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^role$
+        - has:
+            field: arguments
+            regex: Role::(Button|CheckBox|ComboBox|Switch|Tab|MenuItem|ListBoxOption|RadioButton|Slider|TextInput|SearchInput|Link)\b
+  not:
+    any:
+      - matches: named-later-in-chain
+      - matches: named-earlier-in-chain
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

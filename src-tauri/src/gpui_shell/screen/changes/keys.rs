@@ -1,0 +1,170 @@
+//! The diff from the keyboard: Up and Down move a line cursor through
+//! every drawn file, Shift extends the selection within the file, Left
+//! opens the comment box on it and Escape clears it.
+
+use super::review::LineSelection;
+use super::*;
+use crate::gpui_shell::screen::{
+  changes_review::{edge_line, pending_for_line, step_line},
+  commits_data::selection,
+};
+
+/// How many frames a moved cursor waits to be drawn before it is scrolled to.
+const REVEAL_FRAMES: u8 = 3;
+/// Room kept above and below a revealed line.
+const REVEAL_MARGIN: f32 = 48.;
+
+impl ChangesView {
+  /// The keys the diff takes while it has focus; `true` when handled.
+  pub(super) fn diff_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
+    match key {
+      "down" | "up" => self.move_line(key == "down", shift, cx),
+      "left" if !shift => self.comment_selection(cx),
+      _ => return false,
+    }
+    true
+  }
+
+  /// The files whose diff lines are drawn, in the order they are drawn.
+  fn line_files(&self) -> Vec<String> {
+    let Some(snapshot) = self.snapshot.as_ref() else {
+      return Vec::new();
+    };
+    let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
+    let committed = self.visible_committed();
+    snapshot
+      .files
+      .iter()
+      .map(|f| (f.path.as_str(), f.status.as_str(), f.old_path.is_some()))
+      .chain(committed.iter().map(|f| {
+        (
+          f.path.as_str(),
+          f.status.as_str(),
+          f.previous_path.is_some(),
+        )
+      }))
+      .filter(|(path, status, renamed)| {
+        let data = self.file_hunks(path);
+        !conflicted.contains(*path)
+          && body(&BodyInput {
+            path,
+            status,
+            renamed: *renamed,
+            data: data.as_ref(),
+            collapsed: self.collapsed_files.contains(*path),
+            comment_activity: self.file_comment_activity(path),
+            expanded_large: self.expanded_large.contains(*path),
+          }) == Body::Hunks
+      })
+      .map(|(path, _, _)| path.to_string())
+      .collect()
+  }
+
+  fn lines_of(&self, path: &str) -> Vec<JjDiffHunk> {
+    self.file_hunks(path).map(|d| d.hunks).unwrap_or_default()
+  }
+
+  /// Up or Down: the cursor moves a line, into the next file at a file's
+  /// edge. With Shift the selection grows from its anchor instead, within
+  /// its file, as comments take one file's lines.
+  fn move_line(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+    let files = self.line_files();
+    let current = self
+      .review
+      .selection
+      .as_ref()
+      .filter(|s| files.contains(&s.path))
+      .map(|s| (s.path.clone(), s.anchor, s.head));
+    let next = match &current {
+      None => self
+        .active
+        .clone()
+        .filter(|p| files.contains(p))
+        .or_else(|| files.first().cloned())
+        .and_then(|p| edge_line(&self.lines_of(&p), true).map(|at| (p, at))),
+      Some((path, _, head)) => match step_line(&self.lines_of(path), *head, down) {
+        Some(at) => Some((path.clone(), at)),
+        None if extend => None,
+        None => {
+          let i = files.iter().position(|p| p == path).unwrap_or(0);
+          let neighbour = if down {
+            files.get(i + 1)
+          } else {
+            i.checked_sub(1).and_then(|i| files.get(i))
+          };
+          neighbour.and_then(|p| edge_line(&self.lines_of(p), down).map(|at| (p.clone(), at)))
+        }
+      },
+    };
+    let Some((path, head)) = next else {
+      return;
+    };
+    let anchor = match current {
+      Some((p, anchor, _)) if extend && p == path => anchor,
+      _ => head,
+    };
+    let lines = selection(&self.lines_of(&path), anchor, head);
+    self.active = Some(path.clone());
+    self.review.selection = Some(LineSelection {
+      path,
+      anchor,
+      head,
+      lines,
+      dragging: false,
+    });
+    self.review.reveal = REVEAL_FRAMES;
+    cx.notify();
+  }
+
+  /// Left: the comment box on the selected lines, or on the cursor's line
+  /// when the selection spans both sides.
+  fn comment_selection(&mut self, cx: &mut Context<Self>) {
+    let Some(s) = self.review.selection.as_ref() else {
+      return;
+    };
+    let (path, head) = (s.path.clone(), s.head);
+    let draft = self.selection_target().or_else(|| {
+      self
+        .file_hunks(&path)
+        .and_then(|d| pending_for_line(&path, &d.hunks, head))
+    });
+    if let Some(draft) = draft {
+      self.open_draft(draft, cx);
+    }
+  }
+
+  /// Scrolls the cursor's line into view once it is drawn.
+  pub(super) fn reveal_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.review.reveal == 0 {
+      return;
+    }
+    let Some(s) = self.review.selection.as_ref() else {
+      self.review.reveal = 0;
+      return;
+    };
+    let drawn = self.review.head_drawn.borrow().clone();
+    match drawn {
+      Some((path, at, line)) if path == s.path && at == s.head => {
+        let view = self.scroll.bounds();
+        let margin = px(REVEAL_MARGIN);
+        let delta = if line.top() < view.top() + margin {
+          line.top() - view.top() - margin
+        } else if line.bottom() > view.bottom() - margin {
+          line.bottom() - view.bottom() + margin
+        } else {
+          px(0.)
+        };
+        if delta != px(0.) {
+          let offset = self.scroll.offset();
+          self.scroll.set_offset(point(offset.x, offset.y - delta));
+          cx.notify();
+        }
+        self.review.reveal = 0;
+      }
+      _ => {
+        self.review.reveal -= 1;
+        cx.on_next_frame(window, |_, _, cx| cx.notify());
+      }
+    }
+  }
+}

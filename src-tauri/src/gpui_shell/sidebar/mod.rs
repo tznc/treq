@@ -3,7 +3,7 @@
 //! The window model builds its [`SidebarSnapshot`] and carries out every
 //! click the sidebar sends back as a [`SidebarAction`].
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, A11yDisabledExt as _};
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
@@ -20,6 +20,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   popup::{PopupRequest, PopupSink, Side, TooltipContent},
   theme::{self, Palette},
+  title_bar,
 };
 
 #[cfg(test)]
@@ -627,8 +628,7 @@ impl Render for Sidebar {
               .rounded_sm()
               .text_size(zpx(11.))
               .bg(palette.muted)
-              // Same label as the React app shows on every platform.
-              .child("⌘ + K"),
+              .child(crate::gpui_shell::keys::hint("⌘ + K")),
           )
           .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
       )
@@ -658,6 +658,11 @@ impl Render for Sidebar {
       // Room for the right edge line, drawn as a child below so the modal
       // backdrop covers it (GPUI paints a border above the children).
       .pr(zpx(1.))
+      // The traffic lights sit here; the edge line runs past them to the
+      // window's top edge.
+      .when(title_bar::SHOWN, |this| {
+        this.child(title_bar::drag_area("sidebar-title-bar"))
+      })
       .child(header);
 
     for repo in &snapshot.repos {
@@ -721,7 +726,8 @@ impl Render for Sidebar {
           if let Some(count) = snapshot.bulk_archive {
             section = section.child(
               bulk_archive_button(count, &palette)
-                .on_click(self.on_action(SidebarAction::BulkArchive)),
+                .on_click(self.on_action(SidebarAction::BulkArchive))
+                .test_support(),
             );
           }
         }
@@ -851,6 +857,7 @@ impl Sidebar {
       .debug_selector(move || id.into())
       .role(Role::Button)
       .aria_label(tooltip)
+      .a11y_disabled(disabled)
       .test_support()
       .relative()
       .flex()
@@ -912,6 +919,7 @@ impl Sidebar {
       .debug_selector(move || selector)
       .role(Role::Button)
       .aria_label(tooltip)
+      .a11y_disabled(disabled)
       .test_support()
       .relative()
       .flex()
@@ -1462,6 +1470,8 @@ fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Di
   div()
     .id("bulk-archive")
     .debug_selector(|| "bulk-archive".into())
+    .role(Role::Button)
+    .aria_label(label.clone())
     .flex()
     .items_center()
     .justify_center()

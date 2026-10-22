@@ -124,6 +124,16 @@ pub trait ChangesHost: CommitsHost {
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// Splices the comment's suggested change into its file.
   fn apply_agent_suggestion(&self, repo_path: &str, id: &str) -> Result<(), String>;
+  /// Replaces lines `start..=end` of a file in the checkout with a review
+  /// comment's suggestion, refusing when they no longer read `original`.
+  fn apply_suggestion(
+    &self,
+    workspace_path: &str,
+    path: &str,
+    lines: (u32, u32),
+    original: &[String],
+    suggested: &str,
+  ) -> Result<(), String>;
 }
 
 pub type Host = std::sync::Arc<dyn ChangesHost>;
@@ -300,6 +310,27 @@ impl ChangesHost for Backend {
       return Err(unsupported("Applying a review suggestion"));
     }
     crate::commands::agent_review::apply_agent_review_suggestion(repo_path.into(), id.into())
+  }
+
+  fn apply_suggestion(
+    &self,
+    workspace_path: &str,
+    path: &str,
+    (start, end): (u32, u32),
+    original: &[String],
+    suggested: &str,
+  ) -> Result<(), String> {
+    if self.remote_containing(workspace_path).is_some() {
+      return Err(unsupported("Applying a suggestion"));
+    }
+    crate::commands::agent_review::splice_lines(
+      workspace_path,
+      path,
+      start.into(),
+      end.into(),
+      Some(original),
+      suggested,
+    )
   }
 
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String> {

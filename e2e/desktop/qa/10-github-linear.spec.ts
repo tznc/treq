@@ -126,10 +126,9 @@ test("github-linear: pull requests", async ({ page }) => {
     title: "Pull request #418 detail",
     expectations: [
       "Title wraps beside Review changes / Open Workspace / Open in Web",
-      "Checks list with status icons and durations; Treq checks empty state",
+      "Checks list with status icons; finished checks show a duration, the pending typecheck none",
       "Comment box with Comment / Convert to Draft / Close PR",
     ],
-    issue: "The pending typecheck shows a duration of '1682h 23m 2s'",
   });
   await page.getByRole("button", { name: "2/4" }).click();
   await settle(page, 1200);
@@ -191,13 +190,21 @@ test("github-linear: linear without an API key", async ({ page }) => {
   await ready(page);
   await page.getByRole("button", { name: "Linear", exact: true }).click();
   await settle(page, 2000);
+  await expect(page.getByText(/Linear is not connected/)).toBeVisible();
   await capture(page, {
     name: "10-linear-no-key",
     title: "Linear view with no API key",
     expectations: [
-      "Explains that Linear needs an API key and links to Settings",
-      "Centred; no spinner or raw error",
+      "Says Linear is not connected and how to connect it (API key or OAuth)",
+      "An Open Settings button under the message; no spinner",
     ],
-    issue: "Only a red 'Failed to load issues' under the full toolbar; nothing says an API key is missing",
+  });
+  await page.getByRole("button", { name: "Open Settings" }).click();
+  await expect(page.getByRole("tab", { name: "Integrations", selected: true })).toBeVisible();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "10-linear-no-key-settings",
+    title: "Open Settings from the Linear view",
+    expectations: ["Settings opens on the Integrations tab, with the Linear section"],
   });
 });

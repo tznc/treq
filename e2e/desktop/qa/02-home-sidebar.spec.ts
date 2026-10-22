@@ -93,7 +93,6 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
       "Both selected rows are highlighted",
       "Bulk archive button counts the selection ('Archive 2 workspaces')",
     ],
-    issue: "With two rows selected the bar reads 'Archive 1 workspace'",
   });
 
   // Shift+click extends a range across the repo's list.

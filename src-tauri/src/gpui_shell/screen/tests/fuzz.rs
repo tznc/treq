@@ -636,9 +636,7 @@ fn the_changes_tab_survives_random_review() {
         wide: true,
         clicks: CHANGES_CLICKS,
         fields: CHANGES_FIELDS,
-        // Not "discard-all-dialog": Escape does not close it yet
-        // (`escape_closes_the_discard_all_confirmation`).
-        layers: &[],
+        layers: &["discard-all-dialog"],
       };
       let run = fuzz(cx, scenario, &steps);
       let log = run.log.join("\n");

@@ -710,7 +710,7 @@ fn run_submit(
     host,
     ToastTone::Success,
     "Workspace created",
-    format!("Created workspace for branch {branch}"),
+    branch.to_string(),
   );
   Ok(Ok(id))
 }

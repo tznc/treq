@@ -2771,6 +2771,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "file-id"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
+dependencies = [
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4424,7 +4433,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -4465,7 +4474,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4512,7 +4521,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -4835,7 +4844,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -4851,7 +4860,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -7031,7 +7040,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "536bfad37a309d62069485248eeaba1e8d9853aaf951caaeaed0585a95346f08"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7243,6 +7252,19 @@ dependencies = [
  "notify-types",
  "walkdir",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "notify-debouncer-full"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c02b49179cfebc9932238d04d6079912d26de0379328872846118a0fa0dbb302"
+dependencies = [
+ "file-id",
+ "log",
+ "notify",
+ "notify-types",
+ "walkdir",
 ]
 
 [[package]]
@@ -11360,7 +11382,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-gpui"
 version = "0.1.0"
-source = "git+https://github.com/ziinc/tauri-gpui?branch=main#f9cf76bbeb3265b831bb7f4e736b2be66f285030"
+source = "git+https://github.com/ziinc/tauri-gpui?branch=main#470a11f6a65e1ea7346e7bbe5df3ce71b19cca81"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
@@ -12153,6 +12175,8 @@ dependencies = [
  "jj-lib",
  "libc",
  "log",
+ "notify",
+ "notify-debouncer-full",
  "portable-pty",
  "rayon",
  "regex",

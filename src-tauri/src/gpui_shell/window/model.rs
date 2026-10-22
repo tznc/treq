@@ -184,6 +184,25 @@ pub struct Dialogs {
   pub file_picker: bool,
 }
 
+impl Dialogs {
+  /// Whether any dialog or overlay is open, so a shortcut does not open
+  /// another over it.
+  pub fn any_open(&self) -> bool {
+    self.workspace_dialog.is_some()
+      || self.rename.is_some()
+      || self.deletion
+      || self.change_move.is_some()
+      || self.agent_prompt.is_some()
+      || self.prompt_history.is_some()
+      || self.stash
+      || self.palette
+      || self.shortcuts
+      || self.workspace_picker
+      || self.branch_switcher
+      || self.file_picker
+  }
+}
+
 /// `TerminalSessionSummary`, as far as the sidebar reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSummary {
@@ -519,6 +538,20 @@ impl Model {
     }
     self.last_index = Some(index);
     if toggle {
+      // The open workspace's row is highlighted too, so the first Ctrl+click
+      // adds to it rather than starting a selection without it.
+      let shown = !matches!(
+        self.page,
+        Page::Github(_) | Page::Linear | Page::Settings { .. }
+      );
+      if self.multi.is_empty() && shown {
+        if let Some(open) = self
+          .selected
+          .filter(|s| *s != id && rows.iter().any(|w| w.id == *s))
+        {
+          self.multi.insert(open);
+        }
+      }
       if !self.multi.remove(&id) {
         self.multi.insert(id);
       }

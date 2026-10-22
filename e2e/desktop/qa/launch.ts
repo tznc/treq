@@ -121,7 +121,7 @@ appDb
   .run(theme);
 appDb.close();
 
-writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme }));
+writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme, repo }));
 
 const linearPort = Number(process.env.TREQ_E2E_PORT ?? 9333) + 2;
 startFakeLinear(linearPort);

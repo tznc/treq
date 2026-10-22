@@ -8,12 +8,24 @@
 // window (the header row at y=24).
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { dismissPopover, openWorkspace, settle } from "./helpers.ts";
+import { execFileSync } from "node:child_process";
+import { dismissPopover, openWorkspace, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
 const BRANCH = "feat/keyvalues-cache";
 const HEADER_Y = 24;
+
+/** Whether a window besides the repo window shows: the popover's. */
+function popoverShown(): boolean {
+  return (
+    execFileSync("xdotool", ["search", "--onlyvisible", "--name", "."])
+      .toString()
+      .trim()
+      .split("\n")
+      .filter(Boolean).length > 1
+  );
+}
 
 async function popupShot(page: Page, x: number, shot: Parameters<typeof capture>[1]) {
   await page.mouse.click(x, HEADER_Y);
@@ -56,7 +68,6 @@ test("merge: header popovers and menus", async ({ page }) => {
       "Path, branch, base, PR and created time with copy buttons",
       "Long paths truncate in the middle or wrap; popover inside the window",
     ],
-    issue: "Escape does not close the popover; its window-wide backdrop eats the next click",
   });
   await dismissPopover(page);
   await popupShot(page, 1380, {
@@ -64,6 +75,51 @@ test("merge: header popovers and menus", async ({ page }) => {
     title: "Workspace header overflow menu (⋮)",
     expectations: ["Items aligned with icons; destructive ones last and red"],
   });
+});
+
+test("merge: popovers close with Escape and let the next click through", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  // Escape in the repo window closes each popover.
+  const open = {
+    "base-picker": () => page.mouse.click(552, HEADER_Y),
+    checks: () => page.mouse.click(1000, HEADER_Y),
+    details: () => page.getByRole("button", { name: "Details" }).click(),
+  };
+  for (const [what, click] of Object.entries(open)) {
+    await click();
+    await settle(page, 1200);
+    expect(popoverShown(), `${what} popover open`).toBe(true);
+    await page.keyboard.press("Escape");
+    await settle(page, 800);
+    await capture(page, {
+      name: `12-merge-escape-${what}`,
+      title: `After Escape on the ${what} popover`,
+      screen: true,
+      rest: false,
+      expectations: ["The popover is closed; the workspace header shows unchanged"],
+    });
+    expect.soft(popoverShown(), `${what} popover closed by Escape`).toBe(false);
+  }
+  // A click outside the Details popover closes it and still reaches the tab.
+  await page.getByRole("button", { name: "Details" }).click();
+  await settle(page, 1200);
+  expect(popoverShown()).toBe(true);
+  const changes = await page.getByRole("tab", { name: "Changes" }).boundingBox();
+  if (!changes) throw new Error("no Changes tab");
+  await xPointer(page, changes.x + changes.width / 2, changes.y + changes.height / 2, 1);
+  await settle(page, 1500);
+  await capture(page, {
+    name: "12-merge-outside-click",
+    title: "After clicking the Changes tab with Details open",
+    screen: true,
+    rest: false,
+    expectations: [
+      "The Details popover is closed",
+      "The Changes tab is selected and its file list shows",
+    ],
+  });
+  expect.soft(popoverShown()).toBe(false);
+  await expect(page.getByRole("tab", { name: "Changes", selected: true })).toBeVisible();
 });
 
 test("merge: merge preview and strategies", async ({ page }) => {

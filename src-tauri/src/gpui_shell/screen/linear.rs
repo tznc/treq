@@ -17,10 +17,11 @@ use std::{
   time::Duration,
 };
 
+use gpui_kit::base::TestSupportExt as _;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, App, Bounds, ClickEvent, Context, Div, FocusHandle,
-  FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Transformation, Window,
+  FontWeight, Hsla, Pixels, Role, SharedString, Stateful, Task, Transformation, Window,
 };
 
 use super::{
@@ -65,12 +66,13 @@ pub enum IssueMode {
   Kanban,
 }
 
-/// One SWR read: what it returned last, whether it failed, and whether a
-/// read is running.
+/// One SWR read: what it returned last, why it failed, and whether a read
+/// is running.
 #[derive(Debug, Clone)]
 pub struct Fetch<T> {
   pub data: Option<T>,
-  pub failed: bool,
+  /// The last read's error, which says how to connect Linear when it is not.
+  pub error: Option<String>,
   fetching: bool,
 }
 
@@ -78,7 +80,7 @@ impl<T> Default for Fetch<T> {
   fn default() -> Self {
     Self {
       data: None,
-      failed: false,
+      error: None,
       fetching: false,
     }
   }
@@ -90,16 +92,20 @@ impl<T> Fetch<T> {
     self.fetching && self.data.is_none()
   }
 
+  pub fn failed(&self) -> bool {
+    self.error.is_some()
+  }
+
   fn settle(&mut self, result: Result<T, String>, what: &str) {
     self.fetching = false;
     match result {
       Ok(data) => {
         self.data = Some(data);
-        self.failed = false;
+        self.error = None;
       }
       Err(err) => {
         log::warn!("Failed to load Linear {what}: {err}");
-        self.failed = true;
+        self.error = Some(err);
       }
     }
   }
@@ -403,6 +409,16 @@ impl LinearView {
       ScreenAction::Field {
         field: field.into(),
         value,
+      },
+      cx,
+    );
+  }
+
+  /// Settings' Integrations tab, where Linear is connected.
+  fn open_settings(&self, cx: &mut App) {
+    self.send_react(
+      ScreenAction::Press {
+        id: "linear.openSettings".into(),
       },
       cx,
     );
@@ -828,6 +844,7 @@ impl LinearView {
   ) -> impl IntoElement {
     let icon = ui::icon(theme::ICON_REFRESH, 14., p.foreground);
     Button::new(id, p)
+      .aria_label("Refresh")
       .variant(Variant::Ghost)
       .size(Size::Icon)
       .w(zpx(28.))
@@ -1174,9 +1191,13 @@ impl LinearView {
         }),
       );
 
-    let message = |id: &'static str, text: &'static str, color: Hsla| {
+    let message = |id: &'static str, text: SharedString, color: Hsla| {
       ui::text(div(), TextSize::Sm)
+        .id(id)
         .debug_selector(move || id.into())
+        .role(Role::Label)
+        .aria_label(text.clone())
+        .test_support()
         .size_full()
         .flex()
         .flex_col()
@@ -1197,18 +1218,22 @@ impl LinearView {
       .when(loading, |this| {
         this.child(Self::loading("linear-issues-loading", p))
       })
-      .when(fetch.failed, |this| {
-        this.child(message(
-          "linear-issues-error",
-          "Failed to load issues",
-          p.destructive,
-        ))
+      .when_some(fetch.error.clone(), |this, error| {
+        this.child(
+          message("linear-issues-error", error.into(), p.destructive).child(
+            Button::new("linear-open-settings", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Open Settings")
+              .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+          ),
+        )
       });
-    if !loading && !fetch.failed {
+    if !loading && !fetch.failed() {
       content = if shown.is_empty() {
         content.child(message(
           "linear-no-issues",
-          "No issues found",
+          "No issues found".into(),
           p.muted_foreground,
         ))
       } else {
@@ -1587,17 +1612,21 @@ impl LinearView {
       .when(loading, |this| {
         this.child(Self::loading("linear-projects-loading", p))
       })
-      .when(self.projects.failed, |this| {
+      .when_some(self.projects.error.clone(), |this, error| {
         this.child(
           ui::text(div(), TextSize::Sm)
+            .id("linear-projects-error")
             .debug_selector(|| "linear-projects-error".into())
+            .role(Role::Label)
+            .aria_label(error.clone())
+            .test_support()
             .p_4()
             .text_color(p.destructive)
-            .child("Failed to load projects"),
+            .child(error),
         )
       })
       .when(
-        !loading && !self.projects.failed && shown.is_empty(),
+        !loading && !self.projects.failed() && shown.is_empty(),
         |this| {
           this.child(
             ui::text(div(), TextSize::Sm)
@@ -2024,7 +2053,7 @@ impl LinearView {
           p.muted_foreground,
         ))
       })
-      .when(fetch.failed, |this| {
+      .when(fetch.failed(), |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
             .text_color(p.destructive)
@@ -2032,7 +2061,7 @@ impl LinearView {
         )
       })
       .when(
-        !fetch.loading() && !fetch.failed && comments.is_empty(),
+        !fetch.loading() && !fetch.failed() && comments.is_empty(),
         |this| {
           this.child(
             ui::text(div(), TextSize::Sm)

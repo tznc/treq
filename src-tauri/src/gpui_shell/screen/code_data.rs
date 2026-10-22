@@ -55,6 +55,16 @@ impl Agent {
     }
   }
 
+  /// The command-line tool that runs the agent.
+  pub fn binary(self) -> &'static str {
+    match self {
+      Agent::Claude => "claude",
+      Agent::Codex => "codex",
+      Agent::Cursor => "cursor-agent",
+      Agent::Copilot => "copilot",
+    }
+  }
+
   /// Offers "Plan" next to Edit.
   pub fn has_plan_mode(self) -> bool {
     matches!(self, Agent::Claude | Agent::Cursor)

@@ -12,6 +12,8 @@ import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 /** alerting.ts in feat/alerting-logs's Uncommitted list. */
 const SELECTED_ROW = { x: 330, y: 283 };
+/** The Uncommitted header's discard all button, for feat/alerting-logs. */
+const DISCARD_ALL = { x: 453, y: 251 };
 
 test.describe.configure({ mode: "serial" });
 
@@ -78,6 +80,15 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
 test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await openTab(page, "Changes");
+  await settle(page, 1500);
+  await capture(page, {
+    name: "05-changes-diff-top",
+    title: "Changes tab: the diff list scrolled to the top",
+    expectations: [
+      "A gap between the first file card and the top of the diff section",
+      "Diff code reads the same size as the 13px UI text beside it",
+    ],
+  });
   await page.mouse.click(326, 383); // client.ts under Committed
   await settle(page, 1500);
   await capture(page, {
@@ -89,7 +100,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
       "A resolved GitHub review thread is folded on its line",
     ],
   });
-  await commentOnLine(page, 348, "Prefer a typed guard over typeof here", "05-changes-comment-input");
+  await commentOnLine(page, 364, "Prefer a typed guard over typeof here", "05-changes-comment-input");
   await settle(page, 800);
   await capture(page, {
     name: "05-changes-comment-added",
@@ -101,7 +112,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
   });
   // Clicking a comment's body edits it.
   await page.getByTestId(/^comment-/).first().click().catch(async () => {
-    await page.mouse.click(800, 400);
+    await page.mouse.click(800, 416);
   });
   await settle(page, 800);
   const edit = page.getByRole("button", { name: "Save" });
@@ -113,7 +124,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
     });
     await page.getByRole("button", { name: "Cancel" }).first().click();
   }
-  await page.mouse.click(571, 474); // unfold the resolved GitHub thread
+  await page.mouse.click(571, 490); // unfold the resolved GitHub thread
   await settle(page, 800);
   await capture(page, {
     name: "05-changes-github-thread",
@@ -202,4 +213,29 @@ test("changes: selected file row keeps its actions", async ({ page }) => {
       "Status letter and action icons readable on the blue selection",
     ],
   });
+});
+
+test("changes: Escape closes the discard all confirmation", async ({ page }) => {
+  await openWorkspace(page, "feat/alerting-logs");
+  await openTab(page, "Changes");
+  await page.mouse.click(DISCARD_ALL.x, DISCARD_ALL.y); // Uncommitted's discard all
+  const confirm = page.getByRole("button", { name: "Discard all changes", exact: true });
+  await expect(confirm).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-discard-all-open",
+    title: "Discard all changes? confirmation",
+    expectations: ["Dialog centred over a dimmed window with Cancel and Discard all changes"],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-discard-all-escaped",
+    title: "After Escape on the confirmation",
+    expectations: [
+      "Dialog closed; the Changes tab shows again",
+      "alerting.ts and levels.ts still listed under Uncommitted",
+    ],
+  });
+  await expect(confirm).toHaveCount(0);
 });
