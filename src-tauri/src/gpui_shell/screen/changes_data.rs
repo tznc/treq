@@ -10,7 +10,7 @@ use regex::Regex;
 use super::commits_data::CommitsHost;
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole, ConflictRegionView, ConflictStyle},
-  core::{self, WorkspaceFileHunksBatch},
+  core::{self, generated::GeneratedFiles, WorkspaceFileHunksBatch},
   github::GhReviewThread,
   gpui_shell::{native::Backend, remote_repo::unsupported},
   jj::{JjDiffHunk, JjFileChange, JjRevisionDiff},
@@ -70,6 +70,8 @@ pub trait ChangesHost: CommitsHost {
     start: usize,
     end: usize,
   ) -> Result<Vec<String>, String>;
+  /// The workspace's `linguist-generated` rules (`.gitattributes`).
+  fn generated_files(&self, repo_path: &str, workspace_id: Option<i64>) -> GeneratedFiles;
   fn discard_file(&self, workspace_path: &str, path: &str) -> Result<(), String>;
   /// `create_commit`: the whole working copy, pushed if the repository
   /// auto-pushes.
@@ -189,6 +191,16 @@ impl ChangesHost for Backend {
         core::get_file_lines(repo_path, workspace_id, path, false, start, end).map(|l| l.lines)
       }
     }
+  }
+
+  fn generated_files(&self, repo_path: &str, workspace_id: Option<i64>) -> GeneratedFiles {
+    // A remote workspace's files are not on this machine.
+    if self.remote_containing(repo_path).is_some() {
+      return GeneratedFiles::default();
+    }
+    core::changes::resolve_workspace_dir(repo_path, workspace_id)
+      .map(|dir| GeneratedFiles::read(&dir))
+      .unwrap_or_default()
   }
 
   fn discard_file(&self, workspace_path: &str, path: &str) -> Result<(), String> {
@@ -427,6 +439,8 @@ pub struct Snapshot {
   pub committed_hunks: HashMap<String, FileHunks>,
   /// `liveConflictedFiles`, once read; `None` keeps the status's list.
   pub conflicted: Option<Vec<String>>,
+  /// Listed paths that are generated, their diffs behind "Load diff".
+  pub generated: HashSet<String>,
 }
 
 impl Snapshot {
@@ -466,7 +480,21 @@ impl Snapshot {
       committed,
       committed_hunks,
       conflicted: Some(conflicted),
+      generated: HashSet::new(),
     }
+  }
+
+  /// Marks the listed paths `rules` call generated.
+  pub fn with_generated(mut self, rules: &GeneratedFiles) -> Self {
+    self.generated = self
+      .files
+      .iter()
+      .map(|f| &f.path)
+      .chain(self.committed.iter().map(|f| &f.path))
+      .filter(|path| rules.is_generated(path))
+      .cloned()
+      .collect();
+    self
   }
 
   pub fn from_home(files: &[JjFileChange]) -> Self {
@@ -769,6 +797,8 @@ pub enum Body {
   Loading,
   Error,
   Empty,
+  /// A generated file whose diff waits behind "Load diff".
+  Generated,
   /// Changed lines past [`LARGE_FILE_LINES`].
   Large(usize),
   Hunks,
@@ -783,6 +813,9 @@ pub struct BodyInput<'a> {
   pub collapsed: bool,
   pub comment_activity: bool,
   pub expanded_large: bool,
+  pub generated: bool,
+  /// "Load diff" was clicked on the generated file.
+  pub loaded_generated: bool,
 }
 
 /// Whether the file card is shut: comments keep it open; binary files and
@@ -800,6 +833,9 @@ pub fn body(input: &BodyInput) -> Body {
   }
   if input.status == "D" {
     return Body::Deleted;
+  }
+  if input.generated && !input.loaded_generated {
+    return Body::Generated;
   }
   let Some(data) = input.data.filter(|d| !d.loading) else {
     return Body::Loading;
@@ -1149,6 +1185,8 @@ mod tests {
       collapsed: false,
       comment_activity: false,
       expanded_large: false,
+      generated: false,
+      loaded_generated: false,
     };
     assert_eq!(body(&input("a.png", Some(&loaded))), Body::Collapsed);
     assert_eq!(body(&input("a.rs", None)), Body::Loading);
@@ -1163,6 +1201,50 @@ mod tests {
       ..input("a.rs", Some(&loaded))
     };
     assert_eq!(body(&deleted), Body::Deleted);
+  }
+
+  #[test]
+  fn body_waits_for_load_diff_on_a_generated_file() {
+    let generated = BodyInput {
+      path: "Cargo.lock",
+      status: "M",
+      renamed: false,
+      data: None,
+      collapsed: false,
+      comment_activity: false,
+      expanded_large: false,
+      generated: true,
+      loaded_generated: false,
+    };
+    assert_eq!(body(&generated), Body::Generated);
+    let loaded = BodyInput {
+      loaded_generated: true,
+      ..generated
+    };
+    assert_eq!(body(&loaded), Body::Loading);
+  }
+
+  #[test]
+  fn snapshot_marks_generated_files_and_committed_files() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+    };
+    let snapshot = Snapshot {
+      files: ChangedFile::parse(&[change("Cargo.lock"), change("src/a.rs")]),
+      committed: vec![change("web/package-lock.json"), change("gen/api.ts")],
+      ..Snapshot::default()
+    }
+    .with_generated(&GeneratedFiles::parse("gen/** linguist-generated\n"));
+    let mut generated: Vec<&str> = snapshot.generated.iter().map(String::as_str).collect();
+    generated.sort();
+    assert_eq!(
+      generated,
+      ["Cargo.lock", "gen/api.ts", "web/package-lock.json"]
+    );
   }
 
   #[test]

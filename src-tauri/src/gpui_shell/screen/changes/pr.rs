@@ -10,6 +10,7 @@ use gpui::{AnyElement, Task};
 
 use super::*;
 use crate::{
+  core::generated::GeneratedFiles,
   github::GhReviewThread,
   gpui_shell::screen::{
     changes_review::{LineComment, Pending},
@@ -199,10 +200,13 @@ impl ChangesView {
             .collect();
           let listed: HashSet<String> = parsed.files.iter().map(|f| f.path.clone()).collect();
           view.viewed.retain(|p, _| listed.contains(p));
-          view.snapshot = Some(Snapshot {
-            files: parsed.files,
-            ..Snapshot::default()
-          });
+          view.snapshot = Some(
+            Snapshot {
+              files: parsed.files,
+              ..Snapshot::default()
+            }
+            .with_generated(&GeneratedFiles::default()),
+          );
           if let Some(pr) = view.pr.as_mut() {
             pr.error = None;
             pr.read = true;

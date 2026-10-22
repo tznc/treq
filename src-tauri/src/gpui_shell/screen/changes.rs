@@ -128,6 +128,8 @@ pub struct ChangesView {
   committed_collapsed: bool,
   pub(super) collapsed_files: HashSet<String>,
   pub(super) expanded_large: HashSet<String>,
+  /// Generated files whose diff "Load diff" read.
+  pub(super) loaded_generated: HashSet<String>,
   pub(super) changeset_expanded: bool,
   /// Files marked viewed, with the diff's hash then.
   pub(super) viewed: HashMap<String, String>,
@@ -220,6 +222,7 @@ impl ChangesView {
       committed_collapsed: false,
       collapsed_files: HashSet::new(),
       expanded_large: HashSet::new(),
+      loaded_generated: HashSet::new(),
       changeset_expanded: false,
       viewed: HashMap::new(),
       context: HashMap::new(),
@@ -278,6 +281,7 @@ impl ChangesView {
       self.active = None;
       self.collapsed_files.clear();
       self.expanded_large.clear();
+      self.loaded_generated.clear();
       self.changeset_expanded = false;
       self.viewed.clear();
       self.context.clear();
@@ -417,13 +421,17 @@ impl ChangesView {
     self.loading = true;
     let show = self.show_committed();
     self.run(
-      move |host, parent| match parent.workspace_id() {
-        Some(id) => host
-          .workspace_diff(&parent.repo_path, id)
-          .map(|diff| Snapshot::from_workspace_diff(diff, show)),
-        None => host
-          .changed_files(&parent.repo_path, None)
-          .map(|files| Snapshot::from_home(&files)),
+      move |host, parent| {
+        let snapshot = match parent.workspace_id() {
+          Some(id) => host
+            .workspace_diff(&parent.repo_path, id)
+            .map(|diff| Snapshot::from_workspace_diff(diff, show)),
+          None => host
+            .changed_files(&parent.repo_path, None)
+            .map(|files| Snapshot::from_home(&files)),
+        };
+        let rules = host.generated_files(&parent.repo_path, parent.workspace_id());
+        snapshot.map(|s| s.with_generated(&rules))
       },
       |view, result, cx| {
         view.loading = false;
@@ -464,10 +472,41 @@ impl ChangesView {
       .collect();
     self.field("changes.files", files.into(), cx);
     self.staging.retain(&snapshot.files);
-    let paths: Vec<String> = snapshot.files.iter().map(|f| f.path.clone()).collect();
+    // Generated files are read only once "Load diff" asks.
+    let paths: Vec<String> = snapshot
+      .files
+      .iter()
+      .map(|f| f.path.clone())
+      .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
+      .collect();
     self.snapshot = Some(snapshot);
     self.load_hunks(paths, cx);
     self.unmark_stale(cx);
+  }
+
+  /// "Load diff" on a generated file: its diff, read now if it is the
+  /// working copy's.
+  fn load_generated(&mut self, path: &str, cx: &mut Context<Self>) {
+    self.loaded_generated.insert(path.to_string());
+    let working = self.files().iter().any(|f| f.path == path);
+    if working && self.pr.is_none() && !self.hunks.contains_key(path) {
+      self.hunks.insert(
+        path.to_string(),
+        FileHunks {
+          loading: true,
+          ..FileHunks::default()
+        },
+      );
+      self.load_batches(self.generation, vec![vec![path.to_string()]], cx);
+    }
+    cx.notify();
+  }
+
+  pub(super) fn is_generated(&self, path: &str) -> bool {
+    self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| s.generated.contains(path))
   }
 
   /// `loadAllFileHunks`: the first files, then the rest in batches, each
@@ -2475,6 +2514,28 @@ impl ChangesView {
             "No diff hunks available"
           }),
       ),
+      Body::Generated => {
+        let file = path.to_string();
+        card.child(
+          div()
+            .debug_selector(|| "generated-file-placeholder".into())
+            .py_6()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .text_color(muted)
+            .child("Generated file. Its diff is not shown by default.")
+            .child(
+              Button::new(SharedString::from(format!("load-generated-{path}")), p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .label("Load diff")
+                .on_click(cx.listener(move |view, _, _, cx| view.load_generated(&file, cx))),
+            ),
+        )
+      }
       Body::Large(n) => {
         let file = path.clone();
         card.child(

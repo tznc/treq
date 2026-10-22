@@ -13,7 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { appBinary } from "../env.ts";
 import { gitIn, makeFixture, startApp, writeBin } from "../harness.ts";
-import { ALERTING, seedLandingRepo, workspaceDir } from "../landing/seed.ts";
+import { ALERTING, seedLandingRepo, STACK_PARENT, workspaceDir } from "../landing/seed.ts";
 import { startFakeLinear } from "./fake-linear.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -85,6 +85,22 @@ writeFileSync(join(alerting, "packages/api/src/levels.ts"), 'export const LEVELS
 for (const branch of ["fix/slack-retry", "docs/ingest-runbook", "chore/bump-deps"]) {
   gitIn(repo, home, "branch", branch, "main");
 }
+
+// Uncommitted generated files in the stack's base for the Changes tab's
+// "Load diff" placeholders: a lockfile (a known generated path) and a file
+// `.gitattributes` marks `linguist-generated`, next to a hand-written edit.
+const ingest = workspaceDir(repo, STACK_PARENT);
+writeFileSync(join(ingest, ".gitattributes"), "packages/api/src/generated/** linguist-generated\n");
+writeFileSync(
+  join(ingest, "package-lock.json"),
+  `${JSON.stringify({ name: "event-bus", lockfileVersion: 3, packages: { "": { name: "event-bus" } } }, null, 2)}\n`,
+);
+mkdirSync(join(ingest, "packages/api/src/generated"), { recursive: true });
+writeFileSync(
+  join(ingest, "packages/api/src/generated/schema.ts"),
+  '// Generated from schema.json. Do not edit.\nexport const EVENT_FIELDS = ["event_message", "provider", "payload"] as const;\n',
+);
+writeFileSync(join(ingest, "packages/api/src/retry.ts"), "export const MAX_RETRIES = 3;\n");
 
 // A supporting repository: the sidebar's second repo.
 const docs = join(fixture.root, "docs-site");

@@ -49,10 +49,11 @@ struct FakeHost {
   /// Deferred file diffs `commit_file_diff` loads.
   file_diffs: Vec<crate::jj::JjFileDiff>,
   description: String,
-  /// What the Changes tab reads.
+  /// What the Changes tab reads, and the repository's `.gitattributes`.
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  gitattributes: String,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
   /// The pull request's review threads and the review agent's comments.
@@ -678,6 +679,10 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<Vec<String>, String> {
     self.record(format!("read lines {path} {start}..{end}"));
     Ok((start..=end).map(|n| format!("line {n}")).collect())
+  }
+
+  fn generated_files(&self, _: &str, _: Option<i64>) -> crate::core::generated::GeneratedFiles {
+    crate::core::generated::GeneratedFiles::parse(&self.gitattributes)
   }
 
   fn discard_file(&self, _: &str, path: &str) -> Result<(), String> {
@@ -4086,6 +4091,57 @@ fn changes_tab_lists_files_and_their_diffs(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
+}
+
+fn changes_host_with_generated() -> FakeHost {
+  let mut host = changes_host();
+  host.gitattributes = "gen/** linguist-generated\n".into();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false},
+      {"path": "Cargo.lock", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false},
+      {"path": "gen/api.ts", "status": "A", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1,2 +1,3 @@", "lines": [" a", "+b", "+c"], "patch": ""}]},
+      {"path": "Cargo.lock", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-x", "+y"], "patch": ""}]},
+      {"path": "gen/api.ts", "hunks": [{"id": "h", "header": "@@ -0,0 +1,1 @@", "lines": ["+z"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+fn changes_tab_waits_to_read_generated_diffs(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host_with_generated(), changes_route());
+  assert!(h.drawn("file-card-Cargo.lock"));
+  assert!(h.drawn("load-generated-Cargo.lock"));
+  assert!(h.drawn("load-generated-gen/api.ts"));
+  assert!(!h.drawn("load-generated-a.rs"));
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .collect();
+  assert_eq!(reads, vec!["read hunks [\"a.rs\"]".to_string()]);
+}
+
+#[gpui::test]
+fn changes_tab_loads_a_generated_diff_on_request(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host_with_generated(), changes_route());
+  h.click("load-generated-Cargo.lock");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"read hunks [\"Cargo.lock\"]".to_string()));
+  assert!(
+    !h.drawn("load-generated-Cargo.lock"),
+    "the diff shows instead"
+  );
+  assert!(h.drawn("load-generated-gen/api.ts"));
 }
 
 #[gpui::test]
