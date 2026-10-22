@@ -19,6 +19,7 @@ use std::{
 };
 
 use futures::StreamExt as _;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Escape, Input, InputEvent, InputState},
   Sizable,
@@ -68,7 +69,6 @@ const BLINK: Duration = Duration::from_millis(600);
 const SCROLLBAR: f32 = 8.;
 /// `pt-1` above the grid.
 const TOP_PAD: f32 = 4.;
-const TERMINAL_BG: u32 = terminal_emu::BACKGROUND;
 /// Maximize/restore needs both Cmd and Ctrl: Super and Ctrl off macOS.
 const MAXIMIZE_KEYS: &str = if cfg!(target_os = "macos") {
   "⌘ + Ctrl + J"
@@ -1197,7 +1197,8 @@ impl TerminalView {
   }
 
   fn grid(&self, focused: bool) -> Div {
-    let Some(((w, h), frame)) = self.cell.zip(self.with_emulator(|e| e.frame())) else {
+    let scheme = terminal_emu::scheme(self.dark);
+    let Some(((w, h), frame)) = self.cell.zip(self.with_emulator(|e| e.frame(scheme))) else {
       return div();
     };
     let (font_size, advance) = (px(self.font_size), self.advance);
@@ -1210,12 +1211,12 @@ impl TerminalView {
       if focused {
         base
           .w(zpx(1.))
-          .when(self.cursor_on, |d| d.bg(rgb(terminal_emu::FOREGROUND)))
+          .when(self.cursor_on, |d| d.bg(rgb(scheme.foreground)))
       } else {
         base
           .w(zpx(w))
           .border_1()
-          .border_color(rgb(terminal_emu::FOREGROUND))
+          .border_color(rgb(scheme.foreground))
       }
     });
     let lines = frame.lines;
@@ -1391,7 +1392,7 @@ impl TerminalView {
           .flex()
           .items_center()
           .justify_center()
-          .bg(rgb(TERMINAL_BG))
+          .bg(rgb(terminal_emu::scheme(self.dark).background))
           .child(
             ui::text(div(), TextSize::Sm)
               .max_w_full()
@@ -1476,7 +1477,7 @@ impl Render for TerminalView {
       .relative()
       .size_full()
       .overflow_hidden()
-      .bg(rgb(TERMINAL_BG))
+      .bg(rgb(terminal_emu::scheme(self.dark).background))
       .cursor_text()
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
@@ -1784,7 +1785,7 @@ impl TerminalPane {
 
   /// Whether the pane covers the tab (maximized and open).
   pub fn covers(&self) -> bool {
-    self.maximized && !self.collapsed
+    self.maximized && !self.collapsed && !self.columns.is_empty()
   }
 
   pub fn set_place(&mut self, place: Place, cx: &mut Context<Self>) {
@@ -2492,7 +2493,7 @@ impl TerminalPane {
     }
     let column_id = column.id.clone();
     let hovered = self.hovered_asset.as_ref().map(|a| a.id.clone());
-    let bg = rgb(TERMINAL_BG);
+    let bg = rgb(terminal_emu::scheme(self.dark).background);
     let thumbs = assets.into_iter().map(|asset| {
       let id = asset.id.clone();
       let shown = hovered.as_deref() == Some(id.as_str());
@@ -2698,10 +2699,12 @@ impl TerminalPane {
   fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
     let fg = p.foreground;
     let accent = p.accent;
-    let button = |id: &'static str, icon: &'static str| {
+    let button = |id: &'static str, icon: &'static str, name: &'static str| {
       div()
         .id(id)
         .debug_selector(move || id.into())
+        .role(gpui::Role::Button)
+        .aria_label(name)
         .size_5()
         .flex()
         .items_center()
@@ -2719,7 +2722,7 @@ impl TerminalPane {
     };
     let mut buttons: Vec<gpui::AnyElement> = Vec::new();
     if self.collapsed {
-      let b = button("terminal-expand", theme::ICON_CHEVRON_UP).on_click(cx.listener(
+      let b = button("terminal-expand", theme::ICON_CHEVRON_UP, "Expand").on_click(cx.listener(
         |pane, _, _, cx| {
           pane.collapsed = false;
           cx.notify();
@@ -2728,7 +2731,13 @@ impl TerminalPane {
       buttons.push(
         self
           .tooltips
-          .wrap("terminal-expand", Side::Top, tip("Expand", "⌘ + J"), b, cx)
+          .wrap(
+            "terminal-expand",
+            Side::Top,
+            tip("Expand", "⌘ + J"),
+            b.test_support(),
+            cx,
+          )
           .into_any_element(),
       );
     } else {
@@ -2771,7 +2780,7 @@ impl TerminalPane {
         );
       }
       if self.maximized {
-        let b = button("terminal-restore", theme::ICON_MINIMIZE)
+        let b = button("terminal-restore", theme::ICON_MINIMIZE, "Restore")
           .on_click(cx.listener(|pane, _, _, cx| pane.toggle_maximize(cx)));
         buttons.push(
           self
@@ -2780,13 +2789,13 @@ impl TerminalPane {
               "terminal-restore",
               Side::Top,
               tip("Restore", MAXIMIZE_KEYS),
-              b,
+              b.test_support(),
               cx,
             )
             .into_any_element(),
         );
       } else if !self.columns.is_empty() {
-        let b = button("terminal-maximize", theme::ICON_MAXIMIZE)
+        let b = button("terminal-maximize", theme::ICON_MAXIMIZE, "Maximize")
           .on_click(cx.listener(|pane, _, _, cx| pane.toggle_maximize(cx)));
         buttons.push(
           self
@@ -2795,19 +2804,19 @@ impl TerminalPane {
               "terminal-maximize",
               Side::Top,
               tip("Maximize", MAXIMIZE_KEYS),
-              b,
+              b.test_support(),
               cx,
             )
             .into_any_element(),
         );
       }
-      let b = button("terminal-collapse", theme::ICON_CHEVRON_DOWN).on_click(cx.listener(
-        |pane, _, _, cx| {
+      let b = button("terminal-collapse", theme::ICON_CHEVRON_DOWN, "Collapse").on_click(
+        cx.listener(|pane, _, _, cx| {
           pane.collapsed = true;
           pane.maximized = false;
           cx.notify();
-        },
-      ));
+        }),
+      );
       buttons.push(
         self
           .tooltips
@@ -2815,7 +2824,7 @@ impl TerminalPane {
             "terminal-collapse",
             Side::Top,
             tip("Collapse", "⌘ + J"),
-            b,
+            b.test_support(),
             cx,
           )
           .into_any_element(),
@@ -2846,9 +2855,9 @@ impl TerminalPane {
     let column = &self.columns[index];
     let active = self.active.as_deref() == Some(column.id.as_str());
     let id = column.id.clone();
-    // Agent headers, and a shell's while selected, sit on a dark fill, so
-    // their text and badge go light to stay readable.
-    let on_dark = active || !matches!(column.kind, Kind::Shell { .. });
+    // Agent headers, and in the dark theme a shell's while selected, sit on
+    // a dark fill, so their text and badge go light to stay readable.
+    let on_dark = !matches!(column.kind, Kind::Shell { .. }) || (active && self.dark);
     let (title_fg, icon_fg): (gpui::Hsla, gpui::Hsla) = if on_dark {
       (rgb(0xe5e7eb).into(), rgb(0xe5e7eb).into())
     } else {
@@ -2965,7 +2974,7 @@ impl TerminalPane {
         );
         base
           .bg(if active {
-            p.primary.opacity(0.4)
+            gpui::Hsla::from(rgb(terminal_emu::DARK.background)).blend(p.primary.opacity(0.4))
           } else {
             rgb(0x374151).into()
           })
@@ -3195,7 +3204,7 @@ impl TerminalPane {
           .min_h_0()
           .border_r_1()
           .border_color(p.border)
-          .bg(rgb(TERMINAL_BG))
+          .bg(rgb(terminal_emu::scheme(self.dark).background))
           .on_drop(move |drag: &SendAssetDrag, _, cx| {
             on_asset.update(cx, |view, cx| view.insert(&shell_quote(&drag.path), cx));
           })
@@ -3460,6 +3469,10 @@ impl Render for TerminalPane {
     self.sync_lightbox(cx);
     self.load_environment(cx);
     let p = theme::palette(self.dark);
+    // Without terminals the pane, chip included, takes no room.
+    if self.columns.is_empty() {
+      return div().into_any_element();
+    }
     if self.collapsed {
       return div()
         .debug_selector(|| "workspace-terminal-pane".into())
@@ -3523,7 +3536,7 @@ impl Render for TerminalPane {
       .flex()
       .flex_col()
       .flex_shrink_0()
-      .when(maximized, |d| d.size_full())
+      .when(maximized, |d| d.flex_1().min_h_0())
       .when(!maximized, |d| match view_height {
         Some(view) => d.h(zpx(
           view * self.height.min(HEIGHT_MAX) / 100. + DIVIDER_HEIGHT,
@@ -3621,7 +3634,7 @@ impl Render for TerminalPane {
               .flex()
               .overflow_x_scroll()
               .track_scroll(&self.row_scroll)
-              .bg(rgb(TERMINAL_BG))
+              .bg(rgb(terminal_emu::scheme(self.dark).background))
               .child(
                 gpui::canvas(move |b, _, _| row_bounds.set(Some(b)), |_, _, _, _| {})
                   .absolute()

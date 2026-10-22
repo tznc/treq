@@ -1917,8 +1917,8 @@ impl Render for WorkspaceView {
     });
     let body = match (code, self.sync_terminal(cx)) {
       // The tab with the terminal pane below: a share of the whole view,
-      // header and tabs included, which a maximized pane covers, as React
-      // lays it out.
+      // header and tabs included. A maximized pane covers the tabs and
+      // keeps the header.
       (code, Some(pane)) => {
         pane.update(cx, |pane, cx| pane.set_dark(self.dark, cx));
         let covered = pane.read(cx).covers();
@@ -1943,7 +1943,10 @@ impl Render for WorkspaceView {
             .left_0()
             .size_full(),
           )
-          .when(!covered, |this| {
+          .map(|this| {
+            if covered {
+              return this.child(header);
+            }
             this.child(
               div()
                 .flex_1()
