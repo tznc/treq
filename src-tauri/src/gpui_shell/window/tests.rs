@@ -491,7 +491,9 @@ fn shows_onboarding_without_a_repository(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_folder_that_is_not_a_repository_shows_onboarding_and_an_error(cx: &mut TestAppContext) {
+fn a_folder_that_is_not_a_repository_shows_onboarding_and_offers_to_open_it(
+  cx: &mut TestAppContext,
+) {
   let host = Arc::new(FakeHost {
     not_a_repo: true,
     ..FakeHost::default()
@@ -501,7 +503,8 @@ fn a_folder_that_is_not_a_repository_shows_onboarding_and_an_error(cx: &mut Test
     window.last().screen.unwrap().view,
     View::Onboarding(_)
   ));
-  assert_eq!(toasts(&host), ["toast Not a Git Repository"]);
+  // Opening it asks to initialize one, and remembers it once opened.
+  assert_eq!(host.count("open /plain"), 1);
   assert!(host
     .calls()
     .contains(&"save last_opened_repo_path=".to_string()));

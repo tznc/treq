@@ -170,6 +170,13 @@ pub fn is_repository(path: &str) -> bool {
   Path::new(path).join(".git").exists() || jj::is_jj_workspace(path)
 }
 
+/// Makes `path` a Git repository, as `git init` does.
+pub fn init_git_repository(path: &str) -> Result<(), String> {
+  gix::init(path)
+    .map(drop)
+    .map_err(|e| format!("Failed to initialize a Git repository: {e}"))
+}
+
 /// Initializes a repository for use with Treq.
 ///
 /// Sets up both the local database (per-repo) and ensures JJ is initialized.

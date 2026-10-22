@@ -308,6 +308,18 @@ impl WindowHost for Backend {
   }
 
   fn open_in_new_window(&self, path: &str) {
+    if !core::is_repository(path)
+      && WindowHost::ask(
+        self,
+        "Not a Git Repository",
+        &format!("{path} is not a Git repository. Initialize one here?"),
+      )
+    {
+      if let Err(err) = core::init_git_repository(path) {
+        self.toast(ToastTone::Error, "Failed to open repository", &err);
+        return;
+      }
+    }
     if !core::init(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,
