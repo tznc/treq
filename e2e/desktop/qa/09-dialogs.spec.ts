@@ -45,7 +45,7 @@ async function dialogIn(
   }
 }
 
-const heading = (p: Page) => p.getByRole("heading", { name: "Stack a new Workspace" });
+const heading = (p: Page) => p.getByRole("heading", { name: "New Workspaces" });
 
 test("dialogs: create workspace", async ({ page, context }) => {
   await home(page);
@@ -54,18 +54,17 @@ test("dialogs: create workspace", async ({ page, context }) => {
   await settle(page, 800);
   await capture(page, {
     name: "09-create-workspace-dialog",
-    title: "Create workspace dialog (Ctrl+N) from home",
+    title: "New Workspaces dialog (Ctrl+N) from home",
     screen: true,
     rest: false,
     expectations: [
-      "Heading and description match the action (create, not stack)",
-      "Title field focused; Cancel and Create Workspace at the bottom right",
+      "'Workspaces' textarea focused; Stack on reads the default branch",
+      "Cancel and a disabled Create Workspaces at the bottom right",
       "Backdrop dims the window evenly",
     ],
-    issue: "Heading reads 'Stack a new Workspace' for a plain create; Description has focus, not Title",
   });
-  // Opening Advanced (its symlink suggestions are a wide row of chips)
-  // only makes the dialog taller: the centred heading keeps its place.
+  // Opening Advanced only makes the left column taller: the heading keeps
+  // its place.
   {
     const before = await heading(dialog).boundingBox();
     await dialog.getByRole("button", { name: "Advanced" }).click();
@@ -73,25 +72,28 @@ test("dialogs: create workspace", async ({ page, context }) => {
     expect((await heading(dialog).boundingBox())?.x).toBe(before?.x);
     await capture(page, {
       name: "09-create-workspace-advanced",
-      title: "Create workspace: Advanced section open",
+      title: "New Workspaces: Advanced section open",
       screen: true,
       rest: false,
       expectations: [
-        "Dialog keeps the width it had with Advanced closed; the symlink chips wrap",
-        "Dialog grows or scrolls without clipping its buttons",
+        "Sparse paths and Symlink textareas side by side under Stack on",
+        "Dialog keeps its size without clipping its buttons",
       ],
     });
   }
-  await dialog.getByLabel("Title").fill(SCRATCH_TITLE);
-  await settle(page, 1200); // the branch check is debounced
+  await dialog.getByLabel("Workspaces", { exact: true }).fill(SCRATCH_TITLE);
+  await settle(page, 1200); // the line check is debounced
+  await dialog.getByRole("status").click();
+  await settle(page, 500);
   await capture(page, {
     name: "09-create-workspace-title",
-    title: "Create workspace: branch named from the title",
+    title: "New Workspaces: branch named from the title",
     screen: true,
     rest: false,
-    expectations: ["Branch Name filled from the title (prefix/qa-scratch-space)"],
+    expectations: ["The popover lists prefix/qa-scratch-space as a new branch"],
   });
-  await dialog.getByRole("button", { name: "Create Workspace" }).click();
+  await dialog.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Create 1 Workspace" }).click();
   await expect(heading(dialog)).toHaveCount(0, { timeout: 30_000 });
   await settle(page, 1500);
   await capture(page, {
@@ -183,37 +185,14 @@ test("dialogs: stack workspace", async ({ page, context }) => {
   await settle(page, 1200);
   await capture(page, {
     name: "09-stack-dialog",
-    title: "Stack a new workspace on feat/keyvalues-cache",
+    title: "Stack on feat/keyvalues-cache opens New Workspaces",
     screen: true,
     rest: false,
     expectations: [
-      "'Stacking On' names the parent; Before/After segments",
-      "Commits to move listed with checkboxes, Select all / Clear",
+      "'Stack on' reads feat/keyvalues-cache",
       "Buttons aligned at the bottom right",
     ],
-    issue: "The row's 'Stack' tooltip stays up over the dialog backdrop; no field has focus",
   });
-  // The Before segment and the "Move to existing workspace instead"
-  // checkbox are not observable: their places in this dialog.
-  await page.mouse.click(488, 289);
-  await settle(page, 600);
-  await capture(page, {
-    name: "09-stack-dialog-before",
-    title: "Stack dialog: Before selected",
-    screen: true,
-    rest: false,
-    expectations: ["The segment shows the new choice; the stack preview reorders"],
-  });
-  await page.mouse.click(411, 488);
-  await settle(page, 800);
-  await capture(page, {
-    name: "09-stack-dialog-move-existing",
-    title: "Stack dialog: move to an existing workspace",
-    screen: true,
-    rest: false,
-    expectations: ["Target Workspace picker replaces Title / Branch Name"],
-  });
-  await page.mouse.click(411, 488);
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(heading(dialog)).toHaveCount(0);
 
@@ -223,10 +202,10 @@ test("dialogs: stack workspace", async ({ page, context }) => {
   await settle(page, 1000);
   await capture(page, {
     name: "09-stack-dialog-shortcut",
-    title: "Stack dialog from Ctrl+Shift+N",
+    title: "New Workspaces from Ctrl+Shift+N",
     screen: true,
     rest: false,
-    expectations: ["Same dialog, stacking on the open workspace"],
+    expectations: ["Same dialog, 'Stack on' reads the open workspace"],
   });
   await again.getByRole("button", { name: "Cancel" }).click();
 });
