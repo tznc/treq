@@ -100,7 +100,7 @@ test("commits: large commit defers its diff", async ({ page }) => {
   await openWorkspace(page, "feat/alerting-logs");
   await openTab(page, "Commits");
   await settle(page, 1500);
-  // #388 is merged: View PR shows, Create PR doesn't.
+  // #388 is merged: its button reads Merged, Create PR doesn't show.
   await expect(page.getByRole("button", { name: "View PR" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create PR" })).toHaveCount(0);
   await capture(page, {
@@ -109,7 +109,7 @@ test("commits: large commit defers its diff", async ({ page }) => {
     expectations: [
       "Working copy row (uncommitted, amber) above two commits; newest +642",
       "No conflict card",
-      "Header shows the merged 'View PR' and no 'Create PR'",
+      "Header's PR button reads 'Merged' in purple with the merge icon; no 'Create PR'",
     ],
   });
   // The working copy row, at the top of the list. Its fold state outlives

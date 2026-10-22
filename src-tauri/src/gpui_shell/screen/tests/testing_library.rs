@@ -381,3 +381,23 @@ fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
     expect(screen.get_by_role(by::role(Role::ComboBox).name(name))).to_be_visible();
   }
 }
+
+#[gpui::test]
+fn the_view_pr_button_reads_the_pull_requests_status(cx: &mut TestAppContext) {
+  for (state, draft, label) in [
+    ("OPEN", true, "Draft"),
+    ("OPEN", false, "Open"),
+    ("CLOSED", false, "Closed"),
+    ("MERGED", false, "Merged"),
+  ] {
+    let mut host = feature_host();
+    if let Some(Some(pr)) = host.pr.pr.as_mut() {
+      pr.state = state.into();
+      pr.is_draft = draft;
+    }
+    let (mut h, _) = workspace_harness(cx, host, workspace_route());
+    let screen = screen(&mut h);
+    let name = format!("View PR (#42, {})", label.to_lowercase());
+    screen.get_by_role(by::role(Role::Button).name(name.as_str()));
+  }
+}
