@@ -5545,6 +5545,52 @@ fn header_buttons_open_their_popovers_in_the_modal_window(cx: &mut TestAppContex
   }
 }
 
+#[gpui::test]
+fn opening_details_hides_its_tooltip(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::PopupRequest;
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  let at = h
+    .cx
+    .debug_bounds("workspace-details")
+    .expect("details")
+    .center();
+  h.cx.simulate_mouse_move(at, None, Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  assert!(h
+    .popups
+    .borrow()
+    .iter()
+    .any(|p| matches!(p, PopupRequest::ShowTooltip { .. })));
+  h.click("workspace-details");
+  // Hovering again while the popover shows keeps the tooltip hidden.
+  h.cx.simulate_mouse_move(
+    at + gpui::point(gpui::px(1.), gpui::px(0.)),
+    None,
+    Modifiers::none(),
+  );
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let popups = h.popups.borrow();
+  let last_tooltip = popups.iter().rev().find(|p| {
+    matches!(
+      p,
+      PopupRequest::ShowTooltip { .. } | PopupRequest::HideTooltip
+    )
+  });
+  assert!(
+    matches!(last_tooltip, Some(PopupRequest::HideTooltip)),
+    "{popups:?}"
+  );
+  assert!(popups
+    .iter()
+    .any(|p| matches!(p, PopupRequest::ShowPopover { .. })));
+}
+
 fn send_assets() -> serde_json::Value {
   let pty = agent_pty();
   serde_json::json!([

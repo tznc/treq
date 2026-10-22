@@ -572,6 +572,12 @@ impl WorkspaceView {
       return;
     };
     self.close_popover(cx);
+    // The button's tooltip would cover the popover and swallow the next
+    // click; `hover_tooltip` keeps it hidden while the popover shows.
+    if self.tooltip.take().is_some() {
+      self.sync_tooltip_popup(cx);
+      cx.notify();
+    }
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
     let shell = self.window;
     let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
@@ -703,6 +709,9 @@ impl WorkspaceView {
         self.tooltip = None;
         cx.notify();
       }
+      return;
+    }
+    if self.popover.is_some() {
       return;
     }
     self.tooltip = Some((key.clone(), false));
