@@ -23,8 +23,8 @@ use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context,
-  Div, Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful,
-  Subscription, Window,
+  Div, Entity, FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful, Subscription,
+  Window,
 };
 
 use super::{
@@ -41,7 +41,7 @@ use crate::{
   gpui_shell::{
     native::{self, NativeEvent, ToastAction, ToastTone},
     popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     time,
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
@@ -1383,7 +1383,7 @@ pub(super) fn dialog_panel(
     .flex()
     .items_center()
     .justify_center()
-    .bg(gpui::black().opacity(0.4))
+    .bg(p.scrim())
     .occlude();
   let panel = div()
     .debug_selector(move || id.into())
@@ -1401,7 +1401,6 @@ pub(super) fn dialog_panel(
 
 pub(super) fn dialog_title(title: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(title)
 }
@@ -1410,37 +1409,6 @@ pub(super) fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> 
   ui::text(div(), TextSize::Sm)
     .text_color(p.muted_foreground)
     .child(text.into())
-}
-
-/// A pill badge (`px-1.5 py-0.5 rounded-full border font-medium`).
-fn badge(text: &'static str, fg: Hsla, bg: Hsla, border: Hsla) -> Div {
-  div()
-    .px_1p5()
-    .py_0p5()
-    .rounded_full()
-    .bg(bg)
-    .text_color(fg)
-    .border_1()
-    .border_color(border)
-    .font_weight(FontWeight::MEDIUM)
-    .child(text)
-}
-
-/// A `DropdownMenuItem`.
-fn menu_item(id: impl Into<SharedString>, label: &'static str, p: &Palette) -> Stateful<Div> {
-  let id: SharedString = id.into();
-  let selector = id.to_string();
-  let hover = p.menu_accent;
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || selector)
-    .px_2()
-    .py_1p5()
-    .rounded(radius::MD)
-    .whitespace_nowrap()
-    .cursor_pointer()
-    .hover(move |s| s.bg(hover))
-    .child(label)
 }
 
 impl Render for CommitsView {
@@ -1626,23 +1594,16 @@ impl CommitsView {
     let first = matches!(kind, Kind::Own { first: true }) || tentative;
     let expanded = self.expanded.contains(&commit.commit_id);
     let dot = if tentative {
-      tw::color(tw::YELLOW_500)
+      ui::Tone::Warning.color(p)
     } else if first {
       p.primary
     } else {
       p.muted_foreground
     };
-    let (yellow, yellow_hover) = if self.dark {
-      (
-        tw::color(tw::YELLOW_950).opacity(0.2),
-        tw::color(tw::YELLOW_950).opacity(0.3),
-      )
-    } else {
-      (
-        tw::color(tw::YELLOW_50).opacity(0.8),
-        tw::color(tw::YELLOW_100).opacity(0.8),
-      )
-    };
+    let (yellow, yellow_hover) = (
+      ui::Tone::Warning.tint(p),
+      ui::Tone::Warning.color(p).opacity(0.25),
+    );
     let ts = commit.timestamp.clone();
     let time = self.tips.wrap(
       format!("commits-time-{}", commit.commit_id),
@@ -1757,20 +1718,17 @@ impl CommitsView {
               .pl_5()
               .when(commit.has_conflicts, |this| {
                 this.child(
-                  badge(
-                    "Conflict",
-                    p.destructive,
-                    p.destructive.opacity(0.1),
-                    p.destructive.opacity(0.3),
-                  )
-                  .debug_selector({
-                    let id = format!("commit-conflict-badge-{}", commit.change_id);
-                    move || id
-                  }),
+                  div()
+                    .flex_none()
+                    .debug_selector({
+                      let id = format!("commit-conflict-badge-{}", commit.change_id);
+                      move || id
+                    })
+                    .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
                 )
               })
               .when(commit.is_immutable, |this| {
-                this.child(badge("Immutable", p.muted_foreground, p.muted, p.border))
+                this.child(ui::Badge::new("Immutable", p))
               })
               .child(time)
               .children(edit_timestamp)
@@ -1781,13 +1739,13 @@ impl CommitsView {
                     .flex()
                     .child(
                       div()
-                        .text_color(tw::color(tw::GREEN_600))
+                        .text_color(ui::Tone::GitOpen.text(p))
                         .child(format!("+{}", commit.insertions)),
                     )
                     .child("\u{a0}")
                     .child(
                       div()
-                        .text_color(tw::color(tw::RED_600))
+                        .text_color(ui::Tone::GitClosed.text(p))
                         .child(format!("-{}", commit.deletions)),
                     ),
                 )
@@ -1894,11 +1852,11 @@ impl CommitsView {
           .shadow_md()
           .occlude()
           .child(
-            menu_item("move-commit-new", "Move to New Workspace", p)
+            ui::MenuItem::new("move-commit-new", "Move to New Workspace", p)
               .on_click(cx.listener(move |view, _, _, cx| view.move_commit(&to_new, false, cx))),
           )
           .child(
-            menu_item("move-commit-existing", "Move to Existing Workspace", p).on_click(
+            ui::MenuItem::new("move-commit-existing", "Move to Existing Workspace", p).on_click(
               cx.listener(move |view, _, _, cx| view.move_commit(&to_existing, true, cx)),
             ),
           )
@@ -2201,15 +2159,9 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let (fg, bg) = match file.status.as_str() {
-      "A" => (
-        tw::color(tw::GREEN_600),
-        tw::color(tw::GREEN_500).opacity(0.1),
-      ),
-      "M" => (
-        tw::color(tw::BLUE_600),
-        tw::color(tw::BLUE_500).opacity(0.1),
-      ),
-      "D" => (tw::color(tw::RED_600), tw::color(tw::RED_500).opacity(0.1)),
+      "A" => (ui::Tone::GitOpen.text(p), ui::Tone::GitOpen.tint(p)),
+      "M" => (ui::Tone::Primary.text(p), ui::Tone::Primary.tint(p)),
+      "D" => (ui::Tone::GitClosed.text(p), ui::Tone::GitClosed.tint(p)),
       _ => (p.foreground, gpui::transparent_black()),
     };
     let hover = p.muted.opacity(0.4);
@@ -2279,7 +2231,7 @@ impl CommitsView {
       .font_family(theme::SANS_FONT)
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_comment(cx);
         } else if k.key == "enter"
@@ -2339,7 +2291,7 @@ impl CommitsView {
     let viewport = window.viewport_size();
     let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
       let k = &e.keystroke;
-      if k.key == "escape" {
+      if ui::is_escape(k) {
         cx.stop_propagation();
         view.close_dialog(cx);
       } else if k.key == "enter"

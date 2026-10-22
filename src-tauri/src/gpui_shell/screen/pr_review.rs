@@ -41,7 +41,7 @@ use crate::{
   gpui_shell::{
     native::{NativeEvent, ToastTone},
     popup::{self, PopupSink, Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
@@ -503,7 +503,7 @@ impl PrReviewView {
             )
           })),
       )
-      .child(ui::icon(theme::ICON_PR, 16., tw::color(tw::EMERALD_500)).flex_none())
+      .child(ui::icon(theme::ICON_PR, 16., ui::Tone::Success.color(p)).flex_none())
       .child(
         div()
           .min_w_0()
@@ -629,8 +629,7 @@ impl PrReviewView {
           .child(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
           .child(div().truncate().flex_1().child(name))
           .child(
-            div()
-              .text_size(zpx(10.))
+            ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(file.status.clone()),
           )
@@ -738,7 +737,7 @@ impl PrReviewView {
         cx.notify();
       }))
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
-        if e.keystroke.key == "escape" {
+        if ui::is_escape(&e.keystroke) {
           cx.stop_propagation();
           view.finish_open = false;
           cx.notify();

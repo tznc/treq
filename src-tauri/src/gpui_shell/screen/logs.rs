@@ -35,7 +35,7 @@ use crate::{
   },
   gpui_shell::{
     popup::{native_entries, NativeMenuItem, PopupRequest, PopupSink},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     ui::{self, Button, Size, TextSize, Variant},
   },
 };
@@ -664,10 +664,10 @@ fn capitalize(text: &str) -> String {
     .join(" ")
 }
 
-fn severity_color(severity: &str, dark: bool, p: &Palette) -> Hsla {
+fn severity_color(severity: &str, p: &Palette) -> Hsla {
   match severity {
-    "ERROR" => tw::color(if dark { tw::RED_400 } else { tw::RED_600 }),
-    "WARN" => tw::color(if dark { tw::AMBER_400 } else { tw::AMBER_600 }),
+    "ERROR" => ui::Tone::Danger.text(p),
+    "WARN" => ui::Tone::Warning.text(p),
     _ => p.foreground,
   }
 }
@@ -951,15 +951,10 @@ impl LogsView {
       .child(self.search_box(p))
   }
 
-  fn loading(&self, text: &'static str, p: &Palette) -> Div {
-    ui::text(div(), TextSize::Xs)
-      .flex()
-      .items_center()
-      .gap_2()
+  fn pending(&self, text: &'static str, p: &Palette) -> Div {
+    div()
       .p_3()
-      .text_color(p.muted_foreground)
-      .child(ui::spinner("logs-loading", 16., p.muted_foreground))
-      .child(text)
+      .child(ui::Loading::new("logs-loading", p).label(text))
   }
 
   fn empty_message(&self) -> &'static str {
@@ -1119,8 +1114,8 @@ impl LogsView {
     let spec = feed_spec(self.source);
     let query = self.find.query.trim().to_string();
     let mark = gpui::HighlightStyle {
-      background_color: Some(tw::color(tw::YELLOW_300)),
-      color: Some(gpui::black()),
+      background_color: Some(ui::Tone::Warning.color(&p)),
+      color: Some(theme::palette(false).foreground),
       ..Default::default()
     };
     range
@@ -1170,11 +1165,7 @@ impl LogsView {
           )
           .children(spec.columns.iter().map(|c| {
             let color = match c {
-              Column::Job | Column::Role => tw::color(if self.dark {
-                tw::BLUE_400
-              } else {
-                tw::BLUE_600
-              }),
+              Column::Job | Column::Role => ui::Tone::Primary.text(&p),
               Column::Run | Column::Source => p.muted_foreground,
             };
             cell(Some(c.width()))
@@ -1183,7 +1174,7 @@ impl LogsView {
           }))
           .child(
             cell(Some(LEVEL_WIDTH))
-              .text_color(severity_color(&record.severity_text, self.dark, &p))
+              .text_color(severity_color(&record.severity_text, &p))
               .child(record.severity_text.clone()),
           )
           .child(cell(None).child(body))
@@ -1246,25 +1237,14 @@ impl LogsView {
     let input = self.find.input.clone().filter(|_| self.find.open)?;
     let total = self.matches.len();
     let shown = if total == 0 { 0 } else { self.find.current + 1 };
-    let (muted, fg, accent) = (p.muted_foreground, p.foreground, p.accent);
+    let muted = p.muted_foreground;
     let empty = total == 0;
-    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
-      div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .size_5()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(radius::SM)
-        .when(disabled, |this| this.opacity(0.5))
-        .when(!disabled, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.bg(accent).text_color(fg))
-        })
-        .child(ui::icon(icon, 16., muted))
-    };
+    let find_button =
+      |id: &'static str, icon: &'static str, label: &'static str, disabled: bool| {
+        ui::IconButton::new(id, icon, label, p)
+          .size(ui::IconButtonSize::Small)
+          .disabled(disabled)
+      };
     Some(
       div()
         .id("logs-find")
@@ -1306,17 +1286,29 @@ impl LogsView {
             .child(format!("{shown} of {total}")),
         )
         .child(
-          icon_button("logs-find-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
+          find_button(
+            "logs-find-prev",
+            theme::ICON_CHEVRON_UP,
+            "Previous match",
+            empty,
+          )
+          .when(!empty, |this| {
             this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
           }),
         )
         .child(
-          icon_button("logs-find-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
+          find_button(
+            "logs-find-next",
+            theme::ICON_CHEVRON_DOWN,
+            "Next match",
+            empty,
+          )
+          .when(!empty, |this| {
             this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
           }),
         )
         .child(
-          icon_button("logs-find-close", theme::ICON_X, false).on_click(cx.listener(
+          find_button("logs-find-close", theme::ICON_X, "Close find", false).on_click(cx.listener(
             |view, _, _, cx| {
               view.find.open = false;
               cx.notify();
@@ -1333,9 +1325,9 @@ impl LogsView {
       return None;
     }
     let colors = [
-      tw::color(tw::BLUE_400),
-      tw::color(tw::AMBER_500),
-      tw::color(tw::RED_500),
+      ui::Tone::Primary.color(p),
+      ui::Tone::Warning.color(p),
+      ui::Tone::Danger.color(p),
     ];
     let max = data
       .counts
@@ -1362,11 +1354,10 @@ impl LogsView {
       .justify_center()
       .gap_3()
       .children(SERIES.iter().zip(colors).map(|((_, label), color)| {
-        div()
+        ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
           .gap_1()
-          .text_size(zpx(10.))
           .text_color(p.muted_foreground)
           .child(div().size(zpx(8.)).rounded(radius::SM).bg(color))
           .child(*label)
@@ -1427,11 +1418,10 @@ impl LogsView {
       .h(zpx(plot_height))
       .children(ticks.iter().map(|t| {
         let y = plot_height - plot_height * (*t as f32 / top as f32);
-        div()
+        ui::text(div(), TextSize::Xs)
           .absolute()
           .right_0()
           .top(zpx(y - 7.))
-          .text_size(zpx(10.))
           .text_color(p.muted_foreground)
           .child(t.to_string())
       }));
@@ -1442,12 +1432,11 @@ impl LogsView {
       .right(zpx(16.))
       .flex()
       .children(data.labels.iter().enumerate().map(|(i, label)| {
-        div()
+        ui::text(div(), TextSize::Xs)
           .flex_1()
           .flex()
           .justify_center()
           .overflow_hidden()
-          .text_size(zpx(10.))
           .text_color(p.muted_foreground)
           .when(i % every == 0, |this| this.child(label.clone()))
       }));
@@ -1521,10 +1510,10 @@ impl LogsView {
           .debug_selector(|| "sql-editor".into())
           .font_family(theme::MONO_FONT)
           .children(self.explorer.input.as_ref().map(|input| {
-            Textarea::new(input)
-              .font_family(theme::MONO_FONT)
-              .text_size(zpx(11.5))
-              .line_height(zpx(18.))
+            ui::text(
+              Textarea::new(input).font_family(theme::MONO_FONT),
+              TextSize::Code,
+            )
           })),
       )
       .child(
@@ -1579,13 +1568,13 @@ impl LogsView {
           .gap_2()
           .rounded(radius::MD)
           .border_1()
-          .border_color(tw::color(if self.dark { tw::RED_900 } else { tw::RED_200 }))
-          .bg(tw::color(if self.dark { tw::RED_950 } else { tw::RED_50 }))
-          .text_color(tw::color(if self.dark { tw::RED_300 } else { tw::RED_700 }))
+          .border_color(ui::Tone::Danger.border(p))
+          .bg(ui::Tone::Danger.tint(p))
+          .text_color(ui::Tone::Danger.text(p))
           .child(ui::icon(
             theme::ICON_TRIANGLE_ALERT,
             16.,
-            tw::color(if self.dark { tw::RED_300 } else { tw::RED_700 }),
+            ui::Tone::Danger.text(p),
           ))
           .child(div().font_family(theme::MONO_FONT).child(error.clone())),
       );
@@ -1850,7 +1839,7 @@ impl Render for LogsView {
         _ => "Loading logs…",
       };
       let feed = if self.records.is_none() {
-        self.loading(loading, &p)
+        self.pending(loading, &p)
       } else {
         self.feed(shown, &p, cx)
       };

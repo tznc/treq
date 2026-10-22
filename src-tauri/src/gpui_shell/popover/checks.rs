@@ -17,8 +17,8 @@ use super::{data::ChecksData, Popover};
 use crate::{
   github::{PrCheckEntry, PrCiStatus},
   gpui_shell::{
-    theme::{self, tw, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    theme::{self, Palette},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
 };
 
@@ -87,13 +87,13 @@ pub fn check_duration(secs: u64) -> String {
 }
 
 /// `ciStatusStyle(state).textClassName`: `text-x-700 dark:text-x-400`.
-fn ci_color(state: &str, dark: bool) -> Hsla {
-  let (dark_hex, light_hex) = match state {
-    "success" => (0x4ade80, 0x15803d),
-    "failure" => (theme::tw::RED_400, theme::tw::RED_700),
-    _ => (0xfacc15, 0xa16207),
-  };
-  tw::color(if dark { dark_hex } else { light_hex })
+fn ci_color(state: &str, p: &Palette) -> Hsla {
+  match state {
+    "success" => Tone::Success,
+    "failure" => Tone::Danger,
+    _ => Tone::Warning,
+  }
+  .text(p)
 }
 
 /// `ChecksStatusIcon`: one icon per run or summary status.
@@ -105,10 +105,10 @@ fn status_icon(
 ) -> AnyElement {
   match status {
     Some("passed") => {
-      ui::icon(theme::ICON_CIRCLE_CHECK, size, tw::color(tw::GREEN_500)).into_any_element()
+      ui::icon(theme::ICON_CIRCLE_CHECK, size, Tone::Success.color(p)).into_any_element()
     }
     Some("failed") => {
-      ui::icon(theme::ICON_CIRCLE_X, size, tw::color(tw::RED_500)).into_any_element()
+      ui::icon(theme::ICON_CIRCLE_X, size, Tone::Danger.color(p)).into_any_element()
     }
     Some("running" | "pending") => ui::spinner(id, size, p.muted_foreground).into_any_element(),
     _ => ui::icon(theme::ICON_CIRCLE_DOT, size, p.muted_foreground).into_any_element(),
@@ -144,7 +144,7 @@ impl Popover {
     let super::Content::Checks(state) = &self.content else {
       return div().into_any_element();
     };
-    let (p, dark) = (*p, self.dark);
+    let p = *p;
     let input = state.input.clone();
     let data = &input.data;
     let (summary, ..) = data.rollup(&input.running);
@@ -249,8 +249,8 @@ impl Popover {
             )
         }));
 
-      let amber = tw::color(if dark { tw::AMBER_200 } else { tw::AMBER_800 });
-      let amber_border = tw::color(if dark { tw::AMBER_800 } else { tw::AMBER_300 });
+      let amber = Tone::Warning.text(&p);
+      let amber_border = Tone::Warning.border(&p);
       let any_running = summary == "running";
       let mut actions = div().flex().items_center().gap_2().px_2().pt_2();
       if !data.trusted {
@@ -317,12 +317,12 @@ impl Popover {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Div {
-    let (p, dark) = (*p, self.dark);
+    let p = *p;
     let mut checks: Vec<&PrCheckEntry> = ci.checks.iter().collect();
     checks.sort_by_key(|c| severity(c));
     let rows = checks.into_iter().enumerate().map(|(i, check)| {
       let state = ci_state(&check.bucket);
-      let color = ci_color(state, dark);
+      let color = ci_color(state, &p);
       let icon = if state == "pending" {
         ui::spinner(SharedString::from(format!("ci-spin-{i}")), 16., color).into_any_element()
       } else {

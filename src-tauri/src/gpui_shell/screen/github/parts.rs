@@ -4,22 +4,17 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, rgb, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
+  self, div, prelude::*, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
 };
 
 use super::super::github_data::{self as data, CiState};
 use crate::{
   github::{GhLabel, GhPullRequest, PrCheckEntry},
   gpui_shell::{
-    theme::{self, tw, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    theme::{self, Palette},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
 };
-
-/// Tailwind purple-500, behind the Merged chip.
-const PURPLE_500: u32 = 0xa855f7;
-/// Tailwind yellow-700, a running check.
-const YELLOW_700: u32 = 0xa16207;
 
 /// A click handler for a part.
 pub type OnClick = Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>;
@@ -40,21 +35,21 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
     (
       theme::ICON_CIRCLE_DOT,
       "Open",
-      tw::color(tw::GREEN_500).opacity(0.2),
+      Tone::GitOpen.tint(p),
       p.pr_open,
     )
   } else if s == "MERGED" {
     (
       theme::ICON_MERGE,
       "Merged",
-      tw::color(PURPLE_500).opacity(0.2),
+      Tone::GitMerged.tint(p),
       p.pr_merged,
     )
   } else {
     (
       theme::ICON_CIRCLE_ALERT,
       "Closed",
-      tw::color(tw::RED_500).opacity(0.2),
+      Tone::GitClosed.tint(p),
       p.pr_closed,
     )
   };
@@ -75,8 +70,8 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
 /// A label's `#rrggbb` (or bare `rrggbb`) color.
 fn hex(color: &str) -> Hsla {
   u32::from_str_radix(color.trim_start_matches('#'), 16)
-    .map(|v| rgb(v).into())
-    .unwrap_or_else(|_| gpui::black())
+    .map(theme::data_color)
+    .unwrap_or_else(|_| theme::data_color(0))
 }
 
 /// `LabelChip`: the label's color at 20% behind, 40% around.
@@ -110,18 +105,9 @@ pub fn labels(labels: &[GhLabel]) -> Option<Div> {
 /// `ciStatusStyle(state).textClassName`, and its icon.
 pub fn ci_style(state: CiState, p: &Palette) -> (&'static str, Hsla) {
   match state {
-    CiState::Success => (
-      theme::ICON_CIRCLE_CHECK,
-      tw::color(if p.dark { tw::GREEN_400 } else { tw::GREEN_700 }),
-    ),
-    CiState::Failure => (
-      theme::ICON_CIRCLE_X,
-      tw::color(if p.dark { tw::RED_400 } else { tw::RED_700 }),
-    ),
-    CiState::Pending => (
-      theme::ICON_SPINNER,
-      tw::color(if p.dark { tw::YELLOW_400 } else { YELLOW_700 }),
-    ),
+    CiState::Success => (theme::ICON_CIRCLE_CHECK, Tone::Success.text(p)),
+    CiState::Failure => (theme::ICON_CIRCLE_X, Tone::Danger.text(p)),
+    CiState::Pending => (theme::ICON_SPINNER, Tone::Warning.text(p)),
   }
 }
 
@@ -202,25 +188,6 @@ pub fn section_heading(
     .child(label.to_uppercase())
 }
 
-/// `EmptyState`.
-pub fn empty_state(icon: &'static str, message: &str, p: &Palette) -> Div {
-  div()
-    .flex()
-    .flex_col()
-    .items_center()
-    .justify_center()
-    .py_12()
-    .px_6()
-    .gap_2()
-    .text_center()
-    .child(ui::icon(icon, 24., p.muted_foreground))
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .text_color(p.muted_foreground)
-        .child(message.to_string()),
-    )
-}
-
 /// `ErrorState`: the gh message, so auth or network trouble shows.
 pub fn error_state(
   id: &str,
@@ -258,16 +225,6 @@ pub fn error_state(
         .label("Try again")
         .on_click(retry)
     }))
-}
-
-/// A centered `Loader2` (`w-5 h-5`).
-pub fn loading(id: &'static str, p: &Palette) -> Div {
-  div()
-    .flex()
-    .items_center()
-    .justify_center()
-    .py_12()
-    .child(ui::spinner(id, 20., p.muted_foreground))
 }
 
 /// `LoadMoreButton`.
@@ -347,24 +304,6 @@ pub fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
     .text_color(p.popover_foreground)
     .shadow_md()
     .occlude()
-}
-
-/// A plain `DropdownMenuItem`.
-pub fn menu_item(
-  id: impl Into<SharedString>,
-  label: &str,
-  p: &Palette,
-  on_click: OnClick,
-) -> Stateful<Div> {
-  let accent = p.menu_accent;
-  ui::text(named(div(), id), TextSize::Sm)
-    .px_2()
-    .py_1p5()
-    .rounded(radius::SM)
-    .cursor_pointer()
-    .hover(move |s| s.bg(accent))
-    .on_click(on_click)
-    .child(label.to_string())
 }
 
 /// A list row's title and number.

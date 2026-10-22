@@ -25,9 +25,9 @@ use crate::{
       github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab, SETUP_KEY},
       workspace_modal::{dialog_description, dialog_header, dialog_panel},
     },
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     time,
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, EscapeExt as _, Size, TextSize, Tone, Variant},
   },
   local_db::Workspace,
 };
@@ -329,11 +329,9 @@ impl GithubView {
   }
 
   fn title(title: &str) -> Div {
-    div()
+    ui::text(div(), TextSize::Xl)
       .flex_1()
       .min_w_0()
-      .text_size(zpx(20.))
-      .line_height(zpx(28.))
       .font_weight(FontWeight::SEMIBOLD)
       .child(title.to_string())
   }
@@ -633,20 +631,20 @@ impl GithubView {
                   view.close_popover(Popover::CloseIssue, cx)
                 })
                 .children(CLOSE_REASONS.iter().map(|&(reason, label)| {
-                  parts::menu_item(
+                  ui::MenuItem::new(
                     format!("github-close-{}", reason.replace(' ', "-")),
                     label,
                     p,
-                    Box::new(cx.listener(move |view, _, _, cx| {
-                      view.popover = None;
-                      view.change_issue(
-                        Busy::Close,
-                        "Failed to close issue",
-                        IssueChange::Close(reason.into()),
-                        cx,
-                      )
-                    })),
                   )
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    view.popover = None;
+                    view.change_issue(
+                      Busy::Close,
+                      "Failed to close issue",
+                      IssueChange::Close(reason.into()),
+                      cx,
+                    )
+                  }))
                 })),
             )
             .with_priority(1),
@@ -822,11 +820,7 @@ impl GithubView {
             panel
               .id("github-delete-panel")
               .track_focus(self.dialog_focus())
-              .on_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-                if e.keystroke.key == "escape" {
-                  cancel(view, cx);
-                }
-              }))
+              .on_escape(cx.listener(move |view, _, _, cx| cancel(view, cx)))
               .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
           ),
       ),
@@ -1055,31 +1049,12 @@ impl GithubView {
   /// `CiStatusButton`: the passed/total pill and its checks popover.
   fn ci_button(&self, ci: &PrCiStatus, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let state = CiState::parse(&ci.state);
-    let (border, text) = match state {
-      CiState::Success => (
-        if p.dark { tw::GREEN_500 } else { tw::GREEN_600 },
-        if p.dark { tw::GREEN_400 } else { tw::GREEN_700 },
-      ),
-      CiState::Failure => (
-        if p.dark { tw::RED_500 } else { tw::RED_600 },
-        if p.dark { tw::RED_400 } else { tw::RED_700 },
-      ),
-      CiState::Pending => (
-        if p.dark {
-          tw::YELLOW_500
-        } else {
-          tw::YELLOW_600
-        },
-        if p.dark { tw::YELLOW_400 } else { 0xa16207 },
-      ),
+    let tone = match state {
+      CiState::Success => Tone::Success,
+      CiState::Failure => Tone::Danger,
+      CiState::Pending => Tone::Warning,
     };
-    let (border, text) = (tw::color(border), tw::color(text));
-    let hover = tw::color(match state {
-      CiState::Success => tw::GREEN_600,
-      CiState::Failure => tw::RED_600,
-      CiState::Pending => tw::YELLOW_600,
-    })
-    .opacity(0.1);
+    let (border, text, hover) = (tone.color(p), tone.text(p), tone.tint(p));
     let summary = format!(
       "{}: {}/{} checks passed",
       state.label(),
@@ -1267,11 +1242,11 @@ impl GithubView {
       .gap_3()
       .p_4();
     if !checks.workflows.is_empty() && !checks.trusted {
-      let (border, bg, fg) = if p.dark {
-        (0x78350f, tw::color(0x451a03), tw::color(tw::AMBER_200))
-      } else {
-        (tw::AMBER_200, tw::color(0xfffbeb), tw::color(tw::AMBER_800))
-      };
+      let (border, bg, fg) = (
+        Tone::Warning.border(p),
+        Tone::Warning.tint(p),
+        Tone::Warning.text(p),
+      );
       panel = panel.child(
         ui::text(div(), TextSize::Sm)
           .flex()
@@ -1279,7 +1254,7 @@ impl GithubView {
           .justify_between()
           .rounded(radius::MD)
           .border_1()
-          .border_color(tw::color(border))
+          .border_color(border)
           .bg(bg)
           .px_4()
           .py_3()
@@ -1723,10 +1698,10 @@ fn status_icon(
 ) -> gpui::AnyElement {
   match status {
     Some("passed") => {
-      ui::icon(theme::ICON_CIRCLE_CHECK, size, tw::color(tw::GREEN_500)).into_any_element()
+      ui::icon(theme::ICON_CIRCLE_CHECK, size, Tone::Success.color(p)).into_any_element()
     }
     Some("failed") => {
-      ui::icon(theme::ICON_CIRCLE_X, size, tw::color(tw::RED_500)).into_any_element()
+      ui::icon(theme::ICON_CIRCLE_X, size, Tone::Danger.color(p)).into_any_element()
     }
     Some("running" | "pending") => {
       ui::spinner(gpui::ElementId::Name(id.into()), size, p.muted_foreground).into_any_element()

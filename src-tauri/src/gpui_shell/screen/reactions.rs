@@ -8,9 +8,9 @@ use crate::{
   github::GhReactionGroup,
   gpui_shell::{
     popup::{Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
-    ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Variant},
+    ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Tone, Variant},
   },
 };
 
@@ -134,7 +134,7 @@ fn chip<V: Reacts>(
   p: &Palette,
   cx: &mut Context<V>,
 ) -> Button {
-  let sky = tw::color(tw::SKY_500);
+  let sky = Tone::Primary.color(p);
   let mine = group.viewer_has_reacted;
   let (comment, content) = (id.to_string(), static_content(&group.content));
   Button::new(
@@ -173,7 +173,7 @@ fn picker<V: Reacts>(
   p: &Palette,
   cx: &mut Context<V>,
 ) -> impl IntoElement {
-  let sky = tw::color(tw::SKY_500);
+  let sky = Tone::Primary.color(p);
   deferred(
     div()
       .id(SharedString::from(format!("reaction-picker-{id}")))

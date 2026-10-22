@@ -41,7 +41,7 @@ use crate::{
   gpui_shell::{
     native::{NativeEvent, ToastTone},
     popup::{self, NativeMenuItem, PopupRequest, PopupSink},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     time,
     ui::{self, Button, Size, TextSize, Variant},
   },
@@ -90,7 +90,7 @@ impl<T> Default for Fetch<T> {
 
 impl<T> Fetch<T> {
   /// SWR's `isLoading`: reading, with nothing read yet.
-  pub fn loading(&self) -> bool {
+  pub fn is_loading(&self) -> bool {
     self.fetching && self.data.is_none()
   }
 
@@ -711,19 +711,6 @@ enum Action {
   Apply,
 }
 
-/// `text-xs font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground`.
-fn badge(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Xs)
-    .font_weight(FontWeight::MEDIUM)
-    .px_1p5()
-    .py_0p5()
-    .rounded_full()
-    .bg(p.muted)
-    .text_color(p.muted_foreground)
-    .whitespace_nowrap()
-    .child(text.into())
-}
-
 /// An issue's identifier, state, priority, project and assignee.
 fn issue_meta(identifier: impl IntoElement, issue: &LinearIssue, p: &Palette) -> Div {
   div()
@@ -738,13 +725,13 @@ fn issue_meta(identifier: impl IntoElement, issue: &LinearIssue, p: &Palette) ->
         .text_color(p.primary)
         .child(identifier),
     )
-    .child(badge(issue.state.name.clone(), p))
+    .child(ui::Badge::new(issue.state.name.clone(), p))
     .when(
       !issue.priority_label.is_empty() && issue.priority != 0,
-      |this| this.child(badge(issue.priority_label.clone(), p)),
+      |this| this.child(ui::Badge::new(issue.priority_label.clone(), p)),
     )
     .when_some(issue.project.as_ref(), |this, project| {
-      this.child(badge(project.name.clone(), p))
+      this.child(ui::Badge::new(project.name.clone(), p))
     })
     .when_some(issue.assignee.as_ref(), |this, assignee| {
       this.child(
@@ -785,53 +772,23 @@ pub(super) fn capitalize(text: &str) -> String {
     .join(" ")
 }
 
-/// `TabsList`/`TabsTrigger` (horizontal) at `text-base` or `text-sm`.
-fn tabs<V: Copy + PartialEq + 'static>(
+/// A tab strip of `items` (value, id suffix, label), each tab's id `{prefix}-{suffix}`.
+fn tab_strip<V: Copy + PartialEq + 'static>(
   prefix: &'static str,
   items: Vec<(V, &'static str, &'static str)>,
   active: V,
   p: &Palette,
   on_pick: impl Fn(&V, &mut Window, &mut App) + 'static,
-) -> Div {
-  let on_pick = Rc::new(on_pick);
-  let (fg, hover) = (p.foreground, p.background.opacity(0.5));
-  div()
-    .flex()
-    .gap_1()
-    .bg(p.muted)
-    .p_1()
-    .rounded(radius::MD)
-    .children(items.into_iter().map(|(value, key, label)| {
-      let id = format!("{prefix}-{key}");
-      let selector = id.clone();
-      let on = active == value;
-      let on_pick = on_pick.clone();
-      ui::text(div(), TextSize::Sm)
-        .id(SharedString::from(id))
-        .debug_selector(move || selector)
-        .px_3()
-        .py_1()
-        .rounded(radius::MD)
-        .font_weight(FontWeight::MEDIUM)
-        .cursor_pointer()
-        .when(on, |this| this.bg(p.background).text_color(fg).shadow_sm())
-        .when(!on, |this| {
-          this
-            .text_color(p.muted_foreground)
-            .hover(move |s| s.bg(hover).text_color(fg))
-        })
-        .on_click(move |_, window, cx| on_pick(&value, window, cx))
-        .child(label)
-    }))
-}
-
-fn violet(alpha: f32) -> Hsla {
-  tw::color(tw::VIOLET_500).opacity(alpha)
-}
-
-/// `text-violet-600 dark:text-violet-400`.
-fn violet_text(dark: bool) -> Hsla {
-  tw::color(if dark { tw::VIOLET_400 } else { tw::VIOLET_600 })
+) -> ui::Tabs {
+  let values: Vec<V> = items.iter().map(|(value, ..)| *value).collect();
+  ui::Tabs::new(format!("{prefix}s"), p)
+    .tabs(
+      items
+        .into_iter()
+        .map(|(_, key, label)| ui::Tab::new(format!("{prefix}-{key}"), label)),
+    )
+    .selected(values.iter().position(|v| *v == active).unwrap_or(0))
+    .on_select(move |ix, window, cx| on_pick(&values[ix], window, cx))
 }
 
 /// A Lucide chevron turned a quarter (`rotate-90`) while open.
@@ -906,17 +863,6 @@ impl LinearView {
         icon.into_any_element()
       })
       .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| on_click(view, cx)))
-  }
-
-  /// `flex items-center justify-center py-12`, a spinning loader.
-  fn loading(id: &'static str, p: &Palette) -> Div {
-    div()
-      .debug_selector(move || id.into())
-      .flex()
-      .items_center()
-      .justify_center()
-      .py_12()
-      .child(ui::spinner(id, 20., p.muted_foreground))
   }
 
   /// `LinearFilterMenu`: the Filter button, and a chip per filter set.
@@ -1113,7 +1059,6 @@ impl Render for LinearView {
           .child(ui::icon(theme::ICON_ZAP, 20., p.muted_foreground))
           .child(
             ui::text(div(), TextSize::Sm)
-              .line_height(zpx(16.25))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Linear"),
           ),
@@ -1123,7 +1068,7 @@ impl Render for LinearView {
       .px_4()
       .pb_2()
       .flex_none()
-      .child(div().flex().child(tabs(
+      .child(div().flex().child(tab_strip(
         "linear-section",
         vec![
           (Section::Issues, "issues", "Issues"),
@@ -1155,7 +1100,7 @@ impl Render for LinearView {
 impl LinearView {
   fn issues_section(&mut self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> Div {
     let fetch = self.issues.get(&self.team).cloned().unwrap_or_default();
-    let loading = fetch.loading();
+    let loading = fetch.is_loading();
     let all = fetch.data.clone().unwrap_or_default();
     let viewed = data::issue_view(&all, self.issue_view, self.viewer_id());
     let options = data::issue_filter_options(&viewed);
@@ -1194,7 +1139,7 @@ impl LinearView {
     ];
 
     let views = div().px_4().pb_2().flex_none().child(
-      div().flex().child(tabs(
+      div().flex().child(tab_strip(
         "linear-view",
         IssueView::ALL
           .into_iter()
@@ -1216,7 +1161,7 @@ impl LinearView {
       .pb_2()
       .flex_none()
       .flex_wrap()
-      .child(tabs(
+      .child(tab_strip(
         "linear-mode",
         vec![
           (IssueMode::List, "list", "List"),
@@ -1268,7 +1213,11 @@ impl LinearView {
       .overflow_hidden();
     content = content
       .when(loading, |this| {
-        this.child(Self::loading("linear-issues-loading", p))
+        this.child(
+          div()
+            .py_12()
+            .child(ui::Loading::new("linear-issues-loading", p)),
+        )
       })
       .when_some(fetch.error.clone(), |this, error| {
         this.child(
@@ -1435,15 +1384,16 @@ impl LinearView {
     };
     let kickoff = {
       let id = id.clone();
-      Button::new(SharedString::from(format!("linear-kickoff-{id}")), p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .mt_3()
-        .h(zpx(28.))
-        .text_size(zpx(11.))
-        .line_height(zpx(16.))
-        .label("Kick off")
-        .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.kickoff(&id, cx)))
+      ui::text(
+        Button::new(SharedString::from(format!("linear-kickoff-{id}")), p),
+        TextSize::Xs,
+      )
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .mt_3()
+      .h(zpx(28.))
+      .label("Kick off")
+      .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.kickoff(&id, cx)))
     };
     let hover = p.muted.opacity(0.5);
     let expanded = open.then(|| {
@@ -1655,23 +1605,24 @@ impl LinearView {
       })
       .children(labels)
       .child(
-        Button::new(SharedString::from(format!("linear-kanban-kickoff-{id}")), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .w_full()
-          .mt_2()
-          .h(zpx(28.))
-          .text_size(zpx(11.))
-          .line_height(zpx(16.))
-          .label("Kick off")
-          .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.kickoff(&id, cx))),
+        ui::text(
+          Button::new(SharedString::from(format!("linear-kanban-kickoff-{id}")), p),
+          TextSize::Xs,
+        )
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .w_full()
+        .mt_2()
+        .h(zpx(28.))
+        .label("Kick off")
+        .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.kickoff(&id, cx))),
       )
   }
 }
 
 impl LinearView {
   fn projects_section(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let loading = self.projects.loading();
+    let loading = self.projects.is_loading();
     let all = self.projects.data.clone().unwrap_or_default();
     let viewed = data::project_view(&all, self.project_view, self.viewer_id());
     let (states, leads) = data::project_filter_options(&viewed);
@@ -1710,7 +1661,7 @@ impl LinearView {
         }),
       );
     let views = div().px_4().pb_2().flex_none().child(
-      div().flex().child(tabs(
+      div().flex().child(tab_strip(
         "linear-project-view",
         ProjectView::ALL
           .into_iter()
@@ -1738,7 +1689,11 @@ impl LinearView {
       .min_h_0()
       .overflow_y_scroll()
       .when(loading, |this| {
-        this.child(Self::loading("linear-projects-loading", p))
+        this.child(
+          div()
+            .py_12()
+            .child(ui::Loading::new("linear-projects-loading", p)),
+        )
       })
       .when_some(self.projects.error.clone(), |this, error| {
         this.child(
@@ -1891,7 +1846,7 @@ impl LinearView {
           .mb_2()
           .child("Documents"),
       )
-      .when(docs.loading(), |this| {
+      .when(docs.is_loading(), |this| {
         this.child(ui::spinner(
           "linear-documents-loading",
           16.,
@@ -1899,7 +1854,7 @@ impl LinearView {
         ))
       })
       .when(
-        !docs.loading() && docs.data.as_ref().is_none_or(Vec::is_empty),
+        !docs.is_loading() && docs.data.as_ref().is_none_or(Vec::is_empty),
         |this| {
           this.child(
             ui::text(div(), TextSize::Sm)
@@ -2022,7 +1977,7 @@ impl LinearView {
         .unwrap_or_else(|| "No content".into()),
     };
     let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if e.keystroke.key == "escape" {
+      if ui::is_escape(&e.keystroke) {
         cx.stop_propagation();
         view.close_document(cx);
       }
@@ -2096,23 +2051,24 @@ impl LinearView {
     let review_button = {
       let target = target.clone();
       let fg = p.foreground;
-      Button::new(SharedString::from(format!("linear-start-review-{key}")), p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .h(zpx(28.))
-        .gap_1p5()
-        .text_size(zpx(11.))
-        .line_height(zpx(16.))
-        .disabled(starting)
-        .child(if starting {
-          ui::spinner(format!("linear-review-spin-{key}"), 12., fg).into_any_element()
-        } else {
-          ui::icon(theme::ICON_BOT, 12., fg).into_any_element()
-        })
-        .label("Review with agent")
-        .on_click(
-          cx.listener(move |view, _: &ClickEvent, _, cx| view.start_review(target.clone(), cx)),
-        )
+      ui::text(
+        Button::new(SharedString::from(format!("linear-start-review-{key}")), p),
+        TextSize::Xs,
+      )
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .h(zpx(28.))
+      .gap_1p5()
+      .disabled(starting)
+      .child(if starting {
+        ui::spinner(format!("linear-review-spin-{key}"), 12., fg).into_any_element()
+      } else {
+        ui::icon(theme::ICON_BOT, 12., fg).into_any_element()
+      })
+      .label("Review with agent")
+      .on_click(
+        cx.listener(move |view, _: &ClickEvent, _, cx| view.start_review(target.clone(), cx)),
+      )
     };
     let left = div()
       .flex_1()
@@ -2127,7 +2083,7 @@ impl LinearView {
           .when(!open.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Xs)
-                .text_color(violet_text(self.dark))
+                .text_color(ui::Tone::GitMerged.text(p))
                 .child(agent_count_label(open.len())),
             )
           })
@@ -2174,7 +2130,7 @@ impl LinearView {
     }
     column = column
       .child(heading("COMMENTS"))
-      .when(fetch.loading(), |this| {
+      .when(fetch.is_loading(), |this| {
         this.child(ui::spinner(
           format!("linear-comments-loading-{key}"),
           16.,
@@ -2189,7 +2145,7 @@ impl LinearView {
         )
       })
       .when(
-        !fetch.loading() && !fetch.failed() && comments.is_empty(),
+        !fetch.is_loading() && !fetch.failed() && comments.is_empty(),
         |this| {
           this.child(
             ui::text(div(), TextSize::Sm)
@@ -2198,11 +2154,7 @@ impl LinearView {
           )
         },
       );
-    let quote_border = if self.dark {
-      tw::color(tw::YELLOW_500).opacity(0.5)
-    } else {
-      tw::color(tw::YELLOW_400).opacity(0.7)
-    };
+    let quote_border = ui::Tone::Warning.border(p);
     for comment in &comments {
       let author = comment
         .user
@@ -2320,8 +2272,8 @@ impl LinearView {
       .debug_selector(|| "agent-review-comment-card".into())
       .rounded(radius::MD)
       .border_1()
-      .border_color(violet(0.4))
-      .bg(violet(0.05))
+      .border_color(ui::Tone::GitMerged.border(p))
+      .bg(ui::Tone::GitMerged.tint(p))
       .p_3()
       .flex()
       .flex_col()
@@ -2331,11 +2283,11 @@ impl LinearView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(theme::ICON_BOT, 14., tw::color(tw::VIOLET_500)))
+          .child(ui::icon(theme::ICON_BOT, 14., ui::Tone::GitMerged.color(p)))
           .child(
             ui::text(div(), TextSize::Xs)
               .font_weight(FontWeight::MEDIUM)
-              .text_color(violet_text(self.dark))
+              .text_color(ui::Tone::GitMerged.text(p))
               .child("Local"),
           )
           .child(

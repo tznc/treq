@@ -211,8 +211,7 @@ impl Popover {
   }
 
   fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-    let key = event.keystroke.key.as_str();
-    if key == "escape" {
+    if crate::gpui_shell::ui::is_escape(&event.keystroke) {
       self.close(cx);
       cx.stop_propagation();
       return;

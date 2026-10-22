@@ -24,7 +24,7 @@ use crate::{
       commits_data::{line_kind, line_numbers, History, LineKind},
       highlight,
     },
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     ui::{self, zpx},
   },
   jj::{JjDiffHunk, JjLogCommit},
@@ -610,11 +610,11 @@ impl CommitsView {
     let gutter_hover = p.muted.opacity(0.5);
     let kind = line_kind(line);
     let bg = if selected {
-      Some(tw::color(tw::BLUE_500).opacity(0.1))
+      Some(ui::Tone::Primary.tint(p))
     } else {
       match kind {
-        LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-        LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
+        LineKind::Added => Some(ui::Tone::GitOpen.tint(p)),
+        LineKind::Removed => Some(ui::Tone::GitClosed.tint(p)),
         LineKind::Context => None,
       }
     };
