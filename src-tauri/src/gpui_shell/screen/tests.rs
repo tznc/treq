@@ -3282,6 +3282,27 @@ fn code_tab_says_a_remote_file_tree_is_unavailable(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn code_tab_says_when_commits_fail_to_load(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    history: None,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(
+    h.drawn("code-history-error"),
+    "not stuck on Loading commits..."
+  );
+  assert!(!h.drawn("code-history-error-popover"));
+  h.click("code-history-show-error");
+  assert!(
+    h.drawn("code-history-error-popover"),
+    "Show error opens the error"
+  );
+  assert!(!h.drawn("commit-item-a"));
+}
+
+#[gpui::test]
 fn code_tab_hands_navigation_to_react(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.click("code-entry-src");

@@ -20,8 +20,9 @@ use gpui_kit::component::{
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, prelude::*, px, relative, rems, rgb, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
+  self, anchored, deferred, div, prelude::*, px, relative, rems, rgb, Animation, AnimationExt as _,
+  App, Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task,
+  Window,
 };
 
 use super::{
@@ -146,6 +147,12 @@ pub struct CodeView {
   pub(super) history: Option<JjLogResult>,
   pub(super) history_limit: usize,
   history_loading: bool,
+  /// Why the last commit read failed, while there is no history to show.
+  history_error: Option<String>,
+  /// The failed read's message, read-only so it can be copied into a report.
+  history_error_text: Option<Entity<TextareaState>>,
+  /// Whether "Show error" has the error's popover open.
+  history_error_open: bool,
   pub(super) stack: Option<Vec<StackRow>>,
   pub(super) settings: Option<TaskSettings>,
   task: Option<Entity<TextareaState>>,
@@ -197,6 +204,9 @@ impl CodeView {
       history: None,
       history_limit: HISTORY_PAGE,
       history_loading: false,
+      history_error: None,
+      history_error_text: None,
+      history_error_open: false,
       stack: None,
       settings: None,
       task: None,
@@ -238,6 +248,8 @@ impl CodeView {
     if moved {
       self.overview = None;
       self.history = None;
+      self.history_error = None;
+      self.history_error_open = false;
       self.history_limit = HISTORY_PAGE;
       self.stack = None;
       self.settings = None;
@@ -301,20 +313,28 @@ impl CodeView {
     self.read(
       move |host, parent| {
         let home = parent.workspace.is_none();
-        host
-          .commits(
-            &parent.repo_path,
-            parent.workspace_id(),
-            true,
-            Some(if home { limit } else { HISTORY_PAGE }),
-          )
-          .map_err(|err| log::warn!("Failed to load commits: {err}"))
-          .ok()
+        host.commits(
+          &parent.repo_path,
+          parent.workspace_id(),
+          true,
+          Some(if home { limit } else { HISTORY_PAGE }),
+        )
       },
       |view, history, _| {
         view.history_loading = false;
-        if history.is_some() || view.history.is_none() {
-          view.history = history;
+        match history {
+          Ok(history) => {
+            view.history = Some(history);
+            view.history_error = None;
+            view.history_error_open = false;
+          }
+          Err(err) => {
+            log::warn!("Failed to load commits: {err}");
+            // Keep what was read before; only an empty view says it failed.
+            if view.history.is_none() {
+              view.history_error = Some(err);
+            }
+          }
         }
       },
       cx,
@@ -1091,7 +1111,7 @@ impl Render for CodeView {
           .flex_none()
           .h_full()
           .bg(p.muted.opacity(0.2))
-          .child(self.history(&p, cx)),
+          .child(self.history(&p, window, cx)),
       )
       .children(self.picker.clone())
   }
@@ -2230,19 +2250,134 @@ impl CodeView {
       })
   }
 
-  fn history(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  /// The read-only, wrapping text area that shows a failed commit read.
+  fn history_error_text(
+    &mut self,
+    err: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Entity<TextareaState> {
+    if let Some(text) = self.history_error_text.clone() {
+      if text.read(cx).value() != err {
+        text.update(cx, |s, cx| s.set_value(err.to_string(), window, cx));
+      }
+      return text;
+    }
+    let text = cx.new(|cx| {
+      let mut state = TextareaState::new(window, cx)
+        .auto_grow(2, 12)
+        .default_value(err.to_string());
+      state.set_readonly(true, cx);
+      state
+    });
+    self.history_error_text = Some(text.clone());
+    text
+  }
+
+  /// The failed read's message in a popover under "Show error", selectable
+  /// so it can be copied into a bug report.
+  fn history_error_popover(
+    &mut self,
+    err: &str,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let text = self.history_error_text(err, window, cx);
+    let close = |view: &mut Self, cx: &mut Context<Self>| {
+      view.history_error_open = false;
+      cx.notify();
+    };
+    deferred(
+      anchored().snap_to_window_with_margin(px(8.)).child(
+        div()
+          .id("code-history-error-popover")
+          .debug_selector(|| "code-history-error-popover".into())
+          .mt_1()
+          .w(zpx(360.))
+          .p_2()
+          .rounded(zpx(6.))
+          .border_1()
+          .border_color(p.border)
+          .bg(p.popover)
+          .text_color(p.popover_foreground)
+          .shadow_md()
+          .occlude()
+          .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_mouse_down_out(cx.listener(move |view, _, _, cx| close(view, cx)))
+          .capture_action(cx.listener(move |view, _: &Escape, _, cx| {
+            close(view, cx);
+            cx.stop_propagation();
+          }))
+          .child(
+            Textarea::new(&text)
+              .readonly(true)
+              .aria_label("Commit read error")
+              .px_3()
+              .py_2()
+              .text_size(zpx(12.))
+              .line_height(zpx(18.))
+              .font_family(theme::MONO_FONT),
+          ),
+      ),
+    )
+    .with_priority(1)
+  }
+
+  fn history(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let Some(log) = self.history.clone() else {
+      let status = match self.history_error.clone() {
+        Some(err) => div()
+          .id("code-history-error")
+          .debug_selector(|| "code-history-error".into())
+          .role(gpui::Role::Status)
+          .aria_label("Couldn't load commits")
+          .test_support()
+          .w_full()
+          .flex()
+          .flex_col()
+          .items_center()
+          .gap_1()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child("Couldn't load commits"),
+          )
+          .child(
+            div()
+              .child(
+                Button::new("code-history-show-error", p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .label("Show error")
+                  // A press outside the open popover closes it, so this only opens.
+                  .on_click(cx.listener(|view, _, _, cx| {
+                    view.history_error_open = true;
+                    cx.notify();
+                  })),
+              )
+              .when(self.history_error_open, |el| {
+                el.child(self.history_error_popover(&err, p, window, cx))
+              }),
+          )
+          .into_any_element(),
+        None => ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Loading commits...")
+          .into_any_element(),
+      };
       return div()
         .size_full()
         .flex()
         .items_center()
         .justify_center()
         .p_4()
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("Loading commits..."),
-        )
+        .child(status)
         .into_any_element();
     };
     let heading = ui::text(div(), TextSize::Sm)
