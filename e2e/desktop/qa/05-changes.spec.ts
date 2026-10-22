@@ -10,6 +10,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
+/** alerting.ts in feat/alerting-logs's Uncommitted list. */
+const SELECTED_ROW = { x: 330, y: 283 };
+
 test.describe.configure({ mode: "serial" });
 
 /** Comments on the diff line at `y` through its gutter's add button. */
@@ -183,4 +186,20 @@ test("changes: commit box and its split menu", async ({ page }) => {
   });
   await page.keyboard.press("Escape");
   await message.fill("");
+});
+
+test("changes: selected file row keeps its actions", async ({ page }) => {
+  await openWorkspace(page, "feat/alerting-logs");
+  await openTab(page, "Changes");
+  await page.mouse.click(SELECTED_ROW.x, SELECTED_ROW.y); // alerting.ts under Uncommitted
+  await page.mouse.move(900, 600); // off the row: no hover state
+  await settle(page, 800);
+  await capture(page, {
+    name: "05-changes-selected-row",
+    title: "Selected file row without hover",
+    expectations: [
+      "Selected alerting.ts row shows status M, discard and + without hovering",
+      "Status letter and action icons readable on the blue selection",
+    ],
+  });
 });

@@ -30,11 +30,11 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   changes_data::{
-    after_range, before_range, body, can_expand_before, check_message, commit_label,
-    conflict_lines, conflicts, deleted_sides, diff_summary, discarded, full_path, hunks_hash,
-    is_collapsed, line_counts, pending_label, review_prompt, section_label, select_all_label,
-    split_path, stashed, total_lines, visible_committed, Body, BodyInput, ChangedFile, ChangesHost,
-    CommitAction, Conflict, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH,
+    body, check_message, commit_label, conflict_lines, conflicts, context_ranges, deleted_sides,
+    diff_summary, discarded, full_path, hunks_hash, is_collapsed, line_counts, new_lines,
+    pending_label, review_prompt, section_label, select_all_label, split_path, stashed,
+    total_lines, visible_committed, Body, BodyInput, ChangedFile, ChangesHost, CommitAction,
+    Conflict, ContextReads, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH,
     FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
   },
   code::Parent,
@@ -125,6 +125,8 @@ pub struct ChangesView {
   pub(super) viewed: HashMap<String, String>,
   /// Lines read by "Show more lines", by file, hunk and side.
   pub(super) context: HashMap<(String, usize, Dir), Vec<String>>,
+  /// Hunks whose last read below came back short: the file ends there.
+  context_ended: HashSet<(String, usize)>,
   pub(super) message: String,
   message_input: Option<Entity<TextareaState>>,
   pub(super) message_error: Option<&'static str>,
@@ -209,6 +211,7 @@ impl ChangesView {
       changeset_expanded: false,
       viewed: HashMap::new(),
       context: HashMap::new(),
+      context_ended: HashSet::new(),
       message: String::new(),
       message_input: None,
       message_error: None,
@@ -265,6 +268,7 @@ impl ChangesView {
       self.changeset_expanded = false;
       self.viewed.clear();
       self.context.clear();
+      self.context_ended.clear();
       self.message.clear();
       self.message_input = None;
       self.discard_dialog = false;
@@ -960,23 +964,43 @@ impl ChangesView {
   }
 
   /// `handleExpandContext`: twenty more lines above or below a hunk.
+  /// [`context_ranges`] for hunk `h` of `path`, from the lines read so far.
+  fn context_ranges(&self, path: &str, hunks: &[JjDiffHunk], h: usize) -> ContextReads {
+    let read = |i: usize, dir: Dir| {
+      self
+        .context
+        .get(&(path.to_string(), i, dir))
+        .map_or(0, Vec::len)
+    };
+    let ended = self.context_ended.contains(&(path.to_string(), h));
+    context_ranges(
+      hunks,
+      h,
+      |i| (read(i, Dir::Before), read(i, Dir::After)),
+      ended,
+    )
+  }
+
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, cx: &mut Context<Self>) {
     // The PR's files are not checked out.
     if self.read_only() {
       return;
     }
-    let Some(hunk) = self.hunks.get(path).and_then(|d| d.hunks.get(h)).cloned() else {
+    let Some(hunks) = self.hunks.get(path).map(|d| &d.hunks) else {
       return;
     };
-    let key = (path.to_string(), h, dir);
-    let loaded = self.context.get(&key).map_or(0, Vec::len);
+    if h >= hunks.len() {
+      return;
+    }
+    let (before, after) = self.context_ranges(path, hunks, h);
     let range = match dir {
-      Dir::Before => before_range(&hunk.header, loaded),
-      Dir::After => Some(after_range(&hunk.header, loaded)),
+      Dir::Before => before,
+      Dir::After => after,
     };
     let Some((start, end)) = range else {
       return;
     };
+    let key = (path.to_string(), h, dir);
     let file = path.to_string();
     self.run(
       move |host, parent| {
@@ -986,6 +1010,9 @@ impl ChangesView {
         let Ok(lines) = result else {
           return;
         };
+        if dir == Dir::After && lines.len() <= end - start {
+          view.context_ended.insert((key.0.clone(), h));
+        }
         if lines.is_empty() {
           return;
         }
@@ -1888,15 +1915,24 @@ impl ChangesView {
         .hover(move |s| s.bg(hover_bg))
         .child(ui::icon(icon, 12., fg))
     };
-    let red = if self.dark {
+    // Selected rows sit on a saturated blue, so their status and actions
+    // switch to white and stay visible without hovering.
+    let red = if selected {
+      white
+    } else if self.dark {
       tw::color(tw::RED_400)
     } else {
       tw::color(tw::RED_600)
     };
+    let status_color = if selected {
+      white.opacity(0.85)
+    } else {
+      p.muted_foreground
+    };
     let mut actions = div().flex().items_center().gap_1().flex_none().child(
       div()
         .min_w(zpx(8.))
-        .text_color(p.muted_foreground)
+        .text_color(status_color)
         .child(file.status.clone()),
     );
     if last && selected && !staged {
@@ -1921,7 +1957,7 @@ impl ChangesView {
         theme::ICON_PLUS,
         name_color,
         p.accent,
-        true,
+        false,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -1937,7 +1973,7 @@ impl ChangesView {
         theme::ICON_MINUS,
         name_color,
         p.accent,
-        true,
+        !selected,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2798,56 +2834,69 @@ impl ChangesView {
         .get(&(path.to_string(), h, Dir::After))
         .cloned()
         .unwrap_or_default();
-      let expandable = !committed && can_expand_before(&hunk.header, before.len());
+      let (above, below) = self.context_ranges(path, hunks, h);
+      let expandable = !committed && above.is_some();
+      // Once the lines above meet the previous hunk's, or the file's start,
+      // the header no longer separates anything.
+      let joined = above.is_none()
+        && (!before.is_empty()
+          || h.checked_sub(1).is_some_and(|prev| {
+            self
+              .context
+              .get(&(path.to_string(), prev, Dir::After))
+              .is_some_and(|l| !l.is_empty())
+          }));
       let file = path.to_string();
       let hover = p.muted.opacity(0.8);
-      el = el.child(
-        gutter_cols(
-          div()
-            .id(SharedString::from(format!("hunk-header-{path}-{h}")))
-            .flex()
-            .bg(p.muted.opacity(0.6))
-            .when(expandable, |this| {
-              this.cursor_pointer().hover(move |s| s.bg(hover)).on_click(
-                cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::Before, cx)),
-              )
-            }),
-        )
-        .child(
-          div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .items_center()
-            .px_2()
-            .py(zpx(2.))
-            .when(expandable, |this| {
-              this.child(
+      el = el.when(!joined, |el| {
+        el.child(
+          gutter_cols(
+            div()
+              .id(SharedString::from(format!("hunk-header-{path}-{h}")))
+              .flex()
+              .bg(p.muted.opacity(0.6))
+              .when(expandable, |this| {
+                this.cursor_pointer().hover(move |s| s.bg(hover)).on_click(
+                  cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::Before, cx)),
+                )
+              }),
+          )
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .flex()
+              .items_center()
+              .px_2()
+              .py(zpx(2.))
+              .when(expandable, |this| {
+                this.child(
+                  div()
+                    .mr_1()
+                    .child(ui::icon(theme::ICON_CHEVRON_UP, 12., muted)),
+                )
+              })
+              .child(
                 div()
-                  .mr_1()
-                  .child(ui::icon(theme::ICON_CHEVRON_UP, 12., muted)),
-              )
-            })
-            .child(
-              div()
-                .truncate()
-                .text_color(muted)
-                .child(hunk.header.clone()),
-            )
-            .when(expandable, |this| {
-              this.child(
-                ui::text(div(), TextSize::Xs)
-                  .ml_2()
-                  .flex_none()
+                  .truncate()
                   .text_color(muted)
-                  .child("Show more lines above"),
+                  .child(hunk.header.clone()),
               )
-            }),
-        ),
-      );
-      let (start, count) = super::changes_data::new_range(&hunk.header);
+              .when(expandable, |this| {
+                this.child(
+                  ui::text(div(), TextSize::Xs)
+                    .ml_2()
+                    .flex_none()
+                    .text_color(muted)
+                    .child("Show more lines above"),
+                )
+              }),
+          ),
+        )
+      });
+      let (first, last) = new_lines(&hunk.header);
       for (i, line) in before.iter().enumerate() {
-        let n = start as i64 - before.len() as i64 + i as i64;
+        let n = first as i64 - before.len() as i64 + i as i64;
         el = el.child(context_row(n, line, language, p));
       }
       let numbers = line_numbers(hunk);
@@ -2871,12 +2920,11 @@ impl ChangesView {
         );
         el = el.children(self.line_extras(path, hunks, h, l, p, cx));
       }
+      for (i, line) in after.iter().enumerate() {
+        el = el.child(context_row((last + 1 + i) as i64, line, language, p));
+      }
       // Drawn for committed files too, where React's click finds no hunk.
-      if !(self
-        .context
-        .contains_key(&(path.to_string(), h, Dir::After))
-        && after.is_empty())
-      {
+      if below.is_some() {
         let file = path.to_string();
         let hover = p.muted.opacity(0.5);
         el = el.child(
@@ -2907,9 +2955,6 @@ impl ChangesView {
               .child("Show more lines below"),
           ),
         );
-      }
-      for (i, line) in after.iter().enumerate() {
-        el = el.child(context_row((start + count + i) as i64, line, language, p));
       }
     }
     el

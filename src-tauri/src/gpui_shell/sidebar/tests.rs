@@ -413,6 +413,21 @@ fn workspace_actions_appear_on_hover(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn long_workspace_title_truncates_before_hover_actions(cx: &mut TestAppContext) {
+  let title = "zn/intelligent-mayer-276u4-with-a-very-long-branch-name";
+  let mut h = Harness::new(cx, snapshot(vec![row(7, title, 0)]));
+  h.hover("workspace-7");
+  let title = h.bounds("workspace-7-title").expect("drawn");
+  let agent = h.bounds("workspace-7-start-agent").expect("drawn");
+  assert!(
+    title.right() <= agent.left(),
+    "title ends at {:?}, past the agent button at {:?}",
+    title.right(),
+    agent.left()
+  );
+}
+
+#[gpui::test]
 fn unavailable_actions_do_nothing(cx: &mut TestAppContext) {
   let mut s = snapshot(vec![row(7, "feat-a", 0)]);
   s.agent_unavailable = Some("Agents are not supported here".into());

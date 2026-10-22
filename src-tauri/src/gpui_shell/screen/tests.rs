@@ -73,6 +73,8 @@ struct FakeHost {
   /// The devcontainers preview.
   devcontainers: bool,
   ptys: Mutex<Vec<String>>,
+  /// The sizes PTYs were given, as (id, cols, rows).
+  resizes: Mutex<Vec<(String, u16, u16)>>,
   /// PTY output listeners, by PTY id.
   sinks: Mutex<Vec<(String, Sink)>>,
   /// Remote session exit listeners, by local id.
@@ -833,7 +835,12 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(())
   }
 
-  fn resize_pty(&self, _: &str, _: u16, _: u16) -> Result<(), String> {
+  fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String> {
+    self
+      .resizes
+      .lock()
+      .unwrap()
+      .push((id.to_string(), cols, rows));
     Ok(())
   }
 
@@ -4676,6 +4683,40 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
       format!("write {pty} \"\\u{{3}}\""),
     ]
   );
+}
+
+/// A terminal resized while its session starts hands the PTY the new size
+/// once it runs: a program drawing for a wider PTY than the grid wraps
+/// every line, so redraws stack up and overwrite each other.
+#[gpui::test]
+fn terminal_pty_follows_a_resize_while_it_starts(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  let pty = agent_pty();
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.terminal =
+        Some(serde_json::from_value(serde_json::json!({ "activeSessionId": 3 })).expect("route"));
+    }
+  });
+  assert!(
+    !host.calls().iter().any(|c| c.starts_with("spawn ")),
+    "the session is still starting"
+  );
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(900.), gpui::px(900.)));
+  h.cx.run_until_parked();
+  let host_dyn: terminal_data::Host = host.clone();
+  let (live, _) = terminal_data::attach(&host_dyn, &pty, 80, 24);
+  let grid = live.emulator.lock().unwrap().size();
+  let last = host
+    .resizes
+    .lock()
+    .unwrap()
+    .iter()
+    .rev()
+    .find(|(id, ..)| *id == pty)
+    .map(|(_, cols, rows)| (*cols as usize, *rows as usize));
+  assert_eq!(last, Some((grid.cols, grid.rows)));
 }
 
 #[gpui::test]
