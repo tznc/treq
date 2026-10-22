@@ -43,6 +43,8 @@ const EDGE_PADDING: f32 = 5.;
 /// `text-sm`: 14px on a 20px line.
 const TEXT_SIZE: f32 = 14.;
 const LINE_HEIGHT: f32 = 20.;
+/// A text tooltip's widest box: `max-w-xs`. Longer text wraps.
+const TOOLTIP_MAX_WIDTH: f32 = 320.;
 /// A [`TooltipContent::List`] row: `text-xs`.
 const LIST_ITEM_SIZE: f32 = 11.;
 const LIST_ITEM_LINE: f32 = 16.;
@@ -459,10 +461,39 @@ fn text_width_at(cx: &App, text: &str, family: &'static str, size: f32) -> f32 {
     .sum()
 }
 
+/// The widest line and the line count of `text` at `text-sm`, wrapped at
+/// spaces to fit `max` px, as GPUI wraps it.
+fn wrapped_text(cx: &App, text: &str, max: f32) -> (f32, usize) {
+  wrap_lines(text, max, |s| text_width(cx, s, theme::SANS_FONT))
+}
+
+fn wrap_lines(text: &str, max: f32, width: impl Fn(&str) -> f32) -> (f32, usize) {
+  let space = width(" ");
+  let (mut widest, mut line, mut lines) = (0f32, 0f32, 1);
+  for word in text.split_whitespace() {
+    let word = width(word);
+    if line > 0. && line + space + word > max {
+      widest = widest.max(line);
+      line = word;
+      lines += 1;
+    } else {
+      line += if line > 0. { space + word } else { word };
+    }
+  }
+  (widest.max(line), lines)
+}
+
 /// The tooltip box's size: `px-3 py-1.5` and a border around its lines.
 fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
   let (width, lines) = match content {
-    TooltipContent::Text(text) => (text_width(cx, text, theme::SANS_FONT), 1),
+    TooltipContent::Text(text) => {
+      // Wrapped lines sit flush, without the `gap-1` between rows below.
+      let (width, lines) = wrapped_text(cx, text, TOOLTIP_MAX_WIDTH - 24. - 2.);
+      return (
+        (width + 24. + 2.).ceil(),
+        LINE_HEIGHT * lines as f32 + 12. + 2.,
+      );
+    }
     TooltipContent::Shortcut { text, keys } => {
       // The chip's `font-medium` is a little wider than the regular face.
       let keys = text_width_at(cx, keys, theme::SANS_FONT, LIST_ITEM_SIZE) * 1.03;
@@ -1715,6 +1746,15 @@ mod tests {
       bounds(0., 0., 1400., 900.),
     );
     assert_eq!(at.x, px(5.));
+  }
+
+  #[test]
+  fn wraps_long_tooltip_text_at_spaces() {
+    let width = |s: &str| s.chars().count() as f32;
+    assert_eq!(wrap_lines("short tip", 20., width), (9., 1));
+    assert_eq!(wrap_lines("aaaa bbbb cccc dddd", 10., width), (9., 2));
+    // A word longer than the line keeps a line of its own.
+    assert_eq!(wrap_lines("a bbbbbbbbbbbb c", 10., width), (12., 3));
   }
 
   #[test]
