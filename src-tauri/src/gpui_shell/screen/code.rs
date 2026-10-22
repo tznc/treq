@@ -12,6 +12,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
@@ -20,7 +21,7 @@ use gpui_kit::component::{
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, px, relative, rems, rgb, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, SharedString, Stateful, Subscription, Task, Window,
+  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -1956,6 +1957,9 @@ impl CodeView {
             .child(
               ui::text(div(), TextSize::Sm)
                 .id(id)
+                .role(Role::Button)
+                .aria_label(entry.name.clone())
+                .test_support()
                 .flex()
                 .items_center()
                 .gap_3()
