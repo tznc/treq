@@ -1,7 +1,8 @@
-//! The sidebar's Open Workspaces dialog: opens a workspace for each pasted
-//! branch name or GitHub pull request or branch link, and for each pull
-//! request or Linear issue picked from the integrations beside it, all at
-//! once.
+//! The New Workspaces dialog, the one way to create workspaces: a line per
+//! workspace (a title or branch name for a new one, or an existing branch
+//! or GitHub pull request or branch link), plus each pull request or Linear
+//! issue picked from the integrations beside it, all at once and stacked on
+//! one branch.
 
 use crate::gpui_shell::ui::zpx;
 use std::{
@@ -12,7 +13,11 @@ use std::{
 
 use gpui_kit::{
   base::TestSupportExt as _,
-  component::input::{Input, InputEvent, InputState, Textarea, TextareaState},
+  component::{
+    input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    select::{SearchableVec, Select, SelectEvent, SelectState},
+    IndexPath,
+  },
 };
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Div, Entity, FocusHandle,
@@ -24,6 +29,7 @@ use super::{
   linear,
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
+  workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
   workspace_modal::{
     checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check,
   },
@@ -32,6 +38,7 @@ use super::{
 use crate::{
   github::GhPullRequest,
   gpui_shell::{
+    form::SelectOption,
     native::{NativeEvent, ToastTone},
     theme::{self, Palette},
     ui::{self, Button, TextSize, Variant},
@@ -79,7 +86,18 @@ struct Fields {
   lines: Entity<TextareaState>,
   search: Entity<InputState>,
   issue_search: Entity<InputState>,
+  sparse: Entity<TextareaState>,
+  symlinks: Entity<TextareaState>,
 }
+
+/// The Stack on select's branches, and the select.
+type StackSelect = (Vec<SelectOption>, Entity<SelectState<Branches>>);
+
+/// The Stack on select's searchable branches.
+type Branches = SearchableVec<SelectOption>;
+
+/// `treq/{name}`, until the repository's pattern loads.
+const DEFAULT_PATTERN: &str = "treq/{name}";
 
 pub struct OpenWorkspacesDialog {
   route: Route,
@@ -92,6 +110,18 @@ pub struct OpenWorkspacesDialog {
   pub(super) text: String,
   /// Each repository's `owner/name`, once read.
   remotes: Option<Vec<(String, String)>>,
+  /// The repository's branch name pattern, which names a title's branch.
+  pattern: String,
+  /// The repository's default branch, once read.
+  pub(super) default_branch: Option<String>,
+  /// The repository's branches, for the Stack on select.
+  branches: Vec<String>,
+  /// The branch new workspaces stack on; the default branch when `None`.
+  pub(super) stack_on: Option<String>,
+  stack_select: Option<StackSelect>,
+  pub(super) advanced_open: bool,
+  pub(super) sparse_paths: String,
+  pub(super) symlinked_dirs: String,
   /// The repositories have been fetched, so their branches can be checked.
   fetched: bool,
   /// Each line's check, by its text.
@@ -133,6 +163,7 @@ impl OpenWorkspacesDialog {
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
+    let stack_on = route.stack_on.clone();
     let mut view = Self {
       route,
       host,
@@ -143,6 +174,14 @@ impl OpenWorkspacesDialog {
       _subscriptions: Vec::new(),
       text: String::new(),
       remotes: None,
+      pattern: DEFAULT_PATTERN.into(),
+      default_branch: None,
+      branches: Vec::new(),
+      stack_on,
+      stack_select: None,
+      advanced_open: false,
+      sparse_paths: String::new(),
+      symlinked_dirs: String::new(),
       fetched: false,
       checks: HashMap::new(),
       checking: false,
@@ -180,21 +219,43 @@ impl OpenWorkspacesDialog {
   fn load(&mut self, cx: &mut Context<Self>) {
     let (host, route) = (self.host.clone(), self.route.clone());
     cx.spawn(async move |this, cx| {
-      let (remotes, open) = cx
+      let (remotes, open, settings) = cx
         .background_spawn({
           let (host, route) = (host.clone(), route.clone());
           async move {
-            let open: HashSet<String> =
-              super::github_data::GithubHost::workspaces(&*host, &route.repo_path)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|w| w.branch_name)
-                .collect();
-            (data::remotes(&*host, &route.repos), open)
+            let repo = route.repo_path.as_str();
+            let open: HashSet<String> = super::github_data::GithubHost::workspaces(&*host, repo)
+              .unwrap_or_default()
+              .into_iter()
+              .map(|w| w.branch_name)
+              .collect();
+            let pattern = host
+              .repo_settings(repo, &["branch_name_pattern".to_string()])
+              .ok()
+              .and_then(|values| values.get("branch_name_pattern").cloned().flatten())
+              .filter(|p| !p.is_empty());
+            let branches: Vec<String> = host
+              .repo_branches(repo)
+              .unwrap_or_default()
+              .into_iter()
+              .map(|b| b.name)
+              .collect();
+            let default = WorkspaceDialogHost::default_branch(&*host, repo).ok();
+            (
+              data::remotes(&*host, &route.repos),
+              open,
+              (pattern, default, branches),
+            )
           }
         })
         .await;
       let _ = this.update(cx, |view, cx| {
+        let (pattern, default, branches) = settings;
+        if let Some(pattern) = pattern {
+          view.pattern = pattern;
+        }
+        view.default_branch = default;
+        view.branches = branches;
         view.github = remotes
           .iter()
           .find(|(path, _)| *path == view.route.repo_path)
@@ -347,14 +408,18 @@ impl OpenWorkspacesDialog {
     }
     self.checking = true;
     cx.notify();
-    let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    let (host, repo, pattern) = (
+      self.host.clone(),
+      self.route.repo_path.clone(),
+      self.pattern.clone(),
+    );
     cx.spawn(async move |this, cx| {
       let checked = cx
         .background_spawn(async move {
           unchecked
             .into_iter()
             .map(|(raw, line)| {
-              let checked = data::check(&*host, &repo, &remotes, &line);
+              let checked = data::check(&*host, &repo, &remotes, &pattern, &line);
               (raw, checked)
             })
             .collect::<Vec<_>>()
@@ -481,39 +546,15 @@ impl OpenWorkspacesDialog {
     self.errors.clear();
     cx.notify();
     let host = self.host.clone();
+    let plan = Plan {
+      repo_path: self.route.repo_path.clone(),
+      stack_on: self.stack_on.clone(),
+      sparse_paths: self.sparse_paths.clone(),
+      symlinked_dirs: self.symlinked_dirs.clone(),
+    };
     cx.spawn(async move |this, cx| {
       let results = cx
-        .background_spawn({
-          let (host, targets) = (host.clone(), targets.clone());
-          async move {
-            let mut repos: Vec<&str> = Vec::new();
-            for target in &targets {
-              if !repos.contains(&target.repo_path.as_str()) {
-                repos.push(&target.repo_path);
-              }
-            }
-            let mut results = Vec::new();
-            for repo in repos {
-              let batch: Vec<&Target> = targets
-                .iter()
-                .filter(|t| t.repo_path == repo && t.issue.is_none())
-                .collect();
-              if !batch.is_empty() {
-                let requests: Vec<_> = batch.iter().map(|t| t.request()).collect();
-                let opened = host.open_workspaces(repo, &requests);
-                results.extend(batch.into_iter().cloned().zip(opened));
-              }
-            }
-            // An issue's branch may not exist yet, so each opens as the
-            // Linear view opens it.
-            for target in targets.iter().filter(|t| t.issue.is_some()) {
-              let issue = target.issue.as_ref().expect("issue");
-              let opened = host.open_issue(&target.repo_path, issue);
-              results.push((target.clone(), opened));
-            }
-            results
-          }
-        })
+        .background_spawn(async move { plan.run(&*host, targets) })
         .await;
       let _ = this.update(cx, |view, cx| view.opened(results, cx));
     })
@@ -579,12 +620,35 @@ impl OpenWorkspacesDialog {
     if self.fields.is_none() {
       let lines = cx.new(|cx| {
         TextareaState::new(window, cx)
-          .auto_grow(12, 12)
-          .placeholder("feat/login\nhttps://github.com/acme/app/pull/42")
+          .auto_grow(8, 8)
+          .placeholder("Fix the login flow\nfeat/login\nhttps://github.com/acme/app/pull/42")
       });
       let search =
         cx.new(|cx| InputState::new(window, cx).placeholder("Search open pull requests"));
       let issue_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search open issues"));
+      let area = |placeholder: &'static str, window: &mut Window, cx: &mut Context<Self>| {
+        cx.new(|cx| {
+          TextareaState::new(window, cx)
+            .auto_grow(2, 6)
+            .placeholder(placeholder)
+        })
+      };
+      let sparse = area("e.g., src/api\ndocs", window, cx);
+      let symlinks = area("e.g., node_modules\ntarget", window, cx);
+      self._subscriptions.push(
+        cx.subscribe(&sparse, |view, input, event: &InputEvent, cx| {
+          if let InputEvent::Change = event {
+            view.sparse_paths = input.read(cx).value().to_string();
+          }
+        }),
+      );
+      self._subscriptions.push(
+        cx.subscribe(&symlinks, |view, input, event: &InputEvent, cx| {
+          if let InputEvent::Change = event {
+            view.symlinked_dirs = input.read(cx).value().to_string();
+          }
+        }),
+      );
       // `autoFocus`.
       lines.update(cx, |lines, cx| lines.focus(window, cx));
       self
@@ -616,15 +680,155 @@ impl OpenWorkspacesDialog {
         lines,
         search,
         issue_search,
+        sparse,
+        symlinks,
       });
     }
     self.fields.as_ref().expect("fields")
+  }
+
+  /// The Stack on select: the default branch first, then the others.
+  fn stack_select(
+    &mut self,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<Entity<SelectState<Branches>>> {
+    let default = self.default_branch.clone()?;
+    let options: Vec<SelectOption> = std::iter::once(default.clone())
+      .chain(self.branches.iter().filter(|b| **b != default).cloned())
+      .map(|name| SelectOption {
+        value: name.clone(),
+        label: name,
+      })
+      .collect();
+    let value = self.stack_on.clone().unwrap_or(default);
+    if let Some((known, state)) = &mut self.stack_select {
+      let state = state.clone();
+      if *known != options {
+        *known = options.clone();
+        state.update(cx, |s, cx| {
+          s.set_items(SearchableVec::new(options), window, cx);
+          s.set_selected_value(&value, window, cx);
+        });
+      }
+      return Some(state);
+    }
+    let index = options
+      .iter()
+      .position(|o| o.value == value)
+      .map(IndexPath::new);
+    let state = cx.new(|cx| {
+      SelectState::new(SearchableVec::new(options.clone()), index, window, cx).searchable(true)
+    });
+    self._subscriptions.push(
+      cx.subscribe(&state, |view, _, event: &SelectEvent<Branches>, cx| {
+        if let SelectEvent::Confirm(Some(value)) = event {
+          view.stack_on = Some(value.clone());
+          cx.notify();
+        }
+      }),
+    );
+    self.stack_select = Some((options, state.clone()));
+    Some(state)
+  }
+
+  /// Where new workspaces stack, and their sparse checkout and symlinks.
+  fn create_options(
+    &self,
+    select: Option<Entity<SelectState<Branches>>>,
+    sparse: &Entity<TextareaState>,
+    symlinks: &Entity<TextareaState>,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Div {
+    let field = |label: &'static str, selector: &'static str, area: &Entity<TextareaState>| {
+      div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .gap(zpx(6.))
+        .child(label_xs(label))
+        .child(
+          div()
+            .debug_selector(move || selector.into())
+            .child(ui::text(
+              Textarea::new(area).aria_label(label).disabled(self.pending),
+              TextSize::Sm,
+            )),
+        )
+    };
+    div()
+      .flex()
+      .flex_col()
+      .gap_2()
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_3()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .flex_none()
+              .text_color(p.muted_foreground)
+              .child("Stack on"),
+          )
+          .child(
+            div()
+              .id("open-workspaces-stack-on")
+              .debug_selector(|| "open-workspaces-stack-on".into())
+              .w(zpx(240.))
+              .map(|this| match select {
+                Some(state) => this.child(ui::text(
+                  Select::new(&state)
+                    .id("open-workspaces-stack-on-select")
+                    .disabled(self.pending)
+                    .h(zpx(28.)),
+                  TextSize::Sm,
+                )),
+                None => this.child(
+                  ui::text(div(), TextSize::Sm)
+                    .text_color(p.muted_foreground)
+                    .child("Loading branches..."),
+                ),
+              }),
+          )
+          .child(div().flex_1())
+          .child(super::workspace_dialog::disclosure(
+            "open-workspaces-advanced",
+            "Advanced",
+            self.advanced_open,
+            p,
+            cx.listener(|view, _, _, cx| {
+              view.advanced_open = !view.advanced_open;
+              cx.notify();
+            }),
+          )),
+      )
+      .when(self.advanced_open, |this| {
+        this.child(
+          div()
+            .flex()
+            .gap_3()
+            .child(field(
+              "Sparse paths (one per line)",
+              "open-workspaces-sparse",
+              sparse,
+            ))
+            .child(field(
+              "Symlink from home repo (one per line)",
+              "open-workspaces-symlinks",
+              symlinks,
+            )),
+        )
+      })
   }
 
   /// The lines' column: the text, what it will open, and the buttons.
   fn lines_column(
     &self,
     lines: &Entity<TextareaState>,
+    options: Div,
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Div {
@@ -640,7 +844,7 @@ impl OpenWorkspacesDialog {
     let status = if unchecked > 0 {
       format!("Checking {}...", plural(unchecked, "1 line", "lines"))
     } else if targets.is_empty() {
-      "Nothing to open yet.".to_string()
+      "Nothing to create yet.".to_string()
     } else {
       summary_future(new, existing)
     };
@@ -655,13 +859,13 @@ impl OpenWorkspacesDialog {
           .flex()
           .flex_col()
           .gap(zpx(6.))
-          .child(label_xs("Branches or links"))
+          .child(label_xs("Workspaces"))
           .child(
             div()
               .debug_selector(|| "open-workspaces-lines".into())
               .child(ui::text(
                 Textarea::new(lines)
-                  .aria_label("Branches or links")
+                  .aria_label("Workspaces")
                   .disabled(self.pending),
                 TextSize::Sm,
               )),
@@ -669,9 +873,10 @@ impl OpenWorkspacesDialog {
           .child(
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
-              .child("One per line: a branch name, or a GitHub pull request or branch link of one of your repositories."),
+              .child("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories."),
           ),
       )
+      .child(options)
       .child(self.status(status, invalid, checks.len() + self.chosen.len() + self.chosen_issues.len(), p, cx))
       .when(self.lines_open, |this| this.child(self.lines_popover(&checks, p, cx)))
       .when(!self.errors.is_empty(), |this| {
@@ -708,12 +913,12 @@ impl OpenWorkspacesDialog {
             Button::new("open-workspaces-submit", p)
               .disabled(!self.can_submit())
               .label(if self.pending {
-                "Opening...".to_string()
+                "Creating...".to_string()
               } else {
                 match targets.len() {
-                  0 => "Open Workspaces".to_string(),
-                  1 => "Open 1 Workspace".to_string(),
-                  n => format!("Open {n} Workspaces"),
+                  0 => "Create Workspaces".to_string(),
+                  1 => "Create 1 Workspace".to_string(),
+                  n => format!("Create {n} Workspaces"),
                 }
               })
               .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
@@ -1156,6 +1361,94 @@ fn pick_row(
     .child(item)
 }
 
+/// How the dialog's targets are opened or made.
+struct Plan {
+  repo_path: String,
+  stack_on: Option<String>,
+  sparse_paths: String,
+  symlinked_dirs: String,
+}
+
+impl Plan {
+  /// Opens existing branches a repository at a time, makes new ones on the
+  /// Stack on branch, and opens Linear issues as the Linear view does; each
+  /// result in the targets' order.
+  fn run(&self, host: &dyn OpenWorkspacesHost, targets: Vec<Target>) -> Vec<(Target, Opened)> {
+    let mut results: Vec<Option<Opened>> = vec![None; targets.len()];
+    let mut repos: Vec<&str> = Vec::new();
+    for target in &targets {
+      if !repos.contains(&target.repo_path.as_str()) {
+        repos.push(&target.repo_path);
+      }
+    }
+    for repo in repos {
+      let default = WorkspaceDialogHost::default_branch(host, repo).unwrap_or_default();
+      // Only the repository on screen has a Stack on select.
+      let stack_on = Some(repo)
+        .filter(|r| *r == self.repo_path)
+        .and(self.stack_on.clone())
+        .unwrap_or_else(|| default.clone());
+      let batch: Vec<usize> = (0..targets.len())
+        .filter(|&i| {
+          let t = &targets[i];
+          t.repo_path == repo && t.issue.is_none() && !t.create
+        })
+        .collect();
+      if !batch.is_empty() {
+        let requests: Vec<_> = batch
+          .iter()
+          .map(|&i| targets[i].request(&stack_on))
+          .collect();
+        for (i, opened) in batch.into_iter().zip(host.open_workspaces(repo, &requests)) {
+          results[i] = Some(opened);
+        }
+      }
+      for (i, target) in targets.iter().enumerate() {
+        if target.repo_path != repo || !target.create {
+          continue;
+        }
+        let metadata = dialog_data::create_metadata(
+          target.title.as_deref().unwrap_or_default(),
+          "",
+          None,
+          &self.sparse_paths,
+          &self.symlinked_dirs,
+        );
+        // The default branch is where a plain workspace starts already.
+        let on = Some(stack_on.as_str()).filter(|b| *b != default);
+        let mut created = None;
+        let made = dialog_data::create_on_target(
+          host,
+          repo,
+          &target.branch,
+          None,
+          on,
+          &metadata,
+          &mut created,
+        );
+        results[i] = Some(match (made, created) {
+          (Ok(id), _) => Ok((id, true)),
+          (Err(err), Some(id)) => {
+            log::warn!("new workspaces: {} was made, but: {err}", target.branch);
+            Ok((id, true))
+          }
+          (Err(err), None) => Err(err),
+        });
+      }
+    }
+    for (i, target) in targets.iter().enumerate() {
+      if let Some(issue) = &target.issue {
+        results[i] = Some(host.open_issue(&target.repo_path, issue));
+      }
+    }
+    targets
+      .into_iter()
+      .zip(results)
+      .map(|(t, r)| (t, r.unwrap_or_else(|| Err("Not opened".into()))))
+      .collect()
+  }
+}
+
 /// `n` as "1 thing" or "n things".
 fn plural(n: usize, one: &str, many: &str) -> String {
   if n == 1 {
@@ -1240,6 +1533,8 @@ fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -
   detail.push(
     if target.existing {
       "already open"
+    } else if target.create {
+      "new branch"
     } else {
       "new"
     }
@@ -1307,14 +1602,18 @@ impl Render for OpenWorkspacesDialog {
       return div().into_any_element();
     }
     let p = theme::palette(self.dark);
-    let (lines, search, issue_search) = {
+    let (lines, search, issue_search, sparse, symlinks) = {
       let fields = self.fields(window, cx);
       (
         fields.lines.clone(),
         fields.search.clone(),
         fields.issue_search.clone(),
+        fields.sparse.clone(),
+        fields.symlinks.clone(),
       )
     };
+    let select = self.stack_select(window, cx);
+    let options = self.create_options(select, &sparse, &symlinks, &p, cx);
     let split = self.integration().is_some();
     let viewport = window.viewport_size();
     let (backdrop, panel) = dialog_panel(
@@ -1341,21 +1640,21 @@ impl Render for OpenWorkspacesDialog {
     let body = div()
       .flex()
       .gap_4()
-      .h(zpx(460.))
+      .h(zpx(500.))
       .max_h(viewport.height - px(160.))
       .pt_4()
-      .child(self.lines_column(&lines, &p, cx))
+      .child(self.lines_column(&lines, options, &p, cx))
       .when(split, |this| {
         this.child(self.integrations_column((&search, &issue_search), &p, cx))
       });
     let panel = panel
       .child(dialog_header(
-        "Open Workspaces",
+        "New Workspaces",
         dialog_description(
           if split {
-            "Open a workspace for each branch or link, and each item you pick."
+            "Create a workspace for each line, and for each item you pick."
           } else {
-            "Open a workspace for each branch or link."
+            "Create a workspace for each line."
           },
           &p,
         ),

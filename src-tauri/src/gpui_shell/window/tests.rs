@@ -654,7 +654,7 @@ fn the_open_workspaces_dialog_selects_the_first_workspace_opened(cx: &mut TestAp
   let modal = format!("{:?}", window.screen_snapshot().modal);
   assert!(
     modal
-      .contains(r#"OpenWorkspaces(Route { repo_path: "/repo", repos: ["/repo"], linear: false })"#),
+      .contains(r#"OpenWorkspaces(Route { repo_path: "/repo", repos: ["/repo"], linear: false, stack_on: None })"#),
     "{modal}"
   );
 

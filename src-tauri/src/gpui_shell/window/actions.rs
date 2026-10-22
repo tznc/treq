@@ -74,7 +74,7 @@ impl Model {
   pub fn shortcut(&mut self, shortcut: Shortcut, data: &Data) -> Vec<Effect> {
     let repo = self.has_repo();
     match shortcut {
-      Shortcut::NewWorkspace if repo => self.open_workspace_dialog(json!({})),
+      Shortcut::NewWorkspace if repo => self.new_workspaces(None),
       Shortcut::Stack if repo => return self.stack(data),
       Shortcut::Palette => self.dialogs.palette = true,
       Shortcut::AgentPrompt if repo => {
@@ -169,9 +169,7 @@ impl Model {
         done()
       }
       SidebarAction::OpenWorkspaces => {
-        if !repo.is_empty() {
-          self.dialogs.open_workspaces = true;
-        }
+        self.new_workspaces(None);
         done()
       }
       SidebarAction::OpenLinear => {
@@ -192,7 +190,10 @@ impl Model {
         done()
       }
       SidebarAction::Stack { id } => match (id, find(*id)) {
-        (None, _) => Some(self.stack_home(data)),
+        (None, _) => {
+          self.stack_home(data);
+          done()
+        }
         (Some(_), Some(workspace)) => {
           self.stack_on(&workspace);
           done()
@@ -250,7 +251,7 @@ impl Model {
       // The dialogs.
       "workspaceDialog.close" => self.dialogs.workspace_dialog = None,
       "renameWorkspace.close" => self.dialogs.rename = None,
-      "openWorkspaces.close" => self.dialogs.open_workspaces = false,
+      "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
       "changeMove.done" => {
         self.dialogs.change_move = None;
@@ -415,7 +416,7 @@ impl Model {
       field if field.starts_with("terminal.") => return self.terminal_field(field, value, data),
       // The dialogs.
       "openWorkspaces.opened" => {
-        self.dialogs.open_workspaces = false;
+        self.dialogs.open_workspaces = None;
         let (Some(repo_path), Some(id)) = (value["repoPath"].as_str(), value["id"].as_i64()) else {
           return done();
         };
@@ -1201,10 +1202,12 @@ mod tests {
   fn shortcuts_open_dialogs_and_zoom() {
     let (mut model, data) = (model(), data());
     model.shortcut(Shortcut::NewWorkspace, &data);
-    assert_eq!(
-      model.dialogs.workspace_dialog.as_ref().unwrap().1,
-      json!({})
-    );
+    assert_eq!(model.dialogs.open_workspaces, Some(None));
+    // Stacking opens the same dialog.
+    model.dialogs.open_workspaces = None;
+    model.shortcut(Shortcut::Stack, &data);
+    assert!(model.dialogs.open_workspaces.is_some());
+    assert!(model.dialogs.workspace_dialog.is_none());
     model.shortcut(Shortcut::ToggleShortcuts, &data);
     assert!(model.dialogs.shortcuts);
     model.shortcut(Shortcut::Escape, &data);

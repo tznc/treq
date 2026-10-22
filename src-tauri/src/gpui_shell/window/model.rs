@@ -169,8 +169,9 @@ pub struct Dialogs {
   pub workspace_dialog_key: u64,
   /// `renameTarget`: repository, workspace id and branch.
   pub rename: Option<(String, i64, String)>,
-  /// The sidebar's Open Workspaces dialog.
-  pub open_workspaces: bool,
+  /// The New Workspaces dialog, and the branch it stacks new workspaces on
+  /// (`None`: the default branch).
+  pub open_workspaces: Option<Option<String>>,
   pub deletion: bool,
   pub change_move: Option<ChangeMove>,
   pub agent_prompt: Option<AgentPrompt>,
@@ -583,45 +584,33 @@ impl Model {
     self.dialogs.workspace_dialog = Some((self.dialogs.workspace_dialog_key, defaults));
   }
 
+  /// Opens the New Workspaces dialog, stacking on `stack_on` (the default
+  /// branch when `None`).
+  pub fn new_workspaces(&mut self, stack_on: Option<String>) {
+    if !self.repo().is_empty() {
+      self.dialogs.open_workspaces = Some(stack_on);
+    }
+  }
+
   /// `handleCreateStackedWorkspace`: on the selected workspace, or the home
   /// branch.
   pub fn stack(&mut self, data: &Data) -> Vec<Effect> {
     match self.selected_workspace(data).cloned() {
-      Some(workspace) => {
-        self.open_workspace_dialog(json!({
-          "targetBranch": workspace.branch_name,
-          "source": workspace_source(&workspace),
-        }));
-        Vec::new()
-      }
+      Some(workspace) => self.stack_on(&workspace),
       None => self.stack_home(data),
     }
+    Vec::new()
   }
 
-  /// `openHomeStackDialog`: on the home branch, once it is known.
-  pub fn stack_home(&mut self, data: &Data) -> Vec<Effect> {
-    match data.home_stack_branch(self.repo()) {
-      Some(branch) => {
-        self.open_workspace_dialog(json!({
-          "targetBranch": branch,
-          "source": {"kind": "home"},
-        }));
-        Vec::new()
-      }
-      None => vec![Effect::Toast {
-        tone: super::super::native::ToastTone::Error,
-        title: "Cannot create stacked workspace".into(),
-        description: "No parent branch available".into(),
-      }],
-    }
+  /// `openHomeStackDialog`: on the home branch, or the default branch until
+  /// it is known.
+  pub fn stack_home(&mut self, data: &Data) {
+    self.new_workspaces(data.home_stack_branch(self.repo()));
   }
 
   /// `handleAddAfter`.
   pub fn stack_on(&mut self, workspace: &Workspace) {
-    self.open_workspace_dialog(json!({
-      "targetBranch": workspace.branch_name,
-      "source": workspace_source(workspace),
-    }));
+    self.new_workspaces(Some(workspace.branch_name.clone()));
   }
 
   /// `handleStashApplyToNewWorkspace`.

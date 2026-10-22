@@ -1,6 +1,6 @@
-//! What the sidebar's Open Workspaces dialog reads and does: which branch
-//! each pasted line names, whether it can be opened, and the backend calls
-//! that open them.
+//! What the New Workspaces dialog reads and does: which branch each line
+//! names, whether it opens an existing branch or creates a new one, and the
+//! backend calls that do it.
 
 use std::collections::HashSet;
 
@@ -29,6 +29,9 @@ pub struct Route {
   /// The Linear integration is on, so the dialog offers the user's issues.
   #[serde(default)]
   pub linear: bool,
+  /// The branch new workspaces stack on; the default branch when `None`.
+  #[serde(default)]
+  pub stack_on: Option<String>,
 }
 
 /// What a pasted line names.
@@ -40,6 +43,8 @@ pub enum Line {
   RepoBranch { repo: String, branch: String },
   /// `github.com/{repo}/pull/{number}`.
   Pr { repo: String, number: u64 },
+  /// A new workspace's title; its branch follows the repository's pattern.
+  Title(String),
   /// Not a branch or a link the dialog reads, and why.
   Invalid(String),
 }
@@ -65,8 +70,11 @@ pub fn parse_line(line: &str) -> Line {
   if let Some(path) = bare.strip_prefix("github.com/") {
     return parse_github_path(path);
   }
-  if line.contains("://") || line.chars().any(char::is_whitespace) {
-    return Line::Invalid("Not a branch name or a GitHub link".into());
+  if line.contains("://") {
+    return Line::Invalid("Not a GitHub link".into());
+  }
+  if line.chars().any(char::is_whitespace) {
+    return Line::Title(line.to_string());
   }
   let branch = line.strip_prefix("refs/heads/").unwrap_or(line);
   let branch = branch.strip_suffix("@origin").unwrap_or(branch);
@@ -98,21 +106,25 @@ fn parse_github_path(path: &str) -> Line {
 pub struct Target {
   pub repo_path: String,
   pub branch: String,
-  /// The rebase target: the pull request's base, or the default branch.
-  pub base: String,
+  /// The rebase target: the pull request's base, or `None` for the branch
+  /// the dialog stacks on.
+  pub base: Option<String>,
   pub title: Option<String>,
   pub pr: Option<u64>,
   /// The Linear issue the workspace is for; its branch is made when missing.
   pub issue: Option<LinearIssue>,
   /// A workspace for the branch is open already.
   pub existing: bool,
+  /// The branch does not exist yet, so the workspace makes it.
+  pub create: bool,
 }
 
 impl Target {
-  pub fn request(&self) -> BranchWorkspaceRequest {
+  /// Opens the existing branch, stacked on its base or `stack_on`.
+  pub fn request(&self, stack_on: &str) -> BranchWorkspaceRequest {
     BranchWorkspaceRequest {
       head_branch: self.branch.clone(),
-      base_branch: self.base.clone(),
+      base_branch: self.base.clone().unwrap_or_else(|| stack_on.to_string()),
       title: self.title.clone(),
       description: self.pr.map(|n| format!("From GitHub PR #{n}")),
     }
@@ -123,11 +135,12 @@ impl Target {
     Self {
       repo_path: repo_path.to_string(),
       branch: pr.head_ref_name.clone(),
-      base: pr.base_ref_name.clone(),
+      base: Some(pr.base_ref_name.clone()),
       title: Some(pr.title.clone()),
       pr: Some(pr.number),
       issue: None,
       existing,
+      create: false,
     }
   }
 
@@ -136,11 +149,12 @@ impl Target {
     Self {
       repo_path: repo_path.to_string(),
       branch: issue.branch_name.clone(),
-      base: String::new(),
+      base: None,
       title: Some(issue.title.clone()),
       pr: None,
       issue: Some(issue.clone()),
       existing,
+      create: false,
     }
   }
 }
@@ -226,12 +240,14 @@ pub fn remotes(host: &dyn OpenWorkspacesHost, repos: &[String]) -> Vec<(String, 
     .collect()
 }
 
-/// Checks `line` against the backend: the repository it belongs to, that
-/// its branch exists, and whether a workspace is open for it.
+/// Checks `line` against the backend: the repository it belongs to,
+/// whether its branch exists or is made, and whether a workspace is open for
+/// it. `pattern` names a title's branch.
 pub fn check(
   host: &dyn OpenWorkspacesHost,
   repo_path: &str,
   remotes: &[(String, String)],
+  pattern: &str,
   line: &Line,
 ) -> Checked {
   let repo_of = |full_name: &str| {
@@ -246,23 +262,30 @@ pub fn check(
     Line::Branch(branch) => {
       // `git branch -r` prints `origin/feat`.
       let short = branch.strip_prefix("origin/");
-      let branch = if branch_exists(host, repo_path, branch)? {
-        branch.as_str()
+      if branch_exists(host, repo_path, branch)? {
+        branch_target(host, repo_path, branch, None)
       } else if let Some(short) =
         short.filter(|s| branch_exists(host, repo_path, s).unwrap_or(false))
       {
-        short
+        branch_target(host, repo_path, short, None)
       } else {
-        return Err(format!("No branch '{branch}' locally or on the remote"));
-      };
-      branch_target(host, repo_path, branch)
+        new_target(host, repo_path, branch, None)
+      }
+    }
+    Line::Title(title) => {
+      let branch = super::workspace_dialog_data::branch_from_title(pattern, title);
+      if branch_exists(host, repo_path, &branch)? {
+        branch_target(host, repo_path, &branch, Some(title))
+      } else {
+        new_target(host, repo_path, &branch, Some(title))
+      }
     }
     Line::RepoBranch { repo, branch } => {
       let path = repo_of(repo)?;
       if !branch_exists(host, &path, branch)? {
         return Err(format!("No branch '{branch}' in {repo}"));
       }
-      branch_target(host, &path, branch)
+      branch_target(host, &path, branch, None)
     }
     Line::Pr { repo, number } => {
       let path = repo_of(repo)?;
@@ -294,19 +317,45 @@ fn branch_exists(
   Ok(status.local_exists || status.remote_exists)
 }
 
-fn branch_target(host: &dyn OpenWorkspacesHost, repo_path: &str, branch: &str) -> Checked {
-  let base = WorkspaceDialogHost::default_branch(host, repo_path)?;
-  if branch == base {
+fn branch_target(
+  host: &dyn OpenWorkspacesHost,
+  repo_path: &str,
+  branch: &str,
+  title: Option<&str>,
+) -> Checked {
+  let default = WorkspaceDialogHost::default_branch(host, repo_path)?;
+  if branch == default {
     return Err(format!("'{branch}' is the default branch"));
   }
   Ok(Target {
     repo_path: repo_path.to_string(),
     branch: branch.to_string(),
-    base,
-    title: None,
+    base: None,
+    title: title.map(str::to_string),
     pr: None,
     issue: None,
     existing: is_open(host, repo_path, branch),
+    create: false,
+  })
+}
+
+/// A branch no one has made yet, made for a new workspace.
+fn new_target(
+  host: &dyn OpenWorkspacesHost,
+  repo_path: &str,
+  branch: &str,
+  title: Option<&str>,
+) -> Checked {
+  core::validate_branch_name(branch).map_err(|err| {
+    let prefix = format!("Invalid branch name '{branch}': ");
+    format!(
+      "Not a valid branch name: {}",
+      err.strip_prefix(&prefix).unwrap_or(&err)
+    )
+  })?;
+  Ok(Target {
+    create: true,
+    ..branch_target(host, repo_path, branch, title)?
   })
 }
 
@@ -397,7 +446,6 @@ mod tests {
       "https://github.com/acme/app/issues/3",
       "https://github.com/acme/app/pull/abc",
       "https://gitlab.com/acme/app/pull/1",
-      "two words",
     ] {
       assert!(matches!(parse_line(line), Line::Invalid(_)), "{line}");
     }
@@ -442,6 +490,14 @@ mod tests {
 
     let (list, mine) = issue_list(&issues, Some("me"), "eng-3");
     assert_eq!((ids(&list), mine), (vec!["3".to_string()], false));
+  }
+
+  #[test]
+  fn parse_line_reads_titles() {
+    assert_eq!(
+      parse_line(" Fix the login flow "),
+      Line::Title("Fix the login flow".into())
+    );
   }
 
   #[test]
