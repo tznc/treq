@@ -982,7 +982,11 @@ mod tests {
     assert_eq!(model.selected, Some(2));
     assert!(model.multi.is_empty());
     model.sidebar_action(&click(3, false, true), &data);
-    assert_eq!(model.multi.iter().copied().collect::<Vec<_>>(), [3]);
+    assert_eq!(
+      model.multi.iter().copied().collect::<Vec<_>>(),
+      [2, 3],
+      "the open workspace joins the selection"
+    );
     model.sidebar_action(&click(2, true, false), &data);
     assert_eq!(model.multi.len(), 2, "a range from the last click");
     model.sidebar_action(&SidebarAction::ClearSelection, &data);
