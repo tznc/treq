@@ -1,0 +1,106 @@
+id: gpui-clickable-needs-cursor
+snapshots:
+  ? |
+    fn clickable() -> Stateful<Div> {
+      div().id("row").on_click(f)
+    }
+  : labels:
+    - source: div().id("row").on_click(f)
+      style: primary
+      start: 36
+      end: 63
+    - source: on_click
+      style: secondary
+      start: 52
+      end: 60
+    - source: div().id("row").on_click
+      style: secondary
+      start: 36
+      end: 60
+    - source: div()
+      style: secondary
+      start: 36
+      end: 41
+    - source: div()
+      style: secondary
+      start: 36
+      end: 41
+  ? |
+    fn conditional_click() -> Stateful<Div> {
+      div().id("row").when(enabled, |this| this.on_click(f))
+    }
+  : labels:
+    - source: this.on_click(f)
+      style: primary
+      start: 81
+      end: 97
+    - source: on_click
+      style: secondary
+      start: 86
+      end: 94
+    - source: this.on_click
+      style: secondary
+      start: 81
+      end: 94
+    - source: div()
+      style: secondary
+      start: 44
+      end: 49
+    - source: div()
+      style: secondary
+      start: 44
+      end: 49
+  ? |
+    fn cursor_on_child_only() -> Stateful<Div> {
+      div().id("row").child(div().cursor_pointer()).on_click(f)
+    }
+  : labels:
+    - source: div().id("row").child(div().cursor_pointer()).on_click(f)
+      style: primary
+      start: 47
+      end: 104
+    - source: on_click
+      style: secondary
+      start: 93
+      end: 101
+    - source: div().id("row").child(div().cursor_pointer()).on_click
+      style: secondary
+      start: 47
+      end: 101
+    - source: div()
+      style: secondary
+      start: 47
+      end: 52
+    - source: div()
+      style: secondary
+      start: 47
+      end: 52
+  ? |
+    fn role_only() -> Stateful<Div> {
+      div().id("tab").role(Role::Tab).aria_label("Tab")
+    }
+  : labels:
+    - source: div().id("tab").role(Role::Tab)
+      style: primary
+      start: 36
+      end: 67
+    - source: role
+      style: secondary
+      start: 52
+      end: 56
+    - source: div().id("tab").role
+      style: secondary
+      start: 36
+      end: 56
+    - source: (Role::Tab)
+      style: secondary
+      start: 56
+      end: 67
+    - source: div()
+      style: secondary
+      start: 36
+      end: 41
+    - source: div()
+      style: secondary
+      start: 36
+      end: 41

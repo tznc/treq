@@ -1145,6 +1145,7 @@ fn menu_row(
     .rounded_sm()
     .text_color(color)
     .when(highlighted, |this| this.bg(hover_bg))
+    .cursor_pointer()
     .hover(move |style| style.bg(hover_bg))
     .when_some(icon, |this, icon| {
       this.child(

@@ -1166,6 +1166,7 @@ impl ChangesView {
                 .flex_none()
                 .p_1()
                 .rounded(zpx(4.))
+                .cursor_pointer()
                 .hover(move |s| s.bg(accent))
                 .child(ui::icon(theme::ICON_X, 12., muted))
                 .on_click(cx.listener(move |view, _, _, cx| {
