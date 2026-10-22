@@ -126,7 +126,11 @@ Deno.serve(async (req) => {
   }
 
   const redirectUri = `${Deno.env.get("WEB_URL") ?? "https://treq.dev"}/integrations/linear/callback`;
-  let tokenResponse;
+  let tokenResponse: {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
   try {
     const tokenRes = await fetch("https://api.linear.app/oauth/token", {
       method: "POST",

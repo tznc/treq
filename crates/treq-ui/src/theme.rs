@@ -421,9 +421,6 @@ pub struct Palette {
   pub destructive_foreground: Hsla,
   /// `--input`, the border of outline buttons and text fields.
   pub input: Hsla,
-  /// `--ring`, the focus outline.
-  #[allow(dead_code)]
-  pub ring: Hsla,
   /// Tailwind green-500, a passed check.
   pub success: Hsla,
   /// Picks the Prism theme for highlighted code: vsc-dark-plus or vs.
@@ -482,7 +479,6 @@ pub fn palette(dark: bool) -> Palette {
       secondary_foreground: token(0., 0., 95.),
       destructive_foreground: token(0., 0., 100.),
       input: token(0., 0., 25.),
-      ring: token(211., 100., 55.),
       success: rgb(0x22c55e).into(),
       dark: true,
     }
@@ -515,7 +511,6 @@ pub fn palette(dark: bool) -> Palette {
       secondary_foreground: token(0., 0., 13.),
       destructive_foreground: token(0., 0., 100.),
       input: token(220., 13., 91.),
-      ring: token(211., 100., 50.),
       success: rgb(0x22c55e).into(),
       dark: false,
     }

@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
 
   // Look up the repo + installation, verifying the user owns it and, to
   // enqueue, that its owner has Pro.
-  let access;
+  let access: Awaited<ReturnType<typeof authorizeQueueAction>>;
   try {
     access = await authorizeQueueAction(
       { userId: user.id, repoFullName: repo_full_name, action },

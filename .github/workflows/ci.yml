@@ -55,6 +55,7 @@ jobs:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
               - "test/**"
+              - "supabase/functions/**"
               - "package.json"
               - "package-lock.json"
               - "biome.json"

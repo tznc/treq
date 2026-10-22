@@ -67,12 +67,11 @@ Deno.test("sprites adapter creates a deterministic sprite without Machines confi
       manifestVersion: 1,
       idempotencyKey: "idem-create",
     });
+    assertEquals(capturedBodies, [{ name: "dev-treq-user-1" }]);
+    assertEquals(instance.state, "ready");
   } finally {
     globalThis.fetch = originalFetch;
   }
-
-  assertEquals(capturedBodies, [{ name: "dev-treq-user-1" }]);
-  assertEquals(instance.state, "ready");
 });
 
 Deno.test("sprites adapter executes argv through the documented HTTP endpoint", async () => {

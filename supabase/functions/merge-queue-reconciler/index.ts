@@ -46,7 +46,9 @@ async function resetOrphanedTestingEntries(
 
   let repaired = 0;
   for (const entry of data ?? []) {
-    const memberships = (entry.ci_run_entries ?? []) as Array<{
+    // PostgREST returns the to-one ci_runs as an object; the generated type
+    // says array.
+    const memberships = (entry.ci_run_entries ?? []) as unknown as Array<{
       ci_runs: { status: string } | null;
     }>;
     const hasActiveRun = memberships.some(

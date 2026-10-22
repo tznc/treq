@@ -17,8 +17,7 @@ pub const MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 pub struct TelemetryGuards {
   // Held only for its Drop impl, which flushes the non-blocking writer.
-  #[allow(dead_code)]
-  file_guard: WorkerGuard,
+  _file_guard: WorkerGuard,
   /// Where the log files are written; the Logs tab's "System" source reads them.
   pub log_dir: PathBuf,
 }
@@ -60,7 +59,7 @@ pub fn init(log_dir: &Path) -> Result<TelemetryGuards, Box<dyn std::error::Error
   tracing::subscriber::set_global_default(subscriber)?;
 
   Ok(TelemetryGuards {
-    file_guard,
+    _file_guard: file_guard,
     log_dir: log_dir.to_path_buf(),
   })
 }

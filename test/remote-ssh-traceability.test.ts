@@ -17,7 +17,7 @@ function acceptanceCriteriaSection(markdown: string): string {
   return nextSection === -1 ? afterHeading : afterHeading.slice(0, nextSection);
 }
 
-export function countPrdAcceptanceCriteria(markdown: string): number {
+function countPrdAcceptanceCriteria(markdown: string): number {
   const section = acceptanceCriteriaSection(markdown);
   return section.match(/^\d+\.\s+/gm)?.length ?? 0;
 }
@@ -33,7 +33,7 @@ function matrixSection(markdown: string): string {
   return nextSection === -1 ? afterHeading : afterHeading.slice(0, nextSection);
 }
 
-export function countReadmeMatrixRows(markdown: string): number {
+function countReadmeMatrixRows(markdown: string): number {
   const section = matrixSection(markdown);
   return section.match(/^\| \d+ \|/gm)?.length ?? 0;
 }

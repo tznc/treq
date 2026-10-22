@@ -665,7 +665,7 @@ mod tests {
   #[test]
   fn start_list_stop_lifecycle_round_trips_against_a_real_tmux_server() {
     if !tmux_available() {
-      eprintln!("skipping: tmux not installed in this environment");
+      tracing::warn!("skipping: tmux not installed in this environment");
       return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -730,7 +730,7 @@ mod tests {
   #[test]
   fn stop_session_does_not_kill_a_session_whose_name_extends_the_target() {
     if !tmux_available() {
-      eprintln!("skipping: tmux not installed in this environment");
+      tracing::warn!("skipping: tmux not installed in this environment");
       return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -760,7 +760,7 @@ mod tests {
   #[test]
   fn attach_command_reattaches_to_an_existing_session_without_recreating_it() {
     if !tmux_available() {
-      eprintln!("skipping: tmux not installed in this environment");
+      tracing::warn!("skipping: tmux not installed in this environment");
       return;
     }
     let dir = tempfile::tempdir().unwrap();
