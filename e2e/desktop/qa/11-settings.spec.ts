@@ -58,7 +58,6 @@ test("settings: repository", async ({ page }) => {
       "The preview under Branch Name Pattern follows the edit (qa/add-dark-mode)",
       "Save Settings reads as the primary action; unsaved state is visible",
     ],
-    issue: "The preview still reads 'treq/{name} → treq/add-dark-mode' after the edit",
   });
   await pattern.fill("treq/{name}");
 });
@@ -123,11 +122,13 @@ test("settings: application and live theme switch", async ({ page }) => {
 
 test("settings: account, integrations, skills, feature preview", async ({ page }) => {
   await settings(page, "Account");
+  // The pasted-callback box is for `cargo run` builds only.
+  await expect(page.getByRole("textbox", { name: "treq://auth/callback?token=..." })).toHaveCount(0);
   await capture(page, {
     name: "11-settings-account",
     title: "Settings: Account tab (signed out)",
     expectations: [
-      "Sign in with Browser, and the paste-a-callback field with Go",
+      "Sign in with Browser, and no Dev paste-a-callback panel",
       "Copy explains what an account adds",
     ],
   });
@@ -177,11 +178,14 @@ test("settings: account, integrations, skills, feature preview", async ({ page }
   await page.getByRole("textbox", { name: "Search by name or description" }).fill("");
 
   await settings(page, "Feature Preview");
+  await expect(page.getByRole("button", { name: "Logs docs" })).toBeVisible();
   await capture(page, {
     name: "11-settings-feature-preview",
     title: "Settings: Feature Preview tab",
-    expectations: ["Each preview with a switch on the right and a description"],
-    issue: "Feature names are blue like links and have no descriptions",
+    expectations: [
+      "Feature names in plain text, not link-coloured",
+      "Each row has a Docs button and a switch on the right",
+    ],
   });
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await settle(page, 800);
