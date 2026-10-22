@@ -182,6 +182,25 @@ pub struct Dialogs {
   pub file_picker: bool,
 }
 
+impl Dialogs {
+  /// Whether any dialog or overlay is open, so a shortcut does not open
+  /// another over it.
+  pub fn any_open(&self) -> bool {
+    self.workspace_dialog.is_some()
+      || self.rename.is_some()
+      || self.deletion
+      || self.change_move.is_some()
+      || self.agent_prompt.is_some()
+      || self.prompt_history.is_some()
+      || self.stash
+      || self.palette
+      || self.shortcuts
+      || self.workspace_picker
+      || self.branch_switcher
+      || self.file_picker
+  }
+}
+
 /// `TerminalSessionSummary`, as far as the sidebar reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSummary {

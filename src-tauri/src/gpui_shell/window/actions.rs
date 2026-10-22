@@ -73,18 +73,22 @@ impl Model {
   /// A keyboard shortcut.
   pub fn shortcut(&mut self, shortcut: Shortcut, data: &Data) -> Vec<Effect> {
     let repo = self.has_repo();
+    // One dialog at a time: Escape only reaches the one on top.
+    let free = !self.dialogs.any_open();
     match shortcut {
-      Shortcut::NewWorkspace if repo => self.open_workspace_dialog(json!({})),
-      Shortcut::Stack if repo => return self.stack(data),
-      Shortcut::Palette => self.dialogs.palette = true,
-      Shortcut::AgentPrompt if repo => {
+      Shortcut::NewWorkspace if repo && free => self.open_workspace_dialog(json!({})),
+      Shortcut::Stack if repo && free => return self.stack(data),
+      Shortcut::Palette if free => self.dialogs.palette = true,
+      Shortcut::AgentPrompt if repo && free => {
         self
           .dialogs
           .agent_prompt
           .get_or_insert_with(Default::default);
       }
-      Shortcut::FilePicker if repo => self.dialogs.file_picker = true,
-      Shortcut::ToggleShortcuts => self.dialogs.shortcuts = !self.dialogs.shortcuts,
+      Shortcut::FilePicker if repo && free => self.dialogs.file_picker = true,
+      Shortcut::ToggleShortcuts if free || self.dialogs.shortcuts => {
+        self.dialogs.shortcuts = !self.dialogs.shortcuts;
+      }
       Shortcut::Escape => {
         self.dialogs.palette = false;
         self.dialogs.file_picker = false;
@@ -932,7 +936,7 @@ mod tests {
   use std::collections::HashMap;
 
   use super::{
-    super::{data::RepoRead, tree::tests::workspace},
+    super::{data::RepoRead, model::Dialogs, tree::tests::workspace},
     *,
   };
   use crate::local_db::Session;
@@ -1183,6 +1187,7 @@ mod tests {
       model.dialogs.workspace_dialog.as_ref().unwrap().1,
       json!({})
     );
+    model.dialogs.workspace_dialog = None;
     model.shortcut(Shortcut::ToggleShortcuts, &data);
     assert!(model.dialogs.shortcuts);
     model.shortcut(Shortcut::Escape, &data);
@@ -1198,6 +1203,39 @@ mod tests {
     );
     model.shortcut(Shortcut::ToggleTerminal, &data);
     assert_eq!(model.commands.last().unwrap()["kind"], "toggleCollapse");
+  }
+
+  #[test]
+  fn shortcuts_do_not_open_a_dialog_over_another() {
+    let (mut model, data) = (model(), data());
+    model.selected = Some(2);
+    model.shortcut(Shortcut::Stack, &data);
+    let stack = model.dialogs.workspace_dialog.clone();
+    assert!(stack.is_some());
+    for shortcut in [
+      Shortcut::AgentPrompt,
+      Shortcut::NewWorkspace,
+      Shortcut::Stack,
+      Shortcut::Palette,
+      Shortcut::FilePicker,
+      Shortcut::ToggleShortcuts,
+    ] {
+      model.shortcut(shortcut, &data);
+    }
+    assert_eq!(model.dialogs.workspace_dialog, stack, "the same dialog");
+    assert_eq!(
+      model.dialogs,
+      Dialogs {
+        workspace_dialog: stack,
+        workspace_dialog_key: model.dialogs.workspace_dialog_key,
+        ..Dialogs::default()
+      },
+      "nothing over it"
+    );
+    model.dialogs.shortcuts = true;
+    model.dialogs.workspace_dialog = None;
+    model.shortcut(Shortcut::ToggleShortcuts, &data);
+    assert!(!model.dialogs.shortcuts, "closes its own");
   }
 
   #[test]

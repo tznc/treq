@@ -723,6 +723,30 @@ fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn shortcuts_do_not_stack_a_dialog_over_another(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::NewWorkspace, cx));
+  assert!(window.last().screen.unwrap().modal.is_some());
+  for shortcut in [
+    Shortcut::AgentPrompt,
+    Shortcut::Palette,
+    Shortcut::FilePicker,
+  ] {
+    window
+      .controller
+      .update(cx, |c, cx| c.shortcut(shortcut, cx));
+  }
+  let shown = window.last();
+  assert!(shown.modal.is_none() && shown.overlay.is_none() && shown.file_picker.is_none());
+  assert!(
+    shown.screen.unwrap().modal.is_some(),
+    "still the only dialog"
+  );
+}
+
+#[gpui::test]
 fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));
