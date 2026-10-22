@@ -9,14 +9,16 @@
 use crate::gpui_shell::ui::zpx;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState},
   select::{Select, SelectEvent, SelectState},
   IndexPath,
 };
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, Context, Div, Entity, FocusHandle,
-  FontWeight, Hsla, KeyDownEvent, MouseButton, SharedString, Stateful, Subscription, Task, Window,
+  self, anchored, deferred, div, point, prelude::*, px, App, ClickEvent, Context, Div, Entity,
+  FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, SharedString, Stateful, Subscription,
+  Task, Window,
 };
 
 use super::{
@@ -950,12 +952,22 @@ fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<D
     .child(label)
 }
 
-/// A collapsible section's toggle: a chevron and its label.
-fn disclosure(id: &'static str, label: &'static str, open: bool, p: &Palette) -> Stateful<Div> {
+/// A collapsible section's toggle: a chevron and its label, a button named
+/// by the label.
+fn disclosure(
+  id: &'static str,
+  label: &'static str,
+  open: bool,
+  p: &Palette,
+  on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
   let fg = p.foreground;
   ui::text(div(), TextSize::Xs)
     .id(id)
     .debug_selector(move || id.into())
+    .role(gpui::Role::Button)
+    .aria_label(label)
+    .on_click(on_click)
     .flex()
     .items_center()
     .gap_1()
@@ -972,6 +984,7 @@ fn disclosure(id: &'static str, label: &'static str, open: bool, p: &Palette) ->
       p.muted_foreground,
     ))
     .child(label)
+    .test_support()
 }
 
 /// `StackDot`: a 14px dot with a background ring.
@@ -1212,14 +1225,16 @@ impl WorkspaceDialog {
     // Sparse checkout and symlinked dirs, for a create from scratch.
     if !self.move_to_existing && !matches!(source, Source::Workspace { .. }) {
       let open = self.advanced_open;
-      let mut advanced = div().flex().flex_col().gap(zpx(6.)).child(
-        disclosure("workspace-dialog-advanced", "Advanced", open, &p).on_click(cx.listener(
-          |view, _, _, cx| {
-            view.advanced_open = !view.advanced_open;
-            cx.notify();
-          },
-        )),
-      );
+      let mut advanced = div().flex().flex_col().gap(zpx(6.)).child(disclosure(
+        "workspace-dialog-advanced",
+        "Advanced",
+        open,
+        &p,
+        cx.listener(|view, _, _, cx| {
+          view.advanced_open = !view.advanced_open;
+          cx.notify();
+        }),
+      ));
       if open {
         let chips = self.gitignore_suggestions.clone();
         advanced = advanced.child(
@@ -2084,18 +2099,16 @@ impl Render for WorkspaceDialog {
         .border_t_1()
         .border_color(p.border.opacity(0.5))
         .pt_3()
-        .child(
-          disclosure(
-            "workspace-dialog-move-section",
-            "Move to workspace",
-            self.move_section_open,
-            &p,
-          )
-          .on_click(cx.listener(|view, _, _, cx| {
+        .child(disclosure(
+          "workspace-dialog-move-section",
+          "Move to workspace",
+          self.move_section_open,
+          &p,
+          cx.listener(|view, _, _, cx| {
             view.move_section_open = !view.move_section_open;
             cx.notify();
-          })),
-        )
+          }),
+        ))
         .children(right)
     });
     let loading = self.loading;
@@ -2113,11 +2126,9 @@ impl Render for WorkspaceDialog {
         view.close_unless_creating(cx);
       }
     });
-    // `md:min-w-[560px] md:max-w-[640px]` on a panel as wide as its
-    // content, as the browser sizes it.
+    // A fixed width, so opening Advanced or Move to workspace only makes the
+    // dialog taller; the body scrolls once it reaches the window's height.
     let panel = panel
-      .w_auto()
-      .min_w(zpx(560.))
       .overflow_hidden()
       .child(dialog_header(
         "Stack a new Workspace",

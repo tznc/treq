@@ -248,16 +248,6 @@ pub fn listen(app: &AppHandle) {
       }
     },
   );
-  let handle = app.clone();
-  app.listen_any("workspace-files-changed", move |event| {
-    let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap_or_default();
-    let Some(id) = payload["workspace_id"].as_i64() else {
-      return;
-    };
-    for label in labels() {
-      with_controller(&handle, &label, move |c, cx| c.files_changed(id, cx));
-    }
-  });
 }
 
 fn labels() -> Vec<String> {

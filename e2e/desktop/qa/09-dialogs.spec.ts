@@ -64,18 +64,20 @@ test("dialogs: create workspace", async ({ page, context }) => {
     ],
     issue: "Heading reads 'Stack a new Workspace' for a plain create; Description has focus, not Title",
   });
-  // The Advanced disclosure is not observable: its place in the dialog
-  // (centred in the window, as the home view opens it).
+  // Opening Advanced (its symlink suggestions are a wide row of chips)
+  // only makes the dialog taller: the centred heading keeps its place.
   {
-    await page.mouse.click(487, 602);
+    const before = await heading(dialog).boundingBox();
+    await dialog.getByRole("button", { name: "Advanced" }).click();
     await settle(page, 800);
+    expect((await heading(dialog).boundingBox())?.x).toBe(before?.x);
     await capture(page, {
       name: "09-create-workspace-advanced",
       title: "Create workspace: Advanced section open",
       screen: true,
       rest: false,
       expectations: [
-        "Base branch and other options aligned under the disclosure",
+        "Dialog keeps the width it had with Advanced closed; the symlink chips wrap",
         "Dialog grows or scrolls without clipping its buttons",
       ],
     });

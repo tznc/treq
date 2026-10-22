@@ -330,6 +330,8 @@ pub struct TerminalView {
   start: Start,
   live: Option<Arc<Live>>,
   status: Status,
+  /// The size last given to the PTY, which follows the grid once it runs.
+  pty_size: Option<(usize, usize)>,
   focus: FocusHandle,
   font_size: f32,
   /// The cell size, once measured.
@@ -383,6 +385,7 @@ impl TerminalView {
       start,
       live: None,
       status: Status::Preparing,
+      pty_size: None,
       focus: cx.focus_handle(),
       font_size,
       cell: None,
@@ -553,14 +556,14 @@ impl TerminalView {
     };
     match self.live.clone() {
       Some(live) => {
-        if live
-          .emulator
-          .lock()
-          .map(|mut e| e.resize(cols, rows))
-          .unwrap_or(false)
-          && self.status == Status::Ready
-        {
+        if let Ok(mut emulator) = live.emulator.lock() {
+          emulator.resize(cols, rows);
+        }
+        // A resize while the PTY starts reaches it once it runs; otherwise
+        // the program draws for a size the grid isn't.
+        if self.status == Status::Ready && self.pty_size != Some((cols, rows)) {
           let _ = self.host.resize_pty(&self.pty, rows as u16, cols as u16);
+          self.pty_size = Some((cols, rows));
         }
       }
       None => {
@@ -714,6 +717,7 @@ impl TerminalView {
     self._tasks.push(cx.spawn(async move |this, cx| {
       let result: Result<Option<String>, (bool, String)> = task.await;
       let _ = this.update(cx, |view, cx| {
+        view.pty_size = Some((cols, rows));
         view.status = match result {
           Ok(warning) => {
             if let Some(description) = warning {
@@ -2813,7 +2817,14 @@ impl TerminalPane {
     let column = &self.columns[index];
     let active = self.active.as_deref() == Some(column.id.as_str());
     let id = column.id.clone();
-    let fg = p.foreground;
+    // Agent headers, and a shell's while selected, sit on a dark fill, so
+    // their text and badge go light to stay readable.
+    let on_dark = active || !matches!(column.kind, Kind::Shell { .. });
+    let (title_fg, icon_fg): (gpui::Hsla, gpui::Hsla) = if on_dark {
+      (rgb(0xe5e7eb).into(), rgb(0xe5e7eb).into())
+    } else {
+      (p.muted_foreground, p.foreground)
+    };
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
@@ -2821,15 +2832,25 @@ impl TerminalPane {
         .max_w(zpx(200.))
         .truncate()
         .rounded_sm()
-        .bg(p.muted.opacity(0.6))
+        .bg(if on_dark {
+          gpui::white().opacity(0.15)
+        } else {
+          p.muted.opacity(0.6)
+        })
         .px_1()
         .py(zpx(2.))
         .font_family(theme::MONO_FONT)
         .font_weight(gpui::FontWeight::MEDIUM)
         .line_height(zpx(12.))
-        .text_color(p.muted_foreground)
+        .text_color(title_fg)
         .cursor_pointer()
-        .hover(|s| s.bg(p.muted))
+        .hover(|s| {
+          s.bg(if on_dark {
+            gpui::white().opacity(0.25)
+          } else {
+            p.muted
+          })
+        })
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |_, _, cx| {
           react(
@@ -2931,15 +2952,12 @@ impl TerminalPane {
                   .text_color(rgb(0xe5e7eb))
                   .child(name.clone()),
               )
-              .child(
-                label(
-                  label_name,
-                  workspace_name.is_none(),
-                  key,
-                  self.react.clone(),
-                )
-                .text_color(rgb(0xd1d5db)),
-              ),
+              .child(label(
+                label_name,
+                workspace_name.is_none(),
+                key,
+                self.react.clone(),
+              )),
           )
           .child(
             div()
@@ -3052,9 +3070,9 @@ impl TerminalPane {
           }),
           close
             .size_4()
-            .opacity(0.6)
+            .opacity(if on_dark { 0.85 } else { 0.6 })
             .hover(|s| s.opacity(1.))
-            .child(ui::icon(theme::ICON_X, 12., fg)),
+            .child(ui::icon(theme::ICON_X, 12., icon_fg)),
           cx,
         );
         base
@@ -3069,11 +3087,11 @@ impl TerminalPane {
               .items_center()
               .gap(zpx(6.))
               .min_w_0()
-              .child(ui::icon(theme::ICON_TERMINAL, 12., p.muted_foreground))
+              .child(ui::icon(theme::ICON_TERMINAL, 12., title_fg))
               .child(
                 div()
                   .font_weight(gpui::FontWeight::MEDIUM)
-                  .text_color(p.muted_foreground)
+                  .text_color(title_fg)
                   .child("Shell"),
               )
               .child(label(name, main, dir.clone(), self.react.clone())),

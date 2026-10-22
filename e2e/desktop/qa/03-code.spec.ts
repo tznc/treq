@@ -7,7 +7,7 @@
 // neighbour (the window is a fixed 1400x900 and the seed deterministic).
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
+import { home, mod, openTab, openWorkspace, settle, xPointer } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
@@ -182,5 +182,27 @@ test("code: zoom 120%", async ({ page }) => {
     await page.keyboard.press(`${mod}+-`);
     await page.keyboard.press(`${mod}+-`);
     await settle(page, 1000);
+  }
+});
+
+// The home Code tab's Commits column. Its rows are not observable; the
+// first one sits under the "Today" label at the column's top.
+test("code: commit history hover", async ({ page }) => {
+  await home(page);
+  await openTab(page, "Code");
+  await settle(page, 1500);
+  for (const [name, y, expectations] of [
+    ["03-code-history-hover-first", 210, [
+      "Hovered first commit: one even card, no shadow showing through its fill",
+      "Card fill matches the row highlight behind the dot (no darker inner card)",
+    ]],
+    ["03-code-history-hover-other", 295, [
+      "Hovered second commit: row highlight behind dot and text, same tone throughout",
+    ]],
+  ] as const) {
+    await page.mouse.move(1288, y);
+    await xPointer(page, 1288, y);
+    await settle(page, 500);
+    await capture(page, { name, title: "Code tab commit history: hovered row", rest: false, expectations: [...expectations] });
   }
 });
