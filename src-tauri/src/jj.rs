@@ -792,6 +792,56 @@ fn build_log_commits(
     .collect()
 }
 
+/// Short ids of conflicted `commits` whose conflict no longer reaches the tip
+/// of the stack. jj never rewrites a conflicted commit when a later commit
+/// resolves it, so its own tree stays conflicted forever. A conflict counts as
+/// resolved when every head descending from the commit (among `commits` and
+/// the working copy, read from its snapshot when there is one) has a resolved
+/// value at each of the commit's conflicted paths.
+fn conflicts_resolved_by_descendants(
+  repo: &Arc<ReadonlyRepo>,
+  commits: &[Commit],
+  wc_commit: Option<&Commit>,
+  wc_tree_override: Option<(&jj_lib::backend::CommitId, &MergedTree)>,
+) -> HashSet<String> {
+  let index = repo.index();
+  let is_ancestor =
+    |a: &Commit, b: &Commit| a.id() != b.id() && index.is_ancestor(a.id(), b.id()).unwrap_or(false);
+  let candidates: Vec<(&Commit, MergedTree)> = commits
+    .iter()
+    .map(|commit| (commit, commit.tree()))
+    .chain(wc_commit.map(|wc| {
+      let tree = wc_tree_override
+        .filter(|(id, _)| *id == wc.id())
+        .map(|(_, tree)| tree.clone());
+      (wc, tree.unwrap_or_else(|| wc.tree()))
+    }))
+    .collect();
+  let heads: Vec<&(&Commit, MergedTree)> = candidates
+    .iter()
+    .filter(|(c, _)| !candidates.iter().any(|(d, _)| is_ancestor(c, d)))
+    .collect();
+
+  commits
+    .iter()
+    .filter(|commit| commit.tree().has_conflict())
+    .filter(|commit| {
+      let paths: Vec<RepoPathBuf> = commit.tree().conflicts().map(|(path, _)| path).collect();
+      let mut descendants = heads
+        .iter()
+        .filter(|(head, _)| is_ancestor(commit, head))
+        .peekable();
+      descendants.peek().is_some()
+        && descendants.all(|(_, tree)| {
+          paths
+            .iter()
+            .all(|path| block_on(tree.path_value(path)).is_ok_and(|value| value.is_resolved()))
+        })
+    })
+    .map(|commit| commit.id().hex()[..12].to_string())
+    .collect()
+}
+
 fn build_log_commit(
   cache_repo_path: &str,
   repo: &Arc<ReadonlyRepo>,
@@ -1028,7 +1078,8 @@ pub struct JjLogCommit {
   /// True when this commit is on the target branch but not the current branch (target is ahead).
   #[serde(default)]
   pub on_target_only: bool,
-  /// True when this commit's tree still contains unresolved jj conflicts.
+  /// True when this commit's tree contains jj conflicts that no later commit
+  /// in the log (or the working copy) has resolved.
   #[serde(default)]
   pub has_conflicts: bool,
 }
@@ -7624,7 +7675,15 @@ pub fn jj_get_log(
       .collect::<Result<Vec<_>, _>>()
       .map_err(|e| JjError::IoError(format!("Failed to iterate revset '{}': {}", revset_expr, e)))?
   };
-  let commits = build_log_commits(
+  let resolved_later = conflicts_resolved_by_descendants(
+    &loaded.repo,
+    &commits,
+    get_workspace_wc_commit(&loaded)?.as_ref(),
+    wc_tree_override
+      .as_ref()
+      .map(|(commit_id, tree)| (commit_id, tree)),
+  );
+  let mut commits = build_log_commits(
     &cache_repo_path,
     &loaded.repo,
     commits,
@@ -7634,6 +7693,11 @@ pub fn jj_get_log(
       .map(|(commit_id, tree)| (commit_id, tree)),
     &is_immutable,
   );
+  for commit in &mut commits {
+    if resolved_later.contains(&commit.commit_id) {
+      commit.has_conflicts = false;
+    }
+  }
   let tentative_working_copy = if is_home || jj_is_working_copy_empty(workspace_path)? {
     None
   } else {
