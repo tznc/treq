@@ -31,6 +31,7 @@ pub mod native;
 mod overlay;
 mod popover;
 mod popup;
+pub(crate) mod question;
 pub mod remote_repo;
 mod screen;
 mod shortcuts;
