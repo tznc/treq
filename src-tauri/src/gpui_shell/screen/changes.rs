@@ -10,6 +10,7 @@
 mod keys;
 pub(in crate::gpui_shell::screen) mod pr;
 mod review;
+mod rows;
 pub(in crate::gpui_shell::screen) mod search;
 pub(super) mod threads;
 
@@ -25,22 +26,21 @@ use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
-  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle,
-  SharedString, Stateful, Subscription, Window,
+  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful,
+  Subscription, Window,
 };
 
 use super::{
   changes_data::{
     body, check_message, commit_label, conflict_lines, conflicts, context_ranges, deleted_sides,
-    diff_summary, discarded, full_path, hunks_hash, is_collapsed, line_counts, new_lines,
-    pending_label, review_prompt, section_label, select_all_label, split_path, stashed,
-    total_lines, visible_committed, Body, BodyInput, ChangedFile, ChangesHost, CommitAction,
-    Conflict, ContextReads, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH,
-    FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
+    diff_summary, discarded, full_path, hunks_hash, pending_label, review_prompt, section_label,
+    select_all_label, split_path, stashed, total_lines, visible_committed, Body, BodyInput,
+    ChangedFile, ChangesHost, CommitAction, Conflict, ContextReads, EditorApps, FileHunks, Host,
+    List, Snapshot, Staging, BATCH, FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
-  highlight, intraline, ActionSink, ScreenAction,
+  highlight, ActionSink, ScreenAction,
 };
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
@@ -149,9 +149,8 @@ pub struct ChangesView {
   github: bool,
   pr_state: Option<String>,
   editors: EditorApps,
-  scroll: ScrollHandle,
-  /// Where each file card was last drawn, by path.
-  cards: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
+  /// The diff's rows and the list drawing them.
+  diff: rows::DiffRows,
   pub(super) scroll_to: Option<String>,
   /// The button a dropdown opens below, by key.
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
@@ -236,8 +235,7 @@ impl ChangesView {
       github: false,
       pr_state: None,
       editors,
-      scroll: ScrollHandle::new(),
-      cards: Rc::default(),
+      diff: rows::DiffRows::default(),
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
@@ -556,16 +554,7 @@ impl ChangesView {
 
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
-    self.hunks.get(path).cloned().or_else(|| {
-      self
-        .snapshot
-        .as_ref()
-        .and_then(|s| s.committed_hunks.get(path))
-        .map(|hunks| FileHunks {
-          hunks: hunks.clone(),
-          ..FileHunks::default()
-        })
-    })
+    self.shown_hunks(path).cloned()
   }
 
   /// Viewed files whose diff changed since are viewed no longer.
@@ -633,17 +622,9 @@ impl ChangesView {
     let Some(path) = self.scroll_to.clone() else {
       return;
     };
-    let bounds = self.cards.borrow().get(&path).copied();
-    match bounds {
-      Some(card) => {
-        let view = self.scroll.bounds();
-        let offset = self.scroll.offset();
-        // Keep the list's top gap above the card.
-        let gap = ui::zoomed(16., window);
-        self.scroll.set_offset(point(
-          offset.x,
-          (offset.y - (card.top() - view.top()) + gap).min(px(0.)),
-        ));
+    match self.card_row(&path) {
+      Some(ix) => {
+        self.scroll_to_row(ix);
         self.scroll_to = None;
         cx.notify();
       }
@@ -1346,6 +1327,7 @@ impl Render for ChangesView {
     self.ensure_search_input(window, cx);
     self.place_threads();
     self.index_matches();
+    self.sync_rows(window);
     self.reveal_match(window, cx);
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
@@ -2303,7 +2285,7 @@ impl ChangesView {
           .child(format!("Failed to load the PR diff: {err}")),
       );
     }
-    let Some(snapshot) = self.snapshot.clone() else {
+    let Some(snapshot) = self.snapshot.as_ref() else {
       let card = |p: &Palette| {
         div()
           .flex()
@@ -2330,8 +2312,8 @@ impl ChangesView {
           .child(card(p)),
       );
     };
-    let committed = self.visible_committed();
-    if snapshot.files.is_empty() && committed.is_empty() {
+    let n = snapshot.files.len();
+    if n == 0 && self.visible_committed().is_empty() {
       return area.child(
         div()
           .size_full()
@@ -2348,14 +2330,8 @@ impl ChangesView {
           .child(div().mt_3().child("No changes to review")),
       );
     }
-    let total = total_lines(
-      snapshot
-        .files
-        .iter()
-        .filter_map(|f| self.hunks.get(&f.path)),
-    );
-    if total > LARGE_CHANGESET_LINES && !self.changeset_expanded {
-      let n = snapshot.files.len();
+    if self.large_changeset_gated() {
+      let total = self.changeset_lines();
       return area.child(
         div()
           .size_full()
@@ -2397,114 +2373,54 @@ impl ChangesView {
           ),
       );
     }
-    let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
-    let mut list = div().pt_4().pb_32();
-    for file in &snapshot.files {
-      list = list.child(self.file_card(
-        &file.path,
-        &file.status,
-        file.old_path.as_deref(),
-        false,
-        &conflicted,
-        p,
-        cx,
-      ));
-    }
-    for file in &committed {
-      list = list.child(self.file_card(
-        &file.path,
-        &file.status,
-        file.previous_path.as_deref(),
-        true,
-        &conflicted,
-        p,
-        cx,
-      ));
-    }
-    area.child(
-      div().size_full().px_4().child(
-        div()
-          .id("changes-diff-scroll")
-          .size_full()
-          .overflow_y_scroll()
-          .track_scroll(&self.scroll)
-          .child(list),
-      ),
-    )
+    area.child(div().size_full().px_4().child(self.diff_list(cx)))
   }
 
-  #[allow(clippy::too_many_arguments)]
-  fn file_card(
-    &mut self,
-    path: &str,
-    status: &str,
-    old_path: Option<&str>,
-    committed: bool,
-    conflicted: &HashSet<String>,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let data = self.file_hunks(path);
-    let input = BodyInput {
-      path,
-      status,
-      renamed: old_path.is_some(),
-      data: data.as_ref(),
-      collapsed: self.collapsed_files.contains(path),
-      comment_activity: self.file_comment_activity(path),
-      expanded_large: self.expanded_large.contains(path),
-    };
-    let shut = is_collapsed(&input);
-    let kind = body(&input);
-    let (additions, deletions) = data
-      .as_ref()
-      .filter(|d| !d.loading)
-      .map_or((0, 0), |d| line_counts(&d.hunks));
+  /// Lines of every loaded working-copy diff.
+  fn changeset_lines(&self) -> usize {
+    self.snapshot.as_ref().map_or(0, |snapshot| {
+      total_lines(
+        snapshot
+          .files
+          .iter()
+          .filter_map(|f| self.hunks.get(&f.path)),
+      )
+    })
+  }
+
+  /// The diff waits behind "View changes" while it is this large.
+  fn large_changeset_gated(&self) -> bool {
+    !self.changeset_expanded && self.changeset_lines() > LARGE_CHANGESET_LINES
+  }
+
+  /// A card's header and file comments, then the threads and comments with
+  /// no line above its hunks, or what it shows in their place.
+  fn card_head(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let card = &self.diff.cards[c];
+    let (path, status, old_path) = (
+      card.path.clone(),
+      card.status.clone(),
+      card.old_path.clone(),
+    );
+    let (committed, shut, kind, conflicted_file) =
+      (card.committed, card.shut, card.body, card.conflicted);
+    let counts = self.card_counts(c);
     let header = self.file_header(
-      path,
-      status,
-      old_path,
+      &path,
+      &status,
+      old_path.as_deref(),
       committed,
       shut,
-      (additions, deletions),
+      counts,
       p,
       cx,
     );
-    let cards = self.cards.clone();
-    let key = path.to_string();
-    let mut card = div()
-      .debug_selector({
-        let id = format!("file-card-{path}");
-        move || id
-      })
-      .relative()
-      .mb_4()
-      .rounded(zpx(12.))
-      .border_1()
-      .border_color(p.border)
-      .overflow_hidden()
-      .bg(p.background)
-      .child(
-        gpui::canvas(
-          move |bounds, _, _| {
-            cards.borrow_mut().insert(key.clone(), bounds);
-          },
-          |_, _, _, _| {},
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full(),
-      )
+    let card = div()
       .child(header)
-      .children(self.file_comments(path, p, cx));
-    if kind == Body::Collapsed {
-      return card;
-    }
-    let conflicted_file = conflicted.contains(path);
+      .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
     let placeholder = |el: Div| div().font_family(theme::MONO_FONT).child(el);
-    card = match kind {
+    match kind {
       Body::Binary | Body::Deleted => card.child(placeholder(
         div()
           .when(kind == Body::Deleted, |this| {
@@ -2538,11 +2454,12 @@ impl ChangesView {
           .child(skeleton(p).h_4().w(gpui::relative(5. / 6.))),
       ),
       Body::Error => card.child(
-        div()
-          .px_3()
-          .py_2()
-          .text_color(p.destructive)
-          .child(data.and_then(|d| d.error).unwrap_or_default()),
+        div().px_3().py_2().text_color(p.destructive).child(
+          self
+            .shown_hunks(&path)
+            .and_then(|d| d.error.clone())
+            .unwrap_or_default(),
+        ),
       ),
       Body::Empty => card.child(
         div()
@@ -2559,7 +2476,7 @@ impl ChangesView {
           }),
       ),
       Body::Large(n) => {
-        let file = path.to_string();
+        let file = path.clone();
         card.child(
           div()
             .h_20()
@@ -2579,16 +2496,12 @@ impl ChangesView {
             ),
         )
       }
-      Body::Hunks => {
-        let hunks = data.map(|d| d.hunks).unwrap_or_default();
-        card
-          .children(self.unplaced_threads(path, p, cx))
-          .children(self.outdated_comments(path, p, cx))
-          .child(self.hunks(path, &hunks, committed, conflicted_file, p, cx))
-      }
+      Body::Hunks => card
+        .children(self.unplaced_threads(&path, p, cx))
+        .children(self.outdated_comments(&path, p, cx)),
       Body::Collapsed => card,
-    };
-    card
+    }
+    .into_any_element()
   }
 
   #[allow(clippy::too_many_arguments)]
@@ -2858,178 +2771,6 @@ impl ChangesView {
 
   /// The hunks of a file: each header, the lines, and context read above
   /// and below.
-  #[allow(clippy::too_many_arguments)]
-  fn hunks(
-    &mut self,
-    path: &str,
-    hunks: &[JjDiffHunk],
-    committed: bool,
-    conflicted: bool,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> Div {
-    let language = highlight::language(path);
-    let regions: Vec<Conflict> = conflicts(path, hunks);
-    let in_region = conflict_lines(&regions);
-    let mut drawn_regions: HashSet<usize> = HashSet::new();
-    let border = p.border.opacity(0.4);
-    let muted = p.muted_foreground;
-    let mut el = div()
-      .font_family(theme::MONO_FONT)
-      .text_size(zpx(CODE_TEXT));
-    let gutter_cols = |el: Stateful<Div>| {
-      el.child(div().w_24().flex_none().border_r_1().border_color(border))
-        .child(div().w_6().flex_none())
-        .child(div().w_5().flex_none())
-    };
-    for (h, hunk) in hunks.iter().enumerate() {
-      let before = self
-        .context
-        .get(&(path.to_string(), h, Dir::Before))
-        .cloned()
-        .unwrap_or_default();
-      let after = self
-        .context
-        .get(&(path.to_string(), h, Dir::After))
-        .cloned()
-        .unwrap_or_default();
-      let (above, below) = self.context_ranges(path, hunks, h);
-      let expandable = !committed && above.is_some();
-      // Once the lines above meet the previous hunk's, or the file's start,
-      // the header no longer separates anything.
-      let joined = above.is_none()
-        && (!before.is_empty()
-          || h.checked_sub(1).is_some_and(|prev| {
-            self
-              .context
-              .get(&(path.to_string(), prev, Dir::After))
-              .is_some_and(|l| !l.is_empty())
-          }));
-      let file = path.to_string();
-      let hover = p.muted.opacity(0.8);
-      el = el.when(!joined, |el| {
-        el.child(
-          gutter_cols(
-            div()
-              .id(SharedString::from(format!("hunk-header-{path}-{h}")))
-              .flex()
-              .bg(p.muted.opacity(0.6))
-              .when(expandable, |this| {
-                this.cursor_pointer().hover(move |s| s.bg(hover)).on_click(
-                  cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::Before, cx)),
-                )
-              }),
-          )
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .flex()
-              .items_center()
-              .px_2()
-              .py(zpx(2.))
-              .when(expandable, |this| {
-                this.child(
-                  div()
-                    .mr_1()
-                    .child(ui::icon(theme::ICON_CHEVRON_UP, 12., muted)),
-                )
-              })
-              .child(
-                div()
-                  .truncate()
-                  .text_color(muted)
-                  .child(hunk.header.clone()),
-              )
-              .when(expandable, |this| {
-                this.child(
-                  ui::text(div(), TextSize::Xs)
-                    .ml_2()
-                    .flex_none()
-                    .text_color(muted)
-                    .child("Show more lines above"),
-                )
-              }),
-          ),
-        )
-      });
-      let (first, last) = new_lines(&hunk.header);
-      for (i, line) in before.iter().enumerate() {
-        let n = first as i64 - before.len() as i64 + i as i64;
-        el = el.child(context_row(n, line, language, p));
-      }
-      let numbers = line_numbers(hunk);
-      let changed = intraline::changed_ranges(&hunk.lines);
-      for l in 0..hunk.lines.len() {
-        let new = numbers.get(l).and_then(|n| n.1);
-        if let Some(region) = new.and_then(|n| in_region.get(&(n as usize)).copied()) {
-          if regions[region].region.start_line == new.unwrap_or(0) as usize
-            && drawn_regions.insert(region)
-          {
-            el = el.child(self.conflict_card(&regions[region], p, cx));
-          }
-          continue;
-        }
-        el = el.child(
-          self
-            .diff_line(
-              path,
-              hunks,
-              h,
-              l,
-              changed.get(&l).map_or(&[], Vec::as_slice),
-              language,
-              conflicted,
-              p,
-              cx,
-            )
-            .on_mouse_down(
-              MouseButton::Right,
-              cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
-            ),
-        );
-        el = el.children(self.line_extras(path, hunks, h, l, p, cx));
-      }
-      for (i, line) in after.iter().enumerate() {
-        el = el.child(context_row((last + 1 + i) as i64, line, language, p));
-      }
-      // Drawn for committed files too, where React's click finds no hunk.
-      if below.is_some() {
-        let file = path.to_string();
-        let hover = p.muted.opacity(0.5);
-        el = el.child(
-          gutter_cols(
-            div()
-              .id(SharedString::from(format!("expand-after-{path}-{h}")))
-              .flex()
-              .bg(p.muted.opacity(0.3))
-              .cursor_pointer()
-              .hover(move |s| s.bg(hover))
-              .on_click(cx.listener(move |view, _, _, cx| {
-                if !committed {
-                  view.expand_context(&file, h, Dir::After, cx)
-                }
-              })),
-          )
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .flex_1()
-              .flex()
-              .items_center()
-              .justify_center()
-              .gap_1()
-              .px_2()
-              .py(zpx(2.))
-              .text_color(muted)
-              .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., muted))
-              .child("Show more lines below"),
-          ),
-        );
-      }
-    }
-    el
-  }
-
   /// `InlineConflictCard`: the region's lines by side.
   fn conflict_card(
     &self,

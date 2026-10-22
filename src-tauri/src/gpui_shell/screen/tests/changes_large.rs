@@ -1,0 +1,261 @@
+//! The Changes tab on a large working copy: several files of about 500
+//! changed lines each, every one expanded. The diff is a virtual list, so
+//! only the rows on screen are drawn; jumping to a file, the arrow keys and
+//! find still reach rows that are not. `changes_perf` (ignored) prints the
+//! frame cost: `cargo test --features gpui-shell --lib changes_perf --
+//! --ignored --nocapture`.
+
+use std::time::{Duration, Instant};
+
+use gpui::{Modifiers, MouseButton, TestAppContext};
+
+use super::*;
+
+const FILES: usize = 6;
+/// Replaced lines per file: as many removed as added.
+const PAIRS: usize = 250;
+
+fn pairs() -> usize {
+  std::env::var("PERF_PAIRS")
+    .ok()
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(PAIRS)
+}
+
+fn line(file: usize, i: usize, new: bool) -> String {
+  let value = if new { i * 3 + 1 } else { i * 3 };
+  format!(
+    "    let value_{i} = compute_{file}(\"item {i}\", {value}).map(|v| v + {value}); // note {i}"
+  )
+}
+
+/// `FILES` Rust files, each one hunk of `PAIRS` removed and added lines.
+fn large_host() -> FakeHost {
+  let mut host = code_host();
+  let files: Vec<_> = (0..FILES)
+    .map(|f| {
+      serde_json::json!({
+        "path": format!("src/module_{f}.rs"),
+        "status": "M",
+        "previous_path": null,
+        "changed_line_count": pairs() * 2,
+        "diff_deferred": false,
+      })
+    })
+    .collect();
+  let hunks: Vec<_> = (0..FILES)
+    .map(|f| {
+      let mut lines = Vec::new();
+      for chunk in 0..pairs() / 10 {
+        for i in chunk * 10..chunk * 10 + 10 {
+          lines.push(format!("-{}", line(f, i, false)));
+        }
+        for i in chunk * 10..chunk * 10 + 10 {
+          lines.push(format!("+{}", line(f, i, true)));
+        }
+        lines.push(format!(" // context {chunk}"));
+      }
+      let old = lines.iter().filter(|l| !l.starts_with('+')).count();
+      let new = lines.iter().filter(|l| !l.starts_with('-')).count();
+      serde_json::json!({
+        "path": format!("src/module_{f}.rs"),
+        "hunks": [{
+          "id": "h",
+          "header": format!("@@ -1,{old} +1,{new} @@"),
+          "lines": lines,
+          "patch": "",
+        }],
+      })
+    })
+    .collect();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": files,
+    "hunks_by_file": hunks,
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// A full frame: the Changes view rendered, laid out and painted again.
+fn frame(h: &mut Harness) -> Duration {
+  h.cx.run_until_parked();
+  h.cx.update(|window, cx| {
+    let start = Instant::now();
+    window.refresh();
+    window.draw(cx).clear(cx);
+    start.elapsed()
+  })
+}
+
+fn report(name: &str, samples: &mut [Duration]) {
+  samples.sort();
+  let ms = |d: Duration| d.as_secs_f64() * 1000.;
+  let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
+  println!(
+    "{name:<28} n={:<3} mean={mean:>8.2}ms  p50={:>8.2}ms  max={:>8.2}ms",
+    samples.len(),
+    ms(samples[samples.len() / 2]),
+    ms(samples[samples.len() - 1]),
+  );
+}
+
+fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
+  let start = Instant::now();
+  act(h);
+  h.cx.run_until_parked();
+  h.cx.update(|window, cx| window.draw(cx).clear(cx));
+  start.elapsed()
+}
+
+fn leak(s: String) -> &'static str {
+  Box::leak(s.into_boxed_str())
+}
+
+/// The large working copy with every file's diff shown.
+fn expanded(cx: &mut TestAppContext) -> Harness {
+  let (mut h, _) = workspace_harness(cx, large_host(), changes_route());
+  if h.drawn("view-large-changeset") {
+    h.click("view-large-changeset");
+  }
+  // Picking a file in the list shows its diff, however large.
+  for f in (0..FILES).rev() {
+    h.click(leak(format!("file-row-src/module_{f}.rs")));
+  }
+  h.cx.run_until_parked();
+  h
+}
+
+fn gutter(f: usize, l: usize) -> &'static str {
+  leak(format!("gutter-src/module_{f}.rs-0-{l}"))
+}
+
+#[gpui::test]
+fn a_large_diff_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  assert!(h.drawn("file-card-src/module_0.rs"));
+  assert!(h.drawn(gutter(0, 0)));
+  assert!(!h.drawn(gutter(0, 400)), "far below the window");
+  assert!(!h.drawn("file-card-src/module_5.rs"));
+}
+
+#[gpui::test]
+fn a_large_diff_scrolls_to_a_file_picked_in_the_list(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  h.click("file-row-src/module_4.rs");
+  h.cx.run_until_parked();
+  assert!(h.drawn("file-card-src/module_4.rs"));
+  assert!(h.drawn(gutter(4, 0)));
+  assert!(!h.drawn(gutter(0, 0)), "scrolled away from the first file");
+  let card = h
+    .cx
+    .debug_bounds("file-card-src/module_4.rs")
+    .expect("card");
+  let list = h.cx.debug_bounds("changes-diff-list").expect("list");
+  assert!(
+    card.top() >= list.top() && card.top() < list.top() + gpui::px(40.),
+    "{card:?} at the top of {list:?}"
+  );
+}
+
+#[gpui::test]
+fn a_large_diff_follows_the_cursor_line_off_screen(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  h.click(gutter(0, 0));
+  for _ in 0..120 {
+    h.cx.simulate_keystrokes("down");
+  }
+  h.cx.run_until_parked();
+  assert!(h.drawn(gutter(0, 120)), "the cursor's line is drawn");
+  assert!(!h.drawn(gutter(0, 0)));
+  let line = h.cx.debug_bounds(gutter(0, 120)).expect("line");
+  let list = h.cx.debug_bounds("changes-diff-list").expect("list");
+  assert!(
+    line.top() >= list.top() && line.bottom() <= list.bottom(),
+    "{line:?} inside {list:?}"
+  );
+}
+
+#[gpui::test]
+fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  h.click("file-card-src/module_0.rs");
+  h.cx.simulate_keystrokes("cmd-f");
+  assert!(h.drawn("diff-search"));
+  // Only module 5's last pair has `value_249 = compute_5`.
+  h.cx.simulate_input("value_249 = compute_5");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(150));
+  h.cx.run_until_parked();
+  // Enter reveals a match: the removed or the added line 249, in the last
+  // chunk of 21 lines (removed at +9, added at +19). Either way the added
+  // one is on screen.
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(
+    h.drawn(gutter(5, 24 * 21 + 19)),
+    "the match's line is drawn"
+  );
+  assert!(!h.drawn(gutter(0, 0)));
+}
+
+#[gpui::test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn changes_perf(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  assert!(h.drawn(gutter(0, 0)));
+  let mut full: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+  report("full frame", &mut full);
+
+  let origin = h
+    .cx
+    .debug_bounds("gutter-src/module_0.rs-0-0")
+    .expect("gutter")
+    .center();
+  let mut hover: Vec<_> = (0..30)
+    .map(|i| {
+      let at = gpui::point(
+        origin.x + gpui::px(300.),
+        origin.y + gpui::px(i as f32 * 7.),
+      );
+      timed(&mut h, |h| {
+        h.cx.simulate_mouse_move(at, None, Modifiers::none())
+      })
+    })
+    .collect();
+  report("hover a line", &mut hover);
+
+  let mut click: Vec<_> = (0..5)
+    .map(|i| {
+      let at = gpui::point(origin.x, origin.y + gpui::px(i as f32 * 20.));
+      timed(&mut h, |h| {
+        h.cx
+          .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+        h.cx
+          .simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+      })
+    })
+    .collect();
+  report("click a line", &mut click);
+
+  let mut keys: Vec<_> = (0..20)
+    .map(|_| timed(&mut h, |h| h.cx.simulate_keystrokes("down")))
+    .collect();
+  report("arrow down", &mut keys);
+
+  let mut scroll: Vec<_> = (0..20)
+    .map(|_| {
+      timed(&mut h, |h| {
+        h.cx.simulate_event(gpui::ScrollWheelEvent {
+          position: origin,
+          delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-200.))),
+          modifiers: Modifiers::none(),
+          touch_phase: gpui::TouchPhase::Moved,
+        })
+      })
+    })
+    .collect();
+  report("scroll 200px", &mut scroll);
+}

@@ -424,7 +424,7 @@ pub struct Snapshot {
   pub files: Vec<ChangedFile>,
   /// Committed on the branch, conflicted paths included.
   pub committed: Vec<JjFileChange>,
-  pub committed_hunks: HashMap<String, Vec<JjDiffHunk>>,
+  pub committed_hunks: HashMap<String, FileHunks>,
   /// `liveConflictedFiles`, once read; `None` keeps the status's list.
   pub conflicted: Option<Vec<String>>,
 }
@@ -453,7 +453,13 @@ impl Snapshot {
       .filter(|f| {
         show_committed || uncommitted.contains(f.path.as_str()) || conflicted.contains(&f.path)
       })
-      .map(|f| (f.path, f.hunks))
+      .map(|f| {
+        let hunks = FileHunks {
+          hunks: f.hunks,
+          ..FileHunks::default()
+        };
+        (f.path, hunks)
+      })
       .collect();
     Snapshot {
       files,

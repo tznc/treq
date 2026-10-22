@@ -235,24 +235,20 @@ impl ChangesView {
       if !conflicted.contains(path) {
         continue;
       }
-      let hunks = self
-        .hunks
-        .get(path)
-        .map(|d| d.hunks.clone())
-        .unwrap_or_default();
-      for conflict in conflicts(path, &hunks) {
+      let hunks = self.hunks.get(path).map_or(&[][..], |d| &d.hunks);
+      for conflict in conflicts(path, hunks) {
         for (i, text) in conflict_texts(&conflict).iter().enumerate() {
           add(MatchKey::Conflict(conflict.id.clone(), i), text, &mut total);
         }
       }
     }
     for (path, status, renamed) in &files {
-      let data = self.file_hunks(path);
+      let data = self.shown_hunks(path);
       let input = BodyInput {
         path,
         status,
         renamed: *renamed,
-        data: data.as_ref(),
+        data,
         collapsed: self.collapsed_files.contains(path),
         comment_activity: self.file_comment_activity(path),
         expanded_large: self.expanded_large.contains(path),
@@ -260,8 +256,8 @@ impl ChangesView {
       if body(&input) != Body::Hunks {
         continue;
       }
-      let hunks = data.map(|d| d.hunks).unwrap_or_default();
-      let in_region = conflict_lines(&conflicts(path, &hunks));
+      let hunks = data.map_or(&[][..], |d| &d.hunks);
+      let in_region = conflict_lines(&conflicts(path, hunks));
       for (h, hunk) in hunks.iter().enumerate() {
         let numbers = line_numbers(hunk);
         for (l, line) in hunk.lines.iter().enumerate() {
@@ -357,14 +353,22 @@ impl ChangesView {
     let drawn = self.search.target.borrow().clone();
     match drawn {
       Some((k, line)) if k == key => {
-        let view = self.scroll.bounds();
-        let offset = self.scroll.offset();
-        let delta = line.center().y - view.center().y;
-        self.scroll.set_offset(point(offset.x, offset.y - delta));
+        let view = self.diff.list.viewport_bounds();
+        self.diff.list.scroll_by(line.center().y - view.center().y);
         self.search.reveal = false;
         cx.notify();
       }
-      _ => cx.on_next_frame(window, |_, _, cx| cx.notify()),
+      _ => {
+        // Off screen, the match's row is not drawn until scrolled to.
+        let row = match &key {
+          MatchKey::Line(path, h, l) => self.line_row(path, (*h, *l)),
+          MatchKey::Conflict(id, _) => self.conflict_row(id),
+        };
+        if let Some(ix) = row {
+          self.reveal_row(ix);
+        }
+        cx.on_next_frame(window, |_, _, cx| cx.notify())
+      }
     }
   }
 

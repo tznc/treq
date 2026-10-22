@@ -7201,6 +7201,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
   assert_eq!(shown, [path]);
 }
 
+mod changes_large;
 mod commit_diffs;
 mod conflicts;
 mod file_browser;

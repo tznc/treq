@@ -145,7 +145,7 @@ impl ChangesView {
     let drawn = self.review.head_drawn.borrow().clone();
     match drawn {
       Some((path, at, line)) if path == s.path && at == s.head => {
-        let view = self.scroll.bounds();
+        let view = self.diff.list.viewport_bounds();
         let margin = px(REVEAL_MARGIN);
         let delta = if line.top() < view.top() + margin {
           line.top() - view.top() - margin
@@ -155,13 +155,16 @@ impl ChangesView {
           px(0.)
         };
         if delta != px(0.) {
-          let offset = self.scroll.offset();
-          self.scroll.set_offset(point(offset.x, offset.y - delta));
+          self.diff.list.scroll_by(delta);
           cx.notify();
         }
         self.review.reveal = 0;
       }
       _ => {
+        // Off screen, the line's row is not drawn until scrolled to.
+        if let Some(ix) = self.line_row(&s.path, s.head) {
+          self.reveal_row(ix);
+        }
         self.review.reveal -= 1;
         cx.on_next_frame(window, |_, _, cx| cx.notify());
       }
