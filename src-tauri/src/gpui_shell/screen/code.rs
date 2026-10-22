@@ -156,6 +156,9 @@ pub struct CodeView {
   show_save_default: bool,
   pub(super) submitting: bool,
   pub(super) menu: Option<Menu>,
+  /// The title being edited, and its editor.
+  pub(super) title_draft: Option<Entity<TextareaState>>,
+  saving_title: bool,
   /// The description being edited, and its editor.
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
@@ -204,6 +207,8 @@ impl CodeView {
       show_save_default: false,
       submitting: false,
       menu: None,
+      title_draft: None,
+      saving_title: false,
       description_draft: None,
       saving_description: false,
       syncing_submodule: false,
@@ -238,6 +243,7 @@ impl CodeView {
       self.agent_override = None;
       self.save_default = false;
       self.show_save_default = false;
+      self.title_draft = None;
       self.description_draft = None;
       self.menu = None;
     }
@@ -765,6 +771,57 @@ impl CodeView {
     .detach();
   }
 
+  fn edit_title(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+    let draft = cx.new(|cx| {
+      TextareaState::new(window, cx)
+        .auto_grow(1, 5)
+        .placeholder("Workspace title")
+        .default_value(text)
+    });
+    draft.update(cx, |d, cx| d.focus(window, cx));
+    // Save is disabled while the title is blank.
+    self
+      ._subscriptions
+      .push(cx.subscribe(&draft, |_, _, event: &InputEvent, cx| {
+        if matches!(event, InputEvent::Change) {
+          cx.notify();
+        }
+      }));
+    self.title_draft = Some(draft);
+    cx.notify();
+  }
+
+  fn save_title(&mut self, cx: &mut Context<Self>) {
+    let (Some(draft), Some(ws)) = (&self.title_draft, &self.parent.workspace) else {
+      return;
+    };
+    let text = draft.read(cx).value().trim().to_string();
+    if text.is_empty() || self.saving_title {
+      return;
+    }
+    let id = ws.id;
+    self.saving_title = true;
+    self.read(
+      move |host, parent| host.set_title(&parent.repo_path, id, &text),
+      |view, result, _| {
+        view.saving_title = false;
+        match result {
+          Ok(()) => {
+            view.title_draft = None;
+            tell(
+              view.host.as_ref(),
+              NativeEvent::WorkspaceChanged {
+                repo_path: view.parent.repo_path.clone(),
+              },
+            );
+          }
+          Err(err) => view.toast(ToastTone::Error, "Failed to save title", err),
+        }
+      },
+      cx,
+    );
+  }
+
   fn edit_description(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
     let draft = cx.new(|cx| {
       TextareaState::new(window, cx)
@@ -1013,6 +1070,7 @@ impl Render for CodeView {
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
           .children(self.conflicts(&p))
           .child(self.task_card(&p, window, cx))
+          .children(self.title(&p, cx))
           .children(self.description(&p, window, cx))
           .children(self.stack_panel(&p, cx))
           .child(self.go_to_file(&p))
@@ -1570,6 +1628,102 @@ impl CodeView {
     .top(zpx(32.))
     .right_0();
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
+  }
+
+  /// The workspace's full title, wrapped rather than truncated, with an
+  /// inline editor behind its pencil.
+  fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let title = display_title(self.parent.workspace.as_ref()?);
+    let heading = |el: Div| {
+      el.text_size(zpx(24.))
+        .line_height(zpx(30.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(p.foreground)
+    };
+    let panel = div().debug_selector(|| "workspace-title".into());
+    let Some(draft) = self.title_draft.clone() else {
+      return Some(
+        panel
+          .flex()
+          .items_start()
+          .gap_2()
+          .child(
+            heading(div())
+              .flex_1()
+              .min_w_0()
+              .whitespace_normal()
+              .debug_selector(|| "workspace-title-text".into())
+              .child(title.clone()),
+          )
+          .child(
+            Button::new("workspace-title-edit", p)
+              .aria_label("Edit workspace title")
+              .variant(Variant::Ghost)
+              .size(Size::Icon)
+              .flex_none()
+              .w(zpx(20.))
+              .h(zpx(20.))
+              .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
+              .on_click(
+                cx.listener(move |view, _, window, cx| view.edit_title(title.clone(), window, cx)),
+              ),
+          )
+          .into_any_element(),
+      );
+    };
+    let saving = self.saving_title;
+    let empty = draft.read(cx).value().trim().is_empty();
+    Some(
+      panel
+        .child(
+          div()
+            .id("workspace-title-editor")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
+              if action.secondary {
+                view.save_title(cx);
+                cx.stop_propagation();
+              }
+            }))
+            .capture_action(cx.listener(|view, _: &Escape, _, cx| {
+              view.title_draft = None;
+              cx.notify();
+              cx.stop_propagation();
+            }))
+            .child(
+              heading(div())
+                .debug_selector(|| "workspace-title-input".into())
+                .child(Textarea::new(&draft)),
+            )
+            .child(
+              div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                  Button::new("workspace-title-cancel", p)
+                    .variant(Variant::Ghost)
+                    .size(Size::Sm)
+                    .disabled(saving)
+                    .label("Cancel")
+                    .on_click(cx.listener(|view, _, _, cx| {
+                      view.title_draft = None;
+                      cx.notify();
+                    })),
+                )
+                .child(
+                  Button::new("workspace-title-save", p)
+                    .size(Size::Sm)
+                    .disabled(saving || empty)
+                    .label("Save")
+                    .on_click(cx.listener(|view, _, _, cx| view.save_title(cx))),
+                ),
+            ),
+        )
+        .into_any_element(),
+    )
   }
 
   fn description(

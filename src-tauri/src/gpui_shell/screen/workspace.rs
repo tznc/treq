@@ -80,7 +80,6 @@ pub struct Header {
   pub merge: Option<Merge>,
   pub details: bool,
   pub more: Option<Disabled>,
-  pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1095,16 +1094,6 @@ impl WorkspaceView {
           .child(left)
           .child(right),
       )
-      .when_some(h.title.clone(), |this, title| {
-        this.child(
-          div().flex().items_center().px_1().mt_2().child(
-            ui::text(div(), TextSize::Sm)
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(p.foreground)
-              .child(title),
-          ),
-        )
-      })
   }
 
   fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Div {
