@@ -10,7 +10,7 @@ use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc};
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{div, prelude::*, Context, FontWeight, Window};
+use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, FontWeight, Window};
 
 use super::onboarding_remote;
 
@@ -168,20 +168,31 @@ impl Render for OnboardingView {
       palette: p,
       sink: &self.sink,
     };
-    let card = render(&self.screen(), &ctx);
     let Some(form) = self.route.remote_repo.clone() else {
-      return card.into_any_element();
+      return render(&self.screen(), &ctx).into_any_element();
     };
-    // Dashboard draws the form under the full-height card, so the window
-    // scrolls down to it.
+    // The connected endpoint's form comes first, where the window opens,
+    // with the local card under it.
     self.inputs.sync(&form, &self.react, window, cx);
-    div()
-      .id("onboarding-scroll")
-      .size_full()
-      .flex()
-      .flex_col()
-      .overflow_y_scroll()
-      .child(div().flex_shrink_0().h_full().child(card))
+    let remote = ui::card(&p)
+      .w(zpx(448.))
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap(zpx(6.))
+          .p_6()
+          .child(
+            ui::text(div(), TextSize::Lg)
+              .font_weight(FontWeight::SEMIBOLD)
+              .child("Open a Remote Repository"),
+          )
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child("Enter the repository's path on the SSH host."),
+          ),
+      )
       .child(onboarding_remote::render(
         &form,
         &self.inputs,
@@ -189,7 +200,23 @@ impl Render for OnboardingView {
         self.dark,
         &p,
         cx,
-      ))
+      ));
+    div()
+      .id("onboarding-scroll")
+      .size_full()
+      .overflow_y_scroll()
+      .child(
+        div()
+          .min_h_full()
+          .flex()
+          .flex_col()
+          .items_center()
+          .justify_center()
+          .gap_6()
+          .py_6()
+          .child(remote)
+          .child(card(&self.screen(), &ctx)),
+      )
       .into_any_element()
   }
 }
@@ -254,7 +281,8 @@ where
   toast(ToastTone::Success, &format!("Opened {name}"), String::new());
 }
 
-pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {
+/// The card: the open buttons over the prerequisite checklist.
+fn card(screen: &Onboarding, ctx: &Ctx) -> Div {
   let p = ctx.palette;
   let header = div()
     .flex()
@@ -309,24 +337,26 @@ pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {
       )
     });
 
+  ui::card(&p)
+    .w(zpx(384.))
+    .child(header)
+    .child(actions)
+    .child(
+      div()
+        .border_t_1()
+        .border_color(p.border.opacity(0.5))
+        .px_6()
+        .pt_4()
+        .pb_6()
+        .child(checklist::render(&screen.checklist, ctx)),
+    )
+}
+
+pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {
   div()
     .size_full()
     .flex()
     .items_center()
     .justify_center()
-    .child(
-      ui::card(&p)
-        .w(zpx(384.))
-        .child(header)
-        .child(actions)
-        .child(
-          div()
-            .border_t_1()
-            .border_color(p.border.opacity(0.5))
-            .px_6()
-            .pt_4()
-            .pb_6()
-            .child(checklist::render(&screen.checklist, ctx)),
-        ),
-    )
+    .child(card(screen, ctx))
 }
