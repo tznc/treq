@@ -760,10 +760,18 @@ fn place_submenu(
 }
 
 impl PopupView {
-  fn render_tooltip(&self, content: &TooltipContent) -> gpui::AnyElement {
+  fn render_tooltip(&self, content: &TooltipContent, cx: &App) -> gpui::AnyElement {
     let palette = &self.palette;
     match content {
-      TooltipContent::Text(text) => div().child(text.clone()).into_any_element(),
+      // Text that `tooltip_size` fits on one line stays on one line, so a
+      // shaped width a hair over the measured one doesn't wrap it.
+      TooltipContent::Text(text) => div()
+        .when(
+          wrapped_text(cx, text, TOOLTIP_MAX_WIDTH - 24. - 2.).1 == 1,
+          |this| this.whitespace_nowrap(),
+        )
+        .child(text.clone())
+        .into_any_element(),
       TooltipContent::Shortcut { text, keys } => div()
         .flex()
         .items_center()
@@ -1178,7 +1186,7 @@ impl Render for PopupView {
           .px_3()
           .py(zpx(6.))
           .shadow_md()
-          .child(self.render_tooltip(&content)),
+          .child(self.render_tooltip(&content, cx)),
       ),
       // `p-1 shadow-md`, `shadow-lg` for a submenu
       Content::Menu {

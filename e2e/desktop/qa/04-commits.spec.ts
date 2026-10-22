@@ -60,10 +60,29 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     title: "Commits tab: conflicted commit unfolded",
     expectations: [
       "The commit's files show under it with their diffs or conflict state",
-      "Action row (Resolve…, Edit description, Undo, Revert, …) fits the width",
+      "Action row fits on one line with one-word buttons: Undo, Revert, Move, Stash, Delete",
+      "A pencil sits beside the description and another beside the timestamp; no per-commit Resolve",
     ],
-    issue: "The action row overflows: 'Delete commit' is cut off at the right edge",
   });
+  await editDescription.hover();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "04-commits-edit-description-tooltip",
+    title: "Edit description pencil tooltip",
+    screen: true,
+    rest: false,
+    expectations: ["Hovering the pencil beside the description shows an 'Edit description' tooltip"],
+  });
+  await page.getByRole("button", { name: "Edit timestamp" }).hover();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "04-commits-edit-timestamp-tooltip",
+    title: "Edit timestamp pencil tooltip",
+    screen: true,
+    rest: false,
+    expectations: ["Hovering the pencil beside the timestamp shows an 'Edit timestamp' tooltip"],
+  });
+  await page.mouse.move(700, 700);
   await page.mouse.click(329, 279);
   await expect(editDescription).toHaveCount(0);
   await settle(page, 800);

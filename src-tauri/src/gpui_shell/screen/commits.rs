@@ -1505,14 +1505,12 @@ impl Render for CommitsView {
         .bg(p.border),
     );
     if let Some((commit, label)) = &tentative {
-      list = list.child(div().mb_3().child(self.commit(
-        commit,
-        Kind::Tentative,
-        Some(label),
-        false,
-        &p,
-        cx,
-      )));
+      list =
+        list.child(
+          div()
+            .mb_3()
+            .child(self.commit(commit, Kind::Tentative, Some(label), &p, cx)),
+        );
     }
     let mut first = true;
     for (label, commits) in group_by_day(&own) {
@@ -1524,8 +1522,7 @@ impl Render for CommitsView {
           .child(label),
       );
       for commit in &commits {
-        let resolvable = conflicted.iter().any(|c| c.change_id == commit.change_id);
-        group = group.child(self.commit(commit, Kind::Own { first }, None, resolvable, &p, cx));
+        group = group.child(self.commit(commit, Kind::Own { first }, None, &p, cx));
         first = false;
       }
       list = list.child(group);
@@ -1598,7 +1595,7 @@ impl Render for CommitsView {
             .child(label),
         );
         for commit in &commits {
-          group = group.child(self.commit(commit, Kind::Target, None, false, &p, cx));
+          group = group.child(self.commit(commit, Kind::Target, None, &p, cx));
         }
         list = list.child(group);
       }
@@ -1692,7 +1689,6 @@ impl CommitsView {
     commit: &JjLogCommit,
     kind: Kind,
     label: Option<&String>,
-    resolvable: bool,
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
@@ -1727,12 +1723,11 @@ impl CommitsView {
         .child(time::relative(&ts)),
       cx,
     );
-    let mut title = div().min_w_0().flex_1().truncate().child(headline(commit));
+    let mut title = div().min_w_0().truncate().child(headline(commit));
     if let Some(label) = label.filter(|l| !l.is_empty()) {
       // The workspace's label in mono after the headline.
       title = div()
         .min_w_0()
-        .flex_1()
         .flex()
         .overflow_hidden()
         .child(div().flex_none().child(headline(commit)))
@@ -1745,6 +1740,30 @@ impl CommitsView {
             .child(format!("- {label}")),
         );
     }
+    // An unfolded own commit edits its description and timestamp in place.
+    let own = expanded && matches!(kind, Kind::Own { .. });
+    let short = &commit.change_id;
+    let edit_description = own.then(|| {
+      self.edit_icon(
+        format!("edit-description-{short}"),
+        "Edit description",
+        commit,
+        Self::edit_description,
+        p,
+        cx,
+      )
+    });
+    let edit_timestamp =
+      (own && self.parent.workspace.is_some() && !commit.is_immutable).then(|| {
+        self.edit_icon(
+          format!("edit-timestamp-{short}"),
+          "Edit timestamp",
+          commit,
+          Self::edit_timestamp,
+          p,
+          cx,
+        )
+      });
     let id = commit.commit_id.clone();
     let rows = self.rows.clone();
     let hover = if tentative { yellow_hover } else { p.muted };
@@ -1798,7 +1817,8 @@ impl CommitsView {
                 16.,
                 p.muted_foreground,
               ))
-              .child(title),
+              .child(title)
+              .children(edit_description),
           )
           .child(
             div()
@@ -1825,6 +1845,7 @@ impl CommitsView {
                 this.child(badge("Immutable", p.muted_foreground, p.muted, p.border))
               })
               .child(time)
+              .children(edit_timestamp)
               .when(commit.insertions > 0 || commit.deletions > 0, |this| {
                 this.child(
                   div()
@@ -1877,7 +1898,7 @@ impl CommitsView {
       })
       .child(row)
       .when(expanded, |this| {
-        this.child(self.expanded_commit(commit, kind, resolvable, p, cx))
+        this.child(self.expanded_commit(commit, kind, p, cx))
       })
   }
 
@@ -1885,34 +1906,30 @@ impl CommitsView {
     &mut self,
     commit: &JjLogCommit,
     kind: Kind,
-    resolvable: bool,
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let removing = self.removing.contains(&commit.commit_id);
-    let outline = |id: String, icon: &'static str, label: &'static str| {
+    // One-word labels; `name` is the fuller accessible name.
+    let outline = |id: String, icon: &'static str, label: &'static str, name: &'static str| {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
         .gap(zpx(6.))
         .icon(icon, 16.)
         .label(label)
+        .aria_label(name)
     };
-    let destructive_outline = |id: String, label: &'static str| {
+    let destructive_outline = |id: String, name: &'static str| {
       let red = p.destructive;
-      Button::new(id, p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .gap(zpx(6.))
+      outline(id, theme::ICON_TRASH, "Delete", name)
         .border_color(red.opacity(0.3))
         .text_color(red)
         .hover_bg(red.opacity(0.1))
         .disabled(removing)
-        .child(ui::icon(theme::ICON_TRASH, 16., red))
-        .label(label)
     };
     let short = &commit.change_id;
-    let move_label = if kind == Kind::Tentative {
+    let move_name = if kind == Kind::Tentative {
       "Move changes"
     } else {
       "Move commit"
@@ -1924,7 +1941,8 @@ impl CommitsView {
         outline(
           format!("move-commit-{short}"),
           theme::ICON_ARROW_RIGHT_LEFT,
-          move_label,
+          "Move",
+          move_name,
         )
         .on_click({
           let id = commit.commit_id.clone();
@@ -1971,13 +1989,20 @@ impl CommitsView {
           }));
         this.child(deferred(panel).with_priority(1))
       });
-    let mut actions = div().flex().items_center().gap_2().mb_2().mt_2();
+    let mut actions = div()
+      .flex()
+      .flex_wrap()
+      .items_center()
+      .gap_2()
+      .mb_2()
+      .mt_2();
     if kind == Kind::Tentative {
       actions = actions
         .child(
           outline(
             "view-tentative-changes".into(),
             theme::ICON_FILE_TEXT,
+            "View",
             "View changes",
           )
           .on_click(cx.listener(|view, _, _, cx| {
@@ -1993,28 +2018,6 @@ impl CommitsView {
       let own = matches!(kind, Kind::Own { .. });
       let workspace = self.parent.workspace.is_some();
       actions = actions
-        .when(commit.has_conflicts && resolvable, |this| {
-          let ids = vec![commit.change_id.clone()];
-          this.child(
-            Button::new(format!("resolve-commit-{short}"), p)
-              .variant(Variant::Destructive)
-              .size(Size::Sm)
-              .gap(zpx(6.))
-              .icon(theme::ICON_MERGE, 16.)
-              .label("Resolve…")
-              .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
-          )
-        })
-        .when(own, |this| {
-          this.child(
-            outline(
-              format!("edit-description-{short}"),
-              theme::ICON_PENCIL,
-              "Edit description",
-            )
-            .on_click(Self::on_commit(commit, Self::edit_description, cx)),
-          )
-        })
         .when(
           matches!(kind, Kind::Own { first: true }) && workspace,
           |this| {
@@ -2022,6 +2025,7 @@ impl CommitsView {
               outline(
                 format!("undo-commit-{short}"),
                 theme::ICON_UNDO,
+                "Undo",
                 "Undo commit",
               )
               .disabled(removing)
@@ -2033,20 +2037,11 @@ impl CommitsView {
           outline(
             format!("revert-commit-{short}"),
             theme::ICON_ROTATE_CCW,
+            "Revert",
             "Revert commit",
           )
           .on_click(Self::on_commit(commit, Self::revert, cx)),
         )
-        .when(own && workspace && !commit.is_immutable, |this| {
-          this.child(
-            outline(
-              format!("edit-timestamp-{short}"),
-              theme::ICON_CLOCK,
-              "Edit timestamp",
-            )
-            .on_click(Self::on_commit(commit, Self::edit_timestamp, cx)),
-          )
-        })
         .when(own, |this| {
           this
             .child(move_button)
@@ -2054,6 +2049,7 @@ impl CommitsView {
               outline(
                 "stash-commit-button".into(),
                 theme::ICON_ARCHIVE,
+                "Stash",
                 "Stash commit",
               )
               .disabled(removing)
@@ -2167,6 +2163,35 @@ impl CommitsView {
   }
 
   /// A click that runs `f` on `commit`.
+  /// A small pencil button with a tooltip of `name` that runs `f` on
+  /// `commit` without folding its row.
+  fn edit_icon(
+    &self,
+    id: String,
+    name: &'static str,
+    commit: &JjLogCommit,
+    f: fn(&mut Self, JjLogCommit, &mut Context<Self>),
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Stateful<Div> {
+    let on_click = Self::on_commit(commit, f, cx);
+    self.tips.wrap(
+      id.clone(),
+      Side::Top,
+      Some(TooltipContent::Text(name.into())),
+      Button::new(id, p)
+        .variant(Variant::Ghost)
+        .size(Size::IconXs)
+        .icon(theme::ICON_PENCIL, 14.)
+        .aria_label(name)
+        .on_click(move |event, window, cx| {
+          cx.stop_propagation();
+          on_click(event, window, cx);
+        }),
+      cx,
+    )
+  }
+
   fn on_commit(
     commit: &JjLogCommit,
     f: fn(&mut Self, JjLogCommit, &mut Context<Self>),
