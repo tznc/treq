@@ -67,6 +67,23 @@ test("delete-confirmation: one question, owned by the repo window", async ({ pag
     console.log(`open delete questions: ${questions.length}\n${owners.join("\n")}`);
     // Raise the repo window, as clicking back into the app does.
     execFileSync("xdotool", ["windowraise", windows("^Treq")[0]]);
+    // The window manager centres every question on the same spot, so a
+    // second one would hide the first: fan them out.
+    questions.forEach((id, i) => {
+      const g = Object.fromEntries(
+        execFileSync("xdotool", ["getwindowgeometry", "--shell", id])
+          .toString()
+          .trim()
+          .split("\n")
+          .map((l) => l.split("=")),
+      );
+      execFileSync("xdotool", [
+        "windowmove",
+        id,
+        String(Number(g.X) - 500 + i * 1000),
+        String(Number(g.Y) - 200 + i * 400),
+      ]);
+    });
     await page.waitForTimeout(800);
     await capture(page, {
       name: "15-delete-confirmation-asked-twice",
