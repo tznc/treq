@@ -44,7 +44,7 @@ This boundary separates concurrent tasks at the file-system level. Repository hi
 
 Treq writes a `treq` skill into a temporary directory when it starts the agent. You do not install it, and it is not committed to the repository.
 
-Claude Code loads `.claude/skills/treq/`. Codex and Cursor Agent load `.agents/skills/treq/`. Treq always excludes these generated paths from its snapshots. To make external Git skip them too, enable **Ignore generated Treq paths** in repository settings. This appends `.agents/skills/treq*/` and `.claude/skills/treq*/` to `.gitignore`. The copies are deleted when the agent process exits.
+Claude Code loads `.claude/skills/treq/`. Codex and Cursor Agent load `.agents/skills/treq/`. Each copy has its own `.gitignore` that ignores the folder, so Git and Treq's snapshots skip it without changes to your repository's `.gitignore`. The copies are deleted when the agent process exits.
 
 The skill covers workspace CLI commands, `treq send` for UI previews, `treq commit` when the task needs a recorded revision, `treq diff` for conflicts, and [conflict resolution](/docs/concepts/commit-management#resolve-commit-conflicts-inplace). It also tells the agent to run `treq notify` when it finishes or needs input. See the [CLI reference](/docs/reference/cli) and [Workspaces](/docs/concepts/workspaces).
 

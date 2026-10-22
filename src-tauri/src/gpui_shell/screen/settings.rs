@@ -210,7 +210,6 @@ pub struct RepositoryFields {
   pub default_model: String,
   pub default_agent: String,
   pub auto_push: bool,
-  pub ignore_generated_agent_files: bool,
   pub review_prompt: String,
   pub review_agent: String,
   pub auto_review_trigger: String,
@@ -1762,19 +1761,6 @@ impl SettingsView {
             false,
             p,
             self.field("repo.autoPush"),
-          ),
-          p,
-        ))
-        .child(switch_row(
-          "Ignore generated Treq paths",
-          "Add .jj*/ and Treq-generated agent skill paths to this repository's .gitignore",
-          form::switch(
-            "settings-ignore-generated",
-            "Ignore generated Treq paths",
-            f.ignore_generated_agent_files,
-            false,
-            p,
-            self.field("repo.ignoreGeneratedAgentFiles"),
           ),
           p,
         ))

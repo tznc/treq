@@ -431,7 +431,6 @@ const SETTINGS_CLICKS: &[&str] = &[
   "settings-tab-application",
   "settings-tab-repository",
   "settings-auto-push",
-  "settings-ignore-generated",
   "settings-auto-review-trigger",
   "settings-conflict-marker-style",
   "settings-default-agent",
