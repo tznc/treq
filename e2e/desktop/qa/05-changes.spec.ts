@@ -266,3 +266,28 @@ test("changes: generated files wait behind Load diff", async ({ page }) => {
     expectations: ["The clicked generated file's diff renders in place of the placeholder"],
   });
 });
+
+test("changes: filter menu picks what the lists show", async ({ page }) => {
+  await openWorkspace(page, "feat/event-ingest");
+  await openTab(page, "Changes");
+  await expect(page.getByRole("button", { name: "Show committed changes" })).toHaveCount(0);
+  await capture(page, {
+    name: "05-changes-filter-row",
+    title: "The list's filter row",
+    expectations: [
+      "The funnel button sits in its own right-aligned row above the lists",
+      "The Committed header has no Show button",
+    ],
+  });
+  await page.getByRole("button", { name: "Filter changes" }).click();
+  await settle(page, 1000);
+  await capture(page, {
+    name: "05-changes-filter-menu",
+    title: "The list's filter menu",
+    screen: true,
+    rest: false,
+    expectations: ["The menu lists Generated files and Committed, both checked"],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 500);
+});

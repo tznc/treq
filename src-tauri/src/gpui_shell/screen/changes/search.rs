@@ -220,7 +220,7 @@ impl ChangesView {
     };
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
     let mut files: Vec<(String, String, bool)> = self
-      .files()
+      .listed()
       .iter()
       .map(|f| (f.path.clone(), f.status.clone(), f.old_path.is_some()))
       .collect();

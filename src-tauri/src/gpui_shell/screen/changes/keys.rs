@@ -35,6 +35,7 @@ impl ChangesView {
     snapshot
       .files
       .iter()
+      .filter(|f| !self.hides(&f.path))
       .map(|f| (f.path.as_str(), f.status.as_str(), f.old_path.is_some()))
       .chain(committed.iter().map(|f| {
         (

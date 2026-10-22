@@ -171,6 +171,7 @@ impl ChangesView {
     let mut files: Vec<(String, String, Option<String>, bool)> = snapshot
       .files
       .iter()
+      .filter(|f| !self.hides(&f.path))
       .map(|f| (f.path.clone(), f.status.clone(), f.old_path.clone(), false))
       .collect();
     files.extend(
