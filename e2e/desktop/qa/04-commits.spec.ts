@@ -75,8 +75,11 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     title: "Commit row context menu",
     screen: true,
     rest: false,
-    expectations: ["Menu items (copy id, revert, …) aligned; disabled ones dimmed"],
-    issue: "Right-click on a commit row opens no menu (only the hover highlight)",
+    expectations: [
+      "Right-click opens a menu at the pointer: Copy commit ID, Copy change ID, Copy message",
+      "Below a separator, the row's actions (Edit description, Revert commit, …)",
+      "Delete commit sits last, in red",
+    ],
   });
   await page.keyboard.press("Escape");
   await settle(page, 500);
@@ -97,14 +100,17 @@ test("commits: large commit defers its diff", async ({ page }) => {
   await openWorkspace(page, "feat/alerting-logs");
   await openTab(page, "Commits");
   await settle(page, 1500);
+  // #388 is merged: View PR shows, Create PR doesn't.
+  await expect(page.getByRole("button", { name: "View PR" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create PR" })).toHaveCount(0);
   await capture(page, {
     name: "04-commits-plain-workspace",
     title: "Commits tab of a workspace without conflicts",
     expectations: [
       "Working copy row (uncommitted, amber) above two commits; newest +642",
       "No conflict card",
+      "Header shows the merged 'View PR' and no 'Create PR'",
     ],
-    issue: "Header shows both a merged 'View PR' and 'Create PR' for the same branch",
   });
   // The working copy row, at the top of the list. Its fold state outlives
   // the tab, so it is read from its "View changes" action first.

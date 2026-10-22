@@ -102,3 +102,51 @@ fn commits_tab_draws_no_target_section_on_the_default_branch(cx: &mut TestAppCon
   assert!(!h.drawn("target-divider"));
   assert!(!h.drawn("own-commits-empty"));
 }
+
+#[gpui::test]
+fn commit_rows_open_a_context_menu(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
+  use gpui::{Modifiers, MouseButton};
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  h.cx.run_until_parked();
+  let at = h.cx.debug_bounds("commit-row-a").expect("row").center();
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
+  h.cx
+    .simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
+  h.cx.run_until_parked();
+  let texts: Vec<String> = match h.popups.borrow().last() {
+    Some(PopupRequest::ShowMenu { entries, .. }) => entries
+      .iter()
+      .filter_map(|e| match e {
+        MenuEntry::Item { text, .. } => Some(text.clone()),
+        _ => None,
+      })
+      .collect(),
+    _ => panic!("no menu is shown"),
+  };
+  assert_eq!(
+    texts,
+    [
+      "Copy commit ID",
+      "Copy change ID",
+      "Copy message",
+      "Edit description",
+      "Undo commit",
+      "Revert commit",
+      "Edit timestamp",
+      "Stash commit",
+      "Delete commit",
+    ]
+  );
+  assert!(!h.drawn("commit-file-row"), "a right-click doesn't expand");
+  h.pick("Copy commit ID");
+  assert_eq!(
+    h.cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+    Some("a")
+  );
+  assert!(host.calls().contains(&"notify toast Copied".to_string()));
+  h.pick("Revert commit");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"revert a".to_string()));
+}

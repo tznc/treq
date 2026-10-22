@@ -20,9 +20,9 @@ use std::{
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Bounds, Context, Div, Entity,
-  FontWeight, Hsla, KeyDownEvent, MouseButton, MouseMoveEvent, Pixels, ScrollHandle, SharedString,
-  Stateful, Subscription, Window,
+  self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
+  Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseMoveEvent, Pixels, ScrollHandle,
+  SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -38,7 +38,7 @@ use super::{
 use crate::{
   gpui_shell::{
     native::{self, NativeEvent, ToastAction, ToastTone},
-    popup::{PopupSink, Side, TooltipContent},
+    popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, tw, Palette},
     time,
     tooltips::{HasTooltips, Tooltips},
@@ -139,6 +139,7 @@ pub struct CommitsView {
   pub(super) parent: Parent,
   dark: bool,
   tips: Tooltips,
+  popups: PopupSink,
   pub(super) history: Option<History>,
   loading_more: bool,
   pub(super) target_limit: usize,
@@ -186,7 +187,8 @@ impl CommitsView {
       react,
       parent,
       dark,
-      tips: Tooltips::new(popups, dark),
+      tips: Tooltips::new(popups.clone(), dark),
+      popups,
       history: None,
       loading_more: false,
       target_limit: TARGET_PAGE,
@@ -1855,6 +1857,15 @@ impl CommitsView {
         .left_0()
         .size_full(),
       )
+      .when(!tentative, |this| {
+        let commit = commit.clone();
+        this.on_mouse_down(
+          MouseButton::Right,
+          cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+            view.commit_menu(&commit, kind, e.position, cx);
+          }),
+        )
+      })
       .on_click({
         let id = commit.commit_id.clone();
         cx.listener(move |view, _, _, cx| view.toggle(&id, cx))
@@ -2086,6 +2097,73 @@ impl CommitsView {
         .overflow_hidden()
         .child(content),
     )
+  }
+
+  /// A commit row's right-click menu: copy its ids or message, then the
+  /// actions its expanded row offers.
+  fn commit_menu(
+    &self,
+    commit: &JjLogCommit,
+    kind: Kind,
+    at: gpui::Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    let view = cx.entity().downgrade();
+    let copy = |label: &str, text: String, what: &'static str| {
+      let view = view.clone();
+      NativeMenuItem::item(label, move |cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+        let _ = view.update(cx, |view, _| {
+          view.toast(ToastTone::Success, "Copied", format!("Copied {what}"))
+        });
+      })
+      .icon(MenuIcon::Copy)
+    };
+    let run = |label: &str, f: fn(&mut Self, JjLogCommit, &mut Context<Self>)| {
+      let (view, commit) = (view.clone(), commit.clone());
+      NativeMenuItem::item(label, move |cx| {
+        let _ = view.update(cx, |view, cx| f(view, commit.clone(), cx));
+      })
+    };
+    let own = matches!(kind, Kind::Own { .. });
+    let workspace = self.parent.workspace.is_some();
+    let removing = self.removing.contains(&commit.commit_id);
+    let mut items = vec![
+      copy("Copy commit ID", commit.commit_id.clone(), "commit ID"),
+      copy("Copy change ID", commit.change_id.clone(), "change ID"),
+      copy(
+        "Copy message",
+        commit.description.trim().to_string(),
+        "commit message",
+      ),
+      NativeMenuItem::Separator,
+    ];
+    if own {
+      items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
+    }
+    if matches!(kind, Kind::Own { first: true }) && workspace && !removing {
+      items.push(run("Undo commit", Self::undo));
+    }
+    items.push(run("Revert commit", Self::revert));
+    if own && workspace && !commit.is_immutable {
+      items.push(run("Edit timestamp", Self::edit_timestamp));
+    }
+    if own && !removing {
+      items.push(run("Stash commit", Self::stash).icon(MenuIcon::Archive));
+      items.push(NativeMenuItem::Separator);
+      items.push(
+        run("Delete commit", Self::abandon)
+          .icon(MenuIcon::Trash2)
+          .destructive(),
+      );
+    }
+    let popups = self.popups.clone();
+    let request = PopupRequest::ShowMenu {
+      entries: crate::gpui_shell::popup::native_entries(items),
+      at,
+      dark: self.dark,
+    };
+    cx.defer(move |cx| popups(request, cx));
   }
 
   /// A click that runs `f` on `commit`.
