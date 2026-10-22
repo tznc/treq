@@ -117,7 +117,7 @@ fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
   let screen = screen(&mut h);
   let user = screen.user();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login")));
   let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces..."));
   expect(&search).to_have_focus();
 
