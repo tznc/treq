@@ -58,7 +58,7 @@ use crate::{
 /// fifth wider than Inter's at the same size, so 13px code read larger than
 /// the 13px UI around it; 12px matches its width, as GitHub's diffs do.
 const CODE_TEXT: f32 = 12.;
-/// Opacity of a viewed file's row in the file lists.
+/// Opacity of a viewed file's name in the file lists.
 const VIEWED_OPACITY: f32 = 0.5;
 
 /// A workspace, or the home repository, files can move to.
@@ -1976,7 +1976,6 @@ impl ChangesView {
       div()
         .min_w(zpx(8.))
         .text_color(status_color)
-        .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
         .child(file.status.clone()),
     );
     if last && selected && !staged {
@@ -2064,13 +2063,13 @@ impl ChangesView {
           .items_center()
           .gap_2()
           .min_w_0()
-          .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
           .child(
             div()
               .min_w_0()
               .truncate()
               .font_weight(FontWeight::MEDIUM)
               .text_color(name_color)
+              .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
               .child(name),
           )
           .when_some(dir, |this, dir| {
@@ -2209,11 +2208,11 @@ impl ChangesView {
                 .items_center()
                 .gap_2()
                 .min_w_0()
-                .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
                 .child(
                   div()
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
+                    .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
                     .when(active, |this| this.text_color(tw::color(tw::BLUE_500)))
                     .child(name),
                 )
@@ -2227,12 +2226,7 @@ impl ChangesView {
                   )
                 }),
             )
-            .child(
-              div()
-                .text_color(muted)
-                .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-                .child(file.status.clone()),
-            )
+            .child(div().text_color(muted).child(file.status.clone()))
             .on_mouse_down(
               MouseButton::Right,
               cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {

@@ -19,7 +19,7 @@ test("changes viewed: a viewed file fades in the file list", async ({ page }) =>
   await capture(page, {
     name: "16-changes-viewed-01-none",
     title: "Changes tab: no file marked viewed",
-    expectations: ["Every row under Committed has full-strength name, folder and status"],
+    expectations: ["Every file name under Committed is full strength"],
   });
   await page.mouse.click(VIEWED.x, VIEWED.y);
   await page.mouse.move(900, 600);
@@ -29,7 +29,7 @@ test("changes viewed: a viewed file fades in the file list", async ({ page }) =>
     title: "First file marked Viewed",
     expectations: [
       "The first card's Viewed toggle is checked and the card is collapsed",
-      "That file's row in the list is greyed out (name, folder and status)",
+      "That file's name in the list is greyed out; its folder and status are unchanged",
       "The other rows keep their full-strength text",
     ],
   });
@@ -39,6 +39,6 @@ test("changes viewed: a viewed file fades in the file list", async ({ page }) =>
   await capture(page, {
     name: "16-changes-viewed-03-unmarked",
     title: "Viewed mark cleared",
-    expectations: ["The row is back to full-strength text, like the others"],
+    expectations: ["The file name is back to full strength, like the others"],
   });
 });
