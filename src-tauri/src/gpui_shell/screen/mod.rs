@@ -47,6 +47,7 @@ mod linear_data;
 mod logs;
 mod logs_data;
 mod merge;
+mod rows;
 mod merge_queue;
 mod merge_queue_data;
 mod modal;

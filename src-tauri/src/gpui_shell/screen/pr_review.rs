@@ -13,6 +13,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
+  ops::Range,
   rc::Rc,
   sync::Arc,
   time::{Duration, Instant},
@@ -21,7 +22,7 @@ use std::{
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Bounds, Context, Entity, FontWeight,
+  self, anchored, deferred, div, point, prelude::*, px, uniform_list, App, Bounds, Context, Entity, FontWeight,
   KeyDownEvent, MouseButton, Pixels, SharedString, Subscription, Window,
 };
 
@@ -228,12 +229,12 @@ impl PrReviewView {
     );
   }
 
-  /// The PR's files, in diff order.
-  fn files(&self, cx: &App) -> Vec<super::changes_data::ChangedFile> {
+  /// How many files the PR changes.
+  fn file_count(&self, cx: &App) -> usize {
     self
       .changes
       .as_ref()
-      .and_then(|c| c.read(cx).snapshot.as_ref().map(|s| s.files.clone()))
+      .and_then(|c| c.read(cx).snapshot.as_ref().map(|s| s.files.len()))
       .unwrap_or_default()
   }
 
@@ -266,7 +267,7 @@ impl PrReviewView {
       .as_ref()
       .map(|p| p.title.clone())
       .unwrap_or_default();
-    let files = self.files(cx).len();
+    let files = self.file_count(cx);
     self.run(
       move |host| {
         let keys = ["review_prompt".to_string(), "review_agent".to_string()];
@@ -424,7 +425,7 @@ impl Render for PrReviewView {
 impl PrReviewView {
   fn header(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let number = self.route.pr_number;
-    let files = self.files(cx);
+    let files = self.file_count(cx);
     let (postable, _) = self.drafts(cx);
     let muted = p.muted_foreground;
     let title = self
@@ -444,7 +445,7 @@ impl PrReviewView {
         .child(mono(pr.head_ref_name.clone()))
         .child("into")
         .child(mono(pr.base_ref_name.clone()))
-        .child(format!("· {}", files_label(files.len())))
+        .child(format!("· {}", files_label(files)))
     });
     let open = self.pr.as_ref().map(|pr| {
       let (host, url) = (self.host.clone(), pr.url.clone());
@@ -530,7 +531,7 @@ impl PrReviewView {
           .variant(Variant::Outline)
           .size(Size::Sm)
           .gap_2()
-          .disabled(self.starting || files.is_empty())
+          .disabled(self.starting || files == 0)
           .icon(theme::ICON_BOT, 12.)
           .label("AI review")
           .on_click(cx.listener(|view, _, _, cx| view.start_agent_review(cx))),
@@ -568,56 +569,84 @@ impl PrReviewView {
       )
   }
 
-  /// The changed files (`nav aria-label="Changed files"`).
+  /// The changed files (`nav aria-label="Changed files"`), a row each,
+  /// built only while on screen.
   fn nav(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let mut nav = div()
+    let count = self.file_count(cx);
+    div()
       .id("pr-review-files")
       .debug_selector(|| "pr-review-files".into())
       .w_64()
       .flex_none()
       .border_r_1()
       .border_color(p.border)
-      .overflow_y_scroll()
-      .py_2();
-    let accent = p.accent;
-    for file in self.files(cx) {
-      let (name, _) = split_path(&file.path);
-      let path = file.path.clone();
-      let active = self.active.as_deref() == Some(file.path.as_str());
-      let row = ui::text(div(), TextSize::Xs)
-        .id(SharedString::from(format!("pr-file-{}", file.path)))
-        .debug_selector({
-          let id = format!("pr-file-{}", file.path);
-          move || id
-        })
-        .w_full()
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_3()
-        .py_1()
-        .cursor_pointer()
-        .hover(move |s| s.bg(accent))
-        .when(active, |this| this.bg(accent))
-        .child(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
-        .child(div().truncate().flex_1().child(name))
-        .child(
-          div()
-            .text_size(zpx(10.))
-            .text_color(p.muted_foreground)
-            .child(file.status.clone()),
+      .child(
+        uniform_list(
+          "pr-review-file-list",
+          count,
+          cx.processor(|view, range: Range<usize>, _, cx| view.nav_rows(range, cx)),
         )
-        .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
-      let tip = file.path.clone();
-      nav = nav.child(self.tips.wrap(
-        format!("pr-file-tip-{}", file.path),
-        Side::Bottom,
-        Some(TooltipContent::Text(tip.into())),
-        row,
-        cx,
-      ));
-    }
-    nav
+        .size_full()
+        .py_2(),
+      )
+  }
+
+  fn nav_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+    let p = theme::palette(self.dark);
+    let accent = p.accent;
+    let files: Vec<_> = self
+      .changes
+      .as_ref()
+      .and_then(|c| {
+        c.read(cx)
+          .snapshot
+          .as_ref()
+          .and_then(|s| s.files.get(range).map(<[_]>::to_vec))
+      })
+      .unwrap_or_default();
+    files
+      .into_iter()
+      .map(|file| {
+        let (name, _) = split_path(&file.path);
+        let path = file.path.clone();
+        let active = self.active.as_deref() == Some(file.path.as_str());
+        let row = ui::text(div(), TextSize::Xs)
+          .id(SharedString::from(format!("pr-file-{}", file.path)))
+          .debug_selector({
+            let id = format!("pr-file-{}", file.path);
+            move || id
+          })
+          .w_full()
+          .flex()
+          .items_center()
+          .gap_2()
+          .px_3()
+          .py_1()
+          .cursor_pointer()
+          .hover(move |s| s.bg(accent))
+          .when(active, |this| this.bg(accent))
+          .child(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
+          .child(div().truncate().flex_1().child(name))
+          .child(
+            div()
+              .text_size(zpx(10.))
+              .text_color(p.muted_foreground)
+              .child(file.status.clone()),
+          )
+          .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
+        let tip = file.path.clone();
+        self
+          .tips
+          .wrap(
+            format!("pr-file-tip-{}", file.path),
+            Side::Bottom,
+            Some(TooltipContent::Text(tip.into())),
+            row,
+            cx,
+          )
+          .into_any_element()
+      })
+      .collect()
   }
 
   /// The "Finish your review" popover, below its button and right-aligned.

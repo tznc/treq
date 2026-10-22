@@ -4,8 +4,9 @@
 use crate::gpui_shell::ui::zpx;
 use serde::Deserialize;
 use serde_json::json;
+use std::{ops::Range, rc::Rc};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, ClipboardItem, Context, FontWeight, SharedString, Window,
+  self, div, prelude::*, uniform_list, ClipboardItem, Context, FontWeight, SharedString, Window,
 };
 
 use super::{dialog, message, overlay, title, Env};
@@ -33,7 +34,7 @@ pub struct PromptHistoryView {
   route: Route,
   dark: bool,
   /// `None` until the first read returns.
-  pub(in crate::gpui_shell::screen) entries: Option<Vec<PromptHistoryEntry>>,
+  pub(in crate::gpui_shell::screen) entries: Option<Rc<Vec<PromptHistoryEntry>>>,
   pub(in crate::gpui_shell::screen) selected: Option<i64>,
   /// Takes the keyboard on opening, so Escape reaches the dialog.
   focus: gpui::FocusHandle,
@@ -47,6 +48,12 @@ pub fn workspace_label(entry: &PromptHistoryEntry) -> String {
     _ if entry.workspace_id.is_none() => "Home repo".into(),
     _ => "Deleted workspace".into(),
   }
+}
+
+/// A prompt's opening, for its row: the row truncates it anyway, and
+/// shaping a long prompt whole for one line is wasted.
+fn preview(text: &str) -> String {
+  text.chars().take(200).collect()
 }
 
 /// `formatPromptsForCopy`.
@@ -114,7 +121,7 @@ impl PromptHistoryView {
         if view.selected.is_none() {
           view.selected = entries.first().map(|e| e.id);
         }
-        view.entries = Some(entries);
+        view.entries = Some(Rc::new(entries));
         cx.notify();
       });
     })
@@ -139,33 +146,46 @@ impl PromptHistoryView {
     );
   }
 
+  /// The prompts, a row each, built only while on screen.
   fn list(&self, entries: &[PromptHistoryEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-    let (accent, muted) = (p.menu_accent, p.muted_foreground);
     div()
       .debug_selector(|| "prompt-history-list".into())
       .w(zpx(256.))
       .flex_none()
       .h_full()
+      .pr_2()
+      .border_r_1()
+      .border_color(p.border)
       .child(
+        uniform_list(
+          "prompt-history-scroll",
+          entries.len(),
+          cx.processor(|view, range: Range<usize>, _, cx| view.rows(range, cx)),
+        )
+        .size_full(),
+      )
+  }
+
+  fn rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+    let p = theme::palette(self.dark);
+    let (accent, muted) = (p.menu_accent, p.muted_foreground);
+    let Some(entries) = self.entries.clone() else {
+      return Vec::new();
+    };
+    range
+      .filter_map(|i| entries.get(i).map(|entry| (i, entry)))
+      .map(|(i, entry)| {
+        let id = entry.id;
+        let selected = self.selected == Some(id);
+        let selector = format!("prompt-history-item-{i}");
+        // `gap-1` between rows, as padding: a uniform list's rows touch.
         div()
-          .id("prompt-history-scroll")
-          .size_full()
-          .overflow_y_scroll()
-          .flex()
-          .flex_col()
-          .gap_1()
-          .pr_2()
-          .border_r_1()
-          .border_color(p.border)
-          .children(entries.iter().enumerate().map(|(i, entry)| {
-            let id = entry.id;
-            let selected = self.selected == Some(id);
-            let selector = format!("prompt-history-item-{i}");
+          .pb_1()
+          .child(
             ui::text(div(), TextSize::Xs)
               .id(SharedString::from(selector.clone()))
               .debug_selector(move || selector)
               .w_full()
-              .flex_none()
               .px_2()
               .py_2()
               .rounded(zpx(8.))
@@ -192,14 +212,16 @@ impl PromptHistoryView {
                   .mt_1()
                   .text_color(muted)
                   .truncate()
-                  .child(entry.prompt_text.clone()),
+                  .child(preview(&entry.prompt_text)),
               )
               .on_click(cx.listener(move |view, _, _, cx| {
                 view.selected = Some(id);
                 cx.notify();
-              }))
-          })),
-      )
+              })),
+          )
+          .into_any_element()
+      })
+      .collect()
   }
 
   fn detail(
@@ -308,16 +330,15 @@ impl Render for PromptHistoryView {
       &p,
     );
     let entries = self.entries.clone();
-    let all = entries.clone().unwrap_or_default();
-    let copy_all = (!all.is_empty()).then(|| {
-      let text = format_for_copy(&all);
+    let copy_all = entries.as_ref().filter(|all| !all.is_empty()).map(|all| {
+      let all = all.clone();
       Button::new("prompt-history-copy-all", &p)
         .variant(Variant::Outline)
         .size(Size::Sm)
         .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr(zpx(6.)))
         .label("Copy all")
         .on_click(cx.listener(move |view, _, _, cx| {
-          view.copy(text.clone(), "All prompts copied to clipboard", cx)
+          view.copy(format_for_copy(&all), "All prompts copied to clipboard", cx)
         }))
     });
     let header = div()

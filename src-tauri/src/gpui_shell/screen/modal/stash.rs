@@ -13,7 +13,10 @@ use super::{dialog, message, overlay, title, Env};
 use crate::{
   gpui_shell::{
     native::ToastTone,
-    screen::code::{menu_item, menu_panel, tw, GREEN_600, RED_600},
+    screen::{
+      code::{menu_item, menu_panel, tw, GREEN_600, RED_600},
+      rows::Rows,
+    },
     theme::{self, Palette},
     time,
     ui::{self, Button, Size, TextSize, Variant},
@@ -41,6 +44,16 @@ pub struct Route {
   pub workspaces: Vec<Target>,
 }
 
+/// A row of a stash's diff, by file and hunk index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+  File(usize),
+  HunkHeader(usize, usize),
+  Line(usize, usize, usize),
+  /// The space under a hunk.
+  HunkEnd(usize, usize),
+}
+
 struct LoadedDiff {
   id: i64,
   /// `None` when it failed to load, which React shows as nothing.
@@ -55,6 +68,8 @@ pub struct StashView {
   pub(in crate::gpui_shell::screen) entries: Option<Vec<StashEntry>>,
   pub(in crate::gpui_shell::screen) selected: Option<i64>,
   diff: Option<LoadedDiff>,
+  /// The diff's rows.
+  rows: Rows<Row>,
   /// `patch-<id>`, `delete-<id>` or `apply-<id>` while one runs.
   pub(in crate::gpui_shell::screen) pending: Option<String>,
   pub(in crate::gpui_shell::screen) more_open: bool,
@@ -101,6 +116,7 @@ impl StashView {
       entries: None,
       selected: None,
       diff: None,
+      rows: Rows::default(),
       pending: None,
       more_open: false,
       apply: None,
@@ -177,6 +193,7 @@ impl StashView {
         .ok();
       let _ = this.update(cx, |view, cx| {
         if view.selected == Some(id) {
+          view.rows = Rows::default();
           view.diff = Some(LoadedDiff { id, diff });
           cx.notify();
         }
@@ -640,18 +657,14 @@ impl StashView {
 
     let body = match &self.diff {
       Some(LoadedDiff { id, diff }) if *id == entry.id => match diff {
-        Some(diff) => diff_pane(diff, p),
+        Some(diff) => self.diff_pane(diff, p, cx),
         None => div().into_any_element(),
       },
       _ => message("stash-diff-loading", "Loading diff...", p).into_any_element(),
     };
     pane.gap_3().child(header).child(
-      div()
-        .id("stash-detail-scroll")
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .child(body),
+      // The diff's list scrolls itself.
+      div().flex_1().min_h_0().child(body),
     )
   }
 
@@ -808,79 +821,117 @@ impl StashView {
   }
 }
 
-/// `StashDiffPane`.
-fn diff_pane(diff: &JjRevisionDiff, p: &Palette) -> gpui::AnyElement {
-  if diff.too_large_to_render {
-    return message(
-      "stash-diff-too-large",
-      diff
-        .render_block_reason
-        .clone()
-        .unwrap_or_else(|| "Diff is too large to render.".into()),
-      p,
-    )
-    .into_any_element();
+impl StashView {
+  /// The rows of the selected stash's diff.
+  fn sync_rows(&mut self, window: &Window) {
+    let mut rows = Vec::new();
+    if let Some(diff) = self
+      .diff
+      .as_ref()
+      .and_then(|d| d.diff.as_ref())
+      .filter(|d| !d.too_large_to_render)
+    {
+      for (f, file) in diff.hunks_by_file.iter().enumerate() {
+        rows.push(Row::File(f));
+        for (h, hunk) in file.hunks.iter().enumerate() {
+          rows.push(Row::HunkHeader(f, h));
+          rows.extend((0..hunk.lines.len()).map(|l| Row::Line(f, h, l)));
+          rows.push(Row::HunkEnd(f, h));
+        }
+      }
+    }
+    self.rows.sync(window, rows, |a, b| a == b);
   }
-  if diff.hunks_by_file.is_empty() {
-    return message("stash-diff-empty", "No file changes in this stash.", p).into_any_element();
+
+  /// `StashDiffPane`.
+  fn diff_pane(&self, diff: &JjRevisionDiff, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    if diff.too_large_to_render {
+      return message(
+        "stash-diff-too-large",
+        diff
+          .render_block_reason
+          .clone()
+          .unwrap_or_else(|| "Diff is too large to render.".into()),
+        p,
+      )
+      .into_any_element();
+    }
+    if diff.hunks_by_file.is_empty() {
+      return message("stash-diff-empty", "No file changes in this stash.", p).into_any_element();
+    }
+    div()
+      .debug_selector(|| "stash-diff-pane".into())
+      .size_full()
+      .child(
+        gpui::list(
+          self.rows.list.clone(),
+          cx.processor(|view, ix, _, _| view.row(ix)),
+        )
+        .size_full(),
+      )
+      .into_any_element()
   }
-  let green = gpui::rgba(0x10b98133);
-  let red = gpui::rgba(0xef444433);
-  div()
-    .debug_selector(|| "stash-diff-pane".into())
-    .flex()
-    .flex_col()
-    .gap_4()
-    .children(diff.hunks_by_file.iter().enumerate().map(|(f, file)| {
-      div()
+
+  fn row(&self, ix: usize) -> gpui::AnyElement {
+    let p = theme::palette(self.dark);
+    let (Some(&row), Some(diff)) = (
+      self.rows.get(ix),
+      self.diff.as_ref().and_then(|d| d.diff.as_ref()),
+    ) else {
+      return div().into_any_element();
+    };
+    let files = &diff.hunks_by_file;
+    let hunk = |f: usize, h: usize| files.get(f).and_then(|file| file.hunks.get(h));
+    let text = ui::text(div(), TextSize::Xs).font_family(theme::MONO_FONT);
+    match row {
+      Row::File(f) => text
         .debug_selector(move || format!("stash-diff-file-{f}"))
-        .flex_none()
+        .when(f > 0, |this| this.pt_4())
         .child(
-          ui::text(div(), TextSize::Xs)
+          div()
             .px_2()
             .py(zpx(6.))
             .border_b_1()
             .border_color(p.border)
             .bg(p.background.opacity(0.95))
-            .font_family(theme::MONO_FONT)
             .font_weight(FontWeight::MEDIUM)
-            .child(file.path.clone()),
+            .child(files.get(f).map(|f| f.path.clone()).unwrap_or_default()),
         )
-        .child(
-          ui::text(div(), TextSize::Xs)
-            .id(SharedString::from(format!("stash-diff-hunks-{f}")))
-            .font_family(theme::MONO_FONT)
-            .overflow_x_scroll()
-            .children(file.hunks.iter().map(|hunk| {
-              div()
-                .mb_2()
-                .child(
-                  div()
-                    .px_2()
-                    .py(zpx(2.))
-                    .text_color(p.muted_foreground)
-                    .bg(p.muted.opacity(0.4))
-                    .child(hunk.header.clone()),
-                )
-                .children(hunk.lines.iter().map(|line| {
-                  div()
-                    .px_2()
-                    .flex()
-                    .whitespace_nowrap()
-                    .when(line.starts_with('+'), |this| this.bg(green))
-                    .when(line.starts_with('-'), |this| this.bg(red))
-                    .child(
-                      div()
-                        .mr_1()
-                        .text_color(p.muted_foreground)
-                        .child(line_prefix(line)),
-                    )
-                    .child(line_text(line).to_string())
-                }))
-            })),
-        )
-    }))
-    .into_any_element()
+        .into_any_element(),
+      Row::HunkHeader(f, h) => text
+        .px_2()
+        .py(zpx(2.))
+        .text_color(p.muted_foreground)
+        .bg(p.muted.opacity(0.4))
+        .child(hunk(f, h).map(|h| h.header.clone()).unwrap_or_default())
+        .into_any_element(),
+      Row::Line(f, h, l) => {
+        let line = hunk(f, h)
+          .and_then(|h| h.lines.get(l))
+          .map_or("", String::as_str);
+        text
+          .px_2()
+          .flex()
+          .whitespace_nowrap()
+          .overflow_hidden()
+          .when(line.starts_with('+'), |this| {
+            this.bg(gpui::rgba(0x10b98133))
+          })
+          .when(line.starts_with('-'), |this| {
+            this.bg(gpui::rgba(0xef444433))
+          })
+          .child(
+            div()
+              .mr_1()
+              .text_color(p.muted_foreground)
+              .child(line_prefix(line)),
+          )
+          .child(line_text(line).to_string())
+          .into_any_element()
+      }
+      Row::HunkEnd(..) => div().h_2().into_any_element(),
+    }
+  }
 }
 
 impl Render for StashView {
@@ -890,6 +941,7 @@ impl Render for StashView {
       self.focused = true;
       window.focus(&self.focus, cx);
     }
+    self.sync_rows(window);
     let viewport = window.viewport_size();
     // With no stashes there is only a sentence to show: size the dialog to
     // it (`sm:max-w-lg`) instead of the list-and-detail layout's 75vw × 80vh.
