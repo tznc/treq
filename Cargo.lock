@@ -4485,7 +4485,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -5928,7 +5928,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -9011,7 +9011,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -11609,7 +11609,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-gpui"
 version = "0.1.0"
-source = "git+https://github.com/ziinc/tauri-gpui?branch=main#d7877f2ac0da8816257bb49d9e32e03a7fce6823"
+source = "git+https://github.com/ziinc/tauri-gpui?branch=main#9d15ce53deb0650fc681d63897d3c33657b9af6f"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
@@ -11624,6 +11624,7 @@ dependencies = [
  "gtk",
  "image",
  "log",
+ "objc2 0.6.4",
  "raw-window-handle",
  "tauri",
  "tauri-plugin",
