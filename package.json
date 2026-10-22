@@ -43,6 +43,8 @@
     "format": "biome format --write ./test && cargo fmt",
     "check:format": "biome format ./test",
     "check": "ast-grep test",
+    "check:functions": "deno check supabase/functions/*/index.ts supabase/functions/tests/*.ts",
+    "test:functions": "deno test --allow-env --allow-net=example.invalid supabase/functions/tests/remote_ssh_relay.test.ts supabase/functions/tests/remote_quota.test.ts supabase/functions/tests/remote_instance_store.test.ts",
     "lint": "ast-grep scan && biome lint ./test ./supabase/functions && npm run lint:subprocess && npm run lint:home-head && npm run lint:a11y && npm run lint:design",
     "lint:e2e": "ast-grep test --skip-snapshot-tests && ast-grep scan web/e2e",
     "lint:subprocess": "ast-grep scan --filter '^(no-command-for-jj-or-git-tauri-src|no-command-new-git-rust-tests|no-subprocess-conflict-pipeline-tauri-src)$'",
