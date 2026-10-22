@@ -401,3 +401,56 @@ fn the_view_pr_button_reads_the_pull_requests_status(cx: &mut TestAppContext) {
     screen.get_by_role(by::role(Role::Button).name(name.as_str()));
   }
 }
+
+// The terminal pane (QA: a new shell hidden past the row's edge)
+
+#[gpui::test]
+fn a_new_shell_takes_focus_fully_in_view(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  // Each column keeps 40% of the row: two shells beside the agent overflow it.
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.cx.run_until_parked();
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.cx.run_until_parked();
+  let shown = screen(&mut h);
+  let shells = shown.query_all_by_role(by::role(Role::Group).name("Shell terminal"));
+  assert_eq!(shells.len(), 2);
+  let last = shells[1].snapshot();
+  assert_eq!(
+    last.visible_bounds(),
+    last.bounds(),
+    "the new shell is scrolled fully into view"
+  );
+  // In the 1400px window, past the agent and the first shell.
+  assert!(
+    last.bounds().right() <= gpui::px(1400.),
+    "{:?}",
+    last.bounds()
+  );
+  let first = shown.get_by_role(by::role(Role::Group).name("Claude 1 terminal"));
+  assert!(first.bounds().left() < shells[0].bounds().left());
+  assert!(h.drawn("terminal-row-scrollbar"), "the overflow shows");
+
+  // What is typed goes to the new shell.
+  h.cx.simulate_input("x");
+  h.cx.run_until_parked();
+  let spawned: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter_map(|c| {
+      c.strip_prefix("spawn ")
+        .and_then(|rest| rest.split(' ').next().map(str::to_string))
+    })
+    .filter(|id| id.starts_with("shell-"))
+    .collect();
+  assert_eq!(spawned.len(), 2, "{:?}", host.calls());
+  assert!(
+    host
+      .calls()
+      .contains(&format!("write {} \"x\"", spawned[1])),
+    "{:?}",
+    host.calls()
+  );
+}

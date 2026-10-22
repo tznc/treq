@@ -205,6 +205,18 @@ pub fn drag_height(top: f32, bottom: f32, y: f32) -> f32 {
   ((bottom - y) / height * 100.).clamp(HEIGHT_MIN, HEIGHT_MAX)
 }
 
+/// The row's scrollbar thumb, as its left edge and width, for a row
+/// `view` wide that scrolls `max` and is scrolled to `offset`.
+pub fn scrollbar_thumb(view: f32, max: f32, offset: f32) -> (f32, f32) {
+  let width = (view * view / (view + max)).clamp(32_f32.min(view), view);
+  let left = if max > 0. {
+    offset.clamp(0., max) / max * (view - width)
+  } else {
+    0.
+  };
+  (left, width)
+}
+
 /// The column to focus once `closed` goes: the one that takes its place,
 /// else the one before.
 pub fn neighbour(order: &[String], closed: &str) -> Option<String> {
@@ -1552,7 +1564,15 @@ enum Kind {
 #[derive(Clone, Copy)]
 enum Drag {
   Height,
-  Divider { left: usize, x: f32 },
+  Divider {
+    left: usize,
+    x: f32,
+  },
+  /// The row's scrollbar thumb, grabbed at `x` with the row scrolled to `from`.
+  Scrollbar {
+    x: f32,
+    from: f32,
+  },
 }
 
 pub struct TerminalPane {
@@ -1566,6 +1586,8 @@ pub struct TerminalPane {
   incoming: Option<Route>,
   /// A column to focus when the pane next draws.
   focus_next: Option<String>,
+  /// A column to scroll into view when the pane next draws.
+  reveal: Option<String>,
   /// Commands GPUI itself gave the pane, run at the next draw.
   later: Vec<Command>,
   /// What the terminals said since the pane last drew.
@@ -1634,6 +1656,7 @@ impl TerminalPane {
       route: Route::default(),
       incoming: None,
       focus_next: None,
+      reveal: None,
       later: Vec::new(),
       events: Vec::new(),
       font_size,
@@ -1803,6 +1826,7 @@ impl TerminalPane {
         .find(|c| self.column_key(c) == *dir)
         .map(|c| c.id.clone());
       if id.is_some() {
+        self.reveal = id.clone();
         self.active = id;
       }
     }
@@ -2141,6 +2165,7 @@ impl TerminalPane {
 
   fn focus_column(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
     self.collapsed = false;
+    self.reveal = Some(id.to_string());
     self.activate(id, cx);
     if let Some(view) = self.view(id) {
       let focus = view.read(cx).focus.clone();
@@ -2294,7 +2319,15 @@ impl TerminalPane {
       self.send("terminal.newRemoteShell", dir.into(), cx);
       return;
     }
-    let millis = now_millis();
+    // Two shells opened in the same millisecond still get their own ids.
+    let mut millis = now_millis();
+    while self
+      .columns
+      .iter()
+      .any(|c| c.id == terminal_data::shell_pty_id(&dir, millis))
+    {
+      millis += 1;
+    }
     let id = terminal_data::shell_pty_id(&dir, millis);
     let on_event = self.on_event(id.clone(), cx);
     let (host, font_size, start) = (
@@ -2312,9 +2345,9 @@ impl TerminalPane {
       streaming: false,
       bounds: Rc::default(),
     });
-    self.collapsed = false;
     self.publish(cx);
-    let _ = window;
+    // The new shell takes focus at the end of the row, scrolled into view.
+    self.focus_column(&id, window, cx);
     cx.notify();
   }
 
@@ -2647,6 +2680,48 @@ impl TerminalPane {
     )
   }
 
+  /// The row's width and how far it scrolls, while its columns overflow it.
+  fn row_overflow(&self) -> Option<(f32, f32)> {
+    let view = f32::from(self.row.get()?.size.width);
+    let max = f32::from(self.row_scroll.max_offset().x);
+    (view > 0. && max >= 1.).then_some((view, max))
+  }
+
+  /// A scrollbar under the row while its columns overflow it, so the ones
+  /// past the edge show and can be reached.
+  fn row_scrollbar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let (view, max) = self.row_overflow()?;
+    let offset = -f32::from(self.row_scroll.offset().x);
+    let (left, width) = scrollbar_thumb(view, max, offset);
+    let dragging = matches!(self.drag, Some(Drag::Scrollbar { .. }));
+    let hover = p.muted_foreground;
+    Some(
+      div()
+        .id("terminal-row-scrollbar")
+        .debug_selector(|| "terminal-row-scrollbar".into())
+        .absolute()
+        .bottom_0()
+        .left(px(left))
+        .w(px(width))
+        .h(zpx(SCROLLBAR))
+        .rounded(zpx(4.))
+        .bg(if dragging { hover } else { p.border })
+        .hover(move |s| s.bg(hover))
+        .occlude()
+        .on_mouse_down(
+          MouseButton::Left,
+          cx.listener(move |pane, e: &MouseDownEvent, _, cx| {
+            pane.drag = Some(Drag::Scrollbar {
+              x: f32::from(e.position.x),
+              from: offset,
+            });
+            cx.stop_propagation();
+            cx.notify();
+          }),
+        ),
+    )
+  }
+
   fn min_width(&self) -> f32 {
     self
       .row
@@ -2691,6 +2766,15 @@ impl TerminalPane {
         self.columns[left].width = Some(l);
         self.columns[left + 1].width = Some(r);
         self.drag = Some(Drag::Divider { left, x });
+      }
+      Drag::Scrollbar { x: grabbed, from } => {
+        let Some((view, max)) = self.row_overflow() else {
+          return;
+        };
+        let (_, thumb) = scrollbar_thumb(view, max, from);
+        let travel = view - thumb;
+        let offset = (from + (x - grabbed) * max / travel.max(1.)).clamp(0., max);
+        self.row_scroll.set_offset(point(px(-offset), px(0.)));
       }
     }
     cx.notify();
@@ -3159,8 +3243,16 @@ impl TerminalPane {
     let active = self.active.as_deref() == Some(id.as_str());
     let focus_id = id.clone();
     let double_id = id.clone();
+    let name = match &column.kind {
+      Kind::Agent { name, .. } => format!("{name} terminal"),
+      Kind::Shell { .. } => "Shell terminal".into(),
+      Kind::Remote { .. } => "Remote terminal".into(),
+    };
     div()
       .id(SharedString::from(format!("terminal-column-{id}")))
+      .role(gpui::Role::Group)
+      .aria_label(name)
+      .test_support()
       .debug_selector(move || {
         format!(
           "terminal-column-{}",
@@ -3482,6 +3574,12 @@ impl Render for TerminalPane {
         .child(self.controls(&p, cx))
         .into_any_element();
     }
+    if let Some(id) = self.reveal.take() {
+      // Columns and dividers alternate in the row.
+      if let Some(index) = self.columns.iter().position(|c| c.id == id) {
+        self.row_scroll.scroll_to_item(index * 2);
+      }
+    }
     let mut row: Vec<gpui::AnyElement> = Vec::new();
     for index in 0..self.columns.len() {
       if index > 0 {
@@ -3527,6 +3625,7 @@ impl Render for TerminalPane {
       row.push(self.column(index, &p, cx).into_any_element());
     }
     let row_bounds = self.row.clone();
+    let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
     // `height%` of the workspace view, as React sizes the pane, with the
@@ -3635,13 +3734,16 @@ impl Render for TerminalPane {
               .overflow_x_scroll()
               .track_scroll(&self.row_scroll)
               .bg(rgb(terminal_emu::scheme(self.dark).background))
+              .children(row)
+              // After the columns, so a column's index in the row stays
+              // what `scroll_to_item` counts.
               .child(
                 gpui::canvas(move |b, _, _| row_bounds.set(Some(b)), |_, _, _, _| {})
                   .absolute()
                   .size_full(),
-              )
-              .children(row),
+              ),
           )
+          .children(scrollbar)
           .child(
             div()
               .absolute()
@@ -3706,6 +3808,16 @@ mod tests {
     assert_eq!(cell_x(8.4 * 3., 8.4, 8.), 24.);
     // A combining mark shaped just past its letter stays in its cell.
     assert_eq!(cell_x(8.4 * 3. + 0.5, 8.4, 8.), 24.);
+  }
+
+  #[test]
+  fn sizes_the_row_scrollbar_to_what_shows() {
+    // A row showing half of what it holds has a thumb half its width.
+    assert_eq!(scrollbar_thumb(600., 600., 0.), (0., 300.));
+    assert_eq!(scrollbar_thumb(600., 600., 600.), (300., 300.));
+    assert_eq!(scrollbar_thumb(600., 600., 300.), (150., 300.));
+    // The thumb stays big enough to grab.
+    assert_eq!(scrollbar_thumb(100., 10_000., 0.).1, 32.);
   }
 
   #[test]
