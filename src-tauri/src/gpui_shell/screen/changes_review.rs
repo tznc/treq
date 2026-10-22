@@ -468,6 +468,55 @@ pub fn edge_line(hunks: &[JjDiffHunk], down: bool) -> Option<LineRef> {
   }
 }
 
+/// The commented lines' text, without their diff markers.
+pub fn commented_text(line_content: &[String]) -> Vec<String> {
+  line_content
+    .iter()
+    .map(|l| l.get(1..).unwrap_or("").to_string())
+    .collect()
+}
+
+/// The ```` ```suggestion ```` block "Suggest change" starts a comment with:
+/// the lines as they are, to edit. Only lines on the new side can be
+/// replaced.
+pub fn suggestion_block(pending: &Pending) -> Option<String> {
+  if pending.side != Side::New || pending.at.is_none() || pending.line_content.is_empty() {
+    return None;
+  }
+  Some(format!(
+    "```suggestion\n{}\n```\n",
+    commented_text(&pending.line_content).join("\n")
+  ))
+}
+
+/// A comment's text around its first suggestion block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Suggestion {
+  pub before: String,
+  pub suggested: String,
+  pub after: String,
+}
+
+/// The first ```` ```suggestion ```` block of `text`, as GitHub reads it.
+pub fn parse_suggestion(text: &str) -> Option<Suggestion> {
+  const OPEN: &str = "```suggestion";
+  let start = text.find(OPEN)?;
+  let body_start = start + OPEN.len();
+  let body_start = body_start + text[body_start..].find('\n')? + 1;
+  let close = text[body_start..]
+    .match_indices("```")
+    .map(|(i, _)| body_start + i)
+    .find(|&i| i == body_start || text[..i].ends_with('\n'))?;
+  Some(Suggestion {
+    before: text[..start].trim().to_string(),
+    suggested: text[body_start..close]
+      .strip_suffix('\n')
+      .unwrap_or(&text[body_start..close])
+      .to_string(),
+    after: text[close + 3..].trim().to_string(),
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -599,5 +648,35 @@ mod tests {
     assert_eq!(edge_line(&hunks, true), Some((0, 0)));
     assert_eq!(edge_line(&hunks, false), Some((2, 0)));
     assert_eq!(edge_line(&[], true), None);
+  }
+
+  #[test]
+  fn suggest_change_quotes_the_new_side_lines() {
+    let hunks = vec![hunk("h", "@@ -1,2 +1,3 @@", &[" a", "+b", "+c"])];
+    let pending = pending_for_selection("a.rs", &hunks, &[(0, 1), (0, 2)]).unwrap();
+    assert_eq!(
+      suggestion_block(&pending).as_deref(),
+      Some("```suggestion\nb\nc\n```\n")
+    );
+    let removed = vec![hunk("h", "@@ -1,1 +1,0 @@", &["-gone"])];
+    let pending = pending_for_line("a.rs", &removed, (0, 0)).unwrap();
+    assert_eq!(
+      suggestion_block(&pending),
+      None,
+      "old lines cannot be replaced"
+    );
+    assert_eq!(suggestion_block(&Pending::file("a.rs")), None);
+  }
+
+  #[test]
+  fn reads_the_suggestion_out_of_a_comment() {
+    let s = parse_suggestion("Rename it\n```suggestion\nlet x = 2;\n```\nthanks").unwrap();
+    assert_eq!(s.before, "Rename it");
+    assert_eq!(s.suggested, "let x = 2;");
+    assert_eq!(s.after, "thanks");
+    let empty = parse_suggestion("```suggestion\n```").unwrap();
+    assert_eq!(empty.suggested, "", "an empty block deletes the lines");
+    assert_eq!(parse_suggestion("no block"), None);
+    assert_eq!(parse_suggestion("```suggestion\nunclosed"), None);
   }
 }

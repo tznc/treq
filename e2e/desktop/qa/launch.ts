@@ -105,7 +105,7 @@ appDb
   .run(theme);
 appDb.close();
 
-writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme }));
+writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme, repo }));
 
 startApp(fixture, {
   GDK_SCALE: process.env.GDK_SCALE ?? "2",
