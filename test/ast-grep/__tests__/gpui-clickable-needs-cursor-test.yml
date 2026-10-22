@@ -1,0 +1,57 @@
+id: gpui-clickable-needs-cursor
+valid:
+  - |
+    fn clickable() -> Stateful<Div> {
+      div().id("row").cursor_pointer().on_click(f)
+    }
+  - |
+    fn role_with_cursor() -> Stateful<Div> {
+      div().id("row").role(Role::Button).aria_label("Row").cursor_pointer()
+    }
+  - |
+    fn enabled_only(disabled: bool) -> Stateful<Div> {
+      div()
+        .id("x")
+        .role(Role::Button)
+        .when(!disabled, |this| {
+          this.cursor_pointer().hover(|s| s)
+        })
+        .when(!disabled, |this| this.on_click(f))
+    }
+  - |
+    fn backdrop() -> Stateful<Div> {
+      div().id("backdrop").cursor_default().on_click(f)
+    }
+  - |
+    fn wrapped() -> Stateful<Div> {
+      ui::text(div(), TextSize::Sm).id("item").cursor_pointer().on_click(f)
+    }
+  - |
+    fn ui_button(p: &Palette) -> Button {
+      ui::Button::new("save", p).label("Save").on_click(f)
+    }
+  - |
+    fn helper_result() -> Stateful<Div> {
+      menu_item("copy", p, false).role(Role::MenuItem).on_click(f)
+    }
+  - |
+    fn not_a_control() -> Stateful<Div> {
+      div().id("dialog").role(Role::Dialog)
+    }
+invalid:
+  - |
+    fn clickable() -> Stateful<Div> {
+      div().id("row").on_click(f)
+    }
+  - |
+    fn role_only() -> Stateful<Div> {
+      div().id("tab").role(Role::Tab).aria_label("Tab")
+    }
+  - |
+    fn cursor_on_child_only() -> Stateful<Div> {
+      div().id("row").child(div().cursor_pointer()).on_click(f)
+    }
+  - |
+    fn conditional_click() -> Stateful<Div> {
+      div().id("row").when(enabled, |this| this.on_click(f))
+    }

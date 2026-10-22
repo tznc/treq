@@ -1878,6 +1878,8 @@ impl ChangesView {
           .justify_between()
           .w_full()
           .text_color(p.muted_foreground)
+          // A click on the header clears the selection; it is not a control.
+          .cursor_default()
           .child(header)
           .child(buttons)
           .on_click(cx.listener(move |view, _, _, cx| view.deselect(list, cx))),
