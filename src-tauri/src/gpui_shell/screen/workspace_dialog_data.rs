@@ -72,6 +72,9 @@ pub trait WorkspaceDialogHost: ChangesHost {
 
 impl WorkspaceDialogHost for Backend {
   fn all_workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote.workspaces();
+    }
     core::list_workspaces(repo_path)
   }
 
@@ -80,14 +83,26 @@ impl WorkspaceDialogHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<WorkspaceCommit>, String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote
+        .status(Some(workspace_id))
+        .map(|s| s.commits_ahead_of_target);
+    }
     core::workspace_status(repo_path, Some(workspace_id)).map(|s| s.commits_ahead_of_target)
   }
 
   fn repo_branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String> {
+    if let Some(remote) = self.remote(repo_path) {
+      return remote.branches();
+    }
     core::list_repo_branches(repo_path)
   }
 
   fn fetch_in_background(&self, repo_path: &str) {
+    // The host fetches a remote repository's branches itself.
+    if self.remote(repo_path).is_some() {
+      return;
+    }
     let repo_path = repo_path.to_string();
     std::thread::spawn(move || {
       let _ = crate::jj::jj_git_fetch(&repo_path);
@@ -95,18 +110,43 @@ impl WorkspaceDialogHost for Backend {
   }
 
   fn default_branch(&self, repo_path: &str) -> Result<String, String> {
+    if self.remote(repo_path).is_some() {
+      return self
+        .inspect_remote(repo_path)
+        .map(|i| i.default_branch)
+        .ok_or_else(|| format!("Could not read the default branch of {repo_path}"));
+    }
     core::get_repo_default_branch(repo_path)
   }
 
   fn current_branch(&self, repo_path: &str) -> Result<Option<String>, String> {
+    if self.remote(repo_path).is_some() {
+      return self
+        .inspect_remote(repo_path)
+        .map(|i| i.current_branch)
+        .ok_or_else(|| format!("Could not read the current branch of {repo_path}"));
+    }
     core::get_repo_current_branch(repo_path).map(|b| b.current_branch)
   }
 
   fn branch_status(&self, repo_path: &str, branch: &str) -> Result<BranchStatus, String> {
+    if let Some(remote) = self.remote(repo_path) {
+      // The host lists its branches, not whether origin has one.
+      let local_exists = remote.branches()?.iter().any(|b| b.name == branch);
+      return Ok(BranchStatus {
+        local_exists,
+        remote_exists: false,
+        remote_name: None,
+        remote_ref: None,
+      });
+    }
     crate::jj::check_branch_exists(repo_path, branch).map_err(|e| e.to_string())
   }
 
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String> {
+    if self.remote(repo_path).is_some() {
+      return Vec::new();
+    }
     core::list_gitignored_path_suggestions(repo_path).unwrap_or_default()
   }
 
@@ -117,6 +157,11 @@ impl WorkspaceDialogHost for Backend {
     source_branch: Option<&str>,
     metadata: Option<&str>,
   ) -> Result<i64, String> {
+    if let Some(remote) = self.remote(repo_path) {
+      // Copy files and the setup script are local repository settings,
+      // which a remote repository has none of.
+      return remote.create_workspace(branch, source_branch, metadata.map(str::to_string));
+    }
     let copy_files = self.with_db(|db| {
       let raw = db
         .get_repo_setting(repo_path, "included_copy_files")
@@ -138,6 +183,7 @@ impl WorkspaceDialogHost for Backend {
     destination_branch: &str,
     request: WorkspaceMoveRequest,
   ) -> Result<(), String> {
+    self.local_only(repo_path, "Moving changes between workspaces")?;
     core::move_workspace_changes(repo_path, source_branch, destination_branch, request).map(|_| ())
   }
 
@@ -163,6 +209,7 @@ impl WorkspaceDialogHost for Backend {
   }
 
   fn apply_stash(&self, repo_path: &str, stash_id: i64, branch: &str) -> Result<(), String> {
+    self.local_only(repo_path, "Stashing")?;
     core::apply_stash(repo_path, stash_id, branch)
   }
 
@@ -173,6 +220,7 @@ impl WorkspaceDialogHost for Backend {
     branch: &str,
     dry_run: bool,
   ) -> Result<RenameWorkspaceResult, String> {
+    self.local_only(repo_path, "Renaming a workspace")?;
     core::rename_workspace(repo_path, workspace_id, branch, dry_run)
   }
 }
