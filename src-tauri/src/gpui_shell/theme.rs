@@ -36,6 +36,7 @@ icons! {
   // At lucide's default stroke, as React's header draws it; the sidebar's
   // is thinner.
   ICON_BRANCH_BOLD => "git-branch-bold",
+  ICON_BRANCH_PLUS => "git-branch-plus",
   ICON_CHEVRON_DOWN => "chevron-down",
   ICON_CHEVRON_LEFT => "chevron-left",
   ICON_CHEVRONS_UP_DOWN => "chevrons-up-down",
