@@ -51,6 +51,11 @@ pub fn start(cx: &mut App) {
   let Some(server) = gpui_playwright::Server::from_env() else {
     return;
   };
+  // A steady caret: under Xvfb's software rendering every blink's repaint
+  // kept an idle window at ~15% CPU.
+  gpui_kit::base::input::CursorBlinkDefaults::new()
+    .with_interval(None)
+    .install(cx);
   if let Err(err) = server.on_adopt_page(page_window).start(cx) {
     log::error!("gpui-playwright failed to start: {err}");
   }

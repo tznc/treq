@@ -2334,7 +2334,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -4520,7 +4520,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -4561,7 +4561,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4608,7 +4608,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -4932,7 +4932,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -4947,7 +4947,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.3"
-source = "git+https://github.com/Ziinc/gpui-kit?branch=main#4db9cf5775fdd7839aec9989f7d569bf7ace2f7f"
+source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -7668,7 +7668,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -8182,7 +8182,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -9033,7 +9033,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -10347,7 +10347,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",

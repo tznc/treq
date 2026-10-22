@@ -189,8 +189,16 @@ pub fn init(cx: &mut App) {
     log::error!("failed to load bundled fonts: {err:#}");
   }
   gpui_kit::init(cx);
+  // Each blink repaints the window; at gpui-kit's 500ms that cost was
+  // noticeable while idling in a focused input.
+  gpui_kit::base::input::CursorBlinkDefaults::new()
+    .with_interval(CARET_BLINK)
+    .install(cx);
   init_kit_theme(cx);
 }
+
+/// How long the caret in a focused input stays shown, then hidden.
+const CARET_BLINK: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn init_kit_theme(cx: &mut App) {
   let set: kit::ThemeSet = match serde_json::from_str(KIT_THEME) {

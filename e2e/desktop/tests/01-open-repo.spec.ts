@@ -15,9 +15,11 @@ test("opens the repository on its home view", async ({ page }) => {
     page.getByRole("tab", { name: "Code", selected: true }),
   ).toBeVisible();
   // The README, rendered as Markdown, once: the text of earlier frames does
-  // not linger after the caret blinks a few times.
+  // not linger after a few repaints (hovers; the e2e caret does not blink).
   await expect(page.getByText("e2e fixture")).toBeVisible();
-  await page.waitForTimeout(1_500);
+  for (const tab of ["Commits", "Changes", "Code"]) {
+    await page.getByRole("tab", { name: tab }).hover();
+  }
   await expect(page.getByText("e2e fixture")).toHaveCount(1);
   // The home task input.
   await expect(
