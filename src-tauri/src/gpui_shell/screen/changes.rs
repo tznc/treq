@@ -49,17 +49,13 @@ use crate::{
   gpui_shell::{
     native::{self, NativeEvent, ToastAction, ToastTone},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
   jj::{JjDiffHunk, JjFileChange},
 };
 
-/// Diff code and file paths, in pixels. JetBrains Mono's glyphs are about a
-/// fifth wider than Inter's at the same size, so 13px code read larger than
-/// the 13px UI around it; 12px matches its width, as GitHub's diffs do.
-const CODE_TEXT: f32 = 12.;
 /// Opacity of a viewed file's name in the file lists.
 const VIEWED_OPACITY: f32 = 0.5;
 
@@ -1443,7 +1439,7 @@ impl Render for ChangesView {
           let files = view.listed();
           view.staging.select_all(&files);
           cx.notify();
-        } else if k.key == "escape" && view.review.selection.is_some() {
+        } else if ui::is_escape(k) && view.review.selection.is_some() {
           view.clear_selection(cx);
         }
       }))
@@ -2087,8 +2083,8 @@ impl ChangesView {
     // Viewed files fade back, like GitHub's file tree.
     let dimmed = self.viewed.contains_key(&file.path) && !selected;
     let (name, dir) = split_path(&file.path);
-    let blue = tw::color(tw::BLUE_500);
-    let white = gpui::white();
+    let blue = p.primary;
+    let white = p.primary_foreground;
     let hover = p.accent.opacity(0.2);
     let path = file.path.clone();
     let name_color = if selected {
@@ -2099,7 +2095,7 @@ impl ChangesView {
       p.foreground
     };
     let dir_color = if active && !selected {
-      tw::color(tw::BLUE_400)
+      Tone::Primary.text(p)
     } else if selected {
       white.opacity(0.7)
     } else {
@@ -2123,10 +2119,8 @@ impl ChangesView {
     // switch to white and stay visible without hovering.
     let red = if selected {
       white
-    } else if self.dark {
-      tw::color(tw::RED_400)
     } else {
-      tw::color(tw::RED_600)
+      Tone::Danger.text(p)
     };
     let status_color = if selected {
       white.opacity(0.85)
@@ -2146,7 +2140,7 @@ impl ChangesView {
         format!("discard-{}", file.path),
         theme::ICON_UNDO,
         red,
-        tw::color(tw::RED_500).opacity(0.2),
+        Tone::Danger.tint(p),
         false,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -2208,7 +2202,7 @@ impl ChangesView {
       .when(selected, |this| {
         this
           .bg(blue.opacity(0.6))
-          .border_color(tw::color(tw::BLUE_600))
+          .border_color(blue)
           .font_weight(FontWeight::SEMIBOLD)
       })
       .when(!selected, |this| {
@@ -2319,7 +2313,7 @@ impl ChangesView {
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
                     .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-                    .when(active, |this| this.text_color(tw::color(tw::BLUE_500)))
+                    .when(active, |this| this.text_color(p.primary))
                     .child(name),
                 )
                 .when_some(dir, |this, dir| {
@@ -2373,7 +2367,7 @@ impl ChangesView {
         .bg(p.muted.opacity(0.8))
         .border_b_1()
         .border_color(p.border)
-        .children(self.agent_count())
+        .children(self.agent_count(p))
         .child(self.start_review_button(p, cx))
         .into_any_element()
     };
@@ -2655,16 +2649,14 @@ impl ChangesView {
     let fg = p.foreground;
     let renamed = old_path.is_some();
     let viewed = self.viewed.contains_key(path);
-    let dark = self.dark;
-    let shade = |light: u32, dark_: u32| tw::color(if dark { dark_ } else { light });
-    let badge = |text: &'static str, fg: Hsla, bg: Hsla| {
+    let badge = |text: &'static str, tone: Tone| {
       div()
         .flex_none()
         .px_2()
         .py_0p5()
         .rounded(radius::SM)
-        .bg(bg)
-        .text_color(fg)
+        .bg(tone.tint(p))
+        .text_color(tone.text(p))
         .child(text)
     };
     let file = path.to_string();
@@ -2709,10 +2701,9 @@ impl ChangesView {
           .items_center()
           .gap_1p5()
           .child(
-            div()
+            ui::text(div(), TextSize::Code)
               .truncate()
               .font_family(theme::MONO_FONT)
-              .text_size(zpx(CODE_TEXT))
               .text_color(muted)
               .child(shown_path),
           )
@@ -2738,12 +2729,7 @@ impl ChangesView {
           )
           .when(committed, |this| {
             this.child(
-              badge(
-                "Committed",
-                shade(tw::SKY_700, tw::SKY_300),
-                tw::color(tw::SKY_500).opacity(0.2),
-              )
-              .debug_selector(|| "committed-file-label".into()),
+              badge("Committed", Tone::Primary).debug_selector(|| "committed-file-label".into()),
             )
           }),
       );
@@ -2772,9 +2758,9 @@ impl ChangesView {
     }
     let (viewed_fg, viewed_bg, viewed_hover) = if viewed {
       (
-        shade(tw::EMERALD_700, tw::EMERALD_300),
-        tw::color(tw::EMERALD_500).opacity(0.25),
-        tw::color(tw::EMERALD_500).opacity(0.35),
+        Tone::Success.text(p),
+        Tone::Success.tint(p),
+        Tone::Success.color(p).opacity(0.25),
       )
     } else {
       (muted, p.muted, accent)
@@ -2822,29 +2808,15 @@ impl ChangesView {
       ),
     );
     if renamed {
-      right = right.child(badge(
-        "Renamed",
-        shade(tw::BLUE_700, tw::BLUE_300),
-        tw::color(tw::BLUE_500).opacity(0.25),
-      ));
+      right = right.child(badge("Renamed", Tone::Primary));
     }
     let deleted = status == "D";
     if deleted {
-      right = right.child(
-        badge(
-          "Deleted",
-          shade(tw::RED_700, tw::RED_300),
-          tw::color(tw::RED_500).opacity(0.25),
-        )
-        .debug_selector(|| "deleted-file-badge".into()),
-      );
+      right =
+        right.child(badge("Deleted", Tone::Danger).debug_selector(|| "deleted-file-badge".into()));
     }
     if super::changes_data::is_binary(path) {
-      right = right.child(badge(
-        "Binary",
-        shade(tw::ZINC_700, tw::ZINC_300),
-        tw::color(tw::ZINC_500).opacity(0.25),
-      ));
+      right = right.child(badge("Binary", Tone::Neutral));
     }
     if !deleted && (additions > 0 || deletions > 0) {
       right = right.child(
@@ -2855,12 +2827,12 @@ impl ChangesView {
           .font_family(theme::MONO_FONT)
           .child(
             div()
-              .text_color(shade(tw::EMERALD_700, tw::EMERALD_300))
+              .text_color(Tone::GitOpen.color(p))
               .child(format!("+{additions}")),
           )
           .child(
             div()
-              .text_color(shade(tw::RED_700, tw::RED_300))
+              .text_color(Tone::GitClosed.color(p))
               .child(format!("-{deletions}")),
           ),
       );
@@ -2914,8 +2886,6 @@ impl ChangesView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let region = &conflict.region;
-    let dark = self.dark;
-    let shade = |light: u32, dark_: u32| tw::color(if dark { dark_ } else { light });
     let (left_deleted, right_deleted) = deleted_sides(region);
     let mut pre = div()
       .font_family(theme::MONO_FONT)
@@ -2958,28 +2928,19 @@ impl ChangesView {
         continue;
       }
       let bg = match side {
-        ConflictLineRole::Left => Some(tw::color(tw::RED_500).opacity(0.2)),
-        ConflictLineRole::Right => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-        ConflictLineRole::Base => Some(tw::color(tw::AMBER_500).opacity(0.2)),
+        ConflictLineRole::Left => Some(Tone::Danger.tint(p)),
+        ConflictLineRole::Right => Some(Tone::Success.tint(p)),
+        ConflictLineRole::Base => Some(Tone::Warning.tint(p)),
         _ => None,
       };
       let label = (kind == ConflictLineKind::Marker)
         .then(|| section_label(region, role))
         .flatten();
       let label_el = label.map(|label| {
-        let (fg, bg) = match label {
-          "Side #1" => (
-            shade(tw::RED_700, tw::RED_300),
-            tw::color(tw::RED_500).opacity(0.2),
-          ),
-          "Base" => (
-            shade(tw::AMBER_700, tw::AMBER_300),
-            tw::color(tw::AMBER_500).opacity(0.2),
-          ),
-          _ => (
-            shade(tw::EMERALD_700, tw::EMERALD_300),
-            tw::color(tw::EMERALD_500).opacity(0.2),
-          ),
+        let tone = match label {
+          "Side #1" => Tone::Danger,
+          "Base" => Tone::Warning,
+          _ => Tone::Success,
         };
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
@@ -2989,8 +2950,8 @@ impl ChangesView {
           .rounded(radius::SM)
           .font_family(theme::SANS_FONT)
           .font_weight(FontWeight::MEDIUM)
-          .bg(bg)
-          .text_color(fg)
+          .bg(tone.tint(p))
+          .text_color(tone.text(p))
           .child(label)
       });
       let line_id = format!("conflict-line-{}-{i}-{side:?}", conflict.id);
@@ -3010,35 +2971,25 @@ impl ChangesView {
             &[],
           ))),
       );
-      let deleted_notice = |side: &'static str, fg: Hsla, border: Hsla, bg: Hsla| {
+      let deleted_notice = |side: &'static str, tone: Tone| {
         div()
           .debug_selector(|| "conflict-deleted-side".into())
           .my_1()
           .rounded(radius::MD)
           .border_1()
-          .border_color(border)
-          .bg(bg)
+          .border_color(tone.border(p))
+          .bg(tone.tint(p))
           .px_3()
           .py_2()
           .font_family(theme::SANS_FONT)
-          .text_color(fg)
+          .text_color(tone.text(p))
           .child(format!("{side} deleted this file"))
       };
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Start && left_deleted {
-        pre = pre.child(deleted_notice(
-          "Side #1",
-          shade(tw::RED_700, tw::RED_300),
-          tw::color(tw::RED_500).opacity(0.4),
-          tw::color(tw::RED_500).opacity(0.1),
-        ));
+        pre = pre.child(deleted_notice("Side #1", Tone::Danger));
       }
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Separator && right_deleted {
-        pre = pre.child(deleted_notice(
-          "Side #2",
-          shade(tw::EMERALD_700, tw::EMERALD_300),
-          tw::color(tw::EMERALD_500).opacity(0.4),
-          tw::color(tw::EMERALD_500).opacity(0.1),
-        ));
+        pre = pre.child(deleted_notice("Side #2", Tone::Success));
       }
     }
     let number = if region.total_conflicts > 0 {
@@ -3112,7 +3063,7 @@ impl ChangesView {
       .text_color(p.popover_foreground)
       .shadow_2xl()
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
-        if e.keystroke.key == "escape" {
+        if ui::is_escape(&e.keystroke) {
           cx.stop_propagation();
           view.discard_dialog = false;
           cx.notify();
@@ -3126,7 +3077,6 @@ impl ChangesView {
           .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(zpx(15.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Discard all changes?"),
           )
@@ -3173,7 +3123,7 @@ impl ChangesView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::black().opacity(0.4))
+            .bg(p.scrim())
             .occlude()
             .on_mouse_down(
               MouseButton::Left,

@@ -387,26 +387,6 @@ impl ChangesView {
       0
     };
     let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let accent = p.accent;
-    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
-      div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .size_5()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(radius::SM)
-        .text_color(muted)
-        .when(disabled, |this| this.opacity(0.5))
-        .when(!disabled, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.bg(accent).text_color(fg))
-        })
-        .child(ui::icon(icon, 16., muted))
-    };
     Some(
       div()
         .id("diff-search")
@@ -448,27 +428,48 @@ impl ChangesView {
             .text_color(muted)
             .child(format!("{shown} of {}", self.search.total)),
         )
-        .child(self.tip(
-          "diff-search-prev-tip".into(),
-          "Previous (Shift+Enter)",
-          icon_button("diff-search-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
-          }),
-          cx,
-        ))
-        .child(self.tip(
-          "diff-search-next-tip".into(),
-          "Next (Enter)",
-          icon_button("diff-search-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
-          }),
-          cx,
-        ))
+        .child(
+          self.tip(
+            "diff-search-prev-tip".into(),
+            "Previous (Shift+Enter)",
+            ui::IconButton::new(
+              "diff-search-prev",
+              theme::ICON_CHEVRON_UP,
+              "Previous match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .when(!empty, |this| {
+              this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
+            }),
+            cx,
+          ),
+        )
+        .child(
+          self.tip(
+            "diff-search-next-tip".into(),
+            "Next (Enter)",
+            ui::IconButton::new(
+              "diff-search-next",
+              theme::ICON_CHEVRON_DOWN,
+              "Next match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .when(!empty, |this| {
+              this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
+            }),
+            cx,
+          ),
+        )
         .child(
           self.tip(
             "diff-search-close-tip".into(),
             "Close (Esc)",
-            icon_button("diff-search-close", theme::ICON_X, false)
+            ui::IconButton::new("diff-search-close", theme::ICON_X, "Close search", p)
+              .size(ui::IconButtonSize::Small)
               .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
             cx,
           ),

@@ -18,7 +18,7 @@ use tauri_plugin_gpui::gpui::{
   MouseButton, Pixels, SharedString, Stateful, Window,
 };
 
-use super::{context_row, ChangesView, Dir, CODE_TEXT};
+use super::{context_row, ChangesView, Dir};
 use crate::gpui_shell::ui::radius;
 use crate::{
   gpui_shell::{
@@ -31,7 +31,7 @@ use crate::{
       highlight, intraline,
     },
     theme::{self, Palette},
-    ui::{self, zpx, TextSize},
+    ui::{self, TextSize},
   },
   jj::JjDiffHunk,
 };
@@ -397,9 +397,8 @@ impl ChangesView {
     let path = self.diff.cards[c].path.clone();
     let content = match row {
       Row::Head(..) => self.card_head(c, &p, cx),
-      _ => div()
+      _ => ui::text(div(), TextSize::Code)
         .font_family(theme::MONO_FONT)
-        .text_size(zpx(CODE_TEXT))
         .child(self.body_row(row, &p, cx))
         .into_any_element(),
     };

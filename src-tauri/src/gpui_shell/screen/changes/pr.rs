@@ -509,7 +509,7 @@ impl ChangesView {
         .font_family(theme::SANS_FONT)
         .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
           let k = &e.keystroke;
-          if k.key == "escape" {
+          if ui::is_escape(k) {
             cx.stop_propagation();
             view.open_reply(&close, false, cx);
           } else if k.key == "enter"

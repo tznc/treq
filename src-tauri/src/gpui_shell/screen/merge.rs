@@ -16,8 +16,7 @@ use std::{
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, hsla, prelude::*, relative, rgb, App, Context, FontWeight, Hsla,
-  SharedString, Window,
+  self, deferred, div, prelude::*, relative, App, Context, FontWeight, SharedString, Window,
 };
 
 use super::{rows::Rows, workspace_data::WorkspaceHost, ActionSink, ScreenAction};
@@ -27,7 +26,7 @@ use crate::{
     form::{self, Controls},
     native::{Backend, NativeEvent, ToastTone},
     theme::{self, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
   jj::{JjCommitsAhead, JjRevisionDiff},
   local_db::Workspace,
@@ -400,11 +399,7 @@ impl MergeView {
             view.toast(
               ToastTone::Success,
               title,
-              format!(
-                "Successfully {done} {} into {}",
-                ws.branch_name,
-                target_branch(&ws)
-              ),
+              format!("{} {done} into {}", ws.branch_name, target_branch(&ws)),
             );
           }
           Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
@@ -419,11 +414,6 @@ impl MergeView {
     let (sink, id) = (self.sink.clone(), id.into());
     move |_, _, cx| sink(ScreenAction::Press { id: id.clone() }, cx)
   }
-}
-
-/// `hsl(142, 76%, 36%)`, the merge button's inline color.
-fn merge_green() -> Hsla {
-  hsla(142. / 360., 0.76, 0.36, 1.)
 }
 
 fn heading(label: impl Into<SharedString>) -> gpui::Div {
@@ -563,7 +553,7 @@ impl MergeView {
         Strategy::Merge => "Confirm merge",
       }
     };
-    let green = merge_green();
+    let green = Tone::Success.color(p);
     let confirm = Button::new("merge-confirm", p)
       .disabled(disabled)
       .bg(green)
@@ -847,7 +837,7 @@ impl MergeView {
         div()
           .bg(p.muted.opacity(0.3))
           .px_2()
-          .child(hunk_line(line))
+          .child(hunk_line(line, &p))
           .into_any_element()
       }
       Row::HunkEnd(..) => div().bg(p.muted.opacity(0.3)).h_2().into_any_element(),
@@ -911,13 +901,11 @@ impl MergeView {
 
 /// A line of a hunk's `<pre className="p-2 text-xs font-mono">`, clipped
 /// at the card's edge like the other diffs.
-fn hunk_line(line: &str) -> impl IntoElement {
-  let added: Hsla = rgb(0x10b981).into();
-  let removed: Hsla = rgb(0xef4444).into();
+fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
   let bg = if line.starts_with('+') && !line.starts_with("+++") {
-    Some(added.opacity(0.2))
+    Some(Tone::GitOpen.tint(p))
   } else if line.starts_with('-') && !line.starts_with("---") {
-    Some(removed.opacity(0.2))
+    Some(Tone::GitClosed.tint(p))
   } else {
     None
   };
@@ -982,13 +970,13 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                         .flex()
                         .child(
                           div()
-                            .text_color(rgb(0x16a34a))
+                            .text_color(Tone::GitOpen.color(p))
                             .child(format!("+{}", commit.insertions)),
                         )
                         .child("\u{a0}")
                         .child(
                           div()
-                            .text_color(rgb(0xdc2626))
+                            .text_color(Tone::GitClosed.color(p))
                             .child(format!("-{}", commit.deletions)),
                         ),
                     )

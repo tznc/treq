@@ -890,18 +890,18 @@ impl ChangesView {
       .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
     let bg = if selected {
-      Some(tw::color(tw::BLUE_500).opacity(if self.dark { 0.25 } else { 0.1 }))
+      Some(p.selected())
     } else {
       match kind {
-        LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-        LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
+        LineKind::Added => Some(Tone::GitOpen.tint(p)),
+        LineKind::Removed => Some(Tone::GitClosed.tint(p)),
         LineKind::Context => None,
       }
     };
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
-      LineKind::Removed => tw::color(tw::RED_500),
-      _ => tw::color(tw::EMERALD_500),
+      LineKind::Removed => Tone::GitClosed.color(p),
+      _ => Tone::GitOpen.color(p),
     }
     .opacity(0.45);
     let changed: Vec<(Range<usize>, Hsla)> = changed.iter().map(|r| (r.clone(), mark)).collect();
@@ -1250,7 +1250,7 @@ impl ChangesView {
       .font_family(theme::SANS_FONT)
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_edit(cx);
         } else if k.key == "enter"
@@ -1326,7 +1326,7 @@ impl ChangesView {
       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_draft(cx);
         } else if k.key == "enter"
@@ -1344,7 +1344,7 @@ impl ChangesView {
           div()
             .mb_2()
             .border_l_2()
-            .border_color(tw::color(tw::SKY_500).opacity(0.5))
+            .border_color(Tone::Primary.border(p))
             .pl_3()
             .italic()
             .text_color(p.muted_foreground)
@@ -1460,13 +1460,12 @@ impl ChangesView {
     if outdated.is_empty() {
       return None;
     }
-    let shade = |light: u32, dark: u32| tw::color(if self.dark { dark } else { light });
-    let amber = tw::color(tw::AMBER_500);
+    let tone = Tone::Warning;
     let mut section = div()
       .debug_selector(|| "outdated-comments".into())
       .border_b_1()
-      .border_color(amber.opacity(0.4))
-      .bg(amber.opacity(0.05))
+      .border_color(tone.border(p))
+      .bg(tone.tint(p))
       .px_4()
       .py_3()
       .flex()
@@ -1481,7 +1480,7 @@ impl ChangesView {
           .rounded(radius::MD)
           .p_3()
           .border_1()
-          .border_color(amber.opacity(0.3))
+          .border_color(tone.border(p))
           .child(
             div()
               .flex()
@@ -1499,8 +1498,8 @@ impl ChangesView {
                       .px_1p5()
                       .py_0p5()
                       .rounded(radius::SM)
-                      .bg(amber.opacity(0.25))
-                      .text_color(shade(tw::AMBER_700, tw::AMBER_300))
+                      .bg(tone.tint(p))
+                      .text_color(tone.text(p))
                       .font_weight(FontWeight::MEDIUM)
                       .child("Outdated"),
                   )
@@ -1673,7 +1672,7 @@ impl ChangesView {
               .text_color(p.muted_foreground)
               .child(format!("{} pending", count_label(total, "comment"))),
           )
-          .children(self.agent_count()),
+          .children(self.agent_count(p)),
       )
       .child(
         div()
@@ -1735,8 +1734,7 @@ impl ChangesView {
     if self.review.stale.is_empty() {
       return None;
     }
-    let shade = |light: u32, dark: u32| tw::color(if self.dark { dark } else { light });
-    let amber = tw::color(tw::AMBER_500);
+    let tone = Tone::Warning;
     let n = self.review.stale.len();
     let outdated = self
       .review
@@ -1753,13 +1751,13 @@ impl ChangesView {
         )
       })
       .count();
-    let fg = shade(tw::AMBER_800, tw::AMBER_200);
+    let fg = tone.text(p);
     let button = |id: &'static str, icon: &'static str, label: String| {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
         .gap_1p5()
-        .border_color(amber.opacity(0.6))
+        .border_color(tone.border(p))
         .text_color(fg)
         .icon(icon, 12.)
         .label(label)
@@ -1772,26 +1770,22 @@ impl ChangesView {
         .justify_between()
         .px_4()
         .py_2()
-        .bg(amber.opacity(0.15))
+        .bg(tone.tint(p))
         .border_b_1()
-        .border_color(amber.opacity(0.4))
+        .border_color(tone.border(p))
         .child(
           div()
             .flex()
             .items_center()
             .gap_2()
-            .child(ui::icon(
-              theme::ICON_TRIANGLE_ALERT,
-              16.,
-              shade(tw::AMBER_700, tw::AMBER_300),
-            ))
+            .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 16., tone.text(p)))
             .child(div().text_color(fg).child(format!(
               "{} changed since you started reviewing",
               count_label(n, "file")
             )))
             .child(
               div()
-                .text_color(shade(tw::AMBER_700, tw::AMBER_300).opacity(0.8))
+                .text_color(tone.text(p).opacity(0.8))
                 .child(stale_names(&self.review.stale)),
             ),
         )
@@ -2004,7 +1998,7 @@ impl ChangesView {
       .text_color(p.popover_foreground)
       .shadow_2xl()
       .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if e.keystroke.key == "escape" {
+        if ui::is_escape(&e.keystroke) {
           cx.stop_propagation();
           close(view, cx);
         }
@@ -2017,7 +2011,6 @@ impl ChangesView {
           .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(zpx(15.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Discard review?"),
           )
@@ -2060,7 +2053,7 @@ impl ChangesView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::black().opacity(0.4))
+            .bg(p.scrim())
             .occlude()
             .on_mouse_down(
               MouseButton::Left,

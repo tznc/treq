@@ -24,8 +24,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, AnyElement, App, ClipboardItem, Context, Div, FontWeight, Hsla,
-  SharedString, Task, Window,
+  self, div, prelude::*, AnyElement, App, ClipboardItem, Context, Div, FontWeight, SharedString,
+  Task, Window,
 };
 
 use super::{
@@ -40,9 +40,9 @@ use super::{
 use crate::gpui_shell::{
   native,
   popup::{PopupSink, Side, TooltipContent},
-  theme::{self, tw, Palette},
+  theme::{self, Palette},
   tooltips::{HasTooltips, Tooltips},
-  ui::{self, Button, Size, TextSize, Variant},
+  ui::{self, Button, Size, TextSize, Tone, Variant},
 };
 
 /// What React sends: the panel's remote and the history it shows.
@@ -342,10 +342,6 @@ impl MergeQueueView {
     }));
     cx.notify();
   }
-
-  fn shade(&self, light: u32, dark: u32) -> Hsla {
-    tw::color(if self.dark { dark } else { light })
-  }
 }
 
 impl Render for MergeQueueView {
@@ -394,11 +390,7 @@ impl MergeQueueView {
           .items_center()
           .gap_2()
           .child(ui::icon(theme::ICON_GITHUB, 20., p.muted_foreground))
-          .child(
-            heading
-              .font_weight(FontWeight::SEMIBOLD)
-              .line_height(zpx(16.25)),
-          ),
+          .child(heading.font_weight(FontWeight::SEMIBOLD)),
       );
     let tab = |id: &'static str, label: &'static str, active: bool| {
       let bg = p.background;
@@ -424,17 +416,7 @@ impl MergeQueueView {
         })
         .child(label)
     };
-    let pro = (!self.pro).then(|| {
-      ui::text(div(), TextSize::Sm)
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(zpx(13.))
-        .px_1()
-        .py_px()
-        .rounded(radius::SM)
-        .bg(tw::color(tw::GREEN_500).opacity(0.2))
-        .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
-        .child("PRO")
-    });
+    let pro = (!self.pro).then(|| ui::Badge::new("PRO", p).tone(Tone::Success));
     let tabs = div().flex_none().px_4().pb_2().child(
       div()
         .flex()
@@ -578,7 +560,7 @@ impl MergeQueueView {
 
   /// `MergeQueueUpsell`.
   fn upsell(&self, p: &Palette) -> impl IntoElement {
-    let green = self.shade(tw::GREEN_600, tw::GREEN_400);
+    let green = Tone::Success.text(p);
     let host = self.host.clone();
     div()
       .debug_selector(|| "merge-queue-upsell".into())
@@ -597,7 +579,7 @@ impl MergeQueueView {
           .bg(gpui::linear_gradient(
             135.,
             gpui::linear_color_stop(p.muted.opacity(0.4), 0.),
-            gpui::linear_color_stop(tw::color(tw::GREEN_500).opacity(0.05), 1.),
+            gpui::linear_color_stop(Tone::Success.color(p).opacity(0.05), 1.),
           ))
           .p_8()
           .flex()
@@ -611,7 +593,7 @@ impl MergeQueueView {
               .items_center()
               .justify_center()
               .rounded_full()
-              .bg(tw::color(tw::GREEN_500).opacity(0.15))
+              .bg(Tone::Success.tint(p))
               .child(ui::icon(theme::ICON_ROCKET, 24., green)),
           )
           .child(
@@ -620,16 +602,7 @@ impl MergeQueueView {
               .flex_col()
               .items_center()
               .gap_2()
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .px_1p5()
-                  .py_0p5()
-                  .rounded(radius::SM)
-                  .bg(tw::color(tw::GREEN_500).opacity(0.2))
-                  .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
-                  .child("PRO"),
-              )
+              .child(ui::Badge::new("PRO", p).tone(Tone::Success))
               .child(
                 ui::text(div(), TextSize::Lg)
                   .font_weight(FontWeight::SEMIBOLD)
@@ -637,7 +610,6 @@ impl MergeQueueView {
               )
               .child(
                 ui::text(div(), TextSize::Sm)
-                  .line_height(zpx(13. * 1.625))
                   .text_center()
                   .text_color(p.muted_foreground)
                   .child(
@@ -651,10 +623,10 @@ impl MergeQueueView {
               .size(Size::Lg)
               .w_full()
               .gap_2()
-              .bg(tw::color(tw::GREEN_600))
-              .hover_bg(tw::color(tw::GREEN_700))
-              .text_color(gpui::white())
-              .child(ui::icon(theme::ICON_ROCKET, 16., gpui::white()))
+              .bg(Tone::Success.color(p))
+              .hover_bg(Tone::Success.color(p).opacity(0.85))
+              .text_color(p.primary_foreground)
+              .child(ui::icon(theme::ICON_ROCKET, 16., p.primary_foreground))
               .label("Upgrade to Pro")
               .on_click(move |_, _, _| host.open_url(&format!("{}/dashboard", native::web_url()))),
           ),
@@ -888,27 +860,16 @@ impl MergeQueueView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let node = match entry.status.as_str() {
-      "testing" => tw::color(tw::AMBER_500),
-      "merging" => tw::color(tw::GREEN_500),
-      "merged" => tw::color(tw::GREEN_600),
-      "failed" => tw::color(tw::RED_500),
-      _ => p.muted_foreground,
+    let tone = match entry.status.as_str() {
+      "testing" => Tone::Warning,
+      "merging" | "merged" => Tone::Success,
+      "failed" => Tone::Danger,
+      _ => Tone::Neutral,
     };
-    let (chip_bg, chip_fg) = match entry.status.as_str() {
-      "testing" => (
-        tw::color(tw::AMBER_500).opacity(0.2),
-        self.shade(tw::AMBER_600, tw::AMBER_400),
-      ),
-      "failed" => (
-        tw::color(tw::RED_500).opacity(0.2),
-        self.shade(tw::RED_600, tw::RED_400),
-      ),
-      "merged" | "merging" => (
-        tw::color(tw::GREEN_500).opacity(0.2),
-        self.shade(tw::GREEN_600, tw::GREEN_400),
-      ),
-      _ => (p.muted, p.muted_foreground),
+    let node = tone.color(p);
+    let (chip_bg, chip_fg) = match tone {
+      Tone::Neutral => (p.muted, p.muted_foreground),
+      tone => (tone.tint(p), tone.text(p)),
     };
     let (insertions, deletions) = (entry.insertions.unwrap_or(0), entry.deletions.unwrap_or(0));
     let branch = entry.branch_name.clone();
@@ -1012,10 +973,7 @@ impl MergeQueueView {
       return None;
     }
     let (add, del) = bar_widths(insertions, deletions, max);
-    let (green, red) = (
-      self.shade(tw::GREEN_600, tw::GREEN_400),
-      self.shade(tw::RED_600, tw::RED_400),
-    );
+    let (green, red) = (Tone::GitOpen.color(p), Tone::GitClosed.color(p));
     let half = super::merge_queue_data::BAR_HALF;
     Some(
       div()
