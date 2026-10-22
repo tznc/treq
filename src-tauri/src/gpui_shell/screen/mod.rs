@@ -191,6 +191,9 @@ pub struct Screen {
   onboarding: Option<Entity<onboarding::OnboardingView>>,
   settings: Option<Entity<settings::SettingsView>>,
   workspace: Option<Entity<workspace::WorkspaceView>>,
+  /// The terminal pane, while another screen replaces the workspace view:
+  /// its terminals keep running and show again when the workspace does.
+  terminal: Option<Entity<terminal::TerminalPane>>,
   merge: Option<Entity<merge::MergeView>>,
   linear: Option<Entity<linear::LinearView>>,
   github: Option<Entity<github::GithubView>>,
@@ -244,6 +247,7 @@ impl Screen {
       onboarding: None,
       settings: None,
       workspace: None,
+      terminal: None,
       merge: None,
       linear: None,
       github: None,
@@ -372,6 +376,8 @@ impl Screen {
       workspace.update(cx, |workspace, cx| {
         workspace.terminal_command(kind, dir, cx)
       });
+    } else if let Some(pane) = &self.terminal {
+      pane.update(cx, |pane, cx| pane.run_later(kind, dir, cx));
     }
   }
 
@@ -425,7 +431,11 @@ impl Render for Screen {
       self.settings = None;
     }
     if !matches!(self.snapshot.view, View::Workspace(_)) {
-      self.workspace = None;
+      if let Some(workspace) = self.workspace.take() {
+        if let Some(pane) = workspace.update(cx, |view, cx| view.take_terminal(cx)) {
+          self.terminal = Some(pane);
+        }
+      }
     }
     if !matches!(self.snapshot.view, View::MergePreview(_)) {
       self.merge = None;
@@ -516,6 +526,9 @@ impl Render for Screen {
             let (host, sink, popups) = (self.host.clone(), self.sink.clone(), self.popups.clone());
             let view =
               cx.new(|cx| workspace::WorkspaceView::new(route, host, sink, dark, popups, cx));
+            if let Some(pane) = self.terminal.take() {
+              view.update(cx, |view, cx| view.adopt_terminal(pane, cx));
+            }
             self.workspace = Some(view.clone());
             view.into_any_element()
           }

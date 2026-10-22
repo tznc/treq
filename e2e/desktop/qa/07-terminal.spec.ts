@@ -171,3 +171,38 @@ test("terminal: agent in a supporting repository", async ({ page }) => {
     ],
   });
 });
+
+// Settings replaces the workspace view; the terminals must be there, all
+// of them, when the workspace comes back.
+test("terminal: sessions survive a trip to Settings", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Commits");
+  await row(page, BRANCH).hover();
+  await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
+  await settle(page, 2500);
+  for (let i = 0; i < 2; i++) {
+    await row(page, BRANCH).hover();
+    await row(page, BRANCH).getByRole("button", { name: "Start agent" }).click();
+    await settle(page, 3000);
+  }
+  await capture(page, {
+    name: "07-terminal-settings-01-before",
+    title: "Terminal pane: a shell and two agents, before Settings",
+    expectations: ["A shell and two agent columns show"],
+  });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const close = page.getByRole("button", { name: "Close", exact: true });
+  await expect(close).toBeVisible();
+  await settle(page, 1000);
+  await close.click();
+  await expect(page.getByRole("tab", { name: "Commits" })).toBeVisible();
+  await settle(page, 2500);
+  await capture(page, {
+    name: "07-terminal-settings-02-after",
+    title: "Terminal pane after opening and closing Settings",
+    expectations: [
+      "The same shell and two agent columns show, with their output",
+      "No 'PTY session creation already in progress' message",
+    ],
+  });
+});

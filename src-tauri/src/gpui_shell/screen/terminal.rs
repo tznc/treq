@@ -1654,6 +1654,17 @@ impl TerminalPane {
     }
   }
 
+  /// Hidden while another screen replaces the workspace view: the pane
+  /// keeps its terminals but takes no shortcuts until it draws again.
+  pub fn park(&mut self) {
+    self._keys = None;
+  }
+
+  /// Where the pane sends its actions: the workspace view drawing it.
+  pub fn set_react(&mut self, react: ActionSink) {
+    self.react = react;
+  }
+
   /// Follows the app's theme, terminals and all.
   pub fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
     if self.dark == dark {
