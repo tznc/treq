@@ -1430,7 +1430,6 @@ impl CodeView {
               .gap_1()
               .child(ui::icon(theme::ICON_PLUS, 16., p.foreground))
               .child("Add")
-              .child(ui::icon(theme::ICON_CHEVRON_DOWN, 14., p.foreground)),
           )
           .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Add, cx))),
       )
