@@ -11,11 +11,11 @@ use gpui::{Modifiers, MouseButton, TestAppContext};
 
 use super::*;
 
-const FILES: usize = 6;
+pub(super) const FILES: usize = 6;
 /// Replaced lines per file: as many removed as added.
 const PAIRS: usize = 250;
 
-fn pairs() -> usize {
+pub(super) fn pairs() -> usize {
   std::env::var("PERF_PAIRS")
     .ok()
     .and_then(|v| v.parse().ok())
@@ -30,7 +30,7 @@ fn line(file: usize, i: usize, new: bool) -> String {
 }
 
 /// `FILES` Rust files, each one hunk of `PAIRS` removed and added lines.
-fn large_host() -> FakeHost {
+pub(super) fn large_host() -> FakeHost {
   let mut host = code_host();
   let files: Vec<_> = (0..FILES)
     .map(|f| {
@@ -79,7 +79,7 @@ fn large_host() -> FakeHost {
 }
 
 /// A full frame: the Changes view rendered, laid out and painted again.
-fn frame(h: &mut Harness) -> Duration {
+pub(super) fn frame(h: &mut Harness) -> Duration {
   h.cx.run_until_parked();
   h.cx.update(|window, cx| {
     let start = Instant::now();
@@ -89,7 +89,7 @@ fn frame(h: &mut Harness) -> Duration {
   })
 }
 
-fn report(name: &str, samples: &mut [Duration]) {
+pub(super) fn report(name: &str, samples: &mut [Duration]) {
   samples.sort();
   let ms = |d: Duration| d.as_secs_f64() * 1000.;
   let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
@@ -101,7 +101,7 @@ fn report(name: &str, samples: &mut [Duration]) {
   );
 }
 
-fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
+pub(super) fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
   let start = Instant::now();
   act(h);
   h.cx.run_until_parked();
@@ -109,12 +109,12 @@ fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
   start.elapsed()
 }
 
-fn leak(s: String) -> &'static str {
+pub(super) fn leak(s: String) -> &'static str {
   Box::leak(s.into_boxed_str())
 }
 
 /// The large working copy with every file's diff shown.
-fn expanded(cx: &mut TestAppContext) -> Harness {
+pub(super) fn expanded(cx: &mut TestAppContext) -> Harness {
   let (mut h, _) = workspace_harness(cx, large_host(), changes_route());
   if h.drawn("view-large-changeset") {
     h.click("view-large-changeset");

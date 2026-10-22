@@ -32,6 +32,7 @@ use super::{
     IssueView, LinearHost, ProjectFilters, ProjectView, Route,
   },
   modal::{dialog, overlay, title},
+  rows::Rows,
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -166,6 +167,9 @@ pub struct LinearView {
   pub(super) issue_view: IssueView,
   pub(super) issue_filters: IssueFilters,
   pub(super) expanded: HashSet<String>,
+  /// The issue list's rows, and each Kanban column's, by its name.
+  issue_rows: Rows<IssueRow>,
+  column_rows: HashMap<String, Rows<IssueRow>>,
   comments: HashMap<Commented, Fetch<Vec<LinearComment>>>,
   pub(super) projects: Fetch<Vec<LinearProject>>,
   pub(super) project_view: ProjectView,
@@ -184,6 +188,49 @@ pub struct LinearView {
   /// Texts whose review is being prepared.
   pub(super) starting: HashSet<Commented>,
   _poll: Task<()>,
+}
+
+/// An issue's row in the list or a Kanban column: the issue, by its index
+/// in the team's issues and its id, and how the row draws it.
+#[derive(Debug, Clone, PartialEq)]
+struct IssueRow {
+  ix: usize,
+  id: String,
+  indent: bool,
+  /// A rule above it: a root issue below another.
+  divider: bool,
+  open: bool,
+  /// The parent's identifier, which a Kanban card names.
+  parent: Option<String>,
+}
+
+impl IssueRow {
+  fn new(
+    index: &HashMap<&str, usize>,
+    issue: &LinearIssue,
+    indent: bool,
+    divider: bool,
+    expanded: &HashSet<String>,
+    parent: Option<String>,
+  ) -> Self {
+    Self {
+      ix: index.get(issue.id.as_str()).copied().unwrap_or(usize::MAX),
+      id: issue.id.clone(),
+      indent,
+      divider,
+      open: expanded.contains(&issue.id),
+      parent,
+    }
+  }
+}
+
+/// Each issue's index in the team's issues, by id.
+fn issue_index(all: &[LinearIssue]) -> HashMap<&str, usize> {
+  all
+    .iter()
+    .enumerate()
+    .map(|(i, issue)| (issue.id.as_str(), i))
+    .collect()
 }
 
 impl LinearView {
@@ -218,6 +265,8 @@ impl LinearView {
       issue_view: IssueView::All,
       issue_filters: IssueFilters::default(),
       expanded: HashSet::new(),
+      issue_rows: Rows::default(),
+      column_rows: HashMap::new(),
       comments: HashMap::new(),
       projects: Fetch::default(),
       project_view: ProjectView::All,
@@ -1084,7 +1133,7 @@ impl Render for LinearView {
         cx.listener(|view, section: &Section, _, cx| view.set_section(*section, cx)),
       )));
     let body = match self.section {
-      Section::Issues => self.issues_section(&p, cx).into_any_element(),
+      Section::Issues => self.issues_section(&p, window, cx).into_any_element(),
       Section::Projects => self.projects_section(&p, cx).into_any_element(),
     };
     let dialog = self.document_dialog(&p, window, cx);
@@ -1103,7 +1152,7 @@ impl Render for LinearView {
 }
 
 impl LinearView {
-  fn issues_section(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn issues_section(&mut self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> Div {
     let fetch = self.issues.get(&self.team).cloned().unwrap_or_default();
     let loading = fetch.loading();
     let all = fetch.data.clone().unwrap_or_default();
@@ -1209,11 +1258,13 @@ impl LinearView {
         .text_color(color)
         .child(text)
     };
-    let mut content = div().id("linear-issues-scroll").flex_1().min_h_0();
-    content = match self.mode {
-      IssueMode::List => content.overflow_y_scroll(),
-      IssueMode::Kanban => content.overflow_hidden(),
-    };
+    // The list and each Kanban column are virtual lists that scroll
+    // themselves.
+    let mut content = div()
+      .id("linear-issues-scroll")
+      .flex_1()
+      .min_h_0()
+      .overflow_hidden();
     content = content
       .when(loading, |this| {
         this.child(Self::loading("linear-issues-loading", p))
@@ -1238,8 +1289,8 @@ impl LinearView {
         ))
       } else {
         match self.mode {
-          IssueMode::List => content.child(self.issue_list(&shown, p, cx)),
-          IssueMode::Kanban => content.child(self.kanban(&shown, &all, p, cx)),
+          IssueMode::List => content.child(self.issue_list(&shown, &all, window, cx)),
+          IssueMode::Kanban => content.child(self.kanban(&shown, &all, p, window, cx)),
         }
       };
     }
@@ -1253,24 +1304,66 @@ impl LinearView {
       .child(content)
   }
 
-  /// `LinearIssuesList`: roots, each followed by its shown sub-issues.
-  fn issue_list(&self, shown: &[&LinearIssue], p: &Palette, cx: &mut Context<Self>) -> Div {
+  /// `LinearIssuesList`: roots, each followed by its shown sub-issues, a
+  /// row each, built only while on screen.
+  fn issue_list(
+    &mut self,
+    shown: &[&LinearIssue],
+    all: &[LinearIssue],
+    window: &Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let index = issue_index(all);
     let (roots, subs) = data::split_roots(shown);
+    let mut rows = Vec::new();
+    for (i, root) in roots.into_iter().enumerate() {
+      rows.push(IssueRow::new(
+        &index,
+        root,
+        false,
+        i > 0,
+        &self.expanded,
+        None,
+      ));
+      rows.extend(
+        subs
+          .get(&root.id)
+          .into_iter()
+          .flatten()
+          .map(|sub| IssueRow::new(&index, sub, true, false, &self.expanded, None)),
+      );
+    }
+    self.issue_rows.sync(window, rows, |a, b| a == b);
+    gpui::list(
+      self.issue_rows.list.clone(),
+      cx.processor(|view, ix, _, cx| view.issue_list_row(ix, cx)),
+    )
+    .size_full()
+  }
+
+  /// The team's issue a row stands for.
+  fn row_issue(&self, row: &IssueRow) -> Option<&LinearIssue> {
+    self
+      .issues
+      .get(&self.team)?
+      .data
+      .as_ref()?
+      .get(row.ix)
+      .filter(|issue| issue.id == row.id)
+  }
+
+  fn issue_list_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    let p = theme::palette(self.dark);
+    let Some(row) = self.issue_rows.get(ix) else {
+      return div().into_any_element();
+    };
+    let Some(issue) = self.row_issue(row) else {
+      return div().into_any_element();
+    };
     div()
-      .flex()
-      .flex_col()
-      .children(roots.into_iter().enumerate().map(|(i, issue)| {
-        div()
-          .when(i > 0, |this| this.border_t_1().border_color(p.border))
-          .child(self.issue_row(issue, false, p, cx))
-          .children(
-            subs
-              .get(&issue.id)
-              .into_iter()
-              .flatten()
-              .map(|sub| self.issue_row(sub, true, p, cx)),
-          )
-      }))
+      .when(row.divider, |this| this.border_t_1().border_color(p.border))
+      .child(self.issue_row(issue, row.indent, &p, cx))
+      .into_any_element()
   }
 
   fn issue_row(
@@ -1393,19 +1486,43 @@ impl LinearView {
       .children(expanded)
   }
 
-  /// `LinearKanbanView`: a column per state, every shown issue in its own.
+  /// `LinearKanbanView`: a column per state, every shown issue in its own;
+  /// each column builds only the cards on screen.
   fn kanban(
-    &self,
+    &mut self,
     shown: &[&LinearIssue],
     all: &[LinearIssue],
     p: &Palette,
+    window: &Window,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
+    let index = issue_index(all);
     let identifiers: HashMap<&str, &str> = all
       .iter()
       .map(|i| (i.id.as_str(), i.identifier.as_str()))
       .collect();
     let columns = data::group_by_state(shown);
+    let names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+    for column in &columns {
+      let rows = column
+        .issues
+        .iter()
+        .map(|issue| {
+          let parent = issue
+            .parent_id
+            .as_deref()
+            .and_then(|id| identifiers.get(id))
+            .map(|id| id.to_string());
+          IssueRow::new(&index, issue, false, false, &self.expanded, parent)
+        })
+        .collect();
+      self
+        .column_rows
+        .entry(column.name.clone())
+        .or_default()
+        .sync(window, rows, |a, b| a == b);
+    }
+    self.column_rows.retain(|name, _| names.contains(name));
     div()
       .id("linear-kanban")
       .size_full()
@@ -1413,8 +1530,10 @@ impl LinearView {
       .gap_3()
       .overflow_x_scroll()
       .p_4()
-      .children(columns.into_iter().map(|column| {
-        let selector = format!("linear-kanban-column-{}", column.name);
+      .children(names.into_iter().map(|name| {
+        let selector = format!("linear-kanban-column-{name}");
+        let list = self.column_rows[&name].list.clone();
+        let column = name.clone();
         div()
           .debug_selector(move || selector)
           .flex_none()
@@ -1431,29 +1550,37 @@ impl LinearView {
               .font_weight(FontWeight::MEDIUM)
               .mb_3()
               .text_color(p.muted_foreground)
-              .child(column.name.clone()),
+              .child(name.clone()),
           )
           .child(
             div()
-              .id(SharedString::from(format!(
-                "linear-kanban-list-{}",
-                column.name
-              )))
+              .id(SharedString::from(format!("linear-kanban-list-{name}")))
               .flex_1()
               .min_h_0()
-              .overflow_y_scroll()
-              .flex()
-              .flex_col()
-              .gap_2()
-              .children(column.issues.iter().map(|issue| {
-                let parent = issue
-                  .parent_id
-                  .as_deref()
-                  .and_then(|id| identifiers.get(id).copied());
-                self.kanban_card(issue, parent, p, cx)
-              })),
+              .child(
+                gpui::list(
+                  list,
+                  cx.processor(move |view, ix, _, cx| view.kanban_row(&column, ix, cx)),
+                )
+                .size_full(),
+              ),
           )
       }))
+  }
+
+  fn kanban_row(&self, column: &str, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    let p = theme::palette(self.dark);
+    let Some(row) = self.column_rows.get(column).and_then(|rows| rows.get(ix)) else {
+      return div().into_any_element();
+    };
+    let Some(issue) = self.row_issue(row) else {
+      return div().into_any_element();
+    };
+    // `gap-2` between cards, as padding: a list's rows touch.
+    div()
+      .when(ix > 0, |this| this.pt_2())
+      .child(self.kanban_card(issue, row.parent.as_deref(), &p, cx))
+      .into_any_element()
   }
 
   fn kanban_card(

@@ -995,6 +995,9 @@ impl terminal_data::TerminalHost for FakeHost {
 
   fn read_send_asset(&self, path: &str) -> Result<String, String> {
     self.record(format!("read asset {path}"));
+    if path.ends_with("long.txt") {
+      return Ok((1..=3000).map(|n| format!("line {n}\n")).collect());
+    }
     Ok("first\nsecond\nthird".into())
   }
 
@@ -7348,6 +7351,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
 
 mod changes_large;
 mod commit_diffs;
+mod commits_large;
 mod conflicts;
 mod file_browser;
 mod fuzz;
@@ -7362,5 +7366,7 @@ mod stack_panel;
 mod tab_badges;
 mod testing_library;
 mod text_editing;
+mod virtual_chaos;
+mod virtual_lists;
 mod workspace_actions;
 mod workspace_dialogs;

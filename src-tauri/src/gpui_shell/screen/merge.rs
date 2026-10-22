@@ -19,7 +19,7 @@ use tauri_plugin_gpui::gpui::{
   SharedString, Window,
 };
 
-use super::{workspace_data::WorkspaceHost, ActionSink, ScreenAction};
+use super::{rows::Rows, workspace_data::WorkspaceHost, ActionSink, ScreenAction};
 use crate::{
   core::{self, MergeCommit},
   gpui_shell::{
@@ -190,7 +190,7 @@ pub struct MergeView {
   route: Route,
   dark: bool,
   /// `None` while loading.
-  pub(super) preview: Option<Preview>,
+  pub(super) preview: Option<Rc<Preview>>,
   pub(super) strategy: Strategy,
   /// What was typed in the message box, over the default.
   pub(super) draft: Option<String>,
@@ -201,6 +201,22 @@ pub struct MergeView {
   menu_closed_at: Option<Instant>,
   /// Files whose hunks are hidden; React expands every file at first.
   collapsed: HashSet<String>,
+  rows: Rows<Row>,
+}
+
+/// A row of the page's list. Files and hunks are by index in the diff's
+/// `hunks_by_file`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+  /// The message card, the commits and the files' heading.
+  Top,
+  File(usize),
+  HunkHeader(usize, usize),
+  Line(usize, usize, usize),
+  /// The space under a hunk's last line.
+  HunkEnd(usize, usize),
+  /// The space under the files.
+  End,
 }
 
 impl MergeView {
@@ -232,6 +248,7 @@ impl MergeView {
       menu_open: false,
       menu_closed_at: None,
       collapsed: HashSet::new(),
+      rows: Rows::default(),
     };
     this.load(cx);
     this
@@ -269,7 +286,8 @@ impl MergeView {
         if let Some(err) = &preview.error {
           view.toast(ToastTone::Error, "Failed to load merge preview", err);
         }
-        view.preview = Some(preview);
+        view.preview = Some(Rc::new(preview));
+        view.rows = Rows::default();
         cx.notify();
       });
     })
@@ -490,18 +508,19 @@ impl Render for MergeView {
           ),
       );
 
+    self.sync_rows(&preview, window);
     let content = div()
       .id("merge-scroll")
+      .debug_selector(|| "merge-scroll".into())
       .flex_1()
       .min_h_0()
-      .overflow_y_scroll()
-      .p_4()
-      .flex()
-      .flex_col()
-      .gap_6()
-      .child(self.message_card(&preview, &target, &p, window, cx))
-      .child(commits(&preview, &target, &p))
-      .child(self.files(&preview, &p));
+      .child(
+        gpui::list(
+          self.rows.list.clone(),
+          cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+        )
+        .size_full(),
+      );
 
     div()
       .size_full()
@@ -727,106 +746,188 @@ impl MergeView {
     .with_priority(1)
   }
 
-  fn files(&self, preview: &Preview, p: &Palette) -> impl IntoElement {
-    let count = preview.diff.as_ref().map_or(0, |d| d.committed_files.len());
-    let body = match &preview.diff {
-      Some(diff) if count > 0 => list(p)
-        .children(diff.hunks_by_file.iter().enumerate().map(|(i, file)| {
-          let expanded = !self.collapsed.contains(&file.path);
-          let id = SharedString::from(format!("merge-file-{}", file.path));
-          let selector = id.to_string();
-          div()
-            .when(i > 0, |this| this.border_t_1().border_color(p.border))
-            .child(
-              div()
-                .id(id)
-                .debug_selector(move || selector)
-                .w_full()
-                .p_3()
-                .flex()
-                .items_center()
-                .gap_2()
-                .cursor_pointer()
-                .hover(|s| s.bg(p.muted.opacity(0.5)))
-                .child(ui::icon(
-                  if expanded {
-                    theme::ICON_CHEVRON_DOWN
-                  } else {
-                    theme::ICON_CHEVRON_RIGHT
-                  },
-                  16.,
-                  p.muted_foreground,
-                ))
-                .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
-                .child(
-                  ui::text(div(), TextSize::Sm)
-                    .font_family(theme::MONO_FONT)
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(file.path.clone()),
-                )
-                .on_click(self.press(format!("merge.file:{}", file.path))),
-            )
-            .when(expanded && !file.hunks.is_empty(), |this| {
-              this.child(
-                div()
-                  .border_t_1()
-                  .border_color(p.border)
-                  .bg(p.muted.opacity(0.3))
-                  .children(file.hunks.iter().enumerate().map(|(h, hunk)| {
-                    hunk_lines(
-                      SharedString::from(format!("merge-hunk-{i}-{h}")),
-                      &hunk.header,
-                      &hunk.lines,
-                      p,
-                    )
-                  })),
-              )
-            })
-        }))
-        .into_any_element(),
-      _ => empty(p, "No file changes".into()).into_any_element(),
+  /// The page's rows: everything above the files, then each file and,
+  /// when it is open, its hunks line by line.
+  fn sync_rows(&mut self, preview: &Preview, window: &Window) {
+    let mut rows = vec![Row::Top];
+    if let Some(diff) = preview
+      .diff
+      .as_ref()
+      .filter(|d| !d.committed_files.is_empty())
+    {
+      for (i, file) in diff.hunks_by_file.iter().enumerate() {
+        rows.push(Row::File(i));
+        if self.collapsed.contains(&file.path) {
+          continue;
+        }
+        for (h, hunk) in file.hunks.iter().enumerate() {
+          rows.push(Row::HunkHeader(i, h));
+          rows.extend((0..hunk.lines.len()).map(|l| Row::Line(i, h, l)));
+          rows.push(Row::HunkEnd(i, h));
+        }
+      }
+    }
+    rows.push(Row::End);
+    self.rows.sync(window, rows, |a, b| a == b);
+  }
+
+  fn row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let (Some(&row), Some(preview)) = (self.rows.get(ix), self.preview.clone()) else {
+      return div().into_any_element();
     };
+    let p = theme::palette(self.dark);
+    let target = preview
+      .workspace
+      .as_ref()
+      .map_or("main", target_branch)
+      .to_string();
+    let files = preview
+      .diff
+      .as_ref()
+      .map_or(&[][..], |d| d.hunks_by_file.as_slice());
+    let count = preview.diff.as_ref().map_or(0, |d| d.committed_files.len());
+    let file_of = |row: Row| match row {
+      Row::File(i) | Row::HunkHeader(i, _) | Row::Line(i, ..) | Row::HunkEnd(i, _) => Some(i),
+      _ => None,
+    };
+    let content = match row {
+      Row::Top => {
+        // A flex row of a list fits its content unless told its width.
+        return div()
+          .w_full()
+          .px_4()
+          .pt_4()
+          .flex()
+          .flex_col()
+          .gap_6()
+          .child(self.message_card(&preview, &target, &p, window, cx))
+          .child(commits(&preview, &target, &p))
+          .child(
+            div()
+              .child(heading(format!("Changed Files ({count})")))
+              .when(count == 0, |this| {
+                this.child(empty(&p, "No file changes".into()))
+              }),
+          )
+          .into_any_element();
+      }
+      Row::End => return div().pb_4().into_any_element(),
+      Row::File(i) => {
+        let Some(file) = files.get(i) else {
+          return div().into_any_element();
+        };
+        self.file_row(i, &file.path, &p).into_any_element()
+      }
+      Row::HunkHeader(i, h) => {
+        let header = files
+          .get(i)
+          .and_then(|f| f.hunks.get(h))
+          .map(|h| h.header.clone())
+          .unwrap_or_default();
+        let id = format!("merge-hunk-{i}-{h}");
+        ui::text(div(), TextSize::Xs)
+          .debug_selector(move || id)
+          .when(h == 0, |this| this.border_t_1().border_color(p.border))
+          .bg(p.muted.opacity(0.3))
+          .px_2()
+          .pt_2()
+          .pb_1()
+          .font_family(theme::MONO_FONT)
+          .text_color(p.muted_foreground)
+          .child(header)
+          .into_any_element()
+      }
+      Row::Line(i, h, l) => {
+        let line = files
+          .get(i)
+          .and_then(|f| f.hunks.get(h))
+          .and_then(|h| h.lines.get(l))
+          .map_or("", String::as_str);
+        div()
+          .bg(p.muted.opacity(0.3))
+          .px_2()
+          .child(hunk_line(line))
+          .into_any_element()
+      }
+      Row::HunkEnd(..) => div().bg(p.muted.opacity(0.3)).h_2().into_any_element(),
+    };
+    // `border rounded-lg divide-y` around the files, row by row.
+    let top = matches!(row, Row::File(0));
+    let bottom = self.rows.get(ix + 1).copied().and_then(file_of).is_none();
     div()
-      .child(heading(format!("Changed Files ({count})")))
-      .child(body)
+      .px_4()
+      .child(
+        div()
+          .border_x_1()
+          .border_color(p.border)
+          .when(top, |this| this.border_t_1().rounded_t(zpx(12.)))
+          .when(bottom, |this| this.border_b_1().rounded_b(zpx(12.)))
+          .overflow_hidden()
+          .child(content),
+      )
+      .into_any_element()
+  }
+
+  fn file_row(&self, i: usize, path: &str, p: &Palette) -> impl IntoElement {
+    let expanded = !self.collapsed.contains(path);
+    let id = SharedString::from(format!("merge-file-{path}"));
+    let selector = id.to_string();
+    div()
+      .when(i > 0, |this| this.border_t_1().border_color(p.border))
+      .child(
+        div()
+          .id(id)
+          .debug_selector(move || selector)
+          .w_full()
+          .p_3()
+          .flex()
+          .items_center()
+          .gap_2()
+          .cursor_pointer()
+          .hover(|s| s.bg(p.muted.opacity(0.5)))
+          .child(ui::icon(
+            if expanded {
+              theme::ICON_CHEVRON_DOWN
+            } else {
+              theme::ICON_CHEVRON_RIGHT
+            },
+            16.,
+            p.muted_foreground,
+          ))
+          .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_family(theme::MONO_FONT)
+              .flex_1()
+              .min_w_0()
+              .truncate()
+              .child(path.to_string()),
+          )
+          .on_click(self.press(format!("merge.file:{path}"))),
+      )
   }
 }
 
-/// A hunk's `<pre className="p-2 text-xs font-mono overflow-x-auto">`.
-fn hunk_lines(id: SharedString, header: &str, lines: &[String], p: &Palette) -> impl IntoElement {
+/// A line of a hunk's `<pre className="p-2 text-xs font-mono">`, clipped
+/// at the card's edge like the other diffs.
+fn hunk_line(line: &str) -> impl IntoElement {
   let added: Hsla = rgb(0x10b981).into();
   let removed: Hsla = rgb(0xef4444).into();
-  let selector = id.to_string();
+  let bg = if line.starts_with('+') && !line.starts_with("+++") {
+    Some(added.opacity(0.2))
+  } else if line.starts_with('-') && !line.starts_with("---") {
+    Some(removed.opacity(0.2))
+  } else {
+    None
+  };
+  // An empty line still takes its height, as in a `<pre>`.
+  let text = if line.is_empty() { " " } else { line };
   ui::text(div(), TextSize::Xs)
-    .id(id)
-    .debug_selector(move || selector)
-    .p_2()
     .font_family(theme::MONO_FONT)
-    .overflow_x_scroll()
     .whitespace_nowrap()
-    .child(
-      div()
-        .mb_1()
-        .text_color(p.muted_foreground)
-        .child(header.to_string()),
-    )
-    .children(lines.iter().map(|line| {
-      let bg = if line.starts_with('+') && !line.starts_with("+++") {
-        Some(added.opacity(0.2))
-      } else if line.starts_with('-') && !line.starts_with("---") {
-        Some(removed.opacity(0.2))
-      } else {
-        None
-      };
-      // An empty line still takes its height, as in a `<pre>`.
-      let text = if line.is_empty() { " " } else { line.as_str() };
-      div()
-        .min_w_full()
-        .when_some(bg, |this, bg| this.bg(bg))
-        .child(text.replace('\t', "    "))
-    }))
+    .overflow_hidden()
+    .when_some(bg, |this, bg| this.bg(bg))
+    .child(text.replace('\t', "    "))
 }
 
 fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {

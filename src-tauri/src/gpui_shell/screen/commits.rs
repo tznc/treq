@@ -9,9 +9,10 @@
 //!
 //! [`commits_data`]: super::commits_data
 
+mod rows;
+
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
-  cell::RefCell,
   collections::{HashMap, HashSet},
   rc::Rc,
   time::Duration,
@@ -20,20 +21,20 @@ use std::{
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
-  Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseMoveEvent, Pixels, ScrollHandle,
-  SharedString, Stateful, Subscription, Window,
+  self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context,
+  Div, Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful,
+  Subscription, Window,
 };
 
 use super::{
   code::Parent,
-  code_data::{group_by_day, Agent},
+  code_data::Agent,
   commits_data::{
     comment_prompt, comment_target, empty_diff, first_diff, first_file_diff, first_line, headline,
-    line_kind, line_label, line_numbers, resolve_session_name, revisions, selection, CommentTarget,
-    CommitsHost, History, Host, LineKind, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
+    line_label, resolve_session_name, revisions, selection, CommentTarget, CommitsHost, History,
+    Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
   },
-  highlight, ActionSink, ScreenAction,
+  ActionSink, ScreenAction,
 };
 use crate::{
   gpui_shell::{
@@ -44,7 +45,7 @@ use crate::{
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
-  jj::{JjDiffHunk, JjFileChange, JjFileDiff, JjLogCommit, JjRevisionDiff},
+  jj::{JjFileChange, JjFileDiff, JjLogCommit, JjRevisionDiff},
 };
 
 /// `REMOVE_ANIMATION_MS`: how long a removed commit stays, its buttons
@@ -79,6 +80,23 @@ pub(super) struct DiffState {
   pub collapsed: HashSet<String>,
   pub deferred_loading: HashSet<String>,
   pub deferred_errors: HashMap<String, String>,
+  /// Each shown file's line numbers, by hunk.
+  pub numbers: HashMap<String, Rc<Vec<Vec<LineNumbers>>>>,
+}
+
+/// A diff line's old and new numbers.
+type LineNumbers = (Option<u32>, Option<u32>);
+
+impl DiffState {
+  /// The diff lists files, each a row of the card, rather than a message.
+  fn split(&self) -> bool {
+    !self.loading
+      && self.error.is_none()
+      && self
+        .diff
+        .as_ref()
+        .is_some_and(|d| !d.too_large_to_render && !d.committed_files.is_empty())
+  }
 }
 
 /// The diff lines picked for a comment (`diffLineSelection`).
@@ -160,9 +178,7 @@ pub struct CommitsView {
   pub(super) scroll_to: Option<String>,
   /// The request last seen, so a repeat of it is not scrolled to again.
   requested: Option<String>,
-  scroll: ScrollHandle,
-  /// Where each commit row was last drawn, by commit id.
-  rows: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
+  feed: rows::Feed,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -205,8 +221,7 @@ impl CommitsView {
       dialog: None,
       requested: scroll_to.clone(),
       scroll_to,
-      scroll: ScrollHandle::new(),
-      rows: Rc::default(),
+      feed: rows::Feed::default(),
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -455,6 +470,7 @@ impl CommitsView {
           state.deferred_loading.remove(&path);
           match result {
             Ok(file) => {
+              state.numbers.remove(&file.path);
               if let Some(diff) = state.diff.as_mut() {
                 diff.hunks_by_file.retain(|f| f.path != file.path);
                 diff.hunks_by_file.push(file);
@@ -1315,41 +1331,40 @@ impl CommitsView {
     }
   }
 
-  /// Scrolls to and opens the commit React asked for, once it is drawn.
-  fn scroll_to_commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+  /// Scrolls to and opens the commit React asked for, once it is listed.
+  fn scroll_to_commit(&mut self, cx: &mut Context<Self>) {
     let Some(change) = self.scroll_to.clone() else {
       return;
     };
-    let Some(history) = &self.history else {
+    let Some((ix, commit_id)) = self.commit_row(&change) else {
       return;
     };
-    let commit = history
-      .own
-      .iter()
-      .filter(|c| !self.removed.contains(&c.commit_id))
-      .chain(history.tentative.iter().map(|(c, _)| c))
-      .find(|c| c.change_id == change)
-      .cloned();
-    let Some(commit) = commit else {
-      return;
-    };
-    let bounds = self.rows.borrow().get(&commit.commit_id).copied();
-    match bounds {
-      Some(row) => {
-        let view = self.scroll.bounds();
-        let offset = self.scroll.offset();
-        self
-          .scroll
-          .set_offset(point(offset.x, offset.y - (row.top() - view.top())));
-        self.scroll_to = None;
-        self.expand(&commit.commit_id, cx);
-        self.field("commits.scrolled", serde_json::Value::Null, cx);
-        cx.notify();
-      }
-      // Not drawn yet: try again once it is.
-      None => cx.on_next_frame(window, |_, _, cx| cx.notify()),
-    }
+    self.scroll_to_row(ix);
+    self.scroll_to = None;
+    self.expand(&commit_id, cx);
+    self.field("commits.scrolled", serde_json::Value::Null, cx);
+    cx.notify();
   }
+}
+
+/// A diff with no files to list: too large to render, or empty.
+fn diff_message(diff: &JjRevisionDiff, p: &Palette) -> Div {
+  if diff.too_large_to_render {
+    return div()
+      .debug_selector(|| "commit-diff-blocked".into())
+      .p_3()
+      .text_color(p.muted_foreground)
+      .child(
+        diff
+          .render_block_reason
+          .clone()
+          .unwrap_or_else(|| "This commit diff is too large to render.".into()),
+      );
+  }
+  div()
+    .p_3()
+    .text_color(p.muted_foreground)
+    .child("No changes")
 }
 
 /// `ui/dialog.tsx`: the backdrop over the whole window and the panel.
@@ -1431,7 +1446,8 @@ impl Render for CommitsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     self.ensure_inputs(window, cx);
-    self.scroll_to_commit(window, cx);
+    self.sync_rows(window);
+    self.scroll_to_commit(cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "workspace-commits".into())
@@ -1446,7 +1462,7 @@ impl Render for CommitsView {
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
-    let Some(history) = self.history.clone() else {
+    if self.history.is_none() {
       return root.child(
         ui::text(div(), TextSize::Sm)
           .size_full()
@@ -1465,24 +1481,8 @@ impl Render for CommitsView {
               .child("Loading commits..."),
           ),
       );
-    };
-    let home = self.home();
-    let own: Vec<JjLogCommit> = history
-      .own
-      .iter()
-      .filter(|c| !self.removed.contains(&c.commit_id))
-      .cloned()
-      .collect();
-    let tentative = history
-      .tentative
-      .clone()
-      .filter(|_| !home && !self.hide_tentative);
-    let shows_target = history.shows_target();
-    let visible = History {
-      own: own.clone(),
-      ..history.clone()
-    };
-    if visible.is_empty() {
+    }
+    if self.feed_is_empty() {
       return root.child(
         ui::text(div(), TextSize::Sm)
           .p_4()
@@ -1494,191 +1494,120 @@ impl Render for CommitsView {
           .child("Changes you commit will appear here."),
       );
     }
-    let conflicted = visible.resolvable(home);
-    let mut list = div().relative().child(
-      div()
-        .absolute()
-        .left(zpx(7.))
-        .top_2()
-        .bottom_2()
-        .w(zpx(2.))
-        .bg(p.border),
-    );
-    if let Some((commit, label)) = &tentative {
-      list =
-        list.child(
-          div()
-            .mb_3()
-            .child(self.commit(commit, Kind::Tentative, Some(label), &p, cx)),
-        );
-    }
-    let mut first = true;
-    for (label, commits) in group_by_day(&own) {
-      let mut group = div().mt_5().child(
-        ui::text(div(), TextSize::Sm)
-          .mb_1()
-          .pl_7()
-          .text_color(p.muted_foreground)
-          .child(label),
-      );
-      for commit in &commits {
-        group = group.child(self.commit(commit, Kind::Own { first }, None, &p, cx));
-        first = false;
-      }
-      list = list.child(group);
-    }
-    let load_more = |id: &'static str, target: bool, view: &Self, cx: &mut Context<Self>| {
-      let muted = p.muted_foreground;
-      let fg = p.foreground;
-      div().mt_3().pl_7().child(
-        ui::text(div(), TextSize::Sm)
-          .id(id)
-          .debug_selector(move || id.into())
-          .text_color(muted)
-          .when(!view.loading_more, |this| {
-            this
-              .cursor_pointer()
-              .hover(move |s| s.text_color(fg))
-              .on_click(cx.listener(move |view, _, _, cx| view.load_more(target, cx)))
-          })
-          .when(view.loading_more, |this| {
-            this
-              .flex()
-              .items_center()
-              .gap(zpx(6.))
-              .child(ui::spinner(
-                SharedString::from(format!("{id}-spin")),
-                12.,
-                muted,
-              ))
-              .child("Loading...")
-          })
-          .when(!view.loading_more, |this| this.child("Load more commits")),
-      )
-    };
-    if home && own.len() + 1 >= self.home_limit {
-      list = list.child(load_more("commits-load-more", false, self, cx));
-    }
-    if shows_target {
-      if own.is_empty() {
-        list = list.child(
-          div()
-            .debug_selector(|| "own-commits-empty".into())
-            .mb_3()
-            .pl_7()
-            .text_color(p.muted_foreground)
-            .child(if home {
-              "There are no commits on this branch yet."
-            } else {
-              "There are no commits within this workspace branch yet."
-            }),
-        );
-      }
-      list = list
-        // `border-t`, drawn as a rule: an empty div paints no border.
-        .child(div().h(zpx(1.)).bg(p.border).my_4().mx_2())
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "target-divider".into())
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(p.muted_foreground)
-            .mb_2()
-            .pl_7()
-            .child(format!("Recent on {}", history.target_branch)),
-        );
-      for (label, commits) in group_by_day(&history.target) {
-        let mut group = div().mt_5().child(
-          ui::text(div(), TextSize::Sm)
-            .mb_1()
-            .pl_7()
-            .text_color(p.muted_foreground)
-            .child(label),
-        );
-        for commit in &commits {
-          group = group.child(self.commit(commit, Kind::Target, None, &p, cx));
-        }
-        list = list.child(group);
-      }
-      if history.target.len() >= self.target_limit {
-        list = list.child(load_more("commits-target-load-more", true, self, cx));
-      }
-    }
-    let mut body = div().p_4();
-    if !home && visible.has_mutable() {
-      body = body.child(
-        div().mb_3().flex().justify_end().child(
-          Button::new("shift-commits-to-now", &p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .gap(zpx(6.))
-            .disabled(self.shifting)
-            .child(if self.shifting {
-              ui::spinner("shift-spin", 16., p.foreground).into_any_element()
-            } else {
-              ui::icon(theme::ICON_CLOCK, 16., p.foreground).into_any_element()
-            })
-            .label("Shift to now")
-            .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(false, cx))),
-        ),
-      );
-    }
-    if !conflicted.is_empty() {
-      let ids: Vec<String> = conflicted.iter().map(|c| c.change_id.clone()).collect();
-      let n = conflicted.len();
-      body = body.child(
-        div()
-          .debug_selector(|| "resolve-conflicts-banner".into())
-          .mb_4()
-          .flex()
-          .items_center()
-          .justify_between()
-          .gap_3()
-          .rounded(zpx(8.))
-          .border_1()
-          .border_color(p.destructive.opacity(0.4))
-          .bg(p.destructive.opacity(0.05))
-          .px_3()
-          .py_2()
-          .child(
-            div()
-              .min_w_0()
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::MEDIUM)
-                  .text_color(p.destructive)
-                  .child(format!(
-                    "{n} conflicted commit{}",
-                    if n == 1 { "" } else { "s" }
-                  )),
-              )
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Resolve in place via a short-lived resolve workspace — no extra commit."),
-              ),
-          )
-          .child(
-            Button::new("resolve-conflicts-button", &p)
-              .variant(Variant::Destructive)
-              .size(Size::Sm)
-              .gap(zpx(6.))
-              .icon(theme::ICON_MERGE, 16.)
-              .label("Resolve conflicts…")
-              .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
-          ),
-      );
-    }
     let dialog = self.dialog_view(window, &p, cx);
-    root
-      .child(
-        div()
-          .id("commits-scroll")
-          .size_full()
-          .overflow_y_scroll()
-          .track_scroll(&self.scroll)
-          .child(body.child(list)),
-      )
-      .children(dialog)
+    root.child(self.feed_list(cx)).children(dialog)
+  }
+}
+
+impl CommitsView {
+  /// "Shift to now" and the conflicts banner.
+  fn banners(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let ids = self.feed.conflicted().to_vec();
+    let n = ids.len();
+    div()
+      .when(self.feed.shift(), |this| {
+        this.child(
+          div()
+            .when(n > 0, |this| this.mb_3())
+            .flex()
+            .justify_end()
+            .child(
+              Button::new("shift-commits-to-now", p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .gap(zpx(6.))
+                .disabled(self.shifting)
+                .child(if self.shifting {
+                  ui::spinner("shift-spin", 16., p.foreground).into_any_element()
+                } else {
+                  ui::icon(theme::ICON_CLOCK, 16., p.foreground).into_any_element()
+                })
+                .label("Shift to now")
+                .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(false, cx))),
+            ),
+        )
+      })
+      .when(n > 0, |this| {
+        this.child(
+          div()
+            .debug_selector(|| "resolve-conflicts-banner".into())
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .rounded(zpx(8.))
+            .border_1()
+            .border_color(p.destructive.opacity(0.4))
+            .bg(p.destructive.opacity(0.05))
+            .px_3()
+            .py_2()
+            .child(
+              div()
+                .min_w_0()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(p.destructive)
+                    .child(format!(
+                      "{n} conflicted commit{}",
+                      if n == 1 { "" } else { "s" }
+                    )),
+                )
+                .child(
+                  ui::text(div(), TextSize::Xs)
+                    .text_color(p.muted_foreground)
+                    .child(
+                      "Resolve in place via a short-lived resolve workspace — no extra commit.",
+                    ),
+                ),
+            )
+            .child(
+              Button::new("resolve-conflicts-button", p)
+                .variant(Variant::Destructive)
+                .size(Size::Sm)
+                .gap(zpx(6.))
+                .icon(theme::ICON_MERGE, 16.)
+                .label("Resolve conflicts…")
+                .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
+            ),
+        )
+      })
+  }
+
+  /// "Load more commits", of the target's or the branch's own.
+  fn load_more_row(&self, target: bool, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let id = if target {
+      "commits-target-load-more"
+    } else {
+      "commits-load-more"
+    };
+    let muted = p.muted_foreground;
+    let fg = p.foreground;
+    div().pl_7().child(
+      ui::text(div(), TextSize::Sm)
+        .id(id)
+        .debug_selector(move || id.into())
+        .text_color(muted)
+        .when(!self.loading_more, |this| {
+          this
+            .cursor_pointer()
+            .hover(move |s| s.text_color(fg))
+            .on_click(cx.listener(move |view, _, _, cx| view.load_more(target, cx)))
+        })
+        .when(self.loading_more, |this| {
+          this
+            .flex()
+            .items_center()
+            .gap(zpx(6.))
+            .child(ui::spinner(
+              SharedString::from(format!("{id}-spin")),
+              12.,
+              muted,
+            ))
+            .child("Loading...")
+        })
+        .when(!self.loading_more, |this| this.child("Load more commits")),
+    )
   }
 }
 
@@ -1764,8 +1693,6 @@ impl CommitsView {
           cx,
         )
       });
-    let id = commit.commit_id.clone();
-    let rows = self.rows.clone();
     let hover = if tentative { yellow_hover } else { p.muted };
     let row = div()
       .id(SharedString::from(format!(
@@ -1866,18 +1793,6 @@ impl CommitsView {
               }),
           ),
       )
-      .child(
-        gpui::canvas(
-          move |bounds, _, _| {
-            rows.borrow_mut().insert(id.clone(), bounds);
-          },
-          |_, _, _, _| {},
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full(),
-      )
       .when(!tentative, |this| {
         let commit = commit.clone();
         this.on_mouse_down(
@@ -1910,6 +1825,10 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let removing = self.removing.contains(&commit.commit_id);
+    let split = self
+      .diffs
+      .get(&commit.commit_id)
+      .is_some_and(DiffState::split);
     // One-word labels; `name` is the fuller accessible name.
     let outline = |id: String, icon: &'static str, label: &'static str, name: &'static str| {
       Button::new(id, p)
@@ -2084,17 +2003,22 @@ impl CommitsView {
         .text_color(p.destructive)
         .child(format!("Failed to load diff: {err}"))
         .into_any_element(),
-      Some(DiffState { diff: Some(_), .. }) => self.diff_content(commit, p, cx).into_any_element(),
+      Some(DiffState {
+        diff: Some(diff), ..
+      }) => diff_message(diff, p).into_any_element(),
       _ => div().into_any_element(),
     };
-    div().ml_7().mb_3().child(actions).child(
-      div()
-        .border_1()
-        .border_color(p.border)
-        .rounded(zpx(8.))
-        .overflow_hidden()
-        .child(content),
-    )
+    // A diff that lists files continues as rows of its own.
+    div().ml_7().child(actions).when(!split, |this| {
+      this.child(
+        div()
+          .border_1()
+          .border_color(p.border)
+          .rounded(zpx(8.))
+          .overflow_hidden()
+          .child(content),
+      )
+    })
   }
 
   /// A commit row's right-click menu: copy its ids or message, then the
@@ -2205,119 +2129,66 @@ impl CommitsView {
     }
   }
 
-  /// `CommitDiffContent`.
-  fn diff_content(&mut self, commit: &JjLogCommit, p: &Palette, cx: &mut Context<Self>) -> Div {
+  /// "Load diff" for a file whose diff was held back.
+  pub(super) fn deferred_file(
+    &self,
+    commit: &JjLogCommit,
+    f: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
     let Some(state) = self.diffs.get(&commit.commit_id) else {
-      return div();
+      return div().into_any_element();
     };
-    let Some(diff) = state.diff.clone() else {
-      return div();
+    let Some(file) = state.diff.as_ref().and_then(|d| d.committed_files.get(f)) else {
+      return div().into_any_element();
     };
-    if diff.too_large_to_render {
-      return div()
-        .debug_selector(|| "commit-diff-blocked".into())
-        .p_3()
-        .text_color(p.muted_foreground)
-        .child(
-          diff
-            .render_block_reason
-            .clone()
-            .unwrap_or_else(|| "This commit diff is too large to render.".into()),
-        );
-    }
-    if diff.committed_files.is_empty() {
-      return div()
-        .p_3()
-        .text_color(p.muted_foreground)
-        .child("No changes");
-    }
-    let collapsed = state.collapsed.clone();
-    let loading = state.deferred_loading.clone();
-    let errors = state.deferred_errors.clone();
-    let mut list = div();
-    for (i, file) in diff.committed_files.iter().enumerate() {
-      let file_diff = diff.hunks_by_file.iter().find(|f| f.path == file.path);
-      let open = !collapsed.contains(&file.path);
-      let mut el = div()
-        .when(i > 0, |this| this.border_t_1().border_color(p.border))
-        .child(self.file_row(commit, file, open, p, cx));
-      if open {
-        let mut body = div().bg(p.muted.opacity(0.2));
-        match file_diff {
-          Some(file_diff) => {
-            for (h, hunk) in file_diff.hunks.iter().enumerate() {
-              body = body.child(self.hunk(commit, &file.path, h, hunk, p, cx));
-            }
-          }
-          None if file.diff_deferred => {
-            let busy = loading.contains(&file.path);
-            let (id, path) = (commit.commit_id.clone(), file.path.clone());
-            let muted = p.muted_foreground;
-            let (fg, hover) = (p.foreground, p.muted);
-            body =
-              body.child(
-                div()
-                  .flex()
-                  .items_center()
-                  .justify_between()
-                  .gap_3()
-                  .border_t_1()
-                  .border_color(p.border)
-                  .px_3()
-                  .py_3()
-                  .child(div().text_color(muted).child(format!(
-                    "This diff has {} changed lines.",
-                    file.changed_line_count
-                  )))
-                  .child(
-                    div()
-                      .flex()
-                      .items_center()
-                      .gap_3()
-                      .when_some(errors.get(&file.path), |this, err| {
-                        this.child(div().text_color(p.destructive).child(err.clone()))
-                      })
-                      .child(
-                        div()
-                          .id(SharedString::from(format!("load-diff-{}", file.path)))
-                          .debug_selector(|| "load-deferred-diff".into())
-                          .rounded(zpx(8.))
-                          .border_1()
-                          .border_color(p.border)
-                          .px_2()
-                          .py_1()
-                          .text_color(muted)
-                          .when(busy, |this| this.opacity(0.6))
-                          .when(!busy, |this| {
-                            this
-                              .cursor_pointer()
-                              .hover(move |s| s.bg(hover).text_color(fg))
-                              .on_click(cx.listener(move |view, _, _, cx| {
-                                view.load_file_diff(&id, &path, cx)
-                              }))
-                          })
-                          .child(if busy { "Loading..." } else { "Load diff" }),
-                      ),
-                  ),
-              );
-          }
-          None => {
-            body = body.child(
-              div()
-                .border_t_1()
-                .border_color(p.border)
-                .px_3()
-                .py_3()
-                .text_color(p.muted_foreground)
-                .child("No diff content available."),
-            );
-          }
-        }
-        el = el.child(body);
-      }
-      list = list.child(el);
-    }
-    list
+    let busy = state.deferred_loading.contains(&file.path);
+    let (id, path) = (commit.commit_id.clone(), file.path.clone());
+    let muted = p.muted_foreground;
+    let (fg, hover) = (p.foreground, p.muted);
+    div()
+      .flex()
+      .items_center()
+      .justify_between()
+      .gap_3()
+      .border_t_1()
+      .border_color(p.border)
+      .px_3()
+      .py_3()
+      .child(div().text_color(muted).child(format!(
+        "This diff has {} changed lines.",
+        file.changed_line_count
+      )))
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_3()
+          .when_some(state.deferred_errors.get(&file.path), |this, err| {
+            this.child(div().text_color(p.destructive).child(err.clone()))
+          })
+          .child(
+            div()
+              .id(SharedString::from(format!("load-diff-{}", file.path)))
+              .debug_selector(|| "load-deferred-diff".into())
+              .rounded(zpx(8.))
+              .border_1()
+              .border_color(p.border)
+              .px_2()
+              .py_1()
+              .text_color(muted)
+              .when(busy, |this| this.opacity(0.6))
+              .when(!busy, |this| {
+                this
+                  .cursor_pointer()
+                  .hover(move |s| s.bg(hover).text_color(fg))
+                  .on_click(cx.listener(move |view, _, _, cx| view.load_file_diff(&id, &path, cx)))
+              })
+              .child(if busy { "Loading..." } else { "Load diff" }),
+          ),
+      )
+      .into_any_element()
   }
 
   fn file_row(
@@ -2385,148 +2256,6 @@ impl CommitsView {
           .child(file.status.clone()),
       )
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_file(&id, &path, cx)))
-  }
-
-  /// `HunkView`: the header, then each line with its numbers and the
-  /// comment button, and the comment box under the line it is on.
-  fn hunk(
-    &mut self,
-    commit: &JjLogCommit,
-    path: &str,
-    h: usize,
-    hunk: &JjDiffHunk,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> Div {
-    let numbers = line_numbers(hunk);
-    let language = highlight::language(path);
-    let selected: HashSet<LineRef> = self
-      .selection
-      .as_ref()
-      .filter(|s| s.commit_id == commit.commit_id && s.path == path)
-      .map(|s| s.lines.iter().copied().collect())
-      .unwrap_or_default();
-    let comment_at = self
-      .comment
-      .as_ref()
-      .filter(|c| c.commit_id == commit.commit_id && c.target.file_path == path)
-      .map(|c| c.target.at);
-    let gutter_fg = p.muted_foreground.opacity(0.6);
-    let gutter_hover = p.muted.opacity(0.5);
-    let mut el = div().font_family(theme::MONO_FONT).child(
-      div()
-        .px_3()
-        .py(zpx(2.))
-        .bg(p.muted.opacity(0.6))
-        .text_color(p.muted_foreground)
-        .border_t_1()
-        .border_color(p.border)
-        .child(hunk.header.clone()),
-    );
-    for (l, line) in hunk.lines.iter().enumerate() {
-      let at = (h, l);
-      let (old, new) = numbers.get(l).copied().unwrap_or((None, None));
-      let bg = if selected.contains(&at) {
-        Some(tw::color(tw::BLUE_500).opacity(0.1))
-      } else {
-        match line_kind(line) {
-          LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-          LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
-          LineKind::Context => None,
-        }
-      };
-      let prefix = match line_kind(line) {
-        LineKind::Added => "+",
-        LineKind::Removed => "-",
-        LineKind::Context => " ",
-      };
-      let gutter = |n: Option<u32>, which: &'static str, view: &Self, cx: &mut Context<Self>| {
-        let (id, file) = (commit.commit_id.clone(), path.to_string());
-        let _ = view;
-        div()
-          .id(SharedString::from(format!("gutter-{which}-{h}-{l}")))
-          .w_10()
-          .flex_none()
-          .pr_1()
-          .flex()
-          .justify_end()
-          .text_color(gutter_fg)
-          .cursor_pointer()
-          .hover(move |s| s.bg(gutter_hover))
-          .child(n.map(|n| n.to_string()).unwrap_or_default())
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-              view.press_line(&id, &file, at, e.modifiers.shift, cx);
-            }),
-          )
-      };
-      let plus = {
-        let (c, file) = (commit.clone(), path.to_string());
-        div()
-          .w_5()
-          .flex_none()
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(
-            div()
-              .id(SharedString::from(format!("add-comment-{h}-{l}")))
-              .debug_selector(move || format!("add-comment-{h}-{l}"))
-              .p(zpx(1.))
-              .rounded(zpx(4.))
-              .bg(p.primary)
-              .opacity(0.)
-              .group_hover("diff-line", |s| s.opacity(1.))
-              .cursor_pointer()
-              .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-              .on_click(cx.listener(move |view, _, _, cx| {
-                cx.stop_propagation();
-                view.add_comment(&c, &file, at, cx);
-              })),
-          )
-      };
-      let (id, file) = (commit.commit_id.clone(), path.to_string());
-      el = el.child(
-        div()
-          .id(SharedString::from(format!("diff-line-{h}-{l}")))
-          .group("diff-line")
-          .flex()
-          .when_some(bg, |this, bg| this.bg(bg))
-          .on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
-            view.drag_to(&id, &file, at, cx);
-          }))
-          .child(gutter(old, "old", self, cx))
-          .child(gutter(new, "new", self, cx))
-          .child(plus)
-          .child(
-            div()
-              .w_4()
-              .flex_none()
-              .flex()
-              .justify_center()
-              .text_color(gutter_fg)
-              .child(prefix),
-          )
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .overflow_hidden()
-              .whitespace_nowrap()
-              .child(highlight::styled(
-                line.get(1..).unwrap_or(""),
-                language,
-                p.dark,
-              )),
-          ),
-      );
-      if comment_at == Some(at) {
-        el = el.child(self.comment_box(p, cx));
-      }
-    }
-    el
   }
 
   /// `CommentInput` with Plan and Edit.

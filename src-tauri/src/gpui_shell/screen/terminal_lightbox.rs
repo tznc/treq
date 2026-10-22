@@ -19,6 +19,7 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  rows::Rows,
   terminal_data::Host,
   terminal_send::{
     fitted_size, has_unsent, highlighted_png, image_size, rect_from_drag, review_prompt,
@@ -91,8 +92,10 @@ pub struct Lightbox {
   focus_composer: bool,
   /// The line a drag across lines started on.
   anchor: Option<usize>,
-  /// Text attachments' contents, once read.
-  texts: HashMap<String, String>,
+  /// Text attachments' contents, once read, line by line.
+  texts: HashMap<String, Rc<Vec<String>>>,
+  /// The shown text's rows, by the asset's index.
+  text_rows: Rows<(usize, TextRow)>,
   reading: HashSet<String>,
   sizes: HashMap<String, Option<(u32, u32)>>,
   /// An image drag: where it started on the image, and the region so far.
@@ -106,6 +109,19 @@ pub struct Lightbox {
   focus_root: bool,
   _subscriptions: Vec<Subscription>,
 }
+
+/// A row of a text attachment: a line, by its number, the comment box
+/// under the lines being commented on, or a comment, by its id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextRow {
+  Line(usize),
+  Composer,
+  Comment(u64),
+}
+
+/// A text this long draws its lines as a virtual list in a box of fixed
+/// height; a shorter one sizes the box to its lines.
+const LONG_TEXT: usize = 300;
 
 impl EventEmitter<LightboxEvent> for Lightbox {}
 
@@ -137,6 +153,7 @@ impl Lightbox {
       focus_composer: false,
       anchor: None,
       texts: HashMap::new(),
+      text_rows: Rows::default(),
       reading: HashSet::new(),
       sizes: HashMap::new(),
       drag: None,
@@ -198,7 +215,8 @@ impl Lightbox {
       cx.spawn(async move |this, cx| {
         let text = read.await;
         let _ = this.update(cx, |view, cx| {
-          view.texts.insert(path, text);
+          let lines = text_lines(&text).into_iter().map(str::to_string).collect();
+          view.texts.insert(path, Rc::new(lines));
           cx.notify();
         });
       })
@@ -586,8 +604,7 @@ impl Lightbox {
     if text.is_empty() {
       return;
     }
-    let content = self.texts.get(&asset.path).cloned().unwrap_or_default();
-    let lines = text_lines(&content);
+    let lines = self.texts.get(&asset.path).cloned().unwrap_or_default();
     let picked = lines
       .get(pending.start - 1..pending.end.min(lines.len()))
       .unwrap_or_default()
@@ -886,17 +903,45 @@ impl Lightbox {
     div().w_full().flex().justify_center().child(scroll)
   }
 
-  fn text_slide(&self, asset: &SendAsset, window: &Window, cx: &mut Context<Self>) -> Div {
-    let loading = "Loading…".to_string();
-    let text = self.texts.get(&asset.path).unwrap_or(&loading);
-    let comments = self.current_lines();
+  /// The shown text's rows: each line, then under the last line of a
+  /// comment, the box being written and the comments made.
+  fn sync_text_rows(&mut self, window: &Window) {
+    let mut rows = Vec::new();
+    if let Some(asset) = self.current().filter(|a| !a.is_image()) {
+      let count = self.texts.get(&asset.path).map_or(1, |t| t.len());
+      let comments = self.current_lines();
+      for n in 1..=count {
+        rows.push((self.index, TextRow::Line(n)));
+        if self.composer.is_some() && self.pending.is_some_and(|p| p.end == n) {
+          rows.push((self.index, TextRow::Composer));
+        }
+        rows.extend(
+          comments
+            .iter()
+            .filter(|c| c.end == n)
+            .map(|c| (self.index, TextRow::Comment(c.id))),
+        );
+      }
+    }
+    self.text_rows.sync(window, rows, |a, b| a == b);
+  }
+
+  fn text_row(&self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let Some(&(_, row)) = self.text_rows.get(ix) else {
+      return div().into_any_element();
+    };
     let palette = theme::palette(true);
-    let mut rows: Vec<gpui::AnyElement> = Vec::new();
-    for (index, line) in text_lines(text).into_iter().enumerate() {
-      let n = index + 1;
-      let pending = self.pending.is_some_and(|p| n >= p.start && n <= p.end);
-      let commented = comments.iter().any(|c| n >= c.start && n <= c.end);
-      rows.push(
+    match row {
+      TextRow::Line(n) => {
+        let line = self
+          .current()
+          .and_then(|a| self.texts.get(&a.path))
+          .map_or("Loading…", |t| t.get(n - 1).map_or("", String::as_str));
+        let pending = self.pending.is_some_and(|p| n >= p.start && n <= p.end);
+        let commented = self
+          .current_lines()
+          .iter()
+          .any(|c| n >= c.start && n <= c.end);
         div()
           .id(SharedString::from(format!("treq-send-text-line-{n}")))
           .debug_selector(move || format!("treq-send-text-line-{n}"))
@@ -937,87 +982,91 @@ impl Lightbox {
                 line.to_string()
               }),
           )
-          .into_any_element(),
-      );
-      if let (Some(p), Some(composer)) = (self.pending, &self.composer) {
-        if p.end == n {
-          let blank = self.composer_text.trim().is_empty();
-          rows.push(
-            div()
-              .debug_selector(|| "treq-send-line-comment-composer".into())
-              .border_t_1()
-              .border_color(white(0.1))
-              .bg(rgb(ZINC_900))
-              .px_4()
-              .py_3()
-              .font_family(theme::SANS_FONT)
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .min_h(zpx(72.))
-                  .px_3()
-                  .py_2()
-                  .rounded(zpx(6.))
-                  .border_1()
-                  .border_color(palette.input)
-                  .bg(palette.background)
-                  .text_color(palette.foreground)
-                  .child(Textarea::new(composer).appearance(false).bordered(false)),
-              )
-              .child(
-                div()
-                  .mt_2()
-                  .flex()
-                  .justify_end()
-                  .gap_2()
-                  .child(
-                    Button::new("treq-send-line-comment-cancel", &palette)
-                      .variant(Variant::Ghost)
-                      .size(ui::Size::Xs)
-                      .label("Cancel")
-                      .on_click(cx.listener(|view, _, _, cx| {
-                        view.pending = None;
-                        cx.notify();
-                      })),
-                  )
-                  .child(
-                    Button::new("treq-send-line-comment-save", &palette)
-                      .size(ui::Size::Xs)
-                      .disabled(blank)
-                      .label("Add comment")
-                      .on_click(cx.listener(|view, _, _, cx| view.commit_line_comment(cx))),
-                  ),
-              )
-              .into_any_element(),
-          );
-        }
+          .into_any_element()
       }
-      for comment in comments.iter().filter(|c| c.end == n) {
-        let id = comment.id;
+      TextRow::Composer => {
+        let Some(composer) = &self.composer else {
+          return div().into_any_element();
+        };
+        let blank = self.composer_text.trim().is_empty();
+        div()
+          .debug_selector(|| "treq-send-line-comment-composer".into())
+          .border_t_1()
+          .border_color(white(0.1))
+          .bg(rgb(ZINC_900))
+          .px_4()
+          .py_3()
+          .font_family(theme::SANS_FONT)
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .min_h(zpx(72.))
+              .px_3()
+              .py_2()
+              .rounded(zpx(6.))
+              .border_1()
+              .border_color(palette.input)
+              .bg(palette.background)
+              .text_color(palette.foreground)
+              .child(Textarea::new(composer).appearance(false).bordered(false)),
+          )
+          .child(
+            div()
+              .mt_2()
+              .flex()
+              .justify_end()
+              .gap_2()
+              .child(
+                Button::new("treq-send-line-comment-cancel", &palette)
+                  .variant(Variant::Ghost)
+                  .size(ui::Size::Xs)
+                  .label("Cancel")
+                  .on_click(cx.listener(|view, _, _, cx| {
+                    view.pending = None;
+                    cx.notify();
+                  })),
+              )
+              .child(
+                Button::new("treq-send-line-comment-save", &palette)
+                  .size(ui::Size::Xs)
+                  .disabled(blank)
+                  .label("Add comment")
+                  .on_click(cx.listener(|view, _, _, cx| view.commit_line_comment(cx))),
+              ),
+          )
+          .into_any_element()
+      }
+      TextRow::Comment(id) => {
+        let Some(comment) = self.current_lines().iter().find(|c| c.id == id) else {
+          return div().into_any_element();
+        };
         let range = if comment.start == comment.end {
           format!("LINES {}", comment.start)
         } else {
           format!("LINES {}–{}", comment.start, comment.end)
         };
-        rows.push(
-          ui::text(div(), TextSize::Sm)
-            .debug_selector(move || format!("treq-send-line-comment-{id}"))
-            .border_t_1()
-            .border_color(white(0.1))
-            .bg(rgb(ZINC_900).opacity(0.8))
-            .px_4()
-            .py_2()
-            .font_family(theme::SANS_FONT)
-            .text_color(rgb(ZINC_100))
-            .child(
-              ui::text(div(), TextSize::Xs)
-                .text_color(rgb(ZINC_500))
-                .child(range),
-            )
-            .child(div().whitespace_normal().child(comment.text.clone()))
-            .into_any_element(),
-        );
+        ui::text(div(), TextSize::Sm)
+          .debug_selector(move || format!("treq-send-line-comment-{id}"))
+          .border_t_1()
+          .border_color(white(0.1))
+          .bg(rgb(ZINC_900).opacity(0.8))
+          .px_4()
+          .py_2()
+          .font_family(theme::SANS_FONT)
+          .text_color(rgb(ZINC_100))
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(rgb(ZINC_500))
+              .child(range),
+          )
+          .child(div().whitespace_normal().child(comment.text.clone()))
+          .into_any_element()
       }
     }
+  }
+
+  fn text_slide(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    let count = self.text_rows.len();
+    let long = count > LONG_TEXT;
     let max_h = f32::from(window.viewport_size().height) * 0.8;
     let panel = div()
       .id("treq-send-text-preview")
@@ -1025,6 +1074,7 @@ impl Lightbox {
       .w_full()
       .max_w(zpx(1152.))
       .max_h(zpx(max_h))
+      .when(long, |this| this.h(zpx(max_h)))
       .flex()
       .flex_col()
       .overflow_hidden()
@@ -1046,12 +1096,25 @@ impl Lightbox {
           .id("treq-send-text-scroll")
           .min_h_0()
           .flex_shrink(1.)
-          .overflow_y_scroll()
           .font_family(theme::MONO_FONT)
           .text_size(zpx(13.))
           .line_height(zpx(TEXT_LINE))
           .text_color(rgb(ZINC_100))
-          .children(rows),
+          .map(|this| {
+            if long {
+              this.flex_1().child(
+                gpui::list(
+                  self.text_rows.list.clone(),
+                  cx.processor(|view, ix, _, cx| view.text_row(ix, cx)),
+                )
+                .size_full(),
+              )
+            } else {
+              this
+                .overflow_y_scroll()
+                .children((0..count).map(|ix| self.text_row(ix, cx)))
+            }
+          }),
       );
     div().w_full().flex().justify_center().child(content(panel))
   }
@@ -1197,6 +1260,7 @@ impl Render for Lightbox {
         self.sizes.insert(path, size);
       }
     }
+    self.sync_text_rows(window);
     let p = theme::palette(true);
     let viewport = window.viewport_size();
     let current = self.current().cloned();
@@ -1221,7 +1285,7 @@ impl Render for Lightbox {
       if asset.is_image() {
         self.image_slide(asset, window, cx)
       } else {
-        self.text_slide(asset, window, cx)
+        self.text_slide(window, cx)
       }
     });
     let vw = f32::from(viewport.width);
