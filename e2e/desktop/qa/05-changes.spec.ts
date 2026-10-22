@@ -13,7 +13,7 @@ import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 /** alerting.ts in feat/alerting-logs's Uncommitted list. */
 const SELECTED_ROW = { x: 330, y: 283 };
 /** The Uncommitted header's discard all button, for feat/alerting-logs. */
-const DISCARD_ALL = { x: 0, y: 0 };
+const DISCARD_ALL = { x: 453, y: 251 };
 
 test.describe.configure({ mode: "serial" });
 

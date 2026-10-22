@@ -24,8 +24,8 @@ use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
-  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle, SharedString,
-  Stateful, Subscription, Window,
+  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle,
+  SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
