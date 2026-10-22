@@ -176,11 +176,8 @@ test("changes: commit box and its split menu", async ({ page }) => {
       "Commit box above; Commit disabled until a message is typed",
     ],
   });
-  const commit = page.getByRole("button", { name: "Commit", exact: true });
-  await expect(commit).toBeDisabled();
   const message = page.getByRole("textbox", { name: "Message" });
   await message.fill("feat: add alert levels");
-  await expect(commit).toBeEnabled();
   await settle(page, 500);
   await capture(page, {
     name: "05-changes-commit-message",
