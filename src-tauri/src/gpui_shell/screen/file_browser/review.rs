@@ -14,7 +14,7 @@ impl FileBrowserView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let mut section = div()
+    let mut section = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "file-comment-section".into())
       .border_b_1()
       .border_color(p.border)
@@ -24,9 +24,7 @@ impl FileBrowserView {
       .flex()
       .flex_col()
       .gap_3()
-      .font_family(theme::SANS_FONT)
-      .text_size(zpx(13.))
-      .line_height(zpx(20.));
+      .font_family(theme::SANS_FONT);
     for c in comments {
       section = section.child(self.comment_card(c, p, cx));
     }
@@ -124,7 +122,7 @@ impl FileBrowserView {
       .gap_2()
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_edit(cx);
         } else if k.key == "enter"
@@ -185,7 +183,7 @@ impl FileBrowserView {
       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_draft(cx);
         } else if k.key == "enter"
@@ -236,26 +234,6 @@ impl FileBrowserView {
       0
     };
     let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let accent = p.accent;
-    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
-      div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .size_5()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(radius::SM)
-        .text_color(muted)
-        .when(disabled, |this| this.opacity(0.5))
-        .when(!disabled, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.bg(accent).text_color(fg))
-        })
-        .child(ui::icon(icon, 16., muted))
-    };
     Some(
       div()
         .id("file-search")
@@ -298,30 +276,47 @@ impl FileBrowserView {
             .text_color(muted)
             .child(format!("{shown} of {total}")),
         )
-        .child(self.tip(
-          "file-search-prev-tip",
-          "Previous (Shift+Enter)",
-          Side::Top,
-          icon_button("file-search-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
-          }),
-          cx,
-        ))
-        .child(self.tip(
-          "file-search-next-tip",
-          "Next (Enter)",
-          Side::Top,
-          icon_button("file-search-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
-          }),
-          cx,
-        ))
+        .child(
+          self.tip(
+            "file-search-prev-tip",
+            "Previous (Shift+Enter)",
+            Side::Top,
+            ui::IconButton::new(
+              "file-search-prev",
+              theme::ICON_CHEVRON_UP,
+              "Previous match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx))),
+            cx,
+          ),
+        )
+        .child(
+          self.tip(
+            "file-search-next-tip",
+            "Next (Enter)",
+            Side::Top,
+            ui::IconButton::new(
+              "file-search-next",
+              theme::ICON_CHEVRON_DOWN,
+              "Next match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx))),
+            cx,
+          ),
+        )
         .child(
           self.tip(
             "file-search-close-tip",
             "Close (Esc)",
             Side::Top,
-            icon_button("file-search-close", theme::ICON_X, false)
+            ui::IconButton::new("file-search-close", theme::ICON_X, "Close search", p)
+              .size(ui::IconButtonSize::Small)
               .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
             cx,
           ),
@@ -496,7 +491,7 @@ impl FileBrowserView {
       .text_color(p.popover_foreground)
       .shadow_2xl()
       .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if e.keystroke.key == "escape" {
+        if ui::is_escape(&e.keystroke) {
           cx.stop_propagation();
           close(view, cx);
         }
@@ -509,7 +504,6 @@ impl FileBrowserView {
           .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(zpx(15.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Discard review?"),
           )
@@ -552,7 +546,7 @@ impl FileBrowserView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::black().opacity(0.4))
+            .bg(p.scrim())
             .occlude()
             .on_mouse_down(
               MouseButton::Left,

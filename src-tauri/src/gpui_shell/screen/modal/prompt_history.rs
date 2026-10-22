@@ -282,7 +282,7 @@ impl PromptHistoryView {
           .h(zpx(24.))
           .px_2()
           .child(ui::icon(theme::ICON_COPY, 12., p.foreground).mr_1())
-          .child(div().text_size(zpx(11.)).child("Copy"))
+          .child(ui::text(div(), TextSize::Xs).child("Copy"))
           .on_click(cx.listener(move |view, _, _, cx| {
             view.copy(text.clone(), "Prompt copied to clipboard", cx)
           })),
@@ -376,7 +376,7 @@ impl Render for PromptHistoryView {
         .into_any_element(),
     };
     let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if e.keystroke.key == "escape" {
+      if ui::is_escape(&e.keystroke) {
         cx.stop_propagation();
         view.close(cx);
       }

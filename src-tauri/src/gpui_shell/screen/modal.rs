@@ -10,7 +10,6 @@
 //! React's `Dialog` did.
 
 use crate::gpui_shell::ui::radius;
-use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -160,7 +159,7 @@ pub fn dialog(
     .flex()
     .items_center()
     .justify_center()
-    .bg(gpui::black().opacity(0.4))
+    .bg(p.scrim())
     .occlude();
   let panel = div()
     .debug_selector(move || id.into())
@@ -193,7 +192,6 @@ pub fn overlay(backdrop: Stateful<Div>, panel: impl IntoElement) -> impl IntoEle
 /// `DialogTitle`: `text-lg font-semibold leading-none`.
 pub fn title(text: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(text)
 }

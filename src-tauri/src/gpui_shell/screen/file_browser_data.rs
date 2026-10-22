@@ -247,31 +247,6 @@ pub fn status_title(status: &str) -> &'static str {
   }
 }
 
-/// `getFileStatusTextColor`, as a Tailwind hex.
-pub fn status_text_hex(status: &str) -> u32 {
-  match status {
-    "A" => GREEN_500,
-    "D" => RED_500,
-    _ => YELLOW_500,
-  }
-}
-
-/// `getStatusBgColor`, as a Tailwind hex; `None` for `bg-muted`.
-pub fn status_bg_hex(status: &str) -> Option<u32> {
-  match status {
-    "??" | "A" => Some(GREEN_500),
-    "D" => Some(RED_500),
-    "M" => Some(YELLOW_500),
-    "R" => Some(BLUE_500),
-    _ => None,
-  }
-}
-
-const GREEN_500: u32 = 0x22c55e;
-const RED_500: u32 = 0xef4444;
-const YELLOW_500: u32 = 0xeab308;
-const BLUE_500: u32 = 0x3b82f6;
-
 /// The line number column's width in characters.
 pub fn line_number_width(lines: usize) -> usize {
   lines.to_string().len().max(4)
@@ -451,12 +426,9 @@ mod tests {
   }
 
   #[test]
-  fn status_titles_and_colors_match_react() {
+  fn status_titles_match_react() {
     assert_eq!(status_title("M"), "Modified");
     assert_eq!(status_title("R"), "Changed");
-    assert_eq!(status_text_hex("R"), YELLOW_500);
-    assert_eq!(status_bg_hex("R"), Some(BLUE_500));
-    assert_eq!(status_bg_hex("C"), None);
   }
 
   #[test]

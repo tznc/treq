@@ -11,13 +11,13 @@ use gpui_kit::{
   component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp},
 };
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, rgba, Context, Entity, EventEmitter,
+  self, anchored, deferred, div, point, prelude::*, px, Context, Entity, EventEmitter,
   SharedString, Subscription, Task, Window,
 };
 
 use super::code_data::CodeHost;
 use crate::gpui_shell::{
-  theme::{self, Palette},
+  theme,
   ui::{self, TextSize},
 };
 
@@ -133,16 +133,6 @@ impl FilePicker {
   }
 }
 
-/// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
-fn kbd(p: &Palette, key: &str) -> gpui::Div {
-  ui::text(div(), TextSize::Xs)
-    .px_1p5()
-    .py_0p5()
-    .rounded(radius::SM)
-    .bg(p.muted)
-    .child(key.to_string())
-}
-
 impl Render for FilePicker {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let p = theme::palette(self.dark);
@@ -250,9 +240,27 @@ impl Render for FilePicker {
           .items_center()
           .gap_3()
           .text_color(p.muted_foreground)
-          .child(div().flex().gap_1().child(kbd(&p, "↑↓")).child("Navigate"))
-          .child(div().flex().gap_1().child(kbd(&p, "↵")).child("Open"))
-          .child(div().flex().gap_1().child(kbd(&p, "Esc")).child("Close")),
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(ui::Kbd::new("↑↓", &p))
+              .child("Navigate"),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(ui::Kbd::new("↵", &p))
+              .child("Open"),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(ui::Kbd::new("Esc", &p))
+              .child("Close"),
+          ),
       );
     deferred(
       anchored().position(point(px(0.), px(0.))).child(
@@ -260,7 +268,7 @@ impl Render for FilePicker {
           .id("file-picker-backdrop")
           .w(viewport.width)
           .h(viewport.height)
-          .bg(rgba(0x00000099))
+          .bg(p.scrim())
           .flex()
           .items_center()
           .justify_center()

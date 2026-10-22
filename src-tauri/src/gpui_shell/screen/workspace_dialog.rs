@@ -28,9 +28,7 @@ use super::{
     self as data, branch_from_title, branch_name_error, new_workspace_chain, ChainEntry, Position,
     Route, Source, StashCommit, Submit, Submitted, Tab, WorkspaceDialogHost,
   },
-  workspace_modal::{
-    checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check,
-  },
+  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press, Check},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -1004,17 +1002,13 @@ fn stack_dot(highlighted: bool, p: &Palette) -> Div {
   )
 }
 
-fn tw(color: u32) -> Hsla {
-  gpui::rgb(color).into()
-}
-
 /// `statusIcon` and `statusColor`.
 fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
   match status {
     "modified" => ("M", p.warning),
     "added" => ("A", p.success),
-    "deleted" => ("D", tw(theme::tw::RED_500)),
-    "renamed" => ("R", tw(theme::tw::BLUE_500)),
+    "deleted" => ("D", p.destructive),
+    "renamed" => ("R", p.primary),
     _ => ("?", p.muted_foreground),
   }
 }
@@ -1145,12 +1139,7 @@ impl WorkspaceDialog {
               .items_center()
               .gap_2()
               .cursor_pointer()
-              .child(checkbox(
-                "move-to-existing-box",
-                if on { Check::On } else { Check::Off },
-                false,
-                &p,
-              ))
+              .child(ui::Checkbox::new("move-to-existing-box", &p).checked(on))
               .child(
                 ui::text(div(), TextSize::Xs)
                   .text_color(p.muted_foreground)
@@ -1456,7 +1445,7 @@ impl WorkspaceDialog {
         Some(ui::icon(theme::ICON_CIRCLE_ALERT, 14., p.warning).into_any_element())
       }
       (None, Some(BranchState::Remote)) => {
-        Some(ui::icon(theme::ICON_CLOUD, 14., tw(theme::tw::BLUE_500)).into_any_element())
+        Some(ui::icon(theme::ICON_CLOUD, 14., p.primary).into_any_element())
       }
       (None, None) => None,
     };
@@ -1469,7 +1458,7 @@ impl WorkspaceDialog {
       )),
       (None, Some(BranchState::Remote)) => Some((
         "Branch exists on remote — will check out".to_string(),
-        tw(theme::tw::BLUE_500),
+        p.primary,
         "branch-exists-remote",
       )),
       _ => None,
@@ -1762,12 +1751,11 @@ impl WorkspaceDialog {
                 .hover(move |s| s.bg(hover))
                 .on_click(cx.listener(move |view, _, _, cx| view.toggle_commit(&hash, cx)))
             })
-            .child(checkbox(
-              SharedString::from(format!("dialog-commit-box-{i}")),
-              if checked { Check::On } else { Check::Off },
-              is_locked,
-              &p,
-            ))
+            .child(
+              ui::Checkbox::new(SharedString::from(format!("dialog-commit-box-{i}")), &p)
+                .checked(checked)
+                .disabled(is_locked),
+            )
             .child(
               ui::text(div(), TextSize::Xs)
                 .flex_none()
@@ -1892,17 +1880,13 @@ impl WorkspaceDialog {
                 })),
             )
             .child(
-              checkbox(
-                SharedString::from(format!("dialog-file-box-{i}")),
-                state,
-                false,
-                &p,
-              )
-              .cursor_pointer()
-              .on_click(cx.listener({
-                let path = path.clone();
-                move |view, _, _, cx| view.toggle_file_hunks(&path, cx)
-              })),
+              ui::Checkbox::new(SharedString::from(format!("dialog-file-box-{i}")), &p)
+                .checked(state)
+                .cursor_pointer()
+                .on_click(cx.listener({
+                  let path = path.clone();
+                  move |view, _, _, cx| view.toggle_file_hunks(&path, cx)
+                })),
             )
             .child(
               ui::text(div(), TextSize::Xs)
@@ -2020,12 +2004,15 @@ impl WorkspaceDialog {
             .border_t_1()
             .border_color(p.border.opacity(0.3))
             .hover(move |s| s.bg(hover))
-            .child(div().mt_0p5().child(checkbox(
-              SharedString::from(format!("dialog-hunk-box-{file}-{i}")),
-              if checked { Check::On } else { Check::Off },
-              false,
-              &p,
-            )))
+            .child(
+              div().mt_0p5().child(
+                ui::Checkbox::new(
+                  SharedString::from(format!("dialog-hunk-box-{file}-{i}")),
+                  &p,
+                )
+                .checked(checked),
+              ),
+            )
             .child(
               div()
                 .flex()
@@ -2036,14 +2023,14 @@ impl WorkspaceDialog {
                 .child(
                   ui::text(div(), TextSize::Xs)
                     .truncate()
-                    .text_color(tw(theme::tw::BLUE_400))
+                    .text_color(ui::Tone::Primary.text(&p))
                     .child(hunk.header.clone()),
                 )
                 .children(hunk.lines.iter().take(3).map(|line| {
                   let color = if line.starts_with('+') {
                     p.success
                   } else if line.starts_with('-') {
-                    tw(theme::tw::RED_500)
+                    p.destructive
                   } else {
                     p.muted_foreground
                   };
@@ -2123,7 +2110,7 @@ impl Render for WorkspaceDialog {
       {
         cx.stop_propagation();
         view.submit(cx);
-      } else if k.key == "escape" && view.picker.is_none() {
+      } else if ui::is_escape(k) && view.picker.is_none() {
         cx.stop_propagation();
         view.close_unless_creating(cx);
       }

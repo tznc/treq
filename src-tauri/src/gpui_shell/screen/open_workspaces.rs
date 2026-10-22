@@ -31,9 +31,7 @@ use super::{
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
-  workspace_modal::{
-    checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check,
-  },
+  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -1181,7 +1179,13 @@ impl OpenWorkspacesDialog {
       "Open issues"
     };
     let list: gpui::AnyElement = if self.issues.loading {
-      parts::loading("open-workspaces-issues-loading", p).into_any_element()
+      div()
+        .py_12()
+        .child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-issues-loading",
+          p,
+        ))
+        .into_any_element()
     } else if let Some(err) = &self.issues.error {
       parts::error_state(
         "open-workspaces-issues",
@@ -1192,7 +1196,9 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if items.is_empty() {
-      parts::empty_state(theme::ICON_LINEAR, "No open issues.", p).into_any_element()
+      crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues.", p)
+        .icon(theme::ICON_LINEAR)
+        .into_any_element()
     } else {
       div()
         .children(items.into_iter().map(|issue| self.issue_row(issue, p, cx)))
@@ -1218,7 +1224,13 @@ impl OpenWorkspacesDialog {
       "Open pull requests"
     };
     let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
-      parts::loading("open-workspaces-prs-loading", p).into_any_element()
+      div()
+        .py_12()
+        .child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-prs-loading",
+          p,
+        ))
+        .into_any_element()
     } else if let Some(err) = &self.prs.error {
       parts::error_state(
         "open-workspaces-prs",
@@ -1229,7 +1241,13 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if self.prs.items.is_empty() {
-      parts::empty_state(theme::ICON_PR, "No open pull requests.", p).into_any_element()
+      crate::gpui_shell::ui::EmptyState::new(
+        "open-workspaces-no-open-pull-requests",
+        "No open pull requests.",
+        p,
+      )
+      .icon(theme::ICON_PR)
+      .into_any_element()
     } else {
       div()
         .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
@@ -1382,12 +1400,13 @@ fn pick_row(
     .cursor_pointer()
     .when(checked, |d| d.bg(p.primary.opacity(0.1)))
     .when(!checked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
-    .child(div().mt_1().child(checkbox(
-      SharedString::from(format!("{id}-check")),
-      if checked { Check::On } else { Check::Off },
-      disabled,
-      p,
-    )))
+    .child(
+      div().mt_1().child(
+        ui::Checkbox::new(SharedString::from(format!("{id}-check")), p)
+          .checked(checked)
+          .disabled(disabled),
+      ),
+    )
     .child(item)
 }
 
@@ -1671,7 +1690,7 @@ impl Render for OpenWorkspacesDialog {
     let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
       let k = &e.keystroke;
       let held = crate::gpui_shell::keys::held(k.modifiers);
-      if k.key == "escape" {
+      if ui::is_escape(k) {
         cx.stop_propagation();
         if view.lines_open {
           view.close_lines(cx);

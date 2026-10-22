@@ -28,7 +28,7 @@ use gpui_kit::component::{
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
-  relative, rgb, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths, FocusHandle,
+  relative, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths, FocusHandle,
   KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, ScrollHandle,
   ScrollWheelEvent, SharedString, Stateful, Subscription, Task, Window,
 };
@@ -83,9 +83,6 @@ const REMOTE_HEADER_HEIGHT: f32 = 32.;
 /// `AUTO_REATTACH_COOLDOWN_MS`: one automatic reattach covers a brief
 /// drop; a session that keeps dropping waits for the user.
 const AUTO_REATTACH_COOLDOWN: Duration = Duration::from_secs(30);
-/// `text-amber-500` and `text-red-500`.
-const AMBER_500: u32 = 0xf59e0b;
-const RED_500: u32 = 0xef4444;
 
 /// A new session's start that React keeps (`pendingSessionData`), for the
 /// sessions React still creates itself. Sessions the backend starts keep
@@ -1222,14 +1219,14 @@ impl TerminalView {
         .left(zpx(col as f32 * w))
         .h(zpx(h));
       if focused {
-        base
-          .w(zpx(1.))
-          .when(self.cursor_on, |d| d.bg(rgb(scheme.foreground)))
+        base.w(zpx(1.)).when(self.cursor_on, |d| {
+          d.bg(theme::data_color(scheme.foreground))
+        })
       } else {
         base
           .w(zpx(w))
           .border_1()
-          .border_color(rgb(scheme.foreground))
+          .border_color(theme::data_color(scheme.foreground))
       }
     });
     let lines = frame.lines;
@@ -1247,7 +1244,7 @@ impl TerminalView {
                 if let Some(bg) = run.bg {
                   window.paint_quad(gpui::fill(
                     Bounds::new(point(x, y), gpui::size(px(run.cells as f32 * w), px(h))),
-                    rgb(bg),
+                    theme::data_color(bg),
                   ));
                 }
                 if run.text.trim().is_empty() && !run.underline && !run.strike {
@@ -1318,7 +1315,7 @@ impl TerminalView {
           .child(
             div()
               .text_color(if error.is_some() {
-                rgb(RED_500).into()
+                ui::Tone::Danger.text(p)
               } else {
                 p.foreground
               })
@@ -1405,7 +1402,9 @@ impl TerminalView {
           .flex()
           .items_center()
           .justify_center()
-          .bg(rgb(terminal_emu::scheme(self.dark).background))
+          .bg(theme::data_color(
+            terminal_emu::scheme(self.dark).background,
+          ))
           .child(
             ui::text(div(), TextSize::Sm)
               .max_w_full()
@@ -1490,7 +1489,9 @@ impl Render for TerminalView {
       .relative()
       .size_full()
       .overflow_hidden()
-      .bg(rgb(terminal_emu::scheme(self.dark).background))
+      .bg(theme::data_color(
+        terminal_emu::scheme(self.dark).background,
+      ))
       .cursor_text()
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
@@ -2527,7 +2528,8 @@ impl TerminalPane {
     }
     let column_id = column.id.clone();
     let hovered = self.hovered_asset.as_ref().map(|a| a.id.clone());
-    let bg = rgb(terminal_emu::scheme(self.dark).background);
+    let bg = theme::data_color(terminal_emu::scheme(self.dark).background);
+    let dark = theme::palette(true);
     let thumbs = assets.into_iter().map(|asset| {
       let id = asset.id.clone();
       let shown = hovered.as_deref() == Some(id.as_str());
@@ -2549,14 +2551,13 @@ impl TerminalPane {
           .items_center()
           .justify_center()
           .gap_1()
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., rgb(0xd4d4d8).into()))
+          .child(ui::icon(theme::ICON_FILE_TEXT, 16., dark.foreground))
           .child(
             div()
               .w_full()
               .truncate()
               .flex()
               .justify_center()
-              .line_height(zpx(14.))
               .child(asset.title.clone()),
           )
       };
@@ -2577,9 +2578,9 @@ impl TerminalPane {
         .min_w(zpx(144.))
         .rounded(radius::MD)
         .border_1()
-        .border_color(gpui::white().opacity(if shown { 0.4 } else { 0.15 }))
-        .bg(rgb(0x2a2a2a))
-        .text_color(rgb(0xd4d4d8))
+        .border_color(dark.foreground.opacity(if shown { 0.4 } else { 0.15 }))
+        .bg(dark.popover)
+        .text_color(dark.foreground)
         .shadow_md()
         .cursor_grab()
         .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
@@ -2612,9 +2613,9 @@ impl TerminalPane {
               .justify_center()
               .rounded_full()
               .border_1()
-              .border_color(rgb(0x71717a))
-              .bg(rgb(0xc4c4c4))
-              .hover(|s| s.bg(rgb(0xd4d4d4)))
+              .border_color(dark.muted_foreground)
+              .bg(dark.foreground.opacity(0.8))
+              .hover(|s| s.bg(dark.foreground))
               .shadow_md()
               .cursor_pointer()
               .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -2626,7 +2627,7 @@ impl TerminalPane {
                 pane.send("terminal.dismissAsset", dismiss_id.clone().into(), cx);
                 cx.notify();
               }))
-              .child(ui::icon(theme::ICON_X, 12., rgb(0x18181b).into())),
+              .child(ui::icon(theme::ICON_X, 12., dark.background)),
           )
         })
     });
@@ -2944,8 +2945,9 @@ impl TerminalPane {
     // Agent headers, and in the dark theme a shell's while selected, sit on
     // a dark fill, so their text and badge go light to stay readable.
     let on_dark = !matches!(column.kind, Kind::Shell { .. }) || (active && self.dark);
+    let d = theme::palette(true);
     let (title_fg, icon_fg): (gpui::Hsla, gpui::Hsla) = if on_dark {
-      (rgb(0xe5e7eb).into(), rgb(0xe5e7eb).into())
+      (d.foreground, d.foreground)
     } else {
       (p.muted_foreground, p.foreground)
     };
@@ -2957,7 +2959,7 @@ impl TerminalPane {
         .truncate()
         .rounded_sm()
         .bg(if on_dark {
-          gpui::white().opacity(0.15)
+          d.foreground.opacity(0.15)
         } else {
           p.muted.opacity(0.6)
         })
@@ -2965,12 +2967,11 @@ impl TerminalPane {
         .py_0p5()
         .font_family(theme::MONO_FONT)
         .font_weight(gpui::FontWeight::MEDIUM)
-        .line_height(zpx(12.))
         .text_color(title_fg)
         .cursor_pointer()
         .hover(|s| {
           s.bg(if on_dark {
-            gpui::white().opacity(0.25)
+            d.foreground.opacity(0.25)
           } else {
             p.muted
           })
@@ -3033,7 +3034,7 @@ impl TerminalPane {
           .hover(|s| s.bg(p.muted.opacity(0.2)))
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .on_click(cx.listener(move |_, _, _, cx| view.update(cx, |v, cx| v.open_search(cx))))
-          .child(ui::icon(theme::ICON_SEARCH, 16., rgb(0xe5e7eb).into()));
+          .child(ui::icon(theme::ICON_SEARCH, 16., d.foreground));
         let search = self.tooltips.wrap(
           format!("terminal-search-tip-{}", column.id),
           Side::Top,
@@ -3055,14 +3056,14 @@ impl TerminalPane {
             .px_2()
             .rounded_md()
             .hover(|s| s.bg(p.muted.opacity(0.2)))
-            .child(ui::icon(theme::ICON_X, 16., rgb(0xe5e7eb).into())),
+            .child(ui::icon(theme::ICON_X, 16., d.foreground)),
           cx,
         );
         base
           .bg(if active {
-            gpui::Hsla::from(rgb(terminal_emu::DARK.background)).blend(p.primary.opacity(0.4))
+            theme::data_color(terminal_emu::DARK.background).blend(p.primary.opacity(0.4))
           } else {
-            rgb(0x374151).into()
+            d.accent
           })
           .child(
             div()
@@ -3070,12 +3071,12 @@ impl TerminalPane {
               .items_center()
               .gap_1p5()
               .min_w_0()
-              .child(ui::icon(agent_icon(agent), 16., rgb(0xe5e7eb).into()))
+              .child(ui::icon(agent_icon(agent), 16., d.foreground))
               .child(
                 div()
                   .truncate()
                   .font_weight(gpui::FontWeight::MEDIUM)
-                  .text_color(rgb(0xe5e7eb))
+                  .text_color(d.foreground)
                   .child(name.clone()),
               )
               .child(label(
@@ -3164,7 +3165,7 @@ impl TerminalPane {
                 .children(ended.map(|status| {
                   ui::text(div(), TextSize::Xs)
                     .debug_selector(|| "remote-terminal-ended".into())
-                    .text_color(rgb(AMBER_500))
+                    .text_color(ui::Tone::Warning.text(p))
                     .child(match status {
                       Some(code) => format!("(session ended, exit {code})"),
                       None => "(session ended)".into(),
@@ -3298,7 +3299,9 @@ impl TerminalPane {
           .min_h_0()
           .border_r_1()
           .border_color(p.border)
-          .bg(rgb(terminal_emu::scheme(self.dark).background))
+          .bg(theme::data_color(
+            terminal_emu::scheme(self.dark).background,
+          ))
           .on_drop(move |drag: &SendAssetDrag, _, cx| {
             on_asset.update(cx, |view, cx| view.insert(&shell_quote(&drag.path), cx));
           })
@@ -3338,14 +3341,15 @@ struct SendAssetDrag {
 
 impl Render for SendAssetDrag {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    let d = theme::palette(true);
     ui::text(div(), TextSize::Xs)
       .px_2()
       .py_1()
       .rounded(radius::MD)
       .border_1()
-      .border_color(gpui::white().opacity(0.4))
-      .bg(rgb(0x2a2a2a))
-      .text_color(rgb(0xd4d4d8))
+      .border_color(d.foreground.opacity(0.4))
+      .bg(d.popover)
+      .text_color(d.foreground)
       .shadow_md()
       .child(self.title.clone())
   }
@@ -3439,7 +3443,7 @@ fn paint_run(
   window: &mut Window,
   cx: &mut App,
 ) {
-  let color: gpui::Hsla = rgb(run.fg).into();
+  let color = theme::data_color(run.fg);
   // Block elements fill their cells; the font draws the rest.
   let mut text = String::with_capacity(run.text.len());
   for (index, c) in run.text.chars().enumerate() {
@@ -3735,7 +3739,9 @@ impl Render for TerminalPane {
               .flex()
               .overflow_x_scroll()
               .track_scroll(&self.row_scroll)
-              .bg(rgb(terminal_emu::scheme(self.dark).background))
+              .bg(theme::data_color(
+                terminal_emu::scheme(self.dark).background,
+              ))
               .children(row)
               // After the columns, so a column's index in the row stays
               // what `scroll_to_item` counts.
