@@ -660,6 +660,13 @@ fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl
     .cursor_pointer()
     .hover(|s| s.underline())
     .child(format!("@{login}"))
+    .on_mouse_down(MouseButton::Right, {
+      let url = url.clone();
+      cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+        cx.stop_propagation();
+        view.copy_link(url.clone(), e.position, cx);
+      })
+    })
     .on_click(cx.listener(move |_, _, _, cx| {
       cx.stop_propagation();
       cx.open_url(&url);

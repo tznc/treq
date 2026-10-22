@@ -37,7 +37,7 @@ use crate::{
     checks_run,
     form::{self, Controls, SelectOption},
     native::{register_toast_action, NativeEvent, ToastAction, ToastTone},
-    popup::PopupSink,
+    popup::{self, PopupSink},
     theme::{self, tw, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
@@ -171,6 +171,7 @@ pub struct GithubView {
   react: ActionSink,
   pub(super) controls: Controls,
   pub(super) tips: Tooltips,
+  popups: PopupSink,
   pub(super) route: Route,
   pub(super) dark: bool,
   /// `None` while reading.
@@ -227,7 +228,8 @@ impl GithubView {
       host,
       react,
       controls: Controls::new(sink),
-      tips: Tooltips::new(popups, dark),
+      tips: Tooltips::new(popups.clone(), dark),
+      popups,
       remote_for: route.repo_path.clone(),
       route,
       dark,
@@ -702,6 +704,19 @@ impl GithubView {
 
   pub(super) fn open_url(&self, url: &str) {
     self.host.open_url(url);
+  }
+
+  /// A right-click on what opens `url`: its "Copy link" menu.
+  pub(super) fn copy_link(
+    &self,
+    url: String,
+  ) -> impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static {
+    let (popups, host, dark) = (self.popups.clone(), self.host.clone(), self.dark);
+    move |e, _, cx| {
+      let host = host.clone();
+      let menu = popup::copy_link_menu(url.clone(), e.position, dark, move |e| host.notify(e));
+      popups(menu, cx);
+    }
   }
 
   /// Opens `popover`, or closes it when its own button is pressed again.
