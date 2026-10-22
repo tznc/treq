@@ -5005,6 +5005,36 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.cx.simulate_keystrokes("cmd-\\");
+  assert!(h.drawn("terminal-column-shell"));
+  let workspace = h.screen.read_with(&h.cx, |s, _| s.snapshot().clone());
+  let spawns = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("spawn "))
+      .count()
+  };
+  let spawned = spawns(&host);
+
+  h.update(|s| *s = settings());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-terminal-pane"));
+  // The hidden pane takes no shortcuts.
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.update(|s| *s = workspace);
+  h.cx.run_until_parked();
+
+  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.drawn("terminal-column-shell"));
+  assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
+}
+
+#[gpui::test]
 fn terminal_pane_asks_react_for_a_new_agent(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
