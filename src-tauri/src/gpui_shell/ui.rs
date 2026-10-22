@@ -4,8 +4,9 @@
 use std::{rc::Rc, time::Duration};
 
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, svg, Animation, AnimationExt as _, App, ClickEvent, Div, ElementId, Hsla,
-  SharedString, StyleRefinement, Transformation, Window,
+  self, accesskit, div, prelude::*, svg, Animation, AnimationExt as _, AnyElement, App, Bounds,
+  ClickEvent, Div, ElementId, GlobalElementId, Hsla, InspectorElementId, Interactivity, LayoutId,
+  Pixels, SharedString, StyleRefinement, Transformation, Window,
 };
 
 use gpui_kit::{
@@ -345,7 +346,131 @@ impl RenderOnce for Button {
       ButtonChild::Element(el) => el,
       ButtonChild::Icon(path, size) => icon(path, size, fg).into_any_element(),
     }))
+    .a11y_disabled(disabled)
     .test_support()
+  }
+}
+
+/// Marks an element's accessibility node disabled, as `aria-disabled` did:
+/// GPUI has no setter for it, so a disabled button reached screen readers,
+/// and the e2e suite's `toBeDisabled`, as enabled. Call it before
+/// `test_support`, so the observation sees the flag.
+pub trait A11yDisabledExt: Sized {
+  fn a11y_disabled(self, disabled: bool) -> A11yDisabled<Self>;
+}
+
+impl<E: Element + InteractiveElement> A11yDisabledExt for E {
+  fn a11y_disabled(self, disabled: bool) -> A11yDisabled<Self> {
+    A11yDisabled {
+      inner: self,
+      disabled,
+    }
+  }
+}
+
+/// See [`A11yDisabledExt`]. It forwards everything to the element it wraps
+/// and adds no layout node.
+pub struct A11yDisabled<E> {
+  inner: E,
+  disabled: bool,
+}
+
+impl<E: Element> IntoElement for A11yDisabled<E> {
+  type Element = Self;
+
+  fn into_element(self) -> Self {
+    self
+  }
+}
+
+impl<E: Element> Element for A11yDisabled<E> {
+  type RequestLayoutState = E::RequestLayoutState;
+  type PrepaintState = E::PrepaintState;
+
+  fn id(&self) -> Option<ElementId> {
+    self.inner.id()
+  }
+
+  fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+    self.inner.source_location()
+  }
+
+  fn request_layout(
+    &mut self,
+    id: Option<&GlobalElementId>,
+    inspector: Option<&InspectorElementId>,
+    window: &mut Window,
+    cx: &mut App,
+  ) -> (LayoutId, Self::RequestLayoutState) {
+    self.inner.request_layout(id, inspector, window, cx)
+  }
+
+  fn prepaint(
+    &mut self,
+    id: Option<&GlobalElementId>,
+    inspector: Option<&InspectorElementId>,
+    bounds: Bounds<Pixels>,
+    layout: &mut Self::RequestLayoutState,
+    window: &mut Window,
+    cx: &mut App,
+  ) -> Self::PrepaintState {
+    self
+      .inner
+      .prepaint(id, inspector, bounds, layout, window, cx)
+  }
+
+  fn paint(
+    &mut self,
+    id: Option<&GlobalElementId>,
+    inspector: Option<&InspectorElementId>,
+    bounds: Bounds<Pixels>,
+    layout: &mut Self::RequestLayoutState,
+    prepaint: &mut Self::PrepaintState,
+    window: &mut Window,
+    cx: &mut App,
+  ) {
+    self
+      .inner
+      .paint(id, inspector, bounds, layout, prepaint, window, cx)
+  }
+
+  fn a11y_role(&self) -> Option<gpui::Role> {
+    self.inner.a11y_role()
+  }
+
+  fn write_a11y_info(&self, node: &mut accesskit::Node) {
+    self.inner.write_a11y_info(node);
+    if self.disabled {
+      node.set_disabled();
+    }
+  }
+
+  fn a11y_synthetic_children(
+    &mut self,
+    prepaint: &mut Self::PrepaintState,
+    builder: &mut gpui::A11ySubtreeBuilder,
+  ) {
+    self.inner.a11y_synthetic_children(prepaint, builder);
+  }
+}
+
+impl<E: InteractiveElement> InteractiveElement for A11yDisabled<E> {
+  fn interactivity(&mut self) -> &mut Interactivity {
+    self.inner.interactivity()
+  }
+}
+
+impl<E: StatefulInteractiveElement> StatefulInteractiveElement for A11yDisabled<E> {}
+
+impl<E: Styled> Styled for A11yDisabled<E> {
+  fn style(&mut self) -> &mut StyleRefinement {
+    self.inner.style()
+  }
+}
+
+impl<E: ParentElement> ParentElement for A11yDisabled<E> {
+  fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+    self.inner.extend(elements);
   }
 }
 

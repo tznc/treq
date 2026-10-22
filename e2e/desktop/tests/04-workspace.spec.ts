@@ -14,8 +14,10 @@ test("creates a workspace from the Stack dialog", async ({ page }) => {
   ).toBeVisible();
 
   const branch = page.getByRole("textbox", { name: "Branch Name" });
-  await branch.fill("e2e/first");
   const create = page.getByRole("button", { name: "Create Workspace" });
+  await branch.fill("bad name..");
+  await expect(create).toBeDisabled();
+  await branch.fill("e2e/first");
   await expect(create).toBeEnabled();
   await create.click();
 

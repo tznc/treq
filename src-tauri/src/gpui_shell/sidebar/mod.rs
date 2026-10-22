@@ -3,7 +3,7 @@
 //! The window model builds its [`SidebarSnapshot`] and carries out every
 //! click the sidebar sends back as a [`SidebarAction`].
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, A11yDisabledExt as _};
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
@@ -817,6 +817,7 @@ impl Sidebar {
       .debug_selector(move || id.into())
       .role(Role::Button)
       .aria_label(tooltip)
+      .a11y_disabled(disabled)
       .test_support()
       .relative()
       .flex()
@@ -878,6 +879,7 @@ impl Sidebar {
       .debug_selector(move || selector)
       .role(Role::Button)
       .aria_label(tooltip)
+      .a11y_disabled(disabled)
       .test_support()
       .relative()
       .flex()
