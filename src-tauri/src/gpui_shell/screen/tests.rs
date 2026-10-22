@@ -51,6 +51,8 @@ struct FakeHost {
   description: String,
   /// What the Changes tab reads.
   working: Option<crate::jj::JjRevisionDiff>,
+  /// Replaces `working` once set: the files edited on disk meanwhile.
+  edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
   /// The pull request's review threads and the review agent's comments.
@@ -73,6 +75,8 @@ struct FakeHost {
   /// The devcontainers preview.
   devcontainers: bool,
   ptys: Mutex<Vec<String>>,
+  /// The sizes PTYs were given, as (id, cols, rows).
+  resizes: Mutex<Vec<(String, u16, u16)>>,
   /// PTY output listeners, by PTY id.
   sinks: Mutex<Vec<(String, Sink)>>,
   /// Remote session exit listeners, by local id.
@@ -199,6 +203,12 @@ impl file_browser_data::FileBrowserHost for FakeHost {
 }
 
 impl FakeHost {
+  /// What the Changes tab reads now.
+  fn working(&self) -> Option<crate::jj::JjRevisionDiff> {
+    let edited = self.edited.lock().unwrap().clone();
+    edited.or_else(|| self.working.clone())
+  }
+
   fn calls(&self) -> Vec<String> {
     self.calls.lock().unwrap().clone()
   }
@@ -611,7 +621,7 @@ impl changes_data::ChangesHost for FakeHost {
     workspace_id: Option<i64>,
   ) -> Result<Vec<crate::jj::JjFileChange>, String> {
     self.record(format!("read changed files {workspace_id:?}"));
-    let working = self.working.as_ref().ok_or("no changes")?;
+    let working = self.working().ok_or("no changes")?;
     Ok(working.uncommitted_files.clone())
   }
 
@@ -621,7 +631,7 @@ impl changes_data::ChangesHost for FakeHost {
     workspace_id: i64,
   ) -> Result<crate::jj::JjRevisionDiff, String> {
     self.record(format!("read workspace diff {workspace_id}"));
-    self.working.clone().ok_or_else(|| "no changes".into())
+    self.working().ok_or_else(|| "no changes".into())
   }
 
   fn file_hunks(
@@ -631,7 +641,7 @@ impl changes_data::ChangesHost for FakeHost {
     paths: Vec<String>,
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
-    let working = self.working.as_ref().ok_or("no changes")?;
+    let working = self.working().ok_or("no changes")?;
     Ok(crate::core::WorkspaceFileHunksBatch {
       snapshot_token: "t".into(),
       files: paths
@@ -835,7 +845,12 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(())
   }
 
-  fn resize_pty(&self, _: &str, _: u16, _: u16) -> Result<(), String> {
+  fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String> {
+    self
+      .resizes
+      .lock()
+      .unwrap()
+      .push((id.to_string(), cols, rows));
     Ok(())
   }
 
@@ -4002,6 +4017,59 @@ fn changes_tab_reads_again_only_when_files_change(cx: &mut TestAppContext) {
   assert_eq!(reads(&host), 2);
 }
 
+/// An agent edits `a.rs` on disk: its `+c` becomes `+e`, and the watcher
+/// bumps `changesRevision`.
+fn edit_a_rs(h: &mut Harness, host: &FakeHost) {
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  *host.edited.lock().unwrap() = Some(edited);
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+}
+
+/// The diff lines the Changes tab shows for `path`.
+fn shown_lines(h: &mut Harness, path: &str) -> Vec<String> {
+  h.cx.run_until_parked();
+  h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    changes.hunks[path]
+      .hunks
+      .iter()
+      .flat_map(|h| h.lines.clone())
+      .collect()
+  })
+}
+
+#[gpui::test]
+fn changes_tab_follows_edits_on_disk_outside_a_review(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  edit_a_rs(&mut h, &host);
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+  assert!(!h.drawn("stale-banner"));
+}
+
+#[gpui::test]
+fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  edit_a_rs(&mut h, &host);
+  assert!(h.drawn("stale-banner"), "a changed diff, same file list");
+  assert_eq!(
+    shown_lines(&mut h, "a.rs"),
+    [" a", "+b", "+c"],
+    "the reviewed diff stays"
+  );
+  h.click("reload-stale");
+  assert!(!h.drawn("stale-banner"));
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
   h.click("add-comment-a.rs-0-1");
@@ -4678,6 +4746,40 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
       format!("write {pty} \"\\u{{3}}\""),
     ]
   );
+}
+
+/// A terminal resized while its session starts hands the PTY the new size
+/// once it runs: a program drawing for a wider PTY than the grid wraps
+/// every line, so redraws stack up and overwrite each other.
+#[gpui::test]
+fn terminal_pty_follows_a_resize_while_it_starts(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  let pty = agent_pty();
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.terminal =
+        Some(serde_json::from_value(serde_json::json!({ "activeSessionId": 3 })).expect("route"));
+    }
+  });
+  assert!(
+    !host.calls().iter().any(|c| c.starts_with("spawn ")),
+    "the session is still starting"
+  );
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(900.), gpui::px(900.)));
+  h.cx.run_until_parked();
+  let host_dyn: terminal_data::Host = host.clone();
+  let (live, _) = terminal_data::attach(&host_dyn, &pty, 80, 24);
+  let grid = live.emulator.lock().unwrap().size();
+  let last = host
+    .resizes
+    .lock()
+    .unwrap()
+    .iter()
+    .rev()
+    .find(|(id, ..)| *id == pty)
+    .map(|(_, cols, rows)| (*cols as usize, *rows as usize));
+  assert_eq!(last, Some((grid.cols, grid.rows)));
 }
 
 #[gpui::test]

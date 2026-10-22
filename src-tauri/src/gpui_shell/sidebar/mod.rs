@@ -434,12 +434,17 @@ impl Sidebar {
   /// Hovering a row; a button inside it keeps the tooltip if it has it.
   fn hover_row_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
     if hovered {
-      self.hovered_row = Some(key.clone());
+      if self.hovered_row.as_ref() != Some(&key) {
+        self.hovered_row = Some(key.clone());
+        // The hovered workspace row reserves room for its actions.
+        cx.notify();
+      }
       if self.tooltip.is_some() {
         return;
       }
     } else if self.hovered_row.as_ref() == Some(&key) {
       self.hovered_row = None;
+      cx.notify();
     }
     self.hover_tooltip(key, hovered, cx);
   }
@@ -555,6 +560,9 @@ fn queue_dot(status: &str, palette: &Palette) -> (Hsla, bool, String) {
     other => (palette.muted_foreground, false, other.into()),
   }
 }
+
+/// Three 20px row buttons with 2px gaps.
+const ROW_ACTIONS_WIDTH: f32 = 3. * 20. + 2. * 2.;
 
 fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
@@ -939,7 +947,8 @@ impl Sidebar {
       })
   }
 
-  /// The agent, shell and stack buttons of a home or workspace row.
+  /// The agent, shell and stack buttons of a home or workspace row, laid out
+  /// [`ROW_ACTIONS_WIDTH`] wide.
   fn row_actions(
     &self,
     prefix: &str,
@@ -1311,6 +1320,10 @@ impl Sidebar {
       .child(leading)
       .child(
         div()
+          .debug_selector({
+            let selector = format!("{prefix}workspace-{id}-title");
+            move || selector
+          })
           .flex_1()
           .min_w_0()
           .truncate()
@@ -1330,14 +1343,21 @@ impl Sidebar {
           .justify_end()
           .child(indicators)
           .when(interactive, |this| {
-            this.child(
-              self
-                .row_actions(&format!("workspace-{id}"), Some(id), palette, cx)
-                .absolute()
-                .right_0()
-                .invisible()
-                .group_hover(group.clone(), |style| style.visible()),
-            )
+            // Hovering reserves the buttons' width, so the title truncates
+            // before them instead of running under them. Hover styles do not
+            // reach layout, so this follows the hovered row instead.
+            this
+              .when(self.hovered_row.as_ref() == Some(&key), |this| {
+                this.min_w(zpx(ROW_ACTIONS_WIDTH))
+              })
+              .child(
+                self
+                  .row_actions(&format!("workspace-{id}"), Some(id), palette, cx)
+                  .absolute()
+                  .right_0()
+                  .invisible()
+                  .group_hover(group.clone(), |style| style.visible()),
+              )
           }),
       )
       .on_hover(cx.listener({

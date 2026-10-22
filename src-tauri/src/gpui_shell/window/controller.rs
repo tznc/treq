@@ -5,12 +5,14 @@
 
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
+use futures::StreamExt;
+
 use tauri_plugin_gpui::gpui::{prelude::*, App, Context, Task};
 
 use super::{
   actions::{Menu, Shortcut},
   data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
-  host::{read_repo, WindowHost},
+  host::{read_repo, FileWatch, WindowHost},
   model::{self, Effect, FolderPurpose, Model},
   remote::{self, Opened, RemoteEffect},
   sidebar, snapshots,
@@ -56,6 +58,8 @@ pub struct WindowController {
   /// `prepare_repo` finished while a read was in flight: once it returns,
   /// read again if it found no branch.
   recheck_branch: bool,
+  /// The checkout watched for edits on disk, and the task that hears them.
+  watching: Option<(String, Task<()>)>,
   _pollers: Vec<Task<()>>,
 }
 
@@ -83,6 +87,7 @@ impl WindowController {
       reading: false,
       queued: None,
       recheck_branch: false,
+      watching: None,
       _pollers: pollers,
     };
     let host = this.host.clone();
@@ -177,13 +182,54 @@ impl WindowController {
     self.present(cx);
   }
 
-  /// `workspace-files-changed`: the Changes tab of that workspace reads
-  /// again.
-  pub fn files_changed(&mut self, workspace_id: i64, cx: &mut Context<Self>) {
-    if self.model.selected == Some(workspace_id) {
-      self.model.view.changes_revision += 1;
-      self.present(cx);
+  /// The watched checkout changed on disk: the Changes tab reads again.
+  pub fn files_changed(&mut self, cx: &mut Context<Self>) {
+    self.model.view.changes_revision += 1;
+    self.present(cx);
+  }
+
+  /// The checkout the Changes tab shows: the selected workspace's, else
+  /// the repository's. Remote ones change on another machine.
+  fn watch_target(&self) -> Option<String> {
+    if !self.model.has_repo() || self.model.is_remote() {
+      return None;
     }
+    Some(
+      self
+        .model
+        .selected_workspace(&self.data)
+        .map(model::full_path)
+        .unwrap_or_else(|| self.model.repo().to_string()),
+    )
+  }
+
+  /// Follows the selection: watches its checkout, dropping the last one.
+  fn watch(&mut self, cx: &mut Context<Self>) {
+    let target = self.watch_target();
+    if self.watching.as_ref().map(|(path, _)| path) == target.as_ref() {
+      return;
+    }
+    self.watching = target.map(|path| {
+      let (host, at) = (self.host.clone(), path.clone());
+      let task = cx.spawn(async move |this, cx| {
+        let watch = cx
+          .background_spawn(async move { host.watch_files(&at) })
+          .await;
+        let Some(FileWatch {
+          mut changes,
+          _watcher,
+        }) = watch
+        else {
+          return;
+        };
+        while changes.next().await.is_some() {
+          if this.update(cx, |this, cx| this.files_changed(cx)).is_err() {
+            break;
+          }
+        }
+      });
+      (path, task)
+    });
   }
 
   /// `pr-statuses-updated`: the PR poller's cache changed.
@@ -718,6 +764,7 @@ impl WindowController {
 
   /// Builds what the window shows and hands it on if it changed.
   fn present(&mut self, cx: &mut Context<Self>) {
+    self.watch(cx);
     let presentation = Presentation {
       sidebar: sidebar::snapshot(&self.model, &self.data),
       screen: snapshots::screen(&self.model, &self.data),

@@ -27,7 +27,10 @@ writeBin(
 );
 symlinkSync(appBinary, join(fixture.bin, "treq"));
 
-// The agent the terminal pane shows: a short transcript, then it waits.
+// The agent the terminal pane shows: a short transcript, then a rule as
+// wide as the PTY says the terminal is, redrawn in place on every resize
+// the way a TUI redraws. A PTY wider than the grid wraps the rule, and the
+// redraw leaves its head behind.
 writeBin(
   fixture.bin,
   "claude",
@@ -36,8 +39,13 @@ printf '%s\\n' "$*" >> '${fixture.agentLog}'
 printf '\\033[1m> Handle empty event_message in postEvent\\033[0m\\n\\n'
 printf '\\033[32m●\\033[0m Read packages/web/src/lib/client.ts\\n'
 printf '  \\033[2m└ Updated client.ts (+6 -1)\\033[0m\\n\\n'
-printf '\\033[2m>\\033[0m '
-exec cat >/dev/null
+rule() {
+  cols=$(stty size | cut -d' ' -f2)
+  printf '\\r\\033[K\\033[2m%s\\033[0m' "$(printf '%*s' "$cols" '' | tr ' ' '=')"
+}
+trap rule WINCH
+rule
+while :; do sleep 0.2; done
 `,
 );
 

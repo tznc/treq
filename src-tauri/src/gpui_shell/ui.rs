@@ -130,6 +130,20 @@ pub enum Size {
   Xs,
 }
 
+/// How much of a filled variant's color a disabled button keeps, as
+/// gpui-kit's own disabled buttons do. React's `disabled:opacity-40` faded
+/// the whole button as one layer; GPUI fades each primitive on its own, so
+/// element opacity let the faded fill show through a translucent label and
+/// wash it out.
+const DISABLED_FILL_OPACITY: f32 = 0.15;
+
+/// A [`Button`] child. Icons take the button's color when it renders, so
+/// they fade with it whichever order `icon` and `disabled` were called in.
+enum ButtonChild {
+  Element(gpui::AnyElement),
+  Icon(&'static str, f32),
+}
+
 /// `ui/button.tsx`. Its id is also its debug selector, which tests find it
 /// by. Style overrides (a `className` in React) go through
 /// [`Styled`] and win over the variant's own styles.
@@ -140,7 +154,7 @@ pub struct Button {
   variant: Variant,
   size: Size,
   disabled: bool,
-  children: Vec<gpui::AnyElement>,
+  children: Vec<ButtonChild>,
   on_click: Option<OnClick>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
@@ -200,9 +214,9 @@ impl Button {
   }
 
   /// A Lucide icon in the button's text color.
-  pub fn icon(self, path: &'static str, size: f32) -> Self {
-    let color = self.foreground();
-    self.child(icon(path, size, color))
+  pub fn icon(mut self, path: &'static str, size: f32) -> Self {
+    self.children.push(ButtonChild::Icon(path, size));
+    self
   }
 
   pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
@@ -210,8 +224,28 @@ impl Button {
     self
   }
 
-  /// The text color for this variant.
+  /// The text color for this variant, muted when disabled. Set `disabled`
+  /// before reading it.
   pub fn foreground(&self) -> Hsla {
+    if self.disabled {
+      // Over a tinted fill the muted color alone reads as disabled; over the
+      // page it needs fading too, or an outline button looks enabled.
+      let muted = self.palette.muted_foreground;
+      if self.filled() {
+        muted
+      } else {
+        muted.opacity(0.6)
+      }
+    } else {
+      self.variant_foreground()
+    }
+  }
+
+  fn filled(&self) -> bool {
+    matches!(self.variant, Variant::Default | Variant::Destructive)
+  }
+
+  fn variant_foreground(&self) -> Hsla {
     let p = &self.palette;
     match self.variant {
       Variant::Default => p.primary_foreground,
@@ -225,7 +259,9 @@ impl Button {
 
 impl ParentElement for Button {
   fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
-    self.children.extend(elements);
+    self
+      .children
+      .extend(elements.into_iter().map(ButtonChild::Element));
   }
 }
 
@@ -258,6 +294,7 @@ impl RenderOnce for Button {
       Size::Xs => text(base.h(zpx(24.)).px_2(), TextSize::Sm),
     };
     let disabled = self.disabled;
+    let filled = self.filled();
     let base = match self.variant {
       Variant::Default => base.bg(p.primary).shadow_sm(),
       Variant::Destructive => base.bg(p.destructive).shadow_sm(),
@@ -280,6 +317,18 @@ impl RenderOnce for Button {
       .role(gpui::Role::Button)
       .when_some(self.name, |b, name| b.aria_label(name));
     el.style().refine(&self.style);
+    if disabled {
+      // After the overrides, so a custom fill or label color is muted too.
+      let style = el.style();
+      if filled {
+        style.background = style.background.take().map(|fill| match fill {
+          gpui::Fill::Color(bg) => gpui::Fill::Color(bg.opacity(DISABLED_FILL_OPACITY)),
+        });
+      }
+      style.border_color = style.border_color.map(|c| c.opacity(0.5));
+      style.text.color = Some(fg);
+      style.box_shadow = None;
+    }
     // GPUI has no text decoration on hover for a whole subtree, so a link
     // keeps its color and only underlines its text.
     el.when(!disabled, |b| {
@@ -289,11 +338,13 @@ impl RenderOnce for Button {
         None => s,
       })
     })
-    .when(disabled, |b| b.opacity(0.4))
     .when_some(self.on_click.filter(|_| !disabled), |b, f| {
       b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
     })
-    .children(self.children)
+    .children(self.children.into_iter().map(|child| match child {
+      ButtonChild::Element(el) => el,
+      ButtonChild::Icon(path, size) => icon(path, size, fg).into_any_element(),
+    }))
     .test_support()
   }
 }
@@ -306,4 +357,29 @@ pub fn card(p: &Palette) -> Div {
     .border_color(p.border.opacity(0.5))
     .bg(p.card)
     .text_color(p.card_foreground)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn disabled_button_mutes_its_label_and_icons() {
+    let p = theme::palette(false);
+    let primary = Button::new("primary", &p);
+    assert_eq!(primary.foreground(), p.primary_foreground);
+    // An opaque label over the tinted fill, so the fill can't wash it out.
+    let primary = primary.disabled(true);
+    assert_eq!(primary.foreground(), p.muted_foreground);
+    let outline = Button::new("outline", &p)
+      .variant(Variant::Outline)
+      .disabled(true);
+    assert_eq!(outline.foreground(), p.muted_foreground.opacity(0.6));
+    // An icon added before `disabled` still takes the disabled color, since
+    // it is colored when the button renders.
+    let icon_first = Button::new("icon", &p)
+      .icon(theme::ICON_COMPARE, 16.)
+      .disabled(true);
+    assert!(matches!(icon_first.children[..], [ButtonChild::Icon(..)]));
+  }
 }
