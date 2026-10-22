@@ -148,6 +148,8 @@ pub struct CodeView {
   history_loading: bool,
   /// Why the last commit read failed, while there is no history to show.
   history_error: Option<String>,
+  /// The failed read's message, read-only so it can be copied into a report.
+  history_error_text: Option<Entity<TextareaState>>,
   pub(super) stack: Option<Vec<StackRow>>,
   pub(super) settings: Option<TaskSettings>,
   task: Option<Entity<TextareaState>>,
@@ -197,6 +199,7 @@ impl CodeView {
       history_limit: HISTORY_PAGE,
       history_loading: false,
       history_error: None,
+      history_error_text: None,
       stack: None,
       settings: None,
       task: None,
@@ -1044,7 +1047,7 @@ impl Render for CodeView {
           .flex_none()
           .h_full()
           .bg(p.muted.opacity(0.2))
-          .child(self.history(&p, cx)),
+          .child(self.history(&p, window, cx)),
       )
       .children(self.picker.clone())
   }
@@ -2087,7 +2090,36 @@ impl CodeView {
       })
   }
 
-  fn history(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  /// The read-only, wrapping text area that shows a failed commit read.
+  fn history_error_text(
+    &mut self,
+    err: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Entity<TextareaState> {
+    if let Some(text) = self.history_error_text.clone() {
+      if text.read(cx).value() != err {
+        text.update(cx, |s, cx| s.set_value(err.to_string(), window, cx));
+      }
+      return text;
+    }
+    let text = cx.new(|cx| {
+      let mut state = TextareaState::new(window, cx)
+        .auto_grow(2, 12)
+        .default_value(err.to_string());
+      state.set_readonly(true, cx);
+      state
+    });
+    self.history_error_text = Some(text.clone());
+    text
+  }
+
+  fn history(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let Some(log) = self.history.clone() else {
       let status = match self.history_error.clone() {
         Some(err) => div()
@@ -2107,10 +2139,13 @@ impl CodeView {
               .child("Couldn't load commits"),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .text_center()
-              .child(err),
+            div().w_full().child(
+              Textarea::new(&self.history_error_text(&err, window, cx))
+                .xsmall()
+                .text_size(zpx(11.))
+                .line_height(zpx(16.))
+                .font_family(theme::MONO_FONT),
+            ),
           )
           .into_any_element(),
         None => ui::text(div(), TextSize::Sm)
