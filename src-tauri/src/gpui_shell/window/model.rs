@@ -189,6 +189,7 @@ impl Dialogs {
   /// another over it.
   pub fn any_open(&self) -> bool {
     self.workspace_dialog.is_some()
+      || self.open_workspaces
       || self.rename.is_some()
       || self.deletion
       || self.change_move.is_some()
