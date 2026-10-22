@@ -122,6 +122,7 @@ try {
         .filter(([f]) => !debtFiles.includes(f))
         .map(([file, count]) => ({ file, count })),
       debt: debt.reduce((n, [, c]) => n + c, 0),
+      debtByFile: Object.fromEntries(debt),
       listed: debtFiles.length,
       stale: debtFiles.filter((f) => !byFile[f]),
     });
