@@ -571,6 +571,7 @@ impl StashView {
       );
 
     let apply = Button::new("stash-apply-button", p)
+      .aria_label("Apply...")
       .size(Size::Sm)
       .h(zpx(28.))
       .px_2()
@@ -594,6 +595,7 @@ impl StashView {
         }
       }));
     let more = Button::new("stash-more-menu", p)
+      .aria_label("More stash actions")
       .variant(Variant::Outline)
       .size(Size::Sm)
       .h(zpx(28.))
@@ -889,13 +891,23 @@ impl Render for StashView {
       window.focus(&self.focus, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "stash-modal",
-      viewport.width * 0.75,
-      Some(viewport.height * 0.80),
-      viewport,
-      &p,
-    );
+    // With no stashes there is only a sentence to show: size the dialog to
+    // it (`sm:max-w-lg`) instead of the list-and-detail layout's 75vw × 80vh.
+    let empty = self
+      .entries
+      .as_ref()
+      .is_some_and(|entries| entries.is_empty());
+    let (backdrop, panel) = if empty {
+      dialog("stash-modal", zpx(512.), None, viewport, &p)
+    } else {
+      dialog(
+        "stash-modal",
+        viewport.width * 0.75,
+        Some(viewport.height * 0.80),
+        viewport,
+        &p,
+      )
+    };
     let header = div().flex_none().child(
       title(
         div()

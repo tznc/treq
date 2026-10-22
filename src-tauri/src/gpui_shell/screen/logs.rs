@@ -501,7 +501,7 @@ impl LogsView {
       return;
     };
     self.popup(
-      PopupRequest::ShowDropdown {
+      PopupRequest::ShowSelect {
         entries: native_entries(items),
         anchor,
         dark: self.dark,
@@ -512,6 +512,7 @@ impl LogsView {
 
   fn source_menu(&self, cx: &mut Context<Self>) {
     let entity = cx.entity().downgrade();
+    let current = self.source;
     let items = Source::ALL
       .into_iter()
       .map(|source| {
@@ -519,6 +520,7 @@ impl LogsView {
         NativeMenuItem::item(source.label(), move |cx| {
           let _ = entity.update(cx, |view, cx| view.set_source(source, cx));
         })
+        .radio(source == current)
       })
       .collect();
     self.dropdown("log-source", items, cx);
@@ -861,7 +863,7 @@ impl LogsView {
         .size(Size::Sm)
         .min_w(zpx(130.))
         .justify_between()
-        .child(label)
+        .label(label)
         .child(ui::icon(
           theme::ICON_CHEVRON_DOWN,
           12.,
@@ -1724,6 +1726,18 @@ impl LogsView {
       }));
     match open {
       Open::Levels => {
+        list = list.child(
+          check_row(
+            "log-level-option-all".into(),
+            "All Levels".into(),
+            self.levels.is_empty(),
+            p,
+          )
+          .on_click(cx.listener(|view, _, _, cx| {
+            view.levels.clear();
+            view.load(cx);
+          })),
+        );
         for level in LEVELS {
           let checked = self.levels.iter().any(|l| l == level);
           list = list.child(

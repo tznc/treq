@@ -1,0 +1,71 @@
+id: gpui-control-needs-accessible-name
+snapshots:
+  ? |
+    fn icon_only(p: &Palette) -> Button {
+      Button::new("close", p).variant(Variant::Ghost).icon(ICON_X, 16.)
+    }
+  : labels:
+    - source: Button::new("close", p)
+      style: primary
+      start: 40
+      end: 63
+  ? |
+    fn named_child_only() -> Stateful<Div> {
+      div().id("row").role(Role::Button).child(div().aria_label("Inner"))
+    }
+  : labels:
+    - source: div().id("row").role(Role::Button)
+      style: primary
+      start: 43
+      end: 77
+    - source: role
+      style: secondary
+      start: 59
+      end: 63
+    - source: div().id("row").role
+      style: secondary
+      start: 43
+      end: 63
+    - source: (Role::Button)
+      style: secondary
+      start: 63
+      end: 77
+  ? |
+    fn named_parent_only(p: &Palette) -> Div {
+      div().child(Button::new("close", p).icon(ICON_X, 16.)).aria_label("Toolbar")
+    }
+  : labels:
+    - source: Button::new("close", p)
+      style: primary
+      start: 57
+      end: 80
+  ? |
+    fn text_child(p: &Palette) -> Button {
+      Button::new("run", p).child("Run")
+    }
+  : labels:
+    - source: Button::new("run", p)
+      style: primary
+      start: 41
+      end: 62
+  ? |
+    fn unnamed_role(p: &Palette) -> Stateful<Div> {
+      div().id("agent").role(Role::ComboBox).child("Claude")
+    }
+  : labels:
+    - source: div().id("agent").role(Role::ComboBox)
+      style: primary
+      start: 50
+      end: 88
+    - source: role
+      style: secondary
+      start: 68
+      end: 72
+    - source: div().id("agent").role
+      style: secondary
+      start: 50
+      end: 72
+    - source: (Role::ComboBox)
+      style: secondary
+      start: 72
+      end: 88

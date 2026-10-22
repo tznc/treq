@@ -333,6 +333,11 @@ fn local_date(at: &str) -> String {
     .unwrap_or_else(|_| at.to_string())
 }
 
+/// Whether the signed-out Account tab offers the pasted-callback box: in
+/// `cargo run` builds, where `treq://` links don't reach the app, but not in
+/// the e2e build that QA screenshots as the shipped app.
+const DEV_CALLBACK: bool = cfg!(all(debug_assertions, not(feature = "e2e")));
+
 /// The token in a pasted `treq://auth/callback?token=…` link, or the
 /// pasted text itself.
 fn callback_token(pasted: &str) -> Result<String, String> {
@@ -499,7 +504,7 @@ impl SettingsView {
           .sign_in_error
           .as_ref()
           .map(|err| format!("Sign-in failed: {err}")),
-        dev: cfg!(debug_assertions).then(|| DevCallback {
+        dev: DEV_CALLBACK.then(|| DevCallback {
           url: state.callback_url.clone(),
           loading: account.dev_callback.loading,
           error: state
@@ -1052,6 +1057,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       )
     });
     let delete = Button::new("cloud-delete", p)
+      .aria_label("Delete this cloud workspace")
       .variant(Variant::Ghost)
       .size(Size::Icon)
       .w(zpx(28.))

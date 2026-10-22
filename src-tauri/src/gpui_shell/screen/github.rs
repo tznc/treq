@@ -1200,6 +1200,7 @@ impl GithubView {
       .child(div().flex_1())
       .child(
         Button::new("github-refresh", p)
+          .aria_label("Refresh")
           .variant(Variant::Ghost)
           .size(Size::Icon)
           .w(zpx(28.))
@@ -1368,6 +1369,7 @@ impl GithubView {
           .child(ui::text(
             div().h(zpx(32.)).child(form::select_field(
               SharedString::from(field.replace('.', "-")),
+              label,
               &state,
               false,
             )),

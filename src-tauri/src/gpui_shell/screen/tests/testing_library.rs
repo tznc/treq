@@ -69,6 +69,20 @@ fn claude_offers_plan_mode_from_the_submit_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_prompt_dialog_targets_the_workspace_it_opened_on(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login"))).to_be_visible();
+
+  let mut on_main = agent_modal();
+  on_main["initialWorkspaceId"] = serde_json::Value::Null;
+  h.set_modal(None);
+  h.set_modal(Some(on_main));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("Workspace: main"))).to_be_visible();
+}
+
+#[gpui::test]
 fn agents_without_plan_mode_hide_the_submit_menu(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
   let (mut h, _) = modal_harness(cx, host, agent_modal());
@@ -96,6 +110,51 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
     .filter_map(|n| n.name())
     .collect();
   assert_eq!(agents, ["Claude", "Codex", "Cursor", "Copilot"]);
+}
+
+#[gpui::test]
+fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let screen = screen(&mut h);
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login")));
+  let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces..."));
+  expect(&search).to_have_focus();
+
+  user.keyboard("{Escape}");
+  assert!(screen
+    .query_by_role(by::role(Role::TextInput).name("Search workspaces..."))
+    .is_none());
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
+
+  user.keyboard("{Escape}");
+  assert_eq!(h.sent(), vec![press("agentPrompt.close")]);
+}
+
+#[gpui::test]
+fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    installed: vec![
+      ("claude", true),
+      ("codex", false),
+      ("cursor-agent", true),
+      ("copilot", false),
+    ],
+    ..FakeHost::default()
+  };
+  let (mut h, _) = modal_harness(cx, host, agent_modal());
+  // The dialog is built on its first draw, and only then looks up the tools.
+  screen(&mut h);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::ComboBox).name("Agent")));
+  let agents: Vec<String> = screen
+    .get_all_by_role(by::role(Role::MenuItem))
+    .iter()
+    .filter_map(|n| n.name())
+    .collect();
+  assert_eq!(agents, ["Claude", "Cursor"]);
 }
 
 #[gpui::test]
@@ -207,4 +266,118 @@ fn turning_skills_installation_on_shows_the_skills_tab(cx: &mut TestAppContext) 
   assert!(host
     .writes()
     .contains(&"set feature_preview.skillsInstallation=true".to_string()));
+}
+
+// The commit box: Commit waits for a message.
+
+#[gpui::test]
+fn commit_does_nothing_until_a_message_is_typed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = screen(&mut h);
+  let user = screen.user();
+  let commit = || screen.get_by_role(by::role(Role::Button).name("Commit"));
+  user.click(&commit());
+  h.click("commit-message");
+  user.keyboard("   ");
+  user.click(&commit());
+  h.cx.run_until_parked();
+  assert!(
+    !h.drawn("commit-message-error"),
+    "a disabled Commit asks nothing"
+  );
+  assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
+  h.click("commit-message");
+  user.keyboard("Fix");
+  user.click(&commit());
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"commit Some(7) \"Fix\"".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+// The remote chooser can be closed without choosing.
+
+#[gpui::test]
+fn the_remote_chooser_closes_from_its_x(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(true, serde_json::json!({})),
+  );
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Close")));
+  assert_eq!(h.sent(), vec![press("remote.setup.close")]);
+}
+
+// Every control is reachable by name: these had none, so a screen reader
+// read them as "button" and e2e tests clicked them by position.
+
+fn button(name: &str) -> gpui_testing_library::ByRole {
+  by::role(Role::Button).name(name)
+}
+
+#[gpui::test]
+fn the_workspace_header_names_its_icon_buttons(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  let screen = screen(&mut h);
+  for name in [
+    "Workspace target",
+    "View PR (#42, open)",
+    "Open PR on web",
+    "Sync with remote",
+    "More workspace actions",
+  ] {
+    expect(screen.get_by_role(button(name))).to_be_visible();
+  }
+}
+
+#[gpui::test]
+fn the_workspace_header_names_the_create_pr_buttons(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    loaded: feature_loaded(),
+    pr: workspace_data::PrCache {
+      pr: Some(None),
+      ci: None,
+    },
+    ..FakeHost::default()
+  };
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(button("Create PR"))).to_be_visible();
+  expect(screen.get_by_role(button("More Create PR options"))).to_be_visible();
+}
+
+#[gpui::test]
+fn the_create_dialog_names_its_target_button(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_dialogs::dialog(serde_json::json!({})));
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(button("Workspace target"))).to_be_visible();
+}
+
+#[gpui::test]
+fn the_prerequisites_recheck_is_named(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, onboarding());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(button("Check again"))).to_be_visible();
+}
+
+#[gpui::test]
+fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings_route("application"));
+  let screen = screen(&mut h);
+  for name in [
+    "Theme",
+    "Font Size",
+    "Claude Code Model",
+    "Default Agent",
+    "Conflict Marker Style",
+  ] {
+    expect(screen.get_by_role(by::role(Role::ComboBox).name(name))).to_be_visible();
+  }
 }

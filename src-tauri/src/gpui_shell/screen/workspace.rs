@@ -135,6 +135,20 @@ pub struct ViewPr {
   pub draft: bool,
 }
 
+/// React's `View PR (#12, open)`: the number and state the icon and color show.
+fn view_pr_name(pr: &ViewPr) -> String {
+  let state = if pr.draft {
+    "draft"
+  } else {
+    match pr.state {
+      PrState::Open => "open",
+      PrState::Closed => "closed",
+      PrState::Merged => "merged",
+    }
+  };
+  format!("View PR (#{}, {state})", pr.number)
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePr {
@@ -292,6 +306,9 @@ pub struct WorkspaceView {
   code_host: Arc<dyn TerminalHost>,
   /// The header popover that shows in the modal window, if one does.
   popover: Option<(Entity<Popover>, gpui::Subscription)>,
+  /// The window this view draws in, which a press outside the popover goes
+  /// on to.
+  window: Option<gpui::AnyWindowHandle>,
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
@@ -377,6 +394,7 @@ impl WorkspaceView {
       busy: actions::Busy::default(),
       popover_host: host.clone(),
       popover: None,
+      window: None,
       code_host: host,
       terminal: None,
       code: None,
@@ -549,7 +567,8 @@ impl WorkspaceView {
     };
     self.close_popover(cx);
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
-    let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
+    let shell = self.window;
+    let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
     let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
       this.close_popover(cx)
     });
@@ -813,6 +832,7 @@ impl WorkspaceView {
       if let Some(target) = &h.target {
         let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
         let button = Button::new("workspace-target", p)
+          .aria_label("Workspace target")
           .variant(Variant::Outline)
           .size(Size::Sm)
           .disabled(target.disabled)
@@ -928,8 +948,16 @@ impl WorkspaceView {
       }
     }
 
-    // Not shrunk: like CSS's `min-width: auto`, the row wraps it instead.
-    let mut right = div().flex().flex_none().items_center().gap_2().ml_auto();
+    // The row wraps it whole first; alone on its row and still too wide (at
+    // a large zoom), its buttons wrap too, right-aligned.
+    let mut right = div()
+      .flex()
+      .flex_wrap()
+      .justify_end()
+      .items_center()
+      .gap_2()
+      .min_w_0()
+      .ml_auto();
     if let Some(push) = &h.push {
       let blue = tw::color(tw::BLUE_600);
       let hover = tw::color(tw::BLUE_700);
@@ -1068,6 +1096,7 @@ impl WorkspaceView {
               .px_1()
               .disabled(more.disabled)
               .icon(theme::ICON_MORE, 16.)
+              .aria_label("More workspace actions")
               .on_click(self.press("workspace.more")),
           )
           .child(self.record_bounds("workspace-more")),
@@ -1135,12 +1164,14 @@ impl WorkspaceView {
       .rounded_r_none()
       .child(ui::icon(icon, 16., text))
       .child("View PR")
+      .aria_label(view_pr_name(pr))
       .on_click(self.press("workspace.viewPr"));
     let web = styled(Button::new("workspace-view-pr-web", p))
       .rounded_l_none()
       .border_l_0()
       .px_2()
       .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., text))
+      .aria_label("Open PR on web")
       .on_click(self.press("workspace.viewPrWeb"));
     div()
       .flex()
@@ -1185,7 +1216,7 @@ impl WorkspaceView {
           b.child(ui::icon(theme::ICON_GITHUB, 16., white))
         }
       })
-      .child(create.label.clone())
+      .label(create.label.clone())
       .on_click(self.press("workspace.createPr"));
     let menu = styled(Button::new("workspace-create-pr-menu", p))
       .rounded_l_none()
@@ -1193,6 +1224,7 @@ impl WorkspaceView {
       .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
       .px(zpx(6.))
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
+      .aria_label("More Create PR options")
       .on_click(self.press("workspace.createPrMenu"));
     div()
       .flex()
@@ -1219,6 +1251,7 @@ impl WorkspaceView {
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
     let dot = tw::color(tw::YELLOW_600);
     let button = Button::new("workspace-sync", p)
+      .aria_label("Sync with remote")
       .variant(if sync.ahead > 0 {
         Variant::Outline
       } else {
@@ -1344,6 +1377,9 @@ impl WorkspaceView {
     }
     let list = div()
       .flex()
+      // At a large zoom the tabs wrap inside their pill rather than run past
+      // the window's edge.
+      .flex_wrap()
       .gap_1()
       .p_1()
       .rounded(zpx(8.))
@@ -1422,7 +1458,7 @@ impl WorkspaceView {
       .border_b_1()
       .border_color(p.border)
       .debug_selector(|| "workspace-tab-row".into())
-      .child(div().flex().flex_none().items_center().gap_2().child(list))
+      .child(div().flex().min_w_0().items_center().gap_2().child(list))
       .child(div().flex_1().min_w_0())
       .child(status)
   }
@@ -1649,6 +1685,22 @@ impl WorkspaceView {
 }
 
 impl WorkspaceView {
+  /// Gives up the terminal pane, so its terminals outlive this view while
+  /// another screen (Settings, say) shows.
+  pub fn take_terminal(&mut self, cx: &mut Context<Self>) -> Option<Entity<TerminalPane>> {
+    let (pane, _) = self.terminal.take()?;
+    pane.update(cx, |pane, _| pane.park());
+    Some(pane)
+  }
+
+  /// Draws `pane`, which an earlier workspace view gave up, placing it in
+  /// the shown workspace when it next draws.
+  pub fn adopt_terminal(&mut self, pane: Entity<TerminalPane>, cx: &mut Context<Self>) {
+    let react = self.children.clone();
+    pane.update(cx, |pane, _| pane.set_react(react));
+    self.terminal = Some((pane, TerminalPlace::default()));
+  }
+
   /// The terminal pane, placed in the shown workspace, while the route
   /// asks GPUI to draw it.
   fn sync_terminal(&mut self, cx: &mut Context<Self>) -> Option<Entity<TerminalPane>> {
@@ -1845,7 +1897,8 @@ impl Body {
 }
 
 impl Render for WorkspaceView {
-  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
     let p = theme::palette(self.dark);
     let snapshot = self.snapshot.clone();

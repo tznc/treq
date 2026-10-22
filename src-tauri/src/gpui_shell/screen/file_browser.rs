@@ -1135,7 +1135,10 @@ impl FileBrowserView {
     };
     let mut open = vec![{
       let (host, full) = (self.host.clone(), full.clone());
-      NativeMenuItem::item("Open in Finder", move |_| host.reveal(&full)).icon(MenuIcon::FolderOpen)
+      NativeMenuItem::item(crate::core::context_menu::REVEAL_LABEL, move |_| {
+        host.reveal(&full)
+      })
+      .icon(MenuIcon::FolderOpen)
     }];
     for (on, scheme, label) in [
       (self.editors.cursor, "cursor", "Open in Cursor"),

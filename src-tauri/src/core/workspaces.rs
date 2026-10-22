@@ -237,6 +237,8 @@ pub fn ls_workspace(
     .git_global(true)
     .git_exclude(true)
     .parents(true)
+    // Version control metadata is not workspace content.
+    .filter_entry(|entry| !matches!(entry.file_name().to_str(), Some(".git" | ".jj")))
     .build();
 
   for entry in walker {
@@ -1689,6 +1691,21 @@ mod tests {
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn ls_workspace_leaves_out_version_control_directories() {
+    let temp = TempDir::new().expect("tempdir");
+    for dir in [".git", ".jj", ".github", "src"] {
+      fs::create_dir(temp.path().join(dir)).expect("create dir");
+    }
+    fs::write(temp.path().join(".env"), "").expect("write file");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+
+    let entries = super::ls_workspace(repo_path, None).expect("list workspace");
+
+    let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, [".github", "src", ".env"]);
+  }
 
   fn test_workspace(id: i64, branch: &str, target: Option<&str>) -> Workspace {
     Workspace {

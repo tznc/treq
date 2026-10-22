@@ -13,7 +13,13 @@ test("creates a workspace from the New Workspaces dialog", async ({ page }) => {
   await page.getByRole("button", { name: "Stack", exact: true }).click();
   await expect(page.getByRole("heading", heading)).toBeVisible();
 
-  await page.getByLabel("Workspaces", { exact: true }).fill("e2e/first");
+  const lines = page.getByLabel("Workspaces", { exact: true });
+  await lines.fill("e2e/bad..");
+  await expect(page.getByRole("alert", { name: "1 line can't be opened" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByRole("button", { name: "Create Workspaces" })).toBeDisabled();
+  await lines.fill("e2e/first");
   const create = page.getByRole("button", { name: "Create 1 Workspace" });
   await expect(create).toBeEnabled({ timeout: 20_000 });
   await create.click();

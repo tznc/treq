@@ -12,6 +12,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
@@ -20,7 +21,7 @@ use gpui_kit::component::{
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, px, relative, rems, rgb, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, SharedString, Stateful, Subscription, Task, Window,
+  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -1296,6 +1297,7 @@ impl CodeView {
       .relative()
       .child(
         small(Button::new("task-add", p).variant(Variant::Ghost))
+          .aria_label("Add")
           .px_2()
           .gap_1()
           .child(
@@ -1321,17 +1323,15 @@ impl CodeView {
           .flex()
           .items_center()
           .gap(zpx(6.))
-          .child(
-            form::switch_sized(
-              "task-new-workspace",
-              on,
-              false,
-              p,
-              (28., 16., 12.),
-              cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
-            )
-            .aria_label("Run in a new workspace"),
-          )
+          .child(form::switch_sized(
+            "task-new-workspace",
+            "Run in a new workspace",
+            on,
+            false,
+            p,
+            (28., 16., 12.),
+            cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
+          ))
           .child(
             ui::text(div(), TextSize::Xs)
               .id("task-new-workspace-label")
@@ -1376,8 +1376,6 @@ impl CodeView {
         .relative()
         .flex()
         .items_center()
-        .gap(zpx(6.))
-        .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
         .child(
           ui::text(div(), TextSize::Xs)
             .id("task-agent")
@@ -1392,6 +1390,7 @@ impl CodeView {
             .border_color(p.border)
             .bg(p.background)
             .cursor_pointer()
+            .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
             .child(agent.label())
             .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., p.muted_foreground))
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
@@ -1422,7 +1421,9 @@ impl CodeView {
     let submit = self.tips.wrap(
       "task-submit",
       Side::Top,
-      Some(TooltipContent::Text("⌘+Enter".into())),
+      Some(TooltipContent::Text(
+        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+      )),
       submit,
       cx,
     );
@@ -1498,6 +1499,8 @@ impl CodeView {
           .items_start()
           .child(
             div()
+              .flex_1()
+              .min_w_0()
               .flex()
               .flex_col()
               .gap(zpx(2.))
@@ -1608,6 +1611,7 @@ impl CodeView {
           .child(
             div().absolute().top_2().right_2().child(
               Button::new("workspace-description-edit", p)
+                .aria_label("Edit description")
                 .variant(Variant::Ghost)
                 .size(Size::Icon)
                 .w(zpx(28.))
@@ -1885,7 +1889,7 @@ impl CodeView {
             .text_color(p.muted_foreground)
             .child("Go to file"),
         )
-        .child(kbd(p, "⌘ + P"))
+        .child(kbd(p, &crate::gpui_shell::keys::hint("⌘ + P")))
         .on_click(move |_, _, cx| {
           let react = react.clone();
           cx.defer(move |cx| {
@@ -1954,6 +1958,9 @@ impl CodeView {
             .child(
               ui::text(div(), TextSize::Sm)
                 .id(id)
+                .role(Role::Button)
+                .aria_label(entry.name.clone())
+                .test_support()
                 .flex()
                 .items_center()
                 .gap_3()

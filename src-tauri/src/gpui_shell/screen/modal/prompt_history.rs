@@ -253,6 +253,7 @@ impl PromptHistoryView {
       )
       .child(
         Button::new("prompt-history-copy", p)
+          .aria_label("Copy")
           .variant(Variant::Ghost)
           .size(Size::Sm)
           .h(zpx(24.))
@@ -283,7 +284,7 @@ impl PromptHistoryView {
             Button::new("prompt-history-run", p)
               .size(Size::Sm)
               .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr(zpx(6.)))
-              .child("Run prompt...")
+              .label("Run prompt...")
               .on_click(cx.listener(move |view, _, _, cx| view.run(&entry, cx))),
           ),
         ),
@@ -314,7 +315,7 @@ impl Render for PromptHistoryView {
         .variant(Variant::Outline)
         .size(Size::Sm)
         .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr(zpx(6.)))
-        .child("Copy all")
+        .label("Copy all")
         .on_click(cx.listener(move |view, _, _, cx| {
           view.copy(text.clone(), "All prompts copied to clipboard", cx)
         }))

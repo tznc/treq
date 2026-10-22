@@ -20,3 +20,44 @@ pub fn held(mut m: tauri_plugin_gpui::gpui::Modifiers) -> tauri_plugin_gpui::gpu
   }
   m
 }
+
+/// The secondary modifier's name in a shortcut hint: ⌘ on macOS, Ctrl
+/// elsewhere (`Modifiers::secondary`).
+pub const SECONDARY: &str = if cfg!(target_os = "macos") {
+  "⌘"
+} else {
+  "Ctrl"
+};
+
+/// The platform modifier's name: ⌘ on macOS, Super elsewhere.
+pub const PLATFORM: &str = if cfg!(target_os = "macos") {
+  "⌘"
+} else {
+  "Super"
+};
+
+/// Shift's name: ⇧ on macOS, Shift elsewhere.
+pub const SHIFT: &str = if cfg!(target_os = "macos") {
+  "⇧"
+} else {
+  "Shift"
+};
+
+/// A shortcut hint written with ⌘ for the secondary modifier, for this
+/// platform: "⌘ + J" reads "Ctrl + J" on Linux and Windows.
+pub fn hint(keys: &str) -> String {
+  keys.replace('⌘', SECONDARY)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn hint_names_the_secondary_modifier() {
+    assert_eq!(hint("⌘ + J"), format!("{SECONDARY} + J"));
+    if !cfg!(target_os = "macos") {
+      assert_eq!(hint("⌘+Enter"), "Ctrl+Enter");
+    }
+  }
+}

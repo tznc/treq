@@ -546,36 +546,42 @@ pub fn workspace_view(
   let has_commits = has_workspace_commits || commits_ahead > 0;
   const NO_COMMITS: &str =
     "Make a commit before creating a pull request. Uncommitted working-copy changes don't count.";
-  let create_pr =
-    (on_feature && has_remote && pr_loaded && pr_info.as_ref().is_none_or(|p| p.state != "OPEN"))
-      .then(|| CreatePr {
-        label: if route.creating_pr {
-          if needs_push {
-            "Pushing & creating…"
-          } else {
-            "Creating…"
-          }
-        } else {
-          "Create PR"
-        }
-        .into(),
-        creating: route.creating_pr,
-        disabled: route.creating_pr || !has_commits,
-        tooltip: if !has_commits {
-          NO_COMMITS
-        } else if needs_push {
-          "Push this branch and create a pull request on GitHub"
-        } else {
-          "Create a pull request on GitHub"
-        }
-        .into(),
-        menu_tooltip: if has_commits {
-          "More pull request options"
-        } else {
-          NO_COMMITS
-        }
-        .into(),
-      });
+  // An open or merged PR already covers the branch; a closed one may be
+  // replaced.
+  let create_pr = (on_feature
+    && has_remote
+    && pr_loaded
+    && pr_info
+      .as_ref()
+      .is_none_or(|p| p.state != "OPEN" && p.state != "MERGED"))
+  .then(|| CreatePr {
+    label: if route.creating_pr {
+      if needs_push {
+        "Pushing & creating…"
+      } else {
+        "Creating…"
+      }
+    } else {
+      "Create PR"
+    }
+    .into(),
+    creating: route.creating_pr,
+    disabled: route.creating_pr || !has_commits,
+    tooltip: if !has_commits {
+      NO_COMMITS
+    } else if needs_push {
+      "Push this branch and create a pull request on GitHub"
+    } else {
+      "Create a pull request on GitHub"
+    }
+    .into(),
+    menu_tooltip: if has_commits {
+      "More pull request options"
+    } else {
+      NO_COMMITS
+    }
+    .into(),
+  });
 
   let checks = loaded.checks.as_ref().and_then(|summary| {
     let (state, passed, total) = summary.rollup(&route.running_checks);

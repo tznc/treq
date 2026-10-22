@@ -62,6 +62,8 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn flags(&self) -> Flags;
 
   fn save_setting(&self, key: &str, value: &str);
+  /// Whether `path` is a Git or jj repository, without writing to it.
+  fn is_repo(&self, path: &str) -> bool;
   /// `init-repo`: sets the repository up, records it as the window's and
   /// starts polling its pull requests.
   fn prepare_repo(&self, main_repo: &str);
@@ -264,6 +266,10 @@ impl WindowHost for Backend {
     }
   }
 
+  fn is_repo(&self, path: &str) -> bool {
+    core::is_repository(path)
+  }
+
   fn prepare_repo(&self, main_repo: &str) {
     if let Err(err) = core::init(main_repo) {
       log::error!("Failed to init repo: {err}");
@@ -302,6 +308,18 @@ impl WindowHost for Backend {
   }
 
   fn open_in_new_window(&self, path: &str) {
+    if !core::is_repository(path)
+      && WindowHost::ask(
+        self,
+        "Not a Git Repository",
+        &format!("{path} is not a Git repository. Initialize one here?"),
+      )
+    {
+      if let Err(err) = core::init_git_repository(path) {
+        self.toast(ToastTone::Error, "Failed to open repository", &err);
+        return;
+      }
+    }
     if !core::init(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,

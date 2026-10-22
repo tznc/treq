@@ -55,6 +55,8 @@ struct FakeHost {
   last_remote: Option<SavedRepository>,
   /// What a probe finds: a repository, unless set.
   no_repo: bool,
+  /// A local folder that is neither a Git nor a jj repository.
+  not_a_repo: bool,
   /// The next workspaces read panics, as a backend read before the app's
   /// state is managed did.
   panic_once: std::sync::atomic::AtomicBool,
@@ -170,6 +172,10 @@ impl WindowHost for FakeHost {
       .lock()
       .unwrap()
       .insert(key.into(), value.into());
+  }
+
+  fn is_repo(&self, _: &str) -> bool {
+    !self.not_a_repo
   }
 
   fn prepare_repo(&self, repo: &str) {
@@ -485,6 +491,28 @@ fn shows_onboarding_without_a_repository(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_folder_that_is_not_a_repository_shows_onboarding_and_offers_to_open_it(
+  cx: &mut TestAppContext,
+) {
+  let host = Arc::new(FakeHost {
+    not_a_repo: true,
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), Some("/plain"));
+  assert!(matches!(
+    window.last().screen.unwrap().view,
+    View::Onboarding(_)
+  ));
+  // Opening it asks to initialize one, and remembers it once opened.
+  assert_eq!(host.count("open /plain"), 1);
+  assert!(host
+    .calls()
+    .contains(&"save last_opened_repo_path=".to_string()));
+  assert_eq!(host.count("prepare /plain"), 0, "nothing set up in it");
+  assert_eq!(host.count("workspaces /plain"), 0, "nothing read from it");
+}
+
+#[gpui::test]
 fn follows_the_theme_zoom_and_sidebar_width_settings(cx: &mut TestAppContext) {
   let host = repo_host();
   host.settings.lock().unwrap().extend([
@@ -751,6 +779,64 @@ fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn shortcuts_do_not_stack_a_dialog_over_another(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::NewWorkspace, cx));
+  assert!(window.last().screen.unwrap().modal.is_some());
+  for shortcut in [
+    Shortcut::AgentPrompt,
+    Shortcut::Palette,
+    Shortcut::FilePicker,
+  ] {
+    window
+      .controller
+      .update(cx, |c, cx| c.shortcut(shortcut, cx));
+  }
+  let shown = window.last();
+  assert!(shown.modal.is_none() && shown.overlay.is_none() && shown.file_picker.is_none());
+  assert!(
+    shown.screen.unwrap().modal.is_some(),
+    "still the only dialog"
+  );
+}
+
+#[gpui::test]
+fn the_agent_prompt_starts_on_the_open_workspace(cx: &mut TestAppContext) {
+  use crate::gpui_shell::screen::Modal;
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let initial = |window: &Window| match window.last().modal {
+    Some(Modal::AgentPrompt(route)) => route.initial_workspace_id,
+    other => panic!("not the prompt dialog: {other:?}"),
+  };
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::AgentPrompt, cx));
+  assert_eq!(initial(&window), None, "the repository home targets main");
+  window.press(cx, "agentPrompt.close");
+
+  select(&window, cx, 2, false);
+  cx.run_until_parked();
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::AgentPrompt, cx));
+  assert_eq!(initial(&window), Some(2), "Cmd+I");
+  window.press(cx, "agentPrompt.close");
+
+  window.controller.update(cx, |c, cx| {
+    c.overlay_action(
+      &ScreenAction::Press {
+        id: "palette.start-agent-with-prompt".into(),
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  assert_eq!(initial(&window), Some(2), "the palette's command");
+}
+
+#[gpui::test]
 fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));
@@ -888,6 +974,17 @@ fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
     .update(cx, |c, cx| c.menu(Menu::OpenSsh, cx));
   cx.run_until_parked();
   assert!(window.screen_snapshot().remote.setup.is_some());
+}
+
+#[gpui::test]
+fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
+  cx.run_until_parked();
+  assert!(window.screen_snapshot().remote.setup.is_none());
 }
 
 /// A window that registered `endpoint()` and opened `/srv/app` on it.
@@ -1317,6 +1414,27 @@ fn a_workspace_removed_elsewhere_leaves_the_multi_selection(cx: &mut TestAppCont
   cx.run_until_parked();
   assert!(!window.sidebar_ids().contains(&1));
   assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(1));
+}
+
+/// QA: with a workspace open, Ctrl+clicking a second row highlights both,
+/// so Bulk Archive counts both.
+#[gpui::test]
+fn ctrl_click_adds_to_the_open_workspace(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host, Some("/repo"));
+  select(&window, cx, 1, false);
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, None);
+  select(&window, cx, 2, true);
+  let sidebar = window.last().sidebar.unwrap();
+  let mut selected: Vec<_> = sidebar.repos[0]
+    .workspaces
+    .iter()
+    .filter(|r| r.selected)
+    .map(|r| r.id)
+    .collect();
+  selected.sort();
+  assert_eq!(selected, [1, 2]);
+  assert_eq!(sidebar.bulk_archive, Some(2));
 }
 
 /// Bulk Archive with one failure: only the archived row leaves.

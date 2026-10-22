@@ -108,7 +108,7 @@ impl ChangesView {
       remote: false,
     };
     let changes: Host = host.clone();
-    let mut this = Self::blank(parent, Options::default(), changes, react, popups, dark);
+    let mut this = Self::blank(parent, Options::default(), changes, react, popups, dark, cx);
     this.pr = Some(PrMode::new(host, target));
     this.watch_pr(cx);
     this

@@ -73,22 +73,22 @@ impl Model {
   /// A keyboard shortcut.
   pub fn shortcut(&mut self, shortcut: Shortcut, data: &Data) -> Vec<Effect> {
     let repo = self.has_repo();
+    // One dialog at a time: Escape only reaches the one on top.
+    let free = !self.dialogs.any_open();
     match shortcut {
-      Shortcut::NewWorkspace if repo => self.new_workspaces(None),
-      Shortcut::Stack if repo => return self.stack(data),
-      Shortcut::Palette => self.dialogs.palette = true,
-      Shortcut::AgentPrompt if repo => {
-        self
-          .dialogs
-          .agent_prompt
-          .get_or_insert_with(Default::default);
+      Shortcut::NewWorkspace if repo && free => self.new_workspaces(None),
+      Shortcut::Stack if repo && free => return self.stack(data),
+      Shortcut::Palette if free => self.dialogs.palette = true,
+      Shortcut::AgentPrompt if repo && free => self.open_agent_prompt(),
+      Shortcut::FilePicker if repo && free => self.dialogs.file_picker = true,
+      Shortcut::ToggleShortcuts if free || self.dialogs.shortcuts => {
+        self.dialogs.shortcuts = !self.dialogs.shortcuts;
       }
-      Shortcut::FilePicker if repo => self.dialogs.file_picker = true,
-      Shortcut::ToggleShortcuts => self.dialogs.shortcuts = !self.dialogs.shortcuts,
       Shortcut::Escape => {
         self.dialogs.palette = false;
         self.dialogs.file_picker = false;
         self.dialogs.shortcuts = false;
+        self.remote.setup = false;
       }
       Shortcut::ToggleTerminal if self.shows_terminal() => {
         self.terminal("toggleCollapse", json!({}));
@@ -103,6 +103,19 @@ impl Model {
       _ => {}
     }
     Vec::new()
+  }
+
+  /// The agent prompt dialog, on the open workspace (main from the
+  /// repository's home), unless it is open already.
+  fn open_agent_prompt(&mut self) {
+    let workspace_id = self.selected;
+    self
+      .dialogs
+      .agent_prompt
+      .get_or_insert_with(|| super::model::AgentPrompt {
+        workspace_id,
+        ..Default::default()
+      });
   }
 
   /// Whether the workspace view, and so the terminal pane, shows.
@@ -265,6 +278,12 @@ impl Model {
       "filePicker.close" => self.dialogs.file_picker = false,
       // Pages.
       "settings.close" => self.close_settings(),
+      "linear.openSettings" => {
+        self.open_settings();
+        if let Page::Settings { tab } = &mut self.page {
+          *tab = "integrations".into();
+        }
+      }
       "mergePreview.cancel" => self.page = Page::Workspace,
       "mergePreview.merged" => {
         self.page = Page::Workspace;
@@ -764,10 +783,7 @@ impl Model {
         Vec::new()
       }
       "start-agent-with-prompt" => {
-        self
-          .dialogs
-          .agent_prompt
-          .get_or_insert_with(Default::default);
+        self.open_agent_prompt();
         Vec::new()
       }
       "start-agent-terminal" => self.new_agent(self.selected, data),
@@ -955,7 +971,7 @@ mod tests {
   use std::collections::HashMap;
 
   use super::{
-    super::{data::RepoRead, tree::tests::workspace},
+    super::{data::RepoRead, model::Dialogs, tree::tests::workspace},
     *,
   };
   use crate::local_db::Session;
@@ -1001,7 +1017,11 @@ mod tests {
     assert_eq!(model.selected, Some(2));
     assert!(model.multi.is_empty());
     model.sidebar_action(&click(3, false, true), &data);
-    assert_eq!(model.multi.iter().copied().collect::<Vec<_>>(), [3]);
+    assert_eq!(
+      model.multi.iter().copied().collect::<Vec<_>>(),
+      [2, 3],
+      "the open workspace joins the selection"
+    );
     model.sidebar_action(&click(2, true, false), &data);
     assert_eq!(model.multi.len(), 2, "a range from the last click");
     model.sidebar_action(&SidebarAction::ClearSelection, &data);
@@ -1054,6 +1074,21 @@ mod tests {
     );
     model.screen_action(&press("settings.close"), &data);
     assert!(matches!(model.page, Page::Github(_)));
+  }
+
+  #[test]
+  fn linear_opens_the_integrations_settings() {
+    let (mut model, data) = (model(), data());
+    model.sidebar_action(&SidebarAction::OpenLinear, &data);
+    model.screen_action(&press("linear.openSettings"), &data);
+    assert_eq!(
+      model.page,
+      Page::Settings {
+        tab: "integrations".into()
+      }
+    );
+    model.screen_action(&press("settings.close"), &data);
+    assert!(matches!(model.page, Page::Linear));
   }
 
   #[test]
@@ -1208,6 +1243,7 @@ mod tests {
     model.shortcut(Shortcut::Stack, &data);
     assert!(model.dialogs.open_workspaces.is_some());
     assert!(model.dialogs.workspace_dialog.is_none());
+    model.dialogs.open_workspaces = None;
     model.shortcut(Shortcut::ToggleShortcuts, &data);
     assert!(model.dialogs.shortcuts);
     model.shortcut(Shortcut::Escape, &data);
@@ -1223,6 +1259,39 @@ mod tests {
     );
     model.shortcut(Shortcut::ToggleTerminal, &data);
     assert_eq!(model.commands.last().unwrap()["kind"], "toggleCollapse");
+  }
+
+  #[test]
+  fn shortcuts_do_not_open_a_dialog_over_another() {
+    let (mut model, data) = (model(), data());
+    model.selected = Some(2);
+    model.shortcut(Shortcut::Stack, &data);
+    let stack = model.dialogs.open_workspaces.clone();
+    assert!(stack.is_some());
+    for shortcut in [
+      Shortcut::AgentPrompt,
+      Shortcut::NewWorkspace,
+      Shortcut::Stack,
+      Shortcut::Palette,
+      Shortcut::FilePicker,
+      Shortcut::ToggleShortcuts,
+    ] {
+      model.shortcut(shortcut, &data);
+    }
+    assert_eq!(model.dialogs.open_workspaces, stack, "the same dialog");
+    assert_eq!(
+      model.dialogs,
+      Dialogs {
+        open_workspaces: stack,
+        workspace_dialog_key: model.dialogs.workspace_dialog_key,
+        ..Dialogs::default()
+      },
+      "nothing over it"
+    );
+    model.dialogs.shortcuts = true;
+    model.dialogs.open_workspaces = None;
+    model.shortcut(Shortcut::ToggleShortcuts, &data);
+    assert!(!model.dialogs.shortcuts, "closes its own");
   }
 
   #[test]

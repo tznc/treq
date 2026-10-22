@@ -525,6 +525,7 @@ impl MergeQueueView {
         view.field("mergeQueue.showMerged", json!(!on), cx);
       }));
     let refresh = Button::new("merge-queue-refresh", p)
+      .aria_label("Refresh")
       .variant(Variant::Ghost)
       .size(Size::Icon)
       .w(zpx(28.))
@@ -653,7 +654,7 @@ impl MergeQueueView {
               .hover_bg(tw::color(tw::GREEN_700))
               .text_color(gpui::white())
               .child(ui::icon(theme::ICON_ROCKET, 16., gpui::white()))
-              .child("Upgrade to Pro")
+              .label("Upgrade to Pro")
               .on_click(move |_, _, _| host.open_url(&format!("{}/dashboard", native::web_url()))),
           ),
       )
@@ -1072,6 +1073,11 @@ impl MergeQueueView {
     let copied = self.copied;
     let copy = tip.as_ref().map(|short| {
       let button = Button::new("merge-queue-copy-sha", p)
+        .aria_label(if copied {
+          "Commit SHA copied"
+        } else {
+          "Copy commit SHA"
+        })
         .variant(Variant::Ghost)
         .size(Size::IconXs)
         .text_color(p.muted_foreground)

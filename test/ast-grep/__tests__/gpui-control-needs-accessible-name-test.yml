@@ -1,0 +1,55 @@
+id: gpui-control-needs-accessible-name
+valid:
+  - |
+    fn labelled(p: &Palette) -> Button {
+      Button::new("save", p).icon(ICON_SAVE, 16.).label("Save")
+    }
+  - |
+    fn icon_only(p: &Palette) -> Button {
+      Button::new("close", p).variant(Variant::Ghost).icon(ICON_X, 16.).aria_label("Close")
+    }
+  - |
+    fn named_through_a_wrapper(p: &Palette) -> Button {
+      ui::text(Button::new("recheck", p).size(Size::Sm), TextSize::Xs).label("Check again")
+    }
+  - |
+    fn named_in_a_closure(p: &Palette, saving: bool) -> Button {
+      Button::new("apply", p).when(saving, |b| b.label("Saving...")).when(!saving, |b| b.label("Apply"))
+    }
+  - |
+    fn role_named_first(p: &Palette) -> Stateful<Div> {
+      div().id("agent").aria_label("Agent").role(Role::ComboBox).test_support()
+    }
+  - |
+    fn role_named_after(p: &Palette) -> Stateful<Div> {
+      div().id("agent").role(Role::ComboBox).aria_label("Agent")
+    }
+  - |
+    fn not_a_control() -> Stateful<Div> {
+      div().id("dialog").role(Role::Dialog)
+    }
+  - |
+    mod tests {
+      fn builds() { let b = Button::new("x", &p).disabled(true); }
+    }
+invalid:
+  - |
+    fn icon_only(p: &Palette) -> Button {
+      Button::new("close", p).variant(Variant::Ghost).icon(ICON_X, 16.)
+    }
+  - |
+    fn text_child(p: &Palette) -> Button {
+      Button::new("run", p).child("Run")
+    }
+  - |
+    fn named_parent_only(p: &Palette) -> Div {
+      div().child(Button::new("close", p).icon(ICON_X, 16.)).aria_label("Toolbar")
+    }
+  - |
+    fn unnamed_role(p: &Palette) -> Stateful<Div> {
+      div().id("agent").role(Role::ComboBox).child("Claude")
+    }
+  - |
+    fn named_child_only() -> Stateful<Div> {
+      div().id("row").role(Role::Button).child(div().aria_label("Inner"))
+    }

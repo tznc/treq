@@ -409,8 +409,11 @@ impl Render for WorkspaceDeletion {
           .h(viewport.height)
           .bg(rgba(0x00000099))
           .flex()
+          .flex_col()
           .items_center()
-          .justify_center()
+          // Pinned from the top, so the dialog stays put as the filter
+          // shortens its list.
+          .pt(viewport.height * 0.2)
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(|view, _, _, cx| view.dismiss(cx)),
