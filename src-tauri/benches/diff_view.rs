@@ -110,8 +110,9 @@ fn bench_lines(c: &mut Criterion) {
 }
 
 fn bench_threads(c: &mut Criterion) {
-  let working: HashMap<String, Vec<JjDiffHunk>> =
-    (0..FILES).map(|f| (path(f), vec![hunk(f)])).collect();
+  let hunks: Vec<Vec<JjDiffHunk>> = (0..FILES).map(|f| vec![hunk(f)]).collect();
+  let working: HashMap<String, &[JjDiffHunk]> =
+    (0..FILES).map(|f| (path(f), &hunks[f][..])).collect();
   let committed = HashMap::new();
   let threads = threads();
   c.bench_function("diff_view/place_threads_30", |b| {

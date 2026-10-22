@@ -113,25 +113,28 @@ impl ChangesView {
 
   /// Anchors the threads and comments on the diff as it is now.
   pub(super) fn place_threads(&mut self) {
-    // Runs every frame: only the files a thread is on are copied.
+    // Runs every frame: only the files a thread is on are looked at.
     let paths: HashSet<&str> = self
       .threads
       .github
       .iter()
       .map(|t| t.path.as_str())
       .collect();
-    let on = |files: &HashMap<String, FileHunks>| -> HashMap<String, Vec<JjDiffHunk>> {
+    fn on<'a>(
+      files: &'a HashMap<String, FileHunks>,
+      paths: &HashSet<&str>,
+    ) -> HashMap<String, &'a [JjDiffHunk]> {
       files
         .iter()
         .filter(|(p, _)| paths.contains(p.as_str()))
-        .map(|(p, d)| (p.clone(), d.hunks.clone()))
+        .map(|(p, d)| (p.clone(), &d.hunks[..]))
         .collect()
-    };
-    let working = on(&self.hunks);
+    }
+    let working = on(&self.hunks, &paths);
     let committed = self
       .snapshot
       .as_ref()
-      .map(|s| on(&s.committed_hunks))
+      .map(|s| on(&s.committed_hunks, &paths))
       .unwrap_or_default();
     self.threads.placed = place_threads(&self.threads.github, &[&working, &committed]);
     self.threads.agent_lines = agent_by_line(&self.threads.agent);

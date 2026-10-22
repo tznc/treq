@@ -3,7 +3,10 @@
 //! and their sections, which are picked for the next commit, each file's
 //! diff body, context expansion and the conflict regions.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::LazyLock,
+};
 
 use regex::Regex;
 
@@ -862,10 +865,14 @@ pub fn total_lines<'a>(files: impl Iterator<Item = &'a FileHunks>) -> usize {
     .sum()
 }
 
+static NEW_RANGE: LazyLock<Regex> = LazyLock::new(|| {
+  Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@").expect("hunk header regex")
+});
+
 /// The hunk's new-side start and length.
 pub fn new_range(header: &str) -> (usize, usize) {
-  let re = Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@").expect("hunk header regex");
-  re.captures(header)
+  NEW_RANGE
+    .captures(header)
     .map(|c| {
       (
         c[1].parse().unwrap_or(1),
