@@ -74,6 +74,13 @@ impl WindowController {
     cx: &mut Context<Self>,
   ) -> Self {
     let repo = repo.filter(|r| !r.is_empty());
+    // A saved folder that is no longer a repository opens onboarding, as
+    // the folder picker refuses one, before a read writes `.treq/` into it.
+    let refused = repo.clone().filter(|r| !host.is_repo(r));
+    if refused.is_some() {
+      host.save_setting("last_opened_repo_path", "");
+    }
+    let repo = repo.filter(|_| refused.is_none());
     let pollers = vec![
       Self::poll(POLL, Read::POLL, cx),
       Self::poll(SESSIONS_POLL, Read::SESSIONS, cx),
@@ -111,6 +118,13 @@ impl WindowController {
         cx,
       ),
       None => effects.push(Effect::from(RemoteEffect::RestoreLast)),
+    }
+    if let Some(path) = refused {
+      effects.push(toast(
+        ToastTone::Error,
+        "Not a Git Repository",
+        &format!("{path} does not contain a git repository."),
+      ));
     }
     this.run(effects, cx);
     this

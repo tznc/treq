@@ -165,6 +165,11 @@ impl From<InitError> for String {
   }
 }
 
+/// Whether `path` is a Git or jj repository [`init`] accepts.
+pub fn is_repository(path: &str) -> bool {
+  Path::new(path).join(".git").exists() || jj::is_jj_workspace(path)
+}
+
 /// Initializes a repository for use with Treq.
 ///
 /// Sets up both the local database (per-repo) and ensures JJ is initialized.
@@ -178,7 +183,7 @@ impl From<InitError> for String {
 /// Fails with [`InitError::NotGitRepository`], before writing anything, when the
 /// folder is not a Git (or jj) repository.
 pub fn init(repo_path: &str) -> Result<bool, InitError> {
-  if !Path::new(repo_path).join(".git").exists() && !jj::is_jj_workspace(repo_path) {
+  if !is_repository(repo_path) {
     return Err(InitError::NotGitRepository(repo_path.to_string()));
   }
 

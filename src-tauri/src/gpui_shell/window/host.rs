@@ -62,6 +62,8 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn flags(&self) -> Flags;
 
   fn save_setting(&self, key: &str, value: &str);
+  /// Whether `path` is a Git or jj repository, without writing to it.
+  fn is_repo(&self, path: &str) -> bool;
   /// `init-repo`: sets the repository up, records it as the window's and
   /// starts polling its pull requests.
   fn prepare_repo(&self, main_repo: &str);
@@ -262,6 +264,10 @@ impl WindowHost for Backend {
     if let Err(err) = self.with_db(|db| db.set_setting(key, value)) {
       log::warn!("failed to save setting {key}: {err}");
     }
+  }
+
+  fn is_repo(&self, path: &str) -> bool {
+    core::is_repository(path)
   }
 
   fn prepare_repo(&self, main_repo: &str) {
