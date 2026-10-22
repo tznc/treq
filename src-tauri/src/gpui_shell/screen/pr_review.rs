@@ -38,7 +38,7 @@ use crate::{
   github::GhPullRequest,
   gpui_shell::{
     native::{NativeEvent, ToastTone},
-    popup::{PopupSink, Side, TooltipContent},
+    popup::{self, PopupSink, Side, TooltipContent},
     theme::{self, tw, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
@@ -455,7 +455,20 @@ impl PrReviewView {
         .w(zpx(32.))
         .h(zpx(32.))
         .icon(theme::ICON_EXTERNAL_LINK, 16.)
-        .on_click(move |_, _, _| host.open_url(&url))
+        .on_click({
+          let (host, url) = (host.clone(), url.clone());
+          move |_, _, _| host.open_url(&url)
+        })
+        .on_right_click({
+          let (popups, dark) = (self.popups.clone(), self.dark);
+          move |e, _, cx| {
+            let host = host.clone();
+            let menu = popup::copy_link_menu(url.clone(), e.position, dark, move |e| {
+              super::workspace_data::WorkspaceHost::notify(host.as_ref(), e)
+            });
+            popups(menu, cx);
+          }
+        })
     });
     let anchor = self.anchor.clone();
     let mut finish = String::from("Finish review");

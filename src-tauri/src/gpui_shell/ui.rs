@@ -6,7 +6,7 @@ use std::{rc::Rc, time::Duration};
 use tauri_plugin_gpui::gpui::{
   self, accesskit, div, prelude::*, svg, Animation, AnimationExt as _, AnyElement, App, Bounds,
   ClickEvent, Div, ElementId, GlobalElementId, Hsla, InspectorElementId, Interactivity, LayoutId,
-  Pixels, SharedString, StyleRefinement, Transformation, Window,
+  MouseButton, MouseDownEvent, Pixels, SharedString, StyleRefinement, Transformation, Window,
 };
 
 use gpui_kit::{
@@ -51,6 +51,9 @@ pub fn apply_zoom(window: &mut Window, cx: &App) {
 
 /// A click handler that GPUI elements can share.
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// A right-click handler, given where the pointer went down.
+pub type OnRightClick = Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>;
 
 /// The app's text scale (Tailwind's names, as the React UI overrode them):
 /// size and line height in pixels.
@@ -157,6 +160,7 @@ pub struct Button {
   disabled: bool,
   children: Vec<ButtonChild>,
   on_click: Option<OnClick>,
+  on_right_click: Option<OnRightClick>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
@@ -173,6 +177,7 @@ impl Button {
       disabled: false,
       children: Vec::new(),
       on_click: None,
+      on_right_click: None,
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
@@ -222,6 +227,16 @@ impl Button {
 
   pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
     self.on_click = Some(Rc::new(f));
+    self
+  }
+
+  /// Runs `f` on a right-click, such as to open a context menu. It runs
+  /// while disabled too, as a menu that only copies does no harm.
+  pub fn on_right_click(
+    mut self,
+    f: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+  ) -> Self {
+    self.on_right_click = Some(Rc::new(f));
     self
   }
 
@@ -341,6 +356,9 @@ impl RenderOnce for Button {
     })
     .when_some(self.on_click.filter(|_| !disabled), |b, f| {
       b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
+    })
+    .when_some(self.on_right_click, |b, f| {
+      b.on_mouse_down(MouseButton::Right, move |e, w, cx| f(e, w, cx))
     })
     .children(self.children.into_iter().map(|child| match child {
       ButtonChild::Element(el) => el,

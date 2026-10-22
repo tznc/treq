@@ -1490,6 +1490,21 @@ impl Harness {
     self.cx.simulate_click(bounds.center(), Modifiers::none());
   }
 
+  fn right_click(&mut self, selector: &'static str) {
+    self.cx.run_until_parked();
+    let at = self
+      .cx
+      .debug_bounds(selector)
+      .unwrap_or_else(|| panic!("{selector} is not drawn"))
+      .center();
+    self
+      .cx
+      .simulate_mouse_down(at, gpui::MouseButton::Right, Modifiers::none());
+    self
+      .cx
+      .simulate_mouse_up(at, gpui::MouseButton::Right, Modifiers::none());
+  }
+
   fn sent(&self) -> Vec<ScreenAction> {
     self.sent.borrow().clone()
   }
@@ -2257,6 +2272,24 @@ fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
       "open https://linear.app/t/ENG-12",
     ]
   );
+}
+
+#[gpui::test]
+fn workspace_header_github_buttons_copy_their_link(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  let pr = "https://github.com/tznc/treq/pull/42";
+  for (selector, url) in [
+    ("workspace-view-pr", pr.to_string()),
+    ("workspace-view-pr-web", pr.to_string()),
+    ("workspace-checks", format!("{pr}/checks")),
+  ] {
+    h.right_click(selector);
+    h.pick("Copy link");
+    let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
+    assert_eq!(copied.as_deref(), Some(url.as_str()), "{selector}");
+  }
+  assert!(h.sent().is_empty());
+  assert_eq!(host.writes(), vec!["notify toast Copied"; 3]);
 }
 
 #[gpui::test]

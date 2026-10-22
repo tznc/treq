@@ -466,6 +466,7 @@ impl GithubView {
         let destructive = p.destructive;
         let (number, url, title) = (issue.number, issue.url.clone(), issue.title.clone());
         let open = url.clone();
+        let copy_link = self.copy_link(url.clone());
         let buttons = div()
           .flex()
           .flex_none()
@@ -518,11 +519,14 @@ impl GithubView {
                 )
               })),
           )
-          .child(parts::open_in_web(
-            "github-open-web",
-            p,
-            Box::new(cx.listener(move |view, _, _, _| view.open_url(&open))),
-          ));
+          .child(
+            parts::open_in_web(
+              "github-open-web",
+              p,
+              Box::new(cx.listener(move |view, _, _, _| view.open_url(&open))),
+            )
+            .on_right_click(copy_link),
+          );
         div()
           .child(
             div()
@@ -816,6 +820,7 @@ impl GithubView {
     let opening = self.detail.busy.contains(&Busy::Workspace);
     let number = pr.number;
     let open = pr.url.clone();
+    let copy_link = self.copy_link(pr.url.clone());
     let workspace_icon = if opening {
       ui::spinner("github-workspace-spin", 16., p.foreground).into_any_element()
     } else if existing.is_some() {
@@ -865,11 +870,14 @@ impl GithubView {
           })
           .on_click(cx.listener(|view, _, _, cx| view.open_workspace(cx))),
       )
-      .child(parts::open_in_web(
-        "github-open-web",
-        p,
-        Box::new(cx.listener(move |view, _, _, _| view.open_url(&open))),
-      ));
+      .child(
+        parts::open_in_web(
+          "github-open-web",
+          p,
+          Box::new(cx.listener(move |view, _, _, _| view.open_url(&open))),
+        )
+        .on_right_click(copy_link),
+      );
     let checks = self.detail.checks.clone().filter(|c| c.total > 0);
     let head = div()
       .child(
@@ -930,16 +938,22 @@ impl GithubView {
                 .enumerate()
                 .map(|(i, check)| {
                   let link = check.link.clone();
+                  let copy_link = self.copy_link(link.clone());
                   div()
                     .when(i > 0, |d| d.border_t_1().border_color(p.border))
-                    .child(parts::check_row(
-                      format!("github-check-{i}"),
-                      check,
-                      p,
-                      Some(Box::new(
-                        cx.listener(move |view, _, _, _| view.open_url(&link)),
-                      )),
-                    ))
+                    .child(
+                      parts::check_row(
+                        format!("github-check-{i}"),
+                        check,
+                        p,
+                        Some(Box::new(
+                          cx.listener(move |view, _, _, _| view.open_url(&link)),
+                        )),
+                      )
+                      .when(!check.link.is_empty(), |row| {
+                        row.on_mouse_down(MouseButton::Right, copy_link)
+                      }),
+                    )
                 }),
             ),
         )
@@ -1121,6 +1135,7 @@ impl GithubView {
                 .children(data::by_severity(&ci.checks).into_iter().enumerate().map(
                   |(i, check)| {
                     let link = check.link.clone();
+                    let copy_link = self.copy_link(link.clone());
                     parts::check_row(
                       format!("github-ci-check-{i}"),
                       check,
@@ -1129,6 +1144,9 @@ impl GithubView {
                         cx.listener(move |view, _, _, _| view.open_url(&link)),
                       )),
                     )
+                    .when(!check.link.is_empty(), |row| {
+                      row.on_mouse_down(MouseButton::Right, copy_link)
+                    })
                   },
                 )),
             ),

@@ -18,14 +18,15 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Wry};
 use tauri_plugin_gpui::{
   gpui::{
-    self, div, prelude::*, px, svg, App, Bounds, Context, Hsla, Pixels, Point, SharedString,
-    WeakEntity, Window,
+    self, div, prelude::*, px, svg, App, Bounds, ClipboardItem, Context, Hsla, Pixels, Point,
+    SharedString, WeakEntity, Window,
   },
   GpuiOptions, GpuiWindowExt,
 };
 
 use super::{
   defer_main,
+  native::{NativeEvent, ToastTone},
   sidebar::PrState,
   theme::{self, Palette},
 };
@@ -284,6 +285,31 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
       .collect()
   }
   build(items, &mut next)
+}
+
+/// The menu a right-click on a GitHub link opens at `at`: "Copy link",
+/// which copies `url` and toasts through `notify`.
+pub fn copy_link_menu(
+  url: String,
+  at: Point<Pixels>,
+  dark: bool,
+  notify: impl Fn(NativeEvent) + 'static,
+) -> PopupRequest {
+  let item = NativeMenuItem::item("Copy link", move |cx| {
+    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+    notify(NativeEvent::Toast {
+      title: "Copied".into(),
+      description: "Link copied to clipboard".into(),
+      tone: ToastTone::Success,
+      action: None,
+    });
+  })
+  .icon(MenuIcon::Link);
+  PopupRequest::ShowMenu {
+    entries: native_entries(vec![item]),
+    at,
+    dark,
+  }
 }
 
 /// Picks native menu item `id`, as a click on it would.

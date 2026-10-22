@@ -46,7 +46,7 @@ use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
   gpui_shell::{
     native::{self, NativeEvent, ToastAction, ToastTone},
-    popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
+    popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, tw, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
@@ -1281,6 +1281,14 @@ impl ChangesView {
   fn popup(&self, request: PopupRequest, cx: &mut App) {
     let popups = self.popups.clone();
     cx.defer(move |cx| popups(request, cx));
+  }
+
+  /// Opens the "Copy link" menu for `url` at `at`, for a right-click on
+  /// what opens it.
+  fn copy_link(&self, url: String, at: gpui::Point<gpui::Pixels>, cx: &mut App) {
+    let host = self.host.clone();
+    let menu = popup::copy_link_menu(url, at, self.dark, move |e| tell(host.as_ref(), e));
+    self.popup(menu, cx);
   }
 
   /// Records its parent's bounds as `key`'s, for a dropdown below it.

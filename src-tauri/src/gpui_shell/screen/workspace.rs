@@ -17,7 +17,7 @@ use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
-  FontWeight, Hsla, Pixels, SharedString, Stateful, Task, Window,
+  FontWeight, Hsla, MouseDownEvent, Pixels, SharedString, Stateful, Task, Window,
 };
 
 use super::launch_data::LaunchRequest;
@@ -40,7 +40,7 @@ use super::{
 use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
   popover::{self, Popover, PopoverHost},
-  popup::{PopupRequest, PopupSink, Side, TooltipContent},
+  popup::{self, PopupRequest, PopupSink, Side, TooltipContent},
   theme::{self, Palette},
   ui::{self, Button, Size, TextSize, Variant},
 };
@@ -681,6 +681,27 @@ impl WorkspaceView {
     move |_, _, cx| sink(ScreenAction::Press { id: id.to_string() }, cx)
   }
 
+  /// The open PR's GitHub URL.
+  fn pr_url(&self) -> Option<String> {
+    self.pr.pr.as_ref()?.as_ref().map(|pr| pr.url.clone())
+  }
+
+  /// A right-click on a button that opens `url`: its "Copy link" menu.
+  fn copy_link(
+    &self,
+    url: Option<String>,
+  ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+    let (popups, host, dark) = (self.popups.clone(), self.host.clone(), self.dark);
+    move |e, _, cx| {
+      let Some(url) = url.clone() else {
+        return;
+      };
+      let host = host.clone();
+      let menu = popup::copy_link_menu(url, e.position, dark, move |e| host.notify(e));
+      popups(menu, cx);
+    }
+  }
+
   /// Records the bounds of its parent as `key`'s, for a dropdown to open
   /// below.
   fn record_bounds(&self, key: &'static str) -> impl IntoElement {
@@ -1166,14 +1187,16 @@ impl WorkspaceView {
       .child(ui::icon(icon, 16., text))
       .child(label)
       .aria_label(view_pr_name(pr))
-      .on_click(self.press("workspace.viewPr"));
+      .on_click(self.press("workspace.viewPr"))
+      .on_right_click(self.copy_link(self.pr_url()));
     let web = styled(Button::new("workspace-view-pr-web", p))
       .rounded_l_none()
       .border_l_0()
       .px_2()
       .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., text))
       .aria_label("Open PR on web")
-      .on_click(self.press("workspace.viewPrWeb"));
+      .on_click(self.press("workspace.viewPrWeb"))
+      .on_right_click(self.copy_link(self.pr_url()));
     div()
       .flex()
       .flex_none()
@@ -1330,6 +1353,7 @@ impl WorkspaceView {
       )
       .aria_label(checks.name.clone())
       .on_click(self.press("workspace.checks"))
+      .on_right_click(self.copy_link(self.pr_url().map(|url| format!("{url}/checks"))))
   }
 
   fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
