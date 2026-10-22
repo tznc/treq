@@ -628,6 +628,30 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   window::menu_event(app, label, event, payload)
 }
 
+/// Types `keystroke` (GPUI's notation, e.g. "cmd-v") into the focused GPUI
+/// window, as if pressed there. On macOS a menu item's key equivalent takes
+/// the key press before the window sees it, so the Edit menu hands its keys
+/// back this way: text fields and the terminal handle them as typed.
+pub fn type_keystroke(app: &AppHandle, keystroke: &'static str) {
+  defer_main(app, move |_| {
+    let _ = tauri_plugin_gpui::with_app(move |cx| {
+      let Ok(keystroke) = gpui::Keystroke::parse(keystroke) else {
+        return;
+      };
+      // Opening the menu bar with the mouse can leave no window active.
+      let Some(window) = cx
+        .active_window()
+        .or_else(|| cx.windows().into_iter().next())
+      else {
+        return;
+      };
+      let _ = window.update(cx, |_, window, cx| {
+        window.dispatch_keystroke(keystroke, cx);
+      });
+    });
+  });
+}
+
 /// Window `label` gained focus.
 pub fn window_focused(app: &AppHandle, label: &str) {
   window::window_focused(app, label);

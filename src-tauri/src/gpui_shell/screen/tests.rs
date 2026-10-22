@@ -7058,5 +7058,6 @@ mod review_comments;
 mod stack_panel;
 mod tab_badges;
 mod testing_library;
+mod text_editing;
 mod workspace_actions;
 mod workspace_dialogs;
