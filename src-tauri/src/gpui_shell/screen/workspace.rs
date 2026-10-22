@@ -928,8 +928,16 @@ impl WorkspaceView {
       }
     }
 
-    // Not shrunk: like CSS's `min-width: auto`, the row wraps it instead.
-    let mut right = div().flex().flex_none().items_center().gap_2().ml_auto();
+    // The row wraps it whole first; alone on its row and still too wide (at
+    // a large zoom), its buttons wrap too, right-aligned.
+    let mut right = div()
+      .flex()
+      .flex_wrap()
+      .justify_end()
+      .items_center()
+      .gap_2()
+      .min_w_0()
+      .ml_auto();
     if let Some(push) = &h.push {
       let blue = tw::color(tw::BLUE_600);
       let hover = tw::color(tw::BLUE_700);
@@ -1346,6 +1354,9 @@ impl WorkspaceView {
     }
     let list = div()
       .flex()
+      // At a large zoom the tabs wrap inside their pill rather than run past
+      // the window's edge.
+      .flex_wrap()
       .gap_1()
       .p_1()
       .rounded(zpx(8.))
@@ -1424,7 +1435,7 @@ impl WorkspaceView {
       .border_b_1()
       .border_color(p.border)
       .debug_selector(|| "workspace-tab-row".into())
-      .child(div().flex().flex_none().items_center().gap_2().child(list))
+      .child(div().flex().min_w_0().items_center().gap_2().child(list))
       .child(div().flex_1().min_w_0())
       .child(status)
   }
