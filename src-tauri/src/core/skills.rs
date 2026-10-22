@@ -462,7 +462,8 @@ fn install_generated_skill_copy(
   }
   write_skill_pack(&skill_dir, files)?;
   fs::write(&marker, "treq-library\n").map_err(|e| format!("Failed to write skill marker: {e}"))?;
-  Ok(())
+  super::ignore_generated_dir(&skill_dir)
+    .map_err(|e| format!("Failed to ignore generated skill: {e}"))
 }
 
 /// Copy every installed library skill into a workspace's agent skill folders.
@@ -683,6 +684,10 @@ mod tests {
     assert!(workspace
       .path()
       .join(".agents/skills/demo/.treq-generated")
+      .exists());
+    assert!(workspace
+      .path()
+      .join(".claude/skills/demo/.gitignore")
       .exists());
   }
 

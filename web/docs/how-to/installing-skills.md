@@ -34,6 +34,6 @@ Creating a workspace copies every installed library skill into:
 - `.agents/skills/<skill-name>/` (Codex and Cursor Agent)
 - `.claude/skills/<skill-name>/` (Claude Code)
 
-Treq marks those copies with `.treq-generated`. It does not overwrite a folder that already exists without that marker. You can opt in under repository settings to add the generated `.agents/skills/treq*/` and `.claude/skills/treq*/` paths to `.gitignore`; user-owned skills remain available to commit.
+Treq marks those copies with `.treq-generated`. It does not overwrite a folder that already exists without that marker. Each generated copy also gets its own `.gitignore`, so Git ignores it without changes to your repository's `.gitignore`; user-owned skills remain available to commit.
 
 Application-level skills copy into workspaces for every repository. Repository-level skills copy only for that repository.

@@ -148,6 +148,9 @@ fn install_project_treq_skill(
     warnings.push(format!("Failed to write Treq skill marker: {e}"));
     return None;
   }
+  if let Err(e) = super::ignore_generated_dir(&skill_dir) {
+    warnings.push(format!("Failed to ignore Treq skill at {relative}: {e}"));
+  }
   Some(path_to_string(&skill_dir))
 }
 
@@ -354,6 +357,8 @@ mod tests {
     assert!(Path::new(&claude_dir).join("SKILL.md").exists());
     assert!(Path::new(&agents_dir).join(".treq-generated").exists());
     assert!(Path::new(&claude_dir).join(".treq-generated").exists());
+    assert!(Path::new(&agents_dir).join(".gitignore").exists());
+    assert!(Path::new(&claude_dir).join(".gitignore").exists());
 
     cleanup_agent_cli_files(&[
       files.prompt_path,

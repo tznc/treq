@@ -355,13 +355,12 @@ pub fn preview_flags(values: &Values) -> Vec<(PreviewFeature, bool)> {
 }
 
 /// The repository settings behind each field, in the order React saves them.
-const REPO_KEYS: [&str; 9] = [
+const REPO_KEYS: [&str; 8] = [
   "branch_name_pattern",
   "included_copy_files",
   "default_model",
   "default_agent",
   "auto_push",
-  "ignore_generated_treq_paths",
   "review_prompt",
   "review_agent",
   "auto_review_trigger",
@@ -396,7 +395,6 @@ impl RepositoryFields {
       default_model: get("default_model").unwrap_or_default(),
       default_agent: get("default_agent").unwrap_or_default(),
       auto_push: get("auto_push").as_deref() == Some("true"),
-      ignore_generated_agent_files: get("ignore_generated_treq_paths").as_deref() == Some("true"),
       review_prompt: get("review_prompt").unwrap_or_default(),
       review_agent: get("review_agent").unwrap_or_default(),
       auto_review_trigger: auto_review_trigger(get("auto_review_trigger").as_deref()),
@@ -410,7 +408,6 @@ impl RepositoryFields {
       self.default_model.clone(),
       self.default_agent.clone(),
       self.auto_push.to_string(),
-      self.ignore_generated_agent_files.to_string(),
       self.review_prompt.clone(),
       self.review_agent.clone(),
       self.auto_review_trigger.clone(),
@@ -432,7 +429,6 @@ impl RepositoryFields {
       "defaultModel" => self.default_model = text(),
       "defaultAgent" => self.default_agent = text(),
       "autoPush" => self.auto_push = flag(),
-      "ignoreGeneratedAgentFiles" => self.ignore_generated_agent_files = flag(),
       "reviewPrompt" => self.review_prompt = text(),
       "reviewAgent" => self.review_agent = text(),
       "autoReviewTrigger" => self.auto_review_trigger = text(),
@@ -492,9 +488,7 @@ pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
   )
 }
 
-/// `set_repo_setting` for each value. Opting in to
-/// `ignore_generated_treq_paths` also adds the optional `.gitignore`
-/// entries, as the command does.
+/// `set_repo_setting` for each value.
 pub fn save_repo_settings(
   db: &crate::db::Database,
   repo_path: &str,
@@ -503,68 +497,6 @@ pub fn save_repo_settings(
   for (key, value) in values {
     db.set_repo_setting(repo_path, key, value)
       .map_err(|e| e.to_string())?;
-    if key == "ignore_generated_treq_paths" && value == "true" {
-      crate::jj::ensure_optional_gitignore_entries(repo_path).map_err(|e| e.to_string())?;
-    }
   }
   Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-  use tempfile::TempDir;
-
-  use super::save_repo_settings;
-
-  fn setup() -> (TempDir, crate::db::Database) {
-    let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join(".gitignore"), ".treq/\n").unwrap();
-    let db = crate::db::Database::new(dir.path().join("test.db")).unwrap();
-    db.init().unwrap();
-    (dir, db)
-  }
-
-  fn set(key: &str, value: &str) -> Vec<(String, String)> {
-    vec![(key.into(), value.into())]
-  }
-
-  #[test]
-  fn saves_repo_settings_without_touching_the_gitignore() {
-    let (dir, db) = setup();
-    let repo = dir.path().to_str().unwrap();
-
-    save_repo_settings(&db, repo, &set("default_agent", "codex")).unwrap();
-    save_repo_settings(&db, repo, &set("ignore_generated_treq_paths", "false")).unwrap();
-
-    assert_eq!(
-      db.get_repo_setting(repo, "default_agent")
-        .unwrap()
-        .as_deref(),
-      Some("codex")
-    );
-    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(gitignore, ".treq/\n");
-  }
-
-  #[test]
-  fn opting_in_adds_the_optional_gitignore_entries() {
-    let (dir, db) = setup();
-    let repo = dir.path().to_str().unwrap();
-
-    save_repo_settings(&db, repo, &set("ignore_generated_treq_paths", "true")).unwrap();
-
-    assert_eq!(
-      db.get_repo_setting(repo, "ignore_generated_treq_paths")
-        .unwrap()
-        .as_deref(),
-      Some("true")
-    );
-    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    for entry in [".jj*/", ".agents/skills/treq*/", ".claude/skills/treq*/"] {
-      assert!(
-        gitignore.lines().any(|l| l == entry),
-        "{entry} in {gitignore}"
-      );
-    }
-  }
 }

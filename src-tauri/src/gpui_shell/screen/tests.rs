@@ -1800,24 +1800,22 @@ fn drawn_settings(h: &mut Harness) -> settings::Settings {
 
 #[gpui::test]
 fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
-  let host = Arc::new(FakeHost::with_settings(&[
-    ("/repo:ignore_generated_treq_paths", "true"),
-    ("/repo:auto_review_trigger", "on-push"),
-  ]));
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "/repo:auto_review_trigger",
+    "on-push",
+  )]));
   let mut h = Harness::with_host(cx, settings(), host.clone());
   let screen = drawn_settings(&mut h);
   let repo = screen.repository.expect("repository tab");
   assert!(!repo.loading);
   assert_eq!(repo.current_branch.as_deref(), Some("main"));
   assert_eq!(repo.fields.branch_name_pattern, "treq/{name}");
-  assert!(repo.fields.ignore_generated_agent_files);
   // The trigger's old name reads as the new one.
   assert_eq!(repo.fields.auto_review_trigger, "on-pull");
   assert_eq!(repo.model_options[0].label, "Use Application Default");
 
   h.click("settings-tab-application");
   h.click("settings-auto-push");
-  h.click("settings-ignore-generated");
   h.click("settings-save");
   h.click("settings-close");
   // React still owns the tab and closing the page.
@@ -1832,7 +1830,7 @@ fn settings_saves_the_repository_itself(cx: &mut TestAppContext) {
   assert_eq!(
     host.writes(),
     [
-      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true ignore_generated_treq_paths=false review_prompt= review_agent= auto_review_trigger=on-pull",
+      "set repo /repo branch_name_pattern=treq/{name} included_copy_files= default_model= default_agent= auto_push=true review_prompt= review_agent= auto_review_trigger=on-pull",
       "notify repoSettingsChanged",
       "notify toast Settings saved",
     ]

@@ -102,8 +102,7 @@ use jj_lib::workspace::{default_working_copy_factories, default_working_copy_fac
 use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1257,64 +1256,13 @@ username = "{}"
   UserSettings::from_config(config).map_err(|e| JjError::ConfigError(e.to_string()))
 }
 
-/// Ensure Treq's required repository metadata is in `.gitignore`.
-/// This is idempotent - entries won't be duplicated.
-pub fn ensure_gitignore_entries(repo_path: &str) -> Result<(), JjError> {
-  append_gitignore_entries(
-    &Path::new(repo_path).join(".gitignore"),
-    &[".jj/", ".treq/"],
-  )
-}
-
-/// Add broader generated paths after an explicit repository-level opt-in.
-pub fn ensure_optional_gitignore_entries(repo_path: &str) -> Result<(), JjError> {
-  append_gitignore_entries(
-    &Path::new(repo_path).join(".gitignore"),
-    &[".jj*/", ".agents/skills/treq*/", ".claude/skills/treq*/"],
-  )
-}
-
-fn append_gitignore_entries(gitignore_path: &Path, entries_to_add: &[&str]) -> Result<(), JjError> {
-  // Read existing .gitignore content
-  let existing_content = if gitignore_path.exists() {
-    fs::read_to_string(gitignore_path)
-      .map_err(|e| JjError::InitFailed(format!("Failed to read .gitignore: {}", e)))?
-  } else {
-    String::new()
-  };
-
-  let existing_entries: std::collections::HashSet<&str> =
-    existing_content.lines().map(|l| l.trim()).collect();
-
-  // Find entries that need to be added
-  let entries_needed: Vec<&str> = entries_to_add
-    .iter()
-    .filter(|entry| !existing_entries.contains(*entry))
-    .copied()
-    .collect();
-
-  if entries_needed.is_empty() {
-    return Ok(());
+/// Keep `.jj/` and `.treq/` out of version control without editing the repo's
+/// `.gitignore`. jj-lib, unlike the jj CLI, does not write `.jj/.gitignore`.
+pub fn ensure_treq_dirs_ignored(repo_path: &str) -> Result<(), JjError> {
+  for dir in [".jj", ".treq"] {
+    crate::core::ignore_generated_dir(&Path::new(repo_path).join(dir))
+      .map_err(|e| JjError::InitFailed(format!("Failed to ignore {dir}/: {e}")))?;
   }
-
-  // Append missing entries to .gitignore
-  let mut file = OpenOptions::new()
-    .create(true)
-    .append(true)
-    .open(gitignore_path)
-    .map_err(|e| JjError::InitFailed(format!("Failed to open .gitignore: {}", e)))?;
-
-  // Add a newline before our entries if file doesn't end with newline
-  if !existing_content.is_empty() && !existing_content.ends_with('\n') {
-    writeln!(file)
-      .map_err(|e| JjError::InitFailed(format!("Failed to write to .gitignore: {}", e)))?;
-  }
-
-  for entry in entries_needed {
-    writeln!(file, "{}", entry)
-      .map_err(|e| JjError::InitFailed(format!("Failed to write to .gitignore: {}", e)))?;
-  }
-
   Ok(())
 }
 
@@ -1344,8 +1292,7 @@ fn init_jj_for_git_repo(repo_path: &str) -> Result<(), JjError> {
     &git_repo_path,
   ))
   .map_err(|e| JjError::InitFailed(e.to_string()))?;
-  // Ensure .gitignore entries
-  ensure_gitignore_entries(repo_path)?;
+  ensure_treq_dirs_ignored(repo_path)?;
 
   Ok(())
 }
@@ -1388,18 +1335,10 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
     .flatten()
     .map(|v| v == "true")
     .unwrap_or(false);
-  let ignore_generated_treq_paths = db
-    .get_repo_setting(repo_path, "ignore_generated_treq_paths")
-    .ok()
-    .flatten()
-    .is_some_and(|value| value == "true");
 
   if already_configured {
     if is_jj_workspace(repo_path) {
-      ensure_gitignore_entries(repo_path)?;
-      if ignore_generated_treq_paths {
-        ensure_optional_gitignore_entries(repo_path)?;
-      }
+      ensure_treq_dirs_ignored(repo_path)?;
       return Ok(true); // Flag valid, .jj exists
     }
     // Flag stale — .jj was deleted. Clear flag, fall through to reinit
@@ -1407,10 +1346,7 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
   } else if is_jj_workspace(repo_path) {
     // Double-check filesystem in case flag got out of sync
     let _ = db.set_repo_setting(repo_path, flag_key, "true");
-    ensure_gitignore_entries(repo_path)?;
-    if ignore_generated_treq_paths {
-      ensure_optional_gitignore_entries(repo_path)?;
-    }
+    ensure_treq_dirs_ignored(repo_path)?;
     return Ok(true);
   }
 
@@ -1424,9 +1360,6 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
 
   // Initialize jj
   init_jj_for_git_repo(repo_path)?;
-  if ignore_generated_treq_paths {
-    ensure_optional_gitignore_entries(repo_path)?;
-  }
 
   // Mark as configured in database
   db.set_repo_setting(repo_path, flag_key, "true")
@@ -9851,87 +9784,23 @@ mod tests {
   }
 
   #[test]
-  fn ensure_gitignore_entries_does_not_add_opt_in_paths() {
+  fn init_keeps_treq_and_jj_dirs_out_of_git_without_a_root_gitignore() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8");
-    ensure_gitignore_entries(repo_path).expect("write gitignore");
-    let gitignore = fs::read_to_string(temp.path().join(".gitignore")).expect("read gitignore");
-    assert!(!gitignore.contains(".jj*/"));
-    assert!(!gitignore.contains(".agents/skills/treq*/"));
-    assert!(!gitignore.contains(".claude/skills/treq*/"));
-    ensure_gitignore_entries(repo_path).expect("rewrite gitignore");
-    let again = fs::read_to_string(temp.path().join(".gitignore")).expect("read gitignore");
-    assert_eq!(again, gitignore);
-    assert!(
-      !gitignore.lines().any(|line| line == ".agents/skills/"),
-      "must not ignore all Codex/Cursor user skills, got:\n{gitignore}"
-    );
-    assert!(
-      !gitignore.lines().any(|line| line == ".claude/skills/"),
-      "must not ignore all Claude user skills, got:\n{gitignore}"
-    );
+    init_jj_for_git_repo(repo_path).expect("init jj");
+    fs::write(temp.path().join(".treq/local.db"), "db").expect("write db");
+    fs::create_dir_all(temp.path().join(".treq/workspaces/feat")).expect("mkdir workspace");
+    fs::write(temp.path().join(".treq/workspaces/feat/a.txt"), "a").expect("write file");
 
-    ensure_optional_gitignore_entries(repo_path).expect("write optional entries");
-    ensure_optional_gitignore_entries(repo_path).expect("rewrite optional entries");
-    let opted_in = fs::read_to_string(temp.path().join(".gitignore")).expect("read gitignore");
-    for entry in [".jj*/", ".agents/skills/treq*/", ".claude/skills/treq*/"] {
-      assert_eq!(opted_in.matches(entry).count(), 1);
-    }
-  }
-
-  #[test]
-  fn ensure_jj_initialized_appends_opt_in_gitignore_entries() {
-    let temp = TempDir::new().expect("tempdir");
-    init_git_repo(&temp);
-    let repo_path = temp.path().to_str().expect("utf8");
-    fs::create_dir(temp.path().join(".jj")).expect("mkdir .jj");
-    fs::write(temp.path().join(".gitignore"), ".jj/\n.jj*/\n.treq/\n").expect("write gitignore");
-    let db = crate::db::Database::new(temp.path().join("test.db")).expect("open db");
-    db.init().expect("init db");
-    db.set_repo_setting(repo_path, "jj_initialized", "true")
-      .expect("set flag");
-    db.set_repo_setting(repo_path, "ignore_generated_treq_paths", "true")
-      .expect("set opt in");
-    ensure_jj_initialized(&db, repo_path).expect("ensure init");
-    let gitignore = fs::read_to_string(temp.path().join(".gitignore")).expect("read gitignore");
-    assert!(
-      gitignore.contains(".agents/skills/treq*/") && gitignore.contains(".claude/skills/treq*/"),
-      "opening an existing repo should append treq skill globs, got:\n{gitignore}"
-    );
-  }
-
-  #[test]
-  fn git_status_ignores_treq_prefixed_skill_dirs_but_reports_user_skills() {
-    let temp = TempDir::new().expect("tempdir");
-    init_git_repo(&temp);
-    let repo_path = temp.path().to_str().expect("utf8");
-    ensure_gitignore_entries(repo_path).expect("write gitignore");
-    ensure_optional_gitignore_entries(repo_path).expect("write optional gitignore entries");
-    for relative in [
-      ".agents/skills/treq/SKILL.md",
-      ".agents/skills/treq-extra/SKILL.md",
-      ".claude/skills/treq/SKILL.md",
-      ".claude/skills/treq-extra/SKILL.md",
-      ".agents/skills/user-skill/SKILL.md",
-      ".claude/skills/user-skill/SKILL.md",
-    ] {
-      let path = temp.path().join(relative);
-      fs::create_dir_all(path.parent().expect("parent")).expect("mkdir skill");
-      fs::write(&path, "skill\n").expect("write skill");
-    }
+    assert!(!temp.path().join(".gitignore").exists());
     let status = Command::new("git")
       .current_dir(temp.path())
-      .args(["status", "--porcelain"])
+      .args(["status", "--porcelain", "--untracked-files=all"])
       .output()
       .expect("git status");
     assert!(status.status.success(), "git status should succeed");
-    let stdout = String::from_utf8_lossy(&status.stdout);
-    assert!(
-      !stdout.contains(".agents/skills/treq") && !stdout.contains(".claude/skills/treq"),
-      "external git should ignore treq-prefixed skills, got:\n{stdout}"
-    );
-    assert!(stdout.contains(".agents/") && stdout.contains(".claude/"));
+    assert_eq!(String::from_utf8_lossy(&status.stdout), "");
   }
 
   #[test]
