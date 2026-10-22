@@ -38,7 +38,7 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
       "Cancel and Resolve buttons aligned at the bottom right",
       "Backdrop dims the window evenly",
     ],
-    issue: "Title reads 'inplace'; the placeholder runs into the field's right edge",
+    issue: "The placeholder runs into the field's right edge",
   });
   await instructions.fill("Keep the event feed and the ingest owners' copy");
   await capture(page, {

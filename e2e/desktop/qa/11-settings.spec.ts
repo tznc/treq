@@ -94,7 +94,6 @@ test("settings: application and live theme switch", async ({ page }) => {
       "The whole window, sidebar included, repaints in the other theme",
       "No element keeps the old theme's colours",
     ],
-    issue: "UI Zoom help reads 'Ctrl/Cmd + + to zoom in and Ctrl/Cmd + - to zoom out'",
   });
   await select.click();
   await settle(page, 600);

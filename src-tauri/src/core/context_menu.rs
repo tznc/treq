@@ -104,11 +104,19 @@ pub struct EditorApps {
   pub zed: bool,
 }
 
+/// The item that shows a path in the platform's file manager.
+pub const REVEAL_LABEL: &str = if cfg!(target_os = "macos") {
+  "Open in Finder"
+} else if cfg!(target_os = "windows") {
+  "Open in File Explorer"
+} else {
+  "Open in File Manager"
+};
+
 /// `pathMenuEntries`: copy the path, or open it.
 pub fn path_items(relative_path: &str, full_path: &str, editors: EditorApps) -> Vec<MenuItem> {
   let mut open = vec![
-    MenuItem::item("Open in Finder", MenuAction::Reveal(full_path.into()))
-      .icon(MenuIcon::FolderOpen),
+    MenuItem::item(REVEAL_LABEL, MenuAction::Reveal(full_path.into())).icon(MenuIcon::FolderOpen),
   ];
   for (on, label, scheme) in [
     (editors.cursor, "Open in Cursor", "cursor"),
@@ -345,7 +353,7 @@ mod tests {
       [
         "Copy relative path",
         "Copy full path",
-        "Open in...: [Open in Finder, Open in Cursor, Open in Zed]"
+        format!("Open in...: [{REVEAL_LABEL}, Open in Cursor, Open in Zed]").as_str()
       ]
     );
     let MenuItem::Submenu { items, .. } = &items[2] else {
@@ -374,7 +382,7 @@ mod tests {
         "---",
         "Copy relative path",
         "Copy full path",
-        "Open in...: [Open in Finder]",
+        format!("Open in...: [{REVEAL_LABEL}]").as_str(),
         "---",
         "Add Repository…"
       ]
@@ -430,7 +438,7 @@ mod tests {
         "---",
         "Copy relative path",
         "Copy full path",
-        "Open in...: [Open in Finder]",
+        format!("Open in...: [{REVEAL_LABEL}]").as_str(),
         "---",
         "Archive Workspace"
       ]

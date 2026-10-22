@@ -2784,7 +2784,7 @@ impl CommitsView {
               .flex()
               .items_center()
               .gap(zpx(6.))
-              .child(dialog_title("Resolve commit conflicts inplace"))
+              .child(dialog_title("Resolve commit conflicts in place"))
               .child(help),
           )
           .child(

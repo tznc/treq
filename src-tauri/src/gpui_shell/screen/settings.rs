@@ -1454,7 +1454,11 @@ impl SettingsView {
           )
           .child(div().mt_3().child(form::slider_field(&zoom)))
           .child(help(
-            "Scale the application interface. Use Ctrl/Cmd + + to zoom in and Ctrl/Cmd + - to zoom out in 5% steps.",
+            if cfg!(target_os = "macos") {
+              "Scale the application interface. Use ⌘ + + to zoom in and ⌘ + - to zoom out in 5% steps."
+            } else {
+              "Scale the application interface. Use Ctrl + + to zoom in and Ctrl + - to zoom out in 5% steps."
+            },
             p,
             8.,
           )),
