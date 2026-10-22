@@ -311,8 +311,10 @@ pub struct WorkspaceView {
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
-  /// The Code tab, while GPUI draws it.
+  /// The Code tab, kept while other tabs show so it draws at once on return.
   pub(super) code: Option<Entity<CodeView>>,
+  /// Whether the Code tab is the one drawn.
+  code_shown: bool,
   /// The Code tab's file browser, while GPUI draws it.
   pub(super) file_browser: Option<Entity<FileBrowserView>>,
   /// The Commits tab, while GPUI draws it.
@@ -397,6 +399,7 @@ impl WorkspaceView {
       code_host: host,
       terminal: None,
       code: None,
+      code_shown: false,
       file_browser: None,
       commits: None,
       changes: None,
@@ -501,10 +504,14 @@ impl WorkspaceView {
 
   fn rebuild(&mut self, cx: &mut Context<Self>) {
     let route = self.drawn_route(cx);
-    let snapshot = self.loaded.as_ref().map(|loaded| {
-      let (header, tab_row) = workspace_view(&route, loaded, &self.pr, self.pending);
-      Workspace { header, tab_row }
-    });
+    // While another workspace loads, the last one stays drawn and swaps in
+    // one frame once it lands, rather than flashing an empty header.
+    let Some(loaded) = self.loaded.as_ref() else {
+      self.sync_popover(cx);
+      return;
+    };
+    let (header, tab_row) = workspace_view(&route, loaded, &self.pr, self.pending);
+    let snapshot = Some(Workspace { header, tab_row });
     if self.snapshot != snapshot {
       self.snapshot = snapshot;
       cx.notify();
@@ -1760,17 +1767,18 @@ impl WorkspaceView {
 
   /// The tab GPUI draws (Code or Commits), kept in step with the header.
   fn tab_body(&mut self, cx: &mut Context<Self>) -> Option<Body> {
-    let loaded = self.loaded.as_ref();
     let tab = self.route.tab;
-    let Some(loaded) =
-      loaded.filter(|_| matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes | Tab::Logs))
-    else {
+    if !matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes | Tab::Logs) {
       self.code = None;
       self.file_browser = None;
       self.commits = None;
       self.changes = None;
       self.logs = None;
       return None;
+    }
+    // Another workspace is loading: keep the tab drawn as it was.
+    let Some(loaded) = self.loaded.as_ref() else {
+      return self.kept_body();
     };
     let parent = Parent {
       repo_path: self.route.repo_path.clone(),
@@ -1791,7 +1799,7 @@ impl WorkspaceView {
       self.popups.clone(),
     );
     if tab == Tab::Logs {
-      self.code = None;
+      self.code_shown = false;
       self.file_browser = None;
       self.commits = None;
       self.changes = None;
@@ -1811,7 +1819,7 @@ impl WorkspaceView {
     }
     self.logs = None;
     if tab == Tab::Changes {
-      self.code = None;
+      self.code_shown = false;
       self.file_browser = None;
       self.commits = None;
       let options = changes::Options {
@@ -1830,7 +1838,7 @@ impl WorkspaceView {
     self.changes = None;
     let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
-      self.code = None;
+      self.code_shown = false;
       self.file_browser = None;
       let scroll_to = self.route.scroll_to_commit.clone();
       if let Some(commits) = &self.commits {
@@ -1843,7 +1851,7 @@ impl WorkspaceView {
     }
     self.commits = None;
     if let Some(route) = self.route.file_browser.clone() {
-      self.code = None;
+      self.code_shown = false;
       let opening = Opening {
         route,
         revision: self.route.changes_revision,
@@ -1859,13 +1867,31 @@ impl WorkspaceView {
       return Some(Body::FileBrowser(browser));
     }
     self.file_browser = None;
+    // Back on the Code tab: draw what it last read and read it again behind.
+    let returning = !std::mem::replace(&mut self.code_shown, true);
     if let Some(code) = &self.code {
-      code.update(cx, |code, cx| code.set_parent(parent, dark, cx));
+      code.update(cx, |code, cx| {
+        code.set_parent(parent, dark, cx);
+        if returning {
+          code.revalidate(cx);
+        }
+      });
       return Some(Body::Code(code.clone()));
     }
     let code = cx.new(|cx| CodeView::new(parent, host, react, popups, dark, cx));
     self.code = Some(code.clone());
     Some(Body::Code(code))
+  }
+
+  /// The tab's view as last drawn, while the route's workspace loads.
+  fn kept_body(&self) -> Option<Body> {
+    match self.route.tab {
+      Tab::Logs => self.logs.as_ref().map(|(logs, _)| Body::Logs(logs.clone())),
+      Tab::Changes => self.changes.clone().map(Body::Changes),
+      Tab::Commits => self.commits.clone().map(Body::Commits),
+      _ if self.route.file_browser.is_some() => self.file_browser.clone().map(Body::FileBrowser),
+      _ => self.code.clone().map(Body::Code),
+    }
   }
 }
 

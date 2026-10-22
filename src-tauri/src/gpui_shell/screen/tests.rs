@@ -3457,6 +3457,47 @@ fn code_tab_lists_submodules_with_their_pin_and_syncs_them_on_request(cx: &mut T
   );
 }
 
+/// Draws the window once without running the reads a route change started,
+/// so the frame shows what a user sees before they land.
+fn draw_now(h: &mut Harness) {
+  h.cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn code_tab_draws_what_it_read_when_returning_to_it(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  assert!(h.drawn("workspace-description"));
+  h.update(|s| s.view = commits_route().view);
+  assert!(h.drawn("workspace-commits"));
+  h.update(|s| s.view = code_route().view);
+  draw_now(&mut h);
+  assert!(h.cx.debug_bounds("workspace-description").is_some());
+  assert!(h.cx.debug_bounds("workspace-overview-skeleton").is_none());
+}
+
+#[gpui::test]
+fn switching_workspaces_keeps_the_last_one_drawn_until_the_next_loads(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  assert!(h.drawn("workspace-description"));
+  h.update(|s| {
+    let mut route = route_json(Some(8), "main");
+    route["code"] = true.into();
+    route["frameHeight"] = 120.into();
+    s.view = serde_json::from_value::<ScreenSnapshot>(route)
+      .expect("route")
+      .view;
+  });
+  draw_now(&mut h);
+  for selector in [
+    "workspace-branch",
+    "workspace-tab-row",
+    "workspace-description",
+  ] {
+    assert!(h.cx.debug_bounds(selector).is_some(), "{selector}");
+  }
+  assert!(h.cx.debug_bounds("workspace-overview-skeleton").is_none());
+}
+
 fn task_text(h: &mut Harness) -> Option<String> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |s, cx| {
