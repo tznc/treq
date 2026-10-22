@@ -168,14 +168,19 @@ impl PrStatusManager {
       .expect("failed to spawn pr-status-poller thread");
   }
 
-  /// Start watching a repo. Triggers an immediate background refresh.
+  /// Start watching a repo. A newly watched repo triggers an immediate
+  /// background refresh; re-watching one is a no-op, because GPUI reads call
+  /// this on every render and a wake per call forced a full poll each time.
   pub fn watch_repo(&self, repo_path: &str) {
-    {
-      let mut watched = self.inner.watched.lock_or_recover();
-      watched.insert(repo_path.to_string());
-    }
+    let newly_watched = self
+      .inner
+      .watched
+      .lock_or_recover()
+      .insert(repo_path.to_string());
     self.ensure_started();
-    self.request_wake();
+    if newly_watched {
+      self.request_wake();
+    }
   }
 
   /// Stop watching a repo. Cached entries are retained until overwritten.
@@ -1085,6 +1090,35 @@ mod tests {
     assert!(mgr.is_watching("/tmp/repo"));
     mgr.unwatch_repo("/tmp/repo");
     assert!(!mgr.is_watching("/tmp/repo"));
+    mgr.shutdown();
+  }
+
+  #[test]
+  fn rewatching_a_repo_does_not_force_a_poll() {
+    use std::sync::atomic::AtomicUsize;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_fetch = Arc::clone(&calls);
+    let fetch: PrFetchFn = Arc::new(move |_, _| {
+      calls_fetch.fetch_add(1, Ordering::SeqCst);
+      Ok(None)
+    });
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat".into()]));
+    let hour = Duration::from_secs(3600);
+    let mgr = PrStatusManager::new(fetch, list).with_intervals(hour, hour);
+
+    mgr.watch_repo("/tmp/rewatch");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while calls.load(Ordering::SeqCst) == 0 {
+      assert!(std::time::Instant::now() < deadline, "first poll never ran");
+      thread::sleep(Duration::from_millis(10));
+    }
+
+    // GPUI reads re-watch on every render.
+    for _ in 0..50 {
+      mgr.watch_repo("/tmp/rewatch");
+    }
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     mgr.shutdown();
   }
 
