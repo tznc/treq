@@ -11,8 +11,8 @@
 use std::rc::Rc;
 
 use tauri_plugin_gpui::gpui::{
-  self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset,
-  ListState, MouseButton, MouseMoveEvent, Pixels, SharedString, Window,
+  self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset, ListState,
+  MouseButton, MouseMoveEvent, Pixels, SharedString, Window,
 };
 
 use super::{CommitsView, Kind};
@@ -141,7 +141,11 @@ impl Rows {
 }
 
 /// What a row stands for, besides its indices.
-fn ident<'a>(entries: &'a [Entry], days: &'a [String], row: Row) -> Option<(&'a str, Option<Kind>)> {
+fn ident<'a>(
+  entries: &'a [Entry],
+  days: &'a [String],
+  row: Row,
+) -> Option<(&'a str, Option<Kind>)> {
   match row {
     Row::Day(d) => days.get(d).map(|d| (d.as_str(), None)),
     _ => row
@@ -261,7 +265,8 @@ impl CommitsView {
       rows.push(Row::Commit(e), 0, 3);
       return;
     };
-    rows.push(Row::Commit(e), 0, 2);
+    // The actions' own margin is the gap above the card.
+    rows.push(Row::Commit(e), 0, 0);
     let Some(diff) = state.diff.as_ref() else {
       return;
     };
@@ -326,7 +331,10 @@ impl CommitsView {
         .take(n.min(m) - prefix)
         .take_while(|(a, b)| same(**a, **b))
         .count();
-      self.feed.list.splice(prefix..n - suffix, m - prefix - suffix);
+      self
+        .feed
+        .list
+        .splice(prefix..n - suffix, m - prefix - suffix);
     }
     feed.list = self.feed.list.clone();
     feed.rem = self.feed.rem;
@@ -340,13 +348,18 @@ impl CommitsView {
 
   /// The row of the commit with this change id.
   pub(super) fn commit_row(&self, change_id: &str) -> Option<(usize, String)> {
-    self.feed.rows.iter().enumerate().find_map(|(ix, (row, _))| match row {
-      Row::Commit(e) => {
-        let commit = &self.feed.entries[*e].commit;
-        (commit.change_id == change_id).then(|| (ix, commit.commit_id.clone()))
-      }
-      _ => None,
-    })
+    self
+      .feed
+      .rows
+      .iter()
+      .enumerate()
+      .find_map(|(ix, (row, _))| match row {
+        Row::Commit(e) => {
+          let commit = &self.feed.entries[*e].commit;
+          (commit.change_id == change_id).then(|| (ix, commit.commit_id.clone()))
+        }
+        _ => None,
+      })
   }
 
   /// Puts row `ix` at the top of the list.
@@ -379,13 +392,14 @@ impl CommitsView {
     let p = theme::palette(self.dark);
     let n = self.feed.rows.len();
     let content = match row {
-      Row::Top => return div().px_4().pt_4().child(self.banners(&p, cx)).into_any_element(),
-      Row::End => {
+      Row::Top => {
         return div()
-          .pt(rems(gap as f32 * 0.25))
-          .pb_4()
+          .px_4()
+          .pt_4()
+          .child(self.banners(&p, cx))
           .into_any_element()
       }
+      Row::End => return div().pt(rems(gap as f32 * 0.25)).pb_4().into_any_element(),
       Row::Day(d) => ui::text(div(), ui::TextSize::Sm)
         .pb_1()
         .pl_7()
@@ -587,9 +601,10 @@ impl CommitsView {
   ) -> impl IntoElement {
     let (h, l) = at;
     let line = hunk.lines.get(l).map_or("", String::as_str);
-    let selected = self.selection.as_ref().is_some_and(|s| {
-      s.commit_id == commit.commit_id && s.path == path && s.lines.contains(&at)
-    });
+    let selected = self
+      .selection
+      .as_ref()
+      .is_some_and(|s| s.commit_id == commit.commit_id && s.path == path && s.lines.contains(&at));
     let gutter_fg = p.muted_foreground.opacity(0.6);
     let gutter_hover = p.muted.opacity(0.5);
     let kind = line_kind(line);

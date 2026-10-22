@@ -844,7 +844,12 @@ impl StashView {
   }
 
   /// `StashDiffPane`.
-  fn diff_pane(&self, diff: &JjRevisionDiff, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+  fn diff_pane(
+    &self,
+    diff: &JjRevisionDiff,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
     if diff.too_large_to_render {
       return message(
         "stash-diff-too-large",
@@ -910,6 +915,7 @@ impl StashView {
           .and_then(|h| h.lines.get(l))
           .map_or("", String::as_str);
         text
+          .w_full()
           .px_2()
           .flex()
           .whitespace_nowrap()

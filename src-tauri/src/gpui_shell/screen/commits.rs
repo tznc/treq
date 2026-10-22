@@ -21,9 +21,9 @@ use std::{
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context, Div,
-  Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels,
-  SharedString, Stateful, Subscription, Window,
+  self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context,
+  Div, Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful,
+  Subscription, Window,
 };
 
 use super::{
@@ -31,8 +31,8 @@ use super::{
   code_data::Agent,
   commits_data::{
     comment_prompt, comment_target, empty_diff, first_diff, first_file_diff, first_line, headline,
-    line_label, resolve_session_name, revisions, selection, CommentTarget,
-    CommitsHost, History, Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
+    line_label, resolve_session_name, revisions, selection, CommentTarget, CommitsHost, History,
+    Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
   },
   ActionSink, ScreenAction,
 };
@@ -81,8 +81,11 @@ pub(super) struct DiffState {
   pub deferred_loading: HashSet<String>,
   pub deferred_errors: HashMap<String, String>,
   /// Each shown file's line numbers, by hunk.
-  pub numbers: HashMap<String, Rc<Vec<Vec<(Option<u32>, Option<u32>)>>>>,
+  pub numbers: HashMap<String, Rc<Vec<Vec<LineNumbers>>>>,
 }
+
+/// A diff line's old and new numbers.
+type LineNumbers = (Option<u32>, Option<u32>);
 
 impl DiffState {
   /// The diff lists files, each a row of the card, rather than a message.
@@ -1553,7 +1556,9 @@ impl CommitsView {
                 .child(
                   ui::text(div(), TextSize::Xs)
                     .text_color(p.muted_foreground)
-                    .child("Resolve in place via a short-lived resolve workspace — no extra commit."),
+                    .child(
+                      "Resolve in place via a short-lived resolve workspace — no extra commit.",
+                    ),
                 ),
             )
             .child(

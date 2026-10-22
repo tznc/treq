@@ -9,11 +9,11 @@ use gpui::{Modifiers, MouseButton, TestAppContext};
 use super::changes_large::{frame, leak, report, timed};
 use super::*;
 
-const FILES: usize = 6;
+pub(super) const FILES: usize = 6;
 /// Changed lines per file.
 const LINES: usize = 500;
 
-fn lines() -> usize {
+pub(super) fn lines() -> usize {
   std::env::var("PERF_LINES")
     .ok()
     .and_then(|v| v.parse().ok())
@@ -22,7 +22,7 @@ fn lines() -> usize {
 
 /// Every commit's diff: `FILES` files, each one hunk of `LINES` lines,
 /// half removed and half added.
-fn large_host() -> FakeHost {
+pub(super) fn large_host() -> FakeHost {
   let mut host = commits_host();
   let n = lines();
   let files: Vec<_> = (0..FILES)
@@ -61,7 +61,7 @@ fn line(f: usize, l: usize) -> &'static str {
 }
 
 /// The large commit, open.
-fn opened(cx: &mut TestAppContext) -> Harness {
+pub(super) fn opened(cx: &mut TestAppContext) -> Harness {
   let (mut h, _) = workspace_harness(cx, large_host(), commits_route());
   h.click("commit-row-a");
   h.cx.run_until_parked();
@@ -103,7 +103,8 @@ fn a_large_commit_scrolls_and_comments_on_a_line_far_down(cx: &mut TestAppContex
     })
     .expect("a line on screen");
   let row = h.cx.debug_bounds(line(f, l)).expect("line");
-  h.cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(row.center(), None, Modifiers::none());
   h.click(leak(format!("add-comment-0-{l}")));
   assert!(h.drawn("comment-input"));
   let input = h.cx.debug_bounds("comment-input").expect("comment box");

@@ -22,8 +22,8 @@ use std::{
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, uniform_list, App, Bounds, Context, Entity, FontWeight,
-  KeyDownEvent, MouseButton, Pixels, SharedString, Subscription, Window,
+  self, anchored, deferred, div, point, prelude::*, px, uniform_list, App, Bounds, Context, Entity,
+  FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Subscription, Window,
 };
 
 use super::{

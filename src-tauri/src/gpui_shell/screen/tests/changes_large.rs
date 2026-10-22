@@ -11,11 +11,11 @@ use gpui::{Modifiers, MouseButton, TestAppContext};
 
 use super::*;
 
-const FILES: usize = 6;
+pub(super) const FILES: usize = 6;
 /// Replaced lines per file: as many removed as added.
 const PAIRS: usize = 250;
 
-fn pairs() -> usize {
+pub(super) fn pairs() -> usize {
   std::env::var("PERF_PAIRS")
     .ok()
     .and_then(|v| v.parse().ok())
@@ -30,7 +30,7 @@ fn line(file: usize, i: usize, new: bool) -> String {
 }
 
 /// `FILES` Rust files, each one hunk of `PAIRS` removed and added lines.
-fn large_host() -> FakeHost {
+pub(super) fn large_host() -> FakeHost {
   let mut host = code_host();
   let files: Vec<_> = (0..FILES)
     .map(|f| {
@@ -114,7 +114,7 @@ pub(super) fn leak(s: String) -> &'static str {
 }
 
 /// The large working copy with every file's diff shown.
-fn expanded(cx: &mut TestAppContext) -> Harness {
+pub(super) fn expanded(cx: &mut TestAppContext) -> Harness {
   let (mut h, _) = workspace_harness(cx, large_host(), changes_route());
   if h.drawn("view-large-changeset") {
     h.click("view-large-changeset");

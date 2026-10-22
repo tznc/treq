@@ -792,7 +792,9 @@ impl MergeView {
     };
     let content = match row {
       Row::Top => {
+        // A flex row of a list fits its content unless told its width.
         return div()
+          .w_full()
           .px_4()
           .pt_4()
           .flex()

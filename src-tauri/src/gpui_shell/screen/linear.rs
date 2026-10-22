@@ -26,13 +26,13 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   changes::threads::suggestion_box,
-  rows::Rows,
   code::markdown,
   linear_data::{
     self as data, agent_count_label, comment_file, Anchor, Commented, FilterOption, IssueFilters,
     IssueView, LinearHost, ProjectFilters, ProjectView, Route,
   },
   modal::{dialog, overlay, title},
+  rows::Rows,
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -1317,7 +1317,14 @@ impl LinearView {
     let (roots, subs) = data::split_roots(shown);
     let mut rows = Vec::new();
     for (i, root) in roots.into_iter().enumerate() {
-      rows.push(IssueRow::new(&index, root, false, i > 0, &self.expanded, None));
+      rows.push(IssueRow::new(
+        &index,
+        root,
+        false,
+        i > 0,
+        &self.expanded,
+        None,
+      ));
       rows.extend(
         subs
           .get(&root.id)
