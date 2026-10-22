@@ -331,9 +331,13 @@ pub fn comment_date(iso: &str, this_year: i32) -> String {
   }
 }
 
-/// A collapsed thread's one-line preview of its first comment.
+/// A collapsed thread's one-line preview of its first comment, with
+/// shortcodes as emoji.
 pub fn preview(body: &str) -> String {
-  body.split_whitespace().collect::<Vec<_>>().join(" ")
+  super::code_data::emojify(body)
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 #[cfg(test)]

@@ -554,6 +554,43 @@ pub fn looks_like_markdown(text: &str) -> bool {
     .any(|p| Regex::new(p).expect("regex").is_match(text))
 }
 
+/// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
+/// shortcodes stay as typed.
+pub fn emojify(text: &str) -> String {
+  let shortcode = Regex::new(r":([a-z0-9_+-]+):").expect("regex");
+  let mut fenced = false;
+  text
+    .split_inclusive('\n')
+    .map(|line| {
+      let trimmed = line.trim_start();
+      if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        fenced = !fenced;
+        return line.to_string();
+      }
+      if fenced {
+        return line.to_string();
+      }
+      // Odd pieces between backticks are inline code.
+      line
+        .split('`')
+        .enumerate()
+        .map(|(i, piece)| {
+          if i % 2 == 1 {
+            return piece.to_string();
+          }
+          shortcode
+            .replace_all(piece, |c: &regex::Captures| {
+              emojis::get_by_shortcode(&c[1])
+                .map_or_else(|| c[0].to_string(), |e| e.as_str().to_string())
+            })
+            .into_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("`")
+    })
+    .collect()
+}
+
 /// `getWorkspaceDisplayTitle`.
 pub fn display_title(workspace: &Workspace) -> String {
   if !workspace.title.is_empty() {
@@ -813,6 +850,20 @@ mod tests {
     assert_eq!(insert_at("fix", 3, "@a.rs "), ("fix @a.rs ".into(), 10));
     assert_eq!(insert_at("fix ", 4, "@a.rs "), ("fix @a.rs ".into(), 10));
     assert_eq!(insert_at("", 0, "x"), ("x".into(), 1));
+  }
+
+  #[test]
+  fn emojifies_shortcodes_outside_code() {
+    assert_eq!(emojify(":robot: done :+1:"), "🤖 done 👍");
+    assert_eq!(
+      emojify(":not_an_emoji: 10:30:00"),
+      ":not_an_emoji: 10:30:00"
+    );
+    assert_eq!(emojify("`:robot:` :robot:"), "`:robot:` 🤖");
+    assert_eq!(
+      emojify("```\n:robot:\n```\n:robot:"),
+      "```\n:robot:\n```\n🤖"
+    );
   }
 
   #[test]
