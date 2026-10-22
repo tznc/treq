@@ -15,7 +15,7 @@ test("window-zoom: header at 200%", async ({ page }) => {
     // 100% to 200% in 5% steps.
     for (let i = 0; i < 20; i++) await page.keyboard.press(`${mod}+=`);
     await settle(page, 1500);
-    await expect(page.getByRole("button", { name: "Details" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Workspace details" })).toBeVisible();
     await capture(page, {
       name: "15-window-zoom-200",
       title: "Workspace header at 200% zoom",

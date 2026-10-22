@@ -40,7 +40,7 @@ test("merge: header popovers and menus", async ({ page }) => {
     name: "12-merge-header",
     title: "Workspace header with an open PR and green checks",
     expectations: [
-      "Branch → base picker, View PR + external link, Checks GH 3/3, Merge…, Details, ⋮",
+      "Branch → base picker, Details (info icon), View PR + external link, Checks GH 3/3, Merge…, ⋮",
       "Buttons share one height and baseline; nothing wraps",
     ],
   });
@@ -57,7 +57,7 @@ test("merge: header popovers and menus", async ({ page }) => {
       "Popover stays inside the window at the right edge",
     ],
   });
-  await page.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("button", { name: "Workspace details" }).click();
   await settle(page, 1200);
   await capture(page, {
     name: "12-merge-details",
@@ -83,7 +83,7 @@ test("merge: popovers close with Escape and let the next click through", async (
   const open = {
     "base-picker": () => page.mouse.click(552, HEADER_Y),
     checks: () => page.mouse.click(1000, HEADER_Y),
-    details: () => page.getByRole("button", { name: "Details" }).click(),
+    details: () => page.getByRole("button", { name: "Workspace details" }).click(),
   };
   for (const [what, click] of Object.entries(open)) {
     await click();
@@ -101,7 +101,7 @@ test("merge: popovers close with Escape and let the next click through", async (
     expect.soft(popoverShown(), `${what} popover closed by Escape`).toBe(false);
   }
   // A click outside the Details popover closes it and still reaches the tab.
-  await page.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("button", { name: "Workspace details" }).click();
   await settle(page, 1200);
   expect(popoverShown()).toBe(true);
   const changes = await page.getByRole("tab", { name: "Changes" }).boundingBox();

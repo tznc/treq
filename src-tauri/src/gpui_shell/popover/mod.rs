@@ -67,8 +67,8 @@ pub enum Kind {
 impl Kind {
   fn align(&self) -> Align {
     match self {
-      Kind::Target(_) => Align::Start,
-      Kind::Details(_) | Kind::Checks(_) => Align::End,
+      Kind::Target(_) | Kind::Details(_) => Align::Start,
+      Kind::Checks(_) => Align::End,
     }
   }
 }

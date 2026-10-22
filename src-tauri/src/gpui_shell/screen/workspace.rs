@@ -874,6 +874,27 @@ impl WorkspaceView {
               .child(self.record_bounds("workspace-target")),
           );
       }
+      if h.details {
+        let button = Button::new("workspace-details", p)
+          .aria_label("Workspace details")
+          .variant(Variant::Ghost)
+          .size(Size::Sm)
+          .px_1()
+          .icon(theme::ICON_INFO, 16.)
+          .on_click(self.press("workspace.details"));
+        left = left.child(
+          div()
+            .relative()
+            .flex_none()
+            .child(self.with_tooltip(
+              "workspace-details",
+              Some(TooltipContent::Text("Workspace details".into())),
+              button,
+              cx,
+            ))
+            .child(self.record_bounds("workspace-details")),
+        );
+      }
     } else {
       left = left.child(
         mono_title(&h.branch)
@@ -1070,24 +1091,6 @@ impl WorkspaceView {
           button,
           cx,
         ),
-      );
-    }
-    if h.details {
-      right = right.child(
-        div()
-          .relative()
-          .flex_none()
-          .child(
-            Button::new("workspace-details", p)
-              .variant(Variant::Ghost)
-              .size(Size::Sm)
-              .gap_1()
-              .px_2()
-              .icon(theme::ICON_INFO, 16.)
-              .label("Details")
-              .on_click(self.press("workspace.details")),
-          )
-          .child(self.record_bounds("workspace-details")),
       );
     }
     if let Some(more) = &h.more {
