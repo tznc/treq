@@ -79,7 +79,7 @@ fn large_host() -> FakeHost {
 }
 
 /// A full frame: the Changes view rendered, laid out and painted again.
-fn frame(h: &mut Harness) -> Duration {
+pub(super) fn frame(h: &mut Harness) -> Duration {
   h.cx.run_until_parked();
   h.cx.update(|window, cx| {
     let start = Instant::now();
@@ -89,7 +89,7 @@ fn frame(h: &mut Harness) -> Duration {
   })
 }
 
-fn report(name: &str, samples: &mut [Duration]) {
+pub(super) fn report(name: &str, samples: &mut [Duration]) {
   samples.sort();
   let ms = |d: Duration| d.as_secs_f64() * 1000.;
   let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
@@ -101,7 +101,7 @@ fn report(name: &str, samples: &mut [Duration]) {
   );
 }
 
-fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
+pub(super) fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
   let start = Instant::now();
   act(h);
   h.cx.run_until_parked();
@@ -109,7 +109,7 @@ fn timed(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Duration {
   start.elapsed()
 }
 
-fn leak(s: String) -> &'static str {
+pub(super) fn leak(s: String) -> &'static str {
   Box::leak(s.into_boxed_str())
 }
 

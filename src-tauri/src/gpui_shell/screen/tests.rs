@@ -7258,6 +7258,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
 }
 
 mod changes_large;
+mod commits_large;
 mod commit_diffs;
 mod conflicts;
 mod file_browser;
