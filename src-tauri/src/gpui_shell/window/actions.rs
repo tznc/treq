@@ -76,7 +76,7 @@ impl Model {
     // One dialog at a time: Escape only reaches the one on top.
     let free = !self.dialogs.any_open();
     match shortcut {
-      Shortcut::NewWorkspace if repo && free => self.open_workspace_dialog(json!({})),
+      Shortcut::NewWorkspace if repo && free => self.new_workspaces(None),
       Shortcut::Stack if repo && free => return self.stack(data),
       Shortcut::Palette if free => self.dialogs.palette = true,
       Shortcut::AgentPrompt if repo && free => self.open_agent_prompt(),
@@ -182,9 +182,7 @@ impl Model {
         done()
       }
       SidebarAction::OpenWorkspaces => {
-        if !repo.is_empty() {
-          self.dialogs.open_workspaces = true;
-        }
+        self.new_workspaces(None);
         done()
       }
       SidebarAction::OpenLinear => {
@@ -205,7 +203,10 @@ impl Model {
         done()
       }
       SidebarAction::Stack { id } => match (id, find(*id)) {
-        (None, _) => Some(self.stack_home(data)),
+        (None, _) => {
+          self.stack_home(data);
+          done()
+        }
         (Some(_), Some(workspace)) => {
           self.stack_on(&workspace);
           done()
@@ -263,7 +264,7 @@ impl Model {
       // The dialogs.
       "workspaceDialog.close" => self.dialogs.workspace_dialog = None,
       "renameWorkspace.close" => self.dialogs.rename = None,
-      "openWorkspaces.close" => self.dialogs.open_workspaces = false,
+      "openWorkspaces.close" => self.dialogs.open_workspaces = None,
       "workspaceDeletion.close" => self.dialogs.deletion = false,
       "changeMove.done" => {
         self.dialogs.change_move = None;
@@ -434,7 +435,7 @@ impl Model {
       field if field.starts_with("terminal.") => return self.terminal_field(field, value, data),
       // The dialogs.
       "openWorkspaces.opened" => {
-        self.dialogs.open_workspaces = false;
+        self.dialogs.open_workspaces = None;
         let (Some(repo_path), Some(id)) = (value["repoPath"].as_str(), value["id"].as_i64()) else {
           return done();
         };
@@ -1236,11 +1237,13 @@ mod tests {
   fn shortcuts_open_dialogs_and_zoom() {
     let (mut model, data) = (model(), data());
     model.shortcut(Shortcut::NewWorkspace, &data);
-    assert_eq!(
-      model.dialogs.workspace_dialog.as_ref().unwrap().1,
-      json!({})
-    );
-    model.dialogs.workspace_dialog = None;
+    assert_eq!(model.dialogs.open_workspaces, Some(None));
+    // Stacking opens the same dialog.
+    model.dialogs.open_workspaces = None;
+    model.shortcut(Shortcut::Stack, &data);
+    assert!(model.dialogs.open_workspaces.is_some());
+    assert!(model.dialogs.workspace_dialog.is_none());
+    model.dialogs.open_workspaces = None;
     model.shortcut(Shortcut::ToggleShortcuts, &data);
     assert!(model.dialogs.shortcuts);
     model.shortcut(Shortcut::Escape, &data);
@@ -1263,7 +1266,7 @@ mod tests {
     let (mut model, data) = (model(), data());
     model.selected = Some(2);
     model.shortcut(Shortcut::Stack, &data);
-    let stack = model.dialogs.workspace_dialog.clone();
+    let stack = model.dialogs.open_workspaces.clone();
     assert!(stack.is_some());
     for shortcut in [
       Shortcut::AgentPrompt,
@@ -1275,18 +1278,18 @@ mod tests {
     ] {
       model.shortcut(shortcut, &data);
     }
-    assert_eq!(model.dialogs.workspace_dialog, stack, "the same dialog");
+    assert_eq!(model.dialogs.open_workspaces, stack, "the same dialog");
     assert_eq!(
       model.dialogs,
       Dialogs {
-        workspace_dialog: stack,
+        open_workspaces: stack,
         workspace_dialog_key: model.dialogs.workspace_dialog_key,
         ..Dialogs::default()
       },
       "nothing over it"
     );
     model.dialogs.shortcuts = true;
-    model.dialogs.workspace_dialog = None;
+    model.dialogs.open_workspaces = None;
     model.shortcut(Shortcut::ToggleShortcuts, &data);
     assert!(!model.dialogs.shortcuts, "closes its own");
   }

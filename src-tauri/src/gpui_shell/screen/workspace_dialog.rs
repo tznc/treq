@@ -954,7 +954,7 @@ fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<D
 
 /// A collapsible section's toggle: a chevron and its label, a button named
 /// by the label.
-fn disclosure(
+pub(super) fn disclosure(
   id: &'static str,
   label: &'static str,
   open: bool,

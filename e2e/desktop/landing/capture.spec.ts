@@ -240,8 +240,8 @@ test("captures the landing screenshots", async ({ page }) => {
     await row(page, CACHE)
       .getByRole("button", { name: "Stack workspace" })
       .click();
-    await page.getByRole("textbox", { name: "Branch Name" }).fill(branch);
-    await page.getByRole("button", { name: "Create Workspace" }).click();
+    await page.getByLabel("Workspaces", { exact: true }).fill(branch);
+    await page.getByRole("button", { name: "Create 1 Workspace" }).click({ timeout: 20_000 });
     await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
     await rest(page);
   }

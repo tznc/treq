@@ -815,7 +815,7 @@ impl Sidebar {
       .id("open-workspaces")
       .debug_selector(|| "open-workspaces".into())
       .role(Role::Button)
-      .aria_label("Open workspaces")
+      .aria_label("New workspaces")
       .test_support()
       .flex()
       .flex_none()
@@ -832,7 +832,7 @@ impl Sidebar {
         12.,
         palette.sidebar_foreground.opacity(0.7),
       ))
-      .child("Open")
+      .child("New")
       .on_click(self.on_action(SidebarAction::OpenWorkspaces))
   }
 

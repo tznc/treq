@@ -226,7 +226,7 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "defaults": defaults,
     }));
   }
-  if dialogs.open_workspaces && !repo.is_empty() {
+  if let (Some(stack_on), false) = (&dialogs.open_workspaces, repo.is_empty()) {
     // Every repository the sidebar shows, whose links the dialog opens.
     let repos: Vec<&str> = std::iter::once(repo)
       .chain(
@@ -242,6 +242,7 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "repoPath": repo,
       "repos": repos,
       "linear": data.flags.linear,
+      "stackOn": stack_on,
     }));
   }
   if let Some((repo_path, id, branch)) = &dialogs.rename {
