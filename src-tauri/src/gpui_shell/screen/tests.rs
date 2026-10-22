@@ -4833,16 +4833,16 @@ fn agent_pty() -> String {
 }
 
 #[gpui::test]
-fn terminal_pane_starts_collapsed_and_expands(cx: &mut TestAppContext) {
+fn terminal_pane_hides_its_chip_without_terminals(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
-  assert!(h.drawn("workspace-terminal-pane"));
-  assert!(h.drawn("terminal-expand"));
+  assert!(!h.drawn("terminal-pane-controls"));
+  assert!(!h.drawn("terminal-scroll-container"));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-scroll-container"));
+  h.click("terminal-collapse");
   assert!(!h.drawn("terminal-scroll-container"));
   h.click("terminal-expand");
   assert!(h.drawn("terminal-scroll-container"));
-  assert!(h.drawn("terminal-collapse"));
-  // No terminal yet: nothing to maximize.
-  assert!(!h.drawn("terminal-maximize"));
 }
 
 #[gpui::test]
@@ -5012,7 +5012,7 @@ fn terminal_pane_drops_the_active_column_on_a_click_outside(cx: &mut TestAppCont
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   assert!(h.drawn("terminal-column-active"));
   h.click("terminal-maximize");
-  // The controls above the pane are part of it.
+  // The pane's controls are part of it.
   assert!(h.drawn("terminal-column-active"));
   h.click("terminal-restore");
   h.click("workspace-header");
@@ -5025,7 +5025,7 @@ fn terminal_pane_picks_the_environment_new_terminals_run_in(cx: &mut TestAppCont
   host.devcontainers = true;
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   assert!(!h.drawn("terminal-environment"));
-  h.click("terminal-expand");
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-environment");
   assert!(h.drawn("terminal-environment-menu"));
   h.click("environment-local");
@@ -5061,8 +5061,8 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
   assert!(!h.drawn("terminal-column-shell"));
-  // Closing the last terminal collapses the pane.
-  assert!(h.drawn("terminal-expand"));
+  // Closing the last terminal hides the pane, chip included.
+  assert!(!h.drawn("terminal-pane-controls"));
 }
 
 #[gpui::test]
@@ -5131,6 +5131,7 @@ fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
   );
   assert!(h.drawn("terminal-restore"));
   assert!(!h.drawn("code-readme"), "the maximized pane covers the tab");
+  assert!(h.drawn("workspace-header"), "the header stays above it");
   set_terminal(
     &mut h,
     serde_json::json!({
@@ -5416,11 +5417,11 @@ fn a_remote_repository_asks_react_for_new_shells(cx: &mut TestAppContext) {
 fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
   use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
-  h.cx.run_until_parked();
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   let at = h
     .cx
-    .debug_bounds("terminal-expand")
-    .expect("expand")
+    .debug_bounds("terminal-collapse")
+    .expect("collapse")
     .center();
   h.cx.simulate_mouse_move(at, None, Modifiers::none());
   h.cx
@@ -5429,7 +5430,7 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   let shown = h.popups.borrow().iter().any(|p| {
     matches!(p, PopupRequest::ShowTooltip { content: TooltipContent::Shortcut { text, keys }, .. }
-      if text == "Expand" && *keys == crate::gpui_shell::keys::hint("⌘ + J"))
+      if text == "Collapse" && *keys == crate::gpui_shell::keys::hint("⌘ + J"))
   });
   assert!(shown, "{:?}", h.popups.borrow());
 }

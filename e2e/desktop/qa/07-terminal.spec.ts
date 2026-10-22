@@ -1,24 +1,23 @@
 // The terminal pane: a shell and an agent session (the fake `claude`
 // prints a short transcript), a new shell from the keyboard, search,
 // maximize/restore, collapse/expand and the header tooltips.
-//
-// The pane's header controls are not observable: the environment chip
-// (Local, Maximize, Collapse) sits at the pane's top right, at a fixed
-// place in the 1400x900 window while the pane has its default height.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, row, settle } from "./helpers.ts";
 
 const BRANCH = "feat/keyvalues-cache";
-const CHIP_Y = 589;
-const MAXIMIZE_X = 1359;
-const COLLAPSE_X = 1381;
 
 test.describe.configure({ mode: "serial" });
 
 test("terminal: shell and agent sessions", async ({ page }) => {
   await openWorkspace(page, BRANCH);
   await openTab(page, "Commits");
+  await capture(page, {
+    name: "07-terminal-none",
+    title: "No terminals yet",
+    expectations: ["No terminal chip or pane shows: the tab has the whole height"],
+  });
+  await expect(page.getByRole("button", { name: "Expand" })).toHaveCount(0);
   await row(page, BRANCH).hover();
   await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
   await settle(page, 2500);
@@ -32,8 +31,8 @@ test("terminal: shell and agent sessions", async ({ page }) => {
     title: "Terminal pane: a shell session",
     expectations: [
       "Each session column has a header naming it and its workspace",
-      "Prompt, ls output and git log colours render in the theme's ANSI palette",
-      "Cursor visible; no stray characters",
+      "Terminals follow the theme: dark on #1e1e1e, light on white, with readable ANSI colours",
+      "Local, Maximize and Collapse float at the pane's top right",
     ],
   });
   await capture(page, {
@@ -75,7 +74,8 @@ test("terminal: shell and agent sessions", async ({ page }) => {
 test("terminal: tooltip, maximize, collapse", async ({ page }) => {
   await openWorkspace(page, BRANCH);
   await openTab(page, "Commits");
-  await page.mouse.move(MAXIMIZE_X, CHIP_Y, { steps: 4 });
+  const maximize = page.getByRole("button", { name: "Maximize" });
+  await maximize.hover();
   await settle(page, 1500);
   await capture(page, {
     name: "07-terminal-maximize-tooltip",
@@ -85,26 +85,25 @@ test("terminal: tooltip, maximize, collapse", async ({ page }) => {
     expectations: ["Tooltip 'Maximize' with its shortcut, inside the window"],
     issue: "The shortcut reads '⌘ + Ctrl + J' on Linux",
   });
-  await page.mouse.click(MAXIMIZE_X, CHIP_Y);
+  await maximize.click();
   await settle(page, 1500);
   await capture(page, {
     name: "07-terminal-maximized",
     title: "Terminal pane maximized",
     expectations: [
-      "The pane fills the content area below the workspace header",
-      "A Restore control replaces Maximize; terminals reflow",
+      "The workspace header stays; the pane fills the area below it",
+      "Restore sits in the pane's bar; no control covers terminal text",
     ],
   });
-  // Restore: the chip moves with the pane's top edge, so use the keyboard.
-  await page.keyboard.press("Meta+Control+j");
+  await page.getByRole("button", { name: "Restore" }).click();
   await settle(page, 1200);
   await capture(page, {
     name: "07-terminal-restored",
-    title: "Terminal pane restored (Super+Ctrl+J)",
+    title: "Terminal pane restored",
     expectations: ["The pane is back at its default height"],
   });
 
-  await page.mouse.click(COLLAPSE_X, CHIP_Y);
+  await page.getByRole("button", { name: "Collapse" }).click();
   await settle(page, 1200);
   await capture(page, {
     name: "07-terminal-collapsed",

@@ -1,7 +1,8 @@
 //! Terminal emulation for the GPUI terminal pane: PTY output goes through
 //! alacritty's parser into a grid, and keystrokes come back out as the bytes
 //! xterm would send. Matches the xterm.js setup React used (5000 lines of
-//! scrollback, xterm.js's default palette on a #1e1e1e background).
+//! scrollback, xterm.js's default palette on a #1e1e1e background), with a
+//! light scheme for the light theme.
 
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
@@ -14,15 +15,45 @@ use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
 use std::sync::{Arc, Mutex};
 
 pub const SCROLLBACK: usize = 5000;
-pub const BACKGROUND: u32 = 0x1e1e1e;
-pub const FOREGROUND: u32 = 0xffffff;
-pub const SELECTION: u32 = 0x4b4b4b;
+/// The colours a frame is drawn in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scheme {
+  pub background: u32,
+  pub foreground: u32,
+  pub selection: u32,
+  pub ansi: [u32; 16],
+}
 
-/// xterm.js's default ANSI palette.
-const ANSI: [u32; 16] = [
-  0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, 0x555753,
-  0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec,
-];
+/// xterm.js's defaults, as React drew every terminal.
+pub const DARK: Scheme = Scheme {
+  background: 0x1e1e1e,
+  foreground: 0xffffff,
+  selection: 0x4b4b4b,
+  ansi: [
+    0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, 0x555753,
+    0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec,
+  ],
+};
+
+/// VS Code's light terminal, with green and yellow darkened to stay
+/// readable on white.
+pub const LIGHT: Scheme = Scheme {
+  background: 0xffffff,
+  foreground: 0x333333,
+  selection: 0xadd6ff,
+  ansi: [
+    0x000000, 0xcd3131, 0x107c10, 0x949800, 0x0451a5, 0xbc05bc, 0x0598bc, 0x555555, 0x666666,
+    0xcd3131, 0x098f09, 0x8f8f00, 0x0451a5, 0xbc05bc, 0x0598bc, 0xa5a5a5,
+  ],
+};
+
+pub fn scheme(dark: bool) -> &'static Scheme {
+  if dark {
+    &DARK
+  } else {
+    &LIGHT
+  }
+}
 
 /// What the terminal asks of its host while parsing output.
 #[derive(Debug, Clone, PartialEq)]
@@ -398,7 +429,7 @@ impl Emulator {
     lines.join("\n").trim_end().to_string()
   }
 
-  pub fn frame(&self) -> Frame {
+  pub fn frame(&self, scheme: &Scheme) -> Frame {
     let content = self.term.renderable_content();
     let offset = content.display_offset as i32;
     let selection = content.selection;
@@ -410,24 +441,24 @@ impl Emulator {
         continue;
       }
       let flags = cell.flags;
-      let mut fg = resolve(cell.fg, colors, flags.contains(Flags::BOLD));
+      let mut fg = resolve(cell.fg, colors, flags.contains(Flags::BOLD), scheme);
       let mut bg = match cell.bg {
         Color::Named(NamedColor::Background) => None,
-        color => Some(resolve(color, colors, false)),
+        color => Some(resolve(color, colors, false, scheme)),
       };
       if flags.contains(Flags::INVERSE) {
-        let back = bg.unwrap_or(BACKGROUND);
+        let back = bg.unwrap_or(scheme.background);
         bg = Some(fg);
         fg = back;
       }
       if flags.contains(Flags::DIM) {
-        fg = dim(fg);
+        fg = dim(fg, scheme.background);
       }
       if flags.contains(Flags::HIDDEN) {
-        fg = bg.unwrap_or(BACKGROUND);
+        fg = bg.unwrap_or(scheme.background);
       }
       if selection.is_some_and(|range| range.contains(cell.point)) {
-        bg = Some(SELECTION);
+        bg = Some(scheme.selection);
       }
       let width = if flags.contains(Flags::WIDE_CHAR) {
         2
@@ -540,15 +571,17 @@ fn rgb(color: Rgb) -> u32 {
   (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)
 }
 
-fn dim(color: u32) -> u32 {
-  let channel = |shift: u32| (((color >> shift) & 0xff) * 2 / 3) << shift;
+/// Two thirds of the way from the background to `color`.
+fn dim(color: u32, background: u32) -> u32 {
+  let channel =
+    |shift: u32| ((((color >> shift) & 0xff) * 2 + ((background >> shift) & 0xff)) / 3) << shift;
   channel(16) | channel(8) | channel(0)
 }
 
 /// xterm's 256-colour table.
-pub fn indexed(index: u8) -> u32 {
+pub fn indexed(index: u8, scheme: &Scheme) -> u32 {
   match index {
-    0..=15 => ANSI[index as usize],
+    0..=15 => scheme.ansi[index as usize],
     16..=231 => {
       let levels = [0u32, 95, 135, 175, 215, 255];
       let n = u32::from(index - 16);
@@ -563,7 +596,12 @@ pub fn indexed(index: u8) -> u32 {
   }
 }
 
-fn resolve(color: Color, colors: &alacritty_terminal::term::color::Colors, bold: bool) -> u32 {
+fn resolve(
+  color: Color,
+  colors: &alacritty_terminal::term::color::Colors,
+  bold: bool,
+  scheme: &Scheme,
+) -> u32 {
   match color {
     Color::Spec(spec) => rgb(spec),
     Color::Indexed(index) => {
@@ -571,7 +609,7 @@ fn resolve(color: Color, colors: &alacritty_terminal::term::color::Colors, bold:
       let index = if bold && index < 8 { index + 8 } else { index };
       colors[index as usize]
         .map(rgb)
-        .unwrap_or_else(|| indexed(index))
+        .unwrap_or_else(|| indexed(index, scheme))
     }
     Color::Named(named) => {
       let index = named as usize;
@@ -579,12 +617,17 @@ fn resolve(color: Color, colors: &alacritty_terminal::term::color::Colors, bold:
         return rgb(spec);
       }
       match named {
-        NamedColor::Foreground | NamedColor::BrightForeground | NamedColor::Cursor => FOREGROUND,
-        NamedColor::DimForeground => dim(FOREGROUND),
-        NamedColor::Background => BACKGROUND,
-        _ if index < 8 && bold => ANSI[index + 8],
-        _ if index < 16 => ANSI[index],
-        _ => dim(ANSI[(index - NamedColor::DimBlack as usize) % 8]),
+        NamedColor::Foreground | NamedColor::BrightForeground | NamedColor::Cursor => {
+          scheme.foreground
+        }
+        NamedColor::DimForeground => dim(scheme.foreground, scheme.background),
+        NamedColor::Background => scheme.background,
+        _ if index < 8 && bold => scheme.ansi[index + 8],
+        _ if index < 16 => scheme.ansi[index],
+        _ => dim(
+          scheme.ansi[(index - NamedColor::DimBlack as usize) % 8],
+          scheme.background,
+        ),
       }
     }
   }
@@ -711,9 +754,9 @@ mod tests {
     let mut emu = Emulator::new(20, 3);
     emu.feed(b"hello\r\nworld");
     assert_eq!(emu.screen_text(), "hello\nworld");
-    let frame = emu.frame();
+    let frame = emu.frame(&DARK);
     assert_eq!(frame.lines[0][0].text, "hello");
-    assert_eq!(frame.lines[0][0].fg, FOREGROUND);
+    assert_eq!(frame.lines[0][0].fg, DARK.foreground);
     assert_eq!(frame.cursor, Some((1, 5)));
   }
 
@@ -721,7 +764,7 @@ mod tests {
   fn colours_runs_with_sgr() {
     let mut emu = Emulator::new(20, 1);
     emu.feed(b"a\x1b[31mred\x1b[0m\x1b[1;32mok\x1b[38;5;196mx\x1b[48;2;1;2;3my");
-    let runs = &emu.frame().lines[0];
+    let runs = &emu.frame(&DARK).lines[0];
     let texts: Vec<_> = runs
       .iter()
       .map(|run| (run.text.as_str(), run.fg, run.bg))
@@ -729,7 +772,7 @@ mod tests {
     assert_eq!(
       texts,
       vec![
-        ("a", FOREGROUND, None),
+        ("a", DARK.foreground, None),
         ("red", 0xcc0000, None),
         ("ok", 0x8ae234, None),
         ("x", 0xff0000, None),
@@ -740,11 +783,31 @@ mod tests {
   }
 
   #[test]
+  fn draws_in_the_light_scheme() {
+    let mut emu = Emulator::new(10, 1);
+    emu.feed(b"a\x1b[31mr\x1b[0m\x1b[2md\x1b[0m\x1b[7mi");
+    let runs: Vec<_> = emu.frame(&LIGHT).lines[0]
+      .iter()
+      .map(|run| (run.fg, run.bg))
+      .collect();
+    assert_eq!(
+      runs,
+      vec![
+        (LIGHT.foreground, None),
+        (0xcd3131, None),
+        // Dim fades towards the white background, not to black.
+        (0x777777, None),
+        (LIGHT.background, Some(LIGHT.foreground)),
+      ]
+    );
+  }
+
+  #[test]
   fn inverse_swaps_colours() {
     let mut emu = Emulator::new(10, 1);
     emu.feed(b"\x1b[7mx");
-    let run = &emu.frame().lines[0][0];
-    assert_eq!((run.fg, run.bg), (BACKGROUND, Some(FOREGROUND)));
+    let run = &emu.frame(&DARK).lines[0][0];
+    assert_eq!((run.fg, run.bg), (DARK.background, Some(DARK.foreground)));
   }
 
   #[test]
@@ -755,7 +818,7 @@ mod tests {
     assert_eq!(emu.history(), 2);
     emu.scroll(2);
     assert_eq!(emu.screen_text(), "1\n2");
-    assert_eq!(emu.frame().cursor, None);
+    assert_eq!(emu.frame(&DARK).cursor, None);
     emu.scroll_to_bottom();
     assert_eq!(emu.screen_text(), "3\n4");
   }
@@ -801,7 +864,7 @@ mod tests {
     emu.select_start(0, 6, false, SelectKind::Simple);
     emu.select_extend(0, 10, true);
     assert_eq!(emu.selection_text().as_deref(), Some("world"));
-    assert_eq!(emu.frame().lines[0][1].bg, Some(SELECTION));
+    assert_eq!(emu.frame(&DARK).lines[0][1].bg, Some(DARK.selection));
     emu.select_start(0, 1, false, SelectKind::Word);
     assert_eq!(emu.selection_text().as_deref(), Some("hello"));
     emu.select_all();
@@ -816,11 +879,14 @@ mod tests {
     emu.feed(b"a.b one\r\ntwo a.b\r\nend");
     assert!(emu.find("a.b", true));
     assert_eq!(emu.selection_text().as_deref(), Some("a.b"));
-    assert_eq!(emu.frame().lines[0][0].bg, Some(SELECTION));
+    assert_eq!(emu.frame(&DARK).lines[0][0].bg, Some(DARK.selection));
     assert!(emu.find("a.b", true));
-    assert_eq!(emu.frame().lines[1].last().unwrap().bg, Some(SELECTION));
+    assert_eq!(
+      emu.frame(&DARK).lines[1].last().unwrap().bg,
+      Some(DARK.selection)
+    );
     assert!(emu.find("a.b", false));
-    assert_eq!(emu.frame().lines[0][0].bg, Some(SELECTION));
+    assert_eq!(emu.frame(&DARK).lines[0][0].bg, Some(DARK.selection));
     assert!(!emu.find("zzz", true));
     emu.clear_find();
     assert_eq!(emu.selection_text(), None);
@@ -955,12 +1021,12 @@ mod tests {
 
   #[test]
   fn maps_the_256_colour_table() {
-    assert_eq!(indexed(1), 0xcc0000);
-    assert_eq!(indexed(16), 0x000000);
-    assert_eq!(indexed(21), 0x0000ff);
-    assert_eq!(indexed(231), 0xffffff);
-    assert_eq!(indexed(232), 0x080808);
-    assert_eq!(indexed(255), 0xeeeeee);
+    assert_eq!(indexed(1, &DARK), 0xcc0000);
+    assert_eq!(indexed(16, &DARK), 0x000000);
+    assert_eq!(indexed(21, &DARK), 0x0000ff);
+    assert_eq!(indexed(231, &DARK), 0xffffff);
+    assert_eq!(indexed(232, &DARK), 0x080808);
+    assert_eq!(indexed(255, &DARK), 0xeeeeee);
   }
 
   #[test]
