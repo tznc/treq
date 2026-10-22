@@ -1132,20 +1132,25 @@ impl WorkspaceView {
   }
 
   fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let colors = match pr.state {
-      PrState::Open => tw::GREEN,
-      PrState::Closed => tw::RED,
-      PrState::Merged => tw::PURPLE,
-    };
-    let (text, border, hover) = tw::state(self.dark, colors);
-    let icon = if pr.draft {
-      theme::ICON_PR_DRAFT
-    } else {
-      match pr.state {
-        PrState::Open => theme::ICON_PR,
-        PrState::Closed => theme::ICON_PR_CLOSED,
-        PrState::Merged => theme::ICON_MERGE,
-      }
+    // The button reads the PR's status, colored as GitHub colors it.
+    let draft = pr.draft && pr.state == PrState::Open;
+    let (label, icon, (text, border, hover)) = match pr.state {
+      _ if draft => (
+        "Draft",
+        theme::ICON_PR_DRAFT,
+        (p.muted_foreground, p.border, p.muted_foreground),
+      ),
+      PrState::Open => ("Open", theme::ICON_PR, tw::state(self.dark, tw::GREEN)),
+      PrState::Closed => (
+        "Closed",
+        theme::ICON_PR_CLOSED,
+        tw::state(self.dark, tw::RED),
+      ),
+      PrState::Merged => (
+        "Merged",
+        theme::ICON_MERGE,
+        tw::state(self.dark, tw::PURPLE),
+      ),
     };
     let styled = |b: Button| {
       b.variant(Variant::Outline)
@@ -1158,7 +1163,7 @@ impl WorkspaceView {
       .gap_1()
       .rounded_r_none()
       .child(ui::icon(icon, 16., text))
-      .child("View PR")
+      .child(label)
       .aria_label(view_pr_name(pr))
       .on_click(self.press("workspace.viewPr"));
     let web = styled(Button::new("workspace-view-pr-web", p))
