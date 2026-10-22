@@ -6824,9 +6824,34 @@ impl workspace_ops::WorkspaceActionsHost for FakeHost {
 }
 
 /// `open-non-git-folder.test.tsx`: `openRepositoryAtPath` on a folder
-/// without `.git` toasts, creates no `.treq` and remembers nothing.
+/// without `.git` offers to initialize one; declined, it toasts, creates no
+/// `.treq` and remembers nothing.
 #[test]
-fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
+fn declining_to_initialize_a_folder_that_is_not_a_repository_remembers_nothing() {
+  let dir = tempfile::TempDir::new().unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost {
+    decline: true,
+    ..FakeHost::default()
+  };
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(
+    host.calls(),
+    [
+      format!("ask {path} is not a Git repository. Initialize one here?"),
+      "notify toast Not a Git Repository".into(),
+    ]
+  );
+  assert!(shown.is_empty(), "not the window's repository");
+  assert!(!dir.path().join(".treq").exists());
+  assert!(!dir.path().join(".git").exists());
+}
+
+#[test]
+fn initializing_a_folder_that_is_not_a_repository_opens_it() {
   let dir = tempfile::TempDir::new().unwrap();
   let path = dir.path().to_str().unwrap();
   let host = FakeHost::default();
@@ -6834,9 +6859,17 @@ fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
 
   onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
 
-  assert_eq!(host.calls(), ["notify toast Failed to open repository"]);
-  assert!(shown.is_empty(), "not the window's repository");
-  assert!(!dir.path().join(".treq").exists());
+  assert!(gix::open(dir.path()).is_ok(), "a Git repository now");
+  assert_eq!(
+    host.calls(),
+    [
+      format!("ask {path} is not a Git repository. Initialize one here?"),
+      format!("set last_opened_repo_path={path}"),
+      "notify repoOpened".into(),
+      "notify toast Repository Opened".into(),
+    ]
+  );
+  assert_eq!(shown, [path]);
 }
 
 #[test]
