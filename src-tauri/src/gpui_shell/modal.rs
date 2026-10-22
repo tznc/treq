@@ -30,6 +30,8 @@ struct ModalRoot {
 
 impl Render for ModalRoot {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    #[cfg(feature = "e2e")]
+    super::e2e::begin_frame(window);
     super::ui::apply_zoom(window, cx);
     div()
       .size_full()

@@ -154,7 +154,10 @@ impl Render for Shell {
     cx: &mut gpui::Context<Self>,
   ) -> impl IntoElement {
     #[cfg(feature = "e2e")]
-    e2e::shell_window(window.window_handle());
+    {
+      e2e::begin_frame(window);
+      e2e::shell_window(window.window_handle());
+    }
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark

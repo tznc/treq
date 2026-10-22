@@ -14,8 +14,11 @@ test("opens the repository on its home view", async ({ page }) => {
   await expect(
     page.getByRole("tab", { name: "Code", selected: true }),
   ).toBeVisible();
-  // The README, rendered as Markdown.
-  await expect(page.getByText("e2e fixture").first()).toBeVisible();
+  // The README, rendered as Markdown, once: the text of earlier frames does
+  // not linger after the caret blinks a few times.
+  await expect(page.getByText("e2e fixture")).toBeVisible();
+  await page.waitForTimeout(1_500);
+  await expect(page.getByText("e2e fixture")).toHaveCount(1);
   // The home task input.
   await expect(
     page.getByRole("textbox", { name: "Describe a task..." }),
