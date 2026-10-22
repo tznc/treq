@@ -1186,8 +1186,6 @@ impl AgentPromptView {
         .relative()
         .flex()
         .items_center()
-        .gap(zpx(6.))
-        .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
         .child(
           ui::text(div(), TextSize::Xs)
             .id("task-agent")
@@ -1207,6 +1205,7 @@ impl AgentPromptView {
             .border_color(p.border)
             .bg(p.background)
             .cursor_pointer()
+            .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
             .child(agent.label())
             .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., p.muted_foreground))
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
