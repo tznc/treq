@@ -7,7 +7,9 @@
 //! The workspace view builds the popover and hands it to the window with a
 //! [`PopupRequest::ShowPopover`](super::popup::PopupRequest); the popover
 //! reads what it lists from the backend itself and says it is done with a
-//! [`Closed`] event. What only React can do (retargeting the workspace,
+//! [`Closed`] event. An outside press goes on to the shell window under
+//! the backdrop, as base-ui lets it through, but for a press on the
+//! popover's own button, which only closes it. What only React can do (retargeting the workspace,
 //! running workflows, the prompt history dialog) goes back as screen actions.
 
 use crate::gpui_shell::ui::zpx;
@@ -17,8 +19,9 @@ use gpui_kit::component::input::{
   Input, InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
 };
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, Bounds, Context, Entity, EventEmitter, FocusHandle, KeyDownEvent,
-  MouseButton, Pixels, Subscription, Task, Window,
+  self, div, prelude::*, px, AnyWindowHandle, Bounds, Context, Entity, EventEmitter, FocusHandle,
+  KeyDownEvent, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Subscription,
+  Task, Window,
 };
 
 use super::{
@@ -87,6 +90,9 @@ pub struct Popover {
   dark: bool,
   /// The button it opened from, in window coordinates.
   anchor: Bounds<Pixels>,
+  /// The shell window under the backdrop, which an outside press goes on
+  /// to.
+  shell: Option<AnyWindowHandle>,
   align: Align,
   focus: FocusHandle,
   focused: bool,
@@ -100,6 +106,7 @@ impl Popover {
   pub fn new(
     kind: Kind,
     anchor: Bounds<Pixels>,
+    shell: Option<AnyWindowHandle>,
     dark: bool,
     host: Arc<dyn PopoverHost>,
     react: ActionSink,
@@ -116,6 +123,7 @@ impl Popover {
       react,
       dark,
       anchor,
+      shell,
       align,
       focus: cx.focus_handle(),
       focused: false,
@@ -161,6 +169,35 @@ impl Popover {
 
   pub fn close(&mut self, cx: &mut Context<Self>) {
     cx.emit(Closed);
+  }
+
+  /// Closes the popover for a press outside it, and presses the shell
+  /// window there, so the press is not lost on the backdrop. A press on the
+  /// popover's own button only closes it, as a toggle.
+  fn outside_press(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+    self.close(cx);
+    let Some(shell) = self
+      .shell
+      .filter(|_| !self.anchor.contains(&event.position))
+    else {
+      return;
+    };
+    let down = MouseDownEvent {
+      first_mouse: false,
+      ..event.clone()
+    };
+    let up = MouseUpEvent {
+      button: event.button,
+      position: event.position,
+      modifiers: event.modifiers,
+      click_count: event.click_count,
+    };
+    cx.defer(move |cx| {
+      let _ = shell.update(cx, |_, window, cx| {
+        window.dispatch_event(PlatformInput::MouseDown(down), cx);
+        window.dispatch_event(PlatformInput::MouseUp(up), cx);
+      });
+    });
   }
 
   /// Reads what the popover lists, off the main thread.
@@ -244,9 +281,9 @@ impl Render for Popover {
     };
     let origin = self.origin(width, viewport);
     let close = |this: &mut Self,
-                 _: &gpui::MouseDownEvent,
+                 event: &MouseDownEvent,
                  _: &mut Window,
-                 cx: &mut Context<Self>| { this.close(cx) };
+                 cx: &mut Context<Self>| { this.outside_press(event, cx) };
     div()
       .id("header-popover-backdrop")
       .debug_selector(|| "header-popover-backdrop".into())

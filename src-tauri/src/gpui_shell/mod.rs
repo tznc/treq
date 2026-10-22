@@ -138,6 +138,10 @@ impl Shell {
       let shortcut = found
         .map(window::from_app)
         .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
+      if shortcut == Some(window::Shortcut::Escape) && modal::escape_popover(&label, cx) {
+        cx.stop_propagation();
+        return;
+      }
       if let Some(shortcut) = shortcut {
         // An open dialog still takes its Escape.
         if shortcut != window::Shortcut::Escape {
