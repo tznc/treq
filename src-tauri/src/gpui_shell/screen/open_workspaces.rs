@@ -436,12 +436,21 @@ impl OpenWorkspacesDialog {
     .detach();
   }
 
-  /// Each line and its check; `None` while it is checked.
-  pub(super) fn lines(&self) -> Vec<(String, Option<&Checked>)> {
+  /// Each line and its check, an indented line stacked on the line above
+  /// it; `None` while it, or the line it stacks on, is checked.
+  pub(super) fn lines(&self) -> Vec<(String, Option<Checked>)> {
+    let parents = data::stack_parents(&self.text);
+    let mut resolved: HashMap<String, Option<Checked>> = HashMap::new();
     data::parse_lines(&self.text)
       .into_iter()
       .map(|(raw, _)| {
-        let checked = self.checks.get(&raw);
+        let own = self.checks.get(&raw);
+        let checked = match parents.get(&raw).map(|parent| resolved.get(parent)) {
+          None => own.cloned(),
+          Some(Some(Some(parent))) => own.map(|own| data::stack_on_line(own, parent)),
+          Some(_) => None,
+        };
+        resolved.insert(raw.clone(), checked.clone());
         (raw, checked)
       })
       .collect()
@@ -454,7 +463,7 @@ impl OpenWorkspacesDialog {
     let lines = self.lines();
     let from_lines = lines
       .iter()
-      .filter_map(|(_, checked)| checked.and_then(|c| c.as_ref().ok()).cloned());
+      .filter_map(|(_, checked)| checked.as_ref().and_then(|c| c.as_ref().ok()).cloned());
     let from_prs = self.chosen.iter().map(|pr| {
       let existing = self.open_branches.contains(&pr.head_ref_name);
       Target::from_pr(&self.route.repo_path, pr, existing)
@@ -619,9 +628,10 @@ impl OpenWorkspacesDialog {
   fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
     if self.fields.is_none() {
       let lines = cx.new(|cx| {
-        TextareaState::new(window, cx)
-          .auto_grow(8, 8)
-          .placeholder("Fix the login flow\nfeat/login\nhttps://github.com/acme/app/pull/42")
+        // A fixed height, not auto-grow, so Tab indents the lines.
+        TextareaState::new(window, cx).rows(8).placeholder(
+          "Fix the login flow\n  feat/login-tests\nhttps://github.com/acme/app/pull/42",
+        )
       });
       let search =
         cx.new(|cx| InputState::new(window, cx).placeholder("Search open pull requests"));
@@ -873,12 +883,10 @@ impl OpenWorkspacesDialog {
           .child(
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
-              .child("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories."),
+              .child("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above."),
           ),
       )
       .child(options)
-      .child(self.status(status, invalid, checks.len() + self.chosen.len() + self.chosen_issues.len(), p, cx))
-      .when(self.lines_open, |this| this.child(self.lines_popover(&checks, p, cx)))
       .when(!self.errors.is_empty(), |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
@@ -900,8 +908,9 @@ impl OpenWorkspacesDialog {
       .child(
         div()
           .flex()
-          .justify_end()
+          .items_center()
           .gap_2()
+          .child(self.status(status, invalid, &checks, p, cx))
           .child(
             Button::new("open-workspaces-cancel", p)
               .variant(Variant::Outline)
@@ -926,20 +935,37 @@ impl OpenWorkspacesDialog {
       )
   }
 
-  /// What the lines and picks will open; pressed, it lists each of them.
+  /// What the lines and picks will open, beside the buttons; pressed, it
+  /// lists each of them above it.
   fn status(
     &self,
     status: String,
     invalid: usize,
-    rows: usize,
+    checks: &[(String, Option<Checked>)],
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let muted = p.muted;
+    let rows = checks.len() + self.chosen.len() + self.chosen_issues.len();
+    // The invalid count goes under the summary, so neither runs under the
+    // buttons.
     div()
+      .relative()
       .flex()
-      .items_center()
-      .gap_2()
+      .flex_col()
+      .flex_1()
+      .min_w_0()
+      .items_start()
+      .when(self.lines_open, |this| {
+        // The popover's anchor: the summary's top left corner.
+        this.child(
+          div()
+            .absolute()
+            .top_0()
+            .left(zpx(-8.))
+            .child(self.lines_popover(checks, p, cx)),
+        )
+      })
       .child(
         ui::text(div(), TextSize::Sm)
           .id("open-workspaces-status")
@@ -963,9 +989,9 @@ impl OpenWorkspacesDialog {
               .when(self.lines_open, |this| this.bg(muted))
               .child(ui::icon(
                 if self.lines_open {
-                  theme::ICON_CHEVRON_UP
-                } else {
                   theme::ICON_CHEVRON_DOWN
+                } else {
+                  theme::ICON_CHEVRON_UP
                 },
                 14.,
                 p.muted_foreground,
@@ -981,6 +1007,8 @@ impl OpenWorkspacesDialog {
             .id("open-workspaces-invalid")
             .role(gpui::Role::Alert)
             .aria_label(SharedString::from(invalid.clone()))
+            .max_w_full()
+            .truncate()
             .text_color(p.destructive)
             .child(invalid)
             .test_support(),
@@ -988,10 +1016,11 @@ impl OpenWorkspacesDialog {
       })
   }
 
-  /// Each line and pick, and what it opens or why it can't.
+  /// Each line and pick, and what it opens or why it can't; it opens
+  /// upwards from the summary.
   fn lines_popover(
     &self,
-    checks: &[(String, Option<&Checked>)],
+    checks: &[(String, Option<Checked>)],
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
@@ -1014,13 +1043,13 @@ impl OpenWorkspacesDialog {
         )
       }));
     deferred(
-      anchored().child(
+      anchored().anchor(gpui::Anchor::BottomLeft).child(
         div()
           .id("open-workspaces-lines-popover")
           .debug_selector(|| "open-workspaces-lines-popover".into())
           .role(gpui::Role::List)
           .aria_label("Workspaces to open")
-          .mt_1()
+          .mb_1()
           .w(zpx(520.))
           .max_h(zpx(320.))
           .overflow_y_scroll()
@@ -1041,7 +1070,7 @@ impl OpenWorkspacesDialog {
             checks
               .iter()
               .enumerate()
-              .map(|(i, (raw, checked))| result_row(i, raw, *checked, repo_path, p)),
+              .map(|(i, (raw, checked))| result_row(i, raw, checked.as_ref(), repo_path, p)),
           )
           .children(picks.map(|(id, target)| {
             target_row(SharedString::from(id), &target, repo_path, p).into_any_element()
@@ -1370,82 +1399,95 @@ struct Plan {
 }
 
 impl Plan {
-  /// Opens existing branches a repository at a time, makes new ones on the
-  /// Stack on branch, and opens Linear issues as the Linear view does; each
-  /// result in the targets' order.
+  /// Opens or makes the targets in order, so a stacked line's parent comes
+  /// first: runs of existing branches of one repository at a time, new
+  /// branches on their base or the Stack on branch, and Linear issues as the
+  /// Linear view opens them; each result in the targets' order.
   fn run(&self, host: &dyn OpenWorkspacesHost, targets: Vec<Target>) -> Vec<(Target, Opened)> {
     let mut results: Vec<Option<Opened>> = vec![None; targets.len()];
-    let mut repos: Vec<&str> = Vec::new();
-    for target in &targets {
-      if !repos.contains(&target.repo_path.as_str()) {
-        repos.push(&target.repo_path);
+    let mut batch: Vec<usize> = Vec::new();
+    for i in 0..=targets.len() {
+      let next = targets.get(i);
+      let joins = next.is_some_and(|t| {
+        t.issue.is_none()
+          && !t.create
+          && batch
+            .first()
+            .is_none_or(|&b| targets[b].repo_path == t.repo_path)
+      });
+      if joins {
+        batch.push(i);
+        continue;
       }
-    }
-    for repo in repos {
-      let default = WorkspaceDialogHost::default_branch(host, repo).unwrap_or_default();
-      // Only the repository on screen has a Stack on select.
-      let stack_on = Some(repo)
-        .filter(|r| *r == self.repo_path)
-        .and(self.stack_on.clone())
-        .unwrap_or_else(|| default.clone());
-      let batch: Vec<usize> = (0..targets.len())
-        .filter(|&i| {
-          let t = &targets[i];
-          t.repo_path == repo && t.issue.is_none() && !t.create
-        })
-        .collect();
-      if !batch.is_empty() {
+      if let Some(&first) = batch.first() {
+        let repo = &targets[first].repo_path;
+        let (_, stack_on) = self.bases(host, repo);
         let requests: Vec<_> = batch
           .iter()
-          .map(|&i| targets[i].request(&stack_on))
+          .map(|&b| targets[b].request(&stack_on))
           .collect();
-        for (i, opened) in batch.into_iter().zip(host.open_workspaces(repo, &requests)) {
-          results[i] = Some(opened);
+        for (b, opened) in batch.drain(..).zip(host.open_workspaces(repo, &requests)) {
+          results[b] = Some(opened);
         }
       }
-      for (i, target) in targets.iter().enumerate() {
-        if target.repo_path != repo || !target.create {
-          continue;
-        }
-        let metadata = dialog_data::create_metadata(
-          target.title.as_deref().unwrap_or_default(),
-          "",
-          None,
-          &self.sparse_paths,
-          &self.symlinked_dirs,
-        );
-        // The default branch is where a plain workspace starts already.
-        let on = Some(stack_on.as_str()).filter(|b| *b != default);
-        let mut created = None;
-        let made = dialog_data::create_on_target(
-          host,
-          repo,
-          &target.branch,
-          None,
-          on,
-          &metadata,
-          &mut created,
-        );
-        results[i] = Some(match (made, created) {
-          (Ok(id), _) => Ok((id, true)),
-          (Err(err), Some(id)) => {
-            log::warn!("new workspaces: {} was made, but: {err}", target.branch);
-            Ok((id, true))
-          }
-          (Err(err), None) => Err(err),
-        });
-      }
-    }
-    for (i, target) in targets.iter().enumerate() {
-      if let Some(issue) = &target.issue {
-        results[i] = Some(host.open_issue(&target.repo_path, issue));
-      }
+      let Some(target) = next else { break };
+      results[i] = Some(if let Some(issue) = &target.issue {
+        host.open_issue(&target.repo_path, issue)
+      } else if target.create {
+        self.create(host, target)
+      } else {
+        batch.push(i);
+        continue;
+      });
     }
     targets
       .into_iter()
       .zip(results)
       .map(|(t, r)| (t, r.unwrap_or_else(|| Err("Not opened".into()))))
       .collect()
+  }
+
+  /// The repository's default branch, and the branch it stacks on: the
+  /// Stack on select's, which only the repository on screen has.
+  fn bases(&self, host: &dyn OpenWorkspacesHost, repo: &str) -> (String, String) {
+    let default = WorkspaceDialogHost::default_branch(host, repo).unwrap_or_default();
+    let stack_on = Some(repo)
+      .filter(|r| *r == self.repo_path)
+      .and(self.stack_on.clone())
+      .unwrap_or_else(|| default.clone());
+    (default, stack_on)
+  }
+
+  /// Makes the target's branch on its base, or on the Stack on branch.
+  fn create(&self, host: &dyn OpenWorkspacesHost, target: &Target) -> Opened {
+    let (default, stack_on) = self.bases(host, &target.repo_path);
+    let metadata = dialog_data::create_metadata(
+      target.title.as_deref().unwrap_or_default(),
+      "",
+      None,
+      &self.sparse_paths,
+      &self.symlinked_dirs,
+    );
+    // The default branch is where a plain workspace starts already.
+    let on = Some(target.base.as_deref().unwrap_or(&stack_on)).filter(|b| *b != default);
+    let mut created = None;
+    let made = dialog_data::create_on_target(
+      host,
+      &target.repo_path,
+      &target.branch,
+      None,
+      on,
+      &metadata,
+      &mut created,
+    );
+    match (made, created) {
+      (Ok(id), _) => Ok((id, true)),
+      (Err(err), Some(id)) => {
+        log::warn!("new workspaces: {} was made, but: {err}", target.branch);
+        Ok((id, true))
+      }
+      (Err(err), None) => Err(err),
+    }
   }
 }
 
@@ -1529,6 +1571,9 @@ fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -
   }
   if target.repo_path != repo_path {
     detail.push(repo_name(&target.repo_path).to_string());
+  }
+  if let Some(base) = target.base.as_ref().filter(|_| target.pr.is_none()) {
+    detail.push(format!("on {base}"));
   }
   detail.push(
     if target.existing {
