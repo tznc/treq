@@ -35,7 +35,7 @@ enum Op {
   /// The next workspaces read panics.
   FailNextRead,
   Focused,
-  FilesChanged(i64),
+  FilesChanged,
   PrsChanged,
   /// Time passes; the pollers read.
   Advance(u64),
@@ -211,7 +211,7 @@ fn op() -> impl Strategy<Value = Op> {
     1 => id().prop_map(Op::Add),
     1 => Just(Op::FailNextRead),
     1 => Just(Op::Focused),
-    1 => id().prop_map(Op::FilesChanged),
+    1 => Just(Op::FilesChanged),
     1 => Just(Op::PrsChanged),
     2 => (0u64..25_000).prop_map(Op::Advance),
     3 => Just(Op::Park),
@@ -281,7 +281,7 @@ fn run(window: &Window, host: &FakeHost, op: &Op, cx: &mut TestAppContext) {
     }
     Op::FailNextRead => host.panic_once.store(true, Ordering::SeqCst),
     Op::Focused => controller.update(cx, |c, cx| c.focused(cx)),
-    Op::FilesChanged(id) => controller.update(cx, |c, cx| c.files_changed(*id, cx)),
+    Op::FilesChanged => controller.update(cx, |c, cx| c.files_changed(cx)),
     Op::PrsChanged => controller.update(cx, |c, cx| c.prs_changed(cx)),
     Op::Advance(ms) => {
       cx.executor()

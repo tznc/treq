@@ -417,11 +417,9 @@ impl ChangesView {
         view.loading = false;
         view.field("changes.refreshing", false.into(), cx);
         match result {
-          Ok(snapshot) => {
-            if !view.park(&snapshot) {
-              view.apply(snapshot, cx);
-            }
-          }
+          Ok(snapshot) if view.park(&snapshot) => {}
+          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
+          Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
             view.toast(ToastTone::Error, "JJ Error", err);
             view.snapshot.get_or_insert_with(Snapshot::default);

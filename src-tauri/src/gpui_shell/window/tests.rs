@@ -8,6 +8,7 @@ use std::{
   sync::{Arc, Mutex},
 };
 
+use futures::channel::mpsc::UnboundedSender;
 use gpui::{prelude::*, Entity, TestAppContext};
 use tauri_plugin_gpui::gpui;
 
@@ -15,7 +16,7 @@ use super::{
   actions::{Menu, Shortcut},
   controller::{Presentation, WindowController},
   data::{Flags, POLL, SESSIONS_POLL},
-  host::WindowHost,
+  host::{FileWatch, WindowHost},
   remote::{RemoteHost, UserManagedValues},
   tree::tests::workspace,
 };
@@ -62,6 +63,8 @@ struct FakeHost {
   no_branch_once: std::sync::atomic::AtomicBool,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
+  /// The watched checkouts, each with the sender that reports an edit.
+  watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
 }
 
 impl FakeHost {
@@ -227,6 +230,15 @@ impl WindowHost for FakeHost {
 
   fn open_log_dir(&self) {
     self.record("log dir");
+  }
+
+  fn watch_files(&self, path: &str) -> Option<FileWatch> {
+    let (tx, changes) = futures::channel::mpsc::unbounded();
+    self.watches.lock().unwrap().push((path.into(), tx));
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(()),
+    })
   }
 
   fn force_rebase(&self, _: &str, id: i64, branch: &str) -> Result<SingleRebaseResult, String> {
@@ -637,15 +649,56 @@ fn selects_a_created_workspace_once_it_is_listed(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_window_regaining_focus_reads_the_changes_again(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  let before = window
-    .controller
-    .read_with(cx, |c, _| c.model().view.changes_revision);
+  let revision = |cx: &mut TestAppContext| {
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().view.changes_revision)
+  };
+  let before = revision(cx);
   window.controller.update(cx, |c, cx| c.focused(cx));
-  window.controller.update(cx, |c, cx| c.files_changed(9, cx));
-  let after = window
-    .controller
-    .read_with(cx, |c, _| c.model().view.changes_revision);
-  assert_eq!(after, before + 1, "another workspace's files do not count");
+  assert_eq!(revision(cx), before + 1);
+}
+
+#[gpui::test]
+fn edits_on_disk_in_the_selected_checkout_read_the_changes_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  let revision = |cx: &mut TestAppContext| {
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().view.changes_revision)
+  };
+  let watched = |host: &FakeHost| -> Vec<String> {
+    let watches = host.watches.lock().unwrap();
+    watches
+      .iter()
+      .filter(|(_, tx)| !tx.is_closed())
+      .map(|(path, _)| path.clone())
+      .collect()
+  };
+  assert_eq!(watched(&host), ["/repo"]);
+
+  let before = revision(cx);
+  let edit = |host: &FakeHost, path: &str| {
+    let watches = host.watches.lock().unwrap();
+    let (_, tx) = watches.iter().rev().find(|(p, _)| p == path).unwrap();
+    let _ = tx.unbounded_send(());
+  };
+  edit(&host, "/repo");
+  cx.run_until_parked();
+  assert_eq!(revision(cx), before + 1);
+
+  select(&window, cx, 1, false);
+  cx.run_until_parked();
+  assert_eq!(
+    watched(&host),
+    [super::model::full_path(&workspace(1, "a", Some("main")))],
+    "the selection's checkout replaces the repository's"
+  );
+  edit(&host, "/repo");
+  cx.run_until_parked();
+  assert_eq!(revision(cx), before + 1, "the old watch stopped");
 }
 
 #[gpui::test]
