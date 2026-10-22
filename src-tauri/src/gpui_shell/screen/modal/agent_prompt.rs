@@ -1285,6 +1285,8 @@ impl AgentPromptView {
           .items_start()
           .child(
             div()
+              .flex_1()
+              .min_w_0()
               .flex()
               .flex_col()
               .gap(zpx(2.))

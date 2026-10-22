@@ -146,7 +146,7 @@ impl Env {
 /// when given, its content `gap-y-4` apart.
 pub fn dialog(
   id: &'static str,
-  width: gpui::Pixels,
+  width: impl Into<gpui::Length> + Clone,
   height: Option<gpui::Pixels>,
   viewport: gpui::Size<gpui::Pixels>,
   p: &Palette,
