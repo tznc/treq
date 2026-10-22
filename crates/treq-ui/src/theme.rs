@@ -447,6 +447,15 @@ impl Palette {
     gpui::black().opacity(if self.dark { 0.55 } else { 0.4 })
   }
 
+  /// Behind file contents and code blocks: `--code-background`.
+  pub fn code_background(&self) -> Hsla {
+    if self.dark {
+      token(0., 0., 14.)
+    } else {
+      token(220., 13., 94.)
+    }
+  }
+
   /// The GitHub button's fill, GitHub's own near-black in both themes.
   pub fn github(&self) -> Hsla {
     tw::color(tw::GITHUB)

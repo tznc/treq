@@ -22,6 +22,15 @@ impl Kbd {
     }
   }
 
+  /// A key cap showing `label` as written, for keys already formatted, such
+  /// as `↑↓` or `Esc` in a footer of hints.
+  pub fn from_label(label: impl Into<SharedString>, palette: &Palette) -> Self {
+    Self {
+      label: label.into(),
+      palette: *palette,
+    }
+  }
+
   /// `keystroke` as this platform writes it, for a shortcut shown as text
   /// rather than a key cap, such as in a menu.
   pub fn label(keystroke: &str) -> String {
