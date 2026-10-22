@@ -2233,10 +2233,10 @@ impl CodeView {
     let tentative = matches!(kind, Kind::Tentative(_));
     let target = matches!(kind, Kind::Target);
     let title = headline(commit, tentative);
-    let yellow_bg = if self.dark {
-      tw(0x422006).opacity(0.2)
+    let (yellow_bg, yellow_hover) = if self.dark {
+      (tw(0x422006).opacity(0.2), tw(0x422006).opacity(0.3))
     } else {
-      tw(0xfefce8).opacity(0.8)
+      (tw(0xfefce8).opacity(0.8), tw(0xfef9c3).opacity(0.8))
     };
     let yellow_border = if self.dark {
       tw(0x713f12).opacity(0.6)
@@ -2266,8 +2266,12 @@ impl CodeView {
     let change = commit.change_id.clone();
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
     let selector = id.to_string();
-    let muted = p.muted;
     let column = p.background.blend(p.muted.opacity(0.2));
+    // The row's hover fill, and the card's `hover:bg-muted/40` over it. GPUI
+    // paints a shadow under the whole box, so a translucent card shows the
+    // shadow through: blend both down to opaque.
+    let row_hover = if tentative { yellow_hover } else { p.muted };
+    let card_hover = column.blend(row_hover).blend(p.muted.opacity(0.4));
     let body = div()
       .id(id)
       .debug_selector(move || selector)
@@ -2290,7 +2294,7 @@ impl CodeView {
         this.bg(column.blend(yellow_bg)).p_2().m_neg_2().shadow_sm()
       })
       .when(target, |this| this.bg(p.muted.opacity(0.3)).p_2().m_neg_2())
-      .hover(move |s| s.bg(muted.opacity(0.4)))
+      .hover(move |s| s.bg(card_hover))
       .child(ui::text(div(), TextSize::Sm).truncate().child(title))
       .when_some(
         match &kind {
@@ -2352,7 +2356,6 @@ impl CodeView {
       .on_click(cx.listener(move |view, _, _, cx| {
         view.field("code.commit", change.clone().into(), cx);
       }));
-    let hover = p.muted;
     div()
       .relative()
       .flex()
@@ -2362,7 +2365,7 @@ impl CodeView {
       .px_2()
       .mx_neg_2()
       .rounded(zpx(8.))
-      .hover(move |s| s.bg(hover))
+      .hover(move |s| s.bg(row_hover))
       .when(tentative, |this| {
         this.bg(yellow_bg).border_1().border_color(yellow_border)
       })
