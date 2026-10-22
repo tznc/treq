@@ -53,6 +53,11 @@ use crate::{
   jj::{JjDiffHunk, JjFileChange},
 };
 
+/// Diff code and file paths, in pixels. JetBrains Mono's glyphs are about a
+/// fifth wider than Inter's at the same size, so 13px code read larger than
+/// the 13px UI around it; 12px matches its width, as GitHub's diffs do.
+const CODE_TEXT: f32 = 12.;
+
 /// A workspace, or the home repository, files can move to.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct MoveTarget {
@@ -613,9 +618,12 @@ impl ChangesView {
       Some(card) => {
         let view = self.scroll.bounds();
         let offset = self.scroll.offset();
-        self
-          .scroll
-          .set_offset(point(offset.x, offset.y - (card.top() - view.top())));
+        // Keep the list's top gap above the card.
+        let gap = ui::zoomed(16., window);
+        self.scroll.set_offset(point(
+          offset.x,
+          (offset.y - (card.top() - view.top()) + gap).min(px(0.)),
+        ));
         self.scroll_to = None;
         cx.notify();
       }
@@ -2340,7 +2348,7 @@ impl ChangesView {
       );
     }
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
-    let mut list = div().pb_32();
+    let mut list = div().pt_4().pb_32();
     for file in &snapshot.files {
       list = list.child(self.file_card(
         &file.path,
@@ -2606,6 +2614,7 @@ impl ChangesView {
             div()
               .truncate()
               .font_family(theme::MONO_FONT)
+              .text_size(zpx(CODE_TEXT))
               .text_color(muted)
               .child(shown_path),
           )
@@ -2815,7 +2824,9 @@ impl ChangesView {
     let mut drawn_regions: HashSet<usize> = HashSet::new();
     let border = p.border.opacity(0.4);
     let muted = p.muted_foreground;
-    let mut el = div().font_family(theme::MONO_FONT);
+    let mut el = div()
+      .font_family(theme::MONO_FONT)
+      .text_size(zpx(CODE_TEXT));
     let gutter_cols = |el: Stateful<Div>| {
       el.child(div().w_24().flex_none().border_r_1().border_color(border))
         .child(div().w_6().flex_none())
