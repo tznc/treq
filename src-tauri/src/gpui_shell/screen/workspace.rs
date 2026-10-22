@@ -292,6 +292,9 @@ pub struct WorkspaceView {
   code_host: Arc<dyn TerminalHost>,
   /// The header popover that shows in the modal window, if one does.
   popover: Option<(Entity<Popover>, gpui::Subscription)>,
+  /// The window this view draws in, which a press outside the popover goes
+  /// on to.
+  window: Option<gpui::AnyWindowHandle>,
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
@@ -377,6 +380,7 @@ impl WorkspaceView {
       busy: actions::Busy::default(),
       popover_host: host.clone(),
       popover: None,
+      window: None,
       code_host: host,
       terminal: None,
       code: None,
@@ -549,7 +553,8 @@ impl WorkspaceView {
     };
     self.close_popover(cx);
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
-    let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
+    let shell = self.window;
+    let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
     let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
       this.close_popover(cx)
     });
@@ -1874,7 +1879,8 @@ impl Body {
 }
 
 impl Render for WorkspaceView {
-  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
     let p = theme::palette(self.dark);
     let snapshot = self.snapshot.clone();
