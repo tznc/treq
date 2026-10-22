@@ -1318,7 +1318,10 @@ pub fn get_cached_commit_diff_stats_batch(
   Ok(out)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn cache_commit_row(
   repo_path: &str,
   commit_id: &str,
@@ -1969,7 +1972,10 @@ fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewC
 }
 
 /// Insert one local review comment. Returns the stored row.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn create_agent_review_comment(
   repo_path: &str,
   target_type: &str,
@@ -2178,7 +2184,10 @@ pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, St
 }
 
 /// Persist a newly created stash entry.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn add_stash(
   repo_path: &str,
   workspace_id: Option<i64>,
@@ -3438,7 +3447,7 @@ mod tests {
     let original = get_workspace_by_id(repo_path, id)
       .expect("lookup should succeed")
       .expect("workspace should exist");
-    let original_created_at = original.created_at.clone();
+    let original_created_at = original.created_at;
 
     let refreshed_at = "2026-05-01T10:00:00Z";
     let upserted_id = upsert_workspace_discovery(
@@ -3686,7 +3695,7 @@ mod tests {
     let first_review = get_pending_review(repo_path, workspace_id)
       .expect("get should succeed")
       .expect("review should exist");
-    let first_created_at = first_review.created_at.clone();
+    let first_created_at = first_review.created_at;
 
     // Wait a moment
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -4380,7 +4389,10 @@ pub fn create_workflow_run(
   Ok(conn.last_insert_rowid())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn add_workflow_job_result(
   repo_path: &str,
   run_id: i64,

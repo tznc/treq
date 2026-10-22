@@ -1996,7 +1996,7 @@ impl LinearView {
           .track_focus(&self.focus)
           .capture_key_down(keys)
           .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-          .child(div().flex().flex_col().child(title(doc.title.clone())))
+          .child(div().flex().flex_col().child(title(doc.title)))
           .child(self.commented(target, p, cx)),
       )
       .into_any_element(),
@@ -2049,7 +2049,6 @@ impl LinearView {
     let key = format!("{}-{}", of.target_type(), of.id());
     let starting = self.starting.contains(&of);
     let review_button = {
-      let target = target.clone();
       let fg = p.foreground;
       ui::text(
         Button::new(SharedString::from(format!("linear-start-review-{key}")), p),

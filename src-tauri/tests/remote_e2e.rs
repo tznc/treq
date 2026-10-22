@@ -29,6 +29,12 @@
 //!   long the suspend/wake test waits for the Sprite to pause on its own
 //!   (default 600).
 
+#![allow(
+  clippy::unwrap_used,
+  clippy::print_stderr,
+  reason = "test code reports progress on stderr"
+)]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
 use std::time::{Duration, Instant};

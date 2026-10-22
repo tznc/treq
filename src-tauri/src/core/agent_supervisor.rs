@@ -112,6 +112,8 @@ extern "C" {
 /// Terminates a running agent process. Best-effort: a failure here still
 /// lets the caller drop its own record of the process.
 fn kill_process(pid: u32) {
+  // SAFETY: `kill` takes plain integers and touches no Rust memory; a stale or
+  // invalid pid only makes it return an error, which is ignored.
   #[cfg(unix)]
   unsafe {
     libc_kill(pid as i32, 15); // SIGTERM
@@ -175,6 +177,10 @@ pub fn start_agent(
     .map_err(|e| format!("dependency_error: Failed to start agent '{agent}': {e}"))?;
 
   let pid = child.id();
+  #[allow(
+    clippy::mem_forget,
+    reason = "the agent must outlive this call; its pid is tracked in the record"
+  )]
   std::mem::forget(child);
 
   let record = AgentRecord {
@@ -238,6 +244,10 @@ fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<u32>), String
     .spawn()
     .map_err(|e| format!("filesystem_error: Failed to start stdin keeper: {e}"))?;
   let keeper_pid = keeper.id();
+  #[allow(
+    clippy::mem_forget,
+    reason = "the keeper must outlive this call; its pid is tracked in the record"
+  )]
   std::mem::forget(keeper);
   let agent_stdin = fifo
     .try_clone()
@@ -366,9 +376,8 @@ pub fn stop_agent(repo_path: &str, workspace: &str) -> Result<AgentStatusResult,
 pub fn agent_logs(repo_path: &str, workspace: &str) -> Result<String, String> {
   const MAX_TAIL_BYTES: u64 = 200 * 1024;
   let path = log_path(repo_path, workspace);
-  let mut file = match fs::File::open(&path) {
-    Ok(file) => file,
-    Err(_) => return Ok(String::new()),
+  let Ok(mut file) = fs::File::open(&path) else {
+    return Ok(String::new());
   };
   let len = file
     .metadata()
@@ -547,6 +556,10 @@ mod tests {
       keeper_pid,
     };
     write_record(repo_path, &record).unwrap();
+    #[allow(
+      clippy::mem_forget,
+      reason = "the test tracks the process by pid in the record, as production does"
+    )]
     std::mem::forget(child);
     record
   }

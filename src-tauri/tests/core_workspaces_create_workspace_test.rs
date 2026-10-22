@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, reason = "test code")]
 mod common;
 
 use common::{JjVerifier, TestRepo};
@@ -808,7 +809,7 @@ fn test_moved_files_from_main_repo() {
   // Verify workspace has moved_files set
   assert_eq!(
     workspace.moved_files,
-    Some(moved_files.clone()),
+    Some(moved_files),
     "Workspace should have moved_files set after creation"
   );
 
@@ -891,7 +892,7 @@ fn test_moved_files_from_workspace_to_workspace() {
     &repo.repo_path,
     "feat/components",
     Some("extract components".to_string()),
-    Some(moved_files.clone()),
+    Some(moved_files),
     Some("feat/base"),
     None,
     None,

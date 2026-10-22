@@ -76,14 +76,11 @@ fn start_resolve_creates_edit_mode_workspace_without_touching_product_wc() {
 
   let log = core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
     .expect("list commits");
-  let conflicted: Vec<_> = log
-    .commits
-    .iter()
-    .filter(|c| c.has_conflicts && !c.on_target_only)
-    .cloned()
-    .collect();
   assert!(
-    !conflicted.is_empty(),
+    log
+      .commits
+      .iter()
+      .any(|c| c.has_conflicts && !c.on_target_only),
     "expected at least one conflicted commit in log, got {:?}",
     log
       .commits
@@ -182,7 +179,7 @@ fn treq_resolve_side_two_clears_conflict_and_cleans_up_without_extra_commit() {
   let session = core::start_resolve_conflicts(
     &repo.repo_path,
     Some(workspace.id),
-    Some(vec![conflicted.change_id.clone()]),
+    Some(vec![conflicted.change_id]),
   )
   .expect("start resolve");
   let target = session.targets.first().expect("target");

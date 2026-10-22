@@ -68,7 +68,10 @@ pub(crate) struct Launch {
 /// Resolves a session's shell and directory: over ssh for a remote host, in
 /// the repo's devcontainer when it uses one, else on the host in the
 /// workspace's directory.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub(crate) fn launch(
   state: &AppState,
   session_id: &str,

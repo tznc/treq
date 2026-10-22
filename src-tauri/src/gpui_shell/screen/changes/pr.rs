@@ -546,7 +546,6 @@ impl ChangesView {
                 .on_click(cx.listener(move |view, _, _, cx| view.open_reply(&cancel, false, cx))),
             )
             .child({
-              let id = id.clone();
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-send-{id}")))
                 .debug_selector(|| "github-thread-reply-send".into())

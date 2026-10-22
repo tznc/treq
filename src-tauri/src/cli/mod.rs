@@ -1,3 +1,9 @@
+#![allow(
+  clippy::print_stdout,
+  clippy::print_stderr,
+  reason = "the CLI writes to the terminal"
+)]
+
 use args::{Matches, SubcommandMatches};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -336,9 +342,9 @@ fn create_workspace_metadata(
   let Some(raw) = metadata.as_deref() else {
     return Ok(title.map(|title| serde_json::json!({ "title": title }).to_string()));
   };
-  let mut object = match serde_json::from_str::<serde_json::Value>(raw) {
-    Ok(serde_json::Value::Object(object)) => object,
-    _ => return Err("invalid_arguments: --metadata must be a JSON object".to_string()),
+  let Ok(serde_json::Value::Object(mut object)) = serde_json::from_str::<serde_json::Value>(raw)
+  else {
+    return Err("invalid_arguments: --metadata must be a JSON object".to_string());
   };
   let Some(title) = title else {
     return Ok(metadata);
@@ -735,6 +741,8 @@ pub(super) fn fd_has_input(fd: std::os::unix::io::RawFd, timeout: Duration) -> b
     revents: 0,
   };
   let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+  // SAFETY: `poll_fd` is a live, initialised `pollfd` and the count is 1, so
+  // `poll` reads and writes only that one struct.
   let ready = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
   ready > 0 && poll_fd.revents & (libc::POLLIN | libc::POLLHUP) != 0
 }

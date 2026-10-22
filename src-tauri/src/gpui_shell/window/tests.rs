@@ -672,7 +672,7 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
   host
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let window = Window::open(cx, host, Some("/repo"));
   assert!(window.sidebar_ids().is_empty(), "the first read failed");
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
@@ -685,7 +685,7 @@ fn reads_the_branch_again_when_the_first_read_raced_the_repo_init(cx: &mut TestA
   host
     .no_branch_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let window = Window::open(cx, host, Some("/repo"));
   let repos = window.last().sidebar.unwrap().repos;
   assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
 }

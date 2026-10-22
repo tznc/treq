@@ -129,7 +129,7 @@ fn pull_workspace_pulls_a_pushed_branch() {
     .unwrap();
 
   let result = dispatch(TreqCommandRequest::PullWorkspace {
-    repo: repo.repo_path.clone(),
+    repo: repo.repo_path,
     workspace: Some(ws.id.to_string()),
   });
 
@@ -176,7 +176,7 @@ fn restore_all_discards_changes_and_restore_snapshot_brings_them_back() {
   assert!(list_changes(&repo, ws.id).is_empty());
 
   dispatch(TreqCommandRequest::RestoreSnapshot {
-    repo: repo.repo_path.clone(),
+    repo: repo.repo_path,
     workspace,
     snapshot_id: snapshot_id.as_str().unwrap().to_string(),
   });
@@ -198,15 +198,17 @@ fn archive_workspace_removes_it_from_the_list_and_disk() {
   });
 
   let listed = dispatch(TreqCommandRequest::ListWorkspaces {
-    repo: repo.repo_path.clone(),
+    repo: repo.repo_path,
   });
-  let ids: Vec<i64> = listed
-    .as_array()
-    .unwrap()
-    .iter()
-    .filter_map(|w| w["id"].as_i64())
-    .collect();
-  assert!(!ids.contains(&ws.id), "{listed}");
+  assert!(
+    !listed
+      .as_array()
+      .unwrap()
+      .iter()
+      .filter_map(|w| w["id"].as_i64())
+      .any(|x| x == ws.id),
+    "{listed}"
+  );
   assert!(!Path::new(&path).exists());
 }
 
@@ -221,7 +223,7 @@ fn switch_repo_branch_moves_the_home_working_copy() {
   });
 
   let inspected = dispatch(TreqCommandRequest::InspectRepository {
-    repo: repo.repo_path.clone(),
+    repo: repo.repo_path,
   });
   assert_eq!(inspected["current_branch"], "feat/switch-to");
 }
@@ -236,7 +238,7 @@ fn git_remote_info_reads_the_github_origin() {
   .unwrap();
 
   let info = dispatch(TreqCommandRequest::GitRemoteInfo {
-    repo: repo.repo_path.clone(),
+    repo: repo.repo_path,
   });
 
   assert_eq!(

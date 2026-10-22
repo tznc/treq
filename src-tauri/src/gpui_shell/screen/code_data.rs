@@ -628,15 +628,12 @@ pub fn workspace_stack(
   if descendants.is_empty() && ancestors.is_empty() {
     return None;
   }
-  let chain: Vec<&Workspace> = ancestors
-    .into_iter()
-    .rev()
-    .chain(std::iter::once(current))
-    .chain(descendants)
-    .collect();
   Some(
-    chain
+    ancestors
       .into_iter()
+      .rev()
+      .chain(std::iter::once(current))
+      .chain(descendants)
       .rev()
       .map(|w| (w.clone(), w.id == current_id))
       .collect(),

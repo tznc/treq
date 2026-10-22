@@ -821,7 +821,10 @@ impl MergeQueueView {
     card.child(list)
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn entry_row(
     &self,
     entry: &QueueEntry,

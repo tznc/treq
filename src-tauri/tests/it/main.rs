@@ -4,6 +4,8 @@
 //! `core_workspaces_create_workspace_test` (sets `TREQ_APP_DATA_DIR` for the
 //! whole process) stay separate binaries.
 
+#![allow(clippy::unwrap_used, reason = "test code")]
+
 #[path = "../common/mod.rs"]
 mod common;
 

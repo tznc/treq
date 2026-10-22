@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, reason = "test code")]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::path::PathBuf;
 use std::process::Command;

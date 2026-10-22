@@ -72,6 +72,7 @@ extern crate self as treq_lib;
 
 /// The real-repository fixture the integration tests use (`tests/common`).
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "test fixture")]
 mod test_repo;
 
 #[cfg(feature = "gui")]
@@ -320,7 +321,7 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
           return;
         }
       };
-      let app_for_init = app.clone();
+      let app_for_init = app;
       tauri::async_runtime::spawn(async move {
         let path_for_init = path.clone();
         let init_ok = tauri::async_runtime::spawn_blocking(move || core::init(&path_for_init))
@@ -436,6 +437,10 @@ where
 
 #[cfg(feature = "gui")]
 #[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
+#[allow(
+  clippy::exit,
+  reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"
+)]
 pub fn run() {
   telemetry::install_panic_hook();
   // CLI invocations never start Tauri: see `cli::args` for why.
@@ -606,12 +611,7 @@ pub fn run() {
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       match gpui_shell::init(app) {
-        Ok(()) => open_repo_window(
-          app.handle(),
-          "main",
-          saved_repo_path.clone(),
-          "Treq - Stacking ADE",
-        )?,
+        Ok(()) => open_repo_window(app.handle(), "main", saved_repo_path, "Treq - Stacking ADE")?,
         Err(err) => quit_without_gpui(app.handle(), &err),
       }
       // Rust owns the Supabase session; the windows draw the account.
@@ -950,6 +950,7 @@ pub fn run() {
 
 /// Without the desktop app, `treq` is only the command-line interface.
 #[cfg(not(feature = "gui"))]
+#[allow(clippy::exit, reason = "the CLI hands its exit code to the shell")]
 pub fn run() {
   telemetry::install_panic_hook();
   std::process::exit(cli::args::run(std::env::args_os()));

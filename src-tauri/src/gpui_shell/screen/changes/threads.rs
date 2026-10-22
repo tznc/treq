@@ -327,7 +327,10 @@ impl ChangesView {
   }
 
   /// `GithubCommentCard`.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn thread_card(
     &self,
     thread: &GhReviewThread,
@@ -424,7 +427,10 @@ impl ChangesView {
   }
 
   /// `GithubCommentBody`: author, date and text, with a Quote button.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn thread_comment(
     &self,
     comment: &GhReviewComment,

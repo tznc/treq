@@ -13,6 +13,7 @@ use russh::client::{self, Handler};
 use russh::keys::PublicKeyOrCertificate;
 
 use super::remote_ssh_transport::fingerprint_of;
+use crate::lock_ext::LockExt;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -30,7 +31,7 @@ impl Handler for ProbeHandler {
   ) -> Result<bool, Self::Error> {
     let result = fingerprint_of(server_public_key)
       .ok_or_else(|| "the host presented a certificate, which Treq does not pin".to_string());
-    *self.presented.lock().unwrap() = Some(result);
+    *self.presented.lock_or_recover() = Some(result);
     Ok(false)
   }
 }
@@ -46,7 +47,7 @@ pub async fn probe_host_key_fingerprint(hostname: &str, port: u16) -> Result<Str
   let connect = client::connect(config, (hostname, port), handler);
   // The handshake always fails; only a missing recorded key means no host answered.
   let outcome = tokio::time::timeout(PROBE_TIMEOUT, connect).await;
-  if let Some(result) = presented.lock().unwrap().take() {
+  if let Some(result) = presented.lock_or_recover().take() {
     return result;
   }
   match outcome {

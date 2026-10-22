@@ -226,7 +226,7 @@ fn build_resolve_target(
       conflicted_files,
       resolve_path,
       workspace_id: existing.id,
-      workspace_name: existing.workspace_name.clone(),
+      workspace_name: existing.workspace_name,
     });
   }
 

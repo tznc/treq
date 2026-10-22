@@ -13,6 +13,12 @@
 //! Run:
 //! `TREQ_REMOTE_E2E=1 TREQ_REMOTE_E2E_NATIVE=1 cargo test --test remote_e2e_native -- --ignored --test-threads=1`
 
+#![allow(
+  clippy::unwrap_used,
+  clippy::print_stderr,
+  reason = "test code reports progress on stderr"
+)]
+
 use std::time::Duration;
 
 use russh::keys::PrivateKey;

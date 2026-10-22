@@ -851,7 +851,10 @@ impl ChangesView {
   // Drawing.
 
   /// `HunkDiffLine`'s row.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn diff_line(
     &self,
     path: &str,

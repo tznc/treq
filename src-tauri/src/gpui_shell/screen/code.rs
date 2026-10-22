@@ -2393,7 +2393,7 @@ impl CodeView {
               .font_family(theme::MONO_FONT)
               .child(log.target_branch.clone()),
           )
-          .when_some(log.merge_base_id.clone(), |this, base| {
+          .when_some(log.merge_base_id, |this, base| {
             this.child(
               div()
                 .ml_1()

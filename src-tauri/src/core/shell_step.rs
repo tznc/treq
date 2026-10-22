@@ -120,6 +120,8 @@ fn forward_lines(
 #[cfg(unix)]
 fn kill_process_group(child: &mut Child) {
   // `process_group(0)` made the script's pid its group id.
+  // SAFETY: `kill` takes plain integers and touches no Rust memory; a group
+  // that already exited only makes it return an error, which is ignored.
   unsafe {
     libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
   }

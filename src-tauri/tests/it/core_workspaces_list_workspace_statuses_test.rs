@@ -222,7 +222,7 @@ fn test_workspace_list_statuses_preserves_existing_workspace_metadata_on_upsert(
   let before = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, workspace.id)
     .expect("db lookup should succeed")
     .expect("workspace should exist");
-  let before_created_at = before.created_at.clone();
+  let before_created_at = before.created_at;
 
   let statuses = treq_lib::core::list_workspace_statuses(&repo.repo_path)
     .expect("Failed to list workspace statuses");
