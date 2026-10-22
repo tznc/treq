@@ -2141,7 +2141,9 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
     }
     TreqCommandRequest::WorkspaceDiff { repo, workspace } => {
       let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      json(crate::core::workspaces::workspace_diff(&repo, id))
+      // A host has no app settings database, so the diff takes the default
+      // conflict marker style, as `treq changes workspace-diff` does.
+      json(crate::core::workspaces::workspace_cli_diff(&repo, id))
     }
     TreqCommandRequest::CommitDiff {
       repo,
