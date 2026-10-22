@@ -8,8 +8,8 @@ use super::{workspace_dialogs::workspace, *};
 use crate::{
   core::{JobInfo, RunJobSummary, RunSummary, SetupScriptStatus, WorkflowInfo},
   github::{
-    GhAuthor, GhIssue, GhIssueComment, GhLabel, GhListPage, GhPullRequest, GitRemoteInfo,
-    PrCheckEntry, PrCiStatus, PrInfo,
+    GhAuthor, GhIssue, GhIssueComment, GhLabel, GhListPage, GhPullRequest, GhReactionGroup,
+    GitRemoteInfo, PrCheckEntry, PrCiStatus, PrInfo,
   },
   gpui_shell::screen::{
     github::GithubView,
@@ -64,6 +64,7 @@ fn issue(number: u64, title: &str) -> GhIssue {
       body: "Seen it too".into(),
       author: author("bob"),
       created_at: "2026-10-02T10:00:00Z".into(),
+      reactions: Vec::new(),
     }]),
   }
 }
@@ -182,6 +183,11 @@ impl GithubHost for FakeHost {
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String> {
     self.record(format!("pr {repo}#{number} {change:?}"));
     self.gh_fails("change_pr")
+  }
+
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
+    self.record(format!("react {comment_id} {content} {on}"));
+    self.gh_fails("react")
   }
 
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String> {
@@ -575,6 +581,81 @@ fn github_issue_failures_toast(cx: &mut TestAppContext) {
   assert!(host
     .writes()
     .contains(&"notify toast Failed to close issue".to_string()));
+}
+
+fn heart(count: u32, mine: bool) -> GhReactionGroup {
+  GhReactionGroup {
+    content: "HEART".into(),
+    count,
+    viewer_has_reacted: mine,
+  }
+}
+
+fn reacted_issue() -> Fake {
+  let mut fake = issues();
+  let issue = fake.issue.as_mut().unwrap();
+  issue.comments.as_mut().unwrap()[0].reactions = vec![heart(2, false)];
+  fake
+}
+
+fn reactions_of(h: &mut Harness, comment: usize) -> Vec<GhReactionGroup> {
+  view(h, |v| {
+    v.detail.issue.as_ref().unwrap().comments.as_ref().unwrap()[comment]
+      .reactions
+      .clone()
+  })
+}
+
+#[gpui::test]
+fn github_comment_reactions_toggle_and_pick(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, reacted_issue(), route("issues", Some(1), false));
+  assert!(h.drawn("reaction-c1-HEART"));
+
+  // A chip joins the reaction, then leaves it.
+  h.click("reaction-c1-HEART");
+  h.cx.run_until_parked();
+  assert_eq!(reactions_of(&mut h, 0), [heart(3, true)]);
+  h.click("reaction-c1-HEART");
+  h.cx.run_until_parked();
+  assert_eq!(reactions_of(&mut h, 0), [heart(2, false)]);
+
+  // The picker adds a new one and closes.
+  h.click("reaction-add-c1");
+  assert!(h.drawn("reaction-picker"));
+  h.click("reaction-pick-c1-THUMBS_UP");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("reaction-picker"));
+  assert!(h.drawn("reaction-c1-THUMBS_UP"));
+  assert_eq!(
+    host
+      .writes()
+      .into_iter()
+      .filter(|w| w.starts_with("react"))
+      .collect::<Vec<_>>(),
+    [
+      "react c1 HEART true",
+      "react c1 HEART false",
+      "react c1 THUMBS_UP true",
+    ]
+  );
+}
+
+#[gpui::test]
+fn github_comment_reaction_failure_is_undone(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(
+    cx,
+    Fake {
+      fail: vec!["react"],
+      ..reacted_issue()
+    },
+    route("issues", Some(1), false),
+  );
+  h.click("reaction-c1-HEART");
+  h.cx.run_until_parked();
+  assert_eq!(reactions_of(&mut h, 0), [heart(2, false)]);
+  assert!(host
+    .writes()
+    .contains(&"notify toast Failed to react".to_string()));
 }
 
 #[gpui::test]

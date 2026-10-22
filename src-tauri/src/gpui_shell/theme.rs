@@ -109,6 +109,7 @@ icons! {
   ICON_SEND => "send",
   ICON_WAND => "wand-sparkles",
   ICON_QUOTE => "quote",
+  ICON_SMILE_PLUS => "smile-plus",
   ICON_GLOBE => "globe",
   ICON_TABLE => "table-2",
   ICON_FILE_CODE => "file-code-2",

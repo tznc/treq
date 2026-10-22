@@ -324,6 +324,7 @@ mod tests {
         created_at: "2024-01-01T00:00:00Z".to_string(),
         diff_hunk: String::new(),
         url: "https://github.com/o/r/pull/1#discussion_r1".to_string(),
+        reactions: Vec::new(),
       }],
     };
     let normalized = normalize_github_threads(vec![thread]);

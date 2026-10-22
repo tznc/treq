@@ -366,6 +366,7 @@ mod tests {
         created_at: "2026-03-04T00:00:00Z".into(),
         diff_hunk: String::new(),
         url: String::new(),
+        reactions: Vec::new(),
       }],
     }
   }

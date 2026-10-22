@@ -114,6 +114,8 @@ pub trait ChangesHost: CommitsHost {
   /// The review threads of `branch`'s pull request (`gh_list_pr_review_threads`);
   /// none without a GitHub remote or a pull request.
   fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String>;
+  /// Adds (`on`) or removes the user's `content` reaction on a review comment.
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
   /// The review agent's comments on the workspace's diff.
   fn agent_comments(
     &self,
@@ -281,6 +283,19 @@ impl ChangesHost for Backend {
       &remote.owner,
       &remote.repo,
       pr.number,
+      &crate::binary_paths::get_extended_path(),
+    )
+  }
+
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
+    let gh = crate::binary_paths::get_binary_path("gh")
+      .or_else(|| crate::binary_paths::detect_binary("gh"))
+      .ok_or_else(|| "gh CLI not found".to_string())?;
+    crate::github::gh_set_reaction_impl(
+      &gh,
+      comment_id,
+      content,
+      on,
       &crate::binary_paths::get_extended_path(),
     )
   }
