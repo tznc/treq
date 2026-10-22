@@ -93,6 +93,7 @@ impl Model {
         self.dialogs.palette = false;
         self.dialogs.file_picker = false;
         self.dialogs.shortcuts = false;
+        self.remote.setup = false;
       }
       Shortcut::ToggleTerminal if self.shows_terminal() => {
         self.terminal("toggleCollapse", json!({}));

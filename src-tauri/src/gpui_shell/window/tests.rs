@@ -886,6 +886,17 @@ fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
   assert!(window.screen_snapshot().remote.setup.is_some());
 }
 
+#[gpui::test]
+fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
+  cx.run_until_parked();
+  assert!(window.screen_snapshot().remote.setup.is_none());
+}
+
 /// A window that registered `endpoint()` and opened `/srv/app` on it.
 fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
   let window = Window::open(cx, host, None);

@@ -1483,6 +1483,7 @@ impl ChangesView {
   fn commit_box(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let files = self.files().len();
     let disabled = files == 0 || self.pending.is_some();
+    let empty = self.message.trim().is_empty();
     let label = match self.pending {
       Some(action) => pending_label(action).to_string(),
       None => commit_label(self.staging.staged.len()),
@@ -1496,7 +1497,7 @@ impl ChangesView {
       .py(zpx(6.))
       .gap(zpx(6.))
       .rounded_r_none()
-      .disabled(disabled)
+      .disabled(disabled || empty)
       .when(self.pending.is_some(), |b| {
         b.child(ui::spinner("commit-spin", 16., p.primary_foreground))
       })
@@ -1517,7 +1518,7 @@ impl ChangesView {
           .rounded_l_none()
           .border_l_1()
           .border_color(border)
-          .disabled(disabled)
+          .disabled(disabled || empty)
           .child(ui::icon(
             theme::ICON_CHEVRON_DOWN,
             16.,
