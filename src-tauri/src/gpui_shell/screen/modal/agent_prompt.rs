@@ -164,6 +164,8 @@ pub struct AgentPromptView {
   focused: bool,
   pub(in crate::gpui_shell::screen) settings: Option<TaskSettings>,
   pub(in crate::gpui_shell::screen) agent_override: Option<Agent>,
+  /// Agents whose command-line tool isn't installed, left out of the menu.
+  missing: Vec<Agent>,
   save_default: bool,
   show_save_default: bool,
   /// Submitted, until React reports back through the route.
@@ -227,6 +229,7 @@ impl AgentPromptView {
       focused: false,
       settings: None,
       agent_override: None,
+      missing: Vec::new(),
       save_default: false,
       show_save_default: false,
       submitted: false,
@@ -241,6 +244,7 @@ impl AgentPromptView {
       _subscriptions: Vec::new(),
     };
     this.load_settings(cx);
+    this.load_missing(cx);
     this
   }
 
@@ -282,6 +286,24 @@ impl AgentPromptView {
       cx,
       |host, route| task_settings(host.as_ref(), &route.repo_path),
       |view, settings, _cx| view.settings = Some(settings)
+    );
+  }
+
+  fn load_missing(&mut self, cx: &mut Context<Self>) {
+    read!(
+      self,
+      cx,
+      |host, _route| host.check_prerequisites(),
+      |view, statuses, _cx| {
+        view.missing = Agent::ALL
+          .into_iter()
+          .filter(|agent| {
+            statuses
+              .iter()
+              .any(|s| s.binary == agent.binary() && !s.installed)
+          })
+          .collect()
+      }
     );
   }
 
@@ -341,10 +363,27 @@ impl AgentPromptView {
       .collect()
   }
 
+  /// Closes the combobox, handing the keyboard back to the prompt: its
+  /// search field goes with it, and Escape needs a focused element.
+  fn close_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    if self.picker.take().is_none() {
+      return false;
+    }
+    self.focus_task(window, cx);
+    cx.notify();
+    true
+  }
+
+  fn focus_task(&self, window: &mut Window, cx: &mut Context<Self>) {
+    match &self.task {
+      Some(task) => task.update(cx, |task, cx| task.focus(window, cx)),
+      None => window.focus(&self.focus, cx),
+    }
+  }
+
   fn toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.menu = None;
-    if self.picker.take().is_some() {
-      cx.notify();
+    if self.close_picker(window, cx) {
       return;
     }
     let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces..."));
@@ -399,7 +438,7 @@ impl AgentPromptView {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) {
-    self.picker = None;
+    self.close_picker(window, cx);
     if self.selected != id {
       self.selected = id;
       self.agent_override = None;
@@ -407,9 +446,6 @@ impl AgentPromptView {
       self.show_save_default = false;
       self.mention = None;
       self.load_settings(cx);
-    }
-    if let Some(task) = &self.task {
-      task.update(cx, |task, cx| task.focus(window, cx));
     }
     cx.notify();
   }
@@ -748,6 +784,7 @@ impl AgentPromptView {
       .map_or(self.route.default_branch.clone(), |w| w.branch_name.clone());
     let button = Button::new("agent-prompt-workspace", p)
       .variant(Variant::Outline)
+      .aria_label("Workspace")
       .min_w(zpx(240.))
       .max_w_full()
       .justify_between()
@@ -828,10 +865,8 @@ impl AgentPromptView {
             view.step_picker(-1, cx);
             cx.stop_propagation();
           }))
-          .on_mouse_down_out(cx.listener(|view, _, _, cx| {
-            if view.picker.take().is_some() {
-              cx.notify();
-            }
+          .on_mouse_down_out(cx.listener(|view, _, window, cx| {
+            view.close_picker(window, cx);
           }))
           .child(
             ui::text(div(), TextSize::Sm)
@@ -1309,19 +1344,25 @@ impl AgentPromptView {
       .top(zpx(32.))
       .right_0()
       .min_w(zpx(128.))
-      .children(Agent::ALL.into_iter().map(|agent| {
-        menu_item(format!("task-agent-{}", agent.id()), p, false)
-          .role(gpui::Role::MenuItem)
-          .aria_label(agent.label())
-          .aria_selected(agent == selected)
-          .test_support()
-          .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-          .child(div().flex_1().child(agent.label()))
-          .when(agent == selected, |this| {
-            this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
-          })
-          .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
-      }));
+      // Agents that aren't installed are left out, unless already chosen.
+      .children(
+        Agent::ALL
+          .into_iter()
+          .filter(|agent| *agent == selected || !self.missing.contains(agent))
+          .map(|agent| {
+            menu_item(format!("task-agent-{}", agent.id()), p, false)
+              .role(gpui::Role::MenuItem)
+              .aria_label(agent.label())
+              .aria_selected(agent == selected)
+              .test_support()
+              .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
+              .child(div().flex_1().child(agent.label()))
+              .when(agent == selected, |this| {
+                this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
+              })
+              .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
+          }),
+      );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
   }
 
@@ -1385,12 +1426,14 @@ impl Render for AgentPromptView {
     );
     let card = self.task_card(&p, window, cx);
     let picker = self.workspace_picker(&p, cx);
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
+    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, window, cx| {
       if e.keystroke.key != "escape" || view.file_picker.is_some() {
         return;
       }
       cx.stop_propagation();
-      if view.menu.take().is_some() || view.picker.take().is_some() || view.mention.take().is_some()
+      if view.menu.take().is_some()
+        || view.close_picker(window, cx)
+        || view.mention.take().is_some()
       {
         cx.notify();
       } else {
