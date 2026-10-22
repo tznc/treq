@@ -263,11 +263,6 @@ mod tw {
   pub const RED_400: u32 = 0xf87171;
   pub const RED_500: u32 = 0xef4444;
   pub const RED_600: u32 = 0xdc2626;
-  pub const RED_700: u32 = 0xb91c1c;
-  pub const PURPLE_400: u32 = 0xc084fc;
-  pub const PURPLE_500: u32 = 0xa855f7;
-  pub const PURPLE_600: u32 = 0x9333ea;
-  pub const PURPLE_700: u32 = 0x7e22ce;
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_500: u32 = 0xeab308;
   pub const YELLOW_600: u32 = 0xca8a04;
@@ -278,16 +273,20 @@ mod tw {
   pub const GITHUB: u32 = 0x24292f;
   pub const GITHUB_HOVER: u32 = 0x1b1f23;
 
-  /// `text-x-700 dark:text-x-400`, `border-x-600 dark:border-x-500`.
-  pub fn state(dark: bool, [c400, c500, c600, c700]: [u32; 4]) -> (Hsla, Hsla, Hsla) {
-    let text = color(if dark { c400 } else { c700 });
-    let border = color(if dark { c500 } else { c600 });
-    (text, border, color(c600))
-  }
+  /// GitHub's PR state label fills, `[light, light hover, dark, dark hover]`.
+  pub const PR_OPEN: [u32; 4] = [0x1f883d, 0x1a7f37, 0x238636, 0x2ea043];
+  pub const PR_DRAFT: [u32; 4] = [0x6e7781, 0x57606a, 0x6e7681, 0x8b949e];
+  pub const PR_CLOSED: [u32; 4] = [0xcf222e, 0xa40e26, 0xda3633, 0xf85149];
+  pub const PR_MERGED: [u32; 4] = [0x8250df, 0x6639ba, 0x8957e5, 0xa371f7];
 
-  pub const GREEN: [u32; 4] = [GREEN_400, GREEN_500, GREEN_600, GREEN_700];
-  pub const RED: [u32; 4] = [RED_400, RED_500, RED_600, RED_700];
-  pub const PURPLE: [u32; 4] = [PURPLE_400, PURPLE_500, PURPLE_600, PURPLE_700];
+  /// The fill and hover fill of a PR state in the theme.
+  pub fn pr_state(dark: bool, [bg, hover, dark_bg, dark_hover]: [u32; 4]) -> (Hsla, Hsla) {
+    if dark {
+      (color(dark_bg), color(dark_hover))
+    } else {
+      (color(bg), color(hover))
+    }
+  }
 }
 
 /// How often the branch's pull request is re-read from the PR poller's
@@ -1133,45 +1132,33 @@ impl WorkspaceView {
   }
 
   fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    // The button reads the PR's status, colored as GitHub colors it.
+    // The button reads the PR's status, a pill filled as GitHub fills its state label.
     let draft = pr.draft && pr.state == PrState::Open;
-    let (label, icon, (text, border, hover)) = match pr.state {
-      _ if draft => (
-        "Draft",
-        theme::ICON_PR_DRAFT,
-        (p.muted_foreground, p.border, p.muted_foreground),
-      ),
-      PrState::Open => ("Open", theme::ICON_PR, tw::state(self.dark, tw::GREEN)),
-      PrState::Closed => (
-        "Closed",
-        theme::ICON_PR_CLOSED,
-        tw::state(self.dark, tw::RED),
-      ),
-      PrState::Merged => (
-        "Merged",
-        theme::ICON_MERGE,
-        tw::state(self.dark, tw::PURPLE),
-      ),
+    let (label, icon, state) = match pr.state {
+      _ if draft => ("Draft", theme::ICON_PR_DRAFT, tw::PR_DRAFT),
+      PrState::Open => ("Open", theme::ICON_PR, tw::PR_OPEN),
+      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, tw::PR_CLOSED),
+      PrState::Merged => ("Merged", theme::ICON_MERGE, tw::PR_MERGED),
     };
-    let styled = |b: Button| {
-      b.variant(Variant::Outline)
-        .size(Size::Sm)
-        .border_color(border)
-        .text_color(text)
-        .hover_bg(hover.opacity(0.1))
-    };
+    let (bg, hover) = tw::pr_state(self.dark, state);
+    let white = gpui::white();
+    let styled = |b: Button| b.size(Size::Sm).bg(bg).text_color(white).hover_bg(hover);
     let view = styled(Button::new("workspace-view-pr", p))
       .gap_1()
+      .rounded_l_full()
       .rounded_r_none()
-      .child(ui::icon(icon, 16., text))
+      .font_weight(gpui::FontWeight::BOLD)
+      .child(ui::icon(icon, 16., white))
       .child(label)
       .aria_label(view_pr_name(pr))
       .on_click(self.press("workspace.viewPr"));
     let web = styled(Button::new("workspace-view-pr-web", p))
       .rounded_l_none()
-      .border_l_0()
+      .rounded_r_full()
+      .border_l_1()
+      .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
       .px_2()
-      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., text))
+      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., white))
       .aria_label("Open PR on web")
       .on_click(self.press("workspace.viewPrWeb"));
     div()
