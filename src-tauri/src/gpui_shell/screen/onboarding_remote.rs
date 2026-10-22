@@ -1,5 +1,5 @@
-//! Dashboard's explicit-endpoint repository form, under the onboarding
-//! card while an SSH endpoint is connected but no repository is open: the
+//! Dashboard's explicit-endpoint repository form, in its own card above
+//! the onboarding card while an SSH endpoint is connected but no repository is open: the
 //! cut-off notice with Reauthenticate, or `RemoteRepositorySelector`.
 //!
 //! The window keeps the form's state and runs probe, open, clone and init: GPUI
@@ -433,10 +433,8 @@ pub fn render(
     .flex()
     .flex_col()
     .gap_3()
-    .border_b_1()
-    .border_color(p.border)
-    .px_4()
-    .py_3()
+    .px_6()
+    .pb_6()
     .children(cutoff)
     .when(show_selector, |d| {
       d.child(selector(form, inputs, react, dark, p, cx))
