@@ -674,6 +674,52 @@ fn badge(text: impl Into<SharedString>, p: &Palette) -> Div {
     .child(text.into())
 }
 
+/// An issue's identifier, state, priority, project and assignee.
+fn issue_meta(identifier: impl IntoElement, issue: &LinearIssue, p: &Palette) -> Div {
+  div()
+    .flex()
+    .items_center()
+    .gap_2()
+    .flex_wrap()
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .font_family(theme::MONO_FONT)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(p.primary)
+        .child(identifier),
+    )
+    .child(badge(issue.state.name.clone(), p))
+    .when(
+      !issue.priority_label.is_empty() && issue.priority != 0,
+      |this| this.child(badge(issue.priority_label.clone(), p)),
+    )
+    .when_some(issue.project.as_ref(), |this, project| {
+      this.child(badge(project.name.clone(), p))
+    })
+    .when_some(issue.assignee.as_ref(), |this, assignee| {
+      this.child(
+        ui::text(div(), TextSize::Xs)
+          .text_color(p.muted_foreground)
+          .child(assignee.name.clone()),
+      )
+    })
+}
+
+/// An issue row's text without its links or actions, for lists that pick
+/// issues.
+pub(super) fn issue_list_item(issue: &LinearIssue, p: &Palette) -> Div {
+  div()
+    .flex_1()
+    .min_w_0()
+    .child(issue_meta(issue.identifier.clone(), issue, p))
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .mt_1()
+        .truncate()
+        .child(issue.title.clone()),
+    )
+}
+
 /// CSS `capitalize`: each word's first letter in upper case.
 pub(super) fn capitalize(text: &str) -> String {
   text
@@ -1236,39 +1282,17 @@ impl LinearView {
   ) -> impl IntoElement {
     let open = self.expanded.contains(&issue.id);
     let id = issue.id.clone();
-    let mut meta = div()
-      .flex()
-      .items_center()
-      .gap_2()
-      .flex_wrap()
-      .child(
-        ui::text(
-          self.link(
-            format!("linear-issue-link-{id}"),
-            issue.identifier.clone(),
-            &issue.url,
-            p.primary,
-            cx,
-          ),
-          TextSize::Sm,
-        )
-        .font_family(theme::MONO_FONT)
-        .font_weight(FontWeight::MEDIUM),
-      )
-      .child(badge(issue.state.name.clone(), p));
-    if !issue.priority_label.is_empty() && issue.priority != 0 {
-      meta = meta.child(badge(issue.priority_label.clone(), p));
-    }
-    if let Some(project) = &issue.project {
-      meta = meta.child(badge(project.name.clone(), p));
-    }
-    if let Some(assignee) = &issue.assignee {
-      meta = meta.child(
-        ui::text(div(), TextSize::Xs)
-          .text_color(p.muted_foreground)
-          .child(assignee.name.clone()),
-      );
-    }
+    let meta = issue_meta(
+      self.link(
+        format!("linear-issue-link-{id}"),
+        issue.identifier.clone(),
+        &issue.url,
+        p.primary,
+        cx,
+      ),
+      issue,
+      p,
+    );
     let labels = (!issue.labels.is_empty()).then(|| {
       div()
         .flex()

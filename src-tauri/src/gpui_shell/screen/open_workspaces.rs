@@ -1,0 +1,1387 @@
+//! The sidebar's Open Workspaces dialog: opens a workspace for each pasted
+//! branch name or GitHub pull request or branch link, and for each pull
+//! request or Linear issue picked from the integrations beside it, all at
+//! once.
+
+use crate::gpui_shell::ui::zpx;
+use std::{
+  collections::{HashMap, HashSet},
+  sync::Arc,
+  time::{Duration, Instant},
+};
+
+use gpui_kit::{
+  base::TestSupportExt as _,
+  component::input::{Input, InputEvent, InputState, Textarea, TextareaState},
+};
+use tauri_plugin_gpui::gpui::{
+  self, anchored, deferred, div, point, prelude::*, px, Context, Div, Entity, FocusHandle,
+  FontWeight, KeyDownEvent, MouseButton, SharedString, Subscription, Task, Window,
+};
+
+use super::{
+  github::parts,
+  linear,
+  open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
+  workspace_data::WorkspaceHost,
+  workspace_modal::{
+    checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check,
+  },
+  ActionSink, ScreenAction,
+};
+use crate::{
+  github::GhPullRequest,
+  gpui_shell::{
+    native::{NativeEvent, ToastTone},
+    theme::{self, Palette},
+    ui::{self, Button, TextSize, Variant},
+  },
+  linear::LinearIssue,
+};
+
+/// A workspace's id and whether it was made, or why it could not be.
+type Opened = Result<(i64, bool), String>;
+
+/// How long typing pauses before the lines are checked or the pull
+/// requests searched.
+const DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// The pull request list beside the lines.
+#[derive(Default)]
+pub(super) struct PrList {
+  pub(super) loading: bool,
+  pub(super) error: Option<String>,
+  pub(super) items: Vec<GhPullRequest>,
+  /// The list holds only the user's own pull requests.
+  pub(super) mine: bool,
+  /// Bumped per load, so an older answer is dropped.
+  generation: u64,
+}
+
+/// The Linear issues beside the lines.
+#[derive(Default)]
+pub(super) struct IssueList {
+  pub(super) loading: bool,
+  pub(super) error: Option<String>,
+  pub(super) items: Vec<LinearIssue>,
+  /// The user's Linear id, whose issues show first.
+  pub(super) viewer: Option<String>,
+}
+
+/// The integrations' tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Integration {
+  Github,
+  Linear,
+}
+
+struct Fields {
+  lines: Entity<TextareaState>,
+  search: Entity<InputState>,
+  issue_search: Entity<InputState>,
+}
+
+pub struct OpenWorkspacesDialog {
+  route: Route,
+  host: Arc<dyn OpenWorkspacesHost>,
+  sink: ActionSink,
+  dark: bool,
+  focus: FocusHandle,
+  fields: Option<Fields>,
+  _subscriptions: Vec<Subscription>,
+  pub(super) text: String,
+  /// Each repository's `owner/name`, once read.
+  remotes: Option<Vec<(String, String)>>,
+  /// The repositories have been fetched, so their branches can be checked.
+  fetched: bool,
+  /// Each line's check, by its text.
+  pub(super) checks: HashMap<String, Checked>,
+  checking: bool,
+  _check: Option<Task<()>>,
+  /// The repository on screen's `owner/name`: the pull request list shows
+  /// only for a GitHub repository.
+  pub(super) github: Option<String>,
+  pub(super) prs: PrList,
+  pub(super) query: String,
+  _search: Option<Task<()>>,
+  /// The picked pull requests, in the order picked.
+  pub(super) chosen: Vec<GhPullRequest>,
+  pub(super) issues: IssueList,
+  pub(super) issue_query: String,
+  /// The picked Linear issues, in the order picked.
+  pub(super) chosen_issues: Vec<LinearIssue>,
+  /// The tab the user picked; GitHub's when there is one, until then.
+  picked: Option<Integration>,
+  /// The popover listing each line and what it opens.
+  pub(super) lines_open: bool,
+  /// When a press outside closed the popover, so the press on its own
+  /// trigger does not reopen it.
+  lines_closed: Option<Instant>,
+  /// Branches of the repository on screen that have a workspace.
+  open_branches: HashSet<String>,
+  pub(super) pending: bool,
+  /// What failed in the last open, a line per workspace.
+  pub(super) errors: Vec<String>,
+  pub(super) dismissed: bool,
+}
+
+impl OpenWorkspacesDialog {
+  pub fn new(
+    route: Route,
+    host: Arc<dyn OpenWorkspacesHost>,
+    sink: ActionSink,
+    dark: bool,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    let mut view = Self {
+      route,
+      host,
+      sink,
+      dark,
+      focus: cx.focus_handle(),
+      fields: None,
+      _subscriptions: Vec::new(),
+      text: String::new(),
+      remotes: None,
+      fetched: false,
+      checks: HashMap::new(),
+      checking: false,
+      _check: None,
+      github: None,
+      prs: PrList::default(),
+      query: String::new(),
+      _search: None,
+      chosen: Vec::new(),
+      issues: IssueList::default(),
+      issue_query: String::new(),
+      chosen_issues: Vec::new(),
+      picked: None,
+      lines_open: false,
+      lines_closed: None,
+      open_branches: HashSet::new(),
+      pending: false,
+      errors: Vec::new(),
+      dismissed: false,
+    };
+    view.load(cx);
+    view.load_issues(cx);
+    view
+  }
+
+  pub fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
+    if self.dark != dark {
+      self.dark = dark;
+      cx.notify();
+    }
+  }
+
+  /// Reads the remotes, then lists pull requests and fetches, so pasted
+  /// branches check against the remote's latest.
+  fn load(&mut self, cx: &mut Context<Self>) {
+    let (host, route) = (self.host.clone(), self.route.clone());
+    cx.spawn(async move |this, cx| {
+      let (remotes, open) = cx
+        .background_spawn({
+          let (host, route) = (host.clone(), route.clone());
+          async move {
+            let open: HashSet<String> =
+              super::github_data::GithubHost::workspaces(&*host, &route.repo_path)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|w| w.branch_name)
+                .collect();
+            (data::remotes(&*host, &route.repos), open)
+          }
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        view.github = remotes
+          .iter()
+          .find(|(path, _)| *path == view.route.repo_path)
+          .map(|(_, name)| name.clone());
+        view.remotes = Some(remotes);
+        view.open_branches = open;
+        view.load_prs(cx);
+        cx.notify();
+      });
+      cx.background_spawn(async move {
+        for repo in &route.repos {
+          host.fetch(repo);
+        }
+      })
+      .await;
+      let _ = this.update(cx, |view, cx| {
+        view.fetched = true;
+        view.check_lines(cx);
+      });
+    })
+    .detach();
+  }
+
+  /// The user's open pull requests, or everyone's when they have none; with
+  /// a search, everyone's that match.
+  fn load_prs(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.github.clone() else {
+      return;
+    };
+    self.prs.generation += 1;
+    let generation = self.prs.generation;
+    self.prs.loading = true;
+    self.prs.error = None;
+    let (host, query) = (self.host.clone(), self.query.trim().to_string());
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move {
+          if !query.is_empty() {
+            return host.open_prs(&repo, false, &query).map(|prs| (prs, false));
+          }
+          match host.open_prs(&repo, true, "")? {
+            mine if mine.is_empty() => host.open_prs(&repo, false, "").map(|prs| (prs, false)),
+            mine => Ok((mine, true)),
+          }
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        if view.prs.generation != generation {
+          return;
+        }
+        view.prs.loading = false;
+        match result {
+          Ok((items, mine)) => {
+            view.prs.items = items;
+            view.prs.mine = mine;
+          }
+          Err(err) => view.prs.error = Some(err),
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
+  }
+
+  /// The Linear issues and who the user is, when the integration is on.
+  fn load_issues(&mut self, cx: &mut Context<Self>) {
+    if !self.route.linear {
+      return;
+    }
+    self.issues.loading = true;
+    self.issues.error = None;
+    let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move {
+          let issues = host.linear_issues(&repo, None)?;
+          let viewer = host.linear_viewer(&repo).ok().map(|v| v.id);
+          Ok::<_, String>((issues, viewer))
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        view.issues.loading = false;
+        match result {
+          Ok((items, viewer)) => {
+            view.issues.items = items;
+            view.issues.viewer = viewer;
+          }
+          Err(err) => view.issues.error = Some(err),
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
+  }
+
+  /// The integrations the repository has: GitHub once its remote is read.
+  pub(super) fn integrations(&self) -> Vec<Integration> {
+    let mut all = Vec::new();
+    if self.github.is_some() {
+      all.push(Integration::Github);
+    }
+    if self.route.linear {
+      all.push(Integration::Linear);
+    }
+    all
+  }
+
+  pub(super) fn integration(&self) -> Option<Integration> {
+    let all = self.integrations();
+    self
+      .picked
+      .filter(|picked| all.contains(picked))
+      .or_else(|| all.first().copied())
+  }
+
+  fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
+    if query == self.query {
+      return;
+    }
+    self.query = query;
+    self._search = Some(cx.spawn(async move |this, cx| {
+      cx.background_executor().timer(DEBOUNCE).await;
+      let _ = this.update(cx, |view, cx| view.load_prs(cx));
+    }));
+  }
+
+  fn set_text(&mut self, text: String, cx: &mut Context<Self>) {
+    self.text = text;
+    self.errors.clear();
+    cx.notify();
+    self._check = Some(cx.spawn(async move |this, cx| {
+      cx.background_executor().timer(DEBOUNCE).await;
+      let _ = this.update(cx, |view, cx| view.check_lines(cx));
+    }));
+  }
+
+  /// Checks the lines not checked yet.
+  fn check_lines(&mut self, cx: &mut Context<Self>) {
+    let Some(remotes) = self.remotes.clone().filter(|_| self.fetched) else {
+      return;
+    };
+    let unchecked: Vec<(String, Line)> = data::parse_lines(&self.text)
+      .into_iter()
+      .filter(|(raw, _)| !self.checks.contains_key(raw))
+      .collect();
+    if unchecked.is_empty() {
+      return;
+    }
+    self.checking = true;
+    cx.notify();
+    let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    cx.spawn(async move |this, cx| {
+      let checked = cx
+        .background_spawn(async move {
+          unchecked
+            .into_iter()
+            .map(|(raw, line)| {
+              let checked = data::check(&*host, &repo, &remotes, &line);
+              (raw, checked)
+            })
+            .collect::<Vec<_>>()
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        view.checks.extend(checked);
+        view.checking = false;
+        // Lines typed while checking.
+        view.check_lines(cx);
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Each line and its check; `None` while it is checked.
+  pub(super) fn lines(&self) -> Vec<(String, Option<&Checked>)> {
+    data::parse_lines(&self.text)
+      .into_iter()
+      .map(|(raw, _)| {
+        let checked = self.checks.get(&raw);
+        (raw, checked)
+      })
+      .collect()
+  }
+
+  /// The workspaces the dialog will open: the lines', then the picked pull
+  /// requests', each branch once.
+  pub(super) fn targets(&self) -> Vec<Target> {
+    let mut seen = HashSet::new();
+    let lines = self.lines();
+    let from_lines = lines
+      .iter()
+      .filter_map(|(_, checked)| checked.and_then(|c| c.as_ref().ok()).cloned());
+    let from_prs = self.chosen.iter().map(|pr| {
+      let existing = self.open_branches.contains(&pr.head_ref_name);
+      Target::from_pr(&self.route.repo_path, pr, existing)
+    });
+    let from_issues = self.chosen_issues.iter().map(|issue| {
+      let existing = self.open_branches.contains(&issue.branch_name);
+      Target::from_issue(&self.route.repo_path, issue, existing)
+    });
+    from_lines
+      .chain(from_prs)
+      .chain(from_issues)
+      .filter(|t| seen.insert((t.repo_path.clone(), t.branch.clone())))
+      .collect()
+  }
+
+  /// Lines still to check.
+  fn unchecked(&self) -> usize {
+    self.lines().iter().filter(|(_, c)| c.is_none()).count()
+  }
+
+  pub(super) fn can_submit(&self) -> bool {
+    !self.pending && self.unchecked() == 0 && !self.targets().is_empty()
+  }
+
+  fn toggle_pr(&mut self, pr: &GhPullRequest, cx: &mut Context<Self>) {
+    match self.chosen.iter().position(|c| c.number == pr.number) {
+      Some(at) => {
+        self.chosen.remove(at);
+      }
+      None => self.chosen.push(pr.clone()),
+    }
+    self.errors.clear();
+    cx.notify();
+  }
+
+  fn toggle_issue(&mut self, issue: &LinearIssue, cx: &mut Context<Self>) {
+    match self.chosen_issues.iter().position(|c| c.id == issue.id) {
+      Some(at) => {
+        self.chosen_issues.remove(at);
+      }
+      None => self.chosen_issues.push(issue.clone()),
+    }
+    self.errors.clear();
+    cx.notify();
+  }
+
+  fn toggle_lines(&mut self, cx: &mut Context<Self>) {
+    let just_closed = self
+      .lines_closed
+      .take()
+      .is_some_and(|at| at.elapsed() < Duration::from_millis(500));
+    self.lines_open = !self.lines_open && !just_closed;
+    cx.notify();
+  }
+
+  fn close_lines(&mut self, cx: &mut Context<Self>) {
+    if self.lines_open {
+      self.lines_open = false;
+      self.lines_closed = Some(Instant::now());
+      cx.notify();
+    }
+  }
+
+  fn close(&mut self, cx: &mut Context<Self>) {
+    self.dismissed = true;
+    press(&self.sink, "openWorkspaces.close", cx);
+    cx.notify();
+  }
+
+  fn toast(&self, tone: ToastTone, title: &str, description: String) {
+    WorkspaceHost::notify(
+      &*self.host,
+      NativeEvent::Toast {
+        title: title.into(),
+        description,
+        tone,
+        action: None,
+      },
+    );
+  }
+
+  /// Opens every target, a repository at a time.
+  fn submit(&mut self, cx: &mut Context<Self>) {
+    if !self.can_submit() {
+      return;
+    }
+    let targets = self.targets();
+    self.pending = true;
+    self.errors.clear();
+    cx.notify();
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let results = cx
+        .background_spawn({
+          let (host, targets) = (host.clone(), targets.clone());
+          async move {
+            let mut repos: Vec<&str> = Vec::new();
+            for target in &targets {
+              if !repos.contains(&target.repo_path.as_str()) {
+                repos.push(&target.repo_path);
+              }
+            }
+            let mut results = Vec::new();
+            for repo in repos {
+              let batch: Vec<&Target> = targets
+                .iter()
+                .filter(|t| t.repo_path == repo && t.issue.is_none())
+                .collect();
+              if !batch.is_empty() {
+                let requests: Vec<_> = batch.iter().map(|t| t.request()).collect();
+                let opened = host.open_workspaces(repo, &requests);
+                results.extend(batch.into_iter().cloned().zip(opened));
+              }
+            }
+            // An issue's branch may not exist yet, so each opens as the
+            // Linear view opens it.
+            for target in targets.iter().filter(|t| t.issue.is_some()) {
+              let issue = target.issue.as_ref().expect("issue");
+              let opened = host.open_issue(&target.repo_path, issue);
+              results.push((target.clone(), opened));
+            }
+            results
+          }
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| view.opened(results, cx));
+    })
+    .detach();
+  }
+
+  fn opened(&mut self, results: Vec<(Target, Opened)>, cx: &mut Context<Self>) {
+    self.pending = false;
+    let mut repos: Vec<String> = Vec::new();
+    let (mut created, mut reused, mut first) = (0, 0, None);
+    for (target, result) in &results {
+      match result {
+        Ok((id, made)) => {
+          if *made {
+            created += 1;
+          } else {
+            reused += 1;
+          }
+          first.get_or_insert((target.repo_path.clone(), *id));
+          if !repos.contains(&target.repo_path) {
+            repos.push(target.repo_path.clone());
+          }
+        }
+        Err(err) => self.errors.push(format!("{}: {err}", target.branch)),
+      }
+    }
+    for repo_path in repos {
+      WorkspaceHost::notify(&*self.host, NativeEvent::WorkspaceChanged { repo_path });
+    }
+    let opened = summary(created, reused);
+    if self.errors.is_empty() {
+      self.toast(ToastTone::Success, "Workspaces opened", opened);
+      if let Some((repo_path, id)) = first {
+        (self.sink)(
+          ScreenAction::Field {
+            field: "openWorkspaces.opened".into(),
+            value: serde_json::json!({ "repoPath": repo_path, "id": id }),
+          },
+          cx,
+        );
+      }
+      self.close(cx);
+    } else {
+      self.toast(
+        ToastTone::Error,
+        "Some workspaces could not be opened",
+        format!("{} failed. {opened}", self.errors.len()),
+      );
+      // What opened is open now, and a retry should say so.
+      self.checks.clear();
+      self.open_branches.extend(
+        results
+          .iter()
+          .filter(|(t, r)| r.is_ok() && t.repo_path == self.route.repo_path)
+          .map(|(t, _)| t.branch.clone()),
+      );
+      self.check_lines(cx);
+    }
+    cx.notify();
+  }
+
+  fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
+    if self.fields.is_none() {
+      let lines = cx.new(|cx| {
+        TextareaState::new(window, cx)
+          .auto_grow(12, 12)
+          .placeholder("feat/login\nhttps://github.com/acme/app/pull/42")
+      });
+      let search =
+        cx.new(|cx| InputState::new(window, cx).placeholder("Search open pull requests"));
+      let issue_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search open issues"));
+      // `autoFocus`.
+      lines.update(cx, |lines, cx| lines.focus(window, cx));
+      self
+        ._subscriptions
+        .push(cx.subscribe(&lines, |view, lines, event: &InputEvent, cx| {
+          if let InputEvent::Change = event {
+            let text = lines.read(cx).value().to_string();
+            view.set_text(text, cx);
+          }
+        }));
+      self._subscriptions.push(
+        cx.subscribe(&search, |view, search, event: &InputEvent, cx| {
+          if let InputEvent::Change = event {
+            let query = search.read(cx).value().to_string();
+            view.set_query(query, cx);
+          }
+        }),
+      );
+      self._subscriptions.push(cx.subscribe(
+        &issue_search,
+        |view, search, event: &InputEvent, cx| {
+          if let InputEvent::Change = event {
+            view.issue_query = search.read(cx).value().to_string();
+            cx.notify();
+          }
+        },
+      ));
+      self.fields = Some(Fields {
+        lines,
+        search,
+        issue_search,
+      });
+    }
+    self.fields.as_ref().expect("fields")
+  }
+
+  /// The lines' column: the text, what it will open, and the buttons.
+  fn lines_column(
+    &self,
+    lines: &Entity<TextareaState>,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Div {
+    let checks = self.lines();
+    let targets = self.targets();
+    let unchecked = checks.iter().filter(|(_, c)| c.is_none()).count();
+    let invalid = checks
+      .iter()
+      .filter(|(_, c)| matches!(c, Some(Err(_))))
+      .count();
+    let existing = targets.iter().filter(|t| t.existing).count();
+    let new = targets.len() - existing;
+    let status = if unchecked > 0 {
+      format!("Checking {}...", plural(unchecked, "1 line", "lines"))
+    } else if targets.is_empty() {
+      "Nothing to open yet.".to_string()
+    } else {
+      summary_future(new, existing)
+    };
+    div()
+      .flex()
+      .flex_col()
+      .flex_1()
+      .min_w_0()
+      .gap_3()
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .gap(zpx(6.))
+          .child(label_xs("Branches or links"))
+          .child(
+            div()
+              .debug_selector(|| "open-workspaces-lines".into())
+              .child(ui::text(
+                Textarea::new(lines)
+                  .aria_label("Branches or links")
+                  .disabled(self.pending),
+                TextSize::Sm,
+              )),
+          )
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .child("One per line: a branch name, or a GitHub pull request or branch link of one of your repositories."),
+          ),
+      )
+      .child(self.status(status, invalid, checks.len() + self.chosen.len() + self.chosen_issues.len(), p, cx))
+      .when(self.lines_open, |this| this.child(self.lines_popover(&checks, p, cx)))
+      .when(!self.errors.is_empty(), |this| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "open-workspaces-errors".into())
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_color(p.destructive)
+            .children(self.errors.iter().enumerate().map(|(i, error)| {
+              div()
+                .id(("open-workspaces-error", i))
+                .role(gpui::Role::Alert)
+                .aria_label(SharedString::from(error.clone()))
+                .test_support()
+                .child(error.clone())
+            })),
+        )
+      })
+      .child(
+        div()
+          .flex()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("open-workspaces-cancel", p)
+              .variant(Variant::Outline)
+              .disabled(self.pending)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.close(cx))),
+          )
+          .child(
+            Button::new("open-workspaces-submit", p)
+              .disabled(!self.can_submit())
+              .label(if self.pending {
+                "Opening...".to_string()
+              } else {
+                match targets.len() {
+                  0 => "Open Workspaces".to_string(),
+                  1 => "Open 1 Workspace".to_string(),
+                  n => format!("Open {n} Workspaces"),
+                }
+              })
+              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
+          ),
+      )
+  }
+
+  /// What the lines and picks will open; pressed, it lists each of them.
+  fn status(
+    &self,
+    status: String,
+    invalid: usize,
+    rows: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let muted = p.muted;
+    div()
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .id("open-workspaces-status")
+          .debug_selector(|| "open-workspaces-status".into())
+          .role(gpui::Role::Status)
+          .aria_label(SharedString::from(status.clone()))
+          .aria_expanded(self.lines_open)
+          .flex()
+          .items_center()
+          .gap_1()
+          .px_2()
+          .py_1()
+          .ml(zpx(-8.))
+          .rounded(zpx(6.))
+          .font_weight(FontWeight::MEDIUM)
+          .child(status)
+          .when(rows > 0, |this| {
+            this
+              .cursor_pointer()
+              .hover(move |s| s.bg(muted))
+              .when(self.lines_open, |this| this.bg(muted))
+              .child(ui::icon(
+                if self.lines_open {
+                  theme::ICON_CHEVRON_UP
+                } else {
+                  theme::ICON_CHEVRON_DOWN
+                },
+                14.,
+                p.muted_foreground,
+              ))
+              .on_click(cx.listener(|view, _, _, cx| view.toggle_lines(cx)))
+          })
+          .test_support(),
+      )
+      .when(invalid > 0, |this| {
+        let invalid = plural(invalid, "1 line can't be opened", "lines can't be opened");
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .id("open-workspaces-invalid")
+            .role(gpui::Role::Alert)
+            .aria_label(SharedString::from(invalid.clone()))
+            .text_color(p.destructive)
+            .child(invalid)
+            .test_support(),
+        )
+      })
+  }
+
+  /// Each line and pick, and what it opens or why it can't.
+  fn lines_popover(
+    &self,
+    checks: &[(String, Option<&Checked>)],
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let repo_path = &self.route.repo_path;
+    let picks = self
+      .chosen
+      .iter()
+      .map(|pr| {
+        let existing = self.open_branches.contains(&pr.head_ref_name);
+        (
+          format!("open-workspaces-pr-{}", pr.number),
+          Target::from_pr(repo_path, pr, existing),
+        )
+      })
+      .chain(self.chosen_issues.iter().map(|issue| {
+        let existing = self.open_branches.contains(&issue.branch_name);
+        (
+          format!("open-workspaces-issue-{}", issue.id),
+          Target::from_issue(repo_path, issue, existing),
+        )
+      }));
+    deferred(
+      anchored().child(
+        div()
+          .id("open-workspaces-lines-popover")
+          .debug_selector(|| "open-workspaces-lines-popover".into())
+          .role(gpui::Role::List)
+          .aria_label("Workspaces to open")
+          .mt_1()
+          .w(zpx(520.))
+          .max_h(zpx(320.))
+          .overflow_y_scroll()
+          .p_2()
+          .flex()
+          .flex_col()
+          .gap_1()
+          .rounded(zpx(8.))
+          .border_1()
+          .border_color(p.border)
+          .bg(p.popover)
+          .text_color(p.popover_foreground)
+          .shadow_md()
+          .occlude()
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_mouse_down_out(cx.listener(|view, _, _, cx| view.close_lines(cx)))
+          .children(
+            checks
+              .iter()
+              .enumerate()
+              .map(|(i, (raw, checked))| result_row(i, raw, *checked, repo_path, p)),
+          )
+          .children(picks.map(|(id, target)| {
+            target_row(SharedString::from(id), &target, repo_path, p).into_any_element()
+          }))
+          .test_support(),
+      ),
+    )
+    .with_priority(3)
+  }
+
+  /// The integrations' column: a tab for each, with a search and a list to
+  /// pick from.
+  fn integrations_column(
+    &self,
+    fields: (&Entity<InputState>, &Entity<InputState>),
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Div {
+    let current = self.integration();
+    let tabs = div()
+      .flex()
+      .gap_1()
+      .p_1()
+      .rounded(zpx(8.))
+      .bg(p.muted)
+      .children(self.integrations().into_iter().map(|tab| {
+        let (icon, label, picked) = match tab {
+          Integration::Github => (theme::ICON_GITHUB, "GitHub", self.chosen.len()),
+          Integration::Linear => (theme::ICON_LINEAR, "Linear", self.chosen_issues.len()),
+        };
+        let active = Some(tab) == current;
+        let color = if active {
+          p.foreground
+        } else {
+          p.muted_foreground
+        };
+        ui::text(div(), TextSize::Sm)
+          .id(SharedString::from(format!("open-workspaces-tab-{label}")))
+          .role(gpui::Role::Tab)
+          .aria_label(label)
+          .aria_selected(active)
+          .flex()
+          .flex_1()
+          .justify_center()
+          .items_center()
+          .gap(zpx(6.))
+          .px_3()
+          .py_1()
+          .rounded(zpx(6.))
+          .font_weight(FontWeight::MEDIUM)
+          .cursor_pointer()
+          .text_color(color)
+          .map(|this| {
+            if active {
+              this.bg(p.background).shadow_sm()
+            } else {
+              this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
+            }
+          })
+          .child(ui::icon(icon, 14., color))
+          .child(label)
+          .when(picked > 0, |this| {
+            this.child(
+              ui::text(div(), TextSize::Xs)
+                .rounded_full()
+                .bg(p.primary)
+                .px(zpx(6.))
+                .text_color(p.primary_foreground)
+                .child(picked.to_string()),
+            )
+          })
+          .on_click(cx.listener(move |view, _, _, cx| {
+            view.picked = Some(tab);
+            cx.notify();
+          }))
+          .test_support()
+      }));
+    div()
+      .flex()
+      .flex_col()
+      .w(zpx(420.))
+      .flex_none()
+      .min_h_0()
+      .border_l_1()
+      .border_color(p.border)
+      .pl_4()
+      .gap_2()
+      .child(tabs)
+      .map(|this| match current {
+        Some(Integration::Linear) => this.child(self.issues_pane(fields.1, p, cx)),
+        _ => this.child(self.prs_pane(fields.0, p, cx)),
+      })
+  }
+
+  /// The Linear tab: a search and the issues to pick from.
+  fn issues_pane(&self, search: &Entity<InputState>, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let (items, mine) = data::issue_list(
+      &self.issues.items,
+      self.issues.viewer.as_deref(),
+      &self.issue_query,
+    );
+    let heading = if !self.issue_query.trim().is_empty() {
+      "Matching issues"
+    } else if mine {
+      "Your issues"
+    } else {
+      "Open issues"
+    };
+    let list: gpui::AnyElement = if self.issues.loading {
+      parts::loading("open-workspaces-issues-loading", p).into_any_element()
+    } else if let Some(err) = &self.issues.error {
+      parts::error_state(
+        "open-workspaces-issues",
+        "Could not load Linear issues",
+        err,
+        p,
+        Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+      )
+      .into_any_element()
+    } else if items.is_empty() {
+      parts::empty_state(theme::ICON_LINEAR, "No open issues.", p).into_any_element()
+    } else {
+      div()
+        .children(items.into_iter().map(|issue| self.issue_row(issue, p, cx)))
+        .into_any_element()
+    };
+    pane(
+      "open-workspaces-issues",
+      heading,
+      self.chosen_issues.len(),
+      Input::new(search).aria_label("Search issues"),
+      list,
+      p,
+    )
+  }
+
+  /// The GitHub tab: a search and the pull requests to pick from.
+  fn prs_pane(&self, search: &Entity<InputState>, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let heading = if !self.query.trim().is_empty() {
+      "Matching pull requests"
+    } else if self.prs.mine {
+      "Your pull requests"
+    } else {
+      "Open pull requests"
+    };
+    let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
+      parts::loading("open-workspaces-prs-loading", p).into_any_element()
+    } else if let Some(err) = &self.prs.error {
+      parts::error_state(
+        "open-workspaces-prs",
+        "Could not load pull requests",
+        err,
+        p,
+        Some(Box::new(cx.listener(|view, _, _, cx| view.load_prs(cx)))),
+      )
+      .into_any_element()
+    } else if self.prs.items.is_empty() {
+      parts::empty_state(theme::ICON_PR, "No open pull requests.", p).into_any_element()
+    } else {
+      div()
+        .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
+        .into_any_element()
+    };
+    pane(
+      "open-workspaces-prs",
+      heading,
+      self.chosen.len(),
+      Input::new(search).aria_label("Search pull requests"),
+      list,
+      p,
+    )
+  }
+
+  /// A pull request with its checkbox: `PrListItem` without the branches,
+  /// which do not fit.
+  fn pr_row(&self, pr: &GhPullRequest, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let checked = self.chosen.iter().any(|c| c.number == pr.number);
+    let pr_for_click = pr.clone();
+    pick_row(
+      SharedString::from(format!("open-workspaces-pr-{}", pr.number)),
+      format!("#{} {}", pr.number, pr.title),
+      checked,
+      self.pending,
+      parts::pr_list_item(pr, false, p),
+      p,
+    )
+    .on_click(cx.listener(move |view, _, _, cx| {
+      if !view.pending {
+        view.toggle_pr(&pr_for_click, cx);
+      }
+    }))
+    .test_support()
+  }
+
+  /// A Linear issue with its checkbox.
+  fn issue_row(
+    &self,
+    issue: &LinearIssue,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let checked = self.chosen_issues.iter().any(|c| c.id == issue.id);
+    let issue_for_click = issue.clone();
+    pick_row(
+      SharedString::from(format!("open-workspaces-issue-{}", issue.id)),
+      format!("{} {}", issue.identifier, issue.title),
+      checked,
+      self.pending,
+      linear::issue_list_item(issue, p),
+      p,
+    )
+    .on_click(cx.listener(move |view, _, _, cx| {
+      if !view.pending {
+        view.toggle_issue(&issue_for_click, cx);
+      }
+    }))
+    .test_support()
+  }
+}
+
+/// A tab's heading, search and list.
+fn pane(
+  id: &'static str,
+  heading: &'static str,
+  picked: usize,
+  search: Input,
+  list: gpui::AnyElement,
+  p: &Palette,
+) -> Div {
+  div()
+    .flex()
+    .flex_col()
+    .flex_1()
+    .min_h_0()
+    .gap_2()
+    .child(
+      div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(
+          div()
+            .id(SharedString::from(format!("{id}-heading")))
+            .role(gpui::Role::Heading)
+            .aria_label(heading)
+            .child(label_xs(heading))
+            .test_support(),
+        )
+        .when(picked > 0, |this| {
+          this.child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .child(format!("{picked} selected")),
+          )
+        }),
+    )
+    .child(
+      div()
+        .debug_selector(move || format!("{id}-search"))
+        .child(ui::text(
+          Styled::h(
+            search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
+            zpx(28.),
+          ),
+          TextSize::Sm,
+        )),
+    )
+    .child(
+      div()
+        .id(id)
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .rounded_md()
+        .border_1()
+        .border_color(p.border)
+        .child(list),
+    )
+}
+
+/// A list row with its checkbox, named `name`.
+fn pick_row(
+  id: SharedString,
+  name: String,
+  checked: bool,
+  disabled: bool,
+  item: Div,
+  p: &Palette,
+) -> gpui::Stateful<Div> {
+  let muted = p.muted;
+  div()
+    .id(SharedString::from(format!("{id}-row")))
+    .role(gpui::Role::CheckBox)
+    .aria_label(SharedString::from(name))
+    .aria_toggled(if checked {
+      gpui::accesskit::Toggled::True
+    } else {
+      gpui::accesskit::Toggled::False
+    })
+    .w_full()
+    .px_3()
+    .py(zpx(10.))
+    .border_b_1()
+    .border_color(p.border)
+    .flex()
+    .items_start()
+    .gap_2()
+    .cursor_pointer()
+    .when(checked, |d| d.bg(p.primary.opacity(0.1)))
+    .when(!checked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
+    .child(div().mt(zpx(4.)).child(checkbox(
+      SharedString::from(format!("{id}-check")),
+      if checked { Check::On } else { Check::Off },
+      disabled,
+      p,
+    )))
+    .child(item)
+}
+
+/// `n` as "1 thing" or "n things".
+fn plural(n: usize, one: &str, many: &str) -> String {
+  if n == 1 {
+    one.to_string()
+  } else {
+    format!("{n} {many}")
+  }
+}
+
+/// What the dialog will open, before it does.
+fn summary_future(new: usize, existing: usize) -> String {
+  let created = plural(
+    new,
+    "1 workspace will be created",
+    "workspaces will be created",
+  );
+  match (new, existing) {
+    (_, 0) => created,
+    (0, _) => plural(
+      existing,
+      "1 workspace is already open",
+      "workspaces are already open",
+    ),
+    _ => format!("{created}, {existing} already open"),
+  }
+}
+
+/// What the dialog opened.
+fn summary(created: usize, reused: usize) -> String {
+  match (created, reused) {
+    (c, 0) => format!("Created {}.", plural(c, "1 workspace", "workspaces")),
+    (0, r) => format!(
+      "Opened {}.",
+      plural(r, "1 existing workspace", "existing workspaces")
+    ),
+    (c, r) => format!(
+      "Created {}, opened {r} existing.",
+      plural(c, "1 workspace", "workspaces")
+    ),
+  }
+}
+
+/// A pasted line and what it opens, or why it can't.
+fn result_row(
+  index: usize,
+  raw: &str,
+  checked: Option<&Checked>,
+  repo_path: &str,
+  p: &Palette,
+) -> gpui::AnyElement {
+  let id = SharedString::from(format!("open-workspaces-line-{index}"));
+  match checked {
+    Some(Ok(target)) => target_row(id, target, repo_path, p).into_any_element(),
+    Some(Err(reason)) => row(id, format!("{raw}: {reason}"), p)
+      .child(ui::icon(theme::ICON_CIRCLE_ALERT, 14., p.destructive))
+      .child(mono(raw))
+      .child(
+        div()
+          .min_w_0()
+          .truncate()
+          .text_color(p.destructive)
+          .child(reason.clone()),
+      )
+      .test_support()
+      .into_any_element(),
+    None => row(id.clone(), format!("{raw}: checking"), p)
+      .child(ui::spinner(id, 14., p.muted_foreground))
+      .child(mono(raw))
+      .test_support()
+      .into_any_element(),
+  }
+}
+
+fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -> impl IntoElement {
+  let mut detail = Vec::new();
+  if let Some(n) = target.pr {
+    detail.push(format!("PR #{n}"));
+  }
+  if target.repo_path != repo_path {
+    detail.push(repo_name(&target.repo_path).to_string());
+  }
+  detail.push(
+    if target.existing {
+      "already open"
+    } else {
+      "new"
+    }
+    .to_string(),
+  );
+  let detail = detail.join(" · ");
+  row(id, format!("{}: {detail}", target.branch), p)
+    .child(ui::icon(
+      theme::ICON_CHECK,
+      14.,
+      if target.existing {
+        p.muted_foreground
+      } else {
+        p.success
+      },
+    ))
+    .child(mono(&target.branch))
+    .child(
+      div()
+        .min_w_0()
+        .truncate()
+        .text_color(p.muted_foreground)
+        .child(detail),
+    )
+    .test_support()
+}
+
+/// A line of the list under the text, named by its line and what it opens.
+fn row(id: SharedString, name: String, p: &Palette) -> gpui::Stateful<Div> {
+  let selector = id.to_string();
+  ui::text(div(), TextSize::Sm)
+    .id(id)
+    .debug_selector(move || selector)
+    .role(gpui::Role::ListItem)
+    .aria_label(SharedString::from(name))
+    .flex()
+    .flex_none()
+    .items_center()
+    .gap_2()
+    .min_w_0()
+    .text_color(p.foreground)
+}
+
+fn mono(text: &str) -> Div {
+  div()
+    .flex_none()
+    .max_w(zpx(260.))
+    .truncate()
+    .font_family(theme::MONO_FONT)
+    .child(text.to_string())
+}
+
+/// A repository's folder name.
+fn repo_name(path: &str) -> &str {
+  path
+    .trim_end_matches('/')
+    .rsplit('/')
+    .next()
+    .unwrap_or(path)
+}
+
+impl Render for OpenWorkspacesDialog {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    if self.dismissed {
+      return div().into_any_element();
+    }
+    let p = theme::palette(self.dark);
+    let (lines, search, issue_search) = {
+      let fields = self.fields(window, cx);
+      (
+        fields.lines.clone(),
+        fields.search.clone(),
+        fields.issue_search.clone(),
+      )
+    };
+    let split = self.integration().is_some();
+    let viewport = window.viewport_size();
+    let (backdrop, panel) = dialog_panel(
+      "open-workspaces-dialog",
+      if split { 1040. } else { 560. },
+      viewport,
+      &p,
+    );
+    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
+      let k = &e.keystroke;
+      let held = crate::gpui_shell::keys::held(k.modifiers);
+      if k.key == "escape" {
+        cx.stop_propagation();
+        if view.lines_open {
+          view.close_lines(cx);
+        } else {
+          view.close(cx);
+        }
+      } else if k.key == "enter" && (held.platform || held.control) {
+        cx.stop_propagation();
+        view.submit(cx);
+      }
+    });
+    let body = div()
+      .flex()
+      .gap_4()
+      .h(zpx(460.))
+      .max_h(viewport.height - px(160.))
+      .pt_4()
+      .child(self.lines_column(&lines, &p, cx))
+      .when(split, |this| {
+        this.child(self.integrations_column((&search, &issue_search), &p, cx))
+      });
+    let panel = panel
+      .child(dialog_header(
+        "Open Workspaces",
+        dialog_description(
+          if split {
+            "Open a workspace for each branch or link, and each item you pick."
+          } else {
+            "Open a workspace for each branch or link."
+          },
+          &p,
+        ),
+      ))
+      .child(body);
+    deferred(
+      anchored().position(point(px(0.), px(0.))).child(
+        backdrop
+          .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|view, _, _, cx| {
+              if !view.pending {
+                view.close(cx)
+              }
+            }),
+          )
+          .child(
+            panel
+              .id("open-workspaces-panel")
+              .track_focus(&self.focus)
+              .capture_key_down(keys)
+              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
+          ),
+      ),
+    )
+    .with_priority(2)
+    .into_any_element()
+  }
+}

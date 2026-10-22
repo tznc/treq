@@ -675,6 +675,34 @@ fn selects_a_created_workspace_once_it_is_listed(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_open_workspaces_dialog_selects_the_first_workspace_opened(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.sidebar(cx, SidebarAction::OpenWorkspaces);
+  let modal = format!("{:?}", window.screen_snapshot().modal);
+  assert!(
+    modal
+      .contains(r#"OpenWorkspaces(Route { repo_path: "/repo", repos: ["/repo"], linear: false })"#),
+    "{modal}"
+  );
+
+  host
+    .workspaces
+    .lock()
+    .unwrap()
+    .get_mut("/repo")
+    .unwrap()
+    .push(workspace(5, "opened", Some("main")));
+  window.field(
+    cx,
+    "openWorkspaces.opened",
+    serde_json::json!({"repoPath": "/repo", "id": 5}),
+  );
+  assert_eq!(window.route_workspace(), Some(5));
+  assert!(window.screen_snapshot().modal.is_none());
+}
+
+#[gpui::test]
 fn the_window_regaining_focus_reads_the_changes_again(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
   let revision = |cx: &mut TestAppContext| {

@@ -183,6 +183,11 @@ fn linear_endpoint() -> (String, Duration) {
   if let Some(endpoint) = TEST_ENDPOINT.with(|e| e.borrow().clone()) {
     return endpoint;
   }
+  // The desktop QA suite points the app at its fake Linear.
+  #[cfg(feature = "e2e")]
+  if let Ok(url) = std::env::var("TREQ_E2E_LINEAR_URL") {
+    return (url, LINEAR_REQUEST_TIMEOUT);
+  }
   (LINEAR_GRAPHQL_URL.to_string(), LINEAR_REQUEST_TIMEOUT)
 }
 

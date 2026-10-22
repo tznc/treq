@@ -3,7 +3,8 @@
 // fake `gh` with PRs, issues and checks, a fake agent) plus what the QA
 // shots need on top of it: a supporting repository for the multi-repo
 // sidebar, a commit large enough to defer its diff ("Load diff"), and
-// uncommitted edits for the Changes tab. `QA_THEME` (dark|light) picks the
+// uncommitted edits for the Changes tab, and a fake Linear (./fake-linear.ts)
+// that a repository reaches once it has a Linear API key. `QA_THEME` (dark|light) picks the
 // theme the app starts in.
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
@@ -13,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { appBinary } from "../env.ts";
 import { gitIn, makeFixture, startApp, writeBin } from "../harness.ts";
 import { ALERTING, seedLandingRepo, workspaceDir } from "../landing/seed.ts";
+import { startFakeLinear } from "./fake-linear.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = makeFixture("treq-qa-", "event-bus");
@@ -78,6 +80,12 @@ export function formatError(line: string): string {
 );
 writeFileSync(join(alerting, "packages/api/src/levels.ts"), 'export const LEVELS = ["info", "warn", "error"] as const;\n');
 
+// Branches with no workspace yet, for the Open Workspaces dialog: PR #421's
+// and #409's heads, and a plain branch.
+for (const branch of ["fix/slack-retry", "docs/ingest-runbook", "chore/bump-deps"]) {
+  gitIn(repo, home, "branch", branch, "main");
+}
+
 // A supporting repository: the sidebar's second repo.
 const docs = join(fixture.root, "docs-site");
 mkdirSync(docs, { recursive: true });
@@ -115,7 +123,11 @@ appDb.close();
 
 writeFileSync(join(fixture.root, "qa-extra.json"), JSON.stringify({ docs, theme, repo }));
 
+const linearPort = Number(process.env.TREQ_E2E_PORT ?? 9333) + 2;
+startFakeLinear(linearPort);
+
 startApp(fixture, {
   GDK_SCALE: process.env.GDK_SCALE ?? "2",
+  TREQ_E2E_LINEAR_URL: `http://127.0.0.1:${linearPort}/graphql`,
   TREQ_FAKE_GH_LOG: join(fixture.root, "gh-calls.log"),
 });
