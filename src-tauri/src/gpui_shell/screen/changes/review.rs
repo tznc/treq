@@ -1884,6 +1884,7 @@ impl ChangesView {
       .child(
         div().absolute().top_2().right_2().child(
           Button::new("finish-review-close", p)
+            .aria_label("Close")
             .variant(Variant::Ghost)
             .size(Size::Sm)
             .px_1()

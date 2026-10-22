@@ -135,6 +135,20 @@ pub struct ViewPr {
   pub draft: bool,
 }
 
+/// React's `View PR (#12, open)`: the number and state the icon and color show.
+fn view_pr_name(pr: &ViewPr) -> String {
+  let state = if pr.draft {
+    "draft"
+  } else {
+    match pr.state {
+      PrState::Open => "open",
+      PrState::Closed => "closed",
+      PrState::Merged => "merged",
+    }
+  };
+  format!("View PR (#{}, {state})", pr.number)
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePr {
@@ -813,6 +827,7 @@ impl WorkspaceView {
       if let Some(target) = &h.target {
         let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
         let button = Button::new("workspace-target", p)
+          .aria_label("Workspace target")
           .variant(Variant::Outline)
           .size(Size::Sm)
           .disabled(target.disabled)
@@ -1076,6 +1091,7 @@ impl WorkspaceView {
               .px_1()
               .disabled(more.disabled)
               .icon(theme::ICON_MORE, 16.)
+              .aria_label("More workspace actions")
               .on_click(self.press("workspace.more")),
           )
           .child(self.record_bounds("workspace-more")),
@@ -1143,13 +1159,14 @@ impl WorkspaceView {
       .rounded_r_none()
       .child(ui::icon(icon, 16., text))
       .child("View PR")
-      .aria_label("View PR")
+      .aria_label(view_pr_name(pr))
       .on_click(self.press("workspace.viewPr"));
     let web = styled(Button::new("workspace-view-pr-web", p))
       .rounded_l_none()
       .border_l_0()
       .px_2()
       .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., text))
+      .aria_label("Open PR on web")
       .on_click(self.press("workspace.viewPrWeb"));
     div()
       .flex()
@@ -1194,8 +1211,7 @@ impl WorkspaceView {
           b.child(ui::icon(theme::ICON_GITHUB, 16., white))
         }
       })
-      .child(create.label.clone())
-      .aria_label(create.label.clone())
+      .label(create.label.clone())
       .on_click(self.press("workspace.createPr"));
     let menu = styled(Button::new("workspace-create-pr-menu", p))
       .rounded_l_none()
@@ -1203,6 +1219,7 @@ impl WorkspaceView {
       .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
       .px(zpx(6.))
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
+      .aria_label("More Create PR options")
       .on_click(self.press("workspace.createPrMenu"));
     div()
       .flex()
@@ -1229,6 +1246,7 @@ impl WorkspaceView {
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
     let dot = tw::color(tw::YELLOW_600);
     let button = Button::new("workspace-sync", p)
+      .aria_label("Sync with remote")
       .variant(if sync.ahead > 0 {
         Variant::Outline
       } else {

@@ -607,6 +607,7 @@ impl GithubView {
       }
     }));
     let menu_button = Button::new("github-new-pr-type", p)
+      .aria_label("Pull request type")
       .size(Size::Sm)
       .rounded_l_none()
       .border_l_1()

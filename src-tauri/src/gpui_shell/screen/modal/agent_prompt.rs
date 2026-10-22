@@ -1127,6 +1127,7 @@ impl AgentPromptView {
       .relative()
       .child(
         small(Button::new("task-add", p).variant(Variant::Ghost))
+          .aria_label("Add")
           .px_2()
           .gap_1()
           .child(

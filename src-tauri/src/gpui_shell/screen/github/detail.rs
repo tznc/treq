@@ -254,6 +254,7 @@ impl GithubView {
       )
       .child(
         Button::new("github-detail-close", p)
+          .aria_label("Close")
           .variant(Variant::Ghost)
           .size(Size::Icon)
           .w(zpx(28.))
@@ -472,6 +473,7 @@ impl GithubView {
           .gap_2()
           .child(
             Button::new("github-edit", p)
+              .aria_label("Edit issue")
               .variant(Variant::Ghost)
               .size(Size::Icon)
               .w(zpx(32.))
@@ -489,6 +491,7 @@ impl GithubView {
           )
           .child(
             Button::new("github-delete", p)
+              .aria_label("Delete issue")
               .variant(Variant::Ghost)
               .size(Size::Icon)
               .w(zpx(32.))
@@ -579,6 +582,7 @@ impl GithubView {
         )
         .child(
           Button::new("github-close-options", p)
+            .aria_label("Close options")
             .variant(Variant::Outline)
             .size(Size::Sm)
             .rounded_l_none()
@@ -1301,6 +1305,7 @@ impl GithubView {
           )
           .child(
             Button::new("github-rerun-setup", p)
+              .aria_label("Re-run setup script")
               .variant(Variant::Ghost)
               .size(Size::Sm)
               .gap_0()
@@ -1384,6 +1389,7 @@ impl GithubView {
         .child(
           run_button(
             format!("github-run-{w}"),
+            &wf.name,
             latest.is_some(),
             wf_running,
             !can_run,
@@ -1427,6 +1433,7 @@ impl GithubView {
               .child(
                 run_button(
                   format!("github-run-{w}-{j}"),
+                  &job.name,
                   run_job.is_some(),
                   job_running,
                   !can_run || wf_running,
@@ -1688,6 +1695,7 @@ fn status_icon(
 /// `RunButton`: Run or Re-run, with a spinner while running.
 fn run_button(
   id: String,
+  name: &str,
   rerun: bool,
   running: bool,
   disabled: bool,
@@ -1701,7 +1709,9 @@ fn run_button(
   } else {
     ui::icon(theme::ICON_PLAY, 12., p.foreground).into_any_element()
   };
+  let verb = if rerun { "Re-run" } else { "Run" };
   Button::new(id, p)
+    .aria_label(format!("{verb} {name}"))
     .variant(variant)
     .size(Size::Sm)
     .gap_0()

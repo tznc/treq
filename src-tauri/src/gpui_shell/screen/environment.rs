@@ -52,6 +52,7 @@ pub(crate) fn trigger(
   };
   let running = env.status.as_ref().is_some_and(|s| s.running);
   Button::new(id, p)
+    .aria_label(label)
     .variant(Variant::Ghost)
     .size(Size::Sm)
     .h(zpx(size.height))

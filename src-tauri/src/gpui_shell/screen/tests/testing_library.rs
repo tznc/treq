@@ -314,3 +314,70 @@ fn the_remote_chooser_closes_from_its_x(cx: &mut TestAppContext) {
     .click(&screen.get_by_role(by::role(Role::Button).name("Close")));
   assert_eq!(h.sent(), vec![press("remote.setup.close")]);
 }
+
+// Every control is reachable by name: these had none, so a screen reader
+// read them as "button" and e2e tests clicked them by position.
+
+fn button(name: &str) -> gpui_testing_library::ByRole {
+  by::role(Role::Button).name(name)
+}
+
+#[gpui::test]
+fn the_workspace_header_names_its_icon_buttons(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  let screen = screen(&mut h);
+  for name in [
+    "Workspace target",
+    "View PR (#42, open)",
+    "Open PR on web",
+    "Sync with remote",
+    "More workspace actions",
+  ] {
+    expect(screen.get_by_role(button(name))).to_be_visible();
+  }
+}
+
+#[gpui::test]
+fn the_workspace_header_names_the_create_pr_buttons(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    loaded: feature_loaded(),
+    pr: workspace_data::PrCache {
+      pr: Some(None),
+      ci: None,
+    },
+    ..FakeHost::default()
+  };
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(button("Create PR"))).to_be_visible();
+  expect(screen.get_by_role(button("More Create PR options"))).to_be_visible();
+}
+
+#[gpui::test]
+fn the_create_dialog_names_its_target_button(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_dialogs::dialog(serde_json::json!({})));
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(button("Workspace target"))).to_be_visible();
+}
+
+#[gpui::test]
+fn the_prerequisites_recheck_is_named(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, onboarding());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(button("Check again"))).to_be_visible();
+}
+
+#[gpui::test]
+fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, settings_route("application"));
+  let screen = screen(&mut h);
+  for name in [
+    "Theme",
+    "Font Size",
+    "Claude Code Model",
+    "Default Agent",
+    "Conflict Marker Style",
+  ] {
+    expect(screen.get_by_role(by::role(Role::ComboBox).name(name))).to_be_visible();
+  }
+}

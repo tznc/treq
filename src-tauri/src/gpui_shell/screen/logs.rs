@@ -863,7 +863,7 @@ impl LogsView {
         .size(Size::Sm)
         .min_w(zpx(130.))
         .justify_between()
-        .child(label)
+        .label(label)
         .child(ui::icon(
           theme::ICON_CHEVRON_DOWN,
           12.,

@@ -1447,7 +1447,7 @@ impl SettingsView {
       .gap_6()
       .child(field_block(
         "Theme",
-        form::select_field("settings-theme", &theme_select, false),
+        form::select_field("settings-theme", "Theme", &theme_select, false),
         None,
         p,
       ))
@@ -1482,7 +1482,7 @@ impl SettingsView {
           .child(
             div()
               .mt_2()
-              .child(form::select_field("settings-font-size", &font, false)),
+              .child(form::select_field("settings-font-size", "Font Size", &font, false)),
           )
           .child(help(
             "Font size for terminal, code diff display, and overview files",
@@ -1492,20 +1492,20 @@ impl SettingsView {
       )
       .child(field_block(
         "Claude Code Model",
-        form::select_field("settings-default-model", &model, false),
+        form::select_field("settings-default-model", "Claude Code Model", &model, false),
         Some("Default model for new Claude Code sessions"),
         p,
       ))
       .child(field_block(
         "Default Agent",
-        form::select_field("settings-default-agent", &agent, false),
+        form::select_field("settings-default-agent", "Default Agent", &agent, false),
         Some("Default agent for new sessions"),
         p,
       ))
       .child(checklist::render(&app.checklist, &ctx))
       .child(field_block(
         "Conflict Marker Style",
-        form::select_field("settings-conflict-marker-style", &conflict, false),
+        form::select_field("settings-conflict-marker-style", "Conflict Marker Style", &conflict, false),
         Some("Style of conflict markers written to files during rebase. Git Diff3 is compatible with most editors."),
         p,
       ))
@@ -1526,12 +1526,12 @@ impl SettingsView {
           )
           .child(div().mt_1().child(form::switch(
             "settings-notify-agent-finished",
+            "Notify when an agent finishes",
             app.notify_agent_finished,
             false,
             p,
             self.field("app.notifyAgentFinished"),
-          )
-          .aria_label("Notify when an agent finishes"))),
+          ))),
       )
       .child(
         div()
@@ -1554,12 +1554,12 @@ impl SettingsView {
               .mt_3()
               .child(form::switch(
                 "settings-setup-always-run",
+                "Run on every app startup",
                 setup.always_run,
                 setup.loading,
                 p,
                 self.field("app.setupScriptAlwaysRun"),
-              )
-              .aria_label("Run on every app startup"))
+              ))
               .child(label("Run on every app startup")),
           )
           .child(
@@ -1742,21 +1742,27 @@ impl SettingsView {
         ))
         .child(field_block(
           "Claude Code Model",
-          form::select_field("settings-repo-default-model", &model, managed("defaultModel")),
+          form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
           Some("Default model for new Claude Code sessions in this repository (overrides application default)"),
           p,
         ))
         .child(field_block(
           "Default Agent",
-          form::select_field("settings-repo-default-agent", &agent, managed("defaultAgent")),
+          form::select_field("settings-repo-default-agent", "Default Agent", &agent, managed("defaultAgent")),
           Some("Default agent for new sessions in this repository (overrides application default)"),
           p,
         ))
         .child(switch_row(
           "Auto-push to remote",
           "Automatically push to the remote after every commit in this repository",
-          form::switch("settings-auto-push", f.auto_push, false, p, self.field("repo.autoPush"))
-            .aria_label("Auto-push to remote"),
+          form::switch(
+            "settings-auto-push",
+            "Auto-push to remote",
+            f.auto_push,
+            false,
+            p,
+            self.field("repo.autoPush"),
+          ),
           p,
         ))
         .child(switch_row(
@@ -1764,12 +1770,12 @@ impl SettingsView {
           "Add .jj*/ and Treq-generated agent skill paths to this repository's .gitignore",
           form::switch(
             "settings-ignore-generated",
+            "Ignore generated Treq paths",
             f.ignore_generated_agent_files,
             false,
             p,
             self.field("repo.ignoreGeneratedAgentFiles"),
-          )
-          .aria_label("Ignore generated Treq paths"),
+          ),
           p,
         ))
         .child(
@@ -1801,13 +1807,13 @@ impl SettingsView {
             ))
             .child(field_block(
               "Review Agent",
-              form::select_field("settings-review-agent", &review_agent, managed("reviewAgent")),
+              form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),
               Some("Agent launched by Start Review (overrides the default agent)"),
               p,
             ))
             .child(field_block(
               "Automatic Review",
-              form::select_field("settings-auto-review-trigger", &trigger, managed("autoReviewTrigger")),
+              form::select_field("settings-auto-review-trigger", "Automatic Review", &trigger, managed("autoReviewTrigger")),
               Some("Opens a review terminal on its own after the chosen operation finishes in a workspace of this repository."),
               p,
             )),
@@ -1890,12 +1896,12 @@ impl SettingsView {
                   .child(
                     form::switch(
                       format!("settings-preview-{}", feature.id),
+                      feature.title.clone(),
                       feature.checked,
                       false,
                       p,
                       self.field(&format!("preview.{}", feature.id)),
-                    )
-                    .aria_label(feature.title.clone()),
+                    ),
                   ),
               )
           })),
@@ -1974,7 +1980,7 @@ impl SettingsView {
             div()
               .min_w(zpx(160.))
               .child(label("Install level"))
-              .child(div().mt_2().child(form::select_field("skills-scope", &scope, false))),
+              .child(div().mt_2().child(form::select_field("skills-scope", "Install level", &scope, false))),
           ),
       )
       .when(tab.loading, |this| {
@@ -2029,6 +2035,7 @@ impl SettingsView {
         this.child(
           div().absolute().top_2().right_2().child(
             Button::new(format!("skill-uninstall-{id}"), p)
+              .aria_label("Uninstall")
               .variant(Variant::Outline)
               .size(Size::IconXs)
               .disabled(row.busy)
@@ -2115,6 +2122,7 @@ impl SettingsView {
               )
               .child(div().w(zpx(128.)).child(form::select_field(
                 format!("skill-level-{id}"),
+                "Install level",
                 &level,
                 row.busy,
               ))),
