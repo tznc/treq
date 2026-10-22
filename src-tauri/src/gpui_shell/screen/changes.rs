@@ -58,6 +58,8 @@ use crate::{
 /// fifth wider than Inter's at the same size, so 13px code read larger than
 /// the 13px UI around it; 12px matches its width, as GitHub's diffs do.
 const CODE_TEXT: f32 = 12.;
+/// Opacity of a viewed file's row in the file lists.
+const VIEWED_OPACITY: f32 = 0.5;
 
 /// A workspace, or the home repository, files can move to.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -568,7 +570,15 @@ impl ChangesView {
 
   /// Viewed files whose diff changed since are viewed no longer.
   fn unmark_stale(&mut self, cx: &mut Context<Self>) {
-    let listed: HashSet<String> = self.files().iter().map(|f| f.path.clone()).collect();
+    // Committed files can be marked viewed too, so they stay listed.
+    let listed: HashSet<String> = self
+      .snapshot
+      .iter()
+      .flat_map(|s| {
+        let committed = s.committed.iter().map(|f| f.path.clone());
+        s.files.iter().map(|f| f.path.clone()).chain(committed)
+      })
+      .collect();
     self.viewed.retain(|p, _| listed.contains(p));
     let stale: Vec<String> = self
       .viewed
@@ -576,8 +586,7 @@ impl ChangesView {
       .filter(|(path, hash)| {
         !hash.is_empty()
           && self
-            .hunks
-            .get(*path)
+            .file_hunks(path)
             .filter(|d| !d.loading && !d.hunks.is_empty())
             .is_some_and(|d| hunks_hash(&d.hunks) != **hash)
       })
@@ -1914,6 +1923,8 @@ impl ChangesView {
   ) -> impl IntoElement {
     let staged = list == List::Selected;
     let active = self.active.as_deref() == Some(file.path.as_str());
+    // Viewed files fade back, like GitHub's file tree.
+    let dimmed = self.viewed.contains_key(&file.path) && !selected;
     let (name, dir) = split_path(&file.path);
     let blue = tw::color(tw::BLUE_500);
     let white = gpui::white();
@@ -1965,6 +1976,7 @@ impl ChangesView {
       div()
         .min_w(zpx(8.))
         .text_color(status_color)
+        .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
         .child(file.status.clone()),
     );
     if last && selected && !staged {
@@ -2052,6 +2064,7 @@ impl ChangesView {
           .items_center()
           .gap_2()
           .min_w_0()
+          .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
           .child(
             div()
               .min_w_0()
@@ -2173,6 +2186,7 @@ impl ChangesView {
       for file in &visible {
         let (name, dir) = split_path(&file.path);
         let active = self.active.as_deref() == Some(file.path.as_str());
+        let dimmed = self.viewed.contains_key(&file.path);
         let hover = p.accent.opacity(0.2);
         let path = file.path.clone();
         let menu = file.path.clone();
@@ -2195,6 +2209,7 @@ impl ChangesView {
                 .items_center()
                 .gap_2()
                 .min_w_0()
+                .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
                 .child(
                   div()
                     .font_weight(FontWeight::MEDIUM)
@@ -2212,7 +2227,12 @@ impl ChangesView {
                   )
                 }),
             )
-            .child(div().text_color(muted).child(file.status.clone()))
+            .child(
+              div()
+                .text_color(muted)
+                .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
+                .child(file.status.clone()),
+            )
             .on_mouse_down(
               MouseButton::Right,
               cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {

@@ -4095,6 +4095,41 @@ fn changes_tab_marks_files_viewed(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.working = host.working.map(|mut diff| {
+    let committed: crate::jj::JjRevisionDiff = serde_json::from_value(serde_json::json!({
+      "committed_files": [
+        {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+      ],
+      "hunks_by_file": [
+        {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-x", "+y"], "patch": ""}]}
+      ],
+      "too_large_to_render": false
+    }))
+    .expect("committed diff");
+    diff.committed_files = committed.committed_files;
+    diff.hunks_by_file.extend(committed.hunks_by_file);
+    diff
+  });
+  let mut route = changes_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.show_committed = Some(true);
+  }
+  let (mut h, host) = workspace_harness(cx, host, route);
+  h.click("viewed-c.rs");
+  h.cx.run_until_parked();
+  edit_a_rs(&mut h, &host);
+  let viewed = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    changes.viewed.contains_key("c.rs")
+  });
+  assert!(viewed, "{:?}", host.writes());
+  assert!(!host.writes().contains(&"unmark viewed c.rs".to_string()));
+}
+
+#[gpui::test]
 fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
