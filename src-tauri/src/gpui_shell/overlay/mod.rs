@@ -18,7 +18,7 @@ use gpui_kit::component::input::{
 };
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, px, rgba, Context, Entity, FocusHandle, KeyDownEvent, ScrollHandle,
+  self, div, prelude::*, px, Context, Entity, FocusHandle, KeyDownEvent, ScrollHandle,
   SharedString, Subscription, Task, Window,
 };
 
@@ -506,7 +506,7 @@ impl Overlay {
   fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
     let key = event.keystroke.key.as_str();
     let m = crate::gpui_shell::keys::held(event.keystroke.modifiers);
-    if key == "escape" {
+    if ui::is_escape(&event.keystroke) {
       self.close(cx);
       cx.stop_propagation();
       return;
@@ -566,16 +566,6 @@ fn group_branches(list: Vec<JjBranch>) -> Vec<(JjBranch, usize)> {
   grouped
 }
 
-/// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
-fn kbd(p: &Palette, key: &str) -> gpui::Div {
-  ui::text(div(), TextSize::Xs)
-    .px_1p5()
-    .py_0p5()
-    .rounded(radius::SM)
-    .bg(p.muted)
-    .child(SharedString::from(key.to_string()))
-}
-
 /// The footer of keyboard hints, `CmdkFooter` and its copies.
 fn footer(p: &Palette, hints: &[(&str, &str)], right: Option<&'static str>) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
@@ -597,7 +587,7 @@ fn footer(p: &Palette, hints: &[(&str, &str)], right: Option<&'static str>) -> g
             .flex()
             .items_center()
             .gap_1()
-            .child(kbd(p, key))
+            .child(ui::Kbd::from_label(key.to_string(), p))
             .child(SharedString::from(label.to_string()))
         })),
     )
@@ -790,12 +780,10 @@ impl Overlay {
         if let Some(g) = group {
           self.rows.push((index, children.len()));
           children.push(
-            div()
+            ui::text(div(), TextSize::Xs)
               .px_3()
               .py_2()
               .mt_2()
-              .text_size(zpx(11.))
-              .line_height(zpx(16.))
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .text_color(p.muted_foreground)
               .child(BRANCH_GROUPS[g].to_uppercase())
@@ -935,11 +923,7 @@ impl Render for Overlay {
       .items_center()
       .justify_center()
       .when(shortcuts, |this| this.p_4())
-      .bg(if shortcuts {
-        rgba(0x00000066)
-      } else {
-        rgba(0x00000099)
-      })
+      .bg(p.scrim())
       .font_family(theme::SANS_FONT)
       .text_color(p.foreground)
       .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {

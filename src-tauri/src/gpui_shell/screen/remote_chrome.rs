@@ -5,11 +5,11 @@
 //! that dims the window (`remote-cutoff-overlay`).
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, ClickEvent, Div, Hsla, Window};
+use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, ClickEvent, Div, Window};
 
 use crate::gpui_shell::{
-  theme::{tw, Palette},
-  ui::{self, TextSize},
+  theme::Palette,
+  ui::{self, TextSize, Tone},
 };
 
 /// What React knows of the remote repository the workspace view shows.
@@ -29,12 +29,6 @@ pub struct RemoteChrome {
   pub notices: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tone {
-  Warning,
-  Danger,
-}
-
 /// `RemoteStatusBanner`'s `COPY`: the banner's label and tone, or `None`
 /// while connected.
 fn copy(state: &str) -> Option<(&'static str, Tone)> {
@@ -52,23 +46,6 @@ fn copy(state: &str) -> Option<(&'static str, Tone)> {
     ),
     _ => return None,
   })
-}
-
-/// `TONE_CLASSES`: background, text and border. The neutral tone is only
-/// `online`'s, which shows no banner.
-fn tone(tone: Tone, dark: bool) -> (Hsla, Hsla, Hsla) {
-  match tone {
-    Tone::Warning => (
-      tw::color(tw::YELLOW_500).opacity(0.1),
-      tw::color(if dark { tw::YELLOW_400 } else { tw::YELLOW_700 }),
-      tw::color(tw::YELLOW_500).opacity(0.3),
-    ),
-    Tone::Danger => (
-      tw::color(tw::RED_500).opacity(0.1),
-      tw::color(if dark { tw::RED_400 } else { tw::RED_700 }),
-      tw::color(tw::RED_500).opacity(0.3),
-    ),
-  }
 }
 
 /// The links the banner offers in `state`: Wake now, Reconnect, Refresh
@@ -110,7 +87,7 @@ fn link(
 
 /// The strip above the workspace view: the name and its links, the banner
 /// and the capability notice.
-pub fn strip(chrome: &RemoteChrome, dark: bool, p: &Palette, press: &Press) -> Div {
+pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> Div {
   let enabled = !chrome.cut_off;
   let top = ui::text(div(), TextSize::Xs)
     .flex()
@@ -143,7 +120,7 @@ pub fn strip(chrome: &RemoteChrome, dark: bool, p: &Palette, press: &Press) -> D
         )),
     );
   let banner = copy(&chrome.state).map(|(label, t)| {
-    let (bg, fg, border) = tone(t, dark);
+    let (bg, fg, border) = (t.tint(p), t.text(p), t.border(p));
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "remote-status-banner".into())
       .flex()

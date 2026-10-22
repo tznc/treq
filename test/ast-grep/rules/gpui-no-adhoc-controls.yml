@@ -8,23 +8,6 @@ message: >
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
 ignores:
-  # Not migrated yet: remove a file once it passes.
-  - "src-tauri/src/gpui_shell/overlay/mod.rs"
-  - "src-tauri/src/gpui_shell/overlay/shortcuts.rs"
-  - "src-tauri/src/gpui_shell/screen/changes/search.rs"
-  - "src-tauri/src/gpui_shell/screen/code.rs"
-  - "src-tauri/src/gpui_shell/screen/commits.rs"
-  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
-  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
-  - "src-tauri/src/gpui_shell/screen/file_picker.rs"
-  - "src-tauri/src/gpui_shell/screen/github.rs"
-  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
-  - "src-tauri/src/gpui_shell/screen/linear.rs"
-  - "src-tauri/src/gpui_shell/screen/logs.rs"
-  - "src-tauri/src/gpui_shell/screen/remote.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_modal.rs"
-  - "src-tauri/src/gpui_shell/sidebar/mod.rs"
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"
 rule:

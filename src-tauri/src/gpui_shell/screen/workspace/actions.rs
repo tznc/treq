@@ -417,7 +417,7 @@ impl WorkspaceView {
           Ok(()) => workspace_ops::toast(
             &*view.host,
             ToastTone::Success,
-            "Rebased successfully",
+            "Rebased",
             &format!("Workspace rebased onto {branch}"),
           ),
           Err(err) => workspace_ops::toast(&*view.host, ToastTone::Error, "Rebase failed", &err),

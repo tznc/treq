@@ -41,7 +41,7 @@ use crate::{
     form::SelectOption,
     native,
     popup::PopupSink,
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
@@ -261,30 +261,6 @@ fn grid(cells: Vec<(AnyElement, bool)>, two_columns: bool) -> Div {
             .child(cell)
         }))
     }))
-}
-
-/// A 13px native checkbox, as `<input type="checkbox">` draws.
-fn checkbox(id: &'static str, checked: bool, p: &Palette) -> impl IntoElement {
-  div()
-    .id(id)
-    .debug_selector(|| id.into())
-    .size(zpx(13.))
-    .flex_none()
-    .flex()
-    .items_center()
-    .justify_center()
-    .rounded(radius::SM)
-    .when(checked, |this| {
-      this
-        .bg(tw::color(tw::BLUE_500))
-        .child(ui::icon(theme::ICON_CHECK, 11., gpui::white()))
-    })
-    .when(!checked, |this| {
-      this
-        .border_1()
-        .border_color(p.muted_foreground)
-        .bg(p.background)
-    })
 }
 
 /// `mt-1 text-muted-foreground`'s words, each in `font-mono` when marked, so
@@ -1003,7 +979,7 @@ impl RemoteView {
       .items_center()
       .gap_2()
       .cursor_pointer()
-      .child(checkbox("remote-alias-checkbox", form.alias_mode, p))
+      .child(ui::Checkbox::new("remote-alias-checkbox", p).checked(form.alias_mode))
       .child(div().child("Use an explicit SSH alias for this endpoint (optional)"))
       .on_click(cx.listener(|view, _, _, cx| {
         if let Some(form) = view.form() {
@@ -1099,7 +1075,6 @@ impl RemoteView {
     }
 
     let trust = form.trust.clone().map(|fingerprint| {
-      let yellow = tw::color(tw::YELLOW_500);
       let endpoint = format!("{username}@{hostname}:{port}");
       div()
         .id("remote-trust-confirmation")
@@ -1107,8 +1082,8 @@ impl RemoteView {
         .mt_4()
         .rounded(radius::MD)
         .border_1()
-        .border_color(yellow.opacity(0.4))
-        .bg(yellow.opacity(0.1))
+        .border_color(ui::Tone::Warning.border(p))
+        .bg(ui::Tone::Warning.tint(p))
         .p_3()
         .child(div().font_weight(FontWeight::MEDIUM).child("Confirm host trust"))
         .child(div().mt_1().child(words(
@@ -1205,7 +1180,7 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> Option<AnyElement> {
     let terminal = self.route.terminal.clone()?;
-    let red = tw::color(tw::RED_500);
+    let red = ui::Tone::Danger.text(p);
     let list = self.sessions.list.clone();
     let loading = list.is_none() && self.sessions.error.is_none();
     let sessions = list.clone().unwrap_or_default();

@@ -194,10 +194,7 @@ fn retargets_onto_another_branch(cx: &mut TestAppContext) {
   assert!(h.sent().is_empty());
   assert_eq!(
     calls_starting(&host, &["retarget", "notify toast"]),
-    [
-      "retarget feature/login -> develop",
-      "notify toast Rebased successfully",
-    ]
+    ["retarget feature/login -> develop", "notify toast Rebased",]
   );
 }
 

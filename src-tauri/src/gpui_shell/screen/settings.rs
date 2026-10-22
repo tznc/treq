@@ -742,7 +742,7 @@ impl SettingsView {
             host.notify(toast(
               ToastTone::Success,
               "Settings Saved",
-              "Application settings updated successfully",
+              "Application settings updated",
             ));
           }
           Err(err) => host.notify(toast(ToastTone::Error, "Error", err)),
@@ -773,7 +773,7 @@ impl SettingsView {
               host.notify(toast(
                 ToastTone::Success,
                 "Settings saved",
-                "Repository settings have been updated successfully.",
+                "Repository settings updated.",
               ));
             }
             Err(err) => host.notify(toast(
@@ -1143,9 +1143,8 @@ fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEven
 
 /// `<Label>`: 13px medium, `leading-none`.
 fn label(text: impl Into<SharedString>) -> gpui::Div {
-  div()
-    .text_size(zpx(13.))
-    .line_height(zpx(13.))
+  ui::text(div(), TextSize::Sm)
+    .h(zpx(13.))
     .font_weight(FontWeight::MEDIUM)
     .child(text.into())
 }
@@ -1832,9 +1831,7 @@ impl SettingsView {
       .child(
         div()
           .child(
-            div()
-              .text_size(zpx(13.))
-              .line_height(zpx(20.))
+            ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::SEMIBOLD)
               .child("Feature Preview"),
           )
@@ -2146,7 +2143,7 @@ impl SettingsView {
       .flex()
       .items_center()
       .justify_center()
-      .bg(gpui::black().opacity(0.5))
+      .bg(p.scrim())
       .occlude()
       .child(
         div()

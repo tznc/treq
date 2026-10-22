@@ -9,7 +9,6 @@ message: >
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
 ignores:
-  # Not migrated yet: remove a file once it passes.
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"
 rule:
