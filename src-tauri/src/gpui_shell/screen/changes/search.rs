@@ -297,13 +297,14 @@ impl ChangesView {
     key: MatchKey,
     text: &str,
     language: Option<&'static str>,
+    changed: &[(Range<usize>, Hsla)],
   ) -> AnyElement {
-    let base = highlight::styled(text, language, self.dark);
     if !self.search.index.contains_key(&key) {
-      return base.into_any_element();
+      return highlight::styled_marked(text, language, self.dark, changed).into_any_element();
     }
     let current = self.current_in(&key);
     let primary = theme::palette(self.dark).primary;
+    // Matches first: where one overlaps a changed run, it shows.
     let marks: Vec<(Range<usize>, Hsla)> = match_ranges(text, &self.search.applied)
       .into_iter()
       .enumerate()
@@ -313,6 +314,7 @@ impl ChangesView {
           primary.opacity(if Some(i) == current { 0.6 } else { 0.3 }),
         )
       })
+      .chain(changed.iter().cloned())
       .collect();
     let styled: StyledText = highlight::styled_marked(text, language, self.dark, &marks);
     if current.is_none() {
