@@ -887,8 +887,6 @@ impl OpenWorkspacesDialog {
           ),
       )
       .child(options)
-      .child(self.status(status, invalid, checks.len() + self.chosen.len() + self.chosen_issues.len(), p, cx))
-      .when(self.lines_open, |this| this.child(self.lines_popover(&checks, p, cx)))
       .when(!self.errors.is_empty(), |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
@@ -910,8 +908,9 @@ impl OpenWorkspacesDialog {
       .child(
         div()
           .flex()
-          .justify_end()
+          .items_center()
           .gap_2()
+          .child(self.status(status, invalid, &checks, p, cx))
           .child(
             Button::new("open-workspaces-cancel", p)
               .variant(Variant::Outline)
@@ -936,20 +935,37 @@ impl OpenWorkspacesDialog {
       )
   }
 
-  /// What the lines and picks will open; pressed, it lists each of them.
+  /// What the lines and picks will open, beside the buttons; pressed, it
+  /// lists each of them above it.
   fn status(
     &self,
     status: String,
     invalid: usize,
-    rows: usize,
+    checks: &[(String, Option<Checked>)],
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let muted = p.muted;
+    let rows = checks.len() + self.chosen.len() + self.chosen_issues.len();
+    // The invalid count goes under the summary, so neither runs under the
+    // buttons.
     div()
+      .relative()
       .flex()
-      .items_center()
-      .gap_2()
+      .flex_col()
+      .flex_1()
+      .min_w_0()
+      .items_start()
+      .when(self.lines_open, |this| {
+        // The popover's anchor: the summary's top left corner.
+        this.child(
+          div()
+            .absolute()
+            .top_0()
+            .left(zpx(-8.))
+            .child(self.lines_popover(checks, p, cx)),
+        )
+      })
       .child(
         ui::text(div(), TextSize::Sm)
           .id("open-workspaces-status")
@@ -973,9 +989,9 @@ impl OpenWorkspacesDialog {
               .when(self.lines_open, |this| this.bg(muted))
               .child(ui::icon(
                 if self.lines_open {
-                  theme::ICON_CHEVRON_UP
-                } else {
                   theme::ICON_CHEVRON_DOWN
+                } else {
+                  theme::ICON_CHEVRON_UP
                 },
                 14.,
                 p.muted_foreground,
@@ -991,6 +1007,8 @@ impl OpenWorkspacesDialog {
             .id("open-workspaces-invalid")
             .role(gpui::Role::Alert)
             .aria_label(SharedString::from(invalid.clone()))
+            .max_w_full()
+            .truncate()
             .text_color(p.destructive)
             .child(invalid)
             .test_support(),
@@ -998,7 +1016,8 @@ impl OpenWorkspacesDialog {
       })
   }
 
-  /// Each line and pick, and what it opens or why it can't.
+  /// Each line and pick, and what it opens or why it can't; it opens
+  /// upwards from the summary.
   fn lines_popover(
     &self,
     checks: &[(String, Option<Checked>)],
@@ -1024,13 +1043,13 @@ impl OpenWorkspacesDialog {
         )
       }));
     deferred(
-      anchored().child(
+      anchored().anchor(gpui::Anchor::BottomLeft).child(
         div()
           .id("open-workspaces-lines-popover")
           .debug_selector(|| "open-workspaces-lines-popover".into())
           .role(gpui::Role::List)
           .aria_label("Workspaces to open")
-          .mt_1()
+          .mb_1()
           .w(zpx(520.))
           .max_h(zpx(320.))
           .overflow_y_scroll()

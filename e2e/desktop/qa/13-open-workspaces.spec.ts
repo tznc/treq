@@ -111,7 +111,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     title: "The summary's popover lists each line",
     expectations: [
       "A popover by the summary lists: treq/retry-flaky-webhook-tests new branch; chore/bump-deps new; feat/keyvalues-cache already open; fix/slack-retry PR #421 new; acme/other and main with red reasons; docs/ingest-runbook PR #409 new",
-      "The popover sits above the dialog, with a border and shadow",
+      "The popover opens upward from the summary on the button row, with a border and shadow",
     ],
   });
   await page.keyboard.press("Escape");
