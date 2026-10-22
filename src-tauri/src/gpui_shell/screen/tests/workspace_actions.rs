@@ -269,3 +269,25 @@ fn hands_a_remote_repositorys_actions_to_react(cx: &mut TestAppContext) {
   );
   assert!(calls_starting(&host, &["run ", "create pr", "queue"]).is_empty());
 }
+
+#[gpui::test]
+fn a_merged_pull_request_hides_create_pr(cx: &mut TestAppContext) {
+  let mut host = feature_host();
+  if let Some(Some(pr)) = host.pr.pr.as_mut() {
+    pr.state = "MERGED".into();
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  assert!(h.drawn("workspace-view-pr"));
+  assert!(!h.drawn("workspace-create-pr"));
+}
+
+#[gpui::test]
+fn a_closed_pull_request_can_be_replaced(cx: &mut TestAppContext) {
+  let mut host = feature_host();
+  if let Some(Some(pr)) = host.pr.pr.as_mut() {
+    pr.state = "CLOSED".into();
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  assert!(h.drawn("workspace-view-pr"));
+  assert!(h.drawn("workspace-create-pr"));
+}

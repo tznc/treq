@@ -43,6 +43,8 @@ const EDGE_PADDING: f32 = 5.;
 /// `text-sm`: 14px on a 20px line.
 const TEXT_SIZE: f32 = 14.;
 const LINE_HEIGHT: f32 = 20.;
+/// A text tooltip's widest box: `max-w-xs`. Longer text wraps.
+const TOOLTIP_MAX_WIDTH: f32 = 320.;
 /// A [`TooltipContent::List`] row: `text-xs`.
 const LIST_ITEM_SIZE: f32 = 11.;
 const LIST_ITEM_LINE: f32 = 16.;
@@ -133,6 +135,13 @@ pub enum PopupRequest {
   },
   /// A menu of `entries` below the button at `anchor`.
   ShowDropdown {
+    entries: Vec<MenuEntry>,
+    anchor: Bounds<Pixels>,
+    dark: bool,
+  },
+  /// A native `<select>`'s list of `entries` below the control at `anchor`,
+  /// lined up with its left edge.
+  ShowSelect {
     entries: Vec<MenuEntry>,
     anchor: Bounds<Pixels>,
     dark: bool,
@@ -459,10 +468,39 @@ fn text_width_at(cx: &App, text: &str, family: &'static str, size: f32) -> f32 {
     .sum()
 }
 
+/// The widest line and the line count of `text` at `text-sm`, wrapped at
+/// spaces to fit `max` px, as GPUI wraps it.
+fn wrapped_text(cx: &App, text: &str, max: f32) -> (f32, usize) {
+  wrap_lines(text, max, |s| text_width(cx, s, theme::SANS_FONT))
+}
+
+fn wrap_lines(text: &str, max: f32, width: impl Fn(&str) -> f32) -> (f32, usize) {
+  let space = width(" ");
+  let (mut widest, mut line, mut lines) = (0f32, 0f32, 1);
+  for word in text.split_whitespace() {
+    let word = width(word);
+    if line > 0. && line + space + word > max {
+      widest = widest.max(line);
+      line = word;
+      lines += 1;
+    } else {
+      line += if line > 0. { space + word } else { word };
+    }
+  }
+  (widest.max(line), lines)
+}
+
 /// The tooltip box's size: `px-3 py-1.5` and a border around its lines.
 fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
   let (width, lines) = match content {
-    TooltipContent::Text(text) => (text_width(cx, text, theme::SANS_FONT), 1),
+    TooltipContent::Text(text) => {
+      // Wrapped lines sit flush, without the `gap-1` between rows below.
+      let (width, lines) = wrapped_text(cx, text, TOOLTIP_MAX_WIDTH - 24. - 2.);
+      return (
+        (width + 24. + 2.).ceil(),
+        LINE_HEIGHT * lines as f32 + 12. + 2.,
+      );
+    }
     TooltipContent::Shortcut { text, keys } => {
       // The chip's `font-medium` is a little wider than the regular face.
       let keys = text_width_at(cx, keys, theme::SANS_FONT, LIST_ITEM_SIZE) * 1.03;
@@ -1119,6 +1157,8 @@ fn menu_row(
 
 impl Render for PopupView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    #[cfg(feature = "e2e")]
+    super::e2e::begin_frame(window);
     super::ui::apply_zoom(window, cx);
     let palette = self.palette;
     let body = match self.content.clone() {
@@ -1217,16 +1257,22 @@ thread_local! {
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
 }
 
-/// A dropdown's box below `anchor` with their right edges lined up (screen
-/// coordinates), `sideOffset={4}` away, flipped above where it would leave
-/// `screen`.
+/// A dropdown's box below `anchor` with their right edges lined up, or their
+/// left edges when `start` (screen coordinates), `sideOffset={4}` away,
+/// flipped above where it would leave `screen`.
 pub fn place_dropdown(
   anchor: Bounds<Pixels>,
   size: (f32, f32),
   screen: Bounds<Pixels>,
+  start: bool,
 ) -> Point<Pixels> {
   let (width, height) = size;
-  let x = (f32::from(anchor.right()) - width).max(f32::from(screen.left()));
+  let x = if start {
+    f32::from(anchor.left()).min(f32::from(screen.right()) - width)
+  } else {
+    f32::from(anchor.right()) - width
+  }
+  .max(f32::from(screen.left()));
   let mut y = f32::from(anchor.bottom()) + DROPDOWN_OFFSET;
   if y + height > f32::from(screen.bottom()) {
     y = f32::from(anchor.top()) - DROPDOWN_OFFSET - height;
@@ -1251,6 +1297,8 @@ fn popup_window(
     return Some(found);
   }
   let builder = tauri::WindowBuilder::new(app, &label)
+    // Unnamed, it would be listed as Tauri's default "Tauri App".
+    .title(&app.package_info().name)
     .decorations(false)
     .transparent(true)
     .shadow(false)
@@ -1475,7 +1523,12 @@ pub fn handle(app: &AppHandle, owner: &str, request: PopupRequest) {
       entries,
       anchor,
       dark,
-    } => show_dropdown(app, owner, entries, anchor, dark),
+    } => show_dropdown(app, owner, entries, anchor, false, dark),
+    PopupRequest::ShowSelect {
+      entries,
+      anchor,
+      dark,
+    } => show_dropdown(app, owner, entries, anchor, true, dark),
     PopupRequest::ShowTooltip {
       anchor,
       side,
@@ -1578,6 +1631,7 @@ pub fn show_dropdown(
   owner: &str,
   entries: Vec<MenuEntry>,
   anchor: Bounds<Pixels>,
+  start: bool,
   dark: bool,
 ) {
   let Some(client) = tauri::Manager::get_window(app, owner)
@@ -1596,7 +1650,7 @@ pub fn show_dropdown(
     owner,
     entries,
     theme::palette(dark),
-    move |size, screen| place_dropdown(anchor, size, screen),
+    move |size, screen| place_dropdown(anchor, size, screen, start),
   );
 }
 
@@ -1681,6 +1735,21 @@ mod tests {
   }
 
   #[test]
+  fn places_a_dropdown_under_its_button_by_either_edge() {
+    let anchor = bounds(300., 100., 80., 28.);
+    let screen = bounds(0., 0., 1400., 900.);
+    let size = (160., 120.);
+    assert_eq!(
+      place_dropdown(anchor, size, screen, false),
+      gpui::point(px(220.), px(132.))
+    );
+    assert_eq!(
+      place_dropdown(anchor, size, screen, true),
+      gpui::point(px(300.), px(132.))
+    );
+  }
+
+  #[test]
   fn places_a_right_tooltip_beside_its_row_centered() {
     let at = place_tooltip(
       bounds(100., 200., 260., 32.),
@@ -1711,6 +1780,15 @@ mod tests {
       bounds(0., 0., 1400., 900.),
     );
     assert_eq!(at.x, px(5.));
+  }
+
+  #[test]
+  fn wraps_long_tooltip_text_at_spaces() {
+    let width = |s: &str| s.chars().count() as f32;
+    assert_eq!(wrap_lines("short tip", 20., width), (9., 1));
+    assert_eq!(wrap_lines("aaaa bbbb cccc dddd", 10., width), (9., 2));
+    // A word longer than the line keeps a line of its own.
+    assert_eq!(wrap_lines("a bbbbbbbbbbbb c", 10., width), (12., 3));
   }
 
   #[test]

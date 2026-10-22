@@ -99,6 +99,51 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let screen = screen(&mut h);
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace")));
+  let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces..."));
+  expect(&search).to_have_focus();
+
+  user.keyboard("{Escape}");
+  assert!(screen
+    .query_by_role(by::role(Role::TextInput).name("Search workspaces..."))
+    .is_none());
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
+
+  user.keyboard("{Escape}");
+  assert_eq!(h.sent(), vec![press("agentPrompt.close")]);
+}
+
+#[gpui::test]
+fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    installed: vec![
+      ("claude", true),
+      ("codex", false),
+      ("cursor-agent", true),
+      ("copilot", false),
+    ],
+    ..FakeHost::default()
+  };
+  let (mut h, _) = modal_harness(cx, host, agent_modal());
+  // The dialog is built on its first draw, and only then looks up the tools.
+  screen(&mut h);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::ComboBox).name("Agent")));
+  let agents: Vec<String> = screen
+    .get_all_by_role(by::role(Role::MenuItem))
+    .iter()
+    .filter_map(|n| n.name())
+    .collect();
+  assert_eq!(agents, ["Claude", "Cursor"]);
+}
+
+#[gpui::test]
 fn choosing_another_agent_offers_to_make_it_the_repo_default(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   let screen = screen(&mut h);
@@ -207,4 +252,51 @@ fn turning_skills_installation_on_shows_the_skills_tab(cx: &mut TestAppContext) 
   assert!(host
     .writes()
     .contains(&"set feature_preview.skillsInstallation=true".to_string()));
+}
+
+// The commit box: Commit waits for a message.
+
+#[gpui::test]
+fn commit_does_nothing_until_a_message_is_typed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = screen(&mut h);
+  let user = screen.user();
+  let commit = || screen.get_by_role(by::role(Role::Button).name("Commit"));
+  user.click(&commit());
+  h.click("commit-message");
+  user.keyboard("   ");
+  user.click(&commit());
+  h.cx.run_until_parked();
+  assert!(
+    !h.drawn("commit-message-error"),
+    "a disabled Commit asks nothing"
+  );
+  assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
+  h.click("commit-message");
+  user.keyboard("Fix");
+  user.click(&commit());
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"commit Some(7) \"Fix\"".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+// The remote chooser can be closed without choosing.
+
+#[gpui::test]
+fn the_remote_chooser_closes_from_its_x(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    setup_route(true, serde_json::json!({})),
+  );
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Close")));
+  assert_eq!(h.sent(), vec![press("remote.setup.close")]);
 }

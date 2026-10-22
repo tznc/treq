@@ -1157,6 +1157,19 @@ fn help(text: impl Into<SharedString>, p: &Palette, mt: f32) -> gpui::Div {
     .child(text.into())
 }
 
+/// The help line under Branch Name Pattern: the pattern and the branch it
+/// gives a sample workspace name, following unsaved edits.
+fn branch_preview(pattern: &str) -> String {
+  let pattern = match pattern.trim() {
+    "" => "treq/{name}",
+    pattern => pattern,
+  };
+  format!(
+    "{pattern} → {}",
+    super::code_data::apply_branch_name_pattern(pattern, "add dark mode")
+  )
+}
+
 /// A label above a control, with a help line under it.
 fn field_block(
   name: &str,
@@ -1454,7 +1467,11 @@ impl SettingsView {
           )
           .child(div().mt_3().child(form::slider_field(&zoom)))
           .child(help(
-            "Scale the application interface. Use Ctrl/Cmd + + to zoom in and Ctrl/Cmd + - to zoom out in 5% steps.",
+            if cfg!(target_os = "macos") {
+              "Scale the application interface. Use ⌘ + + to zoom in and ⌘ + - to zoom out in 5% steps."
+            } else {
+              "Scale the application interface. Use Ctrl + + to zoom in and Ctrl + - to zoom out in 5% steps."
+            },
             p,
             8.,
           )),
@@ -1714,7 +1731,7 @@ impl SettingsView {
         .child(field_block(
           "Branch Name Pattern",
           form::input_field("settings-branch-pattern", &pattern, true, managed("branchNamePattern")),
-          Some("treq/{name} → treq/add-dark-mode"),
+          Some(&branch_preview(&f.branch_name_pattern)),
           p,
         ))
         .child(field_block(
@@ -1840,8 +1857,6 @@ impl SettingsView {
           .flex_col()
           .gap_4()
           .children(preview.features.iter().map(|feature| {
-            let docs = SharedString::from(format!("settings-preview-docs-{}", feature.id));
-            let docs_selector = docs.to_string();
             div()
               .flex()
               .items_center()
@@ -1853,24 +1868,36 @@ impl SettingsView {
               .p_4()
               .child(
                 ui::text(div(), TextSize::Sm)
-                  .id(docs)
-                  .debug_selector(move || docs_selector)
                   .min_w_0()
                   .font_weight(FontWeight::MEDIUM)
-                  .text_color(p.primary)
-                  .cursor_pointer()
-                  .hover(|style| style.underline())
-                  .child(feature.title.clone())
-                  .on_click(self.press(&format!("preview.docs:{}", feature.id))),
+                  .child(feature.title.clone()),
               )
-              .child(form::switch(
-                format!("settings-preview-{}", feature.id),
-                feature.checked,
-                false,
-                p,
-                self.field(&format!("preview.{}", feature.id)),
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .flex_shrink_0()
+                  .child(
+                    Button::new(format!("settings-preview-docs-{}", feature.id), p)
+                      .variant(Variant::Ghost)
+                      .size(Size::Sm)
+                      .label("Docs")
+                      .icon(theme::ICON_EXTERNAL_LINK, 12.)
+                      .aria_label(format!("{} docs", feature.title))
+                      .on_click(self.press(&format!("preview.docs:{}", feature.id))),
+                  )
+                  .child(
+                    form::switch(
+                      format!("settings-preview-{}", feature.id),
+                      feature.checked,
+                      false,
+                      p,
+                      self.field(&format!("preview.{}", feature.id)),
+                    )
+                    .aria_label(feature.title.clone()),
+                  ),
               )
-              .aria_label(feature.title.clone()))
           })),
       )
   }
@@ -2200,5 +2227,20 @@ impl SettingsView {
               ),
           ),
       )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn previews_the_branch_an_edited_pattern_gives() {
+    assert_eq!(
+      branch_preview("treq/{name}"),
+      "treq/{name} → treq/add-dark-mode"
+    );
+    assert_eq!(branch_preview("qa/{name}"), "qa/{name} → qa/add-dark-mode");
+    assert_eq!(branch_preview("  "), "treq/{name} → treq/add-dark-mode");
   }
 }

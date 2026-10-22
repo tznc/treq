@@ -35,7 +35,7 @@ export async function ready(page: Page): Promise<void> {
  * window itself, the pointer can enter a menu and click its items.
  */
 export function focusMain(): void {
-  const ids = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "^Treq"])
+  const ids = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "^Treq - "])
     .toString()
     .trim()
     .split("\n");

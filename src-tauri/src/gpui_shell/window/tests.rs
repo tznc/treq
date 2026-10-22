@@ -723,6 +723,30 @@ fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn shortcuts_do_not_stack_a_dialog_over_another(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::NewWorkspace, cx));
+  assert!(window.last().screen.unwrap().modal.is_some());
+  for shortcut in [
+    Shortcut::AgentPrompt,
+    Shortcut::Palette,
+    Shortcut::FilePicker,
+  ] {
+    window
+      .controller
+      .update(cx, |c, cx| c.shortcut(shortcut, cx));
+  }
+  let shown = window.last();
+  assert!(shown.modal.is_none() && shown.overlay.is_none() && shown.file_picker.is_none());
+  assert!(
+    shown.screen.unwrap().modal.is_some(),
+    "still the only dialog"
+  );
+}
+
+#[gpui::test]
 fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));
@@ -860,6 +884,17 @@ fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
     .update(cx, |c, cx| c.menu(Menu::OpenSsh, cx));
   cx.run_until_parked();
   assert!(window.screen_snapshot().remote.setup.is_some());
+}
+
+#[gpui::test]
+fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
+  cx.run_until_parked();
+  assert!(window.screen_snapshot().remote.setup.is_none());
 }
 
 /// A window that registered `endpoint()` and opened `/srv/app` on it.
@@ -1289,6 +1324,27 @@ fn a_workspace_removed_elsewhere_leaves_the_multi_selection(cx: &mut TestAppCont
   cx.run_until_parked();
   assert!(!window.sidebar_ids().contains(&1));
   assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(1));
+}
+
+/// QA: with a workspace open, Ctrl+clicking a second row highlights both,
+/// so Bulk Archive counts both.
+#[gpui::test]
+fn ctrl_click_adds_to_the_open_workspace(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host, Some("/repo"));
+  select(&window, cx, 1, false);
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, None);
+  select(&window, cx, 2, true);
+  let sidebar = window.last().sidebar.unwrap();
+  let mut selected: Vec<_> = sidebar.repos[0]
+    .workspaces
+    .iter()
+    .filter(|r| r.selected)
+    .map(|r| r.id)
+    .collect();
+  selected.sort();
+  assert_eq!(selected, [1, 2]);
+  assert_eq!(sidebar.bulk_archive, Some(2));
 }
 
 /// Bulk Archive with one failure: only the archived row leaves.

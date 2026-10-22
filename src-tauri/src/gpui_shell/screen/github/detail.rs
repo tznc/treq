@@ -209,15 +209,12 @@ impl GithubView {
         }
         match result {
           Ok((id, created)) => {
-            let (title, description) = if created {
-              ("Workspace created", format!("Created workspace for {head}"))
+            let title = if created {
+              "Workspace created"
             } else {
-              (
-                "Workspace opened",
-                format!("Opened existing workspace for {head}"),
-              )
+              "Workspace opened"
             };
-            view.toast(ToastTone::Success, title, description);
+            view.toast(ToastTone::Success, title, head.to_string());
             view.load_workspaces(cx);
             view.press(format!("github.openWorkspace:{id}"), cx);
           }

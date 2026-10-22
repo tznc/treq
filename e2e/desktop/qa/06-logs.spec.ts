@@ -26,7 +26,6 @@ test("logs: empty state, filters, query and explorer", async ({ page }) => {
     screen: true,
     rest: false,
     expectations: ["Sources (Checks, …) listed under the trigger; the current one marked"],
-    issue: "The menu opens left of its trigger, over the sidebar",
   });
   await page.keyboard.press("Escape");
   await settle(page, 400);
@@ -38,7 +37,6 @@ test("logs: empty state, filters, query and explorer", async ({ page }) => {
     screen: true,
     rest: false,
     expectations: ["Levels listed and aligned, including a way back to All Levels"],
-    issue: "The menu lists Info, Warning, Error only: no All Levels entry to clear the filter",
   });
   await page.keyboard.press("Escape");
   await settle(page, 400);

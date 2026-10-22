@@ -1143,6 +1143,7 @@ impl WorkspaceView {
       .rounded_r_none()
       .child(ui::icon(icon, 16., text))
       .child("View PR")
+      .aria_label("View PR")
       .on_click(self.press("workspace.viewPr"));
     let web = styled(Button::new("workspace-view-pr-web", p))
       .rounded_l_none()
@@ -1194,6 +1195,7 @@ impl WorkspaceView {
         }
       })
       .child(create.label.clone())
+      .aria_label(create.label.clone())
       .on_click(self.press("workspace.createPr"));
     let menu = styled(Button::new("workspace-create-pr-menu", p))
       .rounded_l_none()

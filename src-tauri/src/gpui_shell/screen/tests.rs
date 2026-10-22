@@ -1449,9 +1449,11 @@ impl Harness {
     use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
     self.cx.run_until_parked();
     let entries = match self.popups.borrow().last() {
-      Some(PopupRequest::ShowDropdown { entries, .. } | PopupRequest::ShowMenu { entries, .. }) => {
-        entries.clone()
-      }
+      Some(
+        PopupRequest::ShowDropdown { entries, .. }
+        | PopupRequest::ShowSelect { entries, .. }
+        | PopupRequest::ShowMenu { entries, .. },
+      ) => entries.clone(),
       _ => panic!("no menu is shown"),
     };
     let id = entries
@@ -3909,7 +3911,8 @@ fn changes_tab_lists_files_and_their_diffs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  h.click("commit-button");
+  h.click("commit-message");
+  h.cx.simulate_keystrokes("cmd-enter");
   h.cx.run_until_parked();
   assert!(h.drawn("commit-message-error"));
   assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
@@ -5338,7 +5341,7 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   let shown = h.popups.borrow().iter().any(|p| {
     matches!(p, PopupRequest::ShowTooltip { content: TooltipContent::Shortcut { text, keys }, .. }
-      if text == "Expand" && keys == "⌘ + J")
+      if text == "Expand" && *keys == crate::gpui_shell::keys::hint("⌘ + J"))
   });
   assert!(shown, "{:?}", h.popups.borrow());
 }

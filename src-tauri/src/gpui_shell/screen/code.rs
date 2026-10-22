@@ -12,6 +12,7 @@
 use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
@@ -20,7 +21,7 @@ use gpui_kit::component::{
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, px, relative, rems, rgb, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, SharedString, Stateful, Subscription, Task, Window,
+  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -1422,7 +1423,9 @@ impl CodeView {
     let submit = self.tips.wrap(
       "task-submit",
       Side::Top,
-      Some(TooltipContent::Text("⌘+Enter".into())),
+      Some(TooltipContent::Text(
+        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+      )),
       submit,
       cx,
     );
@@ -1498,6 +1501,8 @@ impl CodeView {
           .items_start()
           .child(
             div()
+              .flex_1()
+              .min_w_0()
               .flex()
               .flex_col()
               .gap(zpx(2.))
@@ -1885,7 +1890,7 @@ impl CodeView {
             .text_color(p.muted_foreground)
             .child("Go to file"),
         )
-        .child(kbd(p, "⌘ + P"))
+        .child(kbd(p, &crate::gpui_shell::keys::hint("⌘ + P")))
         .on_click(move |_, _, cx| {
           let react = react.clone();
           cx.defer(move |cx| {
@@ -1954,6 +1959,9 @@ impl CodeView {
             .child(
               ui::text(div(), TextSize::Sm)
                 .id(id)
+                .role(Role::Button)
+                .aria_label(entry.name.clone())
+                .test_support()
                 .flex()
                 .items_center()
                 .gap_3()
