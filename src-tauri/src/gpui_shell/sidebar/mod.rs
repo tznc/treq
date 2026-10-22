@@ -718,7 +718,8 @@ impl Render for Sidebar {
           if let Some(count) = snapshot.bulk_archive {
             section = section.child(
               bulk_archive_button(count, &palette)
-                .on_click(self.on_action(SidebarAction::BulkArchive)),
+                .on_click(self.on_action(SidebarAction::BulkArchive))
+                .test_support(),
             );
           }
         }
@@ -1422,6 +1423,8 @@ fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Di
   div()
     .id("bulk-archive")
     .debug_selector(|| "bulk-archive".into())
+    .role(Role::Button)
+    .aria_label(label.clone())
     .flex()
     .items_center()
     .justify_center()

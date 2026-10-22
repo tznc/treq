@@ -517,6 +517,20 @@ impl Model {
     }
     self.last_index = Some(index);
     if toggle {
+      // The open workspace's row is highlighted too, so the first Ctrl+click
+      // adds to it rather than starting a selection without it.
+      let shown = !matches!(
+        self.page,
+        Page::Github(_) | Page::Linear | Page::Settings { .. }
+      );
+      if self.multi.is_empty() && shown {
+        if let Some(open) = self
+          .selected
+          .filter(|s| *s != id && rows.iter().any(|w| w.id == *s))
+        {
+          self.multi.insert(open);
+        }
+      }
       if !self.multi.remove(&id) {
         self.multi.insert(id);
       }

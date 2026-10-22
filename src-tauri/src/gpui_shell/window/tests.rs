@@ -1291,6 +1291,27 @@ fn a_workspace_removed_elsewhere_leaves_the_multi_selection(cx: &mut TestAppCont
   assert_eq!(window.last().sidebar.unwrap().bulk_archive, Some(1));
 }
 
+/// QA: with a workspace open, Ctrl+clicking a second row highlights both,
+/// so Bulk Archive counts both.
+#[gpui::test]
+fn ctrl_click_adds_to_the_open_workspace(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host, Some("/repo"));
+  select(&window, cx, 1, false);
+  assert_eq!(window.last().sidebar.unwrap().bulk_archive, None);
+  select(&window, cx, 2, true);
+  let sidebar = window.last().sidebar.unwrap();
+  let mut selected: Vec<_> = sidebar.repos[0]
+    .workspaces
+    .iter()
+    .filter(|r| r.selected)
+    .map(|r| r.id)
+    .collect();
+  selected.sort();
+  assert_eq!(selected, [1, 2]);
+  assert_eq!(sidebar.bulk_archive, Some(2));
+}
+
 /// Bulk Archive with one failure: only the archived row leaves.
 #[gpui::test]
 fn archiving_drops_the_removed_rows_from_the_multi_selection(cx: &mut TestAppContext) {
