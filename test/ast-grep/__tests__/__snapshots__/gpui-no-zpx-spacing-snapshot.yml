@@ -21,6 +21,14 @@ snapshots:
       style: secondary
       start: 30
       end: 33
+    - source: '6.'
+      style: secondary
+      start: 34
+      end: 36
+    - source: '6.'
+      style: secondary
+      start: 34
+      end: 36
     - source: zpx(6.)
       style: secondary
       start: 30
@@ -50,6 +58,14 @@ snapshots:
       style: secondary
       start: 52
       end: 55
+    - source: '2.'
+      style: secondary
+      start: 56
+      end: 58
+    - source: '2.'
+      style: secondary
+      start: 56
+      end: 58
     - source: zpx(2.)
       style: secondary
       start: 52
@@ -79,6 +95,14 @@ snapshots:
       style: secondary
       start: 32
       end: 35
+    - source: '4.'
+      style: secondary
+      start: 36
+      end: 38
+    - source: '4.'
+      style: secondary
+      start: 36
+      end: 38
     - source: zpx(4.)
       style: secondary
       start: 32
@@ -87,6 +111,47 @@ snapshots:
       style: secondary
       start: 32
       end: 39
+  ? |
+    fn negative_margin() -> Div {
+      div().mx(zpx(-8.))
+    }
+  : labels:
+    - source: div().mx(zpx(-8.))
+      style: primary
+      start: 32
+      end: 50
+    - source: mx
+      style: secondary
+      start: 38
+      end: 40
+    - source: div().mx
+      style: secondary
+      start: 32
+      end: 40
+    - source: zpx
+      style: secondary
+      start: 41
+      end: 44
+    - source: '8.'
+      style: secondary
+      start: 46
+      end: 48
+    - source: '-8.'
+      style: secondary
+      start: 45
+      end: 48
+    - source: '-8.'
+      style: secondary
+      start: 45
+      end: 48
+    - source: zpx(-8.)
+      style: secondary
+      start: 41
+      end: 49
+    - source: zpx(-8.)
+      style: secondary
+      start: 41
+      end: 49
   ? |
     fn padding() -> Div {
       div().px(zpx(10.))
@@ -108,6 +173,14 @@ snapshots:
       style: secondary
       start: 33
       end: 36
+    - source: '10.'
+      style: secondary
+      start: 37
+      end: 40
+    - source: '10.'
+      style: secondary
+      start: 37
+      end: 40
     - source: zpx(10.)
       style: secondary
       start: 33
@@ -137,6 +210,14 @@ snapshots:
       style: secondary
       start: 37
       end: 40
+    - source: '6.'
+      style: secondary
+      start: 41
+      end: 43
+    - source: '6.'
+      style: secondary
+      start: 41
+      end: 43
     - source: zpx(6.)
       style: secondary
       start: 37
@@ -166,6 +247,14 @@ snapshots:
       style: secondary
       start: 47
       end: 50
+    - source: '6.'
+      style: secondary
+      start: 51
+      end: 53
+    - source: '6.'
+      style: secondary
+      start: 51
+      end: 53
     - source: zpx(6.)
       style: secondary
       start: 47
