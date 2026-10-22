@@ -363,7 +363,7 @@ fn title_metadata(title: &str, description: &str) -> String {
 }
 
 /// `buildCreateMetadata`.
-fn create_metadata(
+pub fn create_metadata(
   title: &str,
   description: &str,
   moved_files: Option<&[String]>,
@@ -673,20 +673,6 @@ fn run_submit(
   }
 
   // A plain create, stacked on the target branch when one is picked.
-  let mut has_target_workspace = false;
-  if let Some(target) = &form.target_branch {
-    if form.workspaces.iter().any(|w| &w.branch_name == target) {
-      has_target_workspace = true;
-    } else if host.current_branch(repo)?.as_deref() == Some(target) {
-      // The home repo's own branch is checked out in the home working copy,
-      // so it needs no workspace of its own.
-      has_target_workspace = true;
-    } else {
-      let metadata = serde_json::json!({ "description": format!("Workspace for {target}") });
-      let target_id = host.new_workspace(repo, target, None, Some(&metadata.to_string()))?;
-      has_target_workspace = host.all_workspaces(repo)?.iter().any(|w| w.id == target_id);
-    }
-  }
   let metadata = create_metadata(
     &form.title,
     &form.description,
@@ -699,13 +685,15 @@ fn run_submit(
     .as_ref()
     .filter(|(name, status)| name == branch && status.remote_exists)
     .and_then(|(_, status)| status.remote_ref.clone());
-  let id = host.new_workspace(repo, branch, remote_ref.as_deref(), Some(&metadata))?;
-  *created = Some(id);
-  if let (Some(target), true) = (&form.target_branch, has_target_workspace) {
-    if let Some(workspace) = host.all_workspaces(repo)?.iter().find(|w| w.id == id) {
-      host.retarget(repo, workspace, target)?;
-    }
-  }
+  let id = create_on_target(
+    host,
+    repo,
+    branch,
+    remote_ref.as_deref(),
+    form.target_branch.as_deref(),
+    &metadata,
+    created,
+  )?;
   toast(
     host,
     ToastTone::Success,
@@ -713,6 +701,48 @@ fn run_submit(
     branch.to_string(),
   );
   Ok(Ok(id))
+}
+
+/// Creates a workspace for `branch` (from `source_ref` when it is a remote
+/// branch), stacked on `target` when one is picked. A target branch with no
+/// workspace gets one first, unless it is checked out in the home working
+/// copy. `created` holds the workspace once made, even when stacking it
+/// then fails.
+pub fn create_on_target(
+  host: &dyn WorkspaceDialogHost,
+  repo: &str,
+  branch: &str,
+  source_ref: Option<&str>,
+  target: Option<&str>,
+  metadata: &str,
+  created: &mut Option<i64>,
+) -> Result<i64, String> {
+  let mut has_target_workspace = false;
+  if let Some(target) = target {
+    if host
+      .all_workspaces(repo)?
+      .iter()
+      .any(|w| w.branch_name == target)
+    {
+      has_target_workspace = true;
+    } else if host.current_branch(repo)?.as_deref() == Some(target) {
+      // The home repo's own branch is checked out in the home working copy,
+      // so it needs no workspace of its own.
+      has_target_workspace = true;
+    } else {
+      let metadata = serde_json::json!({ "description": format!("Workspace for {target}") });
+      let target_id = host.new_workspace(repo, target, None, Some(&metadata.to_string()))?;
+      has_target_workspace = host.all_workspaces(repo)?.iter().any(|w| w.id == target_id);
+    }
+  }
+  let id = host.new_workspace(repo, branch, source_ref, Some(metadata))?;
+  *created = Some(id);
+  if let (Some(target), true) = (target, has_target_workspace) {
+    if let Some(workspace) = host.all_workspaces(repo)?.iter().find(|w| w.id == id) {
+      host.retarget(repo, workspace, target)?;
+    }
+  }
+  Ok(id)
 }
 
 /// `useCreateStackedWorkspace` with the dialog's branch name.

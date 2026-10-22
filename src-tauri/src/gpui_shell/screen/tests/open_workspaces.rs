@@ -50,7 +50,10 @@ impl OpenWorkspacesHost for FakeHost {
     repo_path: &str,
     requests: &[BranchWorkspaceRequest],
   ) -> Vec<Result<(i64, bool), String>> {
-    let branches: Vec<&str> = requests.iter().map(|r| r.head_branch.as_str()).collect();
+    let branches: Vec<String> = requests
+      .iter()
+      .map(|r| format!("{}@{}", r.head_branch, r.base_branch))
+      .collect();
     self.record(format!(
       "open workspaces {repo_path} {}",
       branches.join(",")
@@ -83,6 +86,15 @@ fn dialog(host: FakeHost, cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
 }
 
 fn dialog_with(host: FakeHost, linear: bool, cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  dialog_on(host, linear, None, cx)
+}
+
+fn dialog_on(
+  host: FakeHost,
+  linear: bool,
+  stack_on: Option<&str>,
+  cx: &mut TestAppContext,
+) -> (Harness, Arc<FakeHost>) {
   let host = Arc::new(host);
   let snapshot: ScreenSnapshot = serde_json::from_value(serde_json::json!({
     "kind": "onboarding",
@@ -92,6 +104,7 @@ fn dialog_with(host: FakeHost, linear: bool, cx: &mut TestAppContext) -> (Harnes
       "repoPath": "/repo",
       "repos": ["/repo"],
       "linear": linear,
+      "stackOn": stack_on,
     },
   }))
   .expect("snapshot");
@@ -145,19 +158,19 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
   host.github.workspaces = vec![workspace(7, "feat/b", Some("main"))];
   let (mut h, host) = dialog(host, cx);
   let screen = screen(&mut h);
-  expect(screen.get_by_role(by::role(Role::Heading).name("Open Workspaces"))).to_be_visible();
-  assert_eq!(status(&screen), "Nothing to open yet.");
+  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
+  assert_eq!(status(&screen), "Nothing to create yet.");
 
   screen.user().type_text(
-    &screen.get_by_label_text("Branches or links"),
+    &screen.get_by_label_text("Workspaces"),
     "feat/a\norigin/feat/b\nnope\nfeat/a\nmain",
   );
   let screen = self::screen(&mut h);
   assert_eq!(
     status(&screen),
-    "1 workspace will be created, 1 already open"
+    "2 workspaces will be created, 1 already open"
   );
-  expect(screen.get_by_role(by::role(Role::Alert).name("2 lines can't be opened"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Alert).name("1 line can't be opened"))).to_be_visible();
   // Each line shows in a popover from the summary.
   assert!(screen
     .query_by_role(by::role(Role::ListItem).name("feat/b: already open"))
@@ -166,21 +179,24 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
   expect(screen.get_by_role(by::role(Role::ListItem).name("main: 'main' is the default branch")))
     .to_be_visible();
   expect(screen.get_by_role(by::role(Role::ListItem).name("feat/b: already open"))).to_be_visible();
+  // A branch no one has made is made for its workspace.
+  expect(screen.get_by_role(by::role(Role::ListItem).name("nope: new branch"))).to_be_visible();
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Open 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 3 Workspaces")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
-    .contains(&"open workspaces /repo feat/a,feat/b".to_string()));
+    .contains(&"open workspaces /repo feat/a@main,feat/b@main".to_string()));
+  assert!(host.calls().contains(&"create nope from - {}".to_string()));
   assert!(h.sent().contains(&field(
     "openWorkspaces.opened",
     serde_json::json!({"repoPath": "/repo", "id": 200}),
   )));
   let screen = self::screen(&mut h);
   assert!(screen
-    .query_by_role(by::role(Role::Heading).name("Open Workspaces"))
+    .query_by_role(by::role(Role::Heading).name("New Workspaces"))
     .is_none());
 }
 
@@ -193,7 +209,7 @@ fn pull_request_links_open_their_head_branch(cx: &mut TestAppContext) {
   let screen = screen(&mut h);
 
   screen.user().type_text(
-    &screen.get_by_label_text("Branches or links"),
+    &screen.get_by_label_text("Workspaces"),
     "https://github.com/acme/treq/pull/42\nhttps://github.com/other/app/pull/1",
   );
   let screen = show_lines(&mut h);
@@ -208,11 +224,11 @@ fn pull_request_links_open_their_head_branch(cx: &mut TestAppContext) {
   .to_be_visible();
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Open 1 Workspace")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 1 Workspace")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
-    .contains(&"open workspaces /repo feat/x".to_string()));
+    .contains(&"open workspaces /repo feat/x@release".to_string()));
 }
 
 #[gpui::test]
@@ -262,11 +278,11 @@ fn picked_pull_requests_are_opened(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Open 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
   h.cx.run_until_parked();
   assert!(host
     .calls()
-    .contains(&"open workspaces /repo feat/six,feat/five".to_string()));
+    .contains(&"open workspaces /repo feat/six@main,feat/five@main".to_string()));
 }
 
 #[gpui::test]
@@ -277,17 +293,16 @@ fn a_failed_open_keeps_the_dialog_with_the_error(cx: &mut TestAppContext) {
   };
   let (mut h, _) = dialog(host, cx);
   let screen = screen(&mut h);
-  screen.user().type_text(
-    &screen.get_by_label_text("Branches or links"),
-    "feat/a\nfeat/b",
-  );
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Workspaces"), "feat/a\nfeat/b");
   let screen = self::screen(&mut h);
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Open 2 Workspaces")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
   let screen = self::screen(&mut h);
   expect(screen.get_by_role(by::role(Role::Alert).name("feat/b: create failed"))).to_be_visible();
-  expect(screen.get_by_role(by::role(Role::Heading).name("Open Workspaces"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
 }
 
 #[gpui::test]
@@ -348,7 +363,7 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
 
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Open 1 Workspace")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 1 Workspace")));
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"open issue /repo ENG-1".to_string()));
   assert!(!host
@@ -370,4 +385,44 @@ fn linear_shows_without_github(cx: &mut TestAppContext) {
     .query_by_role(by::role(Role::Tab).name("GitHub"))
     .is_none());
   expect(screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1"))).to_be_visible();
+}
+
+#[gpui::test]
+fn titles_and_new_branches_stack_on_the_picked_branch(cx: &mut TestAppContext) {
+  let mut host = with_branches(FakeHost::default());
+  host.github.workspaces = vec![workspace(7, "feat/base", Some("main"))];
+  host.workspaces = vec![workspace(7, "feat/base", Some("main"))];
+  let (mut h, host) = dialog_on(host, false, Some("feat/base"), cx);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Heading).name("New Workspaces"))).to_be_visible();
+
+  screen.user().type_text(
+    &screen.get_by_label_text("Workspaces"),
+    "Fix the login flow\nfeat/a",
+  );
+  let screen = show_lines(&mut h);
+  assert_eq!(status(&screen), "2 workspaces will be created");
+  // A title names its branch by the repository's pattern.
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/fix-the-login-flow: new branch")))
+    .to_be_visible();
+
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 Workspaces")));
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  assert!(
+    calls.contains(&"open workspaces /repo feat/a@feat/base".to_string()),
+    "{calls:?}"
+  );
+  assert!(
+    calls.contains(
+      &r#"create treq/fix-the-login-flow from - {"title":"Fix the login flow"}"#.to_string()
+    ),
+    "{calls:?}"
+  );
+  assert!(
+    calls.contains(&"retarget treq/fix-the-login-flow -> feat/base".to_string()),
+    "{calls:?}"
+  );
 }

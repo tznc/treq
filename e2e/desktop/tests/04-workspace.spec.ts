@@ -1,29 +1,30 @@
-// workspace/create-dialog-branch-name.test.tsx and stack-from-home against
-// the real backend: Stack opens "Stack a new Workspace", and creating it
-// adds a jj workspace on disk and a row to the sidebar.
+// The New Workspaces dialog against the real backend: Stack opens it,
+// and creating a workspace for a new branch adds a jj workspace on disk and
+// a row to the sidebar.
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { fixture, goHome } from "../fixture.ts";
 
-test("creates a workspace from the Stack dialog", async ({ page }) => {
+const heading = { name: "New Workspaces" };
+
+test("creates a workspace from the New Workspaces dialog", async ({ page }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Stack", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Stack a new Workspace" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", heading)).toBeVisible();
 
-  const branch = page.getByRole("textbox", { name: "Branch Name" });
-  const create = page.getByRole("button", { name: "Create Workspace" });
-  await branch.fill("bad name..");
-  await expect(create).toBeDisabled();
-  await branch.fill("e2e/first");
-  await expect(create).toBeEnabled();
+  const lines = page.getByLabel("Workspaces", { exact: true });
+  await lines.fill("e2e/bad..");
+  await expect(page.getByRole("alert", { name: "1 line can't be opened" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByRole("button", { name: "Create Workspaces" })).toBeDisabled();
+  await lines.fill("e2e/first");
+  const create = page.getByRole("button", { name: "Create 1 Workspace" });
+  await expect(create).toBeEnabled({ timeout: 20_000 });
   await create.click();
 
-  await expect(
-    page.getByRole("heading", { name: "Stack a new Workspace" }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("heading", heading)).toHaveCount(0, { timeout: 30_000 });
   const row = page.getByRole("button", { name: "e2e/first", exact: true });
   await expect(row).toBeVisible();
 
@@ -46,11 +47,9 @@ test("creates a workspace from the Stack dialog", async ({ page }) => {
 test("Cancel closes the dialog without creating anything", async ({ page }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Stack", exact: true }).click();
-  await page.getByRole("textbox", { name: "Branch Name" }).fill("e2e/never");
+  await page.getByLabel("Workspaces", { exact: true }).fill("e2e/never");
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Stack a new Workspace" }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("heading", heading)).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "e2e/never", exact: true }),
   ).toHaveCount(0);
