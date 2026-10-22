@@ -4,7 +4,7 @@
 // native Yes/No dialog, whether to initialize a Git repository there:
 // declined, the folder is left untouched; accepted, it opens as a repository.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
@@ -40,8 +40,9 @@ async function launch(): Promise<App> {
   db.exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('theme', ?)").run(theme);
   db.close();
+  const log = openSync(join(fixture.root, "app.log"), "w");
   const app = spawn(appBinary, [], {
-    stdio: "ignore",
+    stdio: ["ignore", log, log],
     env: {
       ...appEnv(fixture),
       GPUI_PLAYWRIGHT: String(plainPort),
@@ -56,10 +57,21 @@ async function launch(): Promise<App> {
   return { app, browser, page, folder: repo };
 }
 
+/** Stops the app and waits for its port to free, so the next one can bind it. */
 async function stop({ app, browser }: App): Promise<void> {
   await browser.close().catch(() => {});
+  const exited = new Promise((r) => app.once("exit", r));
   app.kill("SIGTERM");
-  await new Promise((r) => setTimeout(r, 1000));
+  await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
+  if (app.exitCode === null && app.signalCode === null) app.kill("SIGKILL");
+  for (let i = 0; i < 40; i++) {
+    try {
+      await fetch(`http://127.0.0.1:${plainPort}/`);
+    } catch {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 /** The native "Not a Git Repository" dialog's window, once it shows. */
