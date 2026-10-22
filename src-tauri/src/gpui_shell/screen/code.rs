@@ -9,7 +9,7 @@
 //!
 //! [`code_data`]: super::code_data
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
@@ -1585,11 +1585,13 @@ impl CodeView {
   }
 
   fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-    panel.on_mouse_down_out(cx.listener(|view, _, _, cx| {
-      if view.menu.take().is_some() {
+    panel.dismiss_with("code-menu", cx, |view, cx| {
+      let open = view.menu.take().is_some();
+      if open {
         cx.notify();
       }
-    }))
+      open
+    })
   }
 
   fn add_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {

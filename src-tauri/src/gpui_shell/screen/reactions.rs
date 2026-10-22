@@ -9,7 +9,7 @@ use crate::{
     popup::{Side, TooltipContent},
     theme::{self, tw, Palette},
     tooltips::{HasTooltips, Tooltips},
-    ui::{self, zpx, Button, Size, TextSize, Variant},
+    ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Variant},
   },
 };
 
@@ -189,7 +189,11 @@ fn picker<V: Reacts>(
       .bg(p.popover)
       .shadow_md()
       .occlude()
-      .on_mouse_down_out(cx.listener(|view: &mut V, _, _, cx| view.set_reaction_picker(None, cx)))
+      .dismiss_with(format!("reaction-picker-{id}"), cx, |view: &mut V, cx| {
+        let open = view.reaction_picker().is_some();
+        view.set_reaction_picker(None, cx);
+        open
+      })
       .children(REACTIONS.iter().map(|&(content, emoji, name)| {
         let mine = groups
           .iter()

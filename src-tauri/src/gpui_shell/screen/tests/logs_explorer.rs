@@ -34,6 +34,17 @@ fn logs_tab_filters_by_level(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn escape_closes_the_level_menu(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, logs_host(), logs_route(None));
+  h.click("log-level-filter");
+  assert!(h.drawn("logs-filter-list"));
+  // What the shell window does with an Escape, whatever has focus.
+  assert!(h.cx.update(|_, cx| crate::gpui_shell::ui::escape_menus(cx)));
+  assert!(!h.drawn("logs-filter-list"));
+  assert!(!h.cx.update(|_, cx| crate::gpui_shell::ui::escape_menus(cx)));
+}
+
+#[gpui::test]
 fn logs_tab_draws_the_chart_once_there_are_buckets(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, logs_host(), logs_route(None));
   assert!(!h.drawn("logs-timeseries-chart"), "nothing to chart");

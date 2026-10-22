@@ -138,7 +138,9 @@ impl Shell {
       let shortcut = found
         .map(window::from_app)
         .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
-      if shortcut == Some(window::Shortcut::Escape) && modal::escape_popover(&label, cx) {
+      if shortcut == Some(window::Shortcut::Escape)
+        && (modal::escape_popover(&label, cx) || ui::escape_menus(cx))
+      {
         cx.stop_propagation();
         return;
       }

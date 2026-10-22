@@ -5,7 +5,7 @@
 //! ahead and its diff, and merges it. React still owns leaving the page,
 //! which a merge does too (its caches refresh then).
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -579,7 +579,7 @@ impl MergeView {
       .child(div().w(zpx(1.)).h(zpx(40.)).bg(p.foreground.opacity(0.3)))
       .child(menu)
       .when(self.menu_open && !disabled, |this| {
-        this.child(self.strategy_menu(commit_count, target, p))
+        this.child(self.strategy_menu(commit_count, target, p, cx))
       });
 
     div().flex().justify_center().px_4().child(
@@ -619,8 +619,13 @@ impl MergeView {
   }
 
   /// The `DropdownMenuContent align="end" className="w-64"` radio menu.
-  fn strategy_menu(&self, commits: Option<usize>, target: &str, p: &Palette) -> impl IntoElement {
-    let sink = self.sink.clone();
+  fn strategy_menu(
+    &self,
+    commits: Option<usize>,
+    target: &str,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let commits = commits.map_or("multiple".to_string(), |n| n.to_string());
     let items = [
       (
@@ -660,13 +665,16 @@ impl MergeView {
         .text_color(p.popover_foreground)
         .shadow_md()
         .occlude()
-        .on_mouse_down_out(move |_, _, cx| {
-          sink(
+        .dismiss_with("merge-strategy-menu", cx, |view, cx| {
+          let open = view.menu_open;
+          view.handle(
             ScreenAction::Press {
               id: "merge.menu.close".into(),
             },
             cx,
-          )
+          );
+          cx.notify();
+          open
         })
         .children(items.into_iter().map(|(strategy, icon, title, detail)| {
           let id = SharedString::from(format!("merge-strategy-{}", strategy.value()));

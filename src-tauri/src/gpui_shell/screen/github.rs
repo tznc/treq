@@ -8,7 +8,7 @@
 //! comes back as the next [`Route`]. The Merge Queue tab and the PR review
 //! page are still React's: GPUI hands their routes back and React draws them.
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
@@ -735,13 +735,15 @@ impl GithubView {
 
   /// A press outside the open popover closes it, unless it lands in one of
   /// its own selects' menus.
-  pub(super) fn close_popover(&mut self, popover: Popover, cx: &mut Context<Self>) {
+  /// Closes `popover` if it is the open one, and says whether it was.
+  pub(super) fn close_popover(&mut self, popover: Popover, cx: &mut Context<Self>) -> bool {
     if self.popover != Some(popover) || GlobalState::is_in_deferred_context(cx) {
-      return;
+      return false;
     }
     self.popover = None;
     self.popover_closed = Some((popover, Instant::now()));
     cx.notify();
+    true
   }
 
   /// Fields typed into, and the choices of the filter selects.
@@ -1443,7 +1445,9 @@ impl GithubView {
         .text_color(p.popover_foreground)
         .shadow_md()
         .occlude()
-        .on_mouse_down_out(cx.listener(|view, _, _, cx| view.close_popover(Popover::Filters, cx)))
+        .dismiss_with("github-filters", cx, |view, cx| {
+          view.close_popover(Popover::Filters, cx)
+        })
         .children(rows),
     )
     .with_priority(1)

@@ -8,7 +8,7 @@
 //!
 //! [`logs_data`]: super::logs_data
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
@@ -1720,10 +1720,11 @@ impl LogsView {
       .text_color(p.popover_foreground)
       .shadow_md()
       .occlude()
-      .on_mouse_down_out(cx.listener(|view, _, _, cx| {
-        view.open = None;
+      .dismiss_with("logs-menu", cx, |view, cx| {
+        let open = view.open.take().is_some();
         cx.notify();
-      }));
+        open
+      });
     match open {
       Open::Levels => {
         list = list.child(
