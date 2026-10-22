@@ -20,6 +20,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   popup::{PopupRequest, PopupSink, Side, TooltipContent},
   theme::{self, Palette},
+  title_bar,
 };
 
 #[cfg(test)]
@@ -655,6 +656,11 @@ impl Render for Sidebar {
       // Room for the right edge line, drawn as a child below so the modal
       // backdrop covers it (GPUI paints a border above the children).
       .pr(zpx(1.))
+      // The traffic lights sit here; the edge line runs past them to the
+      // window's top edge.
+      .when(title_bar::SHOWN, |this| {
+        this.child(title_bar::drag_area("sidebar-title-bar"))
+      })
       .child(header);
 
     for repo in &snapshot.repos {

@@ -72,6 +72,8 @@ struct FakeHost {
   sql: Option<Result<crate::core::checks_logs::SqlResult, String>>,
   /// What the terminal pane reads, and the PTYs it started.
   sessions: Vec<crate::local_db::Session>,
+  /// The supporting repositories of every repository.
+  supporting: Vec<String>,
   /// The devcontainers preview.
   devcontainers: bool,
   ptys: Mutex<Vec<String>>,
@@ -924,7 +926,7 @@ impl terminal_data::TerminalHost for FakeHost {
   }
 
   fn supporting_repos(&self, _: &str) -> Vec<String> {
-    Vec::new()
+    self.supporting.clone()
   }
 
   fn shell_command(&self) -> Option<String> {
@@ -4829,6 +4831,36 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
       "agent": "codex",
       "isStreaming": false,
     }]))
+  );
+}
+
+/// A supporting repository on screen: the backend numbers its sessions
+/// relative to the window's main repository, so the pane must too.
+#[gpui::test]
+fn terminal_pane_opens_an_agent_session_of_a_supporting_repo(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    supporting: vec!["/support".into()],
+    ..terminal_host()
+  };
+  let mut route = route_json(Some(7), "main");
+  route["repoPath"] = "/support".into();
+  route["code"] = true.into();
+  route["terminal"] = serde_json::json!({});
+  let route = serde_json::from_value(route).expect("terminal route");
+  let (mut h, host) = workspace_harness(cx, host, route);
+  let pane_id = terminal_data::pane_session_id("/support", "/repo", 3);
+  set_terminal(
+    &mut h,
+    serde_json::json!({ "activeSessionId": pane_id, "mainRepoPath": "/repo" }),
+  );
+  assert!(h.drawn("terminal-column-agent"));
+  let pty = terminal_data::agent_pty_id("/support", 3);
+  let calls = host.calls();
+  assert!(
+    calls
+      .iter()
+      .any(|c| c.starts_with(&format!("spawn {pty} "))),
+    "{calls:?}"
   );
 }
 

@@ -195,6 +195,7 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
       "sessionsRevision": data.sessions_revision,
       "commands": model.commands,
       "remoteShell": model.is_remote(),
+      "mainRepoPath": model.main_repo,
     },
     "fileBrowser": file_browser,
     "remoteChrome": remote_chrome(model),
