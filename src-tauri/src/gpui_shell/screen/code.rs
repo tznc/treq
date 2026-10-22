@@ -146,6 +146,8 @@ pub struct CodeView {
   pub(super) history: Option<JjLogResult>,
   pub(super) history_limit: usize,
   history_loading: bool,
+  /// Why the last commit read failed, while there is no history to show.
+  history_error: Option<String>,
   pub(super) stack: Option<Vec<StackRow>>,
   pub(super) settings: Option<TaskSettings>,
   task: Option<Entity<TextareaState>>,
@@ -194,6 +196,7 @@ impl CodeView {
       history: None,
       history_limit: HISTORY_PAGE,
       history_loading: false,
+      history_error: None,
       stack: None,
       settings: None,
       task: None,
@@ -233,6 +236,7 @@ impl CodeView {
     if moved {
       self.overview = None;
       self.history = None;
+      self.history_error = None;
       self.history_limit = HISTORY_PAGE;
       self.stack = None;
       self.settings = None;
@@ -295,20 +299,27 @@ impl CodeView {
     self.read(
       move |host, parent| {
         let home = parent.workspace.is_none();
-        host
-          .commits(
-            &parent.repo_path,
-            parent.workspace_id(),
-            true,
-            Some(if home { limit } else { HISTORY_PAGE }),
-          )
-          .map_err(|err| log::warn!("Failed to load commits: {err}"))
-          .ok()
+        host.commits(
+          &parent.repo_path,
+          parent.workspace_id(),
+          true,
+          Some(if home { limit } else { HISTORY_PAGE }),
+        )
       },
       |view, history, _| {
         view.history_loading = false;
-        if history.is_some() || view.history.is_none() {
-          view.history = history;
+        match history {
+          Ok(history) => {
+            view.history = Some(history);
+            view.history_error = None;
+          }
+          Err(err) => {
+            log::warn!("Failed to load commits: {err}");
+            // Keep what was read before; only an empty view says it failed.
+            if view.history.is_none() {
+              view.history_error = Some(err);
+            }
+          }
         }
       },
       cx,
@@ -2078,17 +2089,42 @@ impl CodeView {
 
   fn history(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let Some(log) = self.history.clone() else {
+      let status = match self.history_error.clone() {
+        Some(err) => div()
+          .id("code-history-error")
+          .debug_selector(|| "code-history-error".into())
+          .role(gpui::Role::Status)
+          .aria_label("Couldn't load commits")
+          .test_support()
+          .w_full()
+          .flex()
+          .flex_col()
+          .items_center()
+          .gap_1()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .text_color(p.muted_foreground)
+              .child("Couldn't load commits"),
+          )
+          .child(
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .text_center()
+              .child(err),
+          )
+          .into_any_element(),
+        None => ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Loading commits...")
+          .into_any_element(),
+      };
       return div()
         .size_full()
         .flex()
         .items_center()
         .justify_center()
         .p_4()
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("Loading commits..."),
-        )
+        .child(status)
         .into_any_element();
     };
     let heading = ui::text(div(), TextSize::Sm)
