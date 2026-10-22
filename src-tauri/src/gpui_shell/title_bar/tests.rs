@@ -1,4 +1,4 @@
-//! The title bar found by role and name, pressed as a user would.
+//! The title bar found by role, pressed as a user would.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -29,12 +29,9 @@ struct View {
 
 impl gpui::Render for View {
   fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-    div().size_full().child(title_bar(
-      "Treq - Stacking ADE".into(),
-      &theme::palette(false),
-      false,
-      self.host.clone(),
-    ))
+    div()
+      .size_full()
+      .child(drag_area_with("title-bar", self.host.clone()))
   }
 }
 
@@ -51,14 +48,7 @@ fn screen(cx: &mut TestAppContext) -> (gpui_testing_library::Screen, Rc<FakeWind
 }
 
 fn bar() -> ByRole {
-  by::role(Role::TitleBar).name("Treq - Stacking ADE")
-}
-
-#[gpui::test]
-fn draws_the_window_title(cx: &mut TestAppContext) {
-  let (screen, _) = screen(cx);
-  expect(screen.get_by_role(bar())).to_be_visible();
-  expect(screen.get_by_text("Treq - Stacking ADE")).to_be_visible();
+  by::role(Role::TitleBar).name("Title bar")
 }
 
 #[gpui::test]

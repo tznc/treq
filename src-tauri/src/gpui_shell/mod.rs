@@ -93,8 +93,6 @@ pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiErro
 struct Shell {
   app: AppHandle,
   label: SharedString,
-  /// Drawn in the GPUI title bar on macOS (see `title_bar`).
-  title: SharedString,
   sidebar: Option<gpui::Entity<Sidebar>>,
   screen: Option<gpui::Entity<Screen>>,
   /// The dialog drawn over the screen once there is one.
@@ -173,11 +171,9 @@ impl Render for Shell {
     let app = self.app.clone();
     ui::apply_zoom(window, cx);
     self.watch_shortcuts(window, cx);
-    let palette = theme::palette(dark);
     gpui::div()
       .size_full()
       .flex()
-      .flex_col()
       .font_family(theme::SANS_FONT)
       // A click anywhere in the window closes an open menu, as one outside
       // a native menu does.
@@ -186,27 +182,7 @@ impl Render for Shell {
         window.blur(cx);
         defer_main(&app, |_| popup::hide_menus())
       })
-      .bg(palette.background)
-      .when(cfg!(target_os = "macos"), |this| {
-        this.child(title_bar::title_bar(
-          self.title.clone(),
-          &palette,
-          window.is_fullscreen(),
-          std::rc::Rc::new(title_bar::NativeWindow),
-        ))
-      })
-      .child(self.content(cx))
-  }
-}
-
-impl Shell {
-  /// The sidebar next to the screen, below the title bar.
-  fn content(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-    gpui::div()
-      .flex_1()
-      .min_h_0()
-      .w_full()
-      .flex()
+      .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
         // The cut-off overlay spans the sidebar too; the workspace view
         // dims its own part below the remote strip.
@@ -236,7 +212,16 @@ impl Shell {
           .flex_1()
           .min_w_0()
           .h_full()
-          .when_some(self.screen.clone(), |this, screen| this.child(screen)),
+          .flex()
+          .flex_col()
+          // The screen runs to the window's top edge beside the sidebar,
+          // which holds the title bar; without it, the screen moves down.
+          .when(title_bar::SHOWN && self.sidebar.is_none(), |this| {
+            this.child(title_bar::drag_area("screen-title-bar"))
+          })
+          .when_some(self.screen.clone(), |this, screen| {
+            this.child(gpui::div().flex_1().min_h_0().child(screen))
+          }),
       )
   }
 }
@@ -270,13 +255,11 @@ pub fn open_window(
   hide_menu_bar(&window)?;
 
   let shell_label = label.to_string();
-  let shell_title = SharedString::from(title.to_string());
   let shell_app = app.clone();
   window.attach_gpui(move |cx| {
     let shell = cx.new(|_| Shell {
       app: shell_app,
       label: shell_label.clone().into(),
-      title: shell_title.clone(),
       sidebar: None,
       screen: None,
       modal: None,
