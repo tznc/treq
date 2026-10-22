@@ -326,7 +326,7 @@ test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context })
       rest: false,
       expectations: [
         "Agents listed with icons; the current one marked",
-        "Agents whose CLI isn't installed are dimmed and read 'Not installed'",
+        "Agents whose CLI isn't installed are not listed",
       ],
     });
     await dialog.keyboard.press("Escape");

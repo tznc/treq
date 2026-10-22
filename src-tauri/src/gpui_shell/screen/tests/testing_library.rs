@@ -118,25 +118,29 @@ fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn agents_that_are_not_installed_cannot_be_picked(cx: &mut TestAppContext) {
+fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext) {
   let host = FakeHost {
-    installed: vec![("claude", true), ("codex", false), ("cursor-agent", true)],
+    installed: vec![
+      ("claude", true),
+      ("codex", false),
+      ("cursor-agent", true),
+      ("copilot", false),
+    ],
     ..FakeHost::default()
   };
-  let (mut h, host) = modal_harness(cx, host, agent_modal());
+  let (mut h, _) = modal_harness(cx, host, agent_modal());
   // The dialog is built on its first draw, and only then looks up the tools.
   screen(&mut h);
   let screen = screen(&mut h);
-  let user = screen.user();
-  let picker = screen.get_by_role(by::role(Role::ComboBox).name("Agent"));
-  user.click(&picker);
-  user.click(&screen.get_by_role(by::role(Role::MenuItem).name("Codex")));
-  expect(&picker).to_have_value("Claude");
-
-  user.click(&screen.get_by_role(by::role(Role::MenuItem).name("Cursor")));
-  expect(&picker).to_have_value("Cursor");
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Run")));
-  assert_eq!(tasks(&mut h, &host)[0].agent, "cursor");
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::ComboBox).name("Agent")));
+  let agents: Vec<String> = screen
+    .get_all_by_role(by::role(Role::MenuItem))
+    .iter()
+    .filter_map(|n| n.name())
+    .collect();
+  assert_eq!(agents, ["Claude", "Cursor"]);
 }
 
 #[gpui::test]

@@ -164,7 +164,7 @@ pub struct AgentPromptView {
   focused: bool,
   pub(in crate::gpui_shell::screen) settings: Option<TaskSettings>,
   pub(in crate::gpui_shell::screen) agent_override: Option<Agent>,
-  /// Agents whose command-line tool isn't installed, which can't be picked.
+  /// Agents whose command-line tool isn't installed, left out of the menu.
   missing: Vec<Agent>,
   save_default: bool,
   show_save_default: bool,
@@ -650,9 +650,6 @@ impl AgentPromptView {
   // The toolbar.
 
   fn choose_agent(&mut self, agent: Agent, cx: &mut Context<Self>) {
-    if self.missing.contains(&agent) {
-      return;
-    }
     let (configured, _) = self.agents();
     self.agent_override = Some(agent);
     self.save_default = false;
@@ -1343,28 +1340,25 @@ impl AgentPromptView {
       .top(zpx(32.))
       .right_0()
       .min_w(zpx(128.))
-      .children(Agent::ALL.into_iter().map(|agent| {
-        let missing = self.missing.contains(&agent);
-        menu_item(format!("task-agent-{}", agent.id()), p, missing)
-          .role(gpui::Role::MenuItem)
-          .aria_label(agent.label())
-          .aria_selected(agent == selected)
-          .when(missing, |this| this.aria_description("Not installed"))
-          .test_support()
-          .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-          .child(div().flex_1().child(agent.label()))
-          .when(missing, |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .text_color(p.muted_foreground)
-                .child("Not installed"),
-            )
-          })
-          .when(agent == selected, |this| {
-            this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
-          })
-          .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
-      }));
+      // Agents that aren't installed are left out, unless already chosen.
+      .children(
+        Agent::ALL
+          .into_iter()
+          .filter(|agent| *agent == selected || !self.missing.contains(agent))
+          .map(|agent| {
+            menu_item(format!("task-agent-{}", agent.id()), p, false)
+              .role(gpui::Role::MenuItem)
+              .aria_label(agent.label())
+              .aria_selected(agent == selected)
+              .test_support()
+              .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
+              .child(div().flex_1().child(agent.label()))
+              .when(agent == selected, |this| {
+                this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
+              })
+              .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
+          }),
+      );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
   }
 
