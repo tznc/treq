@@ -330,6 +330,8 @@ pub struct TerminalView {
   start: Start,
   live: Option<Arc<Live>>,
   status: Status,
+  /// The size last given to the PTY, which follows the grid once it runs.
+  pty_size: Option<(usize, usize)>,
   focus: FocusHandle,
   font_size: f32,
   /// The cell size, once measured.
@@ -383,6 +385,7 @@ impl TerminalView {
       start,
       live: None,
       status: Status::Preparing,
+      pty_size: None,
       focus: cx.focus_handle(),
       font_size,
       cell: None,
@@ -553,14 +556,14 @@ impl TerminalView {
     };
     match self.live.clone() {
       Some(live) => {
-        if live
-          .emulator
-          .lock()
-          .map(|mut e| e.resize(cols, rows))
-          .unwrap_or(false)
-          && self.status == Status::Ready
-        {
+        if let Ok(mut emulator) = live.emulator.lock() {
+          emulator.resize(cols, rows);
+        }
+        // A resize while the PTY starts reaches it once it runs; otherwise
+        // the program draws for a size the grid isn't.
+        if self.status == Status::Ready && self.pty_size != Some((cols, rows)) {
           let _ = self.host.resize_pty(&self.pty, rows as u16, cols as u16);
+          self.pty_size = Some((cols, rows));
         }
       }
       None => {
@@ -714,6 +717,7 @@ impl TerminalView {
     self._tasks.push(cx.spawn(async move |this, cx| {
       let result: Result<Option<String>, (bool, String)> = task.await;
       let _ = this.update(cx, |view, cx| {
+        view.pty_size = Some((cols, rows));
         view.status = match result {
           Ok(warning) => {
             if let Some(description) = warning {

@@ -7,7 +7,7 @@ use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
-use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::search::{Match, RegexSearch};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
@@ -147,9 +147,49 @@ impl Emulator {
     if size == self.size {
       return false;
     }
+    if size.cols != self.size.cols && !self.alt_screen() {
+      self.hold_cursor_line(size.cols);
+    }
     self.size = size;
     self.term.resize(size);
     true
+  }
+
+  /// Keeps the line the cursor is on out of the reflow, as xterm.js does:
+  /// the program there (a shell's prompt, a TUI's live region) redraws it
+  /// for the new width, counting the rows it drew at the old one. Reflowed,
+  /// it takes more or fewer rows than that, and the redraw leaves a copy
+  /// behind or eats the line above. Cut to the new width instead.
+  fn hold_cursor_line(&mut self, cols: usize) {
+    let grid = self.term.grid_mut();
+    let last = grid.last_column();
+    let wraps = |grid: &alacritty_terminal::Grid<Cell>, line: Line| {
+      grid[line][last].flags.contains(Flags::WRAPLINE)
+    };
+    let cursor = grid.cursor.point.line;
+    let mut top = cursor;
+    while top > grid.topmost_line() && wraps(grid, top - 1) {
+      top -= 1;
+    }
+    let mut bottom = cursor;
+    while bottom < grid.bottommost_line() && wraps(grid, bottom) {
+      bottom += 1;
+    }
+    let mut line = top;
+    while line <= bottom {
+      let row = &mut grid[line];
+      row[last].flags.remove(Flags::WRAPLINE);
+      let mut from = cols;
+      if from > 0 && from <= last.0 && row[Column(from - 1)].flags.contains(Flags::WIDE_CHAR) {
+        from -= 1;
+      }
+      for col in from..=last.0 {
+        row[Column(col)] = Cell::default();
+      }
+      line += 1;
+    }
+    grid.cursor.input_needs_wrap = false;
+    grid.cursor.point.column = grid.cursor.point.column.min(Column(cols - 1));
   }
 
   pub fn scroll(&mut self, lines: i32) {
@@ -723,12 +763,35 @@ mod tests {
   #[test]
   fn resizes_and_reflows() {
     let mut emu = Emulator::new(10, 3);
-    emu.feed(b"abcdefghij");
+    emu.feed(b"abcdefghij\r\n");
     assert!(emu.resize(5, 3));
     assert!(!emu.resize(5, 3));
     // The wrapped line's head goes into scrollback, as in xterm.
     emu.scroll(emu.history() as i32);
     assert!(emu.screen_text().starts_with("abcde\nfghij"));
+  }
+
+  #[test]
+  fn shrinking_leaves_the_cursor_line_to_the_program() {
+    let mut emu = Emulator::new(20, 4);
+    // Output above, then a prompt with its right prompt at the edge.
+    emu.feed(b"abcdefghijklmnop\r\n$ ls\x1b[15G12:00\x1b[5G");
+    assert!(emu.resize(10, 4));
+    // The shell redraws its prompt in place, for the new width.
+    emu.feed(b"\r\x1b[J$ ls 12:00");
+    emu.scroll(emu.history() as i32);
+    assert_eq!(emu.screen_text(), "abcdefghij\nklmnop\n$ ls 12:00");
+  }
+
+  #[test]
+  fn growing_keeps_the_cursor_lines_rows() {
+    let mut emu = Emulator::new(10, 4);
+    emu.feed(b"out\r\n$ 345678901234");
+    assert_eq!(emu.screen_text(), "out\n$ 34567890\n1234");
+    assert!(emu.resize(20, 4));
+    // The shell drew two rows; it goes back up one to redraw them.
+    emu.feed(b"\x1b[1A\r\x1b[J$ 345678901234");
+    assert_eq!(emu.screen_text(), "out\n$ 345678901234");
   }
 
   #[test]
