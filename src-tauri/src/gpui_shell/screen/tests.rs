@@ -4144,10 +4144,16 @@ fn changes_tab_loads_a_generated_diff_on_request(cx: &mut TestAppContext) {
   assert!(h.drawn("load-generated-gen/api.ts"));
 }
 
+/// Clicks the filter button and `item` in its menu.
+fn filter(h: &mut Harness, item: &str) {
+  h.click("changes-filter");
+  h.pick(item);
+}
+
 #[gpui::test]
 fn changes_tab_hides_generated_files_from_the_list_and_diff(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_generated(), changes_route());
-  h.click("hide-generated-files");
+  filter(&mut h, "Generated files");
   assert!(h.drawn("file-row-a.rs"));
   assert!(h.drawn("file-card-a.rs"));
   for hidden in [
@@ -4157,7 +4163,7 @@ fn changes_tab_hides_generated_files_from_the_list_and_diff(cx: &mut TestAppCont
   ] {
     assert!(!h.drawn(hidden), "{hidden}");
   }
-  h.click("hide-generated-files");
+  filter(&mut h, "Generated files");
   assert!(h.drawn("file-row-Cargo.lock"));
   assert!(h.drawn("file-card-gen/api.ts"));
 }
@@ -4167,16 +4173,64 @@ fn changes_tab_keeps_a_selected_generated_file_listed(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_generated(), changes_route());
   h.click("file-row-Cargo.lock");
   h.click("stage-Cargo.lock");
-  h.click("hide-generated-files");
+  filter(&mut h, "Generated files");
   assert!(h.drawn("unstage-Cargo.lock"));
   assert!(!h.drawn("file-row-gen/api.ts"));
 }
 
 #[gpui::test]
-fn changes_tab_offers_the_generated_filter_only_with_generated_files(cx: &mut TestAppContext) {
+fn changes_tab_offers_the_filter_only_with_something_to_filter(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   assert!(h.drawn("file-row-a.rs"));
-  assert!(!h.drawn("hide-generated-files"));
+  assert!(!h.drawn("changes-filter"));
+}
+
+fn committed_route(show: bool) -> ScreenSnapshot {
+  let mut route = route_json(Some(7), "main");
+  route["code"] = true.into();
+  route["tab"] = "changes".into();
+  route["showCommitted"] = show.into();
+  serde_json::from_value(route).expect("changes route")
+}
+
+fn changes_host_with_committed() -> FakeHost {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [
+      {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-a", "+b"], "patch": ""}]},
+      {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-c", "+d"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+fn changes_tab_filters_the_committed_group(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  assert!(h.drawn("committed-section-toggle"));
+  assert!(h.drawn("file-card-c.rs"));
+  filter(&mut h, "Committed");
+  assert_eq!(
+    fields(&h, "changes.showCommitted"),
+    vec![serde_json::json!(false)]
+  );
+}
+
+#[gpui::test]
+fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(false));
+  assert!(h.drawn("file-row-a.rs"));
+  assert!(h.drawn("changes-filter"));
+  assert!(!h.drawn("committed-section-toggle"));
+  assert!(!h.drawn("file-card-c.rs"));
 }
 
 #[gpui::test]

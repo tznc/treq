@@ -617,7 +617,7 @@ const CHANGES_CLICKS: &[&str] = &[
   "viewed-a.rs",
   "discard-all-changes",
   "discard-all-confirm",
-  "show-committed-toggle",
+  "changes-filter",
 ];
 
 const CHANGES_FIELDS: &[&str] = &["comment-input", "comment-edit", "commit-message"];

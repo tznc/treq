@@ -429,12 +429,15 @@ impl ChangesView {
     self.options.show_committed.unwrap_or(false)
   }
 
-  /// The committed files shown: all with the toggle on, else those also
-  /// dirty or conflicted.
+  /// The committed files shown: none with the Committed filter off, all
+  /// with it on, else those also dirty or conflicted.
   pub(super) fn visible_committed(&self) -> Vec<JjFileChange> {
     let Some(snapshot) = &self.snapshot else {
       return Vec::new();
     };
+    if self.options.show_committed == Some(false) {
+      return Vec::new();
+    }
     let always: HashSet<String> = snapshot
       .files
       .iter()
@@ -1500,13 +1503,16 @@ impl ChangesView {
         );
       }
       Some(_) => {
-        list = list.children(self.generated_filter(p, cx));
+        list = list.children(self.filter_row(p, cx));
         let conflicted = self.conflicted();
         if !conflicted.is_empty() {
           list = list.child(self.conflicts_section(&conflicted, p, cx));
         }
         let files = self.listed();
-        let committed = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
+        let committed = match self.options.show_committed {
+          Some(false) => 0,
+          _ => self.snapshot.as_ref().map_or(0, |s| s.committed.len()),
+        };
         if files.is_empty() && committed == 0 {
           list = list.child(
             div()
@@ -1560,40 +1566,83 @@ impl ChangesView {
       .child(list)
   }
 
-  /// The row above the file lists that hides generated files, when any.
-  fn generated_filter(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let any = self
+  /// The row above the file lists whose filter menu picks what they show:
+  /// generated files and the committed group, when either applies.
+  fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let generated = self
       .snapshot
       .as_ref()
       .is_some_and(|s| !s.generated.is_empty());
-    if !any {
+    if !generated && self.options.show_committed.is_none() {
       return None;
     }
-    let hiding = self.hide_generated;
+    let filtering = self.hide_generated || self.options.show_committed == Some(false);
     let primary = p.primary;
     let filter = header_button(
-      "hide-generated-files",
+      "changes-filter",
       theme::ICON_FILTER,
-      if hiding { primary } else { p.muted_foreground },
+      if filtering {
+        primary
+      } else {
+        p.muted_foreground
+      },
       p.foreground.opacity(0.1),
     )
-    .when(hiding, |b| b.bg(primary.opacity(0.1)))
+    .relative()
+    .when(filtering, |b| b.bg(primary.opacity(0.1)))
     .role(gpui::Role::Button)
-    .aria_label("Hide generated files")
-    .on_click(cx.listener(|view, _, _, cx| view.toggle_hide_generated(cx)))
-    .test_support();
-    let tip = if hiding {
-      "Show generated files"
-    } else {
-      "Hide generated files"
-    };
+    .aria_label("Filter changes")
+    .on_click(cx.listener(|view, _, _, cx| view.filter_menu(cx)))
+    .test_support()
+    .child(self.anchor("changes-filter".into()));
     Some(div().mt_3().flex().justify_end().child(self.tips.wrap(
-      "hide-generated-tip",
+      "changes-filter-tip",
       Side::Bottom,
-      Some(TooltipContent::Text(tip.into())),
+      Some(TooltipContent::Text("Filter changes".into())),
       filter,
       cx,
     )))
+  }
+
+  /// The filter button's menu: one checkbox item per kind of file shown.
+  fn filter_menu(&self, cx: &mut Context<Self>) {
+    let Some(anchor) = self.anchors.borrow().get("changes-filter").copied() else {
+      return;
+    };
+    let mut items = Vec::new();
+    if self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| !s.generated.is_empty())
+    {
+      let entity = cx.entity().downgrade();
+      items.push(
+        NativeMenuItem::item("Generated files", move |cx| {
+          let _ = entity.update(cx, |view, cx| view.toggle_hide_generated(cx));
+        })
+        .check(!self.hide_generated),
+      );
+    }
+    if let Some(show) = self.options.show_committed {
+      let entity = cx.entity().downgrade();
+      items.push(
+        NativeMenuItem::item("Committed", move |cx| {
+          let _ = entity.update(cx, |view, cx| {
+            let show = view.options.show_committed.unwrap_or(show);
+            view.field("changes.showCommitted", (!show).into(), cx);
+          });
+        })
+        .check(show),
+      );
+    }
+    self.popup(
+      PopupRequest::ShowDropdown {
+        entries: crate::gpui_shell::popup::native_entries(items),
+        anchor,
+        dark: self.dark,
+      },
+      cx,
+    );
   }
 
   fn commit_box(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2233,61 +2282,6 @@ impl ChangesView {
         view.committed_collapsed = !view.committed_collapsed;
         cx.notify();
       }));
-    let toggle = self.options.show_committed.map(|show| {
-      let (color, hover) = if show {
-        (
-          if self.dark {
-            tw::color(tw::BLUE_300)
-          } else {
-            tw::color(tw::BLUE_700)
-          },
-          tw::color(tw::BLUE_500).opacity(0.2),
-        )
-      } else {
-        (muted, fg.opacity(0.1))
-      };
-      let button = ui::text(div(), TextSize::Xs)
-        .id("show-committed-toggle")
-        .debug_selector(|| "show-committed-toggle".into())
-        .flex()
-        .items_center()
-        .gap_1()
-        .px(zpx(6.))
-        .py(zpx(2.))
-        .rounded(zpx(4.))
-        .ml_auto()
-        .cursor_pointer()
-        .text_color(color)
-        .hover(move |s| s.bg(hover))
-        .child(ui::icon(
-          if show {
-            theme::ICON_EYE
-          } else {
-            theme::ICON_EYE_OFF
-          },
-          14.,
-          color,
-        ))
-        .child("Show")
-        .on_click(cx.listener(move |view, _, _, cx| {
-          cx.stop_propagation();
-          view.field("changes.showCommitted", (!show).into(), cx);
-        }));
-      self.tips.wrap(
-        "show-committed-tip",
-        Side::Top,
-        Some(TooltipContent::Text(
-          if show {
-            "Hide committed changes"
-          } else {
-            "Show committed changes"
-          }
-          .into(),
-        )),
-        button,
-        cx,
-      )
-    });
     let mut rows = div().mt_2().overflow_hidden();
     if !collapsed {
       for file in &visible {
@@ -2354,8 +2348,7 @@ impl ChangesView {
           .justify_between()
           .w_full()
           .text_color(muted)
-          .child(header)
-          .children(toggle),
+          .child(header),
       )
       .when(!collapsed && !visible.is_empty(), |this| this.child(rows))
   }

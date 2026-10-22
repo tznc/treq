@@ -175,6 +175,9 @@ pub enum NativeMenuItem {
     destructive: bool,
     /// A `DropdownMenuRadioItem`, picked or not.
     radio: Option<bool>,
+    /// A `DropdownMenuCheckboxItem`, checked or not: picking it toggles
+    /// the check and keeps the menu open.
+    check: Option<bool>,
     on_select: Pick,
   },
   Separator,
@@ -196,6 +199,7 @@ impl NativeMenuItem {
       icon: None,
       destructive: false,
       radio: None,
+      check: None,
       on_select: Rc::new(on_select),
     }
   }
@@ -219,6 +223,14 @@ impl NativeMenuItem {
   pub fn radio(mut self, checked: bool) -> Self {
     if let NativeMenuItem::Item { radio, .. } = &mut self {
       *radio = Some(checked);
+    }
+    self
+  }
+
+  /// Draws the item as a checkbox item, with its check when `checked`.
+  pub fn check(mut self, checked: bool) -> Self {
+    if let NativeMenuItem::Item { check, .. } = &mut self {
+      *check = Some(checked);
     }
     self
   }
@@ -255,6 +267,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
           icon,
           destructive,
           radio,
+          check,
           on_select,
         } => {
           let id = *next;
@@ -266,6 +279,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
             icon,
             destructive,
             radio,
+            check,
           }
         }
         NativeMenuItem::Separator => MenuEntry::Separator,
@@ -309,6 +323,21 @@ pub fn copy_link_menu(
     entries: native_entries(vec![item]),
     at,
     dark,
+  }
+}
+
+/// Flips the check of checkbox item `id`, in a submenu too.
+fn toggle_check(entries: &mut [MenuEntry], id: u32) {
+  for entry in entries {
+    match entry {
+      MenuEntry::Item {
+        id: item,
+        check: Some(checked),
+        ..
+      } if *item == id => *checked = !*checked,
+      MenuEntry::Submenu { items, .. } => toggle_check(items, id),
+      _ => {}
+    }
   }
 }
 
@@ -387,6 +416,9 @@ pub enum MenuEntry {
     /// A radio item (`pl-8`, its dot drawn when `true`).
     #[serde(default)]
     radio: Option<bool>,
+    /// A checkbox item (`pl-8`, its check drawn when `true`).
+    #[serde(default)]
+    check: Option<bool>,
   },
   Separator,
   Submenu {
@@ -584,8 +616,10 @@ fn entry_width(cx: &App, entry: &MenuEntry) -> f32 {
   if icon.is_some() {
     width += ITEM_ICON + ITEM_ICON_GAP;
   }
-  if let MenuEntry::Item { radio: Some(_), .. } = entry {
-    width += RADIO_INSET - ITEM_PADDING_X;
+  if let MenuEntry::Item { radio, check, .. } = entry {
+    if radio.is_some() || check.is_some() {
+      width += RADIO_INSET - ITEM_PADDING_X;
+    }
   }
   if let MenuEntry::Submenu {
     detail: Some(detail),
@@ -915,8 +949,10 @@ impl PopupView {
           icon,
           destructive,
           radio,
+          check,
         } => {
           let id = *id;
+          let checkable = check.is_some();
           let color = if *destructive {
             palette.destructive
           } else {
@@ -938,13 +974,43 @@ impl PopupView {
                   }),
               )
             })
+            .when_some(*check, |row, checked| {
+              row
+                .relative()
+                .pl(zpx(RADIO_INSET))
+                .role(gpui::Role::MenuItemCheckBox)
+                .aria_toggled(if checked {
+                  gpui::accesskit::Toggled::True
+                } else {
+                  gpui::accesskit::Toggled::False
+                })
+                .child(
+                  div()
+                    .absolute()
+                    .left(zpx(ITEM_PADDING_X))
+                    .size_4()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(checked, |this| {
+                      this.child(super::ui::icon(theme::ICON_CHECK, 16., color))
+                    }),
+                )
+            })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
               if *hovered {
                 this.set_open_submenu(None, cx);
               }
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
-              this.close();
+              if checkable {
+                if let Content::Menu { entries, .. } = &mut this.content {
+                  toggle_check(entries, id);
+                }
+                cx.notify();
+              } else {
+                this.close();
+              }
               if let Some(pick) = native_pick(id) {
                 pick(cx);
               }
@@ -1946,6 +2012,7 @@ mod tests {
           icon: None,
           destructive: false,
           radio: None,
+          check: None,
         }],
       }
     );
@@ -1985,5 +2052,36 @@ mod tests {
       .collect();
     assert_eq!(radios, [Some(false), Some(true)]);
     assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
+  }
+
+  #[test]
+  fn toggles_a_checkbox_item_in_a_submenu() {
+    let mut entries = native_entries(vec![NativeMenuItem::submenu(
+      "View",
+      None,
+      vec![
+        NativeMenuItem::item("Generated files", |_| {}).check(true),
+        NativeMenuItem::item("Committed", |_| {}),
+      ],
+    )]);
+    let MenuEntry::Submenu { items, .. } = &entries[0] else {
+      panic!("{entries:?}");
+    };
+    let id = match &items[0] {
+      MenuEntry::Item { id, .. } => *id,
+      other => panic!("{other:?}"),
+    };
+    toggle_check(&mut entries, id);
+    let MenuEntry::Submenu { items, .. } = &entries[0] else {
+      panic!("{entries:?}");
+    };
+    let checks: Vec<_> = items
+      .iter()
+      .map(|e| match e {
+        MenuEntry::Item { check, .. } => *check,
+        _ => None,
+      })
+      .collect();
+    assert_eq!(checks, [Some(false), None]);
   }
 }

@@ -267,22 +267,27 @@ test("changes: generated files wait behind Load diff", async ({ page }) => {
   });
 });
 
-test("changes: filter hides generated files", async ({ page }) => {
+test("changes: filter menu picks what the lists show", async ({ page }) => {
   await openWorkspace(page, "feat/event-ingest");
   await openTab(page, "Changes");
-  const filter = page.getByRole("button", { name: "Hide generated files" });
-  await filter.click();
-  await expect(page.getByRole("button", { name: "Load diff" })).toHaveCount(0);
-  await settle(page, 600);
+  await expect(page.getByRole("button", { name: "Show committed changes" })).toHaveCount(0);
   await capture(page, {
-    name: "05-changes-generated-hidden",
-    title: "Generated files hidden by the list's filter",
+    name: "05-changes-filter-row",
+    title: "The list's filter row",
     expectations: [
-      "Changes lists only .gitattributes and retry.ts; the funnel button is highlighted",
-      "The diff shows no generated file cards",
+      "The funnel button sits in its own right-aligned row above the lists",
+      "The Committed header has no Show button",
     ],
   });
-  // The earlier shot may have loaded one generated diff already.
-  await filter.click();
-  await expect(page.getByRole("button", { name: "Load diff" })).not.toHaveCount(0);
+  await page.getByRole("button", { name: "Filter changes" }).click();
+  await settle(page, 1000);
+  await capture(page, {
+    name: "05-changes-filter-menu",
+    title: "The list's filter menu",
+    screen: true,
+    rest: false,
+    expectations: ["The menu lists Generated files and Committed, both checked"],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 500);
 });
