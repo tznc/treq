@@ -1500,6 +1500,7 @@ impl ChangesView {
         );
       }
       Some(_) => {
+        list = list.children(self.generated_filter(p, cx));
         let conflicted = self.conflicted();
         if !conflicted.is_empty() {
           list = list.child(self.conflicts_section(&conflicted, p, cx));
@@ -1557,6 +1558,42 @@ impl ChangesView {
       .bg(p.sidebar)
       .child(self.commit_box(p, cx))
       .child(list)
+  }
+
+  /// The row above the file lists that hides generated files, when any.
+  fn generated_filter(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let any = self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| !s.generated.is_empty());
+    if !any {
+      return None;
+    }
+    let hiding = self.hide_generated;
+    let primary = p.primary;
+    let filter = header_button(
+      "hide-generated-files",
+      theme::ICON_FILTER,
+      if hiding { primary } else { p.muted_foreground },
+      p.foreground.opacity(0.1),
+    )
+    .when(hiding, |b| b.bg(primary.opacity(0.1)))
+    .role(gpui::Role::Button)
+    .aria_label("Hide generated files")
+    .on_click(cx.listener(|view, _, _, cx| view.toggle_hide_generated(cx)))
+    .test_support();
+    let tip = if hiding {
+      "Show generated files"
+    } else {
+      "Hide generated files"
+    };
+    Some(div().mt_3().flex().justify_end().child(self.tips.wrap(
+      "hide-generated-tip",
+      Side::Bottom,
+      Some(TooltipContent::Text(tip.into())),
+      filter,
+      cx,
+    )))
   }
 
   fn commit_box(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1914,44 +1951,6 @@ impl ChangesView {
           cx,
         ));
       }
-    }
-    let any_generated = self
-      .snapshot
-      .as_ref()
-      .is_some_and(|s| !s.generated.is_empty());
-    if !staged && any_generated {
-      let hiding = self.hide_generated;
-      let primary = p.primary;
-      let filter = header_button(
-        "hide-generated-files",
-        theme::ICON_FILTER,
-        if hiding { primary } else { muted },
-        hover,
-      )
-      .when(hiding, |b| b.bg(primary.opacity(0.1)))
-      .role(gpui::Role::Button)
-      .aria_label("Hide generated files")
-      .on_click(cx.listener(|view, _, _, cx| {
-        cx.stop_propagation();
-        view.toggle_hide_generated(cx);
-      }))
-      .test_support();
-      buttons = buttons.child(
-        self.tips.wrap(
-          "hide-generated-tip",
-          Side::Bottom,
-          Some(TooltipContent::Text(
-            if hiding {
-              "Show generated files"
-            } else {
-              "Hide generated files"
-            }
-            .into(),
-          )),
-          filter,
-          cx,
-        ),
-      );
     }
     buttons = buttons.child(div().ml_1().child(files.len().to_string()));
     let last = if staged {
