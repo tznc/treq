@@ -868,12 +868,7 @@ fn validate_sql(sql: &str) -> Result<(), String> {
 pub fn run_logs_sql(repo_path: &str, sql: &str, max_rows: i64) -> Result<SqlResult, String> {
   validate_sql(sql)?;
 
-  if !has_any_logs(repo_path) {
-    return Err(
-      "No check logs recorded yet — run a workflow check to populate the logs table.".to_string(),
-    );
-  }
-
+  // With no logs recorded yet the views are empty, so a query returns no rows.
   let conn = connect_with_logs_view(repo_path)?;
   let capped = format!(
     "SELECT * FROM ({}) AS explorer_query LIMIT {}",
@@ -1394,6 +1389,19 @@ mod tests {
     .unwrap();
     assert_eq!(result.columns, vec!["severityText", "n"]);
     assert_eq!(result.row_count, 2);
+  }
+
+  #[test]
+  fn test_run_logs_sql_returns_no_rows_before_any_logs() {
+    let dir = TempDir::new().unwrap();
+    let result = run_logs_sql(
+      &dir.path().to_string_lossy(),
+      "SELECT timestamp, severityText FROM logs",
+      100,
+    )
+    .unwrap();
+    assert_eq!(result.columns, vec!["timestamp", "severityText"]);
+    assert_eq!(result.row_count, 0);
   }
 
   #[test]

@@ -139,6 +139,13 @@ pub enum PopupRequest {
     anchor: Bounds<Pixels>,
     dark: bool,
   },
+  /// A native `<select>`'s list of `entries` below the control at `anchor`,
+  /// lined up with its left edge.
+  ShowSelect {
+    entries: Vec<MenuEntry>,
+    anchor: Bounds<Pixels>,
+    dark: bool,
+  },
   /// A header popover, drawn in the modal window over the whole shell
   /// window (see `popover`).
   ShowPopover {
@@ -1250,16 +1257,22 @@ thread_local! {
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
 }
 
-/// A dropdown's box below `anchor` with their right edges lined up (screen
-/// coordinates), `sideOffset={4}` away, flipped above where it would leave
-/// `screen`.
+/// A dropdown's box below `anchor` with their right edges lined up, or their
+/// left edges when `start` (screen coordinates), `sideOffset={4}` away,
+/// flipped above where it would leave `screen`.
 pub fn place_dropdown(
   anchor: Bounds<Pixels>,
   size: (f32, f32),
   screen: Bounds<Pixels>,
+  start: bool,
 ) -> Point<Pixels> {
   let (width, height) = size;
-  let x = (f32::from(anchor.right()) - width).max(f32::from(screen.left()));
+  let x = if start {
+    f32::from(anchor.left()).min(f32::from(screen.right()) - width)
+  } else {
+    f32::from(anchor.right()) - width
+  }
+  .max(f32::from(screen.left()));
   let mut y = f32::from(anchor.bottom()) + DROPDOWN_OFFSET;
   if y + height > f32::from(screen.bottom()) {
     y = f32::from(anchor.top()) - DROPDOWN_OFFSET - height;
@@ -1510,7 +1523,12 @@ pub fn handle(app: &AppHandle, owner: &str, request: PopupRequest) {
       entries,
       anchor,
       dark,
-    } => show_dropdown(app, owner, entries, anchor, dark),
+    } => show_dropdown(app, owner, entries, anchor, false, dark),
+    PopupRequest::ShowSelect {
+      entries,
+      anchor,
+      dark,
+    } => show_dropdown(app, owner, entries, anchor, true, dark),
     PopupRequest::ShowTooltip {
       anchor,
       side,
@@ -1613,6 +1631,7 @@ pub fn show_dropdown(
   owner: &str,
   entries: Vec<MenuEntry>,
   anchor: Bounds<Pixels>,
+  start: bool,
   dark: bool,
 ) {
   let Some(client) = tauri::Manager::get_window(app, owner)
@@ -1631,7 +1650,7 @@ pub fn show_dropdown(
     owner,
     entries,
     theme::palette(dark),
-    move |size, screen| place_dropdown(anchor, size, screen),
+    move |size, screen| place_dropdown(anchor, size, screen, start),
   );
 }
 
@@ -1713,6 +1732,21 @@ mod tests {
 
   fn bounds(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
     Bounds::new(gpui::point(px(x), px(y)), gpui::size(px(w), px(h)))
+  }
+
+  #[test]
+  fn places_a_dropdown_under_its_button_by_either_edge() {
+    let anchor = bounds(300., 100., 80., 28.);
+    let screen = bounds(0., 0., 1400., 900.);
+    let size = (160., 120.);
+    assert_eq!(
+      place_dropdown(anchor, size, screen, false),
+      gpui::point(px(220.), px(132.))
+    );
+    assert_eq!(
+      place_dropdown(anchor, size, screen, true),
+      gpui::point(px(300.), px(132.))
+    );
   }
 
   #[test]

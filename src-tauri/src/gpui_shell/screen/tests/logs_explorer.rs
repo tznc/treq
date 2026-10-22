@@ -19,6 +19,18 @@ fn logs_tab_filters_by_level(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
+  h.click("log-level-option-all");
+  h.cx.run_until_parked();
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read check logs"))
+    .collect();
+  assert_eq!(
+    reads.last().map(String::as_str),
+    Some("read check logs None None Some([])"),
+    "{reads:?}"
+  );
 }
 
 #[gpui::test]

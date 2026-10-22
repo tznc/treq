@@ -1449,9 +1449,11 @@ impl Harness {
     use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
     self.cx.run_until_parked();
     let entries = match self.popups.borrow().last() {
-      Some(PopupRequest::ShowDropdown { entries, .. } | PopupRequest::ShowMenu { entries, .. }) => {
-        entries.clone()
-      }
+      Some(
+        PopupRequest::ShowDropdown { entries, .. }
+        | PopupRequest::ShowSelect { entries, .. }
+        | PopupRequest::ShowMenu { entries, .. },
+      ) => entries.clone(),
       _ => panic!("no menu is shown"),
     };
     let id = entries
