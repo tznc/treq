@@ -38,6 +38,7 @@ mod sidebar;
 mod sidebar_actions;
 mod theme;
 mod time;
+mod title_bar;
 mod toasts;
 mod tooltips;
 mod ui;
@@ -211,7 +212,16 @@ impl Render for Shell {
           .flex_1()
           .min_w_0()
           .h_full()
-          .when_some(self.screen.clone(), |this, screen| this.child(screen)),
+          .flex()
+          .flex_col()
+          // The screen runs to the window's top edge beside the sidebar,
+          // which holds the title bar; without it, the screen moves down.
+          .when(title_bar::SHOWN && self.sidebar.is_none(), |this| {
+            this.child(title_bar::drag_area("screen-title-bar"))
+          })
+          .when_some(self.screen.clone(), |this, screen| {
+            this.child(gpui::div().flex_1().min_h_0().child(screen))
+          }),
       )
   }
 }
@@ -232,8 +242,15 @@ pub fn open_window(
 ) -> Result<(), Box<dyn std::error::Error>> {
   let window = tauri::WindowBuilder::new(app, label)
     .title(title)
-    .inner_size(1400.0, 900.0)
-    .build()?;
+    .inner_size(1400.0, 900.0);
+  // The default style already extends the content under an opaque bar,
+  // hiding GPUI's top rows. An overlay leaves only the traffic lights, over
+  // the title bar GPUI draws (`title_bar`).
+  #[cfg(target_os = "macos")]
+  let window = window
+    .title_bar_style(tauri::TitleBarStyle::Overlay)
+    .hidden_title(true);
+  let window = window.build()?;
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;
 
