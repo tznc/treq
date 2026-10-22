@@ -41,9 +41,6 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/terminal_emu.rs"
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"
-  - "src-tauri/src/gpui_shell/theme.rs"
-  - "src-tauri/src/gpui_shell/ui.rs"
-  - "src-tauri/src/gpui_shell/ui/**"
 rule:
   any:
     - kind: call_expression

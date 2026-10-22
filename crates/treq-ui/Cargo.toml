@@ -1,0 +1,29 @@
+[package]
+name = "treq-ui"
+version = "0.1.0"
+description = "Treq's design system: tokens and the GPUI components every screen builds from"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The same gpui-pre that tauri-plugin-gpui renders with.
+gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false }
+gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component"] }
+# Bootstrap 5's components on gpui-kit's unstyled controls, re-themed with
+# treq's tokens (`theme::bootstrap`). The branch adds custom button colors
+# and interactive handlers (not on main yet).
+gpui-bootstrap = { git = "https://github.com/Ziinc/gpui-bootstrap", branch = "claude/button-variant-colors" }
+log = "0.4"
+serde_json = "1"
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
+
+# Native: the styleguide window and headless snapshot rendering
+# (`cargo run -p treq-ui --example styleguide -- render|check`).
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component", "test-support"] }
+gpui-styleguidist = { git = "https://github.com/Ziinc/gpui-styleguidist", rev = "7af7f20d75ae7e2cf576873d42fbcc505c10eabe", features = ["gallery", "render"] }
+
+[[example]]
+name = "styleguide"

@@ -37,12 +37,12 @@ mod screen;
 mod shortcuts;
 mod sidebar;
 mod sidebar_actions;
-mod theme;
+use treq_ui::theme;
 mod time;
 mod title_bar;
 mod toasts;
 mod tooltips;
-mod ui;
+use treq_ui as ui;
 mod window;
 
 pub use overlay::OverlaySnapshot;
