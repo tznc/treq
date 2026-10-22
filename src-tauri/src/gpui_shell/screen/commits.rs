@@ -2858,6 +2858,10 @@ impl CommitsView {
         );
         let preparing = session.is_none();
         let ready = matches!(session, Some(Ok(_)));
+        let failed = match session {
+          Some(Err(err)) => Some(err.clone()),
+          _ => None,
+        };
         let help = self.tips.wrap(
           "resolve-conflicts-help",
           Side::Top,
@@ -2895,6 +2899,14 @@ impl CommitsView {
               .debug_selector(|| "resolve-conflicts-prompt".into())
               .children(input.as_ref().map(Textarea::new)),
           )
+          .when_some(failed, |this, err| {
+            this.child(
+              ui::text(div(), TextSize::Sm)
+                .debug_selector(|| "resolve-conflicts-error".into())
+                .text_color(p.destructive)
+                .child(err),
+            )
+          })
           .child(
             div()
               .flex()
