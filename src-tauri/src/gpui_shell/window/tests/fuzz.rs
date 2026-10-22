@@ -168,7 +168,6 @@ fn field() -> impl Strategy<Value = (&'static str, serde_json::Value)> {
     Just("commits.scrolled"),
     Just("commits.moveToNew"),
     Just("commits.stashed"),
-    Just("changes.refreshing"),
     Just("changes.moveToNew"),
     Just("changes.showCommitted"),
     Just("workspaceDialog.created"),

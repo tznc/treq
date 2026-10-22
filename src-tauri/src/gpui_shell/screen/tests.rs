@@ -2035,7 +2035,6 @@ fn route_json(workspace_id: Option<i64>, home_branch: &str) -> serde_json::Value
     "homeBranch": home_branch,
     "tab": "overview",
     "retargeting": false,
-    "refreshing": false,
     "creatingPr": false,
     "runningChecks": [],
     "mergeQueue": null,

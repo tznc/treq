@@ -44,8 +44,6 @@ pub struct Route {
   pub tab: Tab,
   /// The target branch is being changed (`rebasing`).
   pub retargeting: bool,
-  /// The Changes tab is refreshing its files.
-  pub refreshing: bool,
   pub creating_pr: bool,
   /// Workflows started from this window that have not reported yet.
   pub running_checks: Vec<String>,
@@ -742,8 +740,6 @@ pub fn workspace_view(
       logs: loaded.logs_enabled,
       busy: if route.retargeting {
         Some("Rebasing...".into())
-      } else if route.refreshing {
-        Some("Refreshing...".into())
       } else {
         None
       },

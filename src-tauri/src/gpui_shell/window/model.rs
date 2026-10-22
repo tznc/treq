@@ -119,7 +119,6 @@ pub struct WorkspaceView {
   pub file_browser: Option<FileBrowser>,
   pub scroll_to_commit: Option<String>,
   pub show_committed: bool,
-  pub refreshing: bool,
   /// `LogSource`: "checks" or "system".
   pub logs_source: String,
   pub logs_key: u64,
@@ -134,7 +133,6 @@ impl Default for WorkspaceView {
       file_browser: None,
       scroll_to_commit: None,
       show_committed: true,
-      refreshing: false,
       logs_source: "checks".into(),
       logs_key: 0,
       changes_revision: 0,

@@ -176,7 +176,6 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     "homeBranch": home_branch,
     "tab": view.tab.value(),
     "retargeting": false,
-    "refreshing": view.refreshing,
     "creatingPr": false,
     "runningChecks": [],
     "runningWorkflows": [],
