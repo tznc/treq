@@ -11,6 +11,7 @@ use super::{
   parts::{self, named},
   Busy, DetailKey, GithubView, Popover,
 };
+use crate::gpui_shell::screen::reactions::{self, Reacts};
 use crate::{
   core::running_checks::CheckRun,
   github::{GhIssue, GhIssueComment, GhPullRequest, PrCiStatus},
@@ -99,6 +100,16 @@ impl GithubView {
       },
       cx,
     );
+  }
+
+  /// The open issue's or pull request's comment `id`.
+  fn comment_mut(&mut self, id: &str) -> Option<&mut GhIssueComment> {
+    let comments = match (&mut self.detail.issue, &mut self.detail.pr) {
+      (Some(issue), _) => issue.comments.as_mut(),
+      (None, Some(pr)) => pr.comments.as_mut(),
+      (None, None) => None,
+    }?;
+    comments.iter_mut().find(|c| c.id == id)
   }
 
   fn change_issue(
@@ -343,7 +354,12 @@ impl GithubView {
     )
   }
 
-  fn comments(&self, comments: &Option<Vec<GhIssueComment>>, p: &Palette) -> Option<Div> {
+  fn comments(
+    &self,
+    comments: &Option<Vec<GhIssueComment>>,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<Div> {
     let comments = comments.as_ref().filter(|c| !c.is_empty())?;
     Some(
       div()
@@ -369,6 +385,14 @@ impl GithubView {
             .into_any_element(),
             p,
           )
+          .child(reactions::bar(
+            &self.tips,
+            self.reaction_picker.as_deref(),
+            &c.id,
+            &c.reactions,
+            p,
+            cx,
+          ))
         })),
     )
   }
@@ -651,7 +675,7 @@ impl GithubView {
       .when(!editing, |d| {
         d.children(self.body("github-issue-body", &issue.body, p))
       })
-      .children(self.comments(&issue.comments, p))
+      .children(self.comments(&issue.comments, p, cx))
       .child(add)
   }
 
@@ -1009,7 +1033,7 @@ impl GithubView {
       .children(checks_list)
       .children(treq)
       .children(self.body("github-pr-body", &pr.body, p))
-      .children(self.comments(&pr.comments, p))
+      .children(self.comments(&pr.comments, p, cx))
       .child(add)
   }
 
@@ -1718,4 +1742,34 @@ fn run_button(
     .disabled(disabled || running)
     .child(icon)
     .child(div().ml_1().child(if rerun { "Re-run" } else { "Run" }))
+}
+
+impl Reacts for GithubView {
+  fn reaction_picker(&mut self) -> &mut Option<String> {
+    &mut self.reaction_picker
+  }
+
+  fn react(&mut self, id: &str, content: &'static str, cx: &mut Context<Self>) {
+    let Some(comment) = self.comment_mut(id) else {
+      return;
+    };
+    let on = reactions::toggle(&mut comment.reactions, content);
+    cx.notify();
+    let id = id.to_string();
+    self.run(
+      cx,
+      {
+        let id = id.clone();
+        move |host| host.react(&id, content, on)
+      },
+      move |view, result, _| {
+        if let Err(err) = result {
+          if let Some(comment) = view.comment_mut(&id) {
+            reactions::toggle(&mut comment.reactions, content);
+          }
+          view.toast(ToastTone::Error, "Failed to react", err);
+        }
+      },
+    );
+  }
 }

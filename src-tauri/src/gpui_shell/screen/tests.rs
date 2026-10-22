@@ -796,6 +796,11 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(self.threads.clone())
   }
 
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
+    self.record(format!("react {comment_id} {content} {on}"));
+    Ok(())
+  }
+
   fn agent_comments(
     &self,
     _: &str,
@@ -4522,6 +4527,7 @@ fn gh_thread(id: &str, line: i64, resolved: bool) -> crate::github::GhReviewThre
       created_at: "2026-03-04T00:00:00Z".into(),
       diff_hunk: String::new(),
       url: "https://github.com/o/r/pull/1#c".into(),
+      reactions: Vec::new(),
     }],
   }
 }
@@ -4576,6 +4582,23 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
     serde_json::json!(["Why two lines?"])
   );
   assert_eq!(saved[0]["start_line"], 2);
+}
+
+#[gpui::test]
+fn changes_tab_reacts_to_a_review_comment(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(!h.drawn("reaction-t1-c-EYES"));
+  h.click("reaction-add-t1-c");
+  h.click("reaction-pick-t1-c-EYES");
+  h.cx.run_until_parked();
+  assert!(h.drawn("reaction-t1-c-EYES"));
+  assert!(host.writes().contains(&"react t1-c EYES true".to_string()));
+  h.click("reaction-t1-c-EYES");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("reaction-t1-c-EYES"));
+  assert!(host.writes().contains(&"react t1-c EYES false".to_string()));
 }
 
 #[gpui::test]

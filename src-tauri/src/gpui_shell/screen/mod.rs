@@ -53,6 +53,7 @@ mod modal;
 mod onboarding;
 mod open_workspaces;
 mod open_workspaces_data;
+mod reactions;
 pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;

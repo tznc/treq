@@ -154,6 +154,50 @@ pub struct GhIssueComment {
   pub body: String,
   pub author: GhAuthor,
   pub created_at: String,
+  /// `gh` gives the counts; `gh_comment_reactions_impl` adds whether the
+  /// viewer reacted.
+  #[serde(default, rename(deserialize = "reactionGroups"))]
+  pub reactions: Vec<GhReactionGroup>,
+}
+
+/// One of GitHub's eight reactions on a comment, as `ReactionGroup`.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(from = "RawReactionGroup")]
+pub struct GhReactionGroup {
+  /// `ReactionContent`: `THUMBS_UP`, `HEART`, ...
+  pub content: String,
+  pub count: u32,
+  pub viewer_has_reacted: bool,
+}
+
+/// A `ReactionGroup` as `gh --json` (`users`) or GraphQL (`reactors`)
+/// spells it.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawReactionGroup {
+  content: String,
+  #[serde(default)]
+  users: Option<TotalCount>,
+  #[serde(default)]
+  reactors: Option<TotalCount>,
+  #[serde(default)]
+  viewer_has_reacted: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TotalCount {
+  total_count: u32,
+}
+
+impl From<RawReactionGroup> for GhReactionGroup {
+  fn from(raw: RawReactionGroup) -> Self {
+    GhReactionGroup {
+      content: raw.content,
+      count: raw.reactors.or(raw.users).map_or(0, |c| c.total_count),
+      viewer_has_reacted: raw.viewer_has_reacted,
+    }
+  }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -802,6 +846,109 @@ pub fn gh_reply_pr_review_thread_impl(
   check_graphql_errors(&check_gh_output(out)?)
 }
 
+/// GraphQL lists all eight reactions, most with no one on them.
+fn shown_reactions(groups: Vec<GhReactionGroup>) -> Vec<GhReactionGroup> {
+  groups.into_iter().filter(|g| g.count > 0).collect()
+}
+
+const COMMENT_REACTIONS_QUERY: &str = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on Node { id } ... on Reactable { reactionGroups { content viewerHasReacted reactors { totalCount } } } } }";
+
+/// The reactions on comments by GraphQL node id, with whether the viewer
+/// reacted, which `gh ... view --json comments` leaves out.
+pub fn gh_comment_reactions_impl(
+  gh_path: &str,
+  ids: &[String],
+  extended_path: &str,
+) -> Result<std::collections::HashMap<String, Vec<GhReactionGroup>>, String> {
+  #[derive(serde::Deserialize)]
+  struct Response {
+    data: Option<Nodes>,
+  }
+  #[derive(serde::Deserialize)]
+  struct Nodes {
+    nodes: Vec<Option<Node>>,
+  }
+  #[derive(serde::Deserialize)]
+  struct Node {
+    id: Option<String>,
+    #[serde(rename = "reactionGroups", default)]
+    reaction_groups: Vec<GhReactionGroup>,
+  }
+
+  let mut out = std::collections::HashMap::new();
+  // `nodes` takes at most 100 ids.
+  for chunk in ids.chunks(100) {
+    let input = serde_json::json!({
+      "query": COMMENT_REACTIONS_QUERY,
+      "variables": { "ids": chunk },
+    });
+    let out_raw = run_gh_with_stdin(
+      gh_path,
+      &["api", "graphql", "--input", "-"],
+      &input.to_string(),
+      extended_path,
+    )?;
+    let bytes = check_gh_output(out_raw)?;
+    check_graphql_errors(&bytes)?;
+    let parsed: Response = serde_json::from_slice(&bytes)
+      .map_err(|e| format!("Failed to parse gh graphql output: {e}"))?;
+    for node in parsed.data.into_iter().flat_map(|d| d.nodes).flatten() {
+      if let Some(id) = node.id {
+        out.insert(id, shown_reactions(node.reaction_groups));
+      }
+    }
+  }
+  Ok(out)
+}
+
+/// Fills in `comments`' reactions with whether the viewer reacted. A failed
+/// read keeps `gh`'s counts.
+pub fn fill_comment_reactions(
+  gh_path: &str,
+  comments: Option<&mut Vec<GhIssueComment>>,
+  extended_path: &str,
+) {
+  let Some(comments) = comments.filter(|c| !c.is_empty()) else {
+    return;
+  };
+  let ids: Vec<String> = comments.iter().map(|c| c.id.clone()).collect();
+  match gh_comment_reactions_impl(gh_path, &ids, extended_path) {
+    Ok(mut by_id) => {
+      for c in comments.iter_mut() {
+        if let Some(reactions) = by_id.remove(&c.id) {
+          c.reactions = reactions;
+        }
+      }
+    }
+    Err(err) => log::warn!("Failed to read comment reactions: {err}"),
+  }
+}
+
+const ADD_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
+const REMOVE_REACTION_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { removeReaction(input: {subjectId: $id, content: $content}) { clientMutationId } }";
+
+/// Adds or removes the viewer's `content` reaction (`THUMBS_UP`, ...) on a
+/// comment by its GraphQL node id.
+pub fn gh_set_reaction_impl(
+  gh_path: &str,
+  subject_id: &str,
+  content: &str,
+  on: bool,
+  extended_path: &str,
+) -> Result<(), String> {
+  let input = serde_json::json!({
+    "query": if on { ADD_REACTION_MUTATION } else { REMOVE_REACTION_MUTATION },
+    "variables": { "id": subject_id, "content": content },
+  });
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", "graphql", "--input", "-"],
+    &input.to_string(),
+    extended_path,
+  )?;
+  check_graphql_errors(&check_gh_output(out)?)
+}
+
 /// One inline comment of a submitted review. `side` is `LEFT` or `RIGHT`;
 /// `start_line` makes it a multi-line comment on the same side.
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -1197,6 +1344,7 @@ pub struct GhReviewComment {
   pub created_at: String,
   pub diff_hunk: String,
   pub url: String,
+  pub reactions: Vec<GhReactionGroup>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -1230,6 +1378,7 @@ const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: String!, $nu
               url
               diffHunk
               author { login avatarUrl }
+              reactionGroups { content viewerHasReacted reactors { totalCount } }
             }
           }
         }
@@ -1308,6 +1457,8 @@ struct GqlComment {
   #[serde(rename = "diffHunk")]
   diff_hunk: String,
   author: Option<GqlAuthor>,
+  #[serde(rename = "reactionGroups", default)]
+  reaction_groups: Vec<GhReactionGroup>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1399,6 +1550,7 @@ pub fn gh_list_pr_review_threads_impl(
             created_at: c.created_at,
             diff_hunk: c.diff_hunk,
             url: c.url,
+            reactions: shown_reactions(c.reaction_groups),
           })
           .collect(),
       });
@@ -2808,6 +2960,92 @@ esac
     let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"errors":[{"message":"denied"}]}"#);
     let err = gh_reply_pr_review_thread_impl(&gh_path, "T", "b", "/usr/bin:/bin").unwrap_err();
     assert!(err.contains("denied"));
+  }
+
+  // ── Reactions ──────────────────────────────────────────────────────────
+
+  #[test]
+  fn test_issue_comment_reads_gh_reaction_counts() {
+    let comment: GhIssueComment = serde_json::from_value(serde_json::json!({
+      "id": "IC_1",
+      "body": "hi",
+      "author": {"login": "ada"},
+      "createdAt": "2026-01-01T00:00:00Z",
+      "reactionGroups": [{"content": "HEART", "users": {"totalCount": 2}}]
+    }))
+    .unwrap();
+    assert_eq!(
+      comment.reactions,
+      vec![GhReactionGroup {
+        content: "HEART".into(),
+        count: 2,
+        viewer_has_reacted: false,
+      }]
+    );
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_comment_reactions_reads_viewer_flags_and_drops_empty_groups() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(
+      &bin_dir,
+      r#"{"data":{"nodes":[{"id":"IC_1","reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":3}},{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}]},null]}}"#,
+    );
+
+    let by_id = gh_comment_reactions_impl(
+      &gh_path,
+      &["IC_1".to_string(), "IC_gone".to_string()],
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+
+    assert_eq!(
+      by_id["IC_1"],
+      vec![GhReactionGroup {
+        content: "THUMBS_UP".into(),
+        count: 3,
+        viewer_has_reacted: true,
+      }]
+    );
+    assert!(!by_id.contains_key("IC_gone"));
+    let stdin: serde_json::Value =
+      serde_json::from_str(&fs::read_to_string(bin_dir.path().join("stdin")).unwrap()).unwrap();
+    assert_eq!(
+      stdin["variables"]["ids"],
+      serde_json::json!(["IC_1", "IC_gone"])
+    );
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_set_reaction_adds_and_removes() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"data":{}}"#);
+    let read_stdin = || -> serde_json::Value {
+      serde_json::from_str(&fs::read_to_string(bin_dir.path().join("stdin")).unwrap()).unwrap()
+    };
+
+    gh_set_reaction_impl(&gh_path, "PRRC_1", "ROCKET", true, "/usr/bin:/bin").unwrap();
+    let stdin = read_stdin();
+    assert!(stdin["query"].as_str().unwrap().contains("addReaction"));
+    assert_eq!(stdin["variables"]["id"], "PRRC_1");
+    assert_eq!(stdin["variables"]["content"], "ROCKET");
+
+    gh_set_reaction_impl(&gh_path, "PRRC_1", "ROCKET", false, "/usr/bin:/bin").unwrap();
+    assert!(read_stdin()["query"]
+      .as_str()
+      .unwrap()
+      .contains("removeReaction"));
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_set_reaction_surfaces_graphql_errors() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"errors":[{"message":"locked"}]}"#);
+    let err = gh_set_reaction_impl(&gh_path, "IC_1", "HEART", true, "/usr/bin:/bin").unwrap_err();
+    assert!(err.contains("locked"));
   }
 
   #[test]

@@ -17,6 +17,7 @@ use crate::{
       RowKind,
     },
     commits_data::LineRef,
+    reactions::{self, Reacts},
   },
   local_db::AgentReviewComment,
 };
@@ -38,6 +39,8 @@ pub(in crate::gpui_shell::screen) struct Threads {
   placed: Placed,
   agent_lines: HashMap<(String, u32, Side), Vec<AgentReviewComment>>,
   poll: Option<Task<()>>,
+  /// The review comment whose reaction picker is open.
+  reaction_picker: Option<String>,
 }
 
 impl ChangesView {
@@ -463,6 +466,14 @@ impl ChangesView {
           .whitespace_normal()
           .child(comment.body.clone()),
       )
+      .child(reactions::bar(
+        &self.tips,
+        self.threads.reaction_picker.as_deref(),
+        &comment.id,
+        &comment.reactions,
+        p,
+        cx,
+      ))
       .child(
         self.tip(
           format!("quote-{}", comment.id),
@@ -743,4 +754,46 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
     .overflow_hidden()
     .child(header)
     .child(body)
+}
+
+impl ChangesView {
+  /// The GitHub review comment `id`.
+  fn review_comment_mut(&mut self, id: &str) -> Option<&mut GhReviewComment> {
+    self
+      .threads
+      .github
+      .iter_mut()
+      .flat_map(|t| t.comments.iter_mut())
+      .find(|c| c.id == id)
+  }
+}
+
+impl Reacts for ChangesView {
+  fn reaction_picker(&mut self) -> &mut Option<String> {
+    &mut self.threads.reaction_picker
+  }
+
+  fn react(&mut self, id: &str, content: &'static str, cx: &mut Context<Self>) {
+    let Some(comment) = self.review_comment_mut(id) else {
+      return;
+    };
+    let on = reactions::toggle(&mut comment.reactions, content);
+    cx.notify();
+    let id = id.to_string();
+    self.run(
+      {
+        let id = id.clone();
+        move |host, _| host.react(&id, content, on)
+      },
+      move |view, result, _| {
+        if let Err(err) = result {
+          if let Some(comment) = view.review_comment_mut(&id) {
+            reactions::toggle(&mut comment.reactions, content);
+          }
+          view.toast(ToastTone::Error, "Failed to react", err);
+        }
+      },
+      cx,
+    );
+  }
 }
