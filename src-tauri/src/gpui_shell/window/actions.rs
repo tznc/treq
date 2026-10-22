@@ -79,12 +79,7 @@ impl Model {
       Shortcut::NewWorkspace if repo && free => self.open_workspace_dialog(json!({})),
       Shortcut::Stack if repo && free => return self.stack(data),
       Shortcut::Palette if free => self.dialogs.palette = true,
-      Shortcut::AgentPrompt if repo && free => {
-        self
-          .dialogs
-          .agent_prompt
-          .get_or_insert_with(Default::default);
-      }
+      Shortcut::AgentPrompt if repo && free => self.open_agent_prompt(),
       Shortcut::FilePicker if repo && free => self.dialogs.file_picker = true,
       Shortcut::ToggleShortcuts if free || self.dialogs.shortcuts => {
         self.dialogs.shortcuts = !self.dialogs.shortcuts;
@@ -107,6 +102,19 @@ impl Model {
       _ => {}
     }
     Vec::new()
+  }
+
+  /// The agent prompt dialog, on the open workspace (main from the
+  /// repository's home), unless it is open already.
+  fn open_agent_prompt(&mut self) {
+    let workspace_id = self.selected;
+    self
+      .dialogs
+      .agent_prompt
+      .get_or_insert_with(|| super::model::AgentPrompt {
+        workspace_id,
+        ..Default::default()
+      });
   }
 
   /// Whether the workspace view, and so the terminal pane, shows.
@@ -751,10 +759,7 @@ impl Model {
         Vec::new()
       }
       "start-agent-with-prompt" => {
-        self
-          .dialogs
-          .agent_prompt
-          .get_or_insert_with(Default::default);
+        self.open_agent_prompt();
         Vec::new()
       }
       "start-agent-terminal" => self.new_agent(self.selected, data),
