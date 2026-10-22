@@ -8,7 +8,7 @@ _How to set up Treq with your Git repository and understand the relationship bet
 
 Treq works with Git repositories. You pick a repository, create workspaces for parallel work, and keep using Git remotes to fetch and push. You never need to know [Jujutsu](https://jj-vcs.github.io/jj/latest/) to use Treq.
 
-When you open a repository, Treq adds a `.treq/` folder for workspaces and local metadata, and sets up colocated `.jj/` state beside it. Each folder carries its own `.gitignore` that ignores it, so Treq never edits your repository's `.gitignore`.
+When you open a repository, Treq adds a `.treq/` folder for workspaces and local metadata, and sets up colocated `.jj/` state beside it. Each folder carries its own `.gitignore` that ignores it, so Treq never edits your repository's `.gitignore`. `.treq/config.yaml` and `.treq/workflows/` stay trackable so you can commit them. If your `.gitignore` still lists `.treq/` from an older Treq version, remove that line to commit them.
 
 Colocation is the [under-the-hood](/docs/under-the-hood) part. It lets Treq rebase [workspace](/docs/concepts/workspaces) branches when a target moves, which [Git worktrees](/learn/concepts/git/git-worktrees) cannot do. Treq runs those Git and Jujutsu commands for you, and the `jj` CLI is a power-user escape hatch rather than the normal path.
 
