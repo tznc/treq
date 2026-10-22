@@ -4,6 +4,7 @@
 //! (`RemoteCapabilityNotice`) and, while access is cut off, the overlay
 //! that dims the window (`remote-cutoff-overlay`).
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, ClickEvent, Div, Window};
 
@@ -80,9 +81,12 @@ fn link(
   div()
     .id(id)
     .debug_selector(move || id.into())
+    .role(gpui::Role::Button)
+    .aria_label(label)
     .underline()
     .child(label)
     .when(enabled, |d| d.cursor_pointer().on_click(press(action)))
+    .test_support()
 }
 
 /// The strip above the workspace view: the name and its links, the banner
