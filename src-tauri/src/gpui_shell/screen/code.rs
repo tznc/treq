@@ -120,6 +120,49 @@ pub struct StackRow {
   pub stats: (u32, u32),
 }
 
+/// What [`CodeView::load`] reads, all at once.
+struct Read {
+  overview: Overview,
+  history: Result<JjLogResult, String>,
+  stack: Option<Vec<StackRow>>,
+  settings: TaskSettings,
+}
+
+/// The commit history column: `limit` commits of the home repository, a
+/// page of a workspace's.
+fn read_history(host: &dyn CodeHost, parent: &Parent, limit: usize) -> Result<JjLogResult, String> {
+  let home = parent.workspace.is_none();
+  host.commits(
+    &parent.repo_path,
+    parent.workspace_id(),
+    true,
+    Some(if home { limit } else { HISTORY_PAGE }),
+  )
+}
+
+/// The workspace's stack with each row's diff stats; `None` at home.
+fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
+  let current = parent.workspace.as_ref()?;
+  let workspaces = host.workspaces(&parent.repo_path).ok()?;
+  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
+  Some(
+    stack
+      .into_iter()
+      .map(|(workspace, current)| {
+        let stats = host
+          .commits(&parent.repo_path, Some(workspace.id), false, None)
+          .map(|log| diff_stats(&log.commits))
+          .unwrap_or_default();
+        StackRow {
+          workspace,
+          current,
+          stats,
+        }
+      })
+      .collect(),
+  )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
   Add,
@@ -141,6 +184,8 @@ pub struct CodeView {
   host: Arc<dyn CodeHost>,
   react: ActionSink,
   pub(super) parent: Parent,
+  /// The workspace the tab moves to once [`CodeView::load`] reads it.
+  next: Option<Parent>,
   dark: bool,
   tips: Tooltips,
   pub(super) overview: Option<Overview>,
@@ -198,6 +243,7 @@ impl CodeView {
       host,
       react,
       parent,
+      next: None,
       dark,
       tips: Tooltips::new(popups, dark),
       overview: None,
@@ -239,38 +285,82 @@ impl CodeView {
       self.tips.dark = dark;
       cx.notify();
     }
-    if self.parent == parent {
+    if self.next.as_ref().unwrap_or(&self.parent) == &parent {
       return;
     }
-    let moved = self.parent.key() != parent.key();
-    let stale = moved || self.parent.revision != parent.revision;
-    self.parent = parent;
-    if moved {
-      self.overview = None;
-      self.history = None;
-      self.history_error = None;
-      self.history_error_open = false;
-      self.history_limit = HISTORY_PAGE;
-      self.stack = None;
-      self.settings = None;
-      self.agent_override = None;
-      self.save_default = false;
-      self.show_save_default = false;
-      self.title_draft = None;
-      self.description_draft = None;
-      self.menu = None;
+    if parent.key() != self.parent.key() {
+      // Another workspace: keep drawing this one until the new one is read,
+      // then swap them in one frame (`apply`), so the tab never draws empty.
+      self.next = Some(parent);
+    } else {
+      self.next = None;
+      self.parent = parent;
+      cx.notify();
     }
-    if stale {
-      self.load(cx);
-    }
-    cx.notify();
+    self.load(cx);
   }
 
+  /// Reads everything the tab shows off the main thread and applies it in
+  /// one go, so the tab never draws half of a read.
   fn load(&mut self, cx: &mut Context<Self>) {
-    self.load_overview(cx);
-    self.load_history(cx);
-    self.load_stack(cx);
-    self.load_settings(cx);
+    let host = self.host.clone();
+    let parent = self.next.clone().unwrap_or_else(|| self.parent.clone());
+    let limit = if self.next.is_some() {
+      HISTORY_PAGE
+    } else {
+      self.history_limit
+    };
+    self.history_loading = true;
+    cx.spawn(async move |this, cx| {
+      let read = cx
+        .background_spawn(async move {
+          let host = host.as_ref();
+          let read = Read {
+            overview: Overview::or_unavailable(
+              host.overview(&parent.repo_path, parent.workspace_id()),
+            ),
+            history: read_history(host, &parent, limit),
+            stack: read_stack(host, &parent),
+            settings: task_settings(host, &parent.repo_path),
+          };
+          (parent, read)
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| view.apply(read.0, read.1, cx));
+    })
+    .detach();
+  }
+
+  /// Reads the tab again, drawing what it has meanwhile.
+  pub(super) fn revalidate(&mut self, cx: &mut Context<Self>) {
+    self.load(cx);
+  }
+
+  /// Shows what [`Self::load`] read for `parent`, unless the tab moved on to
+  /// another workspace meanwhile.
+  fn apply(&mut self, parent: Parent, read: Read, cx: &mut Context<Self>) {
+    match &self.next {
+      Some(next) if next.key() == parent.key() => {
+        self.parent = self.next.take().unwrap_or(parent);
+        self.history_limit = HISTORY_PAGE;
+        self.agent_override = None;
+        self.save_default = false;
+        self.show_save_default = false;
+        self.title_draft = None;
+        self.description_draft = None;
+        self.menu = None;
+        self.history = None;
+        self.history_error = None;
+        self.history_error_open = false;
+      }
+      None if self.parent.key() == parent.key() => {}
+      _ => return,
+    }
+    self.overview = Some(read.overview);
+    self.set_history(read.history);
+    self.stack = read.stack;
+    self.settings = Some(read.settings);
+    cx.notify();
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved
@@ -311,74 +401,29 @@ impl CodeView {
     self.history_loading = true;
     let limit = self.history_limit;
     self.read(
-      move |host, parent| {
-        let home = parent.workspace.is_none();
-        host.commits(
-          &parent.repo_path,
-          parent.workspace_id(),
-          true,
-          Some(if home { limit } else { HISTORY_PAGE }),
-        )
-      },
-      |view, history, _| {
-        view.history_loading = false;
-        match history {
-          Ok(history) => {
-            view.history = Some(history);
-            view.history_error = None;
-            view.history_error_open = false;
-          }
-          Err(err) => {
-            log::warn!("Failed to load commits: {err}");
-            // Keep what was read before; only an empty view says it failed.
-            if view.history.is_none() {
-              view.history_error = Some(err);
-            }
-          }
+      move |host, parent| read_history(host, parent, limit),
+      |view, history, _| view.set_history(history),
+      cx,
+    );
+  }
+
+  /// Shows a commit read: the history, or why it failed while there is none.
+  fn set_history(&mut self, history: Result<JjLogResult, String>) {
+    self.history_loading = false;
+    match history {
+      Ok(history) => {
+        self.history = Some(history);
+        self.history_error = None;
+        self.history_error_open = false;
+      }
+      Err(err) => {
+        log::warn!("Failed to load commits: {err}");
+        // Keep what was read before; only an empty view says it failed.
+        if self.history.is_none() {
+          self.history_error = Some(err);
         }
-      },
-      cx,
-    );
-  }
-
-  fn load_stack(&mut self, cx: &mut Context<Self>) {
-    if self.parent.workspace.is_none() {
-      self.stack = None;
-      return;
+      }
     }
-    self.read(
-      |host, parent| {
-        let current = parent.workspace.as_ref()?;
-        let workspaces = host.workspaces(&parent.repo_path).ok()?;
-        let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
-        Some(
-          stack
-            .into_iter()
-            .map(|(workspace, current)| {
-              let stats = host
-                .commits(&parent.repo_path, Some(workspace.id), false, None)
-                .map(|log| diff_stats(&log.commits))
-                .unwrap_or_default();
-              StackRow {
-                workspace,
-                current,
-                stats,
-              }
-            })
-            .collect(),
-        )
-      },
-      |view, stack, _| view.stack = stack,
-      cx,
-    );
-  }
-
-  fn load_settings(&mut self, cx: &mut Context<Self>) {
-    self.read(
-      |host, parent| task_settings(host, &parent.repo_path),
-      |view, settings, _| view.settings = Some(settings),
-      cx,
-    );
   }
 
   fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
