@@ -1378,15 +1378,21 @@ impl TerminalView {
           .child(ui::text(div(), TextSize::Sm).child("Preparing terminal...")),
       ),
       Status::AgentFailed(error) => Some(
-        ui::text(div(), TextSize::Sm)
+        div()
           .absolute()
           .inset_0()
+          .p_6()
           .flex()
           .items_center()
           .justify_center()
           .bg(rgb(TERMINAL_BG))
-          .text_color(p.muted_foreground)
-          .child(format!("Failed to start agent: {error}")),
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .max_w_full()
+              .text_center()
+              .text_color(p.muted_foreground)
+              .child(format!("Failed to start agent: {error}")),
+          ),
       ),
       Status::Failed(error) => {
         let error = error.clone();
