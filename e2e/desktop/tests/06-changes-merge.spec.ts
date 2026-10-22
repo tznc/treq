@@ -18,8 +18,9 @@ test("commits a workspace's changes from the Changes tab", async ({ page }) => {
 
   await page.getByRole("tab", { name: "Changes" }).click();
   const commit = page.getByRole("button", { name: /^Commit/ }).first();
-  await expect(commit).toBeEnabled({ timeout: 20_000 });
+  // Commit waits for a message as well as the changes.
   await page.getByRole("textbox", { name: "Message" }).fill("Add feature file");
+  await expect(commit).toBeEnabled({ timeout: 20_000 });
   await commit.click();
   await expect
     .poll(commitSubjects, { timeout: 20_000 })
