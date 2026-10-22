@@ -6,6 +6,7 @@ import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, row, settle } from "./helpers.ts";
 
 const BRANCH = "feat/keyvalues-cache";
+const OTHER = "feat/empty-event-message";
 
 test.describe.configure({ mode: "serial" });
 
@@ -18,6 +19,13 @@ test("terminal: shell and agent sessions", async ({ page }) => {
     expectations: ["No terminal chip or pane shows: the tab has the whole height"],
   });
   await expect(page.getByRole("button", { name: "Expand" })).toHaveCount(0);
+  // An agent of another workspace, which shares the row with BRANCH's.
+  await openWorkspace(page, OTHER);
+  await row(page, OTHER).hover();
+  await row(page, OTHER).getByRole("button", { name: "Start agent" }).click();
+  await settle(page, 3000);
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Commits");
   await row(page, BRANCH).hover();
   await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
   await settle(page, 2500);
@@ -53,21 +61,23 @@ test("terminal: shell and agent sessions", async ({ page }) => {
     title: "Terminal pane: an agent session beside the shell",
     expectations: [
       "Agent transcript: bold prompt line, green bullets, dimmed sub-lines",
-      "Columns share the pane's width; none is cut off at the window edge",
-      "Only this workspace's sessions show",
+      "Sessions of every workspace share the row, each header naming its workspace",
+      "Where the columns overflow the row, a scrollbar under it shows how far it scrolls",
     ],
-    issue:
-      "Sessions of other workspaces (AI Review of feat/empty-event-message) share the pane, and the last column is cut off at the right edge",
   });
 
   // A new shell from the keyboard (Ctrl+\).
   await page.keyboard.press(`${mod}+\\`);
   await settle(page, 2500);
+  await page.keyboard.type("echo typed-into-the-new-shell\n");
+  await settle(page, 1000);
   await capture(page, {
     name: "07-terminal-new-shell-shortcut",
     title: "Terminal pane after Ctrl+\\ (new shell)",
-    expectations: ["A new Shell column opens and takes focus"],
-    issue: "No new column is visible: the pane already overflows its width",
+    expectations: [
+      "A new Shell column opens fully in view at the right and takes focus (the typed echo shows in it)",
+      "The scrollbar under the row sits at its right end",
+    ],
   });
 });
 

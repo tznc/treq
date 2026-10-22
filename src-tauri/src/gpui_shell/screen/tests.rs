@@ -5052,15 +5052,17 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
       && c.contains("Some(\"/repo/.treq/workspaces/login\") running Some(\"export\")")
   });
   assert!(spawned_shell, "{:?}", host.calls());
-  // Cmd+W closes the active agent; the shell next to it takes focus.
+  // The new shell has focus: Cmd+W closes it, and the agent next to it
+  // takes focus.
+  h.cx.simulate_keystrokes("cmd-w");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("terminal-column-shell"));
+  assert!(h.drawn("terminal-column-agent"));
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
   assert!(!h.drawn("terminal-column-agent"));
   assert!(host.calls().contains(&format!("close {}", agent_pty())));
   assert!(h.sent().contains(&field("terminal.closeSession", 3.into())));
-  h.cx.simulate_keystrokes("cmd-w");
-  h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-column-shell"));
   // Closing the last terminal hides the pane, chip included.
   assert!(!h.drawn("terminal-pane-controls"));
 }
@@ -5366,6 +5368,33 @@ fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppC
     .cx
     .debug_bounds("terminal-scroll-container")
     .expect("container");
+  // The newest session opened in view; drag the row's scrollbar back to
+  // the start so the last one overflows again.
+  let thumb = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
+  let grab = thumb.center();
+  let to = gpui::point(container.left(), grab.y);
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: grab,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseMoveEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    pressed_button: Some(MouseButton::Left),
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+  });
+  h.cx.run_until_parked();
   let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
   assert!(
     header.right() > container.right(),
