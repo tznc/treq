@@ -460,12 +460,15 @@ impl ChangesView {
             tw::color(if self.dark { tw::SKY_400 } else { tw::SKY_600 }),
           )),
       )
-      .child(
-        div()
-          .debug_selector(|| "github-comment-body".into())
-          .whitespace_normal()
-          .child(comment.body.clone()),
-      )
+      .child(div().debug_selector(|| "github-comment-body".into()).child(
+        super::super::code::markdown(
+          format!("github-comment-{}", comment.id),
+          &comment.body,
+          13.,
+          20.,
+          self.dark,
+        ),
+      ))
       .child(reactions::bar(
         &self.tips,
         self.threads.reaction_picker.as_deref(),
