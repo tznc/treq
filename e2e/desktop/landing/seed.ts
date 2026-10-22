@@ -212,7 +212,13 @@ export function seedLandingRepo(fixture: Fixture) {
   write(repo, "README.md", README);
   // What `treq add` would add on first use, committed up front so main
   // does not grow a .gitignore commit the workspaces miss.
-  write(repo, ".gitignore", ".jj/\n.treq/\n");
+  // The rest are the heavy and local paths a real repo ignores; the create
+  // dialog offers each as a symlink suggestion.
+  write(
+    repo,
+    ".gitignore",
+    ".jj/\n.treq/\nnode_modules/\ndist/\ncoverage/\n.turbo/\n.env.local\nCLAUDE.local.md\ntsconfig.tsbuildinfo\n",
+  );
   git("add", ".");
   git("commit", "-m", "docs: describe event-bus");
   write(repo, "packages/web/src/pages/Home.tsx", HOME_MAIN);
