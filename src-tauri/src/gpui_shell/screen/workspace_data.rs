@@ -450,7 +450,6 @@ pub enum Pending {
 /// The workspace row's `metadata` JSON.
 #[derive(Debug, Default, Deserialize)]
 struct Metadata {
-  title: Option<String>,
   linear_issue_key: Option<String>,
   linear_issue_url: Option<String>,
   linear_issue_title: Option<String>,
@@ -631,14 +630,6 @@ pub fn workspace_view(
     })
   });
 
-  let title = workspace.and_then(|w| {
-    let title = Some(w.title.clone())
-      .filter(|t| !t.is_empty())
-      .or(metadata.title.clone())
-      .unwrap_or_else(|| w.branch_name.clone());
-    (!title.is_empty() && title != branch).then_some(title)
-  });
-
   let header = Header {
     branch: branch.clone(),
     home: workspace.is_none(),
@@ -707,7 +698,6 @@ pub fn workspace_view(
     }),
     details: workspace.is_some(),
     more: workspace.map(|_| Disabled { disabled: busy }),
-    title,
   };
 
   let has_conflict = conflict_count > 0 || status.is_some_and(|s| s.partial.has_conflicts);

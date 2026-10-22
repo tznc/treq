@@ -206,3 +206,36 @@ test("code: commit history hover", async ({ page }) => {
     await capture(page, { name, title: "Code tab commit history: hovered row", rest: false, expectations: [...expectations] });
   }
 });
+
+test("code: workspace title above the description, edited inline", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Code");
+  await overview(page);
+  await settle(page, 1500);
+  const edit = page.getByRole("button", { name: "Edit workspace title" });
+  await expect(edit).toBeVisible();
+  await capture(page, {
+    name: "03-code-title",
+    title: "Code tab: full workspace title with its edit pencil",
+    expectations: [
+      "The workspace title sits under the prompt box as a large heading, wrapped rather than truncated",
+      "A small pencil button sits at the title's top right",
+      "The header no longer repeats the title under the branch row",
+    ],
+  });
+
+  await edit.click();
+  const input = page.getByRole("textbox", { name: "Workspace title" });
+  await expect(input).toBeVisible();
+  await capture(page, {
+    name: "03-code-title-editing",
+    title: "Code tab: editing the workspace title",
+    expectations: [
+      "The title becomes a focused editor holding the current title",
+      "Cancel and Save buttons sit right-aligned under the editor",
+    ],
+  });
+  await page.keyboard.press("Escape");
+  await expect(input).toHaveCount(0);
+  await home(page);
+});

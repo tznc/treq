@@ -150,6 +150,7 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     workspace_id: i64,
     description: &str,
   ) -> Result<(), String>;
+  fn set_title(&self, repo_path: &str, workspace_id: i64, title: &str) -> Result<(), String>;
   /// Builds the file index the first time, then searches it.
   fn search_files(
     &self,
@@ -241,6 +242,21 @@ impl CodeHost for Backend {
       workspace_id,
       MaybeEmptyParam::Omitted,
       description,
+    )
+    .map(|_| ())
+  }
+  fn set_title(&self, repo_path: &str, workspace_id: i64, title: &str) -> Result<(), String> {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote
+        .update_workspace(workspace_id, None, Some(title), None)
+        .map(drop);
+    }
+    core::update_workspace_with_title(
+      repo_path,
+      workspace_id,
+      MaybeEmptyParam::Omitted,
+      MaybeEmptyParam::Some(title.to_string()),
+      MaybeEmptyParam::Omitted,
     )
     .map(|_| ())
   }

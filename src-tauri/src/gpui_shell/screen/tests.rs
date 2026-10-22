@@ -553,6 +553,11 @@ impl code_data::CodeHost for FakeHost {
     Ok(())
   }
 
+  fn set_title(&self, _: &str, workspace_id: i64, title: &str) -> Result<(), String> {
+    self.record(format!("set title {workspace_id} {title:?}"));
+    Ok(())
+  }
+
   fn search_files(
     &self,
     _: &str,
@@ -2013,8 +2018,7 @@ const WORKSPACE_JSON: &str = r#"{
     "mergeQueue": null,
     "merge": {"passing": true, "disabled": false, "tooltip": null},
     "details": true,
-    "more": {"disabled": false},
-    "title": "Add login"
+    "more": {"disabled": false}
   },
   "tabRow": {
     "tab": "overview",
@@ -3539,6 +3543,61 @@ fn code_tab_saves_the_description(cx: &mut TestAppContext) {
     host.writes()
   );
   assert!(!h.drawn("workspace-description-input"));
+}
+
+#[gpui::test]
+fn code_tab_shows_the_title_above_the_description_not_in_the_header(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.cx.run_until_parked();
+  let title = h.cx.debug_bounds("workspace-title").expect("title");
+  let description = h
+    .cx
+    .debug_bounds("workspace-description")
+    .expect("description");
+  assert!(
+    title.bottom() <= description.top(),
+    "{title:?} {description:?}"
+  );
+  let header = h.cx.debug_bounds("workspace-header").expect("header");
+  assert!(!header.intersects(&title), "{header:?} {title:?}");
+}
+
+#[gpui::test]
+fn code_tab_saves_the_title(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("workspace-title-edit");
+  assert!(h.drawn("workspace-title-input"));
+  h.cx.simulate_input("!");
+  h.click("workspace-title-save");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|c| c.starts_with("set title 7 ") && c.contains('!')),
+    "{:?}",
+    host.writes()
+  );
+  assert!(!h.drawn("workspace-title-input"));
+}
+
+#[gpui::test]
+fn code_tab_discards_title_edits_on_cancel_and_escape(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
+  h.click("workspace-title-edit");
+  h.cx.simulate_input("!");
+  h.click("workspace-title-cancel");
+  assert!(!h.drawn("workspace-title-input"));
+  h.click("workspace-title-edit");
+  h.cx.simulate_input("!");
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-title-input"));
+  assert!(
+    !host.writes().iter().any(|c| c.starts_with("set title")),
+    "{:?}",
+    host.writes()
+  );
 }
 
 fn commits_host() -> FakeHost {
