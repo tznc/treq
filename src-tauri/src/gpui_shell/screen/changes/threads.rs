@@ -463,8 +463,13 @@ impl ChangesView {
       .child(
         div()
           .debug_selector(|| "github-comment-body".into())
-          .whitespace_normal()
-          .child(comment.body.clone()),
+          .child(super::super::code::markdown(
+            format!("github-comment-{}", comment.id),
+            &comment.body,
+            13.,
+            20.,
+            self.dark,
+          )),
       )
       .child(reactions::bar(
         &self.tips,
