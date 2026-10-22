@@ -654,6 +654,44 @@ pub fn gh_list_prs_impl(
   Ok(take_list_page(fetched, limit, page))
 }
 
+/// Open pull requests, newest first, drafts included: the viewer's own
+/// (`--author @me`) or everyone's, narrowed by `query` (GitHub search syntax).
+pub fn gh_search_open_prs_impl(
+  gh_path: &str,
+  repo_full_name: &str,
+  mine: bool,
+  query: &str,
+  limit: u32,
+  extended_path: &str,
+) -> Result<Vec<GhPullRequest>, String> {
+  let search = format!("{} sort:created-desc", query.trim())
+    .trim()
+    .to_string();
+  let limit = limit.max(1).to_string();
+  let mut args = vec![
+    "pr",
+    "list",
+    "--repo",
+    repo_full_name,
+    "--state",
+    "open",
+    "--search",
+    search.as_str(),
+  ];
+  if mine {
+    args.extend(["--author", "@me"]);
+  }
+  args.extend([
+    "--json",
+    "number,title,state,url,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,isDraft",
+    "--limit",
+    limit.as_str(),
+  ]);
+  let out = run_gh(gh_path, &args, extended_path)?;
+  let bytes = check_gh_output(out)?;
+  serde_json::from_slice(&bytes).map_err(|e| format!("Failed to parse gh output: {e}"))
+}
+
 pub fn gh_view_pr_impl(
   gh_path: &str,
   repo_full_name: &str,
@@ -2198,6 +2236,43 @@ echo '[]'"#,
     );
     let page = gh_list_prs_impl(&gh_path, "owner/repo", "open", 30, 1, "/usr/bin:/bin").unwrap();
     assert!(page.items.is_empty());
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn gh_search_open_prs_lists_own_prs_newest_first() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"test "$*" = "pr list --repo owner/repo --state open --search sort:created-desc --author @me --json number,title,state,url,author,labels,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt,isDraft --limit 50" || exit 9
+echo '[{"number":3,"title":"T","state":"OPEN","url":"u","author":{"login":"a"},"labels":[],"headRefName":"feat","baseRefName":"main","createdAt":"c","updatedAt":"u","isDraft":true}]'"#,
+    );
+    let prs =
+      gh_search_open_prs_impl(&gh_path, "owner/repo", true, "", 50, "/usr/bin:/bin").unwrap();
+    assert_eq!(prs[0].head_ref_name, "feat");
+    assert!(prs[0].is_draft);
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn gh_search_open_prs_searches_everyones_prs() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"test "$4 $6 $7 $8" = "owner/repo open --search login fix sort:created-desc" || exit 9
+case "$*" in *--author*) exit 9 ;; esac
+echo '[]'"#,
+    );
+    let prs = gh_search_open_prs_impl(
+      &gh_path,
+      "owner/repo",
+      false,
+      " login fix ",
+      50,
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+    assert!(prs.is_empty());
   }
 
   // ── check duration ───────────────────────────────────────────────────────
