@@ -52,17 +52,21 @@ test("the home task field takes paste, select all, cut and undo", async ({
   );
 });
 
-test("the palette search takes paste, select all, cut and undo", async ({
+test("the file search takes paste, select all, cut and undo", async ({
   page,
   context,
 }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Command palette" }).click();
   const palette = await dialogPage(context);
+  await palette.getByRole("option", { name: "Search Files" }).click();
+  // The picker draws in the repo window, which keeps X's input focus;
+  // xdotool can't move focus to the palette's own window without a window
+  // manager.
   await editsWithShortcuts(
-    palette.getByRole("textbox", { name: "Type a command or search..." }),
+    page.getByRole("textbox", { name: "Search files..." }),
   );
-  await palette.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
 });
 
 test("the New Workspaces lines take paste, select all, cut and undo", async ({
