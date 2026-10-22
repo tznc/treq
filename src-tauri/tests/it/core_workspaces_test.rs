@@ -1693,9 +1693,6 @@ fn test_workspace_status_home_repo_reconciles_external_git_commit() {
 #[test]
 fn test_workspace_status_home_repo_preserves_unstaged_edits_after_external_git_commit() {
   let repo = TestRepo::new().expect("Failed to create test repo");
-  TestRepo::run_git(&repo.repo_path, &["add", ".gitignore"]).expect("stage init metadata");
-  TestRepo::run_git(&repo.repo_path, &["commit", "-m", "Commit init metadata"])
-    .expect("commit init metadata");
   treq_lib::jj::jj_get_changed_files(&repo.repo_path).expect("initial snapshot should succeed");
   TestRepo::write_workspace_file(&repo.repo_path, "committed.txt", "committed by git\n")
     .expect("write committed file");
@@ -1737,9 +1734,6 @@ fn test_workspace_status_home_repo_preserves_unstaged_edits_after_external_git_c
 #[test]
 fn test_home_reconciliation_follows_external_branch_and_detached_head_movements() {
   let repo = TestRepo::new().expect("Failed to create test repo");
-  TestRepo::run_git(&repo.repo_path, &["add", ".gitignore"]).expect("stage init metadata");
-  TestRepo::run_git(&repo.repo_path, &["commit", "-m", "Commit init metadata"])
-    .expect("commit init metadata");
   treq_lib::jj::jj_get_changed_files(&repo.repo_path).expect("initial reconciliation");
 
   TestRepo::run_git(&repo.repo_path, &["checkout", "-b", "external-branch"])

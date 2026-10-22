@@ -161,11 +161,6 @@ fn test_check_branch_exists_local_and_remote_flags() {
 fn test_repo_status_returns_clean_status() {
   let repo = TestRepo::new().expect("Failed to create test repo");
 
-  // core::init() creates .gitignore but doesn't commit it.
-  // Commit it so jj sees a truly clean working copy.
-  TestRepo::run_git(&repo.repo_path, &["add", ".gitignore"]).unwrap();
-  TestRepo::run_git(&repo.repo_path, &["commit", "-m", "Add .gitignore"]).unwrap();
-
   let status = repo_status(&repo.repo_path).expect("repo_status should succeed");
 
   assert!(!status.has_conflicts, "clean repo should have no conflicts");

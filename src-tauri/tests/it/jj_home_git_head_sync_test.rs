@@ -22,8 +22,6 @@ fn git(repo: &TestRepo, args: &[&str]) -> String {
 fn home_on_feature() -> (TestRepo, String) {
   let repo = TestRepo::new().expect("create repo");
   let main = repo.default_branch().to_string();
-  git(&repo, &["add", ".gitignore"]);
-  git(&repo, &["commit", "-m", "Commit init metadata"]);
   git(&repo, &["checkout", "-b", "feature"]);
   repo.commit_file("f1.txt", "f1\n", "f1").expect("commit f1");
   repo.commit_file("f2.txt", "f2\n", "f2").expect("commit f2");
@@ -298,8 +296,6 @@ fn merge_workspace_into_home() {
   ] {
     let repo = TestRepo::new().expect("create repo");
     let main = repo.default_branch().to_string();
-    git(&repo, &["add", ".gitignore"]);
-    git(&repo, &["commit", "-m", "Commit init metadata"]);
     let ws = repo
       .create_workspace_with_commit("ws-branch", "ws.txt", "ws\n", None)
       .expect("workspace");
