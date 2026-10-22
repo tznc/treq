@@ -2,7 +2,7 @@
 //! names, whether it opens an existing branch or creates a new one, and the
 //! backend calls that do it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -58,6 +58,41 @@ pub fn parse_lines(text: &str) -> Vec<(String, Line)> {
     .filter(|line| !line.is_empty() && seen.insert(line.to_string()))
     .map(|line| (line.to_string(), parse_line(line)))
     .collect()
+}
+
+/// Each indented line's parent, by trimmed line: the line above it, so an
+/// indented run stacks in order on the line it follows.
+pub fn stack_parents(text: &str) -> HashMap<String, String> {
+  let mut parents = HashMap::new();
+  let mut seen = HashSet::new();
+  let mut above: Option<&str> = None;
+  for line in text.lines().filter(|l| !l.trim().is_empty()) {
+    let trimmed = line.trim();
+    // A repeat is the first line again, so it keeps that line's parent.
+    if seen.insert(trimmed) {
+      if let Some(above) = above.filter(|_| line.starts_with(char::is_whitespace)) {
+        parents.insert(trimmed.to_string(), above.to_string());
+      }
+    }
+    above = Some(trimmed);
+  }
+  parents
+}
+
+/// `checked` stacked on `parent`'s branch.
+pub fn stack_on_line(checked: &Checked, parent: &Checked) -> Checked {
+  let parent = parent
+    .as_ref()
+    .map_err(|_| "Stacks on a line that can't be opened".to_string())?;
+  let mut target = checked.clone()?;
+  if target.repo_path != parent.repo_path {
+    return Err(format!(
+      "Can't stack on {}, another repository's branch",
+      parent.branch
+    ));
+  }
+  target.base = Some(parent.branch.clone());
+  Ok(target)
 }
 
 pub fn parse_line(line: &str) -> Line {
@@ -505,5 +540,41 @@ mod tests {
     let lines = parse_lines("feat/a\n\n  feat/b \nfeat/a\n");
     let names: Vec<&str> = lines.iter().map(|(raw, _)| raw.as_str()).collect();
     assert_eq!(names, ["feat/a", "feat/b"]);
+  }
+  #[test]
+  fn indented_lines_stack_in_order_on_the_line_above() {
+    let parents = stack_parents("feat/a\n  feat/b\n\n  Fix login\nfeat/c\n\tfeat/d\n  feat/a\n");
+    let get = |line: &str| parents.get(line).map(String::as_str);
+    assert_eq!(get("feat/a"), None);
+    assert_eq!(get("feat/b"), Some("feat/a"));
+    assert_eq!(get("Fix login"), Some("feat/b"));
+    assert_eq!(get("feat/c"), None);
+    assert_eq!(get("feat/d"), Some("feat/c"));
+  }
+
+  #[test]
+  fn stacking_on_a_line_sets_its_base() {
+    let target = |repo: &str, branch: &str| Target {
+      repo_path: repo.into(),
+      branch: branch.into(),
+      base: None,
+      title: None,
+      pr: None,
+      issue: None,
+      existing: false,
+      create: true,
+    };
+    let child = Ok(target("/r", "feat/b"));
+    let stacked = stack_on_line(&child, &Ok(target("/r", "feat/a"))).unwrap();
+    assert_eq!(stacked.base.as_deref(), Some("feat/a"));
+    assert_eq!(
+      stack_on_line(&child, &Err("bad".into())).unwrap_err(),
+      "Stacks on a line that can't be opened"
+    );
+    assert!(stack_on_line(&child, &Ok(target("/other", "feat/a"))).is_err());
+    assert_eq!(
+      stack_on_line(&Err("x".into()), &Ok(target("/r", "a"))).unwrap_err(),
+      "x"
+    );
   }
 }
