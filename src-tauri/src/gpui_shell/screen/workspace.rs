@@ -572,6 +572,12 @@ impl WorkspaceView {
       return;
     };
     self.close_popover(cx);
+    // The button's tooltip would cover the popover and swallow the next
+    // click; `hover_tooltip` keeps it hidden while the popover shows.
+    if self.tooltip.take().is_some() {
+      self.sync_tooltip_popup(cx);
+      cx.notify();
+    }
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
     let shell = self.window;
     let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
@@ -724,6 +730,9 @@ impl WorkspaceView {
         self.tooltip = None;
         cx.notify();
       }
+      return;
+    }
+    if self.popover.is_some() {
       return;
     }
     self.tooltip = Some((key.clone(), false));
@@ -894,6 +903,27 @@ impl WorkspaceView {
               .child(button)
               .child(self.record_bounds("workspace-target")),
           );
+      }
+      if h.details {
+        let button = Button::new("workspace-details", p)
+          .aria_label("Workspace details")
+          .variant(Variant::Ghost)
+          .size(Size::Sm)
+          .px_1()
+          .icon(theme::ICON_INFO, 16.)
+          .on_click(self.press("workspace.details"));
+        left = left.child(
+          div()
+            .relative()
+            .flex_none()
+            .child(self.with_tooltip(
+              "workspace-details",
+              Some(TooltipContent::Text("Workspace details".into())),
+              button,
+              cx,
+            ))
+            .child(self.record_bounds("workspace-details")),
+        );
       }
     } else {
       left = left.child(
@@ -1091,24 +1121,6 @@ impl WorkspaceView {
           button,
           cx,
         ),
-      );
-    }
-    if h.details {
-      right = right.child(
-        div()
-          .relative()
-          .flex_none()
-          .child(
-            Button::new("workspace-details", p)
-              .variant(Variant::Ghost)
-              .size(Size::Sm)
-              .gap_1()
-              .px_2()
-              .icon(theme::ICON_INFO, 16.)
-              .label("Details")
-              .on_click(self.press("workspace.details")),
-          )
-          .child(self.record_bounds("workspace-details")),
       );
     }
     if let Some(more) = &h.more {

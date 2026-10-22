@@ -27,8 +27,12 @@ function popoverShown(): boolean {
   );
 }
 
-async function popupShot(page: Page, x: number, shot: Parameters<typeof capture>[1]) {
-  await page.mouse.click(x, HEADER_Y);
+async function popupShot(
+  page: Page,
+  open: () => Promise<void>,
+  shot: Parameters<typeof capture>[1],
+) {
+  await open();
   await settle(page, 1200);
   await capture(page, { screen: true, rest: false, ...shot });
   await dismissPopover(page);
@@ -40,16 +44,16 @@ test("merge: header popovers and menus", async ({ page }) => {
     name: "12-merge-header",
     title: "Workspace header with an open PR and green checks",
     expectations: [
-      "Branch → base picker, View PR + external link, Checks GH 3/3, Merge…, Details, ⋮",
+      "Branch → base picker, Details (info icon); Checks 3/3, View PR + external link, Merge…, ⋮",
       "Buttons share one height and baseline; nothing wraps",
     ],
   });
-  await popupShot(page, 552, {
+  await popupShot(page, () => page.mouse.click(552, HEADER_Y), {
     name: "12-merge-base-picker",
     title: "Base branch picker",
     expectations: ["Branches searchable; the current base (main) marked"],
   });
-  await popupShot(page, 1068, {
+  await popupShot(page, () => page.getByRole("button", { name: /^Checks:/ }).click(), {
     name: "12-merge-checks-popover",
     title: "Checks popover (GH 3/3)",
     expectations: [
@@ -57,7 +61,7 @@ test("merge: header popovers and menus", async ({ page }) => {
       "Popover stays inside the window at the right edge",
     ],
   });
-  await page.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("button", { name: "Workspace details" }).click();
   await settle(page, 1200);
   await capture(page, {
     name: "12-merge-details",
@@ -70,7 +74,7 @@ test("merge: header popovers and menus", async ({ page }) => {
     ],
   });
   await dismissPopover(page);
-  await popupShot(page, 1380, {
+  await popupShot(page, () => page.getByRole("button", { name: "More workspace actions" }).click(), {
     name: "12-merge-overflow-menu",
     title: "Workspace header overflow menu (⋮)",
     expectations: ["Items aligned with icons; destructive ones last and red"],
@@ -82,8 +86,8 @@ test("merge: popovers close with Escape and let the next click through", async (
   // Escape in the repo window closes each popover.
   const open = {
     "base-picker": () => page.mouse.click(552, HEADER_Y),
-    checks: () => page.mouse.click(1000, HEADER_Y),
-    details: () => page.getByRole("button", { name: "Details" }).click(),
+    checks: () => page.getByRole("button", { name: /^Checks:/ }).click(),
+    details: () => page.getByRole("button", { name: "Workspace details" }).click(),
   };
   for (const [what, click] of Object.entries(open)) {
     await click();
@@ -101,7 +105,7 @@ test("merge: popovers close with Escape and let the next click through", async (
     expect.soft(popoverShown(), `${what} popover closed by Escape`).toBe(false);
   }
   // A click outside the Details popover closes it and still reaches the tab.
-  await page.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("button", { name: "Workspace details" }).click();
   await settle(page, 1200);
   expect(popoverShown()).toBe(true);
   const changes = await page.getByRole("tab", { name: "Changes" }).boundingBox();
