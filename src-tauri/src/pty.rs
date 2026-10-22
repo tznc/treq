@@ -1062,6 +1062,8 @@ mod tests {
   #[test]
   fn schedules_initial_command_without_blocking_creation() {
     let manager = PtyManager::new();
+    // Resolve the cached login-shell PATH first; the app warms it at startup.
+    crate::binary_paths::get_extended_path();
     let started = Instant::now();
     manager
       .create_session(
