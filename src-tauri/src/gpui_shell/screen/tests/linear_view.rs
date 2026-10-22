@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use gpui::TestAppContext;
+use gpui::{Role, TestAppContext};
+use gpui_testing_library::prelude::*;
 
 use super::*;
 use crate::{
@@ -20,7 +21,7 @@ pub(super) struct Fixture {
   documents: Vec<LinearDocument>,
   /// Comments, by the id of what they are on.
   comments: Vec<(String, LinearComment)>,
-  /// Whether reading issues fails.
+  /// Whether reading issues and projects fails, as with no API key.
   failing: bool,
 }
 
@@ -33,7 +34,7 @@ impl linear_data::LinearHost for FakeHost {
   fn linear_issues(&self, _: &str, team: Option<&str>) -> Result<Vec<LinearIssue>, String> {
     self.record(format!("read linear issues {team:?}"));
     if self.linear.failing {
-      return Err("Linear API key is not set".into());
+      return Err(crate::linear::NOT_CONNECTED.into());
     }
     Ok(self.linear.issues.clone())
   }
@@ -44,6 +45,9 @@ impl linear_data::LinearHost for FakeHost {
 
   fn linear_projects(&self, _: &str) -> Result<Vec<LinearProject>, String> {
     self.record("read linear projects".into());
+    if self.linear.failing {
+      return Err(crate::linear::NOT_CONNECTED.into());
+    }
     Ok(self.linear.projects.clone())
   }
 
@@ -206,6 +210,15 @@ fn fixture() -> Fixture {
     comments: vec![("1".into(), comment("c1", Some("the API")))],
     failing: false,
   }
+}
+
+/// The harness's window, queried the way a user perceives it.
+fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
 }
 
 fn linear_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
@@ -497,12 +510,26 @@ fn linear_projects_show_details_and_documents(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn linear_shows_why_issues_did_not_load(cx: &mut TestAppContext) {
+fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.linear.failing = true;
   let (mut h, _) = linear_harness(cx, host);
-  assert!(h.drawn("linear-issues-error"));
   assert!(!h.drawn("linear-no-issues"));
+  let page = screen(&mut h);
+  expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
+  page
+    .user()
+    .click(&page.get_by_role(by::role(Role::Button).name("Open Settings")));
+  h.cx.run_until_parked();
+  assert_eq!(
+    h.sent(),
+    [ScreenAction::Press {
+      id: "linear.openSettings".into()
+    }]
+  );
+  h.click("linear-section-projects");
+  let page = screen(&mut h);
+  expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
 }
 
 #[gpui::test]

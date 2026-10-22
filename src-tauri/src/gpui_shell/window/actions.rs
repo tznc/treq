@@ -257,6 +257,12 @@ impl Model {
       "filePicker.close" => self.dialogs.file_picker = false,
       // Pages.
       "settings.close" => self.close_settings(),
+      "linear.openSettings" => {
+        self.open_settings();
+        if let Page::Settings { tab } = &mut self.page {
+          *tab = "integrations".into();
+        }
+      }
       "mergePreview.cancel" => self.page = Page::Workspace,
       "mergePreview.merged" => {
         self.page = Page::Workspace;
@@ -1031,6 +1037,21 @@ mod tests {
     );
     model.screen_action(&press("settings.close"), &data);
     assert!(matches!(model.page, Page::Github(_)));
+  }
+
+  #[test]
+  fn linear_opens_the_integrations_settings() {
+    let (mut model, data) = (model(), data());
+    model.sidebar_action(&SidebarAction::OpenLinear, &data);
+    model.screen_action(&press("linear.openSettings"), &data);
+    assert_eq!(
+      model.page,
+      Page::Settings {
+        tab: "integrations".into()
+      }
+    );
+    model.screen_action(&press("settings.close"), &data);
+    assert!(matches!(model.page, Page::Linear));
   }
 
   #[test]

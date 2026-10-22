@@ -132,6 +132,11 @@ pub fn resolve_linear_client(
   resolve_client_source(api_key, proxy_session())
 }
 
+/// Why a read fails when the repo has no API key and treq has no OAuth
+/// session: the Linear view shows it as the connect hint.
+pub const NOT_CONNECTED: &str =
+  "Linear is not connected. Add an API key in the Linear settings, or sign in to treq and connect Linear with OAuth.";
+
 /// A repo API key wins over OAuth so a repo can target a different Linear
 /// workspace than the one the user connected.
 fn resolve_client_source(
@@ -141,10 +146,7 @@ fn resolve_client_source(
   match (api_key, session) {
     (Some(key), _) => Ok(LinearClientSource::ApiKey(key)),
     (None, Some(session)) => Ok(LinearClientSource::Proxy(session)),
-    (None, None) => Err(
-      "Linear is not connected. Add an API key in the Linear settings, or sign in to treq and connect Linear with OAuth."
-        .to_string(),
-    ),
+    (None, None) => Err(NOT_CONNECTED.to_string()),
   }
 }
 
