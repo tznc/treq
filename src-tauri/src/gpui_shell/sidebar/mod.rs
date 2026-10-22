@@ -611,6 +611,7 @@ impl Render for Sidebar {
           .border_1()
           .border_color(palette.border)
           .bg(palette.muted.opacity(0.5))
+          .cursor_pointer()
           .hover(|style| style.bg(palette.muted))
           .text_color(palette.muted_foreground)
           .child(icon(theme::ICON_SEARCH, 16., palette.muted_foreground))
@@ -826,6 +827,7 @@ impl Sidebar {
       .rounded_md()
       .text_size(zpx(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
+      .cursor_pointer()
       .hover(|style| style.bg(palette.accent))
       .child(icon(
         theme::ICON_BRANCH_PLUS,
@@ -870,7 +872,9 @@ impl Sidebar {
       .border_color(palette.border)
       .when(active, |this| this.bg(palette.primary.opacity(0.2)))
       .when(!disabled, |this| {
-        this.hover(|style| style.bg(palette.accent))
+        this
+          .cursor_pointer()
+          .hover(|style| style.bg(palette.accent))
       })
       .when(disabled, |this| this.opacity(0.5))
       .child(icon(
@@ -929,7 +933,9 @@ impl Sidebar {
       .size(zpx(20.))
       .rounded_sm()
       .when(!disabled, |this| {
-        this.hover(|style| style.bg(palette.accent))
+        this
+          .cursor_pointer()
+          .hover(|style| style.bg(palette.accent))
       })
       .when(disabled, |this| this.opacity(0.4))
       .child(icon(icon_path, 16., palette.foreground))
@@ -1076,6 +1082,7 @@ impl Sidebar {
       .when(repo.home_selected, |this| {
         this.bg(palette.primary.opacity(0.2))
       })
+      .cursor_pointer()
       .when(!repo.home_selected, |this| {
         this.hover(|style| style.bg(palette.accent))
       })
@@ -1139,6 +1146,7 @@ impl Sidebar {
       .px_2()
       .h(zpx(32.))
       .rounded_md()
+      .cursor_pointer()
       .when(active, |this| this.bg(palette.primary.opacity(0.2)))
       .when(!active, |this| this.hover(|style| style.bg(palette.accent)))
       .child(icon(icon_path, 16., palette.sidebar_foreground))
@@ -1193,6 +1201,7 @@ impl Sidebar {
       .rounded_md()
       .text_size(zpx(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
+      .cursor_pointer()
       .hover(|style| style.bg(palette.accent))
       .child(icon(chevron, 16., palette.sidebar_foreground.opacity(0.7)))
       .child(div().min_w_0().truncate().child(name.to_uppercase()))
@@ -1309,6 +1318,7 @@ impl Sidebar {
       .pl(zpx(row_indent(row.depth)))
       .pr_2()
       .rounded_md()
+      .when(!row.archiving, |this| this.cursor_pointer())
       .when(row.selected, |this| this.bg(palette.primary.opacity(0.2)))
       .when(!row.selected && !row.archiving, |this| {
         this.hover(|style| style.bg(palette.muted.opacity(0.5)))
@@ -1481,6 +1491,7 @@ fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Di
     .rounded_md()
     .bg(palette.destructive)
     .text_color(gpui::white())
+    .cursor_pointer()
     .hover(|style| style.opacity(0.9))
     .child(icon(theme::ICON_ARCHIVE, 14., gpui::white()))
     .child(label)
