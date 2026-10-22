@@ -2519,13 +2519,13 @@ impl ChangesView {
         card.child(
           div()
             .debug_selector(|| "generated-file-placeholder".into())
-            .h_20()
+            .py_6()
             .flex()
+            .flex_col()
             .items_center()
             .justify_center()
             .gap_3()
             .text_color(muted)
-            .child(ui::icon(theme::ICON_FILE_TEXT, 20., muted.opacity(0.5)))
             .child("Generated file. Its diff is not shown by default.")
             .child(
               Button::new(SharedString::from(format!("load-generated-{path}")), p)
