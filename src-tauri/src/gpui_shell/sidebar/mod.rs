@@ -1235,6 +1235,8 @@ impl Sidebar {
     };
     let title_color = if row.conflicted {
       palette.destructive
+    } else if row.selected {
+      palette.sidebar_foreground
     } else {
       palette.muted_foreground
     };

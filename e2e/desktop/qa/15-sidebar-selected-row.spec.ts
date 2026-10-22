@@ -1,5 +1,5 @@
-// The selected workspace row: only its background is tinted. The branch
-// icon and title keep the colors of an unselected row.
+// The selected workspace row: a tinted background and full-contrast title
+// text. Neither the branch icon nor the title turns blue.
 import { test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openWorkspace, ready, row, settle } from "./helpers.ts";
@@ -18,7 +18,7 @@ test("sidebar-selected-row: background tint only", async ({ page }) => {
     clip: { x: 0, y: Math.max(0, box.y - 80), width: box.x + box.width + 8, height: 200 },
     expectations: [
       "feat/event-ingest has a tinted background",
-      "Its branch icon and title use the same colors as the unselected rows around it",
+      "Its title is full-contrast foreground text, not blue; its branch icon keeps the unselected color",
     ],
   });
 });
