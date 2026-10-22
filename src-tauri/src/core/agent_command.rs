@@ -5,6 +5,7 @@
 use super::agent_cli::{write_agent_cli_files, AgentCliFiles};
 use super::remote::shell_quote;
 use serde_json::{json, Map, Value};
+use std::path::Path;
 
 /// Runs in the terminal's shell once the agent subshell ends, so the app can
 /// notify "Agent finished". A status of 128 or more means a signal killed the
@@ -216,6 +217,10 @@ pub fn prepare_auto_command(
   options: &AutoCommand<'_>,
 ) -> Result<Prepared, String> {
   let cwd = paths.workspace_path.unwrap_or(paths.repo_path);
+  // Writing skills would recreate a deleted workspace as an empty folder.
+  if !Path::new(cwd).is_dir() {
+    return Err(format!("Workspace folder no longer exists: {cwd}"));
+  }
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
     "cursor" => (
@@ -523,5 +528,23 @@ mod tests {
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  #[test]
+  fn refuses_to_start_in_a_deleted_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("deleted");
+    let error = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: workspace.to_str(),
+        repo_path: dir.path().to_str().unwrap(),
+        supporting_repo_paths: NONE,
+      },
+      &opts("claude"),
+    )
+    .err()
+    .expect("a deleted workspace must not start an agent");
+    assert!(error.contains("no longer exists"), "{error}");
+    assert!(!workspace.exists());
   }
 }
