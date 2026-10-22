@@ -135,6 +135,9 @@ pub struct Route {
   /// A remote repository is active: a new shell runs on the host, in the
   /// session the window resolves (`resolveRemoteShell`).
   pub remote_shell: bool,
+  /// The window's main repository, which pane session ids are relative to,
+  /// while a supporting one is on screen. Empty: the one on screen.
+  pub main_repo_path: String,
 }
 
 /// `TerminalSessionSummary`, which the sidebar spins on.
@@ -2156,7 +2159,10 @@ impl TerminalPane {
   /// The session's column and what its terminal starts, read from the
   /// session tables of the repository and its supporting ones.
   fn agent_session(&self, pane_id: i64) -> Option<(Kind, String, Start)> {
-    let main = self.place.repo_path.clone();
+    let main = match &self.route.main_repo_path {
+      main if !main.is_empty() => main.clone(),
+      _ => self.place.repo_path.clone(),
+    };
     let mut repos = vec![main.clone()];
     repos.extend(self.host.supporting_repos(&main));
     for repo in repos {

@@ -154,3 +154,20 @@ test("terminal: a narrower column redraws in place", async ({ page }) => {
     ],
   });
 });
+
+test("terminal: agent in a supporting repository", async ({ page }) => {
+  const docs = "docs/getting-started";
+  await openWorkspace(page, docs);
+  await openTab(page, "Commits");
+  await row(page, docs).hover();
+  await row(page, docs).getByRole("button", { name: "Start agent" }).click();
+  await settle(page, 3000);
+  await capture(page, {
+    name: "07-terminal-supporting-agent",
+    title: "Terminal pane: an agent started in docs-site, the supporting repository",
+    expectations: [
+      "The terminal pane is open with an agent column for docs/getting-started",
+      "The fake agent's transcript shows in the column",
+    ],
+  });
+});
