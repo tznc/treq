@@ -402,7 +402,6 @@ impl Model {
         self.open_workspace_dialog(defaults);
       }
       "commits.stashed" => self.dialogs.stash = true,
-      "changes.refreshing" => self.view.refreshing = value.as_bool().unwrap_or(false),
       "changes.moveFiles" => {
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
         let files: Vec<String> = serde_json::from_value(value["files"].clone()).unwrap_or_default();

@@ -415,7 +415,6 @@ impl ChangesView {
       return;
     }
     self.loading = true;
-    self.field("changes.refreshing", true.into(), cx);
     let show = self.show_committed();
     self.run(
       move |host, parent| match parent.workspace_id() {
@@ -428,7 +427,6 @@ impl ChangesView {
       },
       |view, result, cx| {
         view.loading = false;
-        view.field("changes.refreshing", false.into(), cx);
         match result {
           Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
             view.review.stale.clear();
