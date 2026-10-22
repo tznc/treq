@@ -330,6 +330,8 @@ impl RenderOnce for Button {
       style.text.color = Some(fg);
       style.box_shadow = None;
     }
+    // Icons follow the label, including a `text_color` override.
+    let icon_color = el.style().text.color.unwrap_or(fg);
     // GPUI has no text decoration on hover for a whole subtree, so a link
     // keeps its color and only underlines its text.
     el.when(!disabled, |b| {
@@ -344,7 +346,7 @@ impl RenderOnce for Button {
     })
     .children(self.children.into_iter().map(|child| match child {
       ButtonChild::Element(el) => el,
-      ButtonChild::Icon(path, size) => icon(path, size, fg).into_any_element(),
+      ButtonChild::Icon(path, size) => icon(path, size, icon_color).into_any_element(),
     }))
     .a11y_disabled(disabled)
     .test_support()
