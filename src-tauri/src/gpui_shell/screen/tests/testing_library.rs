@@ -243,7 +243,7 @@ fn commit_does_nothing_until_a_message_is_typed(cx: &mut TestAppContext) {
 // The remote chooser can be closed without choosing.
 
 #[gpui::test]
-fn the_remote_chooser_cancels(cx: &mut TestAppContext) {
+fn the_remote_chooser_closes_from_its_x(cx: &mut TestAppContext) {
   let (mut h, _) = remote_harness(
     cx,
     FakeHost::default(),
@@ -252,6 +252,6 @@ fn the_remote_chooser_cancels(cx: &mut TestAppContext) {
   let screen = screen(&mut h);
   screen
     .user()
-    .click(&screen.get_by_role(by::role(Role::Button).name("Cancel")));
+    .click(&screen.get_by_role(by::role(Role::Button).name("Close")));
   assert_eq!(h.sent(), vec![press("remote.setup.close")]);
 }

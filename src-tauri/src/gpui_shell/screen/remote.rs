@@ -742,6 +742,16 @@ impl RemoteView {
       Mode::Managed => self.managed(&route, p, cx).into_any_element(),
       Mode::UserManaged => self.user_managed(window, p, cx).into_any_element(),
     };
+    let content = div().relative().child(content).child(
+      div().absolute().top(zpx(-8.)).right(zpx(-8.)).child(
+        Button::new("remote-setup-close", p)
+          .variant(Variant::Ghost)
+          .size(Size::IconXs)
+          .aria_label("Close")
+          .icon(theme::ICON_X, 16.)
+          .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
+      ),
+    );
     let frame = Frame {
       id: "remote-setup-dialog",
       max_width: 576.,
@@ -822,14 +832,6 @@ impl RemoteView {
             Mode::UserManaged,
             cx,
           )),
-      )
-      .child(
-        div().mt_6().child(
-          Button::new("remote-setup-cancel", p)
-            .variant(Variant::Ghost)
-            .label("Cancel")
-            .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
-        ),
       )
   }
 
