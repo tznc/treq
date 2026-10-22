@@ -1101,11 +1101,12 @@ pub(super) fn markdown(
     3 => px(17.),
     _ => base,
   });
-  // HTML comments never show, as in `MarkdownContent`.
+  // HTML comments never show, as in `MarkdownContent`; shortcodes show as
+  // emoji, as on GitHub.
   let text = regex::Regex::new(r"(?s)<!--.*?-->")
     .expect("regex")
-    .replace_all(text, "")
-    .to_string();
+    .replace_all(text, "");
+  let text = super::code_data::emojify(&text);
   div()
     .text_size(zpx(size))
     .line_height(zpx(line))
