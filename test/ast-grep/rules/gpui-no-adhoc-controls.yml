@@ -1,0 +1,55 @@
+id: gpui-no-adhoc-controls
+language: rust
+severity: error
+message: >
+  Do not build this control by hand. Use the `ui` primitive of the same
+  name (`ui::Button`, `ui::Checkbox`, `ui::Tabs`, ..) so every screen
+  shares one look and one behavior.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Not migrated yet: remove a file once it passes.
+  - "src-tauri/src/gpui_shell/overlay/mod.rs"
+  - "src-tauri/src/gpui_shell/overlay/shortcuts.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/search.rs"
+  - "src-tauri/src/gpui_shell/screen/code.rs"
+  - "src-tauri/src/gpui_shell/screen/commits.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
+  - "src-tauri/src/gpui_shell/screen/file_picker.rs"
+  - "src-tauri/src/gpui_shell/screen/github.rs"
+  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
+  - "src-tauri/src/gpui_shell/screen/linear.rs"
+  - "src-tauri/src/gpui_shell/screen/logs.rs"
+  - "src-tauri/src/gpui_shell/screen/remote.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_modal.rs"
+  - "src-tauri/src/gpui_shell/sidebar/mod.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/gpui_shell/theme.rs"
+  - "src-tauri/src/gpui_shell/ui.rs"
+  - "src-tauri/src/gpui_shell/ui/**"
+rule:
+  any:
+    - kind: function_item
+      has:
+        field: name
+        kind: identifier
+        regex: ^(menu_item|checkbox|kbd|badge|icon_button|tabs|tab_trigger|tabs_list|empty_state|loading|spinner)$
+    - kind: let_declaration
+      all:
+        - has:
+            field: pattern
+            kind: identifier
+            regex: ^icon_button$
+        - has:
+            field: value
+            kind: closure_expression
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

@@ -1,0 +1,42 @@
+id: gpui-escape-via-layers
+valid:
+  - |
+    fn other_key(k: &Keystroke) -> bool {
+      k.key == "enter"
+    }
+  - |
+    fn dismiss(el: Div) -> Div {
+      el.dismiss_with(cx, on_close)
+    }
+  - |
+    fn passes_escape(k: &str) -> Shortcut {
+      window_shortcut("escape", Modifiers::none(), true)
+    }
+invalid:
+  - |
+    fn field(k: &Keystroke) -> bool {
+      k.key == "escape"
+    }
+  - |
+    fn nested(event: &KeyDownEvent) -> bool {
+      event.keystroke.key == "escape"
+    }
+  - |
+    fn reversed(k: &Keystroke) -> bool {
+      "escape" == k.key
+    }
+  - |
+    fn not_equal(k: &Keystroke) -> bool {
+      k.key != "escape"
+    }
+  - |
+    fn match_arm(key: &str) {
+      match key {
+        "escape" => close(),
+        _ => {}
+      }
+    }
+  - |
+    fn matches_macro(key: &str) -> bool {
+      matches!(key, "escape" | "enter")
+    }

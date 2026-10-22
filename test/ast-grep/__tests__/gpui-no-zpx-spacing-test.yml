@@ -1,0 +1,39 @@
+id: gpui-no-zpx-spacing
+valid:
+  - |
+    fn helpers() -> Div {
+      div().gap_1p5().px_3().rounded_md()
+    }
+  - |
+    fn sizes() -> Div {
+      div().w(zpx(width)).h(zpx(24.)).text_size(zpx(13.))
+    }
+  - |
+    fn plain_value() -> Div {
+      div().gap(px(4.))
+    }
+invalid:
+  - |
+    fn gap() -> Div {
+      div().gap(zpx(6.))
+    }
+  - |
+    fn gap_axis() -> Div {
+      div().gap_x(zpx(6.)).gap_y(zpx(2.))
+    }
+  - |
+    fn padding() -> Div {
+      div().px(zpx(10.))
+    }
+  - |
+    fn margin() -> Div {
+      div().mt(zpx(4.))
+    }
+  - |
+    fn radius() -> Div {
+      div().rounded(zpx(6.))
+    }
+  - |
+    fn radius_corner() -> Div {
+      div().rounded_tl(zpx(6.))
+    }

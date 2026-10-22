@@ -1,0 +1,19 @@
+id: gpui-no-raw-text-size
+valid:
+  - |
+    fn scaled() -> Div {
+      ui::text(div(), TextSize::Sm)
+    }
+  - |
+    fn other_method() -> Div {
+      div().text_color(p.text).text_sm()
+    }
+invalid:
+  - |
+    fn raw_size() -> Div {
+      div().text_size(zpx(13.))
+    }
+  - |
+    fn raw_line_height() -> Div {
+      div().line_height(relative(1.4))
+    }

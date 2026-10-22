@@ -370,6 +370,7 @@ impl Shell {
     // Every GPUI window draws at the app's zoom.
     if cx.try_global::<ui::UiZoom>() != Some(&ui::UiZoom(next.zoom)) {
       cx.set_global(ui::UiZoom(next.zoom));
+      theme::sync_zoom(cx);
       cx.refresh_windows();
     }
     self.presented = Some(next);
@@ -410,7 +411,7 @@ impl Shell {
         }
       }
       Some(snapshot) => {
-        theme::set_kit_dark(snapshot.dark, cx);
+        theme::set_dark(snapshot.dark, cx);
         match &self.screen {
           Some(screen) => screen.update(cx, |screen, cx| screen.set_snapshot(snapshot, cx)),
           None => {

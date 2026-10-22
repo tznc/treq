@@ -1,0 +1,71 @@
+id: gpui-escape-via-layers
+language: rust
+severity: error
+message: >
+  Do not handle Escape by comparing the key. Dismiss with
+  `ui::DismissExt::dismiss_with` or the shared dialog layer, so Escape
+  closes the topmost layer only.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Not migrated yet: remove a file once it passes.
+  - "src-tauri/src/gpui_shell/mod.rs"
+  - "src-tauri/src/gpui_shell/overlay/mod.rs"
+  - "src-tauri/src/gpui_shell/popover/mod.rs"
+  - "src-tauri/src/gpui_shell/screen/changes.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/pr.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
+  - "src-tauri/src/gpui_shell/screen/commits.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
+  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
+  - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
+  - "src-tauri/src/gpui_shell/screen/linear.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/agent_prompt.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/stash.rs"
+  - "src-tauri/src/gpui_shell/screen/open_workspaces.rs"
+  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/rename_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal_lightbox.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
+  # Encodes Escape as a terminal byte; not a dismiss.
+  - "src-tauri/src/gpui_shell/screen/terminal_emu.rs"
+  # The window's key router, which hands Escape to the layers.
+  - "src-tauri/src/gpui_shell/window/keys.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/gpui_shell/theme.rs"
+  - "src-tauri/src/gpui_shell/ui.rs"
+  - "src-tauri/src/gpui_shell/ui/**"
+rule:
+  any:
+    - kind: binary_expression
+      all:
+        - has:
+            field: operator
+            regex: ^[!=]=$
+        - has:
+            kind: string_literal
+            regex: ^"escape"$
+            stopBy: neighbor
+    - kind: string_literal
+      regex: ^"escape"$
+      any:
+        - inside:
+            kind: match_pattern
+        - inside:
+            kind: or_pattern
+        - inside:
+            kind: token_tree
+            inside:
+              kind: macro_invocation
+              has:
+                field: macro
+                regex: ^matches$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end
