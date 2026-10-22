@@ -4485,7 +4485,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -5928,7 +5928,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -11609,7 +11609,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-gpui"
 version = "0.1.0"
-source = "git+https://github.com/ziinc/tauri-gpui?branch=main#9d15ce53deb0650fc681d63897d3c33657b9af6f"
+source = "git+https://github.com/ziinc/tauri-gpui?branch=main#470a11f6a65e1ea7346e7bbe5df3ce71b19cca81"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
