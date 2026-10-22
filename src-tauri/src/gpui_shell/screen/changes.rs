@@ -7,6 +7,7 @@
 //!
 //! [`changes_data`]: super::changes_data
 
+mod keys;
 pub(in crate::gpui_shell::screen) mod pr;
 mod review;
 pub(in crate::gpui_shell::screen) mod search;
@@ -24,8 +25,8 @@ use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
-  Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle, SharedString,
-  Stateful, Subscription, Window,
+  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle,
+  SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
@@ -153,6 +154,8 @@ pub struct ChangesView {
   pub(super) threads: threads::Threads,
   /// The pull request reviewed instead of a workspace (`PrReviewPage`).
   pub(super) pr: Option<pr::PrMode>,
+  /// Held by the diff, so it takes the arrow keys.
+  focus: FocusHandle,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -172,7 +175,7 @@ impl ChangesView {
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
-    let mut this = Self::blank(parent, options, host, react, popups, dark);
+    let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
     this.load(cx);
     this.watch_threads(cx);
@@ -187,6 +190,7 @@ impl ChangesView {
     react: ActionSink,
     popups: PopupSink,
     dark: bool,
+    cx: &mut Context<Self>,
   ) -> Self {
     let editors = host.editor_apps();
     Self {
@@ -230,6 +234,7 @@ impl ChangesView {
       search: search::Search::default(),
       threads: threads::Threads::default(),
       pr: None,
+      focus: cx.focus_handle(),
       _subscriptions: Vec::new(),
     }
   }
@@ -417,6 +422,11 @@ impl ChangesView {
         view.loading = false;
         view.field("changes.refreshing", false.into(), cx);
         match result {
+          Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
+            view.review.stale.clear();
+            view.review.parked = None;
+            view.apply(snapshot, cx)
+          }
           Ok(snapshot) if view.park(&snapshot) => {}
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
           Ok(snapshot) => view.apply(snapshot, cx),
@@ -1308,7 +1318,11 @@ impl Render for ChangesView {
     self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
+    self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
+    if std::mem::take(&mut self.review.refocus) {
+      window.focus(&self.focus, cx);
+    }
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "changes-diff-viewer".into())
@@ -1317,9 +1331,16 @@ impl Render for ChangesView {
       .overflow_hidden()
       .bg(p.background)
       .text_color(p.foreground)
-      .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+      .track_focus(&self.focus)
+      .on_key_down(cx.listener(|view, e: &KeyDownEvent, window, cx| {
         let k = &e.keystroke;
-        if k.key == "a"
+        let held = crate::gpui_shell::keys::held(k.modifiers);
+        if view.focus.is_focused(window)
+          && !(held.platform || held.control || held.alt)
+          && view.diff_key(&k.key, held.shift, cx)
+        {
+          cx.stop_propagation();
+        } else if k.key == "a"
           && (crate::gpui_shell::keys::held(k.modifiers).platform
             || crate::gpui_shell::keys::held(k.modifiers).control)
           && !crate::gpui_shell::keys::held(k.modifiers).shift
