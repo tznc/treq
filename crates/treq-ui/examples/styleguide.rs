@@ -112,6 +112,8 @@ fn variant_knob(knobs: &gpui_styleguidist::Knobs) -> Variant {
   )
 }
 
+// Examples with a transparent edge (ghost buttons, empty states) render at a
+// fixed size: cropping to drawn pixels would depend on anti-aliasing.
 fn buttons() -> Vec<Example> {
   vec![
     example!("button/playground", |knobs, _, cx| {
@@ -126,7 +128,8 @@ fn buttons() -> Vec<Example> {
         .selected(knobs.bool("selected", false))
     })
     .component("Button")
-    .title("Playground"),
+    .title("Playground")
+    .size(240., 64.),
     example!("button/variants", |knobs, _, cx| {
       let p = p(cx);
       let disabled = knobs.bool("disabled", false);
@@ -181,7 +184,8 @@ fn buttons() -> Vec<Example> {
         )
     })
     .component("IconButton")
-    .title("States"),
+    .title("States")
+    .size(200., 56.),
     example!("split-button/playground", |knobs, _, cx| {
       let p = p(cx);
       SplitButton::new("push", "Push", &p)
@@ -331,7 +335,8 @@ fn indicators() -> Vec<Example> {
       })
     })
     .component("EmptyState")
-    .title("Empty and error"),
+    .title("Empty and error")
+    .size(420., 220.),
     example!("empty-state/loading", |_, _, cx| {
       let p = p(cx);
       div()
@@ -343,7 +348,8 @@ fn indicators() -> Vec<Example> {
         .child(Skeleton::new("skeleton", 4, &p))
     })
     .component("EmptyState")
-    .title("Loading"),
+    .title("Loading")
+    .size(320., 160.),
   ]
 }
 

@@ -77,10 +77,10 @@
           },
           "is_default": true,
           "file": "snapshots/button/playground/light/default.png",
-          "width": 108,
-          "height": 65,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "c8b2ef8fe3bbae1a"
+          "hash": "3e3fb091a9a8aa3a"
         },
         {
           "theme": "light",
@@ -92,10 +92,10 @@
             "variant": "outline"
           },
           "file": "snapshots/button/playground/light/variant=outline.png",
-          "width": 104,
-          "height": 58,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "f4e6cd29f3f85939"
+          "hash": "936bcd868092d8b9"
         },
         {
           "theme": "light",
@@ -107,10 +107,10 @@
             "variant": "ghost"
           },
           "file": "snapshots/button/playground/light/variant=ghost.png",
-          "width": 81,
-          "height": 43,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "09c4b073d1ce1d7a"
+          "hash": "bf4c937d806bf8e9"
         },
         {
           "theme": "light",
@@ -122,10 +122,10 @@
             "variant": "destructive"
           },
           "file": "snapshots/button/playground/light/variant=destructive.png",
-          "width": 108,
-          "height": 65,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "a1094e32d7d49d58"
+          "hash": "81b221a1e83d2918"
         },
         {
           "theme": "light",
@@ -137,10 +137,10 @@
             "variant": "secondary"
           },
           "file": "snapshots/button/playground/light/variant=secondary.png",
-          "width": 102,
-          "height": 58,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "c73155db039f96b1"
+          "hash": "88c529e3a79d2d99"
         },
         {
           "theme": "light",
@@ -152,10 +152,10 @@
             "variant": "link"
           },
           "file": "snapshots/button/playground/light/variant=link.png",
-          "width": 81,
-          "height": 43,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "27880ee84163f47f"
+          "hash": "f63d2701eed67bb7"
         },
         {
           "theme": "light",
@@ -167,10 +167,10 @@
             "variant": "default"
           },
           "file": "snapshots/button/playground/light/disabled=true.png",
-          "width": 102,
-          "height": 58,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "c0b71438ab71cb10"
+          "hash": "41cf946eeb8ef710"
         },
         {
           "theme": "light",
@@ -182,10 +182,10 @@
             "variant": "default"
           },
           "file": "snapshots/button/playground/light/selected=true.png",
-          "width": 108,
-          "height": 65,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "c8b2ef8fe3bbae1a"
+          "hash": "3e3fb091a9a8aa3a"
         },
         {
           "theme": "dark",
@@ -198,10 +198,10 @@
           },
           "is_default": true,
           "file": "snapshots/button/playground/dark/default.png",
-          "width": 106,
-          "height": 62,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "d4649da02f31b7ae"
+          "hash": "52cf77566572480a"
         },
         {
           "theme": "dark",
@@ -213,10 +213,10 @@
             "variant": "outline"
           },
           "file": "snapshots/button/playground/dark/variant=outline.png",
-          "width": 104,
-          "height": 58,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "a3a1033619ff75bb"
+          "hash": "73f3a10adbd5b2fb"
         },
         {
           "theme": "dark",
@@ -228,10 +228,10 @@
             "variant": "ghost"
           },
           "file": "snapshots/button/playground/dark/variant=ghost.png",
-          "width": 81,
-          "height": 43,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "a940de0409826f76"
+          "hash": "37d7eab40e6f025b"
         },
         {
           "theme": "dark",
@@ -243,10 +243,10 @@
             "variant": "destructive"
           },
           "file": "snapshots/button/playground/dark/variant=destructive.png",
-          "width": 106,
-          "height": 62,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "874ac53346bc07a8"
+          "hash": "d7e7e8d1c10ad094"
         },
         {
           "theme": "dark",
@@ -258,10 +258,10 @@
             "variant": "secondary"
           },
           "file": "snapshots/button/playground/dark/variant=secondary.png",
-          "width": 102,
-          "height": 58,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "83e2478af719dbe8"
+          "hash": "6b8dda6f998382a8"
         },
         {
           "theme": "dark",
@@ -273,10 +273,10 @@
             "variant": "link"
           },
           "file": "snapshots/button/playground/dark/variant=link.png",
-          "width": 81,
-          "height": 43,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "45391bd71902f636"
+          "hash": "4a752be5d093b0d6"
         },
         {
           "theme": "dark",
@@ -288,10 +288,10 @@
             "variant": "default"
           },
           "file": "snapshots/button/playground/dark/disabled=true.png",
-          "width": 102,
-          "height": 58,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "9423a762ee96d547"
+          "hash": "5ca2d2d146e5e507"
         },
         {
           "theme": "dark",
@@ -303,10 +303,10 @@
             "variant": "default"
           },
           "file": "snapshots/button/playground/dark/selected=true.png",
-          "width": 106,
-          "height": 62,
+          "width": 272,
+          "height": 96,
           "scale": 2.0,
-          "hash": "d4649da02f31b7ae"
+          "hash": "52cf77566572480a"
         }
       ]
     },
@@ -432,10 +432,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/light/default.png",
-          "width": 127,
-          "height": 55,
+          "width": 232,
+          "height": 88,
           "scale": 2.0,
-          "hash": "a2a7a94ae5f58a00"
+          "hash": "2608e5be3e59ecf8"
         },
         {
           "theme": "light",
@@ -444,10 +444,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/light/size=small.png",
-          "width": 118,
-          "height": 52,
+          "width": 232,
+          "height": 88,
           "scale": 2.0,
-          "hash": "e6848b5c8791bf0c"
+          "hash": "86eba6428d81defb"
         },
         {
           "theme": "dark",
@@ -457,10 +457,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/dark/default.png",
-          "width": 127,
-          "height": 55,
+          "width": 232,
+          "height": 88,
           "scale": 2.0,
-          "hash": "eca4eae03a25c4bd"
+          "hash": "883e762a4641411d"
         },
         {
           "theme": "dark",
@@ -469,10 +469,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/dark/size=small.png",
-          "width": 118,
-          "height": 52,
+          "width": 232,
+          "height": 88,
           "scale": 2.0,
-          "hash": "2e7b2c8e855fafb4"
+          "hash": "ed40a8c74cdde475"
         }
       ]
     },
@@ -1061,10 +1061,10 @@
           },
           "is_default": true,
           "file": "snapshots/empty-state/playground/light/default.png",
-          "width": 168,
-          "height": 95,
+          "width": 452,
+          "height": 252,
           "scale": 2.0,
-          "hash": "bfeceff2dd0fc1bb"
+          "hash": "afbd7855728f2e7b"
         },
         {
           "theme": "light",
@@ -1073,10 +1073,10 @@
             "error": true
           },
           "file": "snapshots/empty-state/playground/light/error=true.png",
-          "width": 266,
-          "height": 129,
+          "width": 452,
+          "height": 252,
           "scale": 2.0,
-          "hash": "61cc5f0b9c41624b"
+          "hash": "ea3cb054d2c5c23b"
         },
         {
           "theme": "dark",
@@ -1086,10 +1086,10 @@
           },
           "is_default": true,
           "file": "snapshots/empty-state/playground/dark/default.png",
-          "width": 168,
-          "height": 95,
+          "width": 452,
+          "height": 252,
           "scale": 2.0,
-          "hash": "256921c86e0187bc"
+          "hash": "de5472ae913271fc"
         },
         {
           "theme": "dark",
@@ -1098,10 +1098,10 @@
             "error": true
           },
           "file": "snapshots/empty-state/playground/dark/error=true.png",
-          "width": 266,
-          "height": 129,
+          "width": 452,
+          "height": 252,
           "scale": 2.0,
-          "hash": "97ce8c2589a8650f"
+          "hash": "721dcd7da875f7df"
         }
       ]
     },
@@ -1124,20 +1124,20 @@
           "key": "",
           "is_default": true,
           "file": "snapshots/empty-state/loading/light/default.png",
-          "width": 284,
-          "height": 116,
+          "width": 352,
+          "height": 192,
           "scale": 2.0,
-          "hash": "db9879da0e519f01"
+          "hash": "de8244dccd857c30"
         },
         {
           "theme": "dark",
           "key": "",
           "is_default": true,
           "file": "snapshots/empty-state/loading/dark/default.png",
-          "width": 284,
-          "height": 116,
+          "width": 352,
+          "height": 192,
           "scale": 2.0,
-          "hash": "150ec2a8f88616a9"
+          "hash": "18ea8f030c1e3346"
         }
       ]
     },
