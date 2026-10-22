@@ -1251,6 +1251,8 @@ fn popup_window(
     return Some(found);
   }
   let builder = tauri::WindowBuilder::new(app, &label)
+    // Unnamed, it would be listed as Tauri's default "Tauri App".
+    .title(&app.package_info().name)
     .decorations(false)
     .transparent(true)
     .shadow(false)
