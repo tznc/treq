@@ -6,11 +6,14 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
-use super::{github_data::GithubHost, workspace_dialog_data::WorkspaceDialogHost};
+use super::{
+  github_data::GithubHost, linear_data::LinearHost, workspace_dialog_data::WorkspaceDialogHost,
+};
 use crate::{
   core::{self, BranchWorkspaceRequest},
   github::GhPullRequest,
   gpui_shell::native::Backend,
+  linear::LinearIssue,
 };
 
 /// How many pull requests the dialog lists.
@@ -23,6 +26,9 @@ const PR_LIMIT: u32 = 50;
 pub struct Route {
   pub repo_path: String,
   pub repos: Vec<String>,
+  /// The Linear integration is on, so the dialog offers the user's issues.
+  #[serde(default)]
+  pub linear: bool,
 }
 
 /// What a pasted line names.
@@ -88,7 +94,7 @@ fn parse_github_path(path: &str) -> Line {
 }
 
 /// A workspace the dialog will open.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Target {
   pub repo_path: String,
   pub branch: String,
@@ -96,6 +102,8 @@ pub struct Target {
   pub base: String,
   pub title: Option<String>,
   pub pr: Option<u64>,
+  /// The Linear issue the workspace is for; its branch is made when missing.
+  pub issue: Option<LinearIssue>,
   /// A workspace for the branch is open already.
   pub existing: bool,
 }
@@ -118,6 +126,20 @@ impl Target {
       base: pr.base_ref_name.clone(),
       title: Some(pr.title.clone()),
       pr: Some(pr.number),
+      issue: None,
+      existing,
+    }
+  }
+
+  /// A Linear issue, opened on its branch in the repository on screen.
+  pub fn from_issue(repo_path: &str, issue: &LinearIssue, existing: bool) -> Self {
+    Self {
+      repo_path: repo_path.to_string(),
+      branch: issue.branch_name.clone(),
+      base: String::new(),
+      title: Some(issue.title.clone()),
+      pr: None,
+      issue: Some(issue.clone()),
       existing,
     }
   }
@@ -127,7 +149,7 @@ impl Target {
 pub type Checked = Result<Target, String>;
 
 /// What the dialog asks of the backend; faked in tests. Every call blocks.
-pub trait OpenWorkspacesHost: GithubHost + WorkspaceDialogHost {
+pub trait OpenWorkspacesHost: GithubHost + LinearHost + WorkspaceDialogHost {
   /// Fetches the repository's remote, so its branches can be checked.
   fn fetch(&self, repo_path: &str);
   /// Open pull requests, newest first: the user's own, or everyone's
@@ -140,6 +162,9 @@ pub trait OpenWorkspacesHost: GithubHost + WorkspaceDialogHost {
     repo_path: &str,
     requests: &[BranchWorkspaceRequest],
   ) -> Vec<Result<(i64, bool), String>>;
+  /// Opens or creates the workspace for a Linear issue, as the Linear view
+  /// does: its id, and whether it was made.
+  fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String>;
 }
 
 impl OpenWorkspacesHost for Backend {
@@ -172,6 +197,20 @@ impl OpenWorkspacesHost for Backend {
         Ok((workspace.id, created))
       })
       .collect()
+  }
+
+  fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String> {
+    let opened = tauri::async_runtime::block_on(
+      crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, issue),
+    )?;
+    if opened.created {
+      if let Ok(Some(workspace)) =
+        crate::local_db::get_workspace_by_id(repo_path, opened.workspace_id)
+      {
+        crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
+      }
+    }
+    Ok((opened.workspace_id, opened.created))
   }
 }
 
@@ -266,8 +305,42 @@ fn branch_target(host: &dyn OpenWorkspacesHost, repo_path: &str, branch: &str) -
     base,
     title: None,
     pr: None,
+    issue: None,
     existing: is_open(host, repo_path, branch),
   })
+}
+
+/// The Linear issues to offer: with no search, the user's own that are not
+/// done, or everyone's when they have none; with one, everyone's that match
+/// by identifier or title. Says whether the list is the user's own.
+pub fn issue_list<'a>(
+  issues: &'a [LinearIssue],
+  viewer: Option<&str>,
+  query: &str,
+) -> (Vec<&'a LinearIssue>, bool) {
+  let query = query.trim().to_lowercase();
+  let open = issues
+    .iter()
+    .filter(|i| !matches!(i.state.state_type.as_str(), "completed" | "canceled"));
+  if !query.is_empty() {
+    let matching = open
+      .filter(|i| {
+        i.identifier.to_lowercase().contains(&query) || i.title.to_lowercase().contains(&query)
+      })
+      .collect();
+    return (matching, false);
+  }
+  let open: Vec<&LinearIssue> = open.collect();
+  let mine: Vec<&LinearIssue> = open
+    .iter()
+    .copied()
+    .filter(|i| viewer.is_some_and(|v| i.assignee.as_ref().is_some_and(|a| a.id == v)))
+    .collect();
+  if mine.is_empty() {
+    (open, false)
+  } else {
+    (mine, true)
+  }
 }
 
 /// Whether a workspace is open for `branch`.
@@ -328,6 +401,47 @@ mod tests {
     ] {
       assert!(matches!(parse_line(line), Line::Invalid(_)), "{line}");
     }
+  }
+
+  fn issue(id: &str, state: &str, assignee: Option<&str>) -> LinearIssue {
+    serde_json::from_value(serde_json::json!({
+      "id": id,
+      "identifier": format!("ENG-{id}"),
+      "title": format!("Issue {id}"),
+      "description": null,
+      "state": {"name": state, "type": state},
+      "labels": [],
+      "branch_name": format!("eng-{id}"),
+      "parent_id": null,
+      "sub_issue_ids": [],
+      "url": "",
+      "assignee": assignee.map(|a| serde_json::json!({"id": a, "name": a})),
+      "priority": 0,
+      "priority_label": "",
+      "project": null,
+    }))
+    .expect("issue")
+  }
+
+  fn ids(list: &[&LinearIssue]) -> Vec<String> {
+    list.iter().map(|i| i.id.clone()).collect()
+  }
+
+  #[test]
+  fn issue_list_shows_the_users_open_issues_first() {
+    let issues = [
+      issue("1", "started", Some("me")),
+      issue("2", "completed", Some("me")),
+      issue("3", "unstarted", Some("you")),
+    ];
+    let (list, mine) = issue_list(&issues, Some("me"), "");
+    assert_eq!((ids(&list), mine), (vec!["1".to_string()], true));
+
+    let (list, mine) = issue_list(&issues, Some("nobody"), "");
+    assert_eq!((ids(&list), mine), (vec!["1".into(), "3".into()], false));
+
+    let (list, mine) = issue_list(&issues, Some("me"), "eng-3");
+    assert_eq!((ids(&list), mine), (vec!["3".to_string()], false));
   }
 
   #[test]

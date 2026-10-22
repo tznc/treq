@@ -240,6 +240,7 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "kind": "openWorkspaces",
       "repoPath": repo,
       "repos": repos,
+      "linear": data.flags.linear,
     }));
   }
   if let Some((repo_path, id, branch)) = &dialogs.rename {

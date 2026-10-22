@@ -13,9 +13,9 @@ use crate::{
 /// What the faked Linear API returns.
 #[derive(Default)]
 pub(super) struct Fixture {
-  teams: Vec<LinearTeam>,
-  issues: Vec<LinearIssue>,
-  viewer: Option<LinearUser>,
+  pub(super) teams: Vec<LinearTeam>,
+  pub(super) issues: Vec<LinearIssue>,
+  pub(super) viewer: Option<LinearUser>,
   projects: Vec<LinearProject>,
   documents: Vec<LinearDocument>,
   /// Comments, by the id of what they are on.
@@ -108,14 +108,14 @@ impl linear_data::LinearHost for FakeHost {
   }
 }
 
-fn user(id: &str, name: &str) -> LinearUser {
+pub(super) fn user(id: &str, name: &str) -> LinearUser {
   LinearUser {
     id: id.into(),
     name: name.into(),
   }
 }
 
-fn issue(id: &str, state: (&str, &str), assignee: Option<LinearUser>) -> LinearIssue {
+pub(super) fn issue(id: &str, state: (&str, &str), assignee: Option<LinearUser>) -> LinearIssue {
   serde_json::from_value(serde_json::json!({
     "id": id,
     "identifier": format!("ENG-{id}"),

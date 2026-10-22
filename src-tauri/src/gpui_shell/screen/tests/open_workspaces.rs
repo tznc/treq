@@ -5,12 +5,13 @@ use gpui_testing_library::prelude::*;
 
 use super::{
   github::{acme, pr},
+  linear_view::{issue, user},
   workspace_dialogs::workspace,
   *,
 };
 use crate::{
   core::BranchWorkspaceRequest, github::GhPullRequest,
-  gpui_shell::screen::open_workspaces_data::OpenWorkspacesHost,
+  gpui_shell::screen::open_workspaces_data::OpenWorkspacesHost, linear::LinearIssue,
 };
 
 /// What the fake backend's pull request search returns.
@@ -70,14 +71,28 @@ impl OpenWorkspacesHost for FakeHost {
       })
       .collect()
   }
+
+  fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String> {
+    self.record(format!("open issue {repo_path} {}", issue.identifier));
+    Ok((300, true))
+  }
 }
 
 fn dialog(host: FakeHost, cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  dialog_with(host, false, cx)
+}
+
+fn dialog_with(host: FakeHost, linear: bool, cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
   let host = Arc::new(host);
   let snapshot: ScreenSnapshot = serde_json::from_value(serde_json::json!({
     "kind": "onboarding",
     "dark": false,
-    "modal": { "kind": "openWorkspaces", "repoPath": "/repo", "repos": ["/repo"] },
+    "modal": {
+      "kind": "openWorkspaces",
+      "repoPath": "/repo",
+      "repos": ["/repo"],
+      "linear": linear,
+    },
   }))
   .expect("snapshot");
   let h = Harness::with_host(cx, snapshot, host.clone());
@@ -101,6 +116,15 @@ fn status(screen: &gpui_testing_library::Screen) -> String {
     .get_by_role(by::role(Role::Status))
     .name()
     .unwrap_or_default()
+}
+
+/// Opens the popover that lists each line.
+fn show_lines(h: &mut Harness) -> gpui_testing_library::Screen {
+  let screen = screen(h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Status)));
+  self::screen(h)
 }
 
 fn with_branches(host: FakeHost) -> FakeHost {
@@ -134,6 +158,11 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
     "1 workspace will be created, 1 already open"
   );
   expect(screen.get_by_role(by::role(Role::Alert).name("2 lines can't be opened"))).to_be_visible();
+  // Each line shows in a popover from the summary.
+  assert!(screen
+    .query_by_role(by::role(Role::ListItem).name("feat/b: already open"))
+    .is_none());
+  let screen = show_lines(&mut h);
   expect(screen.get_by_role(by::role(Role::ListItem).name("main: 'main' is the default branch")))
     .to_be_visible();
   expect(screen.get_by_role(by::role(Role::ListItem).name("feat/b: already open"))).to_be_visible();
@@ -167,7 +196,7 @@ fn pull_request_links_open_their_head_branch(cx: &mut TestAppContext) {
     &screen.get_by_label_text("Branches or links"),
     "https://github.com/acme/treq/pull/42\nhttps://github.com/other/app/pull/1",
   );
-  let screen = self::screen(&mut h);
+  let screen = show_lines(&mut h);
   assert_eq!(status(&screen), "1 workspace will be created");
   expect(screen.get_by_role(by::role(Role::ListItem).name("feat/x: PR #42 · new"))).to_be_visible();
   expect(
@@ -267,4 +296,78 @@ fn repositories_without_github_hide_the_pull_request_list(cx: &mut TestAppContex
   let screen = screen(&mut h);
   assert!(screen.query_by_label_text("Search pull requests").is_none());
   assert!(!host.calls().iter().any(|c| c.starts_with("read open prs")));
+}
+
+fn linear_host() -> FakeHost {
+  let me = user("u1", "Me");
+  let mut host = FakeHost::default();
+  host.linear.viewer = Some(me.clone());
+  host.linear.issues = vec![
+    issue("1", ("In Progress", "started"), Some(me.clone())),
+    issue("2", ("Done", "completed"), Some(me)),
+    issue("3", ("Todo", "unstarted"), Some(user("u2", "You"))),
+  ];
+  host
+}
+
+#[gpui::test]
+fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
+  let mut host = linear_host();
+  host.github.remote = acme();
+  let (mut h, host) = dialog_with(host, true, cx);
+  let screen = screen(&mut h);
+  // GitHub's tab first; Linear's beside it.
+  expect(screen.get_by_role(by::role(Role::Tab).name("GitHub"))).to_be_selected();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Tab).name("Linear")));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Heading).name("Your issues"))).to_be_visible();
+  // Done issues and other people's are left out.
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("ENG-2 Issue 2"))
+    .is_none());
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("ENG-3 Issue 3"))
+    .is_none());
+
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1")));
+  let screen = show_lines(&mut h);
+  assert_eq!(status(&screen), "1 workspace will be created");
+  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
+
+  // A search looks through everyone's.
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search issues"), "ENG-3");
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Heading).name("Matching issues"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("ENG-3 Issue 3"))).to_be_visible();
+
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Open 1 Workspace")));
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"open issue /repo ENG-1".to_string()));
+  assert!(!host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("open workspaces")));
+  assert!(h.sent().contains(&field(
+    "openWorkspaces.opened",
+    serde_json::json!({"repoPath": "/repo", "id": 300}),
+  )));
+}
+
+#[gpui::test]
+fn linear_shows_without_github(cx: &mut TestAppContext) {
+  let (mut h, _) = dialog_with(linear_host(), true, cx);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Tab).name("Linear"))).to_be_selected();
+  assert!(screen
+    .query_by_role(by::role(Role::Tab).name("GitHub"))
+    .is_none());
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1"))).to_be_visible();
 }

@@ -653,7 +653,8 @@ fn the_open_workspaces_dialog_selects_the_first_workspace_opened(cx: &mut TestAp
   window.sidebar(cx, SidebarAction::OpenWorkspaces);
   let modal = format!("{:?}", window.screen_snapshot().modal);
   assert!(
-    modal.contains(r#"OpenWorkspaces(Route { repo_path: "/repo", repos: ["/repo"] })"#),
+    modal
+      .contains(r#"OpenWorkspaces(Route { repo_path: "/repo", repos: ["/repo"], linear: false })"#),
     "{modal}"
   );
 
