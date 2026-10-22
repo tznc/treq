@@ -145,12 +145,13 @@ jobs:
         uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
 
       # test-rust's packages, plus Xvfb and Mesa's software Vulkan
-      # (lavapipe), which GPUI renders with on a runner without a GPU.
+      # (lavapipe), which GPUI renders with on a runner without a GPU, and
+      # xdotool, which presses keys through X for the text shortcut tests.
       - name: install dependencies (ubuntu only)
         uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers
-          version: webkit-4.1-gpui-e2e-1
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
+          version: webkit-4.1-gpui-e2e-2
           execute_install_scripts: true
 
       # Reads test-rust's cache (warm-caches.yml saves it on main); the

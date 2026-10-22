@@ -1,0 +1,110 @@
+id: gpui-clickable-needs-cursor
+language: rust
+severity: error
+message: >
+  A clickable element needs a cursor, or hovering it keeps the arrow and it
+  does not read as clickable. Give it `.cursor_pointer()` in the same builder
+  chain (inside the `.when(..)` that enables it when it can be disabled),
+  or `.cursor_default()` for a click target that is not a control, such as
+  a backdrop. `ui::Button` sets the pointer itself.
+note: >
+  Checked: a `div()` chain that takes `.on_click(..)` or a control role. A
+  chain that starts from a helper's result is not checked, so a helper that
+  builds a clickable element sets the cursor itself.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  # A step of the builder chain the element is built in: a method call on
+  # it, a plain function that takes and returns it (`ui::text(el, ..)`), or
+  # a `.when(..)`/`.map(..)`-style closure that continues it.
+  in-chain:
+    any:
+      - kind: field_expression
+      - kind: call_expression
+      - kind: closure_expression
+      - kind: block
+        inside:
+          kind: closure_expression
+      - kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: identifier
+              - kind: scoped_identifier
+              - kind: field_expression
+                has:
+                  field: field
+                  regex: ^(when|when_some|when_none|map)$
+  sets-cursor:
+    any:
+      - kind: call_expression
+        has:
+          field: function
+          kind: scoped_identifier
+          regex: (^|::)Button::new$
+      - kind: call_expression
+        has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: ^cursor_[a-z_]+$
+  control-role:
+    kind: call_expression
+    all:
+      - has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: ^role$
+      - has:
+          field: arguments
+          regex: Role::(Button|CheckBox|ComboBox|Switch|Tab|MenuItem|ListBoxOption|RadioButton|Link)\b
+  # Built from a `div()` in this chain, not by a helper (`ui::Button` or a
+  # function returning a styled element), which is checked where it is built.
+  div-chain:
+    inside:
+      stopBy:
+        not:
+          matches: in-chain
+      has:
+        stopBy:
+          not:
+            matches: in-chain
+        pattern: div()
+  clicked:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        regex: ^on_click$
+rule:
+  any:
+    - matches: control-role
+    - matches: clicked
+  matches: div-chain
+  not:
+    any:
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          has:
+            stopBy:
+              not:
+                matches: in-chain
+            matches: sets-cursor
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

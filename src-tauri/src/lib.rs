@@ -372,6 +372,29 @@ fn quit_without_gpui(app: &AppHandle, error: &dyn std::fmt::Display) {
     .show(move |_| handle.exit(1));
 }
 
+/// The macOS Edit menu: each item's id, title, accelerator and the GPUI
+/// keystroke it types into the focused window.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+const EDIT_MENU: &[(&str, &str, &str, &str)] = &[
+  ("edit_undo", "Undo", "Cmd+Z", "cmd-z"),
+  ("edit_redo", "Redo", "Cmd+Shift+Z", "cmd-shift-z"),
+  ("edit_cut", "Cut", "Cmd+X", "cmd-x"),
+  ("edit_copy", "Copy", "Cmd+C", "cmd-c"),
+  ("edit_paste", "Paste", "Cmd+V", "cmd-v"),
+  ("edit_select_all", "Select All", "Cmd+A", "cmd-a"),
+];
+
+/// The keystroke an Edit menu item types, by its id.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn edit_menu_keystroke(menu_id: &str) -> Option<&'static str> {
+  EDIT_MENU
+    .iter()
+    .find(|(id, ..)| *id == menu_id)
+    .map(|&(.., keystroke)| keystroke)
+}
+
 /// Web page a menu item opens in the browser, on every desktop platform.
 /// Menu items handled inside the app return `None`.
 #[cfg(feature = "gui")]
@@ -669,16 +692,22 @@ pub fn run() {
             .item(&add_repository_item)
             .build()?;
 
-          // Edit menu with native shortcuts
-          let edit_menu = SubmenuBuilder::new(app, "Edit")
-            .item(&PredefinedMenuItem::undo(app, None)?)
-            .item(&PredefinedMenuItem::redo(app, None)?)
-            .separator()
-            .item(&PredefinedMenuItem::cut(app, None)?)
-            .item(&PredefinedMenuItem::copy(app, None)?)
-            .item(&PredefinedMenuItem::paste(app, None)?)
-            .item(&PredefinedMenuItem::select_all(app, None)?)
-            .build()?;
+          // Edit menu. The predefined items send `paste:` and the like to
+          // the first responder, which GPUI's view does not answer, and
+          // their key equivalents keep Cmd+V... from ever reaching GPUI.
+          // These type their keys into the window instead.
+          let mut edit_menu = SubmenuBuilder::new(app, "Edit");
+          for &(id, text, accelerator, _) in EDIT_MENU {
+            if id == "edit_cut" {
+              edit_menu = edit_menu.separator();
+            }
+            edit_menu = edit_menu.item(
+              &MenuItemBuilder::with_id(id, text)
+                .accelerator(accelerator)
+                .build(app)?,
+            );
+          }
+          let edit_menu = edit_menu.build()?;
 
           // View menu
           let view_menu = SubmenuBuilder::new(app, "View")
@@ -867,7 +896,12 @@ pub fn run() {
           "factory_reset" => menu_to_focused(app, "menu-factory-reset"),
           "view_logs" => menu_to_focused(app, "menu-view-logs"),
           id => {
-            if let Some(url) = menu_item_url(id) {
+            if let Some(keystroke) = edit_menu_keystroke(id) {
+              #[cfg(feature = "gpui-shell")]
+              gpui_shell::type_keystroke(app, keystroke);
+              #[cfg(not(feature = "gpui-shell"))]
+              let _ = keystroke;
+            } else if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
               let _ = app.opener().open_url(url, None::<&str>);
             }
@@ -915,6 +949,18 @@ mod tests {
   };
   use super::is_cli_process;
   use super::menu_item_url;
+  use super::{edit_menu_keystroke, EDIT_MENU};
+
+  #[test]
+  fn edit_menu_items_type_their_own_shortcut() {
+    assert_eq!(edit_menu_keystroke("edit_paste"), Some("cmd-v"));
+    assert_eq!(edit_menu_keystroke("edit_select_all"), Some("cmd-a"));
+    assert_eq!(edit_menu_keystroke("settings"), None);
+    for &(id, _, accelerator, keystroke) in EDIT_MENU {
+      let typed = keystroke.replace('-', "+").to_lowercase();
+      assert_eq!(accelerator.to_lowercase(), typed, "{id}");
+    }
+  }
 
   #[test]
   fn maps_learn_more_menu_item_to_docs_url() {

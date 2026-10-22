@@ -160,6 +160,8 @@ pub trait GithubHost: WorkspaceHost {
   fn pr_checks(&self, repo: &str, number: u64) -> Result<Option<PrCiStatus>, String>;
   fn change_issue(&self, repo: &str, number: u64, change: &IssueChange) -> Result<(), String>;
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String>;
+  /// Adds (`on`) or removes the user's `content` reaction on a comment.
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String>;
   #[allow(clippy::too_many_arguments)]
   fn create_pr(
@@ -251,12 +253,16 @@ impl GithubHost for Backend {
 
   fn issue(&self, repo: &str, number: u64) -> Result<GhIssue, String> {
     let (gh, path) = gh()?;
-    crate::github::gh_view_issue_impl(&gh, repo, number, &path)
+    let mut issue = crate::github::gh_view_issue_impl(&gh, repo, number, &path)?;
+    crate::github::fill_comment_reactions(&gh, issue.comments.as_mut(), &path);
+    Ok(issue)
   }
 
   fn pr(&self, repo: &str, number: u64) -> Result<GhPullRequest, String> {
     let (gh, path) = gh()?;
-    crate::github::gh_view_pr_impl(&gh, repo, number, &path)
+    let mut pr = crate::github::gh_view_pr_impl(&gh, repo, number, &path)?;
+    crate::github::fill_comment_reactions(&gh, pr.comments.as_mut(), &path);
+    Ok(pr)
   }
 
   fn pr_checks(&self, repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {
@@ -287,6 +293,11 @@ impl GithubHost for Backend {
       PrChange::Reopen => g::gh_reopen_pr_impl(&gh, repo, number, &path),
       PrChange::Draft(draft) => g::gh_set_pr_draft_impl(&gh, repo, number, *draft, &path),
     }
+  }
+
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
+    let (gh, path) = gh()?;
+    crate::github::gh_set_reaction_impl(&gh, comment_id, content, on, &path)
   }
 
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String> {

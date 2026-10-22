@@ -426,3 +426,67 @@ fn titles_and_new_branches_stack_on_the_picked_branch(cx: &mut TestAppContext) {
     "{calls:?}"
   );
 }
+
+#[gpui::test]
+fn indented_lines_stack_in_order_on_the_line_above(cx: &mut TestAppContext) {
+  let (mut h, host) = dialog(with_branches(FakeHost::default()), cx);
+  let screen = screen(&mut h);
+  screen.user().type_text(
+    &screen.get_by_label_text("Workspaces"),
+    "Fix the login flow\n  feat/a\n  Add tests\nfeat/b",
+  );
+  let screen = show_lines(&mut h);
+  assert_eq!(status(&screen), "4 workspaces will be created");
+  expect(
+    screen.get_by_role(by::role(Role::ListItem).name("feat/a: on treq/fix-the-login-flow · new")),
+  )
+  .to_be_visible();
+  expect(
+    screen.get_by_role(by::role(Role::ListItem).name("treq/add-tests: on feat/a · new branch")),
+  )
+  .to_be_visible();
+
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Create 4 Workspaces")));
+  h.cx.run_until_parked();
+  let calls = host.calls();
+  let at = |call: &str| {
+    calls
+      .iter()
+      .position(|c| c == call)
+      .unwrap_or_else(|| panic!("{call} not in {calls:?}"))
+  };
+  // Each parent is made before the line stacked on it.
+  let parent = at(r#"create treq/fix-the-login-flow from - {"title":"Fix the login flow"}"#);
+  let child = at("open workspaces /repo feat/a@treq/fix-the-login-flow");
+  let grandchild = at(r#"create treq/add-tests from - {"title":"Add tests"}"#);
+  assert!(parent < child && child < grandchild, "{calls:?}");
+  at("retarget treq/add-tests -> feat/a");
+  at("open workspaces /repo feat/b@main");
+}
+
+#[gpui::test]
+fn tab_indents_the_selected_lines(cx: &mut TestAppContext) {
+  let (mut h, _) = dialog(with_branches(FakeHost::default()), cx);
+  let screen = screen(&mut h);
+  let lines = screen.get_by_label_text("Workspaces");
+  screen.user().type_text(&lines, "feat/a\nfeat/b\nfeat/x");
+  screen.user().keyboard("{Shift>}{ArrowUp}{/Shift}");
+  screen.user().tab();
+  let screen = show_lines(&mut h);
+  // `to_have_value` collapses whitespace, so read the text itself.
+  assert_eq!(
+    screen.get_by_label_text("Workspaces").value().as_deref(),
+    Some("feat/a\n  feat/b\n  feat/x")
+  );
+  expect(screen.get_by_role(by::role(Role::ListItem).name("feat/x: on feat/b · new")))
+    .to_be_visible();
+
+  screen.user().keyboard("{Shift>}{Tab}{/Shift}");
+  // `to_have_value` collapses whitespace, so read the text itself.
+  assert_eq!(
+    screen.get_by_label_text("Workspaces").value().as_deref(),
+    Some("feat/a\nfeat/b\nfeat/x")
+  );
+}

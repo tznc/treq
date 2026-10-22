@@ -796,6 +796,11 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(self.threads.clone())
   }
 
+  fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
+    self.record(format!("react {comment_id} {content} {on}"));
+    Ok(())
+  }
+
   fn agent_comments(
     &self,
     _: &str,
@@ -1242,6 +1247,9 @@ impl commits_data::CommitsHost for FakeHost {
     change_ids: Option<Vec<String>>,
   ) -> Result<crate::core::ResolveConflictsSession, String> {
     self.record(format!("start resolve {workspace_id:?} {change_ids:?}"));
+    if self.failing.contains(&"start_resolve") {
+      return Err("No conflicted commits found to resolve.".into());
+    }
     serde_json::from_value(serde_json::json!({
       "targets": change_ids.unwrap_or_default().iter().map(|c| serde_json::json!({
         "change_id": c, "commit_id": c, "description": "", "conflicted_files": [],
@@ -3856,6 +3864,7 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .contains(&r#"start resolve Some(7) Some(["a"])"#.to_string()));
+  type_into(&mut h, "resolve-conflicts-prompt", "keep both sides");
   h.click("resolve-conflicts-submit");
   h.cx.run_until_parked();
   assert!(
@@ -3867,8 +3876,26 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
   );
   let created = host.started_sessions();
   assert_eq!(created[0]["workspacePath"], "/r/cwd");
-  assert_eq!(created[0]["pendingPrompt"], "resolve: ");
+  assert_eq!(created[0]["pendingPrompt"], "resolve: keep both sides");
   assert!(!h.drawn("resolve-conflicts-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_resolve_dialog_shows_why_it_cannot_resolve(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  if let Some(log) = host.history.as_mut() {
+    log.commits[0].has_conflicts = true;
+  }
+  host.failing = vec!["start_resolve"];
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("resolve-conflicts-button");
+  h.cx.run_until_parked();
+  assert!(h.drawn("resolve-conflicts-error"));
+  type_into(&mut h, "resolve-conflicts-prompt", "keep both sides");
+  h.click("resolve-conflicts-submit");
+  h.cx.run_until_parked();
+  assert!(host.started_sessions().is_empty());
+  assert!(h.drawn("resolve-conflicts-dialog"));
 }
 
 #[gpui::test]
@@ -4092,6 +4119,41 @@ fn changes_tab_marks_files_viewed(cx: &mut TestAppContext) {
   h.click("viewed-a.rs");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"unmark viewed a.rs".to_string()));
+}
+
+#[gpui::test]
+fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.working = host.working.map(|mut diff| {
+    let committed: crate::jj::JjRevisionDiff = serde_json::from_value(serde_json::json!({
+      "committed_files": [
+        {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+      ],
+      "hunks_by_file": [
+        {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-x", "+y"], "patch": ""}]}
+      ],
+      "too_large_to_render": false
+    }))
+    .expect("committed diff");
+    diff.committed_files = committed.committed_files;
+    diff.hunks_by_file.extend(committed.hunks_by_file);
+    diff
+  });
+  let mut route = changes_route();
+  if let View::Workspace(r) = &mut route.view {
+    r.show_committed = Some(true);
+  }
+  let (mut h, host) = workspace_harness(cx, host, route);
+  h.click("viewed-c.rs");
+  h.cx.run_until_parked();
+  edit_a_rs(&mut h, &host);
+  let viewed = h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    changes.viewed.contains_key("c.rs")
+  });
+  assert!(viewed, "{:?}", host.writes());
+  assert!(!host.writes().contains(&"unmark viewed c.rs".to_string()));
 }
 
 #[gpui::test]
@@ -4522,6 +4584,7 @@ fn gh_thread(id: &str, line: i64, resolved: bool) -> crate::github::GhReviewThre
       created_at: "2026-03-04T00:00:00Z".into(),
       diff_hunk: String::new(),
       url: "https://github.com/o/r/pull/1#c".into(),
+      reactions: Vec::new(),
     }],
   }
 }
@@ -4576,6 +4639,23 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
     serde_json::json!(["Why two lines?"])
   );
   assert_eq!(saved[0]["start_line"], 2);
+}
+
+#[gpui::test]
+fn changes_tab_reacts_to_a_review_comment(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(!h.drawn("reaction-t1-c-EYES"));
+  h.click("reaction-add-t1-c");
+  h.click("reaction-pick-t1-c-EYES");
+  h.cx.run_until_parked();
+  assert!(h.drawn("reaction-t1-c-EYES"));
+  assert!(host.writes().contains(&"react t1-c EYES true".to_string()));
+  h.click("reaction-t1-c-EYES");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("reaction-t1-c-EYES"));
+  assert!(host.writes().contains(&"react t1-c EYES false".to_string()));
 }
 
 #[gpui::test]
@@ -7058,5 +7138,6 @@ mod review_comments;
 mod stack_panel;
 mod tab_badges;
 mod testing_library;
+mod text_editing;
 mod workspace_actions;
 mod workspace_dialogs;

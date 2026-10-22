@@ -187,6 +187,8 @@ pub struct GithubView {
   pub(super) new_issue: NewIssue,
   pub(super) new_pr: Option<new_pr::NewPr>,
   pub(super) popover: Option<Popover>,
+  /// The comment whose reaction picker is open.
+  pub(super) reaction_picker: Option<String>,
   /// The popover a press outside just closed, so the press on its own
   /// button does not open it again.
   popover_closed: Option<(Popover, Instant)>,
@@ -239,6 +241,7 @@ impl GithubView {
       new_issue: NewIssue::default(),
       new_pr: None,
       popover: None,
+      reaction_picker: None,
       popover_closed: None,
       workspaces: Vec::new(),
       logs_enabled: false,

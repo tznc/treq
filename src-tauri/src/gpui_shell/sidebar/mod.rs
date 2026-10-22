@@ -700,6 +700,8 @@ impl Render for Sidebar {
       .px_2()
       .pb_2()
       .gap(zpx(2.))
+      // A click on the empty list clears the selection; it is not a control.
+      .cursor_default()
       .on_click(self.on_action(SidebarAction::ClearSelection))
       .on_drop(self.on_workspace_drop(None));
     let mut any_rows = false;

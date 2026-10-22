@@ -19,14 +19,19 @@ function linearKey(value: string | null): void {
   const key = `repo_${hash}_linear_api_key`;
   const db = new DatabaseSync(join(home, ".local/share/com.treq/treq.db"));
   if (value === null) db.prepare("DELETE FROM settings WHERE key = ?").run(key);
-  else db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+  else
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+    ).run(key, value);
   db.close();
 }
 
 test.describe.configure({ mode: "serial" });
 test.afterAll(() => linearKey(null));
 
-test("open-workspaces: type, pick pull requests and issues, and create", async ({ page }) => {
+test("open-workspaces: type, pick pull requests and issues, and create", async ({
+  page,
+}) => {
   await home(page);
   const open = page.getByRole("button", { name: "New workspaces" });
   await expect(open).toBeVisible();
@@ -34,13 +39,19 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     name: "13-open-workspaces-sidebar-button",
     title: "New button beside WORKSPACES",
     clip: { x: 0, y: 0, width: 300, height: 360 },
-    expectations: ["A small '+ New' button sits right-aligned on the WORKSPACES heading row"],
+    expectations: [
+      "A small 'New' button with a git-branch-plus icon sits right-aligned on the WORKSPACES heading row",
+    ],
   });
 
   linearKey("lin_api_qa");
   await open.click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Your pull requests" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
   await settle(page, 800);
   await capture(page, {
     name: "13-open-workspaces-empty",
@@ -68,8 +79,12 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     { timeout: 20_000 },
   );
   await page.getByLabel("Search pull requests").fill("runbook");
-  await expect(page.getByRole("heading", { name: "Matching pull requests" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Matching pull requests" }),
+  ).toBeVisible();
+  await page
+    .getByRole("checkbox", { name: "#409 docs: add the ingest runbook" })
+    .click();
   await expect(page.getByRole("status")).toHaveAccessibleName(
     "4 workspaces will be created, 1 already open",
   );
@@ -87,25 +102,33 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   });
 
   await page.getByRole("status").click();
-  await expect(page.getByRole("list", { name: "Workspaces to open" })).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "Workspaces to open" }),
+  ).toBeVisible();
   await settle(page, 500);
   await capture(page, {
     name: "13-open-workspaces-popover",
     title: "The summary's popover lists each line",
     expectations: [
       "A popover by the summary lists: treq/retry-flaky-webhook-tests new branch; chore/bump-deps new; feat/keyvalues-cache already open; fix/slack-retry PR #421 new; acme/other and main with red reasons; docs/ingest-runbook PR #409 new",
-      "The popover sits above the dialog, with a border and shadow",
+      "The popover opens upward from the summary on the button row, with a border and shadow",
     ],
   });
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("list", { name: "Workspaces to open" })).toBeHidden();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "Workspaces to open" }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeVisible();
 
   await page.getByRole("tab", { name: "Linear" }).click();
   await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({
     timeout: 20_000,
   });
-  await page.getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" }).click();
+  await page
+    .getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" })
+    .click();
   await expect(page.getByRole("status")).toHaveAccessibleName(
     "5 workspaces will be created, 1 already open",
   );
@@ -121,10 +144,16 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   });
 
   await page.getByRole("button", { name: "Create 6 Workspaces" }).click();
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden({
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden({
     timeout: 30_000,
   });
-  for (const branch of ["treq/retry-flaky-webhook-tests", "chore/bump-deps", "fix/slack-retry"]) {
+  for (const branch of [
+    "treq/retry-flaky-webhook-tests",
+    "chore/bump-deps",
+    "fix/slack-retry",
+  ]) {
     await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
   }
   await settle(page, 1500);
@@ -141,7 +170,9 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
 
   // Stacking on the selected workspace opens the same dialog, on its branch.
   await page.keyboard.press(`${mod}+Shift+N`);
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeVisible();
   await settle(page, 800);
   await capture(page, {
     name: "13-open-workspaces-stack",
@@ -152,5 +183,74 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     ],
   });
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("heading", { name: "New Workspaces" })).toBeHidden();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden();
+});
+
+test("open-workspaces: indented lines stack on the line above", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspaces" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeVisible();
+  const lines = page.getByLabel("Workspaces", { exact: true });
+  await lines.fill(
+    ["Add the audit log", "Audit log API", "Audit log page"].join("\n"),
+  );
+  // Select the last two lines and indent them with Tab.
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("status")).toHaveAccessibleName(
+    "3 workspaces will be created",
+    {
+      timeout: 20_000,
+    },
+  );
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-indent-typed",
+    title: "Tab indents the selected lines",
+    expectations: [
+      "The textarea shows 'Audit log API' and 'Audit log page' indented two spaces under 'Add the audit log'",
+      "Status reads '3 workspaces will be created'; button reads 'Create 3 Workspaces'",
+    ],
+  });
+  await page.getByRole("status").click();
+  await expect(
+    page.getByRole("list", { name: "Workspaces to open" }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-indent",
+    title: "Indented lines stack on the line above",
+    expectations: [
+      "The popover lists treq/add-the-audit-log new branch; treq/audit-log-api on treq/add-the-audit-log; treq/audit-log-page on treq/audit-log-api",
+    ],
+  });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Create 3 Workspaces" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden({
+    timeout: 30_000,
+  });
+  for (const branch of [
+    "treq/add-the-audit-log",
+    "treq/audit-log-api",
+    "treq/audit-log-page",
+  ]) {
+    await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
+  }
+  await settle(page, 1500);
+  await capture(page, {
+    name: "13-open-workspaces-indent-opened",
+    title: "The stack in the sidebar",
+    clip: { x: 0, y: 0, width: 300, height: 520 },
+    expectations: [
+      "The sidebar shows treq/audit-log-api stacked under treq/add-the-audit-log, and treq/audit-log-page under treq/audit-log-api",
+    ],
+  });
 });

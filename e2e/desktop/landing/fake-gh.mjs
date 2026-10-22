@@ -2,7 +2,7 @@
 // A stand-in `gh` for the landing capture: answers the calls the app makes
 // (PR status, checks, the GitHub panel's lists, review threads) with fixture
 // data for lorem-ipsum/event-bus. No network, no token.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 if (process.env.TREQ_FAKE_GH_LOG) {
@@ -180,12 +180,42 @@ const reviewThreads = {
             diffHunk:
               '@@ -0,0 +1,7 @@\n+import type { EventBody } from "../../../api/src/schema";\n+\n+export async function postEvent(body: EventBody): Promise<Response> {\n+  const message =\n+    typeof body.event_message === "string" && body.event_message.length > 0\n+      ? body.event_message\n+      : JSON.stringify(body);',
             author: author("octocat"),
+            reactionGroups: [
+              { content: "THUMBS_UP", viewerHasReacted: false, reactors: { totalCount: 2 } },
+              { content: "ROCKET", viewerHasReacted: true, reactors: { totalCount: 1 } },
+            ],
           },
         ],
       },
     },
   ],
 };
+
+// Issue #77's conversation, with reactions as `gh issue view` reports them
+// and whether octocat reacted, as GraphQL `nodes` reports it.
+const issueComments = {
+  77: [
+    {
+      id: "IC_discord_body",
+      body: "Reproduced with a Discord embed-only message: the body comes through as an empty string.",
+      author: author("bob"),
+      createdAt: "2026-08-10T12:00:00Z",
+      reactionGroups: [
+        { content: "THUMBS_UP", users: { totalCount: 3 } },
+        { content: "HEART", users: { totalCount: 1 } },
+        { content: "EYES", users: { totalCount: 2 } },
+      ],
+    },
+    {
+      id: "IC_discord_fix",
+      body: "Falling back to the serialized payload should cover it.",
+      author: author("alice"),
+      createdAt: "2026-08-10T15:30:00Z",
+      reactionGroups: [],
+    },
+  ],
+};
+const viewerReacted = { IC_discord_body: ["THUMBS_UP"] };
 
 function pick(item, fields) {
   return Object.fromEntries(fields.split(",").map((key) => [key, item[key]]));
@@ -248,7 +278,31 @@ if (group === "pr" && command === "diff") {
   process.exit(0);
 }
 if (group === "api" && command === "graphql") {
-  const query = field("query") ?? "";
+  const input =
+    after("--input") === "-" ? JSON.parse(readFileSync(0, "utf8")) : null;
+  const query = input?.query ?? field("query") ?? "";
+  if (query.includes("nodes(ids")) {
+    const comments = Object.values(issueComments).flat();
+    out({
+      data: {
+        nodes: input.variables.ids.map((id) => {
+          const comment = comments.find((c) => c.id === id);
+          if (!comment) return null;
+          return {
+            id,
+            reactionGroups: comment.reactionGroups.map(({ content, users }) => ({
+              content,
+              viewerHasReacted: (viewerReacted[id] ?? []).includes(content),
+              reactors: users,
+            })),
+          };
+        }),
+      },
+    });
+  }
+  if (query.includes("addReaction") || query.includes("removeReaction")) {
+    out({ data: {} });
+  }
   if (query.includes("reviewThreads")) {
     out({
       data: {
@@ -281,6 +335,6 @@ if (group === "api" && command === "user") out({ login: "octocat" });
 if (group === "issue" && command === "view") {
   const issue = issues.find((i) => String(i.number) === args[2]);
   if (!issue) fail("issue not found");
-  out({ ...issue, body: "", labels: [], comments: [] });
+  out({ ...issue, body: "", labels: [], comments: issueComments[issue.number] ?? [] });
 }
 fail(`fake gh: unsupported call: gh ${args.join(" ")}`);

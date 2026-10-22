@@ -1184,3 +1184,95 @@ fn test_default_branch_without_remote_all_commits_immutable() {
     );
   }
 }
+
+/// A workspace commit rebased onto a `main` that edits the same file, so the
+/// workspace commit's own tree is conflicted on `conflict.txt`.
+fn setup_conflicted_workspace_commit(repo: &TestRepo) -> (treq_lib::local_db::Workspace, String) {
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/conflict-resolved-later",
+    Some("conflict resolved later".to_string()),
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("create workspace");
+  let workspace_path = repo
+    .workspaces_dir()
+    .join(&workspace.workspace_path)
+    .to_str()
+    .expect("workspace path should be utf-8")
+    .to_string();
+
+  TestRepo::write_workspace_file(&workspace_path, "conflict.txt", "workspace version\n")
+    .expect("write workspace conflict.txt");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "conflicting commit")
+    .expect("commit workspace");
+
+  repo
+    .create_file("conflict.txt", "main version\n")
+    .expect("write main conflict.txt");
+  treq_lib::jj::jj_commit(&repo.repo_path, "main commit").expect("commit main");
+  let rebase = treq_lib::jj::jj_rebase_workspace_bookmark_onto(
+    &workspace_path,
+    &workspace.branch_name,
+    repo.default_branch(),
+  )
+  .expect("rebase");
+  assert!(rebase.success, "rebase failed: {}", rebase.message);
+
+  (workspace, workspace_path)
+}
+
+fn conflict_flags(repo: &TestRepo, workspace_id: i64) -> Vec<(String, bool)> {
+  treq_lib::core::list_commits(&repo.repo_path, Some(workspace_id), false, None, None)
+    .expect("list commits")
+    .commits
+    .into_iter()
+    .filter(|c| !c.on_target_only)
+    .map(|c| (c.description, c.has_conflicts))
+    .collect()
+}
+
+#[test]
+fn list_commits_clears_conflict_resolved_by_a_later_commit() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let (workspace, workspace_path) = setup_conflicted_workspace_commit(&repo);
+  assert_eq!(
+    conflict_flags(&repo, workspace.id),
+    vec![("conflicting commit".to_string(), true)]
+  );
+
+  TestRepo::write_workspace_file(&workspace_path, "conflict.txt", "resolved\n")
+    .expect("resolve conflict.txt");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "resolve conflict")
+    .expect("commit resolution");
+
+  assert_eq!(
+    conflict_flags(&repo, workspace.id),
+    vec![
+      ("resolve conflict".to_string(), false),
+      ("conflicting commit".to_string(), false),
+    ]
+  );
+}
+
+#[test]
+fn list_commits_keeps_conflict_a_later_commit_leaves_unresolved() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let (workspace, workspace_path) = setup_conflicted_workspace_commit(&repo);
+
+  TestRepo::write_workspace_file(&workspace_path, "other.txt", "unrelated\n")
+    .expect("write other.txt");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "unrelated commit")
+    .expect("commit unrelated change");
+
+  assert_eq!(
+    conflict_flags(&repo, workspace.id),
+    vec![
+      ("unrelated commit".to_string(), true),
+      ("conflicting commit".to_string(), true),
+    ]
+  );
+}
