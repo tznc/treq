@@ -24,7 +24,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, App, Bounds, ClipboardItem, Context, Div,
-  Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle, SharedString,
+  Entity, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, ScrollHandle, SharedString,
   Stateful, Subscription, Window,
 };
 
@@ -139,6 +139,8 @@ pub struct ChangesView {
   /// The file a discard runs on.
   file_action: Option<String>,
   pub(super) discard_dialog: bool,
+  /// Focus moves into the open confirmation so Escape reaches it.
+  discard_focus: Option<FocusHandle>,
   starting_review: bool,
   /// The repository has a GitHub remote, and the branch's pull request.
   github: bool,
@@ -223,6 +225,7 @@ impl ChangesView {
       pending: None,
       file_action: None,
       discard_dialog: false,
+      discard_focus: None,
       starting_review: false,
       github: false,
       pr_state: None,
@@ -3147,13 +3150,23 @@ impl ChangesView {
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
     if !self.discard_dialog {
+      self.discard_focus = None;
       return None;
     }
+    let focus = self
+      .discard_focus
+      .get_or_insert_with(|| {
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
+        focus
+      })
+      .clone();
     let viewport = window.viewport_size();
     let n = self.staging.unstaged(self.files()).len();
     let panel = div()
       .id("discard-all-dialog")
       .debug_selector(|| "discard-all-dialog".into())
+      .track_focus(&focus)
       .w_full()
       .max_w(zpx(512.))
       .p_6()

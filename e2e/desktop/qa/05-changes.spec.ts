@@ -12,6 +12,8 @@ import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 /** alerting.ts in feat/alerting-logs's Uncommitted list. */
 const SELECTED_ROW = { x: 330, y: 283 };
+/** The Uncommitted header's discard all button, for feat/alerting-logs. */
+const DISCARD_ALL = { x: 0, y: 0 };
 
 test.describe.configure({ mode: "serial" });
 
@@ -211,4 +213,29 @@ test("changes: selected file row keeps its actions", async ({ page }) => {
       "Status letter and action icons readable on the blue selection",
     ],
   });
+});
+
+test("changes: Escape closes the discard all confirmation", async ({ page }) => {
+  await openWorkspace(page, "feat/alerting-logs");
+  await openTab(page, "Changes");
+  await page.mouse.click(DISCARD_ALL.x, DISCARD_ALL.y); // Uncommitted's discard all
+  const confirm = page.getByRole("button", { name: "Discard all changes", exact: true });
+  await expect(confirm).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-discard-all-open",
+    title: "Discard all changes? confirmation",
+    expectations: ["Dialog centred over a dimmed window with Cancel and Discard all changes"],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-discard-all-escaped",
+    title: "After Escape on the confirmation",
+    expectations: [
+      "Dialog closed; the Changes tab shows again",
+      "alerting.ts and levels.ts still listed under Uncommitted",
+    ],
+  });
+  await expect(confirm).toHaveCount(0);
 });
