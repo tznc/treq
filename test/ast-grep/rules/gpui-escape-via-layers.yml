@@ -2,9 +2,10 @@ id: gpui-escape-via-layers
 language: rust
 severity: error
 message: >
-  Do not handle Escape by comparing the key. Dismiss with
-  `ui::DismissExt::dismiss_with` or the shared dialog layer, so Escape
-  closes the topmost layer only.
+  Do not handle Escape by comparing the key. Close a dialog or panel with
+  `ui::EscapeExt::on_escape`, a menu with `ui::DismissExt::dismiss_with`,
+  and test a routed key with `ui::is_escape`, so Escape closes the topmost
+  layer only.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
 ignores:

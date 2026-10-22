@@ -442,10 +442,21 @@ impl Palette {
     self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
   }
 
-  /// Behind every modal dialog.
+  /// Behind every modal dialog, and behind controls laid over an image.
   pub fn scrim(&self) -> Hsla {
     gpui::black().opacity(if self.dark { 0.55 } else { 0.4 })
   }
+
+  /// The GitHub button's fill, GitHub's own near-black in both themes.
+  pub fn github(&self) -> Hsla {
+    tw::color(tw::GITHUB)
+  }
+}
+
+/// A color that arrives with the data, such as a GitHub or Linear label's,
+/// or a terminal's color scheme. UI chrome uses [`Palette`] tokens instead.
+pub fn data_color(hex: u32) -> Hsla {
+  rgb(hex).into()
 }
 
 fn token(h: f32, s: f32, l: f32) -> Hsla {
@@ -607,6 +618,7 @@ pub mod tw {
     rgb(hex).into()
   }
 
+  pub const GITHUB: u32 = 0x24292f;
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;

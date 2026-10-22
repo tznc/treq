@@ -8,9 +8,9 @@ use gpui::{div, prelude::*, px, App};
 use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
   theme::{self, Palette},
-  Alert, Badge, Button, ConfirmDialog, Count, Dialog, Dot, EmptyState, IconButton, IconButtonSize,
-  Kbd, Loading, MenuItem, MenuSeparator, Picker, PickerPlacement, Row, RowDensity, Severity,
-  Skeleton, SplitButton, Tab, Tabs, TabsStyle, Tone, Variant,
+  Alert, Badge, Button, CheckState, Checkbox, ConfirmDialog, Count, Dialog, Dot, EmptyState,
+  IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuSeparator, Picker, PickerPlacement, Row,
+  RowDensity, Severity, Skeleton, SplitButton, Tab, Tabs, TabsStyle, Tone, Variant,
 };
 
 fn main() {
@@ -276,6 +276,21 @@ fn indicators() -> Vec<Example> {
     })
     .component("Kbd")
     .title("Shortcuts"),
+    example!("checkbox/states", |_, _, cx| {
+      let p = p(cx);
+      div().flex().items_center().gap_3().children(
+        [
+          ("off", CheckState::Off, false),
+          ("on", CheckState::On, false),
+          ("mixed", CheckState::Mixed, false),
+          ("disabled", CheckState::On, true),
+        ]
+        .map(|(id, state, disabled)| Checkbox::new(id, &p).checked(state).disabled(disabled)),
+      )
+    })
+    .component("Checkbox")
+    .title("Checkbox")
+    .size(120., 32.),
     example!("alert/playground", |knobs, _, cx| {
       let p = p(cx);
       div().w(px(440.)).child(

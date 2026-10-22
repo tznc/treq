@@ -793,6 +793,42 @@
       ]
     },
     {
+      "id": "checkbox/states",
+      "title": "Checkbox",
+      "component": "Checkbox",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().flex().items_center().gap_3().children(\n  [\n    (\"off\", CheckState::Off, false),\n    (\"on\", CheckState::On, false),\n    (\"mixed\", CheckState::Mixed, false),\n    (\"disabled\", CheckState::On, true),\n  ]\n  .map(|(id, state, disabled)| Checkbox::new(id, &p).checked(state).disabled(disabled)),\n)"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/states/light/default.png",
+          "width": 152,
+          "height": 64,
+          "scale": 2.0,
+          "hash": "81cb226405b697da"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/states/dark/default.png",
+          "width": 152,
+          "height": 64,
+          "scale": 2.0,
+          "hash": "272a4ba6349300b8"
+        }
+      ]
+    },
+    {
       "id": "alert/playground",
       "title": "Playground",
       "component": "Alert",
