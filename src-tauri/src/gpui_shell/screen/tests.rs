@@ -1242,6 +1242,9 @@ impl commits_data::CommitsHost for FakeHost {
     change_ids: Option<Vec<String>>,
   ) -> Result<crate::core::ResolveConflictsSession, String> {
     self.record(format!("start resolve {workspace_id:?} {change_ids:?}"));
+    if self.failing.contains(&"start_resolve") {
+      return Err("No conflicted commits found to resolve.".into());
+    }
     serde_json::from_value(serde_json::json!({
       "targets": change_ids.unwrap_or_default().iter().map(|c| serde_json::json!({
         "change_id": c, "commit_id": c, "description": "", "conflicted_files": [],
@@ -3856,6 +3859,7 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .contains(&r#"start resolve Some(7) Some(["a"])"#.to_string()));
+  type_into(&mut h, "resolve-conflicts-prompt", "keep both sides");
   h.click("resolve-conflicts-submit");
   h.cx.run_until_parked();
   assert!(
@@ -3867,8 +3871,26 @@ fn commits_tab_resolves_conflicts_with_an_agent(cx: &mut TestAppContext) {
   );
   let created = host.started_sessions();
   assert_eq!(created[0]["workspacePath"], "/r/cwd");
-  assert_eq!(created[0]["pendingPrompt"], "resolve: ");
+  assert_eq!(created[0]["pendingPrompt"], "resolve: keep both sides");
   assert!(!h.drawn("resolve-conflicts-dialog"));
+}
+
+#[gpui::test]
+fn commits_tab_resolve_dialog_shows_why_it_cannot_resolve(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  if let Some(log) = host.history.as_mut() {
+    log.commits[0].has_conflicts = true;
+  }
+  host.failing = vec!["start_resolve"];
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("resolve-conflicts-button");
+  h.cx.run_until_parked();
+  assert!(h.drawn("resolve-conflicts-error"));
+  type_into(&mut h, "resolve-conflicts-prompt", "keep both sides");
+  h.click("resolve-conflicts-submit");
+  h.cx.run_until_parked();
+  assert!(host.started_sessions().is_empty());
+  assert!(h.drawn("resolve-conflicts-dialog"));
 }
 
 #[gpui::test]
