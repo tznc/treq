@@ -3993,9 +3993,8 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
 }
 
 /// Found by the fuzzer: the confirmation listens for Escape only while
-/// focus is inside it, and opening it leaves the focus where it was.
+/// focus is inside it, so opening it moves the focus there.
 #[gpui::test]
-#[ignore = "bug: Escape does not close the Discard all changes confirmation"]
 fn escape_closes_the_discard_all_confirmation(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
