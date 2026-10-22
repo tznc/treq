@@ -1,5 +1,5 @@
-// Window limits: the workspace header at the largest UI zoom, Ctrl+0
-// back to 100%, and the window's minimum size.
+// Window limits: the workspace header at the largest UI zoom, and the
+// window's minimum size.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
@@ -8,7 +8,7 @@ const BRANCH = "feat/empty-event-message";
 
 test.describe.configure({ mode: "serial" });
 
-test("window-zoom: header at 200%, then Ctrl+0", async ({ page }) => {
+test("window-zoom: header at 200%", async ({ page }) => {
   await openWorkspace(page, BRANCH);
   await openTab(page, "Code");
   try {
@@ -24,18 +24,8 @@ test("window-zoom: header at 200%, then Ctrl+0", async ({ page }) => {
         "Details and the overflow button are fully inside the window",
       ],
     });
-
-    await page.keyboard.press(`${mod}+0`);
-    await settle(page, 1500);
-    await capture(page, {
-      name: "15-window-zoom-reset",
-      title: "After Ctrl+0",
-      expectations: [
-        "Everything is back at 100%: the header fits on one row",
-      ],
-    });
   } finally {
-    await page.keyboard.press(`${mod}+0`);
+    for (let i = 0; i < 20; i++) await page.keyboard.press(`${mod}+-`);
     await settle(page, 500);
   }
 });

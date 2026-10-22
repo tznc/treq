@@ -38,7 +38,6 @@ pub fn window_shortcut(key: &str, m: Modifiers, in_terminal: bool) -> Option<Sho
   match key {
     "=" | "+" => return Some(Shortcut::ZoomIn),
     "-" | "_" => return Some(Shortcut::ZoomOut),
-    "0" => return Some(Shortcut::ZoomReset),
     _ if in_terminal || m.shift => return None,
     _ => {}
   }
@@ -79,10 +78,6 @@ mod tests {
       ..secondary()
     };
     assert_eq!(window_shortcut("_", shift, false), Some(Shortcut::ZoomOut));
-    assert_eq!(
-      window_shortcut("0", secondary(), true),
-      Some(Shortcut::ZoomReset)
-    );
     assert_eq!(window_shortcut("=", Modifiers::none(), false), None);
   }
 
