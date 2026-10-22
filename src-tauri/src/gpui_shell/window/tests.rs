@@ -747,6 +747,40 @@ fn shortcuts_do_not_stack_a_dialog_over_another(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_agent_prompt_starts_on_the_open_workspace(cx: &mut TestAppContext) {
+  use crate::gpui_shell::screen::Modal;
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let initial = |window: &Window| match window.last().modal {
+    Some(Modal::AgentPrompt(route)) => route.initial_workspace_id,
+    other => panic!("not the prompt dialog: {other:?}"),
+  };
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::AgentPrompt, cx));
+  assert_eq!(initial(&window), None, "the repository home targets main");
+  window.press(cx, "agentPrompt.close");
+
+  select(&window, cx, 2, false);
+  cx.run_until_parked();
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::AgentPrompt, cx));
+  assert_eq!(initial(&window), Some(2), "Cmd+I");
+  window.press(cx, "agentPrompt.close");
+
+  window.controller.update(cx, |c, cx| {
+    c.overlay_action(
+      &ScreenAction::Press {
+        id: "palette.start-agent-with-prompt".into(),
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  assert_eq!(initial(&window), Some(2), "the palette's command");
+}
+
+#[gpui::test]
 fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));
