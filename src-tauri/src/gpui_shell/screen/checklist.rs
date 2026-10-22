@@ -90,7 +90,7 @@ pub fn render(list: &Checklist, ctx: &Ctx) -> impl IntoElement {
       } else {
         refresh.into_any_element()
       })
-      .child("Check again")
+      .label("Check again")
       .on_click(ctx.send(ScreenAction::RecheckPrerequisites))
     });
 

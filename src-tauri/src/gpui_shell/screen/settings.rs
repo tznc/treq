@@ -1447,7 +1447,7 @@ impl SettingsView {
       .gap_6()
       .child(field_block(
         "Theme",
-        form::select_field("settings-theme", &theme_select, false),
+        form::select_field("settings-theme", "Theme", &theme_select, false),
         None,
         p,
       ))
@@ -1482,7 +1482,7 @@ impl SettingsView {
           .child(
             div()
               .mt_2()
-              .child(form::select_field("settings-font-size", &font, false)),
+              .child(form::select_field("settings-font-size", "Font Size", &font, false)),
           )
           .child(help(
             "Font size for terminal, code diff display, and overview files",
@@ -1492,20 +1492,20 @@ impl SettingsView {
       )
       .child(field_block(
         "Claude Code Model",
-        form::select_field("settings-default-model", &model, false),
+        form::select_field("settings-default-model", "Claude Code Model", &model, false),
         Some("Default model for new Claude Code sessions"),
         p,
       ))
       .child(field_block(
         "Default Agent",
-        form::select_field("settings-default-agent", &agent, false),
+        form::select_field("settings-default-agent", "Default Agent", &agent, false),
         Some("Default agent for new sessions"),
         p,
       ))
       .child(checklist::render(&app.checklist, &ctx))
       .child(field_block(
         "Conflict Marker Style",
-        form::select_field("settings-conflict-marker-style", &conflict, false),
+        form::select_field("settings-conflict-marker-style", "Conflict Marker Style", &conflict, false),
         Some("Style of conflict markers written to files during rebase. Git Diff3 is compatible with most editors."),
         p,
       ))
@@ -1742,13 +1742,13 @@ impl SettingsView {
         ))
         .child(field_block(
           "Claude Code Model",
-          form::select_field("settings-repo-default-model", &model, managed("defaultModel")),
+          form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
           Some("Default model for new Claude Code sessions in this repository (overrides application default)"),
           p,
         ))
         .child(field_block(
           "Default Agent",
-          form::select_field("settings-repo-default-agent", &agent, managed("defaultAgent")),
+          form::select_field("settings-repo-default-agent", "Default Agent", &agent, managed("defaultAgent")),
           Some("Default agent for new sessions in this repository (overrides application default)"),
           p,
         ))
@@ -1801,13 +1801,13 @@ impl SettingsView {
             ))
             .child(field_block(
               "Review Agent",
-              form::select_field("settings-review-agent", &review_agent, managed("reviewAgent")),
+              form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),
               Some("Agent launched by Start Review (overrides the default agent)"),
               p,
             ))
             .child(field_block(
               "Automatic Review",
-              form::select_field("settings-auto-review-trigger", &trigger, managed("autoReviewTrigger")),
+              form::select_field("settings-auto-review-trigger", "Automatic Review", &trigger, managed("autoReviewTrigger")),
               Some("Opens a review terminal on its own after the chosen operation finishes in a workspace of this repository."),
               p,
             )),
@@ -1974,7 +1974,7 @@ impl SettingsView {
             div()
               .min_w(zpx(160.))
               .child(label("Install level"))
-              .child(div().mt_2().child(form::select_field("skills-scope", &scope, false))),
+              .child(div().mt_2().child(form::select_field("skills-scope", "Install level", &scope, false))),
           ),
       )
       .when(tab.loading, |this| {
@@ -2115,6 +2115,7 @@ impl SettingsView {
               )
               .child(div().w(zpx(128.)).child(form::select_field(
                 format!("skill-level-{id}"),
+                "Install level",
                 &level,
                 row.busy,
               ))),

@@ -1368,6 +1368,7 @@ impl GithubView {
           .child(ui::text(
             div().h(zpx(32.)).child(form::select_field(
               SharedString::from(field.replace('.', "-")),
+              label,
               &state,
               false,
             )),

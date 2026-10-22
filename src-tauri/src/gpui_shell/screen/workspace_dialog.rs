@@ -1309,6 +1309,7 @@ impl WorkspaceDialog {
     let target = self.target_branch.clone();
     let disabled = self.loading;
     let button = Button::new("workspace-dialog-target", &p)
+      .aria_label("Workspace target")
       .variant(Variant::Outline)
       .size(Size::Sm)
       .disabled(disabled)

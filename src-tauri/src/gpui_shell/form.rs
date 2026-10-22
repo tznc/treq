@@ -305,6 +305,7 @@ pub fn textarea_field(
 /// A `<select>`: `mt-2 w-full px-3 py-2 border rounded-md`.
 pub fn select_field(
   id: impl Into<SharedString>,
+  name: impl Into<SharedString>,
   state: &Entity<SelectState<Options>>,
   disabled: bool,
 ) -> impl IntoElement {
@@ -317,6 +318,7 @@ pub fn select_field(
     .child(
       Select::new(state)
         .id(id)
+        .accessibility_label(name)
         .disabled(disabled)
         .h(zpx(FIELD_HEIGHT)),
     )
