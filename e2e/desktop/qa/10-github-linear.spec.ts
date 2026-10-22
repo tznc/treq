@@ -126,10 +126,9 @@ test("github-linear: pull requests", async ({ page }) => {
     title: "Pull request #418 detail",
     expectations: [
       "Title wraps beside Review changes / Open Workspace / Open in Web",
-      "Checks list with status icons and durations; Treq checks empty state",
+      "Checks list with status icons; finished checks show a duration, the pending typecheck none",
       "Comment box with Comment / Convert to Draft / Close PR",
     ],
-    issue: "The pending typecheck shows a duration of '1682h 23m 2s'",
   });
   await page.getByRole("button", { name: "2/4" }).click();
   await settle(page, 1200);

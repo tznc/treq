@@ -823,6 +823,14 @@ impl RemoteView {
             cx,
           )),
       )
+      .child(
+        div().mt_6().child(
+          Button::new("remote-setup-cancel", p)
+            .variant(Variant::Ghost)
+            .label("Cancel")
+            .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
+        ),
+      )
   }
 
   fn managed(

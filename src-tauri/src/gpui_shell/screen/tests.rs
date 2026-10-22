@@ -3907,7 +3907,8 @@ fn changes_tab_lists_files_and_their_diffs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  h.click("commit-button");
+  h.click("commit-message");
+  h.cx.simulate_keystrokes("cmd-enter");
   h.cx.run_until_parked();
   assert!(h.drawn("commit-message-error"));
   assert!(!host.writes().iter().any(|w| w.starts_with("commit")));

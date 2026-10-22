@@ -906,22 +906,18 @@ pub fn gh_create_pr_impl(
 const CHECK_JSON_FIELDS: &str = "name,bucket,link,startedAt,completedAt";
 
 /// Compute elapsed seconds for a check run from `gh pr checks` timestamps.
-/// Pending runs (no completedAt) measure against `now`. Inverted timestamps
-/// (seen on some skipped checks) clamp to zero.
-fn check_duration_secs(
-  started_at: Option<&str>,
-  completed_at: Option<&str>,
-  now: chrono::DateTime<chrono::Utc>,
-) -> Option<u64> {
-  let started = chrono::DateTime::parse_from_rfc3339(started_at?)
-    .ok()?
-    .with_timezone(&chrono::Utc);
-  let end = match completed_at {
-    Some(raw) => chrono::DateTime::parse_from_rfc3339(raw)
-      .ok()?
-      .with_timezone(&chrono::Utc),
-    None => now,
+/// A run that has not finished has none: `gh` reports its `completedAt` as
+/// missing or as Go's zero time, and the time since it started would be stale
+/// by the next poll. Inverted timestamps (seen on some skipped checks) clamp
+/// to zero.
+fn check_duration_secs(started_at: Option<&str>, completed_at: Option<&str>) -> Option<u64> {
+  let parse = |raw: &str| {
+    chrono::DateTime::parse_from_rfc3339(raw)
+      .ok()
+      .filter(|t| t.timestamp() > 0)
   };
+  let started = parse(started_at?)?;
+  let end = parse(completed_at?)?;
   Some(end.signed_duration_since(started).num_seconds().max(0) as u64)
 }
 
@@ -966,7 +962,6 @@ fn rollup_pr_checks(raw: Vec<GhCheck>) -> Option<PrCiStatus> {
     return None;
   }
 
-  let now = chrono::Utc::now();
   let mut passed = 0u32;
   let mut failed = 0u32;
   let mut pending = 0u32;
@@ -978,8 +973,7 @@ fn rollup_pr_checks(raw: Vec<GhCheck>) -> Option<PrCiStatus> {
         "fail" | "cancel" => failed += 1,
         _ => pending += 1,
       }
-      let duration_secs =
-        check_duration_secs(c.started_at.as_deref(), c.completed_at.as_deref(), now);
+      let duration_secs = check_duration_secs(c.started_at.as_deref(), c.completed_at.as_deref());
       PrCheckEntry {
         name: c.name,
         bucket: c.bucket,
@@ -2210,33 +2204,31 @@ echo '[]'"#,
 
   #[test]
   fn check_duration_secs_from_completed_run() {
-    let secs = check_duration_secs(
-      Some("2026-08-08T22:00:00Z"),
-      Some("2026-08-08T22:05:56Z"),
-      chrono::DateTime::parse_from_rfc3339("2026-08-08T23:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc),
-    );
+    let secs = check_duration_secs(Some("2026-08-08T22:00:00Z"), Some("2026-08-08T22:05:56Z"));
     assert_eq!(secs, Some(5 * 60 + 56));
   }
 
   #[test]
-  fn check_duration_secs_uses_now_when_still_running() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-08-08T22:01:30Z")
-      .unwrap()
-      .with_timezone(&chrono::Utc);
-    let secs = check_duration_secs(Some("2026-08-08T22:00:00Z"), None, now);
-    assert_eq!(secs, Some(90));
+  fn check_duration_secs_is_none_while_still_running() {
+    assert_eq!(
+      check_duration_secs(Some("2026-08-08T22:00:00Z"), None),
+      None
+    );
+    // `gh` reports an unfinished run's completedAt as Go's zero time.
+    assert_eq!(
+      check_duration_secs(Some("2026-08-08T22:00:00Z"), Some("0001-01-01T00:00:00Z")),
+      None
+    );
+    assert_eq!(
+      check_duration_secs(Some("0001-01-01T00:00:00Z"), Some("0001-01-01T00:00:00Z")),
+      None
+    );
   }
 
   #[test]
   fn check_duration_secs_clamps_inverted_timestamps() {
     // Skipped checks sometimes report startedAt after completedAt.
-    let secs = check_duration_secs(
-      Some("2026-08-08T22:02:45Z"),
-      Some("2026-08-08T22:02:35Z"),
-      chrono::Utc::now(),
-    );
+    let secs = check_duration_secs(Some("2026-08-08T22:02:45Z"), Some("2026-08-08T22:02:35Z"));
     assert_eq!(secs, Some(0));
   }
 

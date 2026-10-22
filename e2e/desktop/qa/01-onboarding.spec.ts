@@ -118,7 +118,7 @@ test("onboarding: first run and open repository", async () => {
     title: "Onboarding: Open via SSH (remote repository) dialog",
     screen: true,
     expectations: [
-      "Connect-a-remote-repository form: host, path fields and buttons aligned",
+      "Connect-a-remote-repository chooser: two choice cards and a Cancel button, aligned",
       "Field labels and placeholders readable in this theme",
       "No network is needed to show the form; no stuck spinner",
     ],
@@ -147,16 +147,26 @@ test("onboarding: first run and open repository", async () => {
     if ((await back.count()) > 0) await back.click();
     await page.waitForTimeout(1000);
   }
-  // Escape should dismiss the dialog, as every other dialog's does.
+  // The chooser closes with its Cancel button or Escape, as every other
+  // dialog does.
+  const cancel = page.getByRole("button", { name: "Cancel" });
+  await expect(cancel).toBeVisible();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(1000);
+  await expect(cancel).toHaveCount(0);
   await capture(page, {
     name: "01-onboarding-ssh-after-escape",
     title: "Remote dialog after pressing Escape",
     screen: true,
     expectations: ["The remote dialog is closed and the onboarding card shows"],
-    issue: "Escape does not dismiss the 'Connect a remote repository' chooser, which has no Close or Cancel button",
   });
+  await page.getByRole("button", { name: "Open via SSH" }).click();
+  await page.waitForTimeout(1000);
+  await cancel.click();
+  await page.waitForTimeout(1000);
+  await expect(cancel).toHaveCount(0);
+  await page.getByRole("button", { name: "Open via SSH" }).click();
+  await page.waitForTimeout(1000);
   await page.mouse.click(80, 80);
   await page.waitForTimeout(1000);
   await capture(page, {
