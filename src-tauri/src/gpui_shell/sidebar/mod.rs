@@ -1231,13 +1231,10 @@ impl Sidebar {
     let selector = format!("{prefix}workspace-{id}");
     let branch_color = match row.pr {
       Some(pr) => pr_color(pr, palette),
-      None if row.selected => palette.primary,
       None => palette.muted_foreground,
     };
     let title_color = if row.conflicted {
       palette.destructive
-    } else if row.selected {
-      palette.primary
     } else {
       palette.muted_foreground
     };
@@ -1347,9 +1344,6 @@ impl Sidebar {
           .truncate()
           .font_family(theme::MONO_FONT)
           .text_color(title_color)
-          .when(row.selected, |this| {
-            this.font_weight(gpui::FontWeight::MEDIUM)
-          })
           .child(row.title.clone()),
       )
       .child(
