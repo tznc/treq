@@ -222,6 +222,11 @@ struct Shells(HashMap<String, WeakEntity<Shell>>);
 
 impl Global for Shells {}
 
+/// The smallest a repo window gets: room for the default sidebar beside a
+/// screen whose tabs fit on one row at 100% zoom (the header wraps).
+const MIN_WIDTH: f64 = 900.;
+const MIN_HEIGHT: f64 = 500.;
+
 /// Opens a repo window in the GPUI shell. Must run on the main thread.
 /// `repo` is the repository it opens on (`None`: the start screen).
 pub fn open_window(
@@ -233,6 +238,7 @@ pub fn open_window(
   let window = tauri::WindowBuilder::new(app, label)
     .title(title)
     .inner_size(1400.0, 900.0)
+    .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
     .build()?;
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;

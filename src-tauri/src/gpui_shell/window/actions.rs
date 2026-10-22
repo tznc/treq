@@ -55,6 +55,8 @@ pub enum Shortcut {
   NewShell,
   ZoomIn,
   ZoomOut,
+  /// Cmd+0.
+  ZoomReset,
 }
 
 /// What a handler did: changed the model with these effects, or left the
@@ -100,6 +102,9 @@ impl Model {
       Shortcut::NewShell if self.shows_terminal() => self.terminal("newShell", json!({})),
       Shortcut::ZoomIn => return vec![self.zoom(super::model::ZOOM_STEP as i32)],
       Shortcut::ZoomOut => return vec![self.zoom(-(super::model::ZOOM_STEP as i32))],
+      Shortcut::ZoomReset => {
+        return vec![self.zoom(super::model::DEFAULT_ZOOM as i32 - self.prefs.zoom as i32)]
+      }
       _ => {}
     }
     Vec::new()
@@ -1194,6 +1199,16 @@ mod tests {
       [Effect::SaveSetting {
         key: "ui_zoom".into(),
         value: "105".into()
+      }]
+    );
+    model.shortcut(Shortcut::ZoomIn, &data);
+    let effects = model.shortcut(Shortcut::ZoomReset, &data);
+    assert_eq!(model.prefs.zoom, 100);
+    assert_eq!(
+      effects,
+      [Effect::SaveSetting {
+        key: "ui_zoom".into(),
+        value: "100".into()
       }]
     );
     model.shortcut(Shortcut::ToggleTerminal, &data);
