@@ -557,6 +557,7 @@ impl MergeView {
       .label(label)
       .on_click(self.press("merge.confirm"));
     let menu = Button::new("merge-strategy", p)
+      .aria_label("Merge strategy")
       .disabled(disabled)
       .bg(green)
       .hover_bg(green)

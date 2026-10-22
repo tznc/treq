@@ -1526,12 +1526,12 @@ impl SettingsView {
           )
           .child(div().mt_1().child(form::switch(
             "settings-notify-agent-finished",
+            "Notify when an agent finishes",
             app.notify_agent_finished,
             false,
             p,
             self.field("app.notifyAgentFinished"),
-          )
-          .aria_label("Notify when an agent finishes"))),
+          ))),
       )
       .child(
         div()
@@ -1554,12 +1554,12 @@ impl SettingsView {
               .mt_3()
               .child(form::switch(
                 "settings-setup-always-run",
+                "Run on every app startup",
                 setup.always_run,
                 setup.loading,
                 p,
                 self.field("app.setupScriptAlwaysRun"),
-              )
-              .aria_label("Run on every app startup"))
+              ))
               .child(label("Run on every app startup")),
           )
           .child(
@@ -1755,8 +1755,14 @@ impl SettingsView {
         .child(switch_row(
           "Auto-push to remote",
           "Automatically push to the remote after every commit in this repository",
-          form::switch("settings-auto-push", f.auto_push, false, p, self.field("repo.autoPush"))
-            .aria_label("Auto-push to remote"),
+          form::switch(
+            "settings-auto-push",
+            "Auto-push to remote",
+            f.auto_push,
+            false,
+            p,
+            self.field("repo.autoPush"),
+          ),
           p,
         ))
         .child(switch_row(
@@ -1764,12 +1770,12 @@ impl SettingsView {
           "Add .jj*/ and Treq-generated agent skill paths to this repository's .gitignore",
           form::switch(
             "settings-ignore-generated",
+            "Ignore generated Treq paths",
             f.ignore_generated_agent_files,
             false,
             p,
             self.field("repo.ignoreGeneratedAgentFiles"),
-          )
-          .aria_label("Ignore generated Treq paths"),
+          ),
           p,
         ))
         .child(
@@ -1890,12 +1896,12 @@ impl SettingsView {
                   .child(
                     form::switch(
                       format!("settings-preview-{}", feature.id),
+                      feature.title.clone(),
                       feature.checked,
                       false,
                       p,
                       self.field(&format!("preview.{}", feature.id)),
-                    )
-                    .aria_label(feature.title.clone()),
+                    ),
                   ),
               )
           })),
@@ -2029,6 +2035,7 @@ impl SettingsView {
         this.child(
           div().absolute().top_2().right_2().child(
             Button::new(format!("skill-uninstall-{id}"), p)
+              .aria_label("Uninstall")
               .variant(Variant::Outline)
               .size(Size::IconXs)
               .disabled(row.busy)

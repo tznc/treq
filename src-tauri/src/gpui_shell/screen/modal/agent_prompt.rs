@@ -785,7 +785,6 @@ impl AgentPromptView {
     let button = Button::new("agent-prompt-workspace", p)
       .aria_label(format!("Workspace: {name}"))
       .variant(Variant::Outline)
-      .aria_label("Workspace")
       .min_w(zpx(240.))
       .max_w_full()
       .justify_between()
@@ -1128,6 +1127,7 @@ impl AgentPromptView {
       .relative()
       .child(
         small(Button::new("task-add", p).variant(Variant::Ghost))
+          .aria_label("Add")
           .px_2()
           .gap_1()
           .child(

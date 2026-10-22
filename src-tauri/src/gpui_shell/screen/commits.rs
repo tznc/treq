@@ -1909,7 +1909,7 @@ impl CommitsView {
         .hover_bg(red.opacity(0.1))
         .disabled(removing)
         .child(ui::icon(theme::ICON_TRASH, 16., red))
-        .child(label)
+        .label(label)
     };
     let short = &commit.change_id;
     let move_label = if kind == Kind::Tentative {

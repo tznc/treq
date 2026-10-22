@@ -1297,6 +1297,7 @@ impl CodeView {
       .relative()
       .child(
         small(Button::new("task-add", p).variant(Variant::Ghost))
+          .aria_label("Add")
           .px_2()
           .gap_1()
           .child(
@@ -1322,17 +1323,15 @@ impl CodeView {
           .flex()
           .items_center()
           .gap(zpx(6.))
-          .child(
-            form::switch_sized(
-              "task-new-workspace",
-              on,
-              false,
-              p,
-              (28., 16., 12.),
-              cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
-            )
-            .aria_label("Run in a new workspace"),
-          )
+          .child(form::switch_sized(
+            "task-new-workspace",
+            "Run in a new workspace",
+            on,
+            false,
+            p,
+            (28., 16., 12.),
+            cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
+          ))
           .child(
             ui::text(div(), TextSize::Xs)
               .id("task-new-workspace-label")
@@ -1613,6 +1612,7 @@ impl CodeView {
           .child(
             div().absolute().top_2().right_2().child(
               Button::new("workspace-description-edit", p)
+                .aria_label("Edit description")
                 .variant(Variant::Ghost)
                 .size(Size::Icon)
                 .w(zpx(28.))

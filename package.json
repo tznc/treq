@@ -43,10 +43,11 @@
     "format": "biome format --write ./test && cargo fmt",
     "check:format": "biome format ./test",
     "check": "ast-grep test",
-    "lint": "ast-grep scan --warning && npm run lint:subprocess && npm run lint:home-head",
+    "lint": "ast-grep scan --warning && npm run lint:subprocess && npm run lint:home-head && npm run lint:a11y",
     "lint:e2e": "ast-grep test --skip-snapshot-tests && ast-grep scan web/e2e",
     "lint:subprocess": "ast-grep scan --filter '^(no-command-for-jj-or-git-tauri-src|no-command-new-git-rust-tests|no-subprocess-conflict-pipeline-tauri-src)$'",
     "lint:home-head": "ast-grep scan --filter '^home-git-head-history-edit-needs-test$'",
+    "lint:a11y": "ast-grep scan --filter '^gpui-control-needs-accessible-name$'",
     "icons:generate": "node scripts/generate-icons.js && npx @tauri-apps/cli icon assets/logo-white.imageset/logo-white-rounded.svg"
   },
   "devDependencies": {

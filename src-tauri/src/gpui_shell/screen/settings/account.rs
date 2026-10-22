@@ -1057,6 +1057,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       )
     });
     let delete = Button::new("cloud-delete", p)
+      .aria_label("Delete this cloud workspace")
       .variant(Variant::Ghost)
       .size(Size::Icon)
       .w(zpx(28.))

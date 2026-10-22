@@ -571,6 +571,7 @@ impl StashView {
       );
 
     let apply = Button::new("stash-apply-button", p)
+      .aria_label("Apply...")
       .size(Size::Sm)
       .h(zpx(28.))
       .px_2()
@@ -594,6 +595,7 @@ impl StashView {
         }
       }));
     let more = Button::new("stash-more-menu", p)
+      .aria_label("More stash actions")
       .variant(Variant::Outline)
       .size(Size::Sm)
       .h(zpx(28.))

@@ -329,13 +329,14 @@ pub fn slider_field(state: &Entity<SliderState>) -> impl IntoElement {
   Slider::new(state)
 }
 
-/// A switch, observed for UI tests. Name it with `.aria_label(..)`, as
-/// React's `<Switch aria-label>` or its `<Label htmlFor>` does.
+/// A switch, observed for UI tests. Its name is React's `<Switch aria-label>`
+/// or its `<Label htmlFor>`.
 pub type Switch = ObservedElement<Stateful<Div>>;
 
 /// `ui/switch.tsx`: a 36×20 pill with a 16px thumb.
 pub fn switch(
   id: impl Into<SharedString>,
+  name: impl Into<SharedString>,
   checked: bool,
   disabled: bool,
   palette: &Palette,
@@ -343,6 +344,7 @@ pub fn switch(
 ) -> Switch {
   switch_sized(
     id,
+    name,
     checked,
     disabled,
     palette,
@@ -354,6 +356,7 @@ pub fn switch(
 /// A switch `(width, height, thumb)` pixels, as a `className` resizes it.
 pub fn switch_sized(
   id: impl Into<SharedString>,
+  name: impl Into<SharedString>,
   checked: bool,
   disabled: bool,
   palette: &Palette,
@@ -366,6 +369,7 @@ pub fn switch_sized(
     .id(id)
     .debug_selector(move || selector)
     .role(Role::Switch)
+    .aria_label(name)
     .aria_toggled(if checked {
       Toggled::True
     } else {
