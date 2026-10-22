@@ -23,6 +23,8 @@ use super::{
 };
 
 pub mod account_data;
+#[doc(hidden)]
+pub mod bench;
 mod change_move;
 mod changes;
 mod changes_data;
