@@ -1202,7 +1202,9 @@ impl AgentPromptView {
     let submit = self.tips.wrap(
       "task-submit",
       Side::Top,
-      Some(TooltipContent::Text("⌘+Enter".into())),
+      Some(TooltipContent::Text(
+        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+      )),
       submit,
       cx,
     );

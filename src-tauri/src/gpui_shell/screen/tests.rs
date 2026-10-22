@@ -5338,7 +5338,7 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   let shown = h.popups.borrow().iter().any(|p| {
     matches!(p, PopupRequest::ShowTooltip { content: TooltipContent::Shortcut { text, keys }, .. }
-      if text == "Expand" && keys == "⌘ + J")
+      if text == "Expand" && *keys == crate::gpui_shell::keys::hint("⌘ + J"))
   });
   assert!(shown, "{:?}", h.popups.borrow());
 }

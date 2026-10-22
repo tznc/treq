@@ -625,8 +625,7 @@ impl Render for Sidebar {
               .rounded_sm()
               .text_size(zpx(11.))
               .bg(palette.muted)
-              // Same label as the React app shows on every platform.
-              .child("⌘ + K"),
+              .child(crate::gpui_shell::keys::hint("⌘ + K")),
           )
           .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
       )

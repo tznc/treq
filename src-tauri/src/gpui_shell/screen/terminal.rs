@@ -69,6 +69,12 @@ const SCROLLBAR: f32 = 8.;
 /// `pt-1` above the grid.
 const TOP_PAD: f32 = 4.;
 const TERMINAL_BG: u32 = terminal_emu::BACKGROUND;
+/// Maximize/restore needs both Cmd and Ctrl: Super and Ctrl off macOS.
+const MAXIMIZE_KEYS: &str = if cfg!(target_os = "macos") {
+  "⌘ + Ctrl + J"
+} else {
+  "Super + Ctrl + J"
+};
 /// `RemoteTerminalPanel`'s xterm font size.
 const REMOTE_FONT_SIZE: f32 = 13.;
 /// `h-8`: a remote session's header.
@@ -2691,7 +2697,7 @@ impl TerminalPane {
     let tip = |text: &'static str, keys: &'static str| {
       Some(TooltipContent::Shortcut {
         text: text.into(),
-        keys: keys.into(),
+        keys: crate::gpui_shell::keys::hint(keys).into(),
       })
     };
     let mut buttons: Vec<gpui::AnyElement> = Vec::new();
@@ -2756,7 +2762,7 @@ impl TerminalPane {
             .wrap(
               "terminal-restore",
               Side::Top,
-              tip("Restore", "⌘ + Ctrl + J"),
+              tip("Restore", MAXIMIZE_KEYS),
               b,
               cx,
             )
@@ -2771,7 +2777,7 @@ impl TerminalPane {
             .wrap(
               "terminal-maximize",
               Side::Top,
-              tip("Maximize", "⌘ + Ctrl + J"),
+              tip("Maximize", MAXIMIZE_KEYS),
               b,
               cx,
             )
@@ -2919,7 +2925,9 @@ impl TerminalPane {
         let search = self.tooltips.wrap(
           format!("terminal-search-tip-{}", column.id),
           Side::Top,
-          Some(TooltipContent::Text("Search (⌘+F)".into())),
+          Some(TooltipContent::Text(
+            crate::gpui_shell::keys::hint("Search (⌘+F)").into(),
+          )),
           search,
           cx,
         );
@@ -2928,7 +2936,7 @@ impl TerminalPane {
           Side::Top,
           Some(TooltipContent::Shortcut {
             text: "Close".into(),
-            keys: "⌘ + W".into(),
+            keys: crate::gpui_shell::keys::hint("⌘ + W").into(),
           }),
           close
             .h_6()
@@ -3072,7 +3080,7 @@ impl TerminalPane {
           Side::Top,
           Some(TooltipContent::Shortcut {
             text: "Close".into(),
-            keys: "⌘ + W".into(),
+            keys: crate::gpui_shell::keys::hint("⌘ + W").into(),
           }),
           close
             .size_4()

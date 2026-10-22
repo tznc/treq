@@ -4,6 +4,7 @@ use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
 use crate::gpui_shell::{
+  keys::{PLATFORM, SECONDARY, SHIFT},
   theme::Palette,
   ui::{self, TextSize},
 };
@@ -11,15 +12,28 @@ use crate::gpui_shell::{
 /// A shortcut's keys and what it does.
 type Shortcut = (&'static [&'static str], &'static str);
 
+/// The terminal's copy and paste: Cmd+C/V on macOS, Ctrl+Shift+C/V elsewhere
+/// (Ctrl+C interrupts).
+const COPY: &[&str] = if cfg!(target_os = "macos") {
+  &["⌘", "C"]
+} else {
+  &["Ctrl", "Shift", "C"]
+};
+const PASTE: &[&str] = if cfg!(target_os = "macos") {
+  &["⌘", "V"]
+} else {
+  &["Ctrl", "Shift", "V"]
+};
+
 /// The shortcut sheet: each section's title and its shortcuts.
 pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Global",
     &[
-      (&["⌘", "N"], "New workspace"),
-      (&["⌘", "⇧", "N"], "Create stacked workspace"),
-      (&["⌘", "K"], "Command Palette"),
-      (&["⌘", "P"], "File Search"),
+      (&[SECONDARY, "N"], "New workspace"),
+      (&[SECONDARY, SHIFT, "N"], "Create stacked workspace"),
+      (&[SECONDARY, "K"], "Command Palette"),
+      (&[SECONDARY, "P"], "File Search"),
       (&["?"], "Show keyboard shortcuts"),
       (&["Esc"], "Close dialog"),
     ],
@@ -27,20 +41,20 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Terminal",
     &[
-      (&["⌘", "J"], "Toggle terminal pane"),
-      (&["⌘", "Ctrl", "J"], "Maximize/restore terminal"),
-      (&["⌘", "]"], "New agent terminal"),
-      (&["⌘", "\\"], "New shell terminal"),
-      (&["⌘", "W"], "Close selected terminal"),
-      (&["⌘", "C"], "Copy selection (or interrupt)"),
-      (&["⌘", "V"], "Paste"),
+      (&[SECONDARY, "J"], "Toggle terminal pane"),
+      (&[PLATFORM, "Ctrl", "J"], "Maximize/restore terminal"),
+      (&[SECONDARY, "]"], "New agent terminal"),
+      (&[SECONDARY, "\\"], "New shell terminal"),
+      (&[SECONDARY, "W"], "Close selected terminal"),
+      (COPY, "Copy selection (or interrupt)"),
+      (PASTE, "Paste"),
     ],
   ),
   (
     "Files & Diff",
     &[
-      (&["⌘", "F"], "Search in file or diff"),
-      (&["⌘", "A"], "Select all changed files"),
+      (&[SECONDARY, "F"], "Search in file or diff"),
+      (&[SECONDARY, "A"], "Select all changed files"),
     ],
   ),
 ];

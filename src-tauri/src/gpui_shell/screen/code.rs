@@ -1422,7 +1422,9 @@ impl CodeView {
     let submit = self.tips.wrap(
       "task-submit",
       Side::Top,
-      Some(TooltipContent::Text("⌘+Enter".into())),
+      Some(TooltipContent::Text(
+        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+      )),
       submit,
       cx,
     );
@@ -1885,7 +1887,7 @@ impl CodeView {
             .text_color(p.muted_foreground)
             .child("Go to file"),
         )
-        .child(kbd(p, "⌘ + P"))
+        .child(kbd(p, &crate::gpui_shell::keys::hint("⌘ + P")))
         .on_click(move |_, _, cx| {
           let react = react.clone();
           cx.defer(move |cx| {
