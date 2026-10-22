@@ -2,6 +2,7 @@
 //! Finish review popover and the Discard dialog.
 
 use super::*;
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 
 impl FileBrowserView {
@@ -44,7 +45,7 @@ impl FileBrowserView {
     let box_ = || {
       div()
         .bg(p.background)
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .p_3()
         .border_1()
         .border_color(p.border.opacity(0.6))
@@ -76,7 +77,7 @@ impl FileBrowserView {
           .gap_2()
           .child(
             div()
-              .mt(zpx(2.))
+              .mt_0p5()
               .flex_none()
               .opacity(0.)
               .group_hover("comment-card", |s| s.opacity(1.))
@@ -93,7 +94,7 @@ impl FileBrowserView {
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .cursor_pointer()
                 .hover(move |s| s.bg(accent))
                 .child(ui::icon(theme::ICON_X, 12., muted))
@@ -178,7 +179,7 @@ impl FileBrowserView {
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .px_4()
       .py_3()
       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -245,7 +246,7 @@ impl FileBrowserView {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(zpx(2.))
+        .rounded(radius::SM)
         .text_color(muted)
         .when(disabled, |this| this.opacity(0.5))
         .when(!disabled, |this| {
@@ -265,12 +266,12 @@ impl FileBrowserView {
         .bg(p.background)
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .shadow_lg()
-        .p(zpx(2.))
+        .p_0p5()
         .flex()
         .items_center()
-        .gap(zpx(2.))
+        .gap_0p5()
         .font_family(theme::SANS_FONT)
         .capture_action(cx.listener(|view, _: &Escape, _, cx| {
           view.close_search(cx);
@@ -284,7 +285,7 @@ impl FileBrowserView {
             .px_2()
             .flex()
             .items_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.input)
             .child(ui::input(&input).appearance(false).bordered(false)),
@@ -347,12 +348,12 @@ impl FileBrowserView {
       .debug_selector(|| "use-idle-agent".into())
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .cursor_pointer()
       .child(
         div()
           .size(zpx(14.))
-          .rounded(zpx(3.))
+          .rounded(radius::SM)
           .border_1()
           .border_color(if checked { p.primary } else { p.border })
           .bg(if checked { p.primary } else { p.background })
@@ -382,7 +383,7 @@ impl FileBrowserView {
       .w(zpx(width))
       .relative()
       .p_4()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -488,7 +489,7 @@ impl FileBrowserView {
       .w_full()
       .max_w(zpx(512.))
       .p_6()
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
@@ -505,7 +506,7 @@ impl FileBrowserView {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
               .line_height(zpx(15.))

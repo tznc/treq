@@ -8,6 +8,7 @@
 //! comes back as the next [`Route`]. The Merge Queue tab and the PR review
 //! page are still React's: GPUI hands their routes back and React draws them.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::{HashMap, HashSet},
@@ -952,7 +953,7 @@ pub(super) fn tabs_list(p: &Palette) -> Div {
     .flex()
     .gap_1()
     .p_1()
-    .rounded(zpx(6.))
+    .rounded(radius::MD)
     .bg(p.muted)
 }
 
@@ -966,10 +967,10 @@ pub(super) fn tab_trigger(
   named(div(), id)
     .flex()
     .items_center()
-    .gap(zpx(6.))
+    .gap_1p5()
     .px_3()
     .py_1()
-    .rounded(zpx(6.))
+    .rounded(radius::MD)
     .font_weight(FontWeight::MEDIUM)
     .cursor_pointer()
     .when(active, |t| {
@@ -1132,8 +1133,8 @@ impl GithubView {
               .line_height(zpx(13.))
               .font_weight(FontWeight::SEMIBOLD)
               .px_1()
-              .py(zpx(1.))
-              .rounded(zpx(4.))
+              .py_px()
+              .rounded(radius::SM)
               .bg(tw::color(tw::GREEN_500).opacity(0.2))
               .text_color(green)
               .child("PRO"),
@@ -1157,8 +1158,8 @@ impl GithubView {
       .gap_1()
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(6.))
-      .p(zpx(2.))
+      .rounded(radius::MD)
+      .p_0p5()
       .bg(p.muted.opacity(0.3))
       .children(StateFilter::options(self.route.tab).iter().map(|&filter| {
         let active = filter == current;
@@ -1167,8 +1168,8 @@ impl GithubView {
           TextSize::Sm,
         )
         .px_2()
-        .py(zpx(2.))
-        .rounded(zpx(4.))
+        .py_0p5()
+        .rounded(radius::SM)
         .cursor_pointer()
         .when(active, |b| {
           b.bg(p.background).text_color(p.foreground).shadow_sm()
@@ -1265,7 +1266,7 @@ impl GithubView {
           ui::text(div(), TextSize::Xs)
             .rounded_full()
             .bg(p.primary)
-            .px(zpx(6.))
+            .px_1p5()
             .text_color(p.primary_foreground)
             .child(count.to_string()),
         )
@@ -1438,7 +1439,7 @@ impl GithubView {
         .flex()
         .flex_col()
         .gap_2()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border)
         .bg(p.popover)
@@ -1614,7 +1615,7 @@ impl GithubView {
     named(div(), id)
       .w_full()
       .px_3()
-      .py(zpx(10.))
+      .py_2p5()
       .border_b_1()
       .border_color(p.border)
       .flex()

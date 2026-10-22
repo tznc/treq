@@ -2,6 +2,7 @@
 //! picks the workspace; React asks for confirmation and deletes it, as it
 //! does from the workspace header.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
@@ -227,9 +228,9 @@ impl WorkspaceDeletion {
 /// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
 fn kbd(p: &Palette, key: &str) -> gpui::Div {
   ui::text(div(), TextSize::Xs)
-    .px(zpx(6.))
-    .py(zpx(2.))
-    .rounded(zpx(4.))
+    .px_1p5()
+    .py_0p5()
+    .rounded(radius::SM)
     .bg(p.muted)
     .child(key.to_string())
 }
@@ -263,9 +264,9 @@ impl Render for WorkspaceDeletion {
             .id(id)
             .debug_selector(move || selector)
             .px_3()
-            .py(zpx(6.))
+            .py_1p5()
             .mx_2()
-            .rounded(zpx(8.))
+            .rounded(radius::MD)
             .flex()
             .items_center()
             .gap_3()
@@ -313,7 +314,7 @@ impl Render for WorkspaceDeletion {
       .id("workspace-deletion")
       .debug_selector(|| "workspace-deletion".into())
       .w(viewport.width * 0.4)
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border)
       .bg(p.background)

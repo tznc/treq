@@ -17,6 +17,7 @@
 //!
 //! [`merge_queue_data`]: super::merge_queue_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -406,10 +407,10 @@ impl MergeQueueView {
         .debug_selector(move || id.into())
         .flex()
         .items_center()
-        .gap(zpx(6.))
+        .gap_1p5()
         .px_3()
         .py_1()
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .when(active, |this| {
@@ -428,8 +429,8 @@ impl MergeQueueView {
         .font_weight(FontWeight::SEMIBOLD)
         .line_height(zpx(13.))
         .px_1()
-        .py(zpx(1.))
-        .rounded(zpx(4.))
+        .py_px()
+        .rounded(radius::SM)
         .bg(tw::color(tw::GREEN_500).opacity(0.2))
         .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
         .child("PRO")
@@ -439,7 +440,7 @@ impl MergeQueueView {
         .flex()
         .gap_1()
         .p_1()
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .bg(p.muted)
         .child(
           tab("github-tab-issues", "Issues", false)
@@ -483,7 +484,7 @@ impl MergeQueueView {
       .flex()
       .items_center()
       .justify_center()
-      .rounded(zpx(2.))
+      .rounded(radius::SM)
       .border_1()
       .when(on, |this| {
         this.border_color(p.primary).bg(p.primary).child(ui::icon(
@@ -500,10 +501,10 @@ impl MergeQueueView {
       .debug_selector(|| "merge-queue-merged".into())
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .h_7()
       .px_2()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .cursor_pointer()
       .when(on, |this| {
@@ -590,7 +591,7 @@ impl MergeQueueView {
         div()
           .max_w(zpx(448.))
           .w_full()
-          .rounded(zpx(12.))
+          .rounded(radius::LG)
           .border_1()
           .border_color(p.border)
           .bg(gpui::linear_gradient(
@@ -622,9 +623,9 @@ impl MergeQueueView {
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::SEMIBOLD)
-                  .px(zpx(6.))
-                  .py(zpx(2.))
-                  .rounded(zpx(4.))
+                  .px_1p5()
+                  .py_0p5()
+                  .rounded(radius::SM)
                   .bg(tw::color(tw::GREEN_500).opacity(0.2))
                   .text_color(self.shade(tw::GREEN_700, tw::GREEN_400))
                   .child("PRO"),
@@ -805,7 +806,7 @@ impl MergeQueueView {
     };
     let mut card = div()
       .debug_selector(move || selector)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .p_4();
@@ -832,11 +833,11 @@ impl MergeQueueView {
         ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .font_weight(FontWeight::SEMIBOLD)
           .text_color(p.muted_foreground)
           .mb_3()
-          .pl(zpx(26.))
+          .pl_6()
           .child(ui::icon(theme::ICON_LAYERS, 16., p.muted_foreground))
           .child(format!("Stack of {n}"))
           .child(
@@ -920,7 +921,7 @@ impl MergeQueueView {
       .gap_3()
       .py_2()
       .child(
-        div().flex_none().mt(zpx(2.)).size(zpx(14.)).child(
+        div().flex_none().mt_0p5().size(zpx(14.)).child(
           div()
             .size(zpx(14.))
             .rounded_full()
@@ -980,13 +981,13 @@ impl MergeQueueView {
               .flex_wrap()
               .items_center()
               .gap_2()
-              .mt(zpx(2.))
+              .mt_0p5()
               .min_w_0()
               .child(
                 ui::text(div(), TextSize::Xs)
                   .flex_none()
                   .px_2()
-                  .py(zpx(2.))
+                  .py_0p5()
                   .rounded_full()
                   .bg(chip_bg)
                   .text_color(chip_fg)
@@ -1022,7 +1023,7 @@ impl MergeQueueView {
         .ml_auto()
         .flex()
         .items_center()
-        .gap(zpx(6.))
+        .gap_1p5()
         .child(
           ui::text(div(), TextSize::Xs)
             .font_family(theme::MONO_FONT)
@@ -1095,7 +1096,7 @@ impl MergeQueueView {
         .flex()
         .flex_none()
         .items_center()
-        .gap(zpx(2.))
+        .gap_0p5()
         .child(
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "merge-queue-tip-sha".into())
@@ -1147,9 +1148,9 @@ impl MergeQueueView {
                 ui::text(div(), TextSize::Xs)
                   .debug_selector(|| "merge-queue-target-branch".into())
                   .flex_none()
-                  .px(zpx(6.))
-                  .py(zpx(2.))
-                  .rounded(zpx(4.))
+                  .px_1p5()
+                  .py_0p5()
+                  .rounded(radius::SM)
                   .font_family(theme::MONO_FONT)
                   .font_weight(FontWeight::MEDIUM)
                   .bg(p.muted)

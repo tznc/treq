@@ -7,6 +7,7 @@
 //! through the backend; it hands back only what React still owns: closing
 //! the dialog, opening the workspace it made, and deleting a workspace.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -186,7 +187,7 @@ pub fn dialog_panel(
     .w_full()
     .max_w(zpx(max_width))
     .p_6()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -217,7 +218,7 @@ pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
   div()
     .flex()
     .flex_col()
-    .gap(zpx(6.))
+    .gap_1p5()
     // `DialogTitle` is the dialog's heading.
     .child(
       div()
@@ -265,7 +266,7 @@ pub fn checkbox(
     .flex()
     .items_center()
     .justify_center()
-    .rounded(zpx(3.))
+    .rounded(radius::SM)
     .when(disabled, |this| this.opacity(0.5))
     .map(|this| match state {
       Check::On => this

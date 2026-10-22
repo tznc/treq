@@ -2,6 +2,7 @@
 //! comments, drawn in the Changes tab's diff (`GithubCommentCard`,
 //! `GithubThreadsInlineList`, `AgentReviewCommentCard`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::time::Duration;
 
@@ -352,7 +353,7 @@ impl ChangesView {
       .items_center()
       .gap_2()
       .px_3()
-      .py(zpx(6.))
+      .py_1p5()
       .cursor_pointer()
       .hover(move |s| s.bg(toggle_hover))
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
@@ -377,9 +378,9 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_1()
-          .px(zpx(6.))
-          .py(zpx(2.))
-          .rounded(zpx(4.))
+          .px_1p5()
+          .py_0p5()
+          .rounded(radius::SM)
           .bg(p.muted)
           .text_color(muted)
           .font_weight(FontWeight::MEDIUM)
@@ -406,7 +407,7 @@ impl ChangesView {
       );
     }
     let mut card = div()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(sky(0.3))
       .bg(sky(0.05))
@@ -446,9 +447,9 @@ impl ChangesView {
       .group("github-comment")
       .relative()
       .bg(p.background)
-      .rounded(zpx(6.))
-      .p(zpx(10.))
-      .pr(zpx(36.))
+      .rounded(radius::MD)
+      .p_2p5()
+      .pr_9()
       .border_1()
       .border_color(p.border.opacity(0.6))
       .child(
@@ -456,7 +457,7 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .mb(zpx(6.))
+          .mb_1p5()
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
@@ -498,7 +499,7 @@ impl ChangesView {
             .top_2()
             .right_2()
             .p_1()
-            .rounded(zpx(4.))
+            .rounded(radius::SM)
             .cursor_pointer()
             .opacity(0.)
             .group_hover("github-comment", |s| s.opacity(1.))
@@ -530,7 +531,7 @@ impl ChangesView {
     let mut card = div()
       .debug_selector(|| "agent-review-comment-card".into())
       .font_family(theme::MONO_FONT)
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(violet(0.4))
       .bg(violet(0.05))
@@ -575,7 +576,7 @@ impl ChangesView {
       actions = actions.child(
         Button::new(SharedString::from(format!("agent-apply-{id}")), p)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_WAND, 12.)
           .label("Apply")
@@ -590,7 +591,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-send-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_TERMINAL, 12.)
           .label("Send to agent")
@@ -601,7 +602,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-resolve-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_CHECK, 12.)
           .label("Resolve")
@@ -613,7 +614,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-delete-{id}")), p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .text_color(muted)
           .disabled(busy)
           .icon(theme::ICON_TRASH, 12.)
@@ -739,7 +740,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
             .flex()
             .items_start()
             .px_2()
-            .py(zpx(1.))
+            .py_px()
             .when_some(bg, |this, bg| this.bg(bg))
             .child(
               div()
@@ -762,13 +763,13 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       .debug_selector(|| "agent-review-suggestion".into())
       .font_family(theme::MONO_FONT)
       .px_2()
-      .py(zpx(6.))
+      .py_1p5()
       .bg(tw::color(tw::GREEN_500).opacity(0.1))
       .child(suggested.to_string())
       .into_any_element(),
   };
   div()
-    .rounded(zpx(4.))
+    .rounded(radius::SM)
     .border_1()
     .border_color(p.border.opacity(0.6))
     .overflow_hidden()

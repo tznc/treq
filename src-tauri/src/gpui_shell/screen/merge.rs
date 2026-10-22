@@ -5,6 +5,7 @@
 //! ahead and its diff, and merges it. React still owns leaving the page,
 //! which a merge does too (its caches refresh then).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::HashSet,
@@ -437,7 +438,7 @@ fn empty(p: &Palette, label: String) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
     .border_1()
     .border_color(p.border)
-    .rounded(zpx(12.))
+    .rounded(radius::LG)
     .p_6()
     .text_center()
     .text_color(p.muted_foreground)
@@ -449,7 +450,7 @@ fn list(p: &Palette) -> gpui::Div {
   div()
     .border_1()
     .border_color(p.border)
-    .rounded(zpx(12.))
+    .rounded(radius::LG)
     .flex()
     .flex_col()
 }
@@ -677,7 +678,7 @@ impl MergeView {
         .right_0()
         .w(zpx(256.))
         .p_1()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border)
         .bg(p.popover)
@@ -708,7 +709,7 @@ impl MergeView {
             .py_3()
             .pl_8()
             .pr_2()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .cursor_pointer()
             .hover(move |s| s.bg(p.menu_accent))
             .child(
@@ -860,8 +861,8 @@ impl MergeView {
         div()
           .border_x_1()
           .border_color(p.border)
-          .when(top, |this| this.border_t_1().rounded_t(zpx(12.)))
-          .when(bottom, |this| this.border_b_1().rounded_b(zpx(12.)))
+          .when(top, |this| this.border_t_1().rounded_t(radius::LG))
+          .when(bottom, |this| this.border_b_1().rounded_b(radius::LG))
           .overflow_hidden()
           .child(content),
       )
@@ -950,9 +951,9 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
             ui::text(div(), TextSize::Xs)
               .flex_none()
               .bg(p.muted)
-              .px(zpx(6.))
-              .py(zpx(2.))
-              .rounded(zpx(4.))
+              .px_1p5()
+              .py_0p5()
+              .rounded(radius::SM)
               .font_family(theme::MONO_FONT)
               .child(commit.short_id.clone()),
           )
@@ -972,7 +973,7 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                   .flex_wrap()
                   .items_center()
                   .gap_2()
-                  .mt(zpx(2.))
+                  .mt_0p5()
                   .text_color(p.muted_foreground)
                   .child(commit.author_name.clone())
                   .when(commit.insertions > 0 || commit.deletions > 0, |this| {

@@ -6,6 +6,7 @@
 //! draws what the route says and sends what is typed and pressed
 //! (`remoteRepo.*`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
@@ -191,7 +192,7 @@ fn input(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl Into
     .px_2()
     .flex()
     .items_center()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
@@ -239,10 +240,10 @@ fn selector(
               .id(SharedString::from(format!("remote-saved-repo-{}", repo.id)))
               .debug_selector(|| "remote-saved-repo".into())
               .w_full()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .border_1()
               .px_2()
-              .py(zpx(6.))
+              .py_1p5()
               .cursor_pointer()
               .map(|d| {
                 if selected {
@@ -305,7 +306,7 @@ fn selector(
         .flex()
         .flex_col()
         .gap_2()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_3()
@@ -403,7 +404,7 @@ pub fn render(
     let red: gpui::Hsla = tw::color(tw::RED_500);
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "remote-repo-cutoff".into())
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(red.opacity(0.4))
       .bg(red.opacity(0.1))

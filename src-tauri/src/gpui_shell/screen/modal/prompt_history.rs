@@ -1,6 +1,7 @@
 //! `PromptHistoryModal`: every prompt sent in the repository, newest first,
 //! and the selected one in full.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use serde::Deserialize;
 use serde_json::json;
@@ -188,7 +189,7 @@ impl PromptHistoryView {
               .w_full()
               .px_2()
               .py_2()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .cursor_pointer()
               .when(selected, |this| this.bg(accent))
               .when(!selected, |this| {
@@ -269,7 +270,7 @@ impl PromptHistoryView {
               .rounded_full()
               .bg(p.muted)
               .px_2()
-              .py(zpx(2.))
+              .py_0p5()
               .child(agent)
           })),
       )
@@ -305,7 +306,7 @@ impl PromptHistoryView {
           div().child(
             Button::new("prompt-history-run", p)
               .size(Size::Sm)
-              .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr(zpx(6.)))
+              .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr_1p5())
               .label("Run prompt...")
               .on_click(cx.listener(move |view, _, _, cx| view.run(&entry, cx))),
           ),
@@ -335,7 +336,7 @@ impl Render for PromptHistoryView {
       Button::new("prompt-history-copy-all", &p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr(zpx(6.)))
+        .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr_1p5())
         .label("Copy all")
         .on_click(cx.listener(move |view, _, _, cx| {
           view.copy(format_for_copy(&all), "All prompts copied to clipboard", cx)

@@ -5,6 +5,7 @@
 //! React still owns which tab shows, closing the page, and the Supabase
 //! session the Account and Integrations tabs show (see `account`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc, time::Duration};
 
@@ -1264,7 +1265,7 @@ impl Render for SettingsView {
           .gap_2()
           .px_4()
           .py_2()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .map(|this| {
@@ -1854,7 +1855,7 @@ impl SettingsView {
               .items_center()
               .justify_between()
               .gap_4()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(p.border)
               .p_4()
@@ -2013,9 +2014,9 @@ impl SettingsView {
       .gap_2()
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .p_3()
-      .pr(zpx(48.))
+      .pr_12()
       .debug_selector(move || selector)
       .when(row.installed.is_some(), |this| {
         this.child(
@@ -2158,7 +2159,7 @@ impl SettingsView {
           .flex_col()
           .gap_4()
           .p_6()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.background)

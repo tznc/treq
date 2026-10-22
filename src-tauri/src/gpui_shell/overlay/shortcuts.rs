@@ -1,5 +1,6 @@
 //! `KeyboardShortcutsModal`: the "?" reference of the app's shortcuts.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
@@ -70,7 +71,7 @@ fn kbd(p: &Palette, key: &str) -> gpui::Div {
     .h(zpx(20.))
     .min_w(zpx(20.))
     .px_1()
-    .rounded(zpx(6.))
+    .rounded(radius::MD)
     .bg(p.muted)
     .text_color(p.muted_foreground)
     .font_weight(gpui::FontWeight::MEDIUM)
@@ -151,7 +152,7 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     .max_h(viewport.height * 0.85)
     .overflow_y_scroll()
     .p_6()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)

@@ -10,6 +10,7 @@
 //!
 //! [`workspace_data`]: super::workspace_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
@@ -852,7 +853,7 @@ impl WorkspaceView {
             .items_center()
             .gap_1()
             .px_2()
-            .py(zpx(2.))
+            .py_0p5()
             .rounded_full()
             .bg(p.muted)
             .font_weight(FontWeight::MEDIUM)
@@ -1054,7 +1055,7 @@ impl WorkspaceView {
           .debug_selector(|| "workspace-status-skeleton".into())
           .h(zpx(24.))
           .w(zpx(56.))
-          .rounded(zpx(4.))
+          .rounded(radius::SM)
           .bg(p.muted.opacity(0.6))
           .with_animation("workspace-status-pulse", pulse(), |el, delta| {
             el.opacity(pulse_opacity(delta))
@@ -1245,7 +1246,7 @@ impl WorkspaceView {
       .rounded_l_none()
       .border_l_1()
       .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
-      .px(zpx(6.))
+      .px_1p5()
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
       .aria_label("More Create PR options")
       .on_click(self.press("workspace.createPrMenu"));
@@ -1336,7 +1337,7 @@ impl WorkspaceView {
     Button::new("workspace-checks", p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .gap(zpx(6.))
+      .gap_1p5()
       .px_2()
       .map(|b| {
         if running {
@@ -1367,7 +1368,7 @@ impl WorkspaceView {
         .debug_selector(move || id.into())
         .rounded_full()
         .px_2()
-        .py(zpx(2.))
+        .py_0p5()
         .font_weight(FontWeight::MEDIUM)
         .bg(bg)
         .text_color(fg)
@@ -1406,7 +1407,7 @@ impl WorkspaceView {
       .flex_wrap()
       .gap_1()
       .p_1()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .bg(p.muted)
       .children(tabs.into_iter().map(|(tab, icon, label, extra)| {
         let active = tab == row.tab;
@@ -1427,10 +1428,10 @@ impl WorkspaceView {
           .test_support()
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .px_3()
           .py_1()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1520,7 +1521,7 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
     .debug_selector(|| "loc-diff-marker".into())
     .flex()
     .items_center()
-    .gap(zpx(6.))
+    .gap_1p5()
     .child(count(format!("+{}", loc.insertions), green))
     .child(
       div()

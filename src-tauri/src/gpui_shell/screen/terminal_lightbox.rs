@@ -3,6 +3,7 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::Cell,
@@ -661,7 +662,7 @@ fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
     .flex()
     .items_center()
     .justify_center()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .when(disabled, |d| d.opacity(0.4))
     .when(!disabled, |d| {
       d.cursor_pointer().hover(|s| s.bg(white(0.15)))
@@ -707,7 +708,7 @@ impl Lightbox {
             b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom + 1., cx)))
           }),
         )
-        .child(div().mx(zpx(2.)).h_4().w_px().bg(white(0.2)));
+        .child(div().mx_0p5().h_4().w_px().bg(white(0.2)));
     }
     let pill = content(
       pill
@@ -737,7 +738,7 @@ impl Lightbox {
           .px_3()
           .flex()
           .items_center()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(white(0.15))
           .bg(gpui::black().opacity(0.4))
@@ -830,7 +831,7 @@ impl Lightbox {
           .top_0()
           .ml_2()
           .w_56()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(white(0.2))
           .bg(rgb(ZINC_950))
@@ -842,7 +843,7 @@ impl Lightbox {
               .min_h(zpx(72.))
               .px_3()
               .py_2()
-              .rounded(zpx(6.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(white(0.15))
               .text_color(rgb(ZINC_100))
@@ -859,7 +860,7 @@ impl Lightbox {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(zpx(8.))
+                .rounded(radius::MD)
                 .cursor_pointer()
                 .hover(|s| s.bg(white(0.1)))
                 .on_click(cx.listener(move |view, _, _, cx| view.remove_highlight(id, cx)))
@@ -950,7 +951,7 @@ impl Lightbox {
           .items_start()
           .gap_3()
           .px_4()
-          .py(zpx(2.))
+          .py_0p5()
           .hover(|s| s.bg(white(0.05)))
           .when(pending, |d| d.bg(rgb(RED).opacity(0.15)))
           .when(commented, |d| d.bg(rgb(AMBER_500).opacity(0.1)))
@@ -1002,7 +1003,7 @@ impl Lightbox {
               .min_h(zpx(72.))
               .px_3()
               .py_2()
-              .rounded(zpx(6.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(palette.input)
               .bg(palette.background)
@@ -1078,7 +1079,7 @@ impl Lightbox {
       .flex()
       .flex_col()
       .overflow_hidden()
-      .rounded(zpx(12.))
+      .rounded(radius::LG)
       .bg(rgb(ZINC_900))
       .shadow_2xl()
       .child(
@@ -1087,7 +1088,7 @@ impl Lightbox {
           .border_b_1()
           .border_color(white(0.1))
           .px_4()
-          .py(zpx(6.))
+          .py_1p5()
           .text_color(rgb(ZINC_500))
           .child("Click a line to comment. Drag or Shift+click to select multiple lines."),
       )
@@ -1141,7 +1142,7 @@ impl Lightbox {
         .debug_selector(move || id.into())
         .absolute()
         .top(gpui::relative(0.5))
-        .mt(zpx(-32.))
+        .mt_neg_8()
         .when(next, |d| d.right_3())
         .when(!next, |d| d.left_3())
         .size_16()
@@ -1176,7 +1177,7 @@ impl Lightbox {
       .w_full()
       .max_w(zpx(512.))
       .p_6()
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
@@ -1187,7 +1188,7 @@ impl Lightbox {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
               .line_height(zpx(15.))
@@ -1269,7 +1270,7 @@ impl Render for Lightbox {
       .flex()
       .flex_col()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .children(current.as_ref().map(|asset| {
         ui::text(div(), TextSize::Sm)
           .id("treq-send-preview-title")

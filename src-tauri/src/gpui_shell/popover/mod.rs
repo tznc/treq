@@ -12,6 +12,7 @@
 //! popover's own button, which only closes it. What only React can do (retargeting the workspace,
 //! running workflows, the prompt history dialog) goes back as screen actions.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -235,7 +236,7 @@ impl Popover {
       .debug_selector(move || id.into())
       .w(zpx(width))
       .p(zpx(padding))
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)

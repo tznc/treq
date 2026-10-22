@@ -215,7 +215,7 @@ impl Popover {
       .panel("workspace-details-popover", WIDTH, 16., &p)
       .flex()
       .flex_col()
-      .gap(zpx(12.))
+      .gap_3()
       .child(details)
       .child(starting)
   }

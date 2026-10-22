@@ -19,6 +19,7 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{context_row, ChangesView, Dir, CODE_TEXT};
+use crate::gpui_shell::ui::radius;
 use crate::{
   gpui_shell::{
     screen::{
@@ -411,9 +412,9 @@ impl ChangesView {
             this
               .debug_selector(move || id)
               .border_t_1()
-              .rounded_t(zpx(12.))
+              .rounded_t(radius::LG)
           })
-          .when(bottom, |this| this.border_b_1().rounded_b(zpx(12.)))
+          .when(bottom, |this| this.border_b_1().rounded_b(radius::LG))
           .border_x_1()
           .border_color(p.border)
           .overflow_hidden()
@@ -475,7 +476,7 @@ impl ChangesView {
             .flex()
             .items_center()
             .px_2()
-            .py(zpx(2.))
+            .py_0p5()
             .when(expandable, |this| {
               this.child(
                 div()
@@ -558,7 +559,7 @@ impl ChangesView {
             .justify_center()
             .gap_1()
             .px_2()
-            .py(zpx(2.))
+            .py_0p5()
             .text_color(muted)
             .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., muted))
             .child("Show more lines below"),

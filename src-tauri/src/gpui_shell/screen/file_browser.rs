@@ -10,6 +10,7 @@
 
 mod review;
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
@@ -1309,7 +1310,7 @@ impl FileBrowserView {
                 .debug_selector(|| "file-browser-pending".into())
                 .flex()
                 .items_center()
-                .gap(zpx(6.))
+                .gap_1p5()
                 .text_color(muted)
                 .child(ui::icon(theme::ICON_MESSAGE, 16., p.primary))
                 .child(format!("{} pending", count_label(n, "comment"))),
@@ -1412,7 +1413,7 @@ impl FileBrowserView {
       .px_2()
       .py_1()
       .pl(zpx(depth as f32 * 16. + 8.))
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .cursor_pointer()
       .hover(move |s| s.bg(hover))
       .on_mouse_down(
@@ -1478,7 +1479,7 @@ impl FileBrowserView {
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
-                .gap(zpx(2.))
+                .gap_0p5()
                 .text_color(primary)
                 .child(ui::icon(theme::ICON_MESSAGE, 12., primary))
                 .child(count.to_string()),
@@ -1607,7 +1608,7 @@ impl FileBrowserView {
         .id(id)
         .debug_selector(move || id.into())
         .p_1()
-        .rounded(zpx(4.))
+        .rounded(radius::SM)
         .cursor_pointer()
         .text_color(muted)
         .hover(move |s| s.bg(hover).text_color(fg))
@@ -1668,8 +1669,8 @@ impl FileBrowserView {
           .items_center()
           .gap_1()
           .px_2()
-          .py(zpx(2.))
-          .rounded(zpx(6.))
+          .py_0p5()
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1681,9 +1682,9 @@ impl FileBrowserView {
       right = right.child(
         div()
           .flex()
-          .gap(zpx(2.))
-          .p(zpx(2.))
-          .rounded(zpx(8.))
+          .gap_0p5()
+          .p_0p5()
+          .rounded(radius::MD)
           .bg(p.muted)
           .child(
             tab("markdown-code", theme::ICON_CODE, "Code", !previewing).on_click(cx.listener(
@@ -1854,7 +1855,7 @@ impl FileBrowserView {
                       .flex()
                       .items_center()
                       .justify_center()
-                      .rounded(zpx(4.))
+                      .rounded(radius::SM)
                       .bg(blue)
                       .cursor_pointer()
                       .opacity(0.)

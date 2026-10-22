@@ -10,6 +10,7 @@
 //! [`terminal_data`]: super::terminal_data
 //! [`terminal_emu`]: super::terminal_emu
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   cell::Cell,
@@ -1177,8 +1178,8 @@ impl TerminalView {
         .right_2()
         .flex()
         .items_center()
-        .gap(zpx(2.))
-        .p(zpx(2.))
+        .gap_0p5()
+        .p_0p5()
         .rounded_md()
         .border_1()
         .border_color(p.border)
@@ -1279,7 +1280,7 @@ impl TerminalView {
         .top(zpx(top.min(height - thumb)))
         .w(zpx(SCROLLBAR))
         .h(zpx(thumb))
-        .rounded(zpx(4.))
+        .rounded(radius::SM)
         .bg(p.border),
     )
   }
@@ -2537,7 +2538,7 @@ impl TerminalPane {
           img(std::path::PathBuf::from(&asset.path))
             .object_fit(ObjectFit::Contain)
             .size_full()
-            .rounded(zpx(7.)),
+            .rounded(radius::MD),
         )
       } else {
         ui::text(div(), TextSize::Xs)
@@ -2574,7 +2575,7 @@ impl TerminalPane {
         .h_20()
         .w(zpx(144.))
         .min_w(zpx(144.))
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(gpui::white().opacity(if shown { 0.4 } else { 0.15 }))
         .bg(rgb(0x2a2a2a))
@@ -2704,7 +2705,7 @@ impl TerminalPane {
         .left(px(left))
         .w(px(width))
         .h(zpx(SCROLLBAR))
-        .rounded(zpx(4.))
+        .rounded(radius::SM)
         .bg(if dragging { hover } else { p.border })
         .hover(move |s| s.bg(hover))
         .occlude()
@@ -2925,7 +2926,7 @@ impl TerminalPane {
       .border_1()
       .border_color(p.border.opacity(0.8))
       .bg(p.background.opacity(0.9))
-      .p(zpx(2.))
+      .p_0p5()
       .shadow_sm()
       .child({
         let bounds = self.controls_bounds.clone();
@@ -2961,7 +2962,7 @@ impl TerminalPane {
           p.muted.opacity(0.6)
         })
         .px_1()
-        .py(zpx(2.))
+        .py_0p5()
         .font_family(theme::MONO_FONT)
         .font_weight(gpui::FontWeight::MEDIUM)
         .line_height(zpx(12.))
@@ -3067,7 +3068,7 @@ impl TerminalPane {
             div()
               .flex()
               .items_center()
-              .gap(zpx(6.))
+              .gap_1p5()
               .min_w_0()
               .child(ui::icon(agent_icon(agent), 16., rgb(0xe5e7eb).into()))
               .child(
@@ -3150,7 +3151,7 @@ impl TerminalPane {
               div()
                 .flex()
                 .items_center()
-                .gap(zpx(6.))
+                .gap_1p5()
                 .min_w_0()
                 .font_weight(gpui::FontWeight::MEDIUM)
                 .text_color(muted)
@@ -3210,7 +3211,7 @@ impl TerminalPane {
             div()
               .flex()
               .items_center()
-              .gap(zpx(6.))
+              .gap_1p5()
               .min_w_0()
               .child(ui::icon(theme::ICON_TERMINAL, 12., title_fg))
               .child(
@@ -3340,7 +3341,7 @@ impl Render for SendAssetDrag {
     ui::text(div(), TextSize::Xs)
       .px_2()
       .py_1()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(gpui::white().opacity(0.4))
       .bg(rgb(0x2a2a2a))
@@ -3571,7 +3572,7 @@ impl Render for TerminalPane {
         .debug_selector(|| "workspace-terminal-pane".into())
         .flex()
         .justify_end()
-        .m(zpx(6.))
+        .m_1p5()
         .child(self.controls(&p, cx))
         .into_any_element();
     }

@@ -2,6 +2,7 @@
 //! file index. It covers the whole window, sidebar included, as React's
 //! `Command.Dialog` does.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
@@ -135,9 +136,9 @@ impl FilePicker {
 /// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
 fn kbd(p: &Palette, key: &str) -> gpui::Div {
   ui::text(div(), TextSize::Xs)
-    .px(zpx(6.))
-    .py(zpx(2.))
-    .rounded(zpx(4.))
+    .px_1p5()
+    .py_0p5()
+    .rounded(radius::SM)
     .bg(p.muted)
     .child(key.to_string())
 }
@@ -173,9 +174,9 @@ impl Render for FilePicker {
             .aria_label(path.clone())
             .aria_selected(i == selected)
             .px_3()
-            .py(zpx(6.))
+            .py_1p5()
             .mx_2()
-            .rounded(zpx(8.))
+            .rounded(radius::MD)
             .flex()
             .items_center()
             .gap_3()
@@ -201,7 +202,7 @@ impl Render for FilePicker {
       .id("file-picker")
       .debug_selector(|| "file-picker".into())
       .w(width)
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border)
       .bg(p.background)

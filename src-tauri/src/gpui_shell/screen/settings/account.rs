@@ -10,6 +10,7 @@
 //! [`account_data`]: crate::gpui_shell::screen::account_data
 //! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -1041,7 +1042,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .variant(Variant::Outline)
         .size(Size::Sm)
         .h(zpx(28.))
-        .gap(zpx(6.))
+        .gap_1p5()
         .disabled(c.submitting)
         .child(ui::icon(theme::ICON_WRENCH, 14., p.foreground))
         .label("Repair")
@@ -1102,7 +1103,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         } => div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             div()
               .flex()
@@ -1208,7 +1209,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   let green = tw::color(tw::GREEN_500);
   div()
     .debug_selector(|| "cloud-workspace-card".into())
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
     .p_4()
@@ -1235,10 +1236,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .gap_2()
           .child(
             ui::text(div(), TextSize::Xs)
-              .rounded(zpx(4.))
+              .rounded(radius::SM)
               .bg(green.opacity(0.2))
-              .px(zpx(6.))
-              .py(zpx(2.))
+              .px_1p5()
+              .py_0p5()
               .font_weight(FontWeight::SEMIBOLD)
               .text_color(tw::color(if p.dark {
                 tw::GREEN_400
@@ -1299,7 +1300,7 @@ pub(in crate::gpui_shell::screen) fn cloud_delete_dialog_element(
         .flex_col()
         .gap_4()
         .p_6()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border)
         .bg(p.background)
@@ -1429,7 +1430,7 @@ impl SettingsView {
       .border_1()
       .border_dashed()
       .border_color(yellow.opacity(0.5))
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .bg(yellow.opacity(0.05))
       .child(
         ui::text(div(), TextSize::Xs)
@@ -1497,7 +1498,7 @@ impl SettingsView {
       div()
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .p_4()
     };
     let row = |name: String, value: AnyElement| {
@@ -1692,7 +1693,7 @@ impl SettingsView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .py(zpx(6.))
+                    .py_1p5()
                     .child(div().font_family(theme::MONO_FONT).child(name.clone()))
                     .child(div().text_color(p.muted_foreground).child(if *private {
                       "Private"

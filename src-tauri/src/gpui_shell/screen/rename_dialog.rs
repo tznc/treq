@@ -321,9 +321,7 @@ impl Render for RenameDialog {
                   .w_full()
                   .child(
                     Styled::h(ui::input(&input).disabled(pending), zpx(40.))
-                      .when_some(status, |this, icon| {
-                        this.suffix(div().pr(zpx(4.)).child(icon))
-                      }),
+                      .when_some(status, |this, icon| this.suffix(div().pr_1().child(icon))),
                   ),
               )
               .when_some(invalid, |this, v| {

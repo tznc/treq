@@ -11,6 +11,7 @@
 //! The dialogs cover the whole window, sidebar included, as `ui/dialog.tsx`
 //! did.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
@@ -189,7 +190,7 @@ fn header(title: impl IntoElement, description: impl Into<SharedString>, p: &Pal
   div()
     .flex()
     .flex_col()
-    .gap(zpx(6.))
+    .gap_1p5()
     .child(dialog_title(title))
     .child(dialog_description(description, p))
 }
@@ -205,7 +206,7 @@ fn text_field(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl
     .px_2()
     .flex()
     .items_center()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
@@ -272,7 +273,7 @@ fn checkbox(id: &'static str, checked: bool, p: &Palette) -> impl IntoElement {
     .flex()
     .items_center()
     .justify_center()
-    .rounded(zpx(3.))
+    .rounded(radius::SM)
     .when(checked, |this| {
       this
         .bg(tw::color(tw::BLUE_500))
@@ -292,7 +293,7 @@ fn words(parts: &[(&str, bool)], p: &Palette) -> Div {
   let mut paragraph = div()
     .flex()
     .flex_wrap()
-    .gap_x(zpx(3.5))
+    .gap_x_1()
     .text_color(p.muted_foreground);
   for (text, mono) in parts {
     for word in text.split_whitespace() {
@@ -791,7 +792,7 @@ impl RemoteView {
         .flex_1()
         .min_w_0()
         .cursor_pointer()
-        .rounded(zpx(12.))
+        .rounded(radius::LG)
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_4()
@@ -900,7 +901,7 @@ impl RemoteView {
           .debug_selector(move || format!("{id}-suggestion-{i}"))
           .px_2()
           .py_1()
-          .rounded(zpx(4.))
+          .rounded(radius::SM)
           .cursor_pointer()
           .hover(move |s| s.bg(menu_accent))
           .child(alias)
@@ -919,7 +920,7 @@ impl RemoteView {
             div()
               .w(anchor.size.width)
               .p_1()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(p.border)
               .bg(p.popover)
@@ -1104,7 +1105,7 @@ impl RemoteView {
         .id("remote-trust-confirmation")
         .debug_selector(|| "remote-trust-confirmation".into())
         .mt_4()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(yellow.opacity(0.4))
         .bg(yellow.opacity(0.1))
@@ -1227,7 +1228,7 @@ impl RemoteView {
             .items_center()
             .justify_between()
             .gap_2()
-            .rounded(zpx(8.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.border)
             .px_3()
@@ -1269,7 +1270,7 @@ impl RemoteView {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(dialog_title(
             div()
               .flex()

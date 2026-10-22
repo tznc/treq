@@ -8,6 +8,7 @@
 //! what the nested layout's collapsing margins made it, and each row in the
 //! timeline draws its own stretch of the rule.
 
+use crate::gpui_shell::ui::radius;
 use std::rc::Rc;
 
 use tauri_plugin_gpui::gpui::{
@@ -490,8 +491,8 @@ impl CommitsView {
       .ml_7()
       .border_x_1()
       .border_color(p.border)
-      .when(top, |this| this.border_t_1().rounded_t(zpx(8.)))
-      .when(bottom, |this| this.border_b_1().rounded_b(zpx(8.)))
+      .when(top, |this| this.border_t_1().rounded_t(radius::MD))
+      .when(bottom, |this| this.border_b_1().rounded_b(radius::MD))
       .overflow_hidden()
       .child(content)
       .into_any_element()
@@ -551,7 +552,7 @@ impl CommitsView {
         .child(
           div()
             .px_3()
-            .py(zpx(2.))
+            .py_0p5()
             .bg(p.muted.opacity(0.6))
             .text_color(p.muted_foreground)
             .border_t_1()
@@ -654,8 +655,8 @@ impl CommitsView {
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
             .debug_selector(move || format!("add-comment-{h}-{l}"))
-            .p(zpx(1.))
-            .rounded(zpx(4.))
+            .p_px()
+            .rounded(radius::SM)
             .bg(p.primary)
             .opacity(0.)
             .group_hover("diff-line", |s| s.opacity(1.))

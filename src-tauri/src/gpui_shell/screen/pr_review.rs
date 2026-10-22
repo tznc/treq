@@ -10,6 +10,7 @@
 //!
 //! [`pr_review_data`]: super::pr_review_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
@@ -437,7 +438,7 @@ impl PrReviewView {
       ui::text(div(), TextSize::Xs)
         .debug_selector(|| "pr-review-subtitle".into())
         .flex()
-        .gap(zpx(4.))
+        .gap_1()
         .overflow_hidden()
         .whitespace_nowrap()
         .text_color(muted)
@@ -511,7 +512,7 @@ impl PrReviewView {
             ui::text(div(), TextSize::Sm)
               .debug_selector(|| "pr-review-title".into())
               .flex()
-              .gap(zpx(4.))
+              .gap_1()
               .overflow_hidden()
               .whitespace_nowrap()
               .font_weight(FontWeight::MEDIUM)
@@ -723,7 +724,7 @@ impl PrReviewView {
       .debug_selector(|| "pr-review-popover".into())
       .w(zpx(width))
       .p_4()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)

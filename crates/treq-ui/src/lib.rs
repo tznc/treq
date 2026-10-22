@@ -47,6 +47,21 @@ use theme::Palette;
 /// The rem size at 100% `ui_zoom`, as the webview's root font size.
 pub const BASE_REM: f32 = 16.;
 
+/// The corner radii, as rems so they follow UI zoom:
+/// `.rounded(radius::MD)`.
+pub mod radius {
+  use gpui::Rems;
+
+  use crate::{theme, BASE_REM};
+
+  /// Kbd, checkboxes, menu and list rows.
+  pub const SM: Rems = Rems(theme::RADIUS_SM / BASE_REM);
+  /// Buttons, inputs, menus, popovers and tooltips.
+  pub const MD: Rems = Rems(theme::RADIUS_MD / BASE_REM);
+  /// Cards, toasts and dialogs.
+  pub const LG: Rems = Rems(theme::RADIUS_LG / BASE_REM);
+}
+
 /// `v` CSS pixels as rems, so the length follows the window's rem size,
 /// which `ui_zoom` scales the way React's CSS `zoom` scaled every length.
 pub fn zpx(v: f32) -> gpui::Rems {
@@ -90,9 +105,16 @@ pub type OnHover = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 /// size and line height in pixels.
 #[derive(Clone, Copy)]
 pub enum TextSize {
+  /// Captions, badges and kbd.
   Xs,
+  /// Body text and controls.
   Sm,
+  /// Titles.
   Lg,
+  /// Headings.
+  Xl,
+  /// Code, paths and aligned digits, in the mono font.
+  Code,
 }
 
 impl TextSize {
@@ -101,6 +123,8 @@ impl TextSize {
       TextSize::Xs => (11., 16.),
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
+      TextSize::Xl => (20., 28.),
+      TextSize::Code => (12., 18.),
     }
   }
 }

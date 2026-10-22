@@ -1,6 +1,7 @@
 //! `NewPrDialog`: a pull request from a workspace (`CreatePrFromWorkspaceForm`)
 //! or from any branch (`CreatePrForm`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
   anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
@@ -397,7 +398,7 @@ impl GithubView {
           .id("github-new-pr-workspaces")
           .max_h(zpx(240.))
           .overflow_y_scroll()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .children(list.iter().enumerate().map(|(i, ws)| {
@@ -612,7 +613,7 @@ impl GithubView {
       .rounded_l_none()
       .border_l_1()
       .border_color(gpui_kit::white().opacity(0.2))
-      .px(zpx(6.))
+      .px_1p5()
       .disabled(pending)
       .icon(theme::ICON_CHEVRON_DOWN, 16.)
       .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::PrType, cx)));
@@ -642,11 +643,11 @@ impl GithubView {
             .relative()
             .flex()
             .flex_col()
-            .gap(zpx(2.))
-            .py(zpx(6.))
+            .gap_0p5()
+            .py_1p5()
             .pl_8()
             .pr_2()
-            .rounded(zpx(4.))
+            .rounded(radius::SM)
             .cursor_pointer()
             .hover(move |s| s.bg(accent))
             .child(

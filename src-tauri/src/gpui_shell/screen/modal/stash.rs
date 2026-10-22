@@ -1,6 +1,7 @@
 //! `StashModal`: the repository's stashed changes, each one's diff, and
 //! applying, copying and deleting them.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
@@ -467,7 +468,7 @@ impl StashView {
               .flex_none()
               .px_2()
               .py_2()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .cursor_pointer()
               .when(selected, |this| this.bg(accent))
               .when(!selected, |this| {
@@ -482,7 +483,7 @@ impl StashView {
               )
               .child(
                 div()
-                  .mt(zpx(2.))
+                  .mt_0p5()
                   .flex()
                   .items_center()
                   .gap_2()
@@ -565,7 +566,7 @@ impl StashView {
           .flex()
           .flex_wrap()
           .gap_x_3()
-          .gap_y(zpx(2.))
+          .gap_y_0p5()
           .text_color(p.muted_foreground)
           .child(
             div()
@@ -576,7 +577,7 @@ impl StashView {
           .child(
             div()
               .flex()
-              .gap(zpx(4.))
+              .gap_1()
               .child(
                 div()
                   .text_color(green)
@@ -629,7 +630,7 @@ impl StashView {
       .flex_none()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .child(
         div()
           .relative()
@@ -716,8 +717,8 @@ impl StashView {
         .items_center()
         .gap_2()
         .px_2()
-        .py(zpx(6.))
-        .rounded(zpx(6.))
+        .py_1p5()
+        .rounded(radius::MD)
         .cursor_pointer()
         .when(active, |this| this.bg(accent))
     };
@@ -734,7 +735,7 @@ impl StashView {
         .child(
           ui::text(div(), TextSize::Xs)
             .px_2()
-            .py(zpx(6.))
+            .py_1p5()
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
             .child("Apply to"),
@@ -759,7 +760,7 @@ impl StashView {
       .top(zpx(32.))
       .right_0()
       .w(zpx(288.))
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -895,7 +896,7 @@ impl StashView {
         .child(
           div()
             .px_2()
-            .py(zpx(6.))
+            .py_1p5()
             .border_b_1()
             .border_color(p.border)
             .bg(p.background.opacity(0.95))
@@ -905,7 +906,7 @@ impl StashView {
         .into_any_element(),
       Row::HunkHeader(f, h) => text
         .px_2()
-        .py(zpx(2.))
+        .py_0p5()
         .text_color(p.muted_foreground)
         .bg(p.muted.opacity(0.4))
         .child(hunk(f, h).map(|h| h.header.clone()).unwrap_or_default())

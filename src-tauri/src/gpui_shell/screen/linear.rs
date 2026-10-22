@@ -8,6 +8,7 @@
 //! agent itself. React still owns the prompt dialog, so GPUI hands back an
 //! issue to kick off (`linear.kickoff`) for React to open it with.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
@@ -714,8 +715,8 @@ enum Action {
 fn badge(text: impl Into<SharedString>, p: &Palette) -> Div {
   ui::text(div(), TextSize::Xs)
     .font_weight(FontWeight::MEDIUM)
-    .px(zpx(6.))
-    .py(zpx(2.))
+    .px_1p5()
+    .py_0p5()
     .rounded_full()
     .bg(p.muted)
     .text_color(p.muted_foreground)
@@ -799,7 +800,7 @@ fn tabs<V: Copy + PartialEq + 'static>(
     .gap_1()
     .bg(p.muted)
     .p_1()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .children(items.into_iter().map(|(value, key, label)| {
       let id = format!("{prefix}-{key}");
       let selector = id.clone();
@@ -810,7 +811,7 @@ fn tabs<V: Copy + PartialEq + 'static>(
         .debug_selector(move || selector)
         .px_3()
         .py_1()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .when(on, |this| this.bg(p.background).text_color(fg).shadow_sm())
@@ -963,7 +964,7 @@ impl LinearView {
     let trigger = Button::new(test_id, p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .gap(zpx(6.))
+      .gap_1p5()
       .icon(theme::ICON_FILTER, 14.)
       .label("Filter")
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground))
@@ -1032,7 +1033,7 @@ impl LinearView {
     div()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .flex_wrap()
       .child(div().relative().child(trigger).child(self.anchor(test_id)))
       .children(chips)
@@ -1394,8 +1395,8 @@ impl LinearView {
         .flex_wrap()
         .children(issue.labels.iter().map(|label| {
           ui::text(div(), TextSize::Xs)
-            .px(zpx(6.))
-            .py(zpx(2.))
+            .px_1p5()
+            .py_0p5()
             .rounded_full()
             .bg(p.primary.opacity(0.1))
             .text_color(p.primary.opacity(0.8))
@@ -1462,7 +1463,7 @@ impl LinearView {
         .debug_selector(move || selector)
         .px_4()
         .pb_4()
-        .pl(zpx(44.))
+        .pl_11()
         .child(self.commented(target, p, cx))
     });
     div()
@@ -1539,7 +1540,7 @@ impl LinearView {
           .flex_none()
           .w(zpx(320.))
           .bg(p.muted.opacity(0.3))
-          .rounded(zpx(12.))
+          .rounded(radius::LG)
           .border_1()
           .border_color(p.border)
           .p_3()
@@ -1595,13 +1596,13 @@ impl LinearView {
       div()
         .flex()
         .gap_1()
-        .mt(zpx(6.))
+        .mt_1p5()
         .flex_wrap()
         .children(issue.labels.iter().take(2).map(|label| {
           ui::text(div(), TextSize::Xs)
             .px_1()
-            .py(zpx(2.))
-            .rounded(zpx(4.))
+            .py_0p5()
+            .rounded(radius::SM)
             .bg(p.primary.opacity(0.1))
             .text_color(p.primary.opacity(0.7))
             .child(label.clone())
@@ -1610,7 +1611,7 @@ impl LinearView {
           this.child(
             ui::text(div(), TextSize::Xs)
               .px_1()
-              .py(zpx(2.))
+              .py_0p5()
               .text_color(p.muted_foreground)
               .child(format!("+{}", issue.labels.len() - 2)),
           )
@@ -1620,8 +1621,8 @@ impl LinearView {
       .bg(p.background)
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
-      .p(zpx(10.))
+      .rounded(radius::MD)
+      .p_2p5()
       .child(
         ui::text(
           self.link(
@@ -1800,8 +1801,8 @@ impl LinearView {
                   .mt_1()
                   .child(
                     ui::text(div(), TextSize::Xs)
-                      .px(zpx(6.))
-                      .py(zpx(2.))
+                      .px_1p5()
+                      .py_0p5()
                       .rounded_full()
                       .bg(p.muted)
                       .text_color(p.muted_foreground)
@@ -1868,8 +1869,8 @@ impl LinearView {
       .flex_wrap()
       .child(
         div()
-          .px(zpx(6.))
-          .py(zpx(2.))
+          .px_1p5()
+          .py_0p5()
           .rounded_full()
           .bg(p.muted)
           .child(capitalize(&project.state)),
@@ -2036,7 +2037,7 @@ impl LinearView {
           .id("linear-document-panel")
           .max_h(viewport.height * 0.8)
           .overflow_y_scroll()
-          .gap(zpx(0.))
+          .gap_0()
           .track_focus(&self.focus)
           .capture_key_down(keys)
           .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -2099,7 +2100,7 @@ impl LinearView {
         .variant(Variant::Outline)
         .size(Size::Sm)
         .h(zpx(28.))
-        .gap(zpx(6.))
+        .gap_1p5()
         .text_size(zpx(11.))
         .line_height(zpx(16.))
         .disabled(starting)
@@ -2214,7 +2215,7 @@ impl LinearView {
           .debug_selector(move || selector)
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .when_some(comment.quoted_text.clone(), |this, quote| {
             this.child(
               ui::text(div(), TextSize::Xs)
@@ -2286,7 +2287,7 @@ impl LinearView {
       actions = actions.child(
         Button::new(SharedString::from(format!("linear-agent-apply-{id}")), p)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_WAND, 12.)
           .label("Apply to Linear")
@@ -2298,7 +2299,7 @@ impl LinearView {
         Button::new(SharedString::from(format!("linear-agent-resolve-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_CHECK, 12.)
           .label("Resolve")
@@ -2308,7 +2309,7 @@ impl LinearView {
         Button::new(SharedString::from(format!("linear-agent-delete-{id}")), p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .text_color(p.muted_foreground)
           .disabled(busy)
           .icon(theme::ICON_TRASH, 12.)
@@ -2317,7 +2318,7 @@ impl LinearView {
       );
     div()
       .debug_selector(|| "agent-review-comment-card".into())
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(violet(0.4))
       .bg(violet(0.05))

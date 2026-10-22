@@ -7,6 +7,7 @@
 //! window per [`Slot`] (per shell window, for toasts) is built on first use,
 //! then moved and resized.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::{Cell, RefCell},
@@ -846,7 +847,7 @@ impl PopupView {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .bg(palette.muted)
             .text_color(palette.muted_foreground)
             .text_size(zpx(LIST_ITEM_SIZE))
@@ -867,7 +868,7 @@ impl PopupView {
           div()
             .flex()
             .items_center()
-            .gap(zpx(6.))
+            .gap_1p5()
             .font_family(theme::MONO_FONT)
             .child(
               svg()
@@ -906,7 +907,7 @@ impl PopupView {
           div()
             .flex()
             .flex_col()
-            .gap(zpx(2.))
+            .gap_0p5()
             .font_family(theme::MONO_FONT)
             .text_size(zpx(LIST_ITEM_SIZE))
             .line_height(zpx(LIST_ITEM_LINE))
@@ -1143,7 +1144,7 @@ impl PopupView {
           svg()
             .path(icon)
             .size(zpx(16.))
-            .mt(zpx(2.))
+            .mt_0p5()
             .flex_none()
             .text_color(icon_color),
         )
@@ -1277,7 +1278,7 @@ impl Render for PopupView {
       Content::Tooltip(content) => Some(
         div()
           .px_3()
-          .py(zpx(6.))
+          .py_1p5()
           .shadow_md()
           .child(self.render_tooltip(&content, cx)),
       ),

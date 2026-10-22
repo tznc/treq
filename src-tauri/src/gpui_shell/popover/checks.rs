@@ -7,6 +7,7 @@
 //! popover reads the workflows and their latest runs from the route, and
 //! asks React to trust, run and re-run.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
@@ -346,9 +347,9 @@ impl Popover {
         .flex()
         .items_center()
         .gap_2()
-        .py(zpx(6.))
+        .py_1p5()
         .px_2()
-        .rounded(zpx(4.))
+        .rounded(radius::SM)
         .child(icon)
         .child(
           div()

@@ -658,7 +658,7 @@ impl Render for Sidebar {
       .text_size(zpx(13.))
       // Room for the right edge line, drawn as a child below so the modal
       // backdrop covers it (GPUI paints a border above the children).
-      .pr(zpx(1.))
+      .pr_px()
       // The traffic lights sit here; the edge line runs past them to the
       // window's top edge.
       .when(title_bar::SHOWN, |this| {
@@ -699,7 +699,7 @@ impl Render for Sidebar {
       .overflow_y_scroll()
       .px_2()
       .pb_2()
-      .gap(zpx(2.))
+      .gap_0p5()
       // A click on the empty list clears the selection; it is not a control.
       .cursor_default()
       .on_click(self.on_action(SidebarAction::ClearSelection))
@@ -709,11 +709,7 @@ impl Render for Sidebar {
     for (index, repo) in snapshot.repos.iter().enumerate() {
       // Each repository's rows sit in their own element, so workspace ids,
       // which are per repository, do not collide.
-      let mut section = div()
-        .id(("repo-section", index))
-        .flex()
-        .flex_col()
-        .gap(zpx(4.));
+      let mut section = div().id(("repo-section", index)).flex().flex_col().gap_1();
       if let Some(name) = &repo.label {
         section = section.child(self.group_label(repo, name, &palette));
       }
@@ -824,7 +820,7 @@ impl Sidebar {
       .flex_none()
       .items_center()
       .gap_1()
-      .px(zpx(6.))
+      .px_1p5()
       .h(zpx(22.))
       .rounded_md()
       .text_size(zpx(12.))
@@ -977,7 +973,7 @@ impl Sidebar {
       .flex()
       .flex_none()
       .items_center()
-      .gap(zpx(2.))
+      .gap_0p5()
       .child(self.row_button(
         format!("{prefix}-start-agent").into(),
         theme::ICON_BOT,
@@ -1024,7 +1020,7 @@ impl Sidebar {
         .flex_1()
         .min_w_0()
         .items_baseline()
-        .gap(zpx(6.))
+        .gap_1p5()
         .child(
           div()
             .flex_none()
@@ -1076,7 +1072,7 @@ impl Sidebar {
       .relative()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .mx_2()
       .px_2()
       .h(zpx(32.))
@@ -1143,7 +1139,7 @@ impl Sidebar {
       .test_support()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .mx_2()
       .px_2()
       .h(zpx(32.))
@@ -1314,7 +1310,7 @@ impl Sidebar {
       .relative()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .h(zpx(32.))
       .pl(zpx(row_indent(row.depth)))
       .pr_2()

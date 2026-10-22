@@ -8,6 +8,7 @@
 //! (a palette command, the picked workspace, closing) goes back to it as a
 //! screen action, and the model pushes what shows next.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -568,9 +569,9 @@ fn group_branches(list: Vec<JjBranch>) -> Vec<(JjBranch, usize)> {
 /// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
 fn kbd(p: &Palette, key: &str) -> gpui::Div {
   ui::text(div(), TextSize::Xs)
-    .px(zpx(6.))
-    .py(zpx(2.))
-    .rounded(zpx(4.))
+    .px_1p5()
+    .py_0p5()
+    .rounded(radius::SM)
     .bg(p.muted)
     .child(SharedString::from(key.to_string()))
 }
@@ -687,9 +688,9 @@ impl Overlay {
       Body::Palette { commands, .. } => {
         let command = &commands[index];
         base
-          .py(zpx(6.))
+          .py_1p5()
           .mx_2()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .text_color(p.foreground)
           .when(!selected, |this| {
             this.hover(|s| s.bg(p.menu_accent.opacity(0.3)))
@@ -707,7 +708,7 @@ impl Overlay {
         base
           .py_2()
           .mx_2()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .when(selected, |this| this.text_color(p.foreground))
           .when(!selected, |this| {
             this.hover(|s| s.bg(p.menu_accent.opacity(0.5)))
@@ -877,7 +878,7 @@ impl Render for Overlay {
             .role(gpui::Role::Dialog)
             .test_support()
             .w(viewport.width * 0.4)
-            .rounded(zpx(16.))
+            .rounded(radius::LG)
             .border_1()
             .border_color(if palette {
               p.border

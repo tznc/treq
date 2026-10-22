@@ -57,7 +57,7 @@ pub(crate) fn trigger(
     .size(Size::Sm)
     .h(zpx(size.height))
     .px(zpx(size.padding))
-    .gap(zpx(6.))
+    .gap_1p5()
     .child(ui::icon(icon, size.icon, p.foreground))
     .child(ui::text(div(), TextSize::Xs).child(label))
     .when(devcontainer, |b| {
@@ -109,7 +109,7 @@ pub(crate) fn menu<V: 'static>(
       .items_start()
       .child(
         div()
-          .mt(zpx(2.))
+          .mt_0p5()
           .child(ui::icon(icon, 14., p.popover_foreground)),
       )
       .child(
@@ -118,7 +118,7 @@ pub(crate) fn menu<V: 'static>(
           .min_w_0()
           .flex()
           .flex_col()
-          .gap(zpx(2.))
+          .gap_0p5()
           .child(div().font_weight(FontWeight::MEDIUM).child(title))
           .child(
             ui::text(div(), TextSize::Xs)
@@ -129,7 +129,7 @@ pub(crate) fn menu<V: 'static>(
       .when(selected, |this| {
         this.child(
           div()
-            .mt(zpx(2.))
+            .mt_0p5()
             .child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground)),
         )
       })
@@ -140,7 +140,7 @@ pub(crate) fn menu<V: 'static>(
     .child(
       ui::text(div(), TextSize::Xs)
         .px_2()
-        .py(zpx(6.))
+        .py_1p5()
         .text_color(p.muted_foreground)
         .child("New terminals and agents run in"),
     )

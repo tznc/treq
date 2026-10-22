@@ -9,6 +9,7 @@
 //! new workspace. Each dialog covers the whole window, sidebar included, as
 //! React's `Dialog` did.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -170,7 +171,7 @@ pub fn dialog(
     .flex()
     .flex_col()
     .gap_4()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)

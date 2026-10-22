@@ -1,6 +1,7 @@
 //! Reactions on GitHub comments: the counts under a comment, and the
 //! picker of GitHub's eight reactions that adds or removes the user's own.
 
+use crate::gpui_shell::ui::radius;
 use tauri_plugin_gpui::gpui::{deferred, div, prelude::*, Context, Div, SharedString};
 
 use crate::{
@@ -183,7 +184,7 @@ fn picker<V: Reacts>(
       .p_1()
       .flex()
       .gap_1()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)

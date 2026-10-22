@@ -3,6 +3,7 @@
 //! conflicts, the pending review the backend keeps, and sending it to an
 //! agent through React.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{ops::Range, time::Duration};
 
@@ -1019,8 +1020,8 @@ impl ChangesView {
                     let id = format!("add-comment-{path}-{h}-{l}");
                     move || id
                   })
-                  .p(zpx(2.))
-                  .rounded(zpx(4.))
+                  .p_0p5()
+                  .rounded(radius::SM)
                   .bg(p.primary)
                   .cursor_pointer()
                   .opacity(0.)
@@ -1049,7 +1050,7 @@ impl ChangesView {
           .flex_1()
           .min_w_0()
           .px_2()
-          .py(zpx(2.))
+          .py_0p5()
           .child(self.marked_text(
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
@@ -1111,7 +1112,7 @@ impl ChangesView {
     let box_ = || {
       div()
         .bg(p.background)
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .p_3()
         .border_1()
         .border_color(p.border.opacity(0.6))
@@ -1149,7 +1150,7 @@ impl ChangesView {
           .gap_2()
           .child(
             div()
-              .mt(zpx(2.))
+              .mt_0p5()
               .flex_none()
               .opacity(0.)
               .group_hover("comment-card", |s| s.opacity(1.))
@@ -1165,7 +1166,7 @@ impl ChangesView {
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .cursor_pointer()
                 .hover(move |s| s.bg(accent))
                 .child(ui::icon(theme::ICON_X, 12., muted))
@@ -1316,7 +1317,7 @@ impl ChangesView {
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .mx_2()
       .my_1()
       .px_4()
@@ -1351,7 +1352,7 @@ impl ChangesView {
               ui::text(div(), TextSize::Xs)
                 .font_weight(FontWeight::MEDIUM)
                 .not_italic()
-                .mb(zpx(2.))
+                .mb_0p5()
                 .child(format!("Quoting @{}", quote.author)),
             )
             .child(d.line_content.join(" ")),
@@ -1477,7 +1478,7 @@ impl ChangesView {
       section = section.child(
         div()
           .bg(p.background)
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .p_3()
           .border_1()
           .border_color(amber.opacity(0.3))
@@ -1495,9 +1496,9 @@ impl ChangesView {
                   .gap_2()
                   .child(
                     ui::text(div(), TextSize::Xs)
-                      .px(zpx(6.))
-                      .py(zpx(2.))
-                      .rounded(zpx(4.))
+                      .px_1p5()
+                      .py_0p5()
+                      .rounded(radius::SM)
                       .bg(amber.opacity(0.25))
                       .text_color(shade(tw::AMBER_700, tw::AMBER_300))
                       .font_weight(FontWeight::MEDIUM)
@@ -1513,7 +1514,7 @@ impl ChangesView {
                 div()
                   .id(SharedString::from(format!("delete-outdated-{id}")))
                   .p_1()
-                  .rounded(zpx(4.))
+                  .rounded(radius::SM)
                   .cursor_pointer()
                   .hover(move |s| s.bg(accent))
                   .child(ui::icon(theme::ICON_X, 12., p.muted_foreground))
@@ -1524,7 +1525,7 @@ impl ChangesView {
             this.child(
               ui::text(div(), TextSize::Xs)
                 .bg(p.muted.opacity(0.6))
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .px_2()
                 .py_1()
                 .mb_2()
@@ -1757,7 +1758,7 @@ impl ChangesView {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .gap(zpx(6.))
+        .gap_1p5()
         .border_color(amber.opacity(0.6))
         .text_color(fg)
         .icon(icon, 12.)
@@ -1839,12 +1840,12 @@ impl ChangesView {
         .debug_selector(|| "use-idle-agent".into())
         .flex()
         .items_center()
-        .gap(zpx(6.))
+        .gap_1p5()
         .cursor_pointer()
         .child(
           div()
             .size(zpx(14.))
-            .rounded(zpx(3.))
+            .rounded(radius::SM)
             .border_1()
             .border_color(if checked { p.primary } else { p.border })
             .bg(if checked { p.primary } else { p.background })
@@ -1871,7 +1872,7 @@ impl ChangesView {
       .w(zpx(width))
       .relative()
       .p_4()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -1996,7 +1997,7 @@ impl ChangesView {
       .w_full()
       .max_w(zpx(512.))
       .p_6()
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
@@ -2013,7 +2014,7 @@ impl ChangesView {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
               .line_height(zpx(15.))

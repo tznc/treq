@@ -8,6 +8,7 @@
 //!
 //! [`logs_data`]: super::logs_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
@@ -693,8 +694,8 @@ fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpu
     .relative()
     .flex()
     .items_center()
-    .rounded(zpx(2.))
-    .py(zpx(6.))
+    .rounded(radius::SM)
+    .py_1p5()
     .pl_8()
     .pr_2()
     .cursor_pointer()
@@ -750,7 +751,7 @@ impl LogsView {
       .items_center()
       .justify_between()
       .gap_2()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.background)
@@ -777,7 +778,7 @@ impl LogsView {
       .px_2()
       .flex()
       .items_center()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.background)
@@ -814,7 +815,7 @@ impl LogsView {
             .child(
               Button::new("logs-browse-view", p)
                 .size(Size::Sm)
-                .gap(zpx(12.))
+                .gap_3()
                 .variant(if browsing {
                   Variant::Secondary
                 } else {
@@ -830,7 +831,7 @@ impl LogsView {
             .child(
               Button::new("logs-explorer-view", p)
                 .size(Size::Sm)
-                .gap(zpx(12.))
+                .gap_3()
                 .variant(if browsing {
                   Variant::Ghost
                 } else {
@@ -908,7 +909,7 @@ impl LogsView {
           Button::new("open-log-folder", p)
             .variant(Variant::Ghost)
             .size(Size::Sm)
-            .gap(zpx(12.))
+            .gap_3()
             .icon(theme::ICON_FOLDER_OPEN, 12.)
             .label("Open log folder")
             .on_click(cx.listener(|view, _, _, _| {
@@ -996,14 +997,14 @@ impl LogsView {
       .items_center()
       .gap_2()
       .px_3()
-      .py(zpx(6.))
+      .py_1p5()
       .border_b_1()
       .border_color(p.border)
       .bg(p.muted.opacity(0.3))
       .child(
         Button::new("multi-select-toggle", p)
           .size(Size::Sm)
-          .gap(zpx(12.))
+          .gap_3()
           .variant(if multi {
             Variant::Secondary
           } else {
@@ -1214,7 +1215,7 @@ impl LogsView {
             Button::new("send-to-agent", p)
               .variant(Variant::Outline)
               .size(Size::Sm)
-              .gap(zpx(12.))
+              .gap_3()
               .icon(theme::ICON_BOT, 12.)
               .label("Send to agent")
               .on_click(cx.listener(|view, _, _, cx| {
@@ -1255,7 +1256,7 @@ impl LogsView {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(zpx(2.))
+        .rounded(radius::SM)
         .when(disabled, |this| this.opacity(0.5))
         .when(!disabled, |this| {
           this
@@ -1274,12 +1275,12 @@ impl LogsView {
         .bg(p.background)
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .shadow_lg()
-        .p(zpx(2.))
+        .p_0p5()
         .flex()
         .items_center()
-        .gap(zpx(2.))
+        .gap_0p5()
         .capture_action(cx.listener(|view, _: &Escape, _, cx| {
           view.find.open = false;
           cx.stop_propagation();
@@ -1292,7 +1293,7 @@ impl LogsView {
             .px_2()
             .flex()
             .items_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.input)
             .child(ui::input(&input).appearance(false).bordered(false)),
@@ -1367,7 +1368,7 @@ impl LogsView {
           .gap_1()
           .text_size(zpx(10.))
           .text_color(p.muted_foreground)
-          .child(div().size(zpx(8.)).rounded(zpx(2.)).bg(color))
+          .child(div().size(zpx(8.)).rounded(radius::SM).bg(color))
           .child(*label)
       }));
     let plot_height = CHART_HEIGHT - 52. - 26.;
@@ -1488,7 +1489,7 @@ impl LogsView {
           Button::new("template-menu", p)
             .variant(Variant::Outline)
             .size(Size::Sm)
-            .gap(zpx(12.))
+            .gap_3()
             .icon(theme::ICON_FILE_CODE, 12.)
             .label("Templates")
             .child(ui::icon(
@@ -1538,7 +1539,7 @@ impl LogsView {
               Button::new("send-resultset-to-agent", p)
                 .variant(Variant::Outline)
                 .size(Size::Sm)
-                .gap(zpx(12.))
+                .gap_3()
                 .icon(theme::ICON_BOT, 12.)
                 .label("Send results to agent")
                 .on_click(cx.listener(|view, _, _, cx| {
@@ -1551,7 +1552,7 @@ impl LogsView {
           .child(
             Button::new("run-query", p)
               .size(Size::Sm)
-              .gap(zpx(12.))
+              .gap_3()
               .disabled(self.explorer.running)
               .child(if self.explorer.running {
                 ui::spinner("run-query-spin", 12., p.primary_foreground).into_any_element()
@@ -1576,7 +1577,7 @@ impl LogsView {
           .flex()
           .items_start()
           .gap_2()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(tw::color(if self.dark { tw::RED_900 } else { tw::RED_200 }))
           .bg(tw::color(if self.dark { tw::RED_950 } else { tw::RED_50 }))
@@ -1687,7 +1688,7 @@ impl LogsView {
               .flex_none()
               .w(zpx(*w))
               .px_3()
-              .py(zpx(6.))
+              .py_1p5()
               .border_b_1()
               .border_color(p.border)
               .whitespace_normal();
@@ -1713,7 +1714,7 @@ impl LogsView {
       .debug_selector(|| "logs-filter-list".into())
       .w(zpx(width))
       .p_1()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -1782,10 +1783,10 @@ impl LogsView {
               .debug_selector(move || format!("sql-template-{label}"))
               .flex()
               .flex_col()
-              .gap(zpx(2.))
+              .gap_0p5()
               .px_2()
               .py_2()
-              .rounded(zpx(2.))
+              .rounded(radius::SM)
               .cursor_pointer()
               .hover(move |s| s.bg(accent))
               .child(

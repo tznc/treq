@@ -4,6 +4,7 @@
 //! session (`startAgentTask`, in `core::agent_launch`): it opens the issue's
 //! workspaces, records the prompt and tells React which session to show.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::time::Duration;
 
@@ -825,7 +826,7 @@ impl AgentPromptView {
               .gap_2()
               .px_2()
               .py_2()
-              .rounded(zpx(4.))
+              .rounded(radius::SM)
               .cursor_pointer()
               .when(i == index, |this| this.bg(accent))
               .child(
@@ -850,7 +851,7 @@ impl AgentPromptView {
           .top(zpx(44.))
           .left_0()
           .w(zpx(288.))
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -928,7 +929,7 @@ impl AgentPromptView {
       .flex()
       .flex_wrap()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .px_3()
       .pt_3()
       .child(
@@ -937,12 +938,12 @@ impl AgentPromptView {
           .flex()
           .items_center()
           .gap_1()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.muted.opacity(0.5))
           .px_2()
-          .py(zpx(2.))
+          .py_0p5()
           .child(ui::icon(theme::ICON_CIRCLE_DOT, 12., color))
           .child(div().font_weight(FontWeight::MEDIUM).child(format!(
             "{} {}",
@@ -953,9 +954,9 @@ impl AgentPromptView {
             div()
               .id("issue-chip-remove")
               .debug_selector(|| "issue-chip-remove".into())
-              .ml(zpx(2.))
-              .p(zpx(2.))
-              .rounded(zpx(4.))
+              .ml_0p5()
+              .p_0p5()
+              .rounded(radius::SM)
               .cursor_pointer()
               .hover({
                 let muted = p.muted;
@@ -989,7 +990,7 @@ impl AgentPromptView {
         div()
           .id("task-card")
           .min_h(zpx(112.))
-          .rounded(zpx(16.))
+          .rounded(radius::LG)
           .border_1()
           .border_color(border)
           .bg(p.background)
@@ -1064,7 +1065,7 @@ impl AgentPromptView {
       .debug_selector(|| "task-mentions".into())
       .mx_2()
       .mb_1()
-      .rounded(zpx(12.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border)
       .bg(p.muted.opacity(0.5))
@@ -1088,7 +1089,7 @@ impl AgentPromptView {
           .debug_selector(move || selector)
           .w_full()
           .px_3()
-          .py(zpx(6.))
+          .py_1p5()
           .flex()
           .items_center()
           .gap_2()
@@ -1167,7 +1168,7 @@ impl AgentPromptView {
           .test_support()
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .cursor_pointer()
           .text_color(p.muted_foreground)
           .child(checkbox("task-save-default-box", checked, tw(BLUE_500), p))
@@ -1200,7 +1201,7 @@ impl AgentPromptView {
             .flex()
             .items_center()
             .gap_1()
-            .rounded(zpx(8.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.border)
             .bg(p.background)
@@ -1252,7 +1253,7 @@ impl AgentPromptView {
             .rounded_l_none()
             .border_l_1()
             .border_color(gpui::white().opacity(0.2))
-            .px(zpx(6.))
+            .px_1p5()
             .icon(theme::ICON_CHEVRON_DOWN, 14.)
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
         )
@@ -1325,7 +1326,7 @@ impl AgentPromptView {
               .min_w_0()
               .flex()
               .flex_col()
-              .gap(zpx(2.))
+              .gap_0p5()
               .child(div().font_weight(FontWeight::MEDIUM).child("Plan"))
               .child(
                 ui::text(div(), TextSize::Xs)

@@ -4,6 +4,7 @@
 //! issue picked from the integrations beside it, all at once and stacked on
 //! one branch.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   collections::{HashMap, HashSet},
@@ -757,7 +758,7 @@ impl OpenWorkspacesDialog {
         .flex_col()
         .flex_1()
         .min_w_0()
-        .gap(zpx(6.))
+        .gap_1p5()
         .child(label_xs(label))
         .child(
           div()
@@ -868,7 +869,7 @@ impl OpenWorkspacesDialog {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(label_xs("Workspaces"))
           .child(
             div()
@@ -978,8 +979,8 @@ impl OpenWorkspacesDialog {
           .gap_1()
           .px_2()
           .py_1()
-          .ml(zpx(-8.))
-          .rounded(zpx(6.))
+          .ml_neg_2()
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .child(status)
           .when(rows > 0, |this| {
@@ -1057,7 +1058,7 @@ impl OpenWorkspacesDialog {
           .flex()
           .flex_col()
           .gap_1()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -1094,7 +1095,7 @@ impl OpenWorkspacesDialog {
       .flex()
       .gap_1()
       .p_1()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .bg(p.muted)
       .children(self.integrations().into_iter().map(|tab| {
         let (icon, label, picked) = match tab {
@@ -1116,10 +1117,10 @@ impl OpenWorkspacesDialog {
           .flex_1()
           .justify_center()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .px_3()
           .py_1()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1137,7 +1138,7 @@ impl OpenWorkspacesDialog {
               ui::text(div(), TextSize::Xs)
                 .rounded_full()
                 .bg(p.primary)
-                .px(zpx(6.))
+                .px_1p5()
                 .text_color(p.primary_foreground)
                 .child(picked.to_string()),
             )
@@ -1372,7 +1373,7 @@ fn pick_row(
     })
     .w_full()
     .px_3()
-    .py(zpx(10.))
+    .py_2p5()
     .border_b_1()
     .border_color(p.border)
     .flex()
@@ -1381,7 +1382,7 @@ fn pick_row(
     .cursor_pointer()
     .when(checked, |d| d.bg(p.primary.opacity(0.1)))
     .when(!checked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
-    .child(div().mt(zpx(4.)).child(checkbox(
+    .child(div().mt_1().child(checkbox(
       SharedString::from(format!("{id}-check")),
       if checked { Check::On } else { Check::Off },
       disabled,

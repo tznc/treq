@@ -6,6 +6,7 @@
 //!
 //! [`workspace_dialog_data`]: super::workspace_dialog_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -989,7 +990,7 @@ pub(super) fn disclosure(
 
 /// `StackDot`: a 14px dot with a background ring.
 fn stack_dot(highlighted: bool, p: &Palette) -> Div {
-  div().flex_none().mt(zpx(2.)).child(
+  div().flex_none().mt_0p5().child(
     div()
       .size(zpx(14.))
       .rounded_full()
@@ -1047,7 +1048,7 @@ impl WorkspaceDialog {
           .px_3()
           .flex()
           .items_center()
-          .rounded(zpx(4.))
+          .rounded(radius::SM)
           .border_1()
           .border_color(p.input)
           .bg(p.background)
@@ -1062,7 +1063,7 @@ impl WorkspaceDialog {
       div()
         .flex()
         .flex_col()
-        .gap(zpx(6.))
+        .gap_1p5()
         .child(label_xs("Stacking On"))
         .child(stacking_on),
     );
@@ -1075,9 +1076,9 @@ impl WorkspaceDialog {
         ui::text(div(), TextSize::Xs)
           .id(id)
           .debug_selector(move || id.into())
-          .px(zpx(10.))
+          .px_2p5()
           .py_1()
-          .rounded(zpx(4.))
+          .rounded(radius::SM)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .when(active, |this| {
@@ -1101,8 +1102,8 @@ impl WorkspaceDialog {
               .flex()
               .gap_1()
               .bg(p.muted)
-              .p(zpx(2.))
-              .rounded(zpx(6.))
+              .p_0p5()
+              .rounded(radius::MD)
               .child(
                 segment("position-before", "Before", Position::Before, self.position).on_click(
                   cx.listener(|view, _, _, cx| {
@@ -1166,7 +1167,7 @@ impl WorkspaceDialog {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(label_xs("Target Workspace"))
           .child(match select {
             None => ui::text(div(), TextSize::Xs)
@@ -1194,7 +1195,7 @@ impl WorkspaceDialog {
           div()
             .flex()
             .flex_col()
-            .gap(zpx(6.))
+            .gap_1p5()
             .child(label_xs("Title (optional)"))
             .child(
               div()
@@ -1211,7 +1212,7 @@ impl WorkspaceDialog {
           div()
             .flex()
             .flex_col()
-            .gap(zpx(6.))
+            .gap_1p5()
             .child(label_xs("Description (optional)"))
             .child(
               div()
@@ -1225,7 +1226,7 @@ impl WorkspaceDialog {
     // Sparse checkout and symlinked dirs, for a create from scratch.
     if !self.move_to_existing && !matches!(source, Source::Workspace { .. }) {
       let open = self.advanced_open;
-      let mut advanced = div().flex().flex_col().gap(zpx(6.)).child(disclosure(
+      let mut advanced = div().flex().flex_col().gap_1p5().child(disclosure(
         "workspace-dialog-advanced",
         "Advanced",
         open,
@@ -1246,7 +1247,7 @@ impl WorkspaceDialog {
               div()
                 .flex()
                 .flex_col()
-                .gap(zpx(6.))
+                .gap_1p5()
                 .child(label_xs("Sparse paths (optional, one per line)"))
                 .child(
                   div()
@@ -1259,7 +1260,7 @@ impl WorkspaceDialog {
               div()
                 .flex()
                 .flex_col()
-                .gap(zpx(6.))
+                .gap_1p5()
                 .child(label_xs("Symlink from home repo (optional, one per line)"))
                 .child(
                   div()
@@ -1276,7 +1277,7 @@ impl WorkspaceDialog {
                     ),
                 )
                 .when(!chips.is_empty(), |this| {
-                  this.child(div().flex().flex_wrap().gap(zpx(6.)).children(
+                  this.child(div().flex().flex_wrap().gap_1p5().children(
                     chips.into_iter().enumerate().map(|(i, chip)| {
                       let label = format!("+ {chip}");
                       ui::text(
@@ -1361,7 +1362,7 @@ impl WorkspaceDialog {
               .id(id)
               .debug_selector(move || selector)
               .px_3()
-              .py(zpx(6.))
+              .py_1p5()
               .flex()
               .items_center()
               .gap_2()
@@ -1384,7 +1385,7 @@ impl WorkspaceDialog {
             .debug_selector(|| "branch-picker".into())
             .mt_1()
             .w(zpx(300.))
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.border)
             .bg(p.popover)
@@ -1483,15 +1484,15 @@ impl WorkspaceDialog {
         .gap_3()
         .py_2()
         .px_2()
-        .mx(zpx(-8.))
-        .rounded(zpx(6.))
+        .mx_neg_2()
+        .rounded(radius::MD)
         // Opaque: GPUI draws the shadow under the whole box, where a
         // browser leaves it out, so a see-through tint would darken.
         .bg(p.popover.blend(p.primary.opacity(0.1)))
         .border_1()
         .border_color(p.primary.opacity(0.4))
         .shadow_sm()
-        .child(div().mt(zpx(6.)).child(stack_dot(true, &p)))
+        .child(div().mt_1p5().child(stack_dot(true, &p)))
         .child(
           div()
             .flex_1()
@@ -1534,7 +1535,7 @@ impl WorkspaceDialog {
           .gap_3()
           .py_2()
           .px_2()
-          .mx(zpx(-8.))
+          .mx_neg_2()
           .child(stack_dot(false, &p))
           .child(
             ui::text(div(), TextSize::Sm)
@@ -1555,7 +1556,7 @@ impl WorkspaceDialog {
       .debug_selector(|| "new-workspace-stack-card".into())
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .px_4()
       .py_2()
       .child(
@@ -1580,12 +1581,12 @@ impl WorkspaceDialog {
                 .gap_3()
                 .py_2()
                 .px_2()
-                .mx(zpx(-8.))
+                .mx_neg_2()
                 .text_color(p.muted_foreground)
                 .child(
                   div()
                     .flex_none()
-                    .mt(zpx(2.))
+                    .mt_0p5()
                     .size(zpx(14.))
                     .flex()
                     .items_center()
@@ -1651,7 +1652,7 @@ impl WorkspaceDialog {
         .debug_selector(move || id.into())
         .px_3()
         .py_1()
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .font_weight(FontWeight::MEDIUM)
         .when(active, |this| {
           this.bg(p.background).text_color(p.foreground).shadow_sm()
@@ -1670,7 +1671,7 @@ impl WorkspaceDialog {
       .gap_1()
       .bg(p.muted)
       .p_1()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .mb_2()
       .child(
         tab_trigger(
@@ -1750,7 +1751,7 @@ impl WorkspaceDialog {
             .items_center()
             .gap_2()
             .px_3()
-            .py(zpx(6.))
+            .py_1p5()
             .when(i + 1 < count, |this| {
               this.border_b_1().border_color(p.border)
             })
@@ -1799,7 +1800,7 @@ impl WorkspaceDialog {
           .overflow_y_scroll()
           .border_1()
           .border_color(p.border)
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .child(rows),
       )
       .when(count > 0 && locked.is_none(), |this| {
@@ -1807,7 +1808,7 @@ impl WorkspaceDialog {
           div()
             .flex()
             .gap_2()
-            .mt(zpx(6.))
+            .mt_1p5()
             .child(
               text_button("dialog-commits-select-all", "Select all", &p).on_click(cx.listener(
                 |view, _, _, cx| {
@@ -1829,7 +1830,7 @@ impl WorkspaceDialog {
       })
       .child(
         ui::text(div(), TextSize::Xs)
-          .mt(zpx(6.))
+          .mt_1p5()
           .text_color(p.muted_foreground)
           .child(if locked.is_some() {
             "Stashed changes will be copied onto the new workspace"
@@ -1864,7 +1865,7 @@ impl WorkspaceDialog {
             .items_center()
             .gap_1()
             .px_2()
-            .py(zpx(6.))
+            .py_1p5()
             .hover(move |s| s.bg(hover))
             .child(
               div()
@@ -1950,7 +1951,7 @@ impl WorkspaceDialog {
           .overflow_y_scroll()
           .border_1()
           .border_color(p.border)
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .child(rows),
       )
       .when(count > 0, |this| {
@@ -1958,7 +1959,7 @@ impl WorkspaceDialog {
           div()
             .flex()
             .gap_2()
-            .mt(zpx(6.))
+            .mt_1p5()
             .child(
               text_button("dialog-hunks-select-all", "Select all", &p)
                 .on_click(cx.listener(|view, _, _, cx| view.select_all_hunks(cx))),
@@ -1975,7 +1976,7 @@ impl WorkspaceDialog {
       })
       .child(
         ui::text(div(), TextSize::Xs)
-          .mt(zpx(6.))
+          .mt_1p5()
           .text_color(p.muted_foreground)
           .child("Select file changes to move to the new workspace"),
       )
@@ -2013,13 +2014,13 @@ impl WorkspaceDialog {
             .items_start()
             .gap_2()
             .px_8()
-            .py(zpx(6.))
+            .py_1p5()
             .cursor_pointer()
             .bg(muted_bg)
             .border_t_1()
             .border_color(p.border.opacity(0.3))
             .hover(move |s| s.bg(hover))
-            .child(div().mt(zpx(2.)).child(checkbox(
+            .child(div().mt_0p5().child(checkbox(
               SharedString::from(format!("dialog-hunk-box-{file}-{i}")),
               if checked { Check::On } else { Check::Off },
               false,
@@ -2065,7 +2066,7 @@ impl WorkspaceDialog {
       }
       _ => ui::text(div(), TextSize::Xs)
         .px_8()
-        .py(zpx(6.))
+        .py_1p5()
         .bg(muted_bg)
         .text_color(p.muted_foreground)
         .child("No hunks"),
@@ -2139,7 +2140,7 @@ impl Render for WorkspaceDialog {
         div()
           .id("workspace-dialog-body")
           .mt_2()
-          .mx(zpx(-4.))
+          .mx_neg_1()
           .px_1()
           .max_h(viewport.height - crate::gpui_shell::ui::zoomed(224., window))
           .overflow_y_scroll()
