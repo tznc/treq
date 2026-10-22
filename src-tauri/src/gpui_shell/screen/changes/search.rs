@@ -84,6 +84,28 @@ pub(in crate::gpui_shell::screen) fn match_ranges(text: &str, query: &str) -> Ve
   out
 }
 
+/// How many `match_ranges` `text` has. ASCII text and queries, the usual
+/// case, are counted in place: the index counts every line every frame.
+fn match_count(text: &str, query: &str) -> usize {
+  if !(text.is_ascii() && query.is_ascii()) {
+    return match_ranges(text, query).len();
+  }
+  let (text, query) = (text.as_bytes(), query.as_bytes());
+  if query.is_empty() {
+    return 0;
+  }
+  let (mut i, mut n) = (0, 0);
+  while i + query.len() <= text.len() {
+    if text[i..i + query.len()].eq_ignore_ascii_case(query) {
+      n += 1;
+      i += query.len();
+    } else {
+      i += 1;
+    }
+  }
+  n
+}
+
 /// A conflict region's lines as React searches them.
 pub(in crate::gpui_shell::screen) fn conflict_texts(conflict: &Conflict) -> Vec<String> {
   if conflict.region.lines.is_empty() {
@@ -212,7 +234,7 @@ impl ChangesView {
     let mut total = 0;
     let mut index = HashMap::new();
     let mut add = |key: MatchKey, text: &str, total: &mut usize| {
-      let n = match_ranges(text, &query).len();
+      let n = match_count(text, &query);
       if n > 0 {
         index.insert(key, (*total, n));
         *total += n;
@@ -479,7 +501,7 @@ impl ChangesView {
 
 #[cfg(test)]
 mod tests {
-  use super::match_ranges;
+  use super::{match_count, match_ranges};
 
   #[test]
   fn matches_ignore_case_and_do_not_overlap() {
@@ -493,6 +515,25 @@ mod tests {
       match_ranges("ab", "abc"),
       Vec::<std::ops::Range<usize>>::new()
     );
+  }
+
+  #[test]
+  fn match_count_agrees_with_match_ranges() {
+    for (text, query) in [
+      ("Logout logout", "LOG"),
+      ("aaaa", "aa"),
+      ("aaa", "aa"),
+      ("abc", ""),
+      ("ab", "abc"),
+      ("é x É", "é"),
+      ("let value_1 = VALUE_10", "value_1"),
+    ] {
+      assert_eq!(
+        match_count(text, query),
+        match_ranges(text, query).len(),
+        "{text:?} / {query:?}"
+      );
+    }
   }
 
   #[test]
