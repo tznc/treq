@@ -59,7 +59,7 @@ struct Pending {
 
 /// A text line's vertical padding: 23px rows, which the virtual list's
 /// scroll math is tuned to.
-const LINE_PADDING_Y: f32 = 2.5;
+const LINE_PADDING_Y: f32 = 1.5;
 
 /// The lightbox is dark in both themes: its text and lines at `alpha`.
 fn chrome(alpha: f32) -> Hsla {

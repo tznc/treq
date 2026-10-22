@@ -126,7 +126,7 @@ impl TextSize {
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
       TextSize::Xl => (20., 28.),
-      TextSize::Code => (12., 18.),
+      TextSize::Code => (12., 20.),
     }
   }
 }
