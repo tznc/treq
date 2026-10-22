@@ -1,7 +1,7 @@
 //! `NewPrDialog`: a pull request from a workspace (`CreatePrFromWorkspaceForm`)
 //! or from any branch (`CreatePrForm`).
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
   anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
   MouseButton, SharedString, Window,
@@ -624,7 +624,9 @@ impl GithubView {
           .top(zpx(36.))
           .left_0()
           .w(zpx(320.))
-          .on_mouse_down_out(cx.listener(|view, _, _, cx| view.close_popover(Popover::PrType, cx)))
+          .dismiss_with("github-pr-type", cx, |view, cx| {
+            view.close_popover(Popover::PrType, cx)
+          })
           .children(PR_TYPES.iter().map(|&(is_draft, _, item, description)| {
             ui::text(
               named(

@@ -1,7 +1,7 @@
 //! `PrDetailPanel`, `IssueDetailPanel` and their actions, and the PR's
 //! workspace checks (`PrWorkspaceChecks`).
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
   MouseButton, SharedString, Window,
@@ -628,9 +628,9 @@ impl GithubView {
                 .top(zpx(36.))
                 .left_0()
                 .min_w(zpx(128.))
-                .on_mouse_down_out(
-                  cx.listener(|view, _, _, cx| view.close_popover(Popover::CloseIssue, cx)),
-                )
+                .dismiss_with("github-close-issue", cx, |view, cx| {
+                  view.close_popover(Popover::CloseIssue, cx)
+                })
                 .children(CLOSE_REASONS.iter().map(|&(reason, label)| {
                   parts::menu_item(
                     format!("github-close-{}", reason.replace(' ', "-")),
@@ -1140,9 +1140,9 @@ impl GithubView {
             .text_color(p.popover_foreground)
             .shadow_md()
             .occlude()
-            .on_mouse_down_out(
-              cx.listener(|view, _, _, cx| view.close_popover(Popover::CiChecks, cx)),
-            )
+            .dismiss_with("github-ci-checks", cx, |view, cx| {
+              view.close_popover(Popover::CiChecks, cx)
+            })
             .child(
               ui::text(div(), TextSize::Xs)
                 .px_2()

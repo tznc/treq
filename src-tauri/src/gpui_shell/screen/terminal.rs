@@ -10,7 +10,7 @@
 //! [`terminal_data`]: super::terminal_data
 //! [`terminal_emu`]: super::terminal_emu
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   cell::Cell,
   rc::Rc,
@@ -2849,10 +2849,11 @@ impl TerminalPane {
           )
           .top(zpx(24.))
           .right_0()
-          .on_mouse_down_out(cx.listener(|pane, _, _, cx| {
-            pane.environment_menu = false;
+          .dismiss_with("terminal-environment-menu", cx, |pane, cx| {
+            let open = std::mem::take(&mut pane.environment_menu);
             cx.notify();
-          }));
+            open
+          });
           deferred(panel).with_priority(1)
         });
         buttons.push(

@@ -9,7 +9,7 @@
 //!
 //! [`commits_data`]: super::commits_data
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1982,11 +1982,13 @@ impl CommitsView {
               cx.listener(move |view, _, _, cx| view.move_commit(&to_existing, true, cx)),
             ),
           )
-          .on_mouse_down_out(cx.listener(|view, _, _, cx| {
-            if view.move_menu.take().is_some() {
+          .dismiss_with("move-commit-menu", cx, |view, cx| {
+            let open = view.move_menu.take().is_some();
+            if open {
               cx.notify();
             }
-          }));
+            open
+          });
         this.child(deferred(panel).with_priority(1))
       });
     let mut actions = div()

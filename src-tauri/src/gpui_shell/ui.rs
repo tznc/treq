@@ -1,12 +1,13 @@
 //! Building blocks shared by GPUI screens: the sizes and colors the React
 //! app's UI primitives had, from their Tailwind classes.
 
-use std::{rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 use tauri_plugin_gpui::gpui::{
   self, accesskit, div, prelude::*, svg, Animation, AnimationExt as _, AnyElement, App, Bounds,
-  ClickEvent, Div, ElementId, GlobalElementId, Hsla, InspectorElementId, Interactivity, LayoutId,
-  MouseButton, MouseDownEvent, Pixels, SharedString, StyleRefinement, Transformation, Window,
+  ClickEvent, Context, Div, ElementId, GlobalElementId, Hsla, InspectorElementId, Interactivity,
+  LayoutId, MouseButton, MouseDownEvent, Pixels, SharedString, StyleRefinement, Transformation,
+  Window,
 };
 
 use gpui_kit::{
@@ -370,6 +371,69 @@ impl RenderOnce for Button {
     .test_support()
   }
 }
+
+/// Closes a click-to-open menu and says whether it was open.
+type CloseMenu = Rc<dyn Fn(&mut App) -> bool>;
+
+thread_local! {
+  /// What closes each click-to-open menu a view draws, by the menu's key,
+  /// for [`escape_menus`]. Each says whether its menu was open; one that no
+  /// longer is drops out on the next Escape.
+  static MENUS: RefCell<HashMap<SharedString, CloseMenu>> = RefCell::default();
+}
+
+/// Closes the open click-to-open menus for an Escape the shell window took,
+/// whatever had focus: a click on a menu's button blurs the window, so the
+/// menu never sees the key itself. Whether one was open.
+pub fn escape_menus(cx: &mut App) -> bool {
+  let menus: Vec<_> = MENUS.with(|menus| {
+    menus
+      .borrow()
+      .iter()
+      .map(|(key, close)| (key.clone(), close.clone()))
+      .collect()
+  });
+  let mut closed = false;
+  for (key, close) in menus {
+    if close(cx) {
+      closed = true;
+    } else {
+      MENUS.with(|menus| menus.borrow_mut().remove(&key));
+    }
+  }
+  closed
+}
+
+/// A click-to-open menu that a press outside it and Escape both close, as
+/// base-ui's `DropdownMenu` and `Popover` do.
+pub trait DismissExt: InteractiveElement + Sized {
+  /// `close` closes the menu `key` names and says whether it was open.
+  fn dismiss_with<V: 'static>(
+    self,
+    key: impl Into<SharedString>,
+    cx: &mut Context<V>,
+    close: impl Fn(&mut V, &mut Context<V>) -> bool + 'static,
+  ) -> Self {
+    let close = Rc::new(close);
+    let view = cx.weak_entity();
+    let on_escape = close.clone();
+    MENUS.with(|menus| {
+      menus.borrow_mut().insert(
+        key.into(),
+        Rc::new(move |cx: &mut App| {
+          view
+            .update(cx, |view, cx| on_escape(view, cx))
+            .unwrap_or(false)
+        }),
+      )
+    });
+    self.on_mouse_down_out(cx.listener(move |view, _, _, cx| {
+      close(view, cx);
+    }))
+  }
+}
+
+impl<E: InteractiveElement> DismissExt for E {}
 
 /// Marks an element's accessibility node disabled, as `aria-disabled` did:
 /// GPUI has no setter for it, so a disabled button reached screen readers,

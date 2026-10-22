@@ -239,3 +239,30 @@ test("code: workspace title above the description, edited inline", async ({ page
   await expect(input).toHaveCount(0);
   await home(page);
 });
+
+test("code: Escape closes the prompt box's Add menu", async ({ page }) => {
+  await home(page);
+  const add = page.getByRole("button", { name: "Add", exact: true });
+  const box = await add.boundingBox();
+  if (!box) throw new Error("no Add button");
+  // The menu's items are not observable elements: compare the area the
+  // menu opens over instead.
+  const under = { x: box.x, y: box.y + box.height, width: 200, height: 100 };
+  const closed = await page.screenshot({ clip: under });
+  await add.click();
+  await settle(page, 600);
+  expect(await page.screenshot({ clip: under }), "the Add menu opened").not.toEqual(closed);
+  await capture(page, {
+    name: "03-code-add-menu-open",
+    title: "Prompt box: Add menu open",
+    expectations: ["File and Attach listed under Add"],
+  });
+  await page.keyboard.press("Escape");
+  await settle(page, 600);
+  await capture(page, {
+    name: "03-code-add-menu-escape",
+    title: "Prompt box after Escape with the Add menu open",
+    expectations: ["The Add menu is closed; the prompt box is unchanged"],
+  });
+  expect(await page.screenshot({ clip: under }), "Escape closed the Add menu").toEqual(closed);
+});
