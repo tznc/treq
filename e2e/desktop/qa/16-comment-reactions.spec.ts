@@ -76,7 +76,7 @@ test("comment-reactions: review thread", async ({ page }) => {
   await settle(page, 1500);
   await page.mouse.click(326, 383); // client.ts under Committed
   await settle(page, 1500);
-  await page.getByText("Resolved").first().click();
+  await page.mouse.click(910, 426); // unfold the resolved GitHub thread
   await settle(page, 800);
   await expect(page.getByRole("button", { name: "Rocket (1, you reacted)" })).toBeVisible();
   await capture(page, {
