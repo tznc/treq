@@ -1662,6 +1662,22 @@ impl WorkspaceView {
 }
 
 impl WorkspaceView {
+  /// Gives up the terminal pane, so its terminals outlive this view while
+  /// another screen (Settings, say) shows.
+  pub fn take_terminal(&mut self, cx: &mut Context<Self>) -> Option<Entity<TerminalPane>> {
+    let (pane, _) = self.terminal.take()?;
+    pane.update(cx, |pane, _| pane.park());
+    Some(pane)
+  }
+
+  /// Draws `pane`, which an earlier workspace view gave up, placing it in
+  /// the shown workspace when it next draws.
+  pub fn adopt_terminal(&mut self, pane: Entity<TerminalPane>, cx: &mut Context<Self>) {
+    let react = self.children.clone();
+    pane.update(cx, |pane, _| pane.set_react(react));
+    self.terminal = Some((pane, TerminalPlace::default()));
+  }
+
   /// The terminal pane, placed in the shown workspace, while the route
   /// asks GPUI to draw it.
   fn sync_terminal(&mut self, cx: &mut Context<Self>) -> Option<Entity<TerminalPane>> {

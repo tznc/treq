@@ -69,6 +69,20 @@ fn claude_offers_plan_mode_from_the_submit_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_prompt_dialog_targets_the_workspace_it_opened_on(cx: &mut TestAppContext) {
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login"))).to_be_visible();
+
+  let mut on_main = agent_modal();
+  on_main["initialWorkspaceId"] = serde_json::Value::Null;
+  h.set_modal(None);
+  h.set_modal(Some(on_main));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::Button).name("Workspace: main"))).to_be_visible();
+}
+
+#[gpui::test]
 fn agents_without_plan_mode_hide_the_submit_menu(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
   let (mut h, _) = modal_harness(cx, host, agent_modal());

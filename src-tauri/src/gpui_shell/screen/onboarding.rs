@@ -15,6 +15,8 @@ use super::onboarding_remote;
 
 use super::{
   checklist::{self, Checklist, ToolsHost},
+  settings_data::SettingsHost,
+  workspace_ops::WorkspaceActionsHost,
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
@@ -227,19 +229,36 @@ pub fn open_repo_at(backend: &Backend, path: &str) {
 /// `openRepositoryAtPath` through `host`; `shown` records the path as the
 /// window's (`setWindowRepoPath`). A folder that fails to open is not
 /// remembered as the last one.
-pub(super) fn open_repo(
-  host: &dyn super::settings_data::SettingsHost,
-  path: &str,
-  shown: impl FnOnce(&str),
-) {
+pub(super) fn open_repo<H>(host: &H, path: &str, shown: impl FnOnce(&str))
+where
+  H: SettingsHost + WorkspaceActionsHost + ?Sized,
+{
   let toast = |tone, title: &str, description: String| {
-    host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description,
-      tone,
-      action: None,
-    })
+    SettingsHost::notify(
+      host,
+      NativeEvent::Toast {
+        title: title.into(),
+        description,
+        tone,
+        action: None,
+      },
+    )
   };
+  if !core::is_repository(path) {
+    let question = format!("{path} is not a Git repository. Initialize one here?");
+    if !host.ask("Not a Git Repository", &question) {
+      toast(
+        ToastTone::Error,
+        "Not a Git Repository",
+        "Please select a folder that contains a git repository.".into(),
+      );
+      return;
+    }
+    if let Err(err) = core::init_git_repository(path) {
+      toast(ToastTone::Error, "Failed to open repository", err);
+      return;
+    }
+  }
   if let Err(err) = core::init(path) {
     toast(
       ToastTone::Error,
@@ -253,9 +272,12 @@ pub(super) fn open_repo(
     log::warn!("failed to remember the last opened repository: {err}");
   }
   shown(path);
-  host.notify(NativeEvent::RepoOpened {
-    path: path.to_string(),
-  });
+  SettingsHost::notify(
+    host,
+    NativeEvent::RepoOpened {
+      path: path.to_string(),
+    },
+  );
   let name = path
     .rsplit('/')
     .find(|part| !part.is_empty())

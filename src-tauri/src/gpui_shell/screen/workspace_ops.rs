@@ -49,23 +49,7 @@ impl WorkspaceActionsHost for Backend {
   }
 
   fn ask(&self, title: &str, message: &str) -> bool {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    let (tx, rx) = std::sync::mpsc::channel();
-    let app = self.app().clone();
-    let (title, message) = (title.to_string(), message.to_string());
-    // The dialog opens from the main thread; this waits off it.
-    let _ = self.app().run_on_main_thread(move || {
-      app
-        .dialog()
-        .message(message)
-        .title(title)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::YesNo)
-        .show(move |yes| {
-          let _ = tx.send(yes);
-        });
-    });
-    rx.recv().unwrap_or(false)
+    self.ask_native(title, message, crate::gpui_shell::question::Buttons::YesNo)
   }
 }
 

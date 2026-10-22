@@ -5008,6 +5008,36 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.cx.simulate_keystrokes("cmd-\\");
+  assert!(h.drawn("terminal-column-shell"));
+  let workspace = h.screen.read_with(&h.cx, |s, _| s.snapshot().clone());
+  let spawns = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("spawn "))
+      .count()
+  };
+  let spawned = spawns(&host);
+
+  h.update(|s| *s = settings());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-terminal-pane"));
+  // The hidden pane takes no shortcuts.
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.update(|s| *s = workspace);
+  h.cx.run_until_parked();
+
+  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.drawn("terminal-column-shell"));
+  assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
+}
+
+#[gpui::test]
 fn terminal_pane_asks_react_for_a_new_agent(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
@@ -6794,9 +6824,34 @@ impl workspace_ops::WorkspaceActionsHost for FakeHost {
 }
 
 /// `open-non-git-folder.test.tsx`: `openRepositoryAtPath` on a folder
-/// without `.git` toasts, creates no `.treq` and remembers nothing.
+/// without `.git` offers to initialize one; declined, it toasts, creates no
+/// `.treq` and remembers nothing.
 #[test]
-fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
+fn declining_to_initialize_a_folder_that_is_not_a_repository_remembers_nothing() {
+  let dir = tempfile::TempDir::new().unwrap();
+  let path = dir.path().to_str().unwrap();
+  let host = FakeHost {
+    decline: true,
+    ..FakeHost::default()
+  };
+  let mut shown = Vec::new();
+
+  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
+
+  assert_eq!(
+    host.calls(),
+    [
+      format!("ask {path} is not a Git repository. Initialize one here?"),
+      "notify toast Not a Git Repository".into(),
+    ]
+  );
+  assert!(shown.is_empty(), "not the window's repository");
+  assert!(!dir.path().join(".treq").exists());
+  assert!(!dir.path().join(".git").exists());
+}
+
+#[test]
+fn initializing_a_folder_that_is_not_a_repository_opens_it() {
   let dir = tempfile::TempDir::new().unwrap();
   let path = dir.path().to_str().unwrap();
   let host = FakeHost::default();
@@ -6804,9 +6859,17 @@ fn opening_a_folder_that_is_not_a_repository_toasts_and_remembers_nothing() {
 
   onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
 
-  assert_eq!(host.calls(), ["notify toast Failed to open repository"]);
-  assert!(shown.is_empty(), "not the window's repository");
-  assert!(!dir.path().join(".treq").exists());
+  assert!(gix::open(dir.path()).is_ok(), "a Git repository now");
+  assert_eq!(
+    host.calls(),
+    [
+      format!("ask {path} is not a Git repository. Initialize one here?"),
+      format!("set last_opened_repo_path={path}"),
+      "notify repoOpened".into(),
+      "notify toast Repository Opened".into(),
+    ]
+  );
+  assert_eq!(shown, [path]);
 }
 
 #[test]

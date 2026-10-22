@@ -783,6 +783,7 @@ impl AgentPromptView {
       .workspace()
       .map_or(self.route.default_branch.clone(), |w| w.branch_name.clone());
     let button = Button::new("agent-prompt-workspace", p)
+      .aria_label(format!("Workspace: {name}"))
       .variant(Variant::Outline)
       .aria_label("Workspace")
       .min_w(zpx(240.))

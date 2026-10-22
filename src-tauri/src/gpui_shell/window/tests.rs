@@ -55,6 +55,8 @@ struct FakeHost {
   last_remote: Option<SavedRepository>,
   /// What a probe finds: a repository, unless set.
   no_repo: bool,
+  /// A local folder that is neither a Git nor a jj repository.
+  not_a_repo: bool,
   /// The next workspaces read panics, as a backend read before the app's
   /// state is managed did.
   panic_once: std::sync::atomic::AtomicBool,
@@ -170,6 +172,10 @@ impl WindowHost for FakeHost {
       .lock()
       .unwrap()
       .insert(key.into(), value.into());
+  }
+
+  fn is_repo(&self, _: &str) -> bool {
+    !self.not_a_repo
   }
 
   fn prepare_repo(&self, repo: &str) {
@@ -485,6 +491,28 @@ fn shows_onboarding_without_a_repository(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_folder_that_is_not_a_repository_shows_onboarding_and_offers_to_open_it(
+  cx: &mut TestAppContext,
+) {
+  let host = Arc::new(FakeHost {
+    not_a_repo: true,
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), Some("/plain"));
+  assert!(matches!(
+    window.last().screen.unwrap().view,
+    View::Onboarding(_)
+  ));
+  // Opening it asks to initialize one, and remembers it once opened.
+  assert_eq!(host.count("open /plain"), 1);
+  assert!(host
+    .calls()
+    .contains(&"save last_opened_repo_path=".to_string()));
+  assert_eq!(host.count("prepare /plain"), 0, "nothing set up in it");
+  assert_eq!(host.count("workspaces /plain"), 0, "nothing read from it");
+}
+
+#[gpui::test]
 fn follows_the_theme_zoom_and_sidebar_width_settings(cx: &mut TestAppContext) {
   let host = repo_host();
   host.settings.lock().unwrap().extend([
@@ -744,6 +772,40 @@ fn shortcuts_do_not_stack_a_dialog_over_another(cx: &mut TestAppContext) {
     shown.screen.unwrap().modal.is_some(),
     "still the only dialog"
   );
+}
+
+#[gpui::test]
+fn the_agent_prompt_starts_on_the_open_workspace(cx: &mut TestAppContext) {
+  use crate::gpui_shell::screen::Modal;
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let initial = |window: &Window| match window.last().modal {
+    Some(Modal::AgentPrompt(route)) => route.initial_workspace_id,
+    other => panic!("not the prompt dialog: {other:?}"),
+  };
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::AgentPrompt, cx));
+  assert_eq!(initial(&window), None, "the repository home targets main");
+  window.press(cx, "agentPrompt.close");
+
+  select(&window, cx, 2, false);
+  cx.run_until_parked();
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::AgentPrompt, cx));
+  assert_eq!(initial(&window), Some(2), "Cmd+I");
+  window.press(cx, "agentPrompt.close");
+
+  window.controller.update(cx, |c, cx| {
+    c.overlay_action(
+      &ScreenAction::Press {
+        id: "palette.start-agent-with-prompt".into(),
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  assert_eq!(initial(&window), Some(2), "the palette's command");
 }
 
 #[gpui::test]
