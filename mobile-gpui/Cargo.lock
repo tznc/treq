@@ -2435,6 +2435,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
+name = "emojis"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589871e639330783bc20ad89d32ac1b049e02c273d96c907ca27478c8bc674a2"
+dependencies = [
+ "phf 0.13.1",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4469,6 +4478,14 @@ dependencies = [
  "unicode-segmentation",
  "web-time",
  "windows 0.58.0",
+]
+
+[[package]]
+name = "gpui-bootstrap"
+version = "0.1.0"
+source = "git+https://github.com/Ziinc/gpui-bootstrap?branch=claude%2Fbutton-variant-colors#21626e7327a25e46dc5b714f267953c7792e8b3c"
+dependencies = [
+ "gpui-kit",
 ]
 
 [[package]]
@@ -12164,6 +12181,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "emojis",
  "futures",
  "getrandom 0.4.3",
  "gix",
@@ -12206,6 +12224,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "treq-ui",
  "two-face",
  "url",
  "urlencoding",
@@ -12237,9 +12256,21 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "treq",
+ "treq-ui",
  "url",
  "uuid",
  "vt100",
+]
+
+[[package]]
+name = "treq-ui"
+version = "0.1.0"
+dependencies = [
+ "gpui-bootstrap",
+ "gpui-kit",
+ "gpui-pre",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
