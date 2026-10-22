@@ -3290,6 +3290,12 @@ fn code_tab_says_when_commits_fail_to_load(cx: &mut TestAppContext) {
     h.drawn("code-history-error"),
     "not stuck on Loading commits..."
   );
+  assert!(!h.drawn("code-history-error-popover"));
+  h.click("code-history-show-error");
+  assert!(
+    h.drawn("code-history-error-popover"),
+    "Show error opens the error"
+  );
   assert!(!h.drawn("commit-item-a"));
 }
 
