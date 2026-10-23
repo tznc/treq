@@ -12,8 +12,8 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use crate::result_ext::ResultExt;
 use crate::lock_ext::LockExt as _;
+use crate::result_ext::ResultExt;
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
