@@ -3039,7 +3039,7 @@ impl TerminalPane {
           format!("terminal-search-tip-{}", column.id),
           Side::Top,
           Some(TooltipContent::Text(
-            crate::gpui_shell::keys::hint("Search (⌘+F)").into(),
+            crate::gpui_shell::keys::hint("Search (⌘ + F)").into(),
           )),
           search,
           cx,

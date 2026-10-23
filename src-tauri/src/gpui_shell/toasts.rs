@@ -5,6 +5,7 @@
 use std::{
   collections::HashMap,
   sync::{Mutex, OnceLock},
+  time::Duration,
 };
 
 use tauri::AppHandle;
@@ -83,11 +84,27 @@ pub fn push(
   redraw(app, label);
   let (app, label) = (app.clone(), label.to_string());
   tauri::async_runtime::spawn(async move {
-    tokio::time::sleep(toast.duration()).await;
+    // Only a plain success toast goes by itself; errors, warnings and
+    // toasts with an action wait to be dismissed.
+    let Some(duration) = expiry(&toast) else {
+      return;
+    };
+    tokio::time::sleep(duration).await;
     if remove(&label, &toast.id) {
       redraw(&app, &label);
     }
   });
+}
+
+/// How long a toast shows before it dismisses itself; `None` stays until
+/// closed.
+fn expiry(toast: &QueuedToast) -> Option<Duration> {
+  let plain = toast.kind == toast_queue::ToastKind::Success && toast.action.is_none();
+  match (plain, toast.description.is_none()) {
+    (true, true) => Some(Duration::from_secs(4)),
+    (true, false) => Some(toast.duration()),
+    _ => None,
+  }
 }
 
 fn remove(label: &str, id: &str) -> bool {

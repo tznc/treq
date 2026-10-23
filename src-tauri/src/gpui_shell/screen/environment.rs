@@ -3,31 +3,21 @@
 //! agent prompt dialog and the terminal pane each show one.
 
 use crate::gpui_shell::ui::zpx;
-use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, FontWeight, Stateful};
+use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, Stateful};
 
-use super::{
-  code::{menu_panel, menu_row},
-  code_data::Environment,
-};
+use super::{code::menu_panel, code_data::Environment};
 use crate::gpui_shell::{
   theme::{self, Palette},
   ui::{self, Button, Size, TextSize, Variant},
 };
 
-/// How big the trigger draws: the task input's (`h-7`, 14px icons) or the
-/// terminal pane's (`h-5 px-1.5`, 12px icons).
+/// How big the pane's trigger draws (`h-5 px-1.5`, 12px icons).
 #[derive(Clone, Copy)]
 pub(crate) struct TriggerSize {
   pub height: f32,
   pub padding: f32,
   pub icon: f32,
 }
-
-pub(crate) const TASK_TRIGGER: TriggerSize = TriggerSize {
-  height: 28.,
-  padding: 8.,
-  icon: 14.,
-};
 
 pub(crate) const PANE_TRIGGER: TriggerSize = TriggerSize {
   height: 20.,
@@ -77,6 +67,19 @@ pub(crate) fn trigger(
     })
 }
 
+/// The selector as a toolbar picker: it shows a value, so it reads as one.
+pub(crate) fn picker(id: &'static str, env: &Environment, p: &Palette) -> ui::Picker {
+  let (icon, label) = if env.devcontainer {
+    (theme::ICON_BOX, "Devcontainer")
+  } else {
+    (theme::ICON_LAPTOP, "Local")
+  };
+  ui::Picker::new(id, p)
+    .placement(ui::PickerPlacement::Toolbar)
+    .icon(icon)
+    .value(label)
+}
+
 /// The selector's menu (`DropdownMenuContent`, `w-64`), unpositioned:
 /// `set` picks the devcontainer (`true`) or this machine, `start` starts
 /// the stopped devcontainer.
@@ -105,34 +108,11 @@ pub(crate) fn menu<V: 'static>(
               detail: &str,
               selected: bool,
               disabled: bool| {
-    menu_row(id, p, disabled)
-      .items_start()
-      .child(
-        div()
-          .mt_0p5()
-          .child(ui::icon(icon, 14., p.popover_foreground)),
-      )
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .flex()
-          .flex_col()
-          .gap_0p5()
-          .child(div().font_weight(FontWeight::MEDIUM).child(title))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child(detail.to_string()),
-          ),
-      )
-      .when(selected, |this| {
-        this.child(
-          div()
-            .mt_0p5()
-            .child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground)),
-        )
-      })
+    ui::MenuItem::new(id, title, p)
+      .icon(icon)
+      .description(detail.to_string())
+      .checked(selected)
+      .disabled(disabled)
   };
   let devcontainer = env.devcontainer;
   let mut panel = menu_panel(id, p)

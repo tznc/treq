@@ -80,8 +80,8 @@ impl Popover {
     };
     cx.write_to_clipboard(ClipboardItem::new_string(prompt.text.clone()));
     self.host.notify(NativeEvent::Toast {
-      title: "Copied".into(),
-      description: "Starting prompt copied to clipboard".into(),
+      title: "Prompt copied".into(),
+      description: String::new(),
       tone: ToastTone::Success,
       action: None,
     });

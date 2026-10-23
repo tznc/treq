@@ -739,11 +739,7 @@ impl SettingsView {
         match &result {
           Ok(()) => {
             host.notify(NativeEvent::SettingsChanged);
-            host.notify(toast(
-              ToastTone::Success,
-              "Settings Saved",
-              "Application settings updated",
-            ));
+            host.notify(toast(ToastTone::Success, "Settings saved", ""));
           }
           Err(err) => host.notify(toast(ToastTone::Error, "Error", err)),
         }
@@ -770,11 +766,7 @@ impl SettingsView {
               host.notify(NativeEvent::RepoSettingsChanged {
                 repo_path: path.clone(),
               });
-              host.notify(toast(
-                ToastTone::Success,
-                "Settings saved",
-                "Repository settings updated.",
-              ));
+              host.notify(toast(ToastTone::Success, "Settings saved", ""));
             }
             Err(err) => host.notify(toast(
               ToastTone::Error,

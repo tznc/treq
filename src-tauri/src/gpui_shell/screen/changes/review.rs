@@ -581,11 +581,7 @@ impl ChangesView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(
-      ToastTone::Success,
-      "Review canceled",
-      "All comments have been discarded",
-    );
+    self.toast(ToastTone::Success, "Review canceled", "");
   }
 
   /// A refreshed list that adds, removes or changes a file waits while a
@@ -724,11 +720,8 @@ impl ChangesView {
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
     self.toast(
       ToastTone::Success,
-      "Copied",
-      format!(
-        "{} copied to clipboard",
-        count_label(all.len(), "outdated comment")
-      ),
+      &format!("{} copied", count_label(all.len(), "outdated comment")),
+      "",
     );
   }
 
@@ -756,13 +749,9 @@ impl ChangesView {
     };
     let items = vec![
       NativeMenuItem::item("Add comment", add).icon(MenuIcon::MessageSquare),
-      NativeMenuItem::item(
-        "Copy line location",
-        copy(location, "Line location copied to clipboard"),
-      )
-      .icon(MenuIcon::Copy),
-      NativeMenuItem::item("Copy lines", copy(lines, "Lines copied to clipboard"))
+      NativeMenuItem::item("Copy line location", copy(location, "Line location copied"))
         .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy lines", copy(lines, "Lines copied")).icon(MenuIcon::Copy),
     ];
     self.popup(
       PopupRequest::ShowMenu {

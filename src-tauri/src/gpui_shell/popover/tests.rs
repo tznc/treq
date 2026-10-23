@@ -366,7 +366,7 @@ fn details_copy_the_prompt_and_toast(cx: &mut TestAppContext) {
     h.cx.read_from_clipboard().and_then(|item| item.text()),
     Some("Add a login form".to_string())
   );
-  assert!(h.host.calls().contains(&"toast Copied".to_string()));
+  assert!(h.host.calls().contains(&"toast Prompt copied".to_string()));
   assert!(!h.closed.get());
 }
 

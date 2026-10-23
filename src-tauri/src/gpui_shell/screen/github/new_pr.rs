@@ -407,7 +407,7 @@ impl GithubView {
                 d.border_b_1().border_color(p.border)
               })
               .cursor_pointer()
-              .when(picked, |d| d.bg(p.primary.opacity(0.1)))
+              .when(picked, |d| d.bg(p.selected()))
               .when(!picked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
               .on_click(cx.listener(move |view, _, _, cx| view.pick_workspace(id, cx)))
               .child(

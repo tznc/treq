@@ -800,11 +800,7 @@ impl ChangesView {
       let event = match host.restore_snapshot(&workspace, &snapshot) {
         Ok(()) => {
           Self::changed(host.as_ref(), &parent);
-          toast_event(
-            ToastTone::Success,
-            "Restored",
-            "Discarded changes have been restored",
-          )
+          toast_event(ToastTone::Success, "Changes restored", "")
         }
         Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
       };
@@ -942,15 +938,7 @@ impl ChangesView {
         match result {
           Ok(result) => {
             let text = result.trim();
-            view.toast(
-              ToastTone::Success,
-              "Commit created",
-              if text.is_empty() {
-                "Commit successful"
-              } else {
-                text
-              },
-            );
+            view.toast(ToastTone::Success, "Commit created", text);
             view.committed_collapsed = true;
             if action == CommitAction::Push {
               view.toast(ToastTone::Success, "Pushed to remote", "");
@@ -1151,9 +1139,9 @@ impl ChangesView {
     );
   }
 
-  fn copy(&self, text: String, description: String, cx: &mut App) {
+  fn copy(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, "Copied", description);
+    self.toast(ToastTone::Success, &title, "");
   }
 
   fn open_in(&self, scheme: &str, path: &str) {
@@ -1188,12 +1176,10 @@ impl ChangesView {
       .unwrap_or(&full)
       .to_string();
     let entity = cx.entity().downgrade();
-    let copy = |text: String, description: String| {
+    let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          view.copy(text.clone(), description.clone(), cx)
-        });
+        let _ = entity.update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx));
       }
     };
     let mut open = vec![{
@@ -1207,15 +1193,12 @@ impl ChangesView {
     let mut items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(
-          relative.clone(),
-          format!("Copied relative path: {relative}"),
-        ),
+        copy(relative.clone(), "Relative path copied".into()),
       )
       .icon(MenuIcon::Copy),
       NativeMenuItem::item(
         "Copy full path",
-        copy(full.clone(), format!("Copied full path: {full}")),
+        copy(full.clone(), "Full path copied".into()),
       )
       .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
@@ -1774,12 +1757,11 @@ impl ChangesView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let collapsed = self.collapsed_sections.contains(&Section::Conflicts);
-    let red = p.destructive;
     let header = self.section_header(
       "conflicts-section-toggle",
       "Conflicts",
       collapsed,
-      red,
+      p.muted_foreground,
       p,
       cx,
       |view, cx| view.toggle_section(Section::Conflicts, cx),
@@ -1803,7 +1785,7 @@ impl ChangesView {
             .items_center()
             .gap_1()
             .cursor_pointer()
-            .when(active, |this| this.bg(p.accent.opacity(0.4)))
+            .when(active, |this| this.bg(p.selected()))
             .when(!active, |this| this.hover(move |s| s.bg(hover)))
             .child(
               div()
@@ -1818,23 +1800,18 @@ impl ChangesView {
                     .flex_none()
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
-                    .when(active, |this| this.text_color(red))
                     .child(name),
                 )
                 .when_some(dir, |this, dir| {
                   this.child(
                     ui::text(div(), TextSize::Xs)
                       .truncate()
-                      .text_color(if active {
-                        red.opacity(0.7)
-                      } else {
-                        p.muted_foreground.opacity(0.6)
-                      })
+                      .text_color(p.muted_foreground.opacity(0.6))
                       .child(dir),
                   )
                 }),
             )
-            .child(div().mr_1().text_color(red).child("C"))
+            .child(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
             .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx))),
         );
       }
@@ -1846,9 +1823,16 @@ impl ChangesView {
           .flex()
           .items_center()
           .justify_between()
-          .text_color(red)
-          .child(header)
-          .child(div().ml_1().child(files.len().to_string())),
+          .text_color(p.muted_foreground)
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(header)
+              .child(ui::Dot::new(Tone::Danger, p)),
+          )
+          .child(ui::Count::new(files.len(), p)),
       )
       .when(!collapsed, |this| this.child(rows))
   }
@@ -2001,7 +1985,7 @@ impl ChangesView {
         ));
       }
     }
-    buttons = buttons.child(div().ml_1().child(files.len().to_string()));
+    buttons = buttons.child(div().ml_1().child(ui::Count::new(files.len(), p)));
     let last = if staged {
       self
         .staging
@@ -2083,24 +2067,11 @@ impl ChangesView {
     // Viewed files fade back, like GitHub's file tree.
     let dimmed = self.viewed.contains_key(&file.path) && !selected;
     let (name, dir) = split_path(&file.path);
-    let blue = p.primary;
-    let white = p.primary_foreground;
+    let tint = p.selected();
     let hover = p.accent.opacity(0.2);
     let path = file.path.clone();
-    let name_color = if selected {
-      white
-    } else if active {
-      blue
-    } else {
-      p.foreground
-    };
-    let dir_color = if active && !selected {
-      Tone::Primary.text(p)
-    } else if selected {
-      white.opacity(0.7)
-    } else {
-      p.muted_foreground.opacity(0.6)
-    };
+    let name_color = p.foreground;
+    let dir_color = p.muted_foreground.opacity(0.6);
     let small = |id: String, icon: &'static str, fg: Hsla, hover_bg: Hsla, hidden: bool| {
       let selector = id.clone();
       div()
@@ -2115,18 +2086,8 @@ impl ChangesView {
         .hover(move |s| s.bg(hover_bg))
         .child(ui::icon(icon, 12., fg))
     };
-    // Selected rows sit on a saturated blue, so their status and actions
-    // switch to white and stay visible without hovering.
-    let red = if selected {
-      white
-    } else {
-      Tone::Danger.text(p)
-    };
-    let status_color = if selected {
-      white.opacity(0.85)
-    } else {
-      p.muted_foreground
-    };
+    let red = Tone::Danger.text(p);
+    let status_color = p.muted_foreground;
     let mut actions = div().flex().items_center().gap_1().flex_none().child(
       div()
         .min_w(zpx(8.))
@@ -2199,16 +2160,11 @@ impl ChangesView {
       .gap_1()
       .cursor_pointer()
       .border_l_2()
-      .when(selected, |this| {
-        this
-          .bg(blue.opacity(0.6))
-          .border_color(blue)
-          .font_weight(FontWeight::SEMIBOLD)
-      })
-      .when(!selected, |this| {
-        this
-          .border_color(gpui::transparent_black())
-          .hover(move |s| s.bg(hover))
+      .border_color(gpui::transparent_black())
+      .when(selected || active, |this| this.bg(tint))
+      .when(selected, |this| this.font_weight(FontWeight::SEMIBOLD))
+      .when(!selected && !active, |this| {
+        this.hover(move |s| s.bg(hover))
       })
       .child(
         div()
@@ -2275,7 +2231,7 @@ impl ChangesView {
         muted,
       ))
       .child("Committed")
-      .child(div().ml_1().child(total.to_string()))
+      .child(div().ml_1().child(ui::Count::new(total, p)))
       .on_click(cx.listener(|view, _, _, cx| {
         view.committed_collapsed = !view.committed_collapsed;
         cx.notify();
@@ -2649,16 +2605,7 @@ impl ChangesView {
     let fg = p.foreground;
     let renamed = old_path.is_some();
     let viewed = self.viewed.contains_key(path);
-    let badge = |text: &'static str, tone: Tone| {
-      div()
-        .flex_none()
-        .px_2()
-        .py_0p5()
-        .rounded(radius::SM)
-        .bg(tone.tint(p))
-        .text_color(tone.text(p))
-        .child(text)
-    };
+    let badge = |text: &'static str, tone: Tone| ui::Badge::new(text, p).tone(tone);
     let file = path.to_string();
     let chevron = if renamed {
       div().size_3().flex_none().into_any_element()
@@ -2718,18 +2665,16 @@ impl ChangesView {
                 .child(ui::icon(theme::ICON_COPY, 16., muted))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();
-                  view.copy(
-                    copy_path.clone(),
-                    "File path copied to clipboard".into(),
-                    cx,
-                  );
+                  view.copy(copy_path.clone(), "File path copied".into(), cx);
                 })),
               cx,
             ),
           )
           .when(committed, |this| {
             this.child(
-              badge("Committed", Tone::Primary).debug_selector(|| "committed-file-label".into()),
+              div()
+                .debug_selector(|| "committed-file-label".into())
+                .child(badge("Committed", Tone::Primary)),
             )
           }),
       );
@@ -2756,15 +2701,6 @@ impl ChangesView {
         ),
       );
     }
-    let (viewed_fg, viewed_bg, viewed_hover) = if viewed {
-      (
-        Tone::Success.text(p),
-        Tone::Success.tint(p),
-        Tone::Success.color(p).opacity(0.25),
-      )
-    } else {
-      (muted, p.muted, accent)
-    };
     let file = path.to_string();
     right = right.child(
       self.tip(
@@ -2787,18 +2723,9 @@ impl ChangesView {
           .py_0p5()
           .rounded(radius::SM)
           .cursor_pointer()
-          .bg(viewed_bg)
-          .text_color(viewed_fg)
-          .hover(move |s| s.bg(viewed_hover))
-          .child(ui::icon(
-            if viewed {
-              theme::ICON_CHECK
-            } else {
-              theme::ICON_SQUARE
-            },
-            12.,
-            viewed_fg,
-          ))
+          .text_color(muted)
+          .hover(move |s| s.bg(accent))
+          .child(ui::Checkbox::new(format!("viewed-box-{path}"), p).checked(viewed))
           .child("Viewed")
           .on_click(cx.listener(move |view, _, _, cx| {
             cx.stop_propagation();
@@ -2812,8 +2739,11 @@ impl ChangesView {
     }
     let deleted = status == "D";
     if deleted {
-      right =
-        right.child(badge("Deleted", Tone::Danger).debug_selector(|| "deleted-file-badge".into()));
+      right = right.child(
+        div()
+          .debug_selector(|| "deleted-file-badge".into())
+          .child(badge("Deleted", Tone::Danger)),
+      );
     }
     if super::changes_data::is_binary(path) {
       right = right.child(badge("Binary", Tone::Neutral));

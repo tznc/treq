@@ -347,7 +347,6 @@ impl GithubView {
           SharedString::from(id.to_string()),
           body,
           13.,
-          20.,
           self.dark,
         )),
     )
@@ -378,7 +377,6 @@ impl GithubView {
               SharedString::from(format!("github-comment-{}", c.id)),
               &c.body,
               13.,
-              20.,
               self.dark,
             )
             .into_any_element(),

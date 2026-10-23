@@ -1347,8 +1347,8 @@ impl LinearView {
             .px_1p5()
             .py_0p5()
             .rounded_full()
-            .bg(p.primary.opacity(0.1))
-            .text_color(p.primary.opacity(0.8))
+            .bg(p.muted)
+            .text_color(p.muted_foreground)
             .child(label.clone())
         }))
     });
@@ -1553,8 +1553,8 @@ impl LinearView {
             .px_1()
             .py_0p5()
             .rounded(radius::SM)
-            .bg(p.primary.opacity(0.1))
-            .text_color(p.primary.opacity(0.7))
+            .bg(p.muted)
+            .text_color(p.muted_foreground)
             .child(label.clone())
         }))
         .when(issue.labels.len() > 2, |this| {
@@ -2083,7 +2083,7 @@ impl LinearView {
           .when(!open.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Xs)
-                .text_color(ui::Tone::GitMerged.text(p))
+                .text_color(p.muted_foreground)
                 .child(agent_count_label(open.len())),
             )
           })
@@ -2093,7 +2093,6 @@ impl LinearView {
         format!("linear-md-{key}"),
         &highlighted,
         13.,
-        20.,
         self.dark,
       ));
 
@@ -2197,7 +2196,6 @@ impl LinearView {
             format!("linear-comment-md-{}", comment.id),
             &comment.body,
             13.,
-            20.,
             self.dark,
           ))
           .children(

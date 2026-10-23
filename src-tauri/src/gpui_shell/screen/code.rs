@@ -990,27 +990,6 @@ pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
     .occlude()
 }
 
-/// A `DropdownMenuItem` whose content the caller lays out, such as a title with
-/// a description under it; [`ui::MenuItem`] draws the plain ones.
-pub(super) fn menu_row(id: impl Into<SharedString>, p: &Palette, disabled: bool) -> Stateful<Div> {
-  let id: SharedString = id.into();
-  let selector = id.to_string();
-  let hover = p.menu_accent;
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || selector)
-    .flex()
-    .items_center()
-    .gap_2()
-    .px_2()
-    .py_1p5()
-    .rounded(radius::MD)
-    .when(disabled, |this| this.opacity(0.5))
-    .when(!disabled, |this| {
-      this.cursor_pointer().hover(move |s| s.bg(hover))
-    })
-}
-
 pub(super) fn agent_icon(agent: Agent) -> &'static str {
   match agent {
     Agent::Claude => theme::ICON_AGENT_CLAUDE,
@@ -1021,13 +1000,11 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
 }
 
 /// `MarkdownContent`'s prose, at the type scale step nearest `size` (`Lg`
-/// for `prose`, `Sm` for `prose-sm`). `_line` is the line height callers
-/// used to pass; the step sets it.
+/// for `prose`, `Sm` for `prose-sm`); the step sets the line height.
 pub(super) fn markdown(
   id: impl Into<SharedString>,
   text: &str,
   size: f32,
-  _line: f32,
   dark: bool,
 ) -> impl IntoElement {
   let id: SharedString = id.into();
@@ -1155,64 +1132,37 @@ impl CodeView {
     if count == 0 {
       return None;
     }
-    let red = p.destructive;
     let react = self.react.clone();
     Some(
-      div()
-        .debug_selector(|| "code-conflicts".into())
-        .rounded(radius::MD)
-        .border_1()
-        .border_color(red.opacity(0.3))
-        .bg(red.opacity(0.05))
-        .p_4()
-        .flex()
-        .items_start()
-        .gap_3()
-        .child(
-          div()
-            .mt_0p5()
-            .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 20., red)),
-        )
-        .child(
-          div()
-            .flex_1()
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(red)
-                .child(format!(
-                  "{count} {} detected",
-                  if count == 1 { "conflict" } else { "conflicts" }
-                )),
-            )
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .mt_1()
-                .text_color(p.muted_foreground)
-                .child("Some files have conflicts that need to be resolved"),
-            ),
-        )
-        .child(
-          Button::new("code-view-conflicts", p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .border_color(red.opacity(0.3))
-            .text_color(red)
-            .hover_bg(red.opacity(0.1))
-            .label("View conflicts")
-            .on_click(move |_, _, cx| {
-              let react = react.clone();
-              cx.defer(move |cx| {
-                react(
-                  ScreenAction::Field {
-                    field: "workspace.tab".into(),
-                    value: "changes".into(),
-                  },
-                  cx,
-                )
-              });
-            }),
+      ui::Alert::new(
+        "code-conflicts",
+        format!(
+          "{count} {} {} conflicts",
+          if count == 1 { "file" } else { "files" },
+          if count == 1 { "has" } else { "have" }
         ),
+        p,
+      )
+      .severity(ui::Severity::Danger)
+      .message("Resolve them before you push or merge.")
+      .action(
+        Button::new("code-view-conflicts", p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .label("Resolve…")
+          .on_click(move |_, _, cx| {
+            let react = react.clone();
+            cx.defer(move |cx| {
+              react(
+                ScreenAction::Field {
+                  field: "workspace.tab".into(),
+                  value: "changes".into(),
+                },
+                cx,
+              )
+            });
+          }),
+      ),
     )
   }
 
@@ -1450,22 +1400,11 @@ impl CodeView {
         .flex()
         .items_center()
         .child(
-          ui::text(div(), TextSize::Xs)
-            .id("task-agent")
-            .debug_selector(|| "task-agent".into())
-            .h(zpx(28.))
-            .px_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(p.border)
-            .bg(p.background)
-            .cursor_pointer()
-            .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-            .child(agent.label())
-            .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., p.muted_foreground))
+          ui::Picker::new("task-agent", p)
+            .placement(ui::PickerPlacement::Toolbar)
+            .icon(agent_icon(agent))
+            .value(agent.label())
+            .open(self.menu == Some(Menu::Agent))
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
         )
         .when(self.menu == Some(Menu::Agent), |this| {
@@ -1495,7 +1434,7 @@ impl CodeView {
       "task-submit",
       Side::Top,
       Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
       )),
       submit,
       cx,
@@ -1568,22 +1507,8 @@ impl CodeView {
       .right_0()
       .w(zpx(224.))
       .child(
-        menu_row("task-plan", p, false)
-          .items_start()
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .flex()
-              .flex_col()
-              .gap_0p5()
-              .child(div().font_weight(FontWeight::MEDIUM).child("Plan"))
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Plan the change first, without editing files"),
-              ),
-          )
+        ui::MenuItem::new("task-plan", "Plan", p)
+          .description("Plan the change first, without editing files")
           .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
@@ -1609,14 +1534,9 @@ impl CodeView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let button = environment::trigger(
-      "task-environment",
-      env,
-      self.starting_devcontainer,
-      environment::TASK_TRIGGER,
-      p,
-    )
-    .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
+    let button = environment::picker("task-environment", env, p)
+      .open(self.menu == Some(Menu::Environment))
+      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
     div()
       .relative()
       .child(button)
@@ -1756,13 +1676,7 @@ impl CodeView {
       let shown = if looks_like_markdown(&text) {
         div()
           .pr_8()
-          .child(markdown(
-            "workspace-description-md",
-            &text,
-            14.,
-            24.,
-            self.dark,
-          ))
+          .child(markdown("workspace-description-md", &text, 14., self.dark))
           .into_any_element()
       } else {
         ui::text(div(), TextSize::Sm)
@@ -2224,7 +2138,7 @@ impl CodeView {
               .mb_4()
               .child("README.md"),
           )
-          .child(markdown("code-readme-md", &text, 16., 28., self.dark))
+          .child(markdown("code-readme-md", &text, 16., self.dark))
           .into_any_element(),
         None => ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)

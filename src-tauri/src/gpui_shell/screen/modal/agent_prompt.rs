@@ -27,7 +27,7 @@ use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
   popup::{Side, TooltipContent},
   screen::{
-    code::{agent_icon, menu_panel, menu_row},
+    code::{agent_icon, menu_panel},
     code_data::{
       self, insert_at, mention_at, task_settings, Agent, Environment, TaskSettings,
       ENVIRONMENT_SETTING,
@@ -1175,7 +1175,9 @@ impl AgentPromptView {
         .flex()
         .items_center()
         .child(
-          ui::text(div(), TextSize::Xs)
+          // The wrapper keeps the combobox name, value and click; the
+          // picker inside draws it.
+          div()
             .id("task-agent")
             .debug_selector(|| "task-agent".into())
             .role(gpui::Role::ComboBox)
@@ -1183,19 +1185,13 @@ impl AgentPromptView {
             .aria_value(agent.label())
             .aria_expanded(self.menu == Some(Menu::Agent))
             .test_support()
-            .h(zpx(28.))
-            .px_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(p.border)
-            .bg(p.background)
-            .cursor_pointer()
-            .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-            .child(agent.label())
-            .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., p.muted_foreground))
+            .child(
+              ui::Picker::new("task-agent-picker", p)
+                .placement(ui::PickerPlacement::Toolbar)
+                .icon(agent_icon(agent))
+                .value(agent.label())
+                .open(self.menu == Some(Menu::Agent)),
+            )
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
         )
         .when(self.menu == Some(Menu::Agent), |this| {
@@ -1225,7 +1221,7 @@ impl AgentPromptView {
       "task-submit",
       Side::Top,
       Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
       )),
       submit,
       cx,
@@ -1300,25 +1296,8 @@ impl AgentPromptView {
       .right_0()
       .w(zpx(224.))
       .child(
-        menu_row("task-plan", p, false)
-          .role(gpui::Role::MenuItem)
-          .aria_label("Plan")
-          .test_support()
-          .items_start()
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .flex()
-              .flex_col()
-              .gap_0p5()
-              .child(div().font_weight(FontWeight::MEDIUM).child("Plan"))
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Plan the change first, without editing files"),
-              ),
-          )
+        ui::MenuItem::new("task-plan", "Plan", p)
+          .description("Plan the change first, without editing files")
           .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
@@ -1335,16 +1314,10 @@ impl AgentPromptView {
           .into_iter()
           .filter(|agent| *agent == selected || !self.missing.contains(agent))
           .map(|agent| {
-            menu_row(format!("task-agent-{}", agent.id()), p, false)
-              .role(gpui::Role::MenuItem)
-              .aria_label(agent.label())
+            ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
+              .icon(agent_icon(agent))
+              .checked(agent == selected)
               .aria_selected(agent == selected)
-              .test_support()
-              .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-              .child(div().flex_1().child(agent.label()))
-              .when(agent == selected, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
-              })
               .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
           }),
       );
@@ -1357,14 +1330,9 @@ impl AgentPromptView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let button = environment::trigger(
-      "task-environment",
-      env,
-      self.starting_devcontainer,
-      environment::TASK_TRIGGER,
-      p,
-    )
-    .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
+    let button = environment::picker("task-environment", env, p)
+      .open(self.menu == Some(Menu::Environment))
+      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
     div()
       .relative()
       .child(button)

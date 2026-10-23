@@ -281,12 +281,7 @@ impl Lightbox {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(shell_quote(&asset.path)));
-    self.toast(
-      "Copied",
-      "Asset path copied to clipboard".into(),
-      ToastTone::Success,
-      cx,
-    );
+    self.toast("Asset path copied", String::new(), ToastTone::Success, cx);
   }
 
   fn reveal(&mut self) {

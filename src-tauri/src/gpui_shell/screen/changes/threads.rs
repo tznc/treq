@@ -468,7 +468,6 @@ impl ChangesView {
           format!("github-comment-{}", comment.id),
           &comment.body,
           13.,
-          20.,
           self.dark,
         ),
       ))

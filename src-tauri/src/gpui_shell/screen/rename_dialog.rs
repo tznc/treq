@@ -205,8 +205,8 @@ impl RenameDialog {
             view.error.clear();
             view.toast(
               ToastTone::Success,
-              "Workspace renamed",
-              format!("Renamed to {next}"),
+              &format!("Renamed to {next}"),
+              String::new(),
             );
             WorkspaceHost::notify(
               &*view.host,
