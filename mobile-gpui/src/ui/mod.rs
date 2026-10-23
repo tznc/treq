@@ -31,10 +31,15 @@ use crate::{
 
 pub use load::Load;
 
-/// The signed-out, unconnected home is a landing page. Once signed in or
-/// connected (even to a saved SSH host) the regular home takes over.
-fn is_landing(user: Option<&str>, connected: bool) -> bool {
-  user.is_none() && !connected
+/// The signed-out home with no machines is a landing page. Once signed in,
+/// or with a saved SSH host, the machine list takes over.
+fn is_landing(user: Option<&str>, has_machines: bool) -> bool {
+  user.is_none() && !has_machines
+}
+
+/// Whether there is a machine to list: a connection or a saved SSH host.
+fn has_machines(model: &AppModel) -> bool {
+  model.connection.is_some() || !store::user_managed_endpoints().is_empty()
 }
 
 /// App-wide state the screens observe.
@@ -334,7 +339,7 @@ impl Render for Root {
     let can_go_back = self.stack.len() > 1;
     let model = self.model.read(cx);
     // The landing page brings its own branding, so it drops the title bar.
-    let landing = !can_go_back && is_landing(model.user.as_deref(), model.connection.is_some());
+    let landing = !can_go_back && is_landing(model.user.as_deref(), has_machines(model));
     let blocked = model.cutoff();
     let managed = model
       .connection

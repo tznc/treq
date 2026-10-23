@@ -360,11 +360,7 @@ impl HomeScreen {
 impl Render for HomeScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
-    let has_hosts = !store::user_managed_endpoints().is_empty();
-    let landing = super::is_landing(
-      model.user.as_deref(),
-      model.connection.is_some() || has_hosts,
-    );
+    let landing = super::is_landing(model.user.as_deref(), super::has_machines(model));
     let content = if landing {
       self.landing(cx).into_any_element()
     } else {
