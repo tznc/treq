@@ -101,7 +101,7 @@ test("not-a-repository: asks, and cancelled leaves the folder alone", async () =
       ],
     });
     await cancel.click();
-    const open = run.page.getByRole("button", { name: "Open Repository" });
+    const open = run.page.getByRole("button", { name: "Open repository…" });
     await expect(open).toBeVisible();
     await run.page.waitForTimeout(500);
     await capture(run.page, {
@@ -124,7 +124,7 @@ test("not-a-repository: initialized, it opens as a repository", async () => {
   const run = await launch();
   try {
     await (await question(run.page)).initialize.click();
-    await expect(run.page.getByRole("button", { name: "Open Repository" })).toBeHidden({
+    await expect(run.page.getByRole("button", { name: "Open repository…" })).toBeHidden({
       timeout: 30_000,
     });
     await run.page.waitForTimeout(2000);

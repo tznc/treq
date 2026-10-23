@@ -13,10 +13,9 @@
 use crate::gpui_shell::ui::zpx;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, prelude::*, AnyElement, Context, Div, FontWeight, SharedString, Window,
+  self, div, prelude::*, AnyElement, Context, Div, FontWeight, Window,
 };
 
 use super::onboarding_remote;
@@ -33,7 +32,10 @@ use crate::{
     confirm::{self, Question},
     native::{Backend, NativeEvent, ToastTone},
     theme::{self, Palette},
-    ui::{self, Button, DismissExt as _, Size, TextSize, Variant},
+    ui::{
+      self, radius, Alert, Button, DismissExt as _, Dot, EmptyState, IconButton, IconButtonSize,
+      Loading, Popover, Row, RowDensity, Severity, Size, TextSize, Tone, Variant,
+    },
   },
 };
 
@@ -362,25 +364,12 @@ fn place_icon(place: &Place) -> &'static str {
   }
 }
 
-/// A clickable list row that the e2e suite finds by its name.
-fn row(
-  id: impl Into<SharedString>,
-  label: impl Into<SharedString>,
-  p: &Palette,
-) -> gpui::Stateful<Div> {
-  let id = id.into();
-  div()
-    .id(id.clone())
-    .debug_selector(move || id.to_string())
-    .role(gpui::Role::Button)
-    .aria_label(label)
-    .flex()
-    .items_center()
-    .gap_2()
-    .px_2()
-    .py(zpx(6.))
-    .rounded(zpx(6.))
-    .hover(|s| s.bg(p.accent))
+/// A group's label in the machines panel, as the sidebar's.
+fn group_label(label: &str, p: &Palette) -> Div {
+  ui::text(div(), TextSize::Xs)
+    .font_weight(FontWeight::SEMIBOLD)
+    .text_color(p.muted_foreground)
+    .child(label.to_uppercase())
 }
 
 impl OnboardingView {
@@ -393,66 +382,50 @@ impl OnboardingView {
       .and_then(|t| t.result.as_ref())
       .and_then(|r| r.as_ref().err())
       .cloned();
-    let (status_icon, status_color, status_label) = match (error.is_some(), checklist::ready(&list))
-    {
-      (true, _) => (theme::ICON_CIRCLE_ALERT, p.warning, "Could not check tools"),
-      (false, Some(true)) => (theme::ICON_CIRCLE_CHECK, p.success, "Tools installed"),
-      (false, Some(false)) => (theme::ICON_CIRCLE_X, p.destructive, "Tools missing"),
-      (false, None) => (theme::ICON_WRENCH, p.muted_foreground, "Check tools"),
+    // One dot for the machine's tools, once they are checked.
+    let (status, status_label) = match (error.is_some(), checklist::ready(&list)) {
+      (true, _) => (Some(Tone::Warning), "Could not check tools"),
+      (false, Some(true)) => (Some(Tone::Success), "Tools installed"),
+      (false, Some(false)) => (Some(Tone::Danger), "Tools missing"),
+      (false, None) => (None, "Check tools"),
     };
-    let tools_id = format!("machine-tools-{}", machine.id);
-    let tools_button = div()
-      .id(SharedString::from(tools_id.clone()))
-      .debug_selector(move || tools_id.clone())
-      .role(gpui::Role::Button)
-      .aria_label(format!("{status_label} on {}", machine.name))
-      .flex_none()
-      .p_1()
-      .rounded(zpx(4.))
-      .hover(|s| s.bg(p.muted))
-      .child(ui::icon(status_icon, 16., status_color))
-      .on_click({
-        // Not the row's press, which opens a repository on the machine.
-        let send = ctx.send(press(format!("machines.tools:{}", machine.id)));
-        move |event, window, cx| {
-          cx.stop_propagation();
-          send(event, window, cx);
-        }
-      })
-      .test_support();
     let open = self.popover.as_deref() == Some(machine.id.as_str());
+    let tools_button = IconButton::new(
+      format!("machine-tools-{}", machine.id),
+      theme::ICON_WRENCH,
+      format!("{status_label} on {}", machine.name),
+      &p,
+    )
+    .size(IconButtonSize::Small)
+    .selected(open)
+    .on_click({
+      // Not the row's press, which opens a repository on the machine.
+      let send = ctx.send(press(format!("machines.tools:{}", machine.id)));
+      move |event, window, cx| {
+        cx.stop_propagation();
+        send(event, window, cx);
+      }
+    });
     let popover = open.then(|| self.tools_popover(machine, list, error, ctx, cx));
+    let row_id = format!("machine-{}", machine.id);
     div()
       .relative()
       .child(
-        row(format!("machine-{}", machine.id), machine.name.clone(), &p)
-          .when(open, |d| d.bg(p.accent))
-          .on_click(ctx.send(press(format!("machines.open:{}", machine.id))))
-          .child(ui::icon(
-            place_icon(&machine.place),
-            16.,
-            p.muted_foreground,
-          ))
-          .child(
-            div()
-              .min_w_0()
-              .flex_1()
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .truncate()
-                  .child(machine.name.clone()),
-              )
-              .when(!machine.detail.is_empty(), |d| {
-                d.child(
-                  ui::text(div(), TextSize::Xs)
-                    .truncate()
-                    .text_color(p.muted_foreground)
-                    .child(machine.detail.clone()),
-                )
-              }),
-          )
-          .child(tools_button)
-          .test_support(),
+        Row::new(row_id, &p)
+          .density(if machine.detail.is_empty() {
+            RowDensity::Comfortable
+          } else {
+            RowDensity::TwoLine
+          })
+          .icon(place_icon(&machine.place))
+          .title(machine.name.clone())
+          .when(!machine.detail.is_empty(), |row| {
+            row.meta(machine.detail.clone())
+          })
+          .when_some(status, |row, tone| row.trailing(Dot::new(tone, &p)))
+          .actions(tools_button, 24.)
+          .selected(open)
+          .on_click(ctx.send(press(format!("machines.open:{}", machine.id)))),
       )
       .children(popover)
       .into_any_element()
@@ -468,54 +441,37 @@ impl OnboardingView {
   ) -> AnyElement {
     let p = ctx.palette;
     let removable = matches!(machine.place, Place::Ssh { .. });
-    deferred(
-      div()
-        .id("machine-tools-popover")
-        .debug_selector(|| "machine-tools-popover".into())
-        .absolute()
-        .top_0()
-        .left(zpx(MACHINES_WIDTH - 16.))
-        .w(zpx(POPOVER_WIDTH))
-        .p_3()
-        .rounded(zpx(8.))
-        .border_1()
-        .border_color(p.border)
-        .bg(p.popover)
-        .text_color(p.popover_foreground)
-        .shadow_md()
-        .occlude()
-        .dismiss_with("machine-tools", cx, |view, cx| view.close_popover(cx))
-        .child(checklist::render(&list, ctx))
-        .when_some(error, |d, error| {
-          d.child(
-            ui::text(div(), TextSize::Xs)
-              .debug_selector(|| "machine-tools-error".into())
-              .mt_2()
-              .text_color(p.destructive)
-              .child(error),
-          )
-        })
-        .when(removable, |d| {
-          d.child(
-            div()
-              .mt_3()
-              .pt_2()
-              .border_t_1()
-              .border_color(p.border.opacity(0.5))
-              .flex()
-              .justify_end()
-              .child(
-                Button::new("machine-remove", &p)
-                  .variant(Variant::Ghost)
-                  .size(Size::Sm)
-                  .label("Remove Host")
-                  .on_click(ctx.send(press(format!("machines.remove:{}", machine.id)))),
-              ),
-          )
-        }),
-    )
-    .with_priority(1)
-    .into_any_element()
+    Popover::new("machine-tools-popover", &p)
+      .w(zpx(POPOVER_WIDTH))
+      .p_3()
+      .gap_3()
+      .dismiss_with("machine-tools", cx, |view, cx| view.close_popover(cx))
+      .child(checklist::render(&list, ctx))
+      .when_some(error, |d, error| {
+        d.child(
+          Alert::new("machine-tools-error", "Couldn't check the tools", &p)
+            .severity(Severity::Warning)
+            .message(error),
+        )
+      })
+      .when(removable, |d| {
+        d.child(
+          div()
+            .pt_2()
+            .border_t_1()
+            .border_color(p.border)
+            .flex()
+            .justify_end()
+            .child(
+              Button::new("machine-remove", &p)
+                .variant(Variant::Ghost)
+                .size(Size::Sm)
+                .label("Remove host…")
+                .on_click(ctx.send(press(format!("machines.remove:{}", machine.id)))),
+            ),
+        )
+      })
+      .into_any_element()
   }
 
   /// The left panel: the machines by section, and adding one.
@@ -556,20 +512,30 @@ impl OnboardingView {
       )),
       _ => None,
     };
-    let mut container_status = self.container.clone().map(|status| {
-      let (text, color) = match status {
-        Ok(path) => (
-          format!("Starting {}…", path.rsplit('/').next().unwrap_or(&path)),
-          p.muted_foreground,
-        ),
-        Err(error) => (error, p.destructive),
-      };
-      ui::text(div(), TextSize::Xs)
-        .debug_selector(|| "machines-container-status".into())
+    let mut container_status = self.container.clone().map(|status| match status {
+      Ok(path) => div()
         .px_2()
         .py_1()
-        .text_color(color)
-        .child(text)
+        .child(
+          Loading::new("machines-container-starting", &p).label(format!(
+            "Starting {}…",
+            path.rsplit('/').next().unwrap_or(&path)
+          )),
+        )
+        .into_any_element(),
+      Err(error) => div()
+        .px_2()
+        .py_1()
+        .child(
+          Alert::new(
+            "machines-container-status",
+            "Couldn't start the dev container",
+            &p,
+          )
+          .severity(Severity::Danger)
+          .message(error),
+        )
+        .into_any_element(),
     });
     div()
       .debug_selector(|| "onboarding-machines".into())
@@ -603,29 +569,16 @@ impl OnboardingView {
               .pb_3()
               .child(
                 div()
+                  .h(zpx(theme::CONTROL_SM))
                   .flex()
                   .items_center()
                   .justify_between()
-                  .px_2()
-                  .pb_1()
-                  .child(
-                    ui::text(div(), TextSize::Xs)
-                      .text_color(p.muted_foreground)
-                      .child(section),
-                  )
+                  .pl_2()
+                  .child(group_label(section, &p))
                   .children(add(section).map(|(id, label, action)| {
-                    div()
-                      .id(id)
-                      .debug_selector(move || id.into())
-                      .role(gpui::Role::Button)
-                      .aria_label(label)
-                      .p_0p5()
-                      .rounded(zpx(4.))
-                      .cursor_pointer()
-                      .hover(|s| s.bg(p.accent))
-                      .on_click(ctx.send(ScreenAction::Press { id: action.into() }))
-                      .child(ui::icon(theme::ICON_PLUS, 14., p.muted_foreground))
-                      .test_support()
+                    IconButton::new(id, theme::ICON_PLUS, label, &p)
+                      .size(IconButtonSize::Small)
+                      .on_click(ctx.send(press(action)))
                   })),
               )
               .children(rows)
@@ -636,8 +589,9 @@ impl OnboardingView {
                 empty && !(section == containers && self.container.is_some()),
                 |d| {
                   d.child(
-                    ui::text(div(), TextSize::Xs)
+                    ui::text(div(), TextSize::Sm)
                       .px_2()
+                      .py_1()
                       .text_color(p.muted_foreground)
                       .child(if section == ssh {
                         "No hosts yet."
@@ -654,16 +608,11 @@ impl OnboardingView {
         d.child(
           div().p_3().border_t_1().border_color(p.border).child(
             Button::new("onboarding-sign-in", &p)
+              .variant(Variant::Outline)
               .w_full()
-              .child(div().flex().mr_2().child(ui::icon(
-                theme::ICON_CLOUD,
-                16.,
-                p.primary_foreground,
-              )))
+              .icon(theme::ICON_CLOUD, 16.)
               .label("Sign in to Treq Cloud")
-              .on_click(ctx.send(ScreenAction::Press {
-                id: "machines.signIn".into(),
-              })),
+              .on_click(ctx.send(press("machines.signIn"))),
           ),
         )
       })
@@ -675,29 +624,13 @@ impl OnboardingView {
       Some(id) => press(format!("machines.openSaved:{id}")),
       None => press(format!("machines.openLocal:{}", recent.path)),
     };
-    row(
-      format!("recent-{}-{i}", recent.machine_id),
-      recent.name.clone(),
-      &p,
-    )
-    .on_click(ctx.send(action))
-    .child(ui::icon(theme::ICON_FOLDER_GIT, 16., p.muted_foreground))
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .flex_none()
-        .font_weight(FontWeight::MEDIUM)
-        .child(recent.name.clone()),
-    )
-    .child(
-      ui::text(div(), TextSize::Xs)
-        .min_w_0()
-        .flex_1()
-        .truncate()
-        .text_color(p.muted_foreground)
-        .child(recent.path.clone()),
-    )
-    .test_support()
-    .into_any_element()
+    Row::new(format!("recent-{}-{i}", recent.machine_id), &p)
+      .density(RowDensity::Comfortable)
+      .icon(theme::ICON_FOLDER_GIT)
+      .title(recent.name.clone())
+      .meta(recent.path.clone())
+      .on_click(ctx.send(action))
+      .into_any_element()
   }
 
   /// The right panel: recent repositories grouped by machine, with the
@@ -743,14 +676,16 @@ impl OnboardingView {
             .mx_2()
             .mt_2()
             .p_3()
-            .rounded(zpx(8.))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.border)
             .child(
               ui::text(div(), TextSize::Sm)
-                .pb_2()
                 .text_color(p.muted_foreground)
-                .child("Enter the repository's path on the host."),
+                .child("Pick the repository's folder on the host."),
             )
             .children(form.clone().map(|form| {
               onboarding_remote::render(&form, &self.inputs, &self.react, self.dark, &p, cx)
@@ -772,17 +707,13 @@ impl OnboardingView {
                   14.,
                   p.muted_foreground,
                 ))
-                .child(
-                  ui::text(div(), TextSize::Xs)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(p.muted_foreground)
-                    .child(machine.name.clone()),
-                )
+                .child(group_label(&machine.name, &p))
                 .when(!machine.detail.is_empty(), |d| {
                   d.child(
                     ui::text(div(), TextSize::Xs)
+                      .min_w_0()
                       .truncate()
-                      .text_color(p.muted_foreground.opacity(0.7))
+                      .text_color(p.muted_foreground)
                       .child(machine.detail.clone()),
                   )
                 }),
@@ -794,12 +725,9 @@ impl OnboardingView {
       })
       .collect();
     let empty = groups.is_empty().then(|| {
-      ui::text(div(), TextSize::Sm)
-        .debug_selector(|| "onboarding-no-recents".into())
-        .px_2()
-        .py_6()
-        .text_color(p.muted_foreground)
-        .child("Repositories you open show up here, grouped by machine.")
+      EmptyState::new("onboarding-no-recents", "No recent repositories", &p)
+        .icon(theme::ICON_FOLDER_GIT)
+        .message("Repositories you open show up here, grouped by machine.")
     });
     div()
       .flex_1()
@@ -820,7 +748,7 @@ impl OnboardingView {
             div()
               .flex()
               .flex_col()
-              .gap(zpx(6.))
+              .gap_1p5()
               .child(
                 ui::text(div(), TextSize::Lg)
                   .font_weight(FontWeight::SEMIBOLD)
@@ -835,12 +763,8 @@ impl OnboardingView {
           .child(
             Button::new("onboarding-open-repo", &p)
               .flex_none()
-              .child(div().flex().mr_2().child(ui::icon(
-                theme::ICON_FOLDER_OPEN,
-                16.,
-                p.primary_foreground,
-              )))
-              .label("Open Repository")
+              .icon(theme::ICON_FOLDER_OPEN, 16.)
+              .label("Open repository…")
               .on_click(ctx.send(ScreenAction::OpenRepo)),
           ),
       )
@@ -858,7 +782,7 @@ impl OnboardingView {
               .px_2()
               .pb_3()
               .font_weight(FontWeight::SEMIBOLD)
-              .child("Recent Repositories"),
+              .child("Recent repositories"),
           )
           .children(groups)
           .children(empty),

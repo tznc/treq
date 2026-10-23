@@ -2,6 +2,8 @@
 
 use gpui::{div, prelude::*, AnyElement, App, Div, Interactivity, SharedString, Stateful, Window};
 
+use gpui_kit::base::TestSupportExt as _;
+
 use crate::{icon, text, theme, theme::Palette, zpx, TextSize};
 
 /// How tall a [`Row`] is.
@@ -131,6 +133,7 @@ impl RenderOnce for Row {
     } else {
       p.foreground
     };
+    let name = self.title.clone();
     let title = self.title.map(|title| {
       text(div(), TextSize::Sm)
         .min_w_0()
@@ -148,7 +151,9 @@ impl RenderOnce for Row {
     self
       .base
       .role(gpui::Role::ListItem)
+      .when_some(name, |el, name| el.aria_label(name))
       .aria_selected(self.selected)
+      .test_support()
       .flex()
       .items_center()
       .gap_2()

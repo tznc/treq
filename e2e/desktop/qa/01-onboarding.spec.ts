@@ -69,7 +69,7 @@ test.afterAll(async () => {
 });
 
 test("onboarding: first run and open repository", async () => {
-  const open = page.getByRole("button", { name: "Open Repository" });
+  const open = page.getByRole("button", { name: "Open repository…" });
   await expect(open).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(1500);
   await capture(page, {
@@ -77,7 +77,7 @@ test("onboarding: first run and open repository", async () => {
     title: "Onboarding: first run, no repository",
     expectations: [
       "'Overview' heading and helper text are centred and unclipped",
-      "Open Repository button is the primary action, aligned with the text",
+      "Open repository… is the primary action, aligned with the text",
       "Background and text colours match the theme",
     ],
   });
@@ -121,14 +121,13 @@ test("onboarding: first run and open repository", async () => {
     title: "Overview: Add SSH host (your own VM) form",
     screen: true,
     expectations: [
-      "The own-VM form opens directly, with an X close button at the top right",
+      "The own-VM form opens directly; Cancel and Continue at the bottom and no X, as it has an action pair",
       "Field labels and placeholders readable in this theme",
       "No network is needed to show the form; no stuck spinner",
     ],
   });
-  // The dialog closes with its X button or Escape, as every other
-  // dialog does.
-  const close = page.getByRole("button", { name: "Close" });
+  // The dialog closes with Cancel or Escape, as every other dialog does.
+  const close = page.getByRole("button", { name: "Cancel" });
   await expect(close).toBeVisible();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(1000);

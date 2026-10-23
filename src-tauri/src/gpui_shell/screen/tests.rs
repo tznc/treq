@@ -6941,6 +6941,12 @@ fn setup_dialog_opens_on_your_own_vm_from_the_ssh_hosts_plus(cx: &mut TestAppCon
   );
   assert!(h.drawn("remote-username"));
   assert!(!h.drawn("remote-setup-own-vm"));
+  // An action pair and no X; Cancel closes, as there is no choice to go
+  // back to.
+  assert!(!h.drawn("remote-setup-close"));
+  assert!(!h.drawn("remote-setup-back"));
+  h.click("remote-setup-cancel");
+  assert_eq!(h.sent(), vec![press("remote.setup.close")]);
 }
 
 #[gpui::test]
