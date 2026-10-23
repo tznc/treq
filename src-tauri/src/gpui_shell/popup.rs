@@ -47,6 +47,8 @@ const TEXT_SIZE: f32 = 13.;
 const LINE_HEIGHT: f32 = 20.;
 /// A text tooltip's widest box: `max-w-xs`. Longer text wraps.
 const TOOLTIP_MAX_WIDTH: f32 = 320.;
+/// A branch tooltip's title wraps inside `max-w-xs`, less `px-3` and the border.
+const BRANCH_NAME_MAX_WIDTH: f32 = TOOLTIP_MAX_WIDTH - 24. - 2.;
 /// A [`TooltipContent::List`] row: `text-xs`.
 const LIST_ITEM_SIZE: f32 = 11.;
 const LIST_ITEM_LINE: f32 = 16.;
@@ -88,8 +90,10 @@ const COMPACT_CHROME: f32 = 2. + 32. + 16. + 12.;
 pub enum TooltipContent {
   Text(SharedString),
   /// A branch in mono with its icon, and its conflict and PR state below,
-  /// like the React sidebar's row tooltips.
+  /// like the React sidebar's row tooltips. A titled workspace's `name`
+  /// sits above the branch.
   Branch {
+    name: Option<SharedString>,
     title: SharedString,
     conflicted: bool,
     pr: Option<PrState>,
@@ -559,6 +563,8 @@ fn wrap_lines(text: &str, max: f32, width: impl Fn(&str) -> f32) -> (f32, usize)
 
 /// The tooltip box's size: `px-3 py-1.5` and a border around its lines.
 fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
+  // The height of wrapped lines past each row's first.
+  let mut flush = 0.;
   let (width, lines) = match content {
     TooltipContent::Text(text) => {
       // Wrapped lines sit flush, without the `gap-1` between rows below.
@@ -577,6 +583,7 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
       )
     }
     TooltipContent::Branch {
+      name,
       title,
       conflicted,
       pr,
@@ -584,6 +591,13 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
       // `gap-1.5` after a `w-3` icon.
       let mut width = 12. + 6. + text_width(cx, title, theme::MONO_FONT);
       let mut lines = 1;
+      if let Some(name) = name {
+        // A long title wraps; its lines sit flush, without the `gap-1`.
+        let (name_width, name_lines) = wrapped_text(cx, name, BRANCH_NAME_MAX_WIDTH);
+        width = width.max(name_width);
+        lines += 1;
+        flush = LINE_HEIGHT * (name_lines - 1) as f32;
+      }
       if *conflicted {
         width = width.max(text_width(cx, "Conflicts detected", theme::SANS_FONT));
         lines += 1;
@@ -608,7 +622,7 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
   let lines = lines as f32;
   (
     (width + 24. + 2.).ceil(),
-    LINE_HEIGHT * lines + 4. * (lines - 1.) + 12. + 2.,
+    LINE_HEIGHT * lines + 4. * (lines - 1.) + flush + 12. + 2.,
   )
 }
 
@@ -868,6 +882,7 @@ impl PopupView {
         )
         .into_any_element(),
       TooltipContent::Branch {
+        name,
         title,
         conflicted,
         pr,
@@ -875,6 +890,15 @@ impl PopupView {
         .flex()
         .flex_col()
         .gap_1()
+        .when_some(name.as_ref(), |this, name| {
+          let one_line = wrapped_text(cx, name, BRANCH_NAME_MAX_WIDTH).1 == 1;
+          this.child(
+            div()
+              .max_w(zpx(BRANCH_NAME_MAX_WIDTH))
+              .when(one_line, |this| this.whitespace_nowrap())
+              .child(name.clone()),
+          )
+        })
         .child(
           div()
             .flex()
@@ -1946,6 +1970,27 @@ mod tests {
     assert_eq!(toasts[0].kind, ToastKind::Success);
     assert_eq!(toasts[0].description, None);
     assert_eq!(toasts[1].action.as_deref(), Some("Retry"));
+  }
+
+  #[gpui::test]
+  fn sizes_a_titled_branch_tooltip(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      theme::init(cx);
+      let branch = |name: Option<&str>| TooltipContent::Branch {
+        name: name.map(|n| n.to_string().into()),
+        title: "zn/blissful-shannon".into(),
+        conflicted: false,
+        pr: None,
+      };
+      let (_, bare) = tooltip_size(cx, &branch(None));
+      // The title sits above the branch, `gap-1` apart.
+      let (_, titled) = tooltip_size(cx, &branch(Some("Fix spool")));
+      assert_eq!(titled, bare + LINE_HEIGHT + 4.);
+      // A long title wraps at `max-w-xs`, its lines flush.
+      let (width, long) = tooltip_size(cx, &branch(Some(&"word ".repeat(40))));
+      assert!(width <= TOOLTIP_MAX_WIDTH);
+      assert!(long >= titled + 2. * LINE_HEIGHT);
+    });
   }
 
   #[gpui::test]
