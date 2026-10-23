@@ -2334,7 +2334,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -4570,7 +4570,7 @@ dependencies = [
 [[package]]
 name = "gpui-bootstrap"
 version = "0.1.0"
-source = "git+https://github.com/Ziinc/gpui-bootstrap?branch=claude%2Fbutton-variant-colors#21626e7327a25e46dc5b714f267953c7792e8b3c"
+source = "git+https://github.com/Ziinc/gpui-bootstrap?branch=main#d0fd269dc61b70210efe0dee3f7c2fc8a05e8c2d"
 dependencies = [
  "gpui-kit",
 ]
@@ -10402,7 +10402,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.21.7",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
