@@ -229,9 +229,17 @@ pub fn window_focused(app: &AppHandle, label: &str) {
 /// Follows the app-wide events the window's data depends on. Once.
 pub fn listen(app: &AppHandle) {
   let handle = app.clone();
-  app.listen_any("pr-statuses-updated", move |_| {
+  app.listen_any("pr-statuses-updated", move |event| {
+    // The PR's title or body was copied into workspaces: read them again.
+    let synced = crate::pr_status::synced_repo(event.payload());
     for label in labels() {
-      with_controller(&handle, &label, |c, cx| c.prs_changed(cx));
+      let synced = synced.clone();
+      with_controller(&handle, &label, move |c, cx| {
+        c.prs_changed(cx);
+        if let Some(repo_path) = synced {
+          c.native_event(&NativeEvent::WorkspaceChanged { repo_path }, cx);
+        }
+      });
     }
   });
   // `remoteCutoffStore`: the transport tore an endpoint's connections down.

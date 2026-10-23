@@ -536,12 +536,14 @@ pub fn open_or_create_workspace_from_pr(
   base_branch: &str,
   title: Option<&str>,
   description: Option<&str>,
+  pr_number: Option<u64>,
 ) -> Result<(local_db::Workspace, bool), String> {
   let request = BranchWorkspaceRequest {
     head_branch: head_branch.to_string(),
     base_branch: base_branch.to_string(),
     title: title.map(str::to_string),
     description: description.map(str::to_string),
+    pr_number,
   };
   request.validate()?;
 
@@ -569,6 +571,9 @@ pub struct BranchWorkspaceRequest {
   pub base_branch: String,
   pub title: Option<String>,
   pub description: Option<String>,
+  /// The pull request the branch is the head of; the new workspace's title
+  /// and description then follow it (`pr_sync`).
+  pub pr_number: Option<u64>,
 }
 
 impl BranchWorkspaceRequest {
@@ -672,6 +677,9 @@ pub(crate) fn open_or_create_synced(
         workspace.id
       )
     })?;
+  if let Some(number) = request.pr_number {
+    super::pr_sync::record_created(repo_path, &updated, number)?;
+  }
 
   Ok((updated, true))
 }
@@ -2378,7 +2386,7 @@ mod tests {
     super::archive_workspace(&repo_path, &first.id).expect("archive workspace");
 
     let (workspace, created) =
-      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None)
+      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None, None)
         .expect("open PR workspace");
 
     assert!(created);
@@ -2399,7 +2407,7 @@ mod tests {
     fs::remove_dir_all(&workspace_dir).expect("remove workspace directory");
 
     let (workspace, created) =
-      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None)
+      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None, None)
         .expect("open PR workspace");
 
     assert!(created);
@@ -2427,6 +2435,7 @@ mod tests {
       base_branch: "main".into(),
       title: title.map(str::to_string),
       description: None,
+      pr_number: None,
     };
 
     let results = super::open_or_create_workspaces(

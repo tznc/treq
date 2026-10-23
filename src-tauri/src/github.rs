@@ -18,6 +18,9 @@ pub struct PrInfo {
   pub merge_state_status: Option<String>,
   #[serde(default)]
   pub is_draft: bool,
+  /// The PR description, markdown. Empty when the PR has none.
+  #[serde(default)]
+  pub body: String,
 }
 
 /// Parse owner/repo from a GitHub remote URL in SSH or HTTPS form.
@@ -1344,6 +1347,8 @@ pub fn get_pr_info_via_gh_impl(
     merge_state_status: Option<String>,
     #[serde(default)]
     is_draft: bool,
+    #[serde(default)]
+    body: String,
   }
 
   let mut cmd = std::process::Command::new(gh_path);
@@ -1353,7 +1358,7 @@ pub fn get_pr_info_via_gh_impl(
       "pr",
       "view",
       "--json",
-      "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft",
+      "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body",
       "--",
       branch_name,
     ])
@@ -1384,6 +1389,7 @@ pub fn get_pr_info_via_gh_impl(
     base_ref_name: raw.base_ref_name,
     merge_state_status: raw.merge_state_status,
     is_draft: raw.is_draft,
+    body: raw.body,
   }))
 }
 
@@ -1880,6 +1886,27 @@ mod tests {
 
   #[test]
   #[cfg(unix)]
+  fn get_pr_info_parses_body() {
+    let bin_dir = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+    let gh_path = write_fake_gh(
+      &bin_dir,
+      r#"echo '{"number":7,"title":"T","state":"OPEN","url":"u","headRefName":"feat","baseRefName":"main","mergeStateStatus":null,"isDraft":false,"body":"**Why**: because"}'"#,
+    );
+
+    let info = get_pr_info_via_gh_impl(
+      &gh_path,
+      repo_dir.path().to_str().unwrap(),
+      "feat",
+      "/usr/bin:/bin",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(info.body, "**Why**: because");
+  }
+
+  #[test]
+  #[cfg(unix)]
   fn get_pr_info_invokes_gh_with_exact_arguments_and_working_directory() {
     let bin_dir = TempDir::new().unwrap();
     let repo_dir = TempDir::new().unwrap();
@@ -1887,7 +1914,7 @@ mod tests {
     let expected_dir = expected_dir.display();
     let script = format!(
       r#"test "$PWD" = "{expected_dir}" || exit 8
-test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- feat" || exit 9
+test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat" || exit 9
 echo '{{"number":42,"title":"My PR","state":"OPEN","url":"https://github.com/o/r/pull/42","headRefName":"feat","baseRefName":"main","mergeStateStatus":null,"isDraft":false}}'"#,
     );
     let gh_path = write_fake_gh(&bin_dir, &script);
@@ -1908,7 +1935,7 @@ echo '{{"number":42,"title":"My PR","state":"OPEN","url":"https://github.com/o/r
     let bin_dir = TempDir::new().unwrap();
     let gh_path = write_fake_gh(
       &bin_dir,
-      r#"test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- --web" || exit 9
+      r#"test "$*" = "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- --web" || exit 9
 echo 'no pull requests found for branch "--web"' >&2
 exit 1"#,
     );
