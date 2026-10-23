@@ -102,9 +102,17 @@ test("ssh remote: connect and open a Git repository", async () => {
   const open = page.getByRole("button", { name: "Open via SSH" });
   await expect(open).toBeVisible({ timeout: 60_000 });
   await shot("machines", "Open a Repository: machines and recent repositories", [
-    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, with 'Open via SSH' at the bottom",
+    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER and 'Cloud workspace' under TREQ CLOUD ('Sign in to create one'), with 'Open via SSH' at the bottom",
     "Right panel is headed 'Open a Repository' with the Open Repository button; no recents yet says where they appear",
   ]);
+  await page.getByRole("button", { name: "Cloud workspace", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sign in with Browser" })).toBeVisible({ timeout: 30_000 });
+  await shot("cloud-sign-in", "The cloud row while signed out", [
+    "Setup opens on the Treq-managed cloud workspace, not the choice",
+    "It asks to sign in with the browser before creating the workspace",
+  ]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Sign in with Browser" })).toHaveCount(0);
   await page.getByRole("button", { name: /on This computer$/ }).click();
   await shot("local-tools", "This computer's tools popover", [
     "A popover beside the row lists Required (Git), Agent CLI and Optional tools with Installed or Install",
@@ -131,12 +139,18 @@ test("ssh remote: connect and open a Git repository", async () => {
     "Names user@host:port and the server's SHA256 host key fingerprint (compare with ssh-keygen -lf on the server)",
   ]);
   await page.getByRole("button", { name: "Trust and connect" }).click();
-  const path = page.getByRole("textbox").first();
-  await expect(page.getByRole("button", { name: "Probe" })).toBeVisible({ timeout: 30_000 });
-  await shot("connected", "Connected: the host's repository form", [
+  const repoName = env.repo.split("/").pop()!;
+  const repoFolder = page.getByRole("button", { name: repoName, exact: true });
+  await expect(repoFolder).toBeVisible({ timeout: 30_000 });
+  await shot("connected", "Connected: browsing the host from its home", [
     "'QA container' is listed under SSH HOSTS with user@host:port",
-    "Its group on the right holds the path field and Probe button",
+    "Its group on the right browses /home/dev: breadcrumbs, Show hidden (off) and the folders, with qa-demo marked Repository",
+    "No dot folders while Show hidden is off; the plain home folder offers Use this folder",
   ]);
+  await page.getByRole("checkbox", { name: "Show hidden folders" }).click();
+  await expect(page.getByRole("button", { name: ".ssh", exact: true })).toBeVisible({ timeout: 30_000 });
+  await shot("hidden", "Show hidden folders", ["Dot folders such as .ssh now show, dimmed"]);
+  await page.getByRole("checkbox", { name: "Show hidden folders" }).click();
   await page.getByRole("button", { name: /on QA container$/ }).click();
   await expect(page.getByRole("button", { name: "Remove Host" })).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(3000);
@@ -145,11 +159,12 @@ test("ssh remote: connect and open a Git repository", async () => {
     "Claude Code is not installed yet; Remove Host at the bottom",
   ]);
   await page.keyboard.press("Escape");
-  await path.fill(env.repo);
-  await page.getByRole("button", { name: "Probe" }).click();
+  await repoFolder.click();
   const openRemote = page.getByRole("button", { name: "Open", exact: true });
   await expect(openRemote).toBeVisible({ timeout: 30_000 });
-  await shot("probed", "Remote repository probed", ["The probe found a repository and offers Open"]);
+  await shot("probed", "Browsed into the repository", [
+    "The breadcrumbs end at qa-demo and Open shows for the repository",
+  ]);
   await openRemote.click();
   await expect(page.getByRole("tab", { name: "Commits" })).toBeVisible({ timeout: 60_000 });
   await page.getByRole("tab", { name: "Commits" }).click();
