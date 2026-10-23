@@ -10,6 +10,7 @@
 
 use crate::github::{PrCiStatus, PrInfo};
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -623,7 +624,7 @@ pub fn set_app_handle(app: tauri::AppHandle) {
         "statuses": statuses,
         "ci_statuses": ci_statuses,
     });
-    let _ = app.emit("pr-statuses-updated", payload);
+    app.emit("pr-statuses-updated", payload).ignore_closed();
   }));
   global().ensure_started();
 }

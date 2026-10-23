@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -2111,7 +2112,9 @@ where
   // Best-effort, bounded retention: opportunistically sweep old completed
   // records on the same connection rather than running a separate cleanup
   // process. A failure here must never mask the mutation's own outcome.
-  let _ = store.cleanup(crate::core::idempotency_store::DEFAULT_RETENTION);
+  store
+    .cleanup(crate::core::idempotency_store::DEFAULT_RETENTION)
+    .warn_on_err("cleanup");
   outcome
 }
 

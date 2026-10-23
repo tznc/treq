@@ -13,6 +13,7 @@ mod rows;
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
@@ -297,12 +298,14 @@ impl CommitsView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -515,12 +518,14 @@ impl CommitsView {
     self.removing.insert(commit_id.clone());
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(REMOVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        if view.removing.remove(&commit_id) {
-          view.removed.insert(commit_id);
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.removing.remove(&commit_id) {
+            view.removed.insert(commit_id);
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1968,16 +1973,20 @@ impl CommitsView {
       let view = view.clone();
       NativeMenuItem::item(label, move |cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-        let _ = view.update(cx, |view, _| {
-          view.toast(ToastTone::Success, &format!("{what} copied"), "")
-        });
+        view
+          .update(cx, |view, _| {
+            view.toast(ToastTone::Success, &format!("{what} copied"), "")
+          })
+          .ignore_closed();
       })
       .icon(MenuIcon::Copy)
     };
     let run = |label: &str, f: fn(&mut Self, JjLogCommit, &mut Context<Self>)| {
       let (view, commit) = (view.clone(), commit.clone());
       NativeMenuItem::item(label, move |cx| {
-        let _ = view.update(cx, |view, cx| f(view, commit.clone(), cx));
+        view
+          .update(cx, |view, cx| f(view, commit.clone(), cx))
+          .ignore_closed();
       })
     };
     let own = matches!(kind, Kind::Own { .. });
@@ -2058,7 +2067,9 @@ impl CommitsView {
   ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
     let (c, view) = (commit.clone(), cx.entity().downgrade());
     move |_, _, cx| {
-      let _ = view.update(cx, |view, cx| f(view, c.clone(), cx));
+      view
+        .update(cx, |view, cx| f(view, c.clone(), cx))
+        .ignore_closed();
     }
   }
 

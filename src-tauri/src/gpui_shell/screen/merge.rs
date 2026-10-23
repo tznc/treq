@@ -7,6 +7,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -181,7 +182,9 @@ impl MergeView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -229,17 +232,19 @@ impl MergeView {
           async move { host.merge_preview(&route.repo_path, route.workspace_id) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route != route {
-          return;
-        }
-        if let Some(err) = &preview.error {
-          view.toast(ToastTone::Error, "Failed to load merge preview", err);
-        }
-        view.preview = Some(Rc::new(preview));
-        view.rows = Rows::default();
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route != route {
+            return;
+          }
+          if let Some(err) = &preview.error {
+            view.toast(ToastTone::Error, "Failed to load merge preview", err);
+          }
+          view.preview = Some(Rc::new(preview));
+          view.rows = Rows::default();
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -331,31 +336,33 @@ impl MergeView {
           host.merge(&route.repo_path, route.workspace_id, &message, strategy)
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.merging = false;
-        match result {
-          Ok(()) => {
-            (view.react)(
-              ScreenAction::Press {
-                id: "mergePreview.merged".into(),
-              },
-              cx,
-            );
-            let (title, done) = match strategy {
-              Strategy::Squash => ("Workspace squashed", "squashed"),
-              Strategy::Rebase => ("Workspace rebased", "rebased"),
-              Strategy::Merge => ("Workspace merged", "merged"),
-            };
-            view.toast(
-              ToastTone::Success,
-              title,
-              format!("{} {done} into {}", ws.branch_name, target_branch(&ws)),
-            );
+      this
+        .update(cx, |view, cx| {
+          view.merging = false;
+          match result {
+            Ok(()) => {
+              (view.react)(
+                ScreenAction::Press {
+                  id: "mergePreview.merged".into(),
+                },
+                cx,
+              );
+              let (title, done) = match strategy {
+                Strategy::Squash => ("Workspace squashed", "squashed"),
+                Strategy::Rebase => ("Workspace rebased", "rebased"),
+                Strategy::Merge => ("Workspace merged", "merged"),
+              };
+              view.toast(
+                ToastTone::Success,
+                title,
+                format!("{} {done} into {}", ws.branch_name, target_branch(&ws)),
+              );
+            }
+            Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
           }
-          Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

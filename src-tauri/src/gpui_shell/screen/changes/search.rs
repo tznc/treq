@@ -2,6 +2,7 @@
 //! opens it, matches are marked in the diff and Enter steps through them.
 
 use crate::gpui_shell::ui::radius;
+use crate::result_ext::ResultExt;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -193,11 +194,13 @@ impl ChangesView {
     self.search.current = 0;
     self.search.debounce = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.search.applied = query;
-        view.search.current = 0;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.search.applied = query;
+          view.search.current = 0;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }

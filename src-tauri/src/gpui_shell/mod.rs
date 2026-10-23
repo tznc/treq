@@ -6,6 +6,7 @@
 //! (`sidebar`), a screen (`screen`) and the dialogs over them. Tooltips,
 //! menus and toasts open in popup windows of their own (see `popup`).
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, VecDeque},
   sync::Mutex,
@@ -541,11 +542,12 @@ fn close_workspace_terminals(app: &AppHandle, label: &str, path: String) {
 fn terminal_command(app: &AppHandle, label: &str, kind: &'static str, dir: Option<String>) {
   let label = label.to_string();
   defer_main(app, move |_| {
-    let _ = update_shell(&label, move |shell, cx| {
+    update_shell(&label, move |shell, cx| {
       if let Some(screen) = &shell.screen {
         screen.update(cx, |screen, cx| screen.terminal_command(kind, dir, cx));
       }
-    });
+    })
+    .ignore_closed();
   });
 }
 
@@ -585,11 +587,13 @@ fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
   let app = app.clone();
   tauri::async_runtime::spawn(async move {
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-      while let Some(next) = DEFERRED.lock().ok().and_then(|mut d| d.pop_front()) {
-        next(&handle);
-      }
-    });
+    app
+      .run_on_main_thread(move || {
+        while let Some(next) = DEFERRED.lock().ok().and_then(|mut d| d.pop_front()) {
+          next(&handle);
+        }
+      })
+      .ignore_closed();
   });
 }
 
@@ -688,7 +692,7 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
 /// back this way: text fields and the terminal handle them as typed.
 pub fn type_keystroke(app: &AppHandle, keystroke: &'static str) {
   defer_main(app, move |_| {
-    let _ = tauri_plugin_gpui::with_app(move |cx| {
+    tauri_plugin_gpui::with_app(move |cx| {
       let Ok(keystroke) = gpui::Keystroke::parse(keystroke) else {
         return;
       };
@@ -699,10 +703,13 @@ pub fn type_keystroke(app: &AppHandle, keystroke: &'static str) {
       else {
         return;
       };
-      let _ = window.update(cx, |_, window, cx| {
-        window.dispatch_keystroke(keystroke, cx);
-      });
-    });
+      window
+        .update(cx, |_, window, cx| {
+          window.dispatch_keystroke(keystroke, cx);
+        })
+        .ignore_closed();
+    })
+    .ignore_closed();
   });
 }
 
@@ -739,13 +746,14 @@ pub fn forget_window(label: &str) {
   modal::forget(label);
   window::forget(label);
   let label = label.to_string();
-  let _ = tauri_plugin_gpui::with_app(move |cx| {
+  tauri_plugin_gpui::with_app(move |cx| {
     if let Some(shells) = cx.try_global::<Shells>() {
       if shells.0.contains_key(&label) {
         cx.global_mut::<Shells>().0.remove(&label);
       }
     }
-  });
+  })
+  .ignore_closed();
 }
 
 #[cfg(test)]

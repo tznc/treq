@@ -3,6 +3,7 @@
 //! stacked on the line above. [`plan`] says what each line would do;
 //! [`run`] does it, in line order, so a stacked line's base exists first.
 
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -18,12 +19,17 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 /// A title's branch until the repository sets its own pattern.
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static DASH_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_DASH_LETTER: LazyLock<Regex> =
   LazyLock::new(|| Regex::new("-[a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_SEPARATOR_LETTER: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-][a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_SEPARATORS: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
 
@@ -359,7 +365,7 @@ pub fn run(
 ) -> Result<Vec<NewWorkspaceRow>, String> {
   workspaces::sync_workspaces(repo_path)?;
   // Remote branches named in the text must be visible before they open.
-  let _ = jj::jj_git_fetch(repo_path);
+  jj::jj_git_fetch(repo_path).warn_on_err("jj git fetch");
   let mut rows = plan(repo_path, text, stack_on)?;
   let default = super::get_repo_default_branch(repo_path)?;
   let copy_files = included_copy_files(repo_path);

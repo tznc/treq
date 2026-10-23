@@ -9,6 +9,7 @@
 
 use crate::gpui_shell::ui::zpx;
 use crate::gpui_shell::ui::{self, radius, TextSize};
+use crate::result_ext::ResultExt;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -1433,7 +1434,7 @@ fn popup_window(
     .map_err(|err| log::warn!("failed to build a GPUI popup window: {err}"))
     .ok()?;
   // On Linux every window gets the app's menu bar.
-  let _ = window.remove_menu();
+  window.remove_menu().ignore_closed();
   // Mark it a tooltip or menu so X11 window managers neither place nor
   // decorate it.
   #[cfg(target_os = "linux")]
@@ -1465,7 +1466,7 @@ fn popup_window(
   );
   if let Err(err) = attached {
     log::warn!("failed to attach GPUI to a popup window: {err}");
-    let _ = window.destroy();
+    window.destroy().ignore_closed();
     return None;
   }
   let view = view.borrow_mut().take()?;
@@ -1475,8 +1476,8 @@ fn popup_window(
   // it is still 1x1 settles that, so the first real show draws like the rest.
   #[cfg(target_os = "linux")]
   {
-    let _ = window.show();
-    let _ = window.hide();
+    window.show().ignore_closed();
+    window.hide().ignore_closed();
   }
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
@@ -1520,13 +1521,15 @@ fn show(
     };
     let bounds = Bounds::new(origin, gpui::size(px(size.0), px(size.1)));
     *placed.borrow_mut() = Some((bounds, zoom));
-    let _ = view.update(cx, |view, cx| {
-      view.content = content;
-      view.palette = palette;
-      view.owner = owner;
-      view.frame = bounds;
-      cx.notify();
-    });
+    view
+      .update(cx, |view, cx| {
+        view.content = content;
+        view.palette = palette;
+        view.owner = owner;
+        view.frame = bounds;
+        cx.notify();
+      })
+      .ignore_closed();
   });
   let Some((bounds, zoom)) = frame.borrow_mut().take().filter(|_| updated.is_ok()) else {
     return;
@@ -1536,7 +1539,7 @@ fn show(
     f32::from(bounds.size.width + margin * 2.),
     f32::from(bounds.size.height + margin * 2.),
   );
-  let _ = window.set_size(size);
+  window.set_size(size).ignore_closed();
   // GTK keeps a hidden, fixed-size window at its first size otherwise.
   #[cfg(target_os = "linux")]
   if let Ok(gtk_window) = window.gtk_window() {
@@ -1545,11 +1548,13 @@ fn show(
     gtk_window.set_size_request(width, height);
     gtk_window.resize(width, height);
   }
-  let _ = window.set_position(LogicalPosition::new(
-    f32::from(bounds.origin.x - margin),
-    f32::from(bounds.origin.y - margin),
-  ));
-  let _ = window.show();
+  window
+    .set_position(LogicalPosition::new(
+      f32::from(bounds.origin.x - margin),
+      f32::from(bounds.origin.y - margin),
+    ))
+    .ignore_closed();
+  window.show().ignore_closed();
 }
 
 /// Hides the popup for `slot` (a tooltip or menu). Main thread only.
@@ -1563,7 +1568,7 @@ fn hide(slot: Slot) {
 fn hide_label(label: &str) {
   let window = WINDOWS.with(|windows| windows.borrow().get(label).map(|p| p.window.clone()));
   if let Some(window) = window {
-    let _ = window.hide();
+    window.hide().ignore_closed();
   }
 }
 
@@ -1818,10 +1823,12 @@ pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
     let size = (f32::from(frame.size.width), f32::from(frame.size.height));
     let origin = place_toasts(size, client);
     let margin = px(shadow_margin() * zoom);
-    let _ = window.set_position(LogicalPosition::new(
-      f32::from(origin.x - margin),
-      f32::from(origin.y - margin),
-    ));
+    window
+      .set_position(LogicalPosition::new(
+        f32::from(origin.x - margin),
+        f32::from(origin.y - margin),
+      ))
+      .ignore_closed();
   }
 }
 
@@ -1830,7 +1837,7 @@ pub fn place_owner_toasts(app: &AppHandle, owner: &str) {
 pub fn forget_owner(owner: &str) {
   let label = Slot::Toasts.label(owner);
   if let Some(popup) = WINDOWS.with(|windows| windows.borrow_mut().remove(&label)) {
-    let _ = popup.window.destroy();
+    popup.window.destroy().ignore_closed();
   }
 }
 

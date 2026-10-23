@@ -16,6 +16,7 @@ pub(super) mod threads;
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -329,12 +330,14 @@ impl ChangesView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1160,7 +1163,9 @@ impl ChangesView {
       if on {
         let (view, path) = (cx.entity().downgrade(), path.to_string());
         items.push(NativeMenuItem::item(label, move |cx| {
-          let _ = view.update(cx, |view, _| view.open_in(scheme, &path));
+          view
+            .update(cx, |view, _| view.open_in(scheme, &path))
+            .ignore_closed();
         }));
       }
     }
@@ -1179,7 +1184,9 @@ impl ChangesView {
     let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx));
+        entity
+          .update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx))
+          .ignore_closed();
       }
     };
     let mut open = vec![{
@@ -1232,7 +1239,9 @@ impl ChangesView {
           .map(|target| {
             let (entity, paths) = (entity.clone(), paths.clone());
             NativeMenuItem::item(target.label.clone(), move |cx| {
-              let _ = entity.update(cx, |view, cx| view.move_files(paths.clone(), &target, cx));
+              entity
+                .update(cx, |view, cx| view.move_files(paths.clone(), &target, cx))
+                .ignore_closed();
             })
           })
           .collect(),
@@ -1265,7 +1274,9 @@ impl ChangesView {
       let (entity, path) = (cx.entity().downgrade(), path.to_string());
       items.push(
         NativeMenuItem::item(label, move |cx| {
-          let _ = entity.update(cx, |view, cx| view.discard_files(&path, cx));
+          entity
+            .update(cx, |view, cx| view.discard_files(&path, cx))
+            .ignore_closed();
         })
         .destructive(),
       );
@@ -1294,17 +1305,19 @@ impl ChangesView {
     let action = |action: CommitAction| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          let message = view.message.trim().to_string();
-          if message.is_empty() {
-            view.message_error = Some("Enter a commit message.");
-            cx.notify();
-            return;
-          }
-          view.message.clear();
-          view.message_input = None;
-          view.commit(action, message, cx);
-        });
+        entity
+          .update(cx, |view, cx| {
+            let message = view.message.trim().to_string();
+            if message.is_empty() {
+              view.message_error = Some("Enter a commit message.");
+              cx.notify();
+              return;
+            }
+            view.message.clear();
+            view.message_input = None;
+            view.commit(action, message, cx);
+          })
+          .ignore_closed();
       }
     };
     let mut items = vec![NativeMenuItem::item(
@@ -1595,7 +1608,9 @@ impl ChangesView {
       let entity = cx.entity().downgrade();
       items.push(
         NativeMenuItem::item("Generated files", move |cx| {
-          let _ = entity.update(cx, |view, cx| view.toggle_hide_generated(cx));
+          entity
+            .update(cx, |view, cx| view.toggle_hide_generated(cx))
+            .ignore_closed();
         })
         .check(!self.hide_generated),
       );
@@ -1604,10 +1619,12 @@ impl ChangesView {
       let entity = cx.entity().downgrade();
       items.push(
         NativeMenuItem::item("Committed", move |cx| {
-          let _ = entity.update(cx, |view, cx| {
-            let show = view.options.show_committed.unwrap_or(show);
-            view.field("changes.showCommitted", (!show).into(), cx);
-          });
+          entity
+            .update(cx, |view, cx| {
+              let show = view.options.show_committed.unwrap_or(show);
+              view.field("changes.showCommitted", (!show).into(), cx);
+            })
+            .ignore_closed();
         })
         .check(show),
       );

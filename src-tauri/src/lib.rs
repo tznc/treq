@@ -1,8 +1,9 @@
 #![cfg_attr(
   test,
   allow(
+    clippy::let_underscore_must_use,
     clippy::string_slice,
-    reason = "tests slice fixed literals at known offsets"
+    reason = "test code drops Results freely and slices fixed literals at known offsets"
   )
 )]
 
@@ -46,12 +47,15 @@ pub(crate) mod open_new_window;
 pub mod pr_status;
 pub mod pty;
 pub mod repo_config;
+pub mod result_ext;
 pub mod review_aggregate;
 pub mod send_dispatch;
 pub mod telemetry;
 pub mod tracker;
 pub mod unified_patch;
 
+#[cfg(feature = "gui")]
+use crate::result_ext::ResultExt;
 #[cfg(feature = "gui")]
 use agent_runtime::{
   parse_agent_request_from_url, route_agent_deep_link, route_agent_dispatch_request,
@@ -225,9 +229,9 @@ fn focus_target_window(app: &AppHandle) {
   let Some(window) = resolve_menu_target_label(app).and_then(|l| app.get_window(&l)) else {
     return;
   };
-  let _ = window.unminimize();
-  let _ = window.show();
-  let _ = window.set_focus();
+  window.unminimize().ignore_closed();
+  window.show().ignore_closed();
+  window.set_focus().ignore_closed();
 }
 
 /// Handles the regular "Open..." menu action (CmdOrCtrl+O).
@@ -346,11 +350,13 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
         let title = open_new_window::new_repo_window_title(&path);
         let app_for_window = app_for_init.clone();
         // The GPUI shell builds windows on the main thread.
-        let _ = app_for_init.run_on_main_thread(move || {
-          if let Err(err) = open_repo_window(&app_for_window, &label, Some(path), &title) {
-            log::error!("failed to open repo window: {err}");
-          }
-        });
+        app_for_init
+          .run_on_main_thread(move || {
+            if let Err(err) = open_repo_window(&app_for_window, &label, Some(path), &title) {
+              log::error!("failed to open repo window: {err}");
+            }
+          })
+          .ignore_closed();
         open_new_window::OPEN_NEW_WINDOW_GATE.end();
       });
     });
@@ -363,11 +369,13 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
 fn open_overview_window(app: &AppHandle) {
   let label = open_new_window::new_repo_window_label();
   let handle = app.clone();
-  let _ = app.run_on_main_thread(move || {
-    if let Err(err) = open_repo_window(&handle, &label, None, "Treq - Overview") {
-      log::error!("failed to open overview window: {err}");
-    }
-  });
+  app
+    .run_on_main_thread(move || {
+      if let Err(err) = open_repo_window(&handle, &label, None, "Treq - Overview") {
+        log::error!("failed to open overview window: {err}");
+      }
+    })
+    .ignore_closed();
 }
 
 /// Opens a window on repository `repo` (`None`: the start screen) in the
@@ -944,7 +952,7 @@ pub fn run() {
           "close_window" => {
             for (_, window) in repo_windows(app) {
               if window.is_focused().unwrap_or(false) {
-                let _ = window.close();
+                window.close().ignore_closed();
                 break;
               }
             }
@@ -960,7 +968,10 @@ pub fn run() {
               let _ = keystroke;
             } else if let Some(url) = menu_item_url(id) {
               use tauri_plugin_opener::OpenerExt;
-              let _ = app.opener().open_url(url, None::<&str>);
+              app
+                .opener()
+                .open_url(url, None::<&str>)
+                .warn_on_err("open menu url");
             }
           }
         });

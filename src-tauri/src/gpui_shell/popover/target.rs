@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, KeyDownEvent, SharedString, Window,
 };
@@ -86,17 +87,19 @@ impl Popover {
       let read = cx
         .background_spawn(async move { host.branches(&repo) })
         .await;
-      let _ = this.update(cx, |this, cx| {
-        if let super::Content::Target(state) = &mut this.content {
-          // A failed read lists nothing, as React's does.
-          let names = read
-            .map_err(|err| log::warn!("target branches: {err}"))
-            .unwrap_or_default();
-          state.branches = Some(names.into_iter().map(|b| b.name).collect());
-          state.select_first();
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |this, cx| {
+          if let super::Content::Target(state) = &mut this.content {
+            // A failed read lists nothing, as React's does.
+            let names = read
+              .map_err(|err| log::warn!("target branches: {err}"))
+              .unwrap_or_default();
+            state.branches = Some(names.into_iter().map(|b| b.name).collect());
+            state.select_first();
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 

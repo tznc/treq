@@ -6,6 +6,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::time::Duration;
 
 use gpui_kit::base::TestSupportExt as _;
@@ -203,10 +204,12 @@ macro_rules! read {
             $read
           })
           .await;
-        let _ = this.update(cx, |$view, $cx2| {
-          $apply;
-          $cx2.notify();
-        });
+        this
+          .update(cx, |$view, $cx2| {
+            $apply;
+            $cx2.notify();
+          })
+          .ignore_closed();
       })
       .detach();
   }};
@@ -524,13 +527,15 @@ impl AgentPromptView {
         .background_spawn(async move { host.search_files(&repo, workspace_id, &path, &search, 4) })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |view, cx| {
-        if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-          mention.results = results;
-          mention.index = 0;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
+            mention.results = results;
+            mention.index = 0;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -636,10 +641,12 @@ impl AgentPromptView {
           .collect::<Vec<_>>()
           .join(" ")
       );
-      let _ = this.update(cx, |view, cx| {
-        view.insert = Some(insertion);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.insert = Some(insertion);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

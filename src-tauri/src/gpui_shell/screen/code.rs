@@ -11,6 +11,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
   sync::{Arc, LazyLock},
   time::Duration,
@@ -329,7 +330,9 @@ impl CodeView {
           (parent, read)
         })
         .await;
-      let _ = this.update(cx, |view, cx| view.apply(read.0, read.1, cx));
+      this
+        .update(cx, |view, cx| view.apply(read.0, read.1, cx))
+        .ignore_closed();
     })
     .detach();
   }
@@ -380,12 +383,14 @@ impl CodeView {
       let value = cx
         .background_spawn(async move { read(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -534,13 +539,15 @@ impl CodeView {
         })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |view, cx| {
-        if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-          mention.results = results;
-          mention.index = 0;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
+            mention.results = results;
+            mention.index = 0;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -643,10 +650,12 @@ impl CodeView {
           .collect::<Vec<_>>()
           .join(" ")
       );
-      let _ = this.update(cx, |view, cx| {
-        view.insert = Some(insertion);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.insert = Some(insertion);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -811,27 +820,29 @@ impl CodeView {
           })))
         })
         .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        view.submitting = false;
-        match result {
-          Ok(session) => {
-            if save_default {
-              view.save_default = false;
-              if let Some(settings) = view.settings.as_mut() {
-                settings.agent = agent;
-                settings.from_repo = true;
+      this
+        .update_in(cx, |view, window, cx| {
+          view.submitting = false;
+          match result {
+            Ok(session) => {
+              if save_default {
+                view.save_default = false;
+                if let Some(settings) = view.settings.as_mut() {
+                  settings.agent = agent;
+                  settings.from_repo = true;
+                }
+              }
+              let _ = session;
+              if view.parent.key() == key {
+                view.show_save_default = false;
+                view.set_task_text(String::new(), 0, window, cx);
               }
             }
-            let _ = session;
-            if view.parent.key() == key {
-              view.show_save_default = false;
-              view.set_task_text(String::new(), 0, window, cx);
-            }
+            Err(err) => view.toast(ToastTone::Error, "Failed to create task", err),
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to create task", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

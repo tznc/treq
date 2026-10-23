@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
@@ -197,7 +198,9 @@ pub(crate) fn route_notify_dispatch_request(
   let notifier = app.notification();
   // Desktop always reports Granted. Mobile prompts until the user decides.
   if !matches!(notifier.permission_state(), Ok(PermissionState::Granted)) {
-    let _ = notifier.request_permission();
+    notifier
+      .request_permission()
+      .warn_on_err("request permission");
   }
   match notifier
     .builder()
@@ -221,15 +224,17 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
 
       let mut payload = String::new();
       if stream.read_to_string(&mut payload).is_err() {
-        let _ = stream.write_all(
-          serde_json::to_string(&agent_dispatch::AgentDispatchResponse::error(
-            "invalid request payload",
-          ))
-          .unwrap_or_else(|_| {
-            "{\"status\":\"error\",\"reason\":\"invalid request payload\"}".to_string()
-          })
-          .as_bytes(),
-        );
+        stream
+          .write_all(
+            serde_json::to_string(&agent_dispatch::AgentDispatchResponse::error(
+              "invalid request payload",
+            ))
+            .unwrap_or_else(|_| {
+              "{\"status\":\"error\",\"reason\":\"invalid request payload\"}".to_string()
+            })
+            .as_bytes(),
+          )
+          .best_effort();
         continue;
       }
 
@@ -248,7 +253,7 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
       let response_json = serde_json::to_string(&response).unwrap_or_else(|_| {
         "{\"status\":\"error\",\"reason\":\"failed to serialize response\"}".to_string()
       });
-      let _ = stream.write_all(response_json.as_bytes());
+      stream.write_all(response_json.as_bytes()).best_effort();
     }
   });
 }

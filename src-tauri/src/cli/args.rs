@@ -7,6 +7,7 @@
 //! `tauri.conf.json` and maps its matches to `Matches`, the same shape the
 //! plugin produces. The types live here so the CLI builds without Tauri.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 
 use clap::{Arg as ClapArg, ArgAction, ArgMatches, Command};
@@ -182,7 +183,7 @@ where
     Ok(matches) => matches,
     Err(error) => {
       // Prints help/version to stdout and usage errors to stderr.
-      let _ = error.print();
+      error.print().best_effort();
       return if error.use_stderr() {
         USAGE_ERROR_EXIT_CODE
       } else {

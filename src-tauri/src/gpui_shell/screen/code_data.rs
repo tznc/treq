@@ -3,6 +3,7 @@
 //! the task input's agent, branch names and mentions, the stack, and the
 //! commit history column.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   sync::LazyLock,
@@ -360,16 +361,19 @@ impl CodeHost for Backend {
     let (tx, rx) = std::sync::mpsc::channel();
     let app = self.app().clone();
     // The dialog opens from the main thread; this waits off it.
-    let _ = self.app().run_on_main_thread(move || {
-      use tauri_plugin_dialog::DialogExt;
-      app
-        .dialog()
-        .file()
-        .set_title("Attach Files")
-        .pick_files(move |files| {
-          let _ = tx.send(files);
-        });
-    });
+    self
+      .app()
+      .run_on_main_thread(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app
+          .dialog()
+          .file()
+          .set_title("Attach Files")
+          .pick_files(move |files| {
+            tx.send(files).ignore_closed();
+          });
+      })
+      .ignore_closed();
     let files = rx.recv().ok()??;
     Some(
       files

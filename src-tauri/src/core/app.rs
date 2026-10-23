@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use std::path::Path;
 
 use crate::auto_rebase;
@@ -205,7 +206,7 @@ pub fn init(repo_path: &str) -> Result<bool, InitError> {
 
   match jj::ensure_jj_initialized(&db, repo_path) {
     Ok(_already_initialized) => {
-      let _ = workspaces::sync_workspaces(repo_path);
+      workspaces::sync_workspaces(repo_path).warn_on_err("sync workspaces");
       let conflict_style = super::resolve_conflict_marker_style_from_db(&db);
       if let Ok(all_workspaces) = local_db::get_workspaces(repo_path) {
         for workspace in all_workspaces {
