@@ -556,14 +556,17 @@ impl WindowController {
         },
         cx,
       ),
-      RemoteEffect::Probe { endpoint, path } => self.background(
-        move |host| remote::probe(host, &endpoint, &path),
-        |this, result, cx| {
-          this.model.remote.probed(result);
-          this.present(cx);
-        },
-        cx,
-      ),
+      RemoteEffect::Browse { endpoint, path } => {
+        let endpoint_id = endpoint.id.clone();
+        self.background(
+          move |host| remote::list_directories(host, &endpoint, &path),
+          move |this, result, cx| {
+            this.model.remote.browsed(&endpoint_id, result);
+            this.present(cx);
+          },
+          cx,
+        )
+      }
       RemoteEffect::Open {
         endpoint,
         generation,

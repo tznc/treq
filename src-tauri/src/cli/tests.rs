@@ -743,6 +743,19 @@ fn parses_repo_usage_into_machine_usage_request() {
 }
 
 #[test]
+fn keeps_the_home_shorthand_for_repo_dirs() {
+  let request = parse_remote_command_request(
+    "repo",
+    &remote_matches(&[("action", "dirs"), ("repo", "~")]),
+  )
+  .unwrap();
+  assert_eq!(
+    request,
+    crate::core::remote::TreqCommandRequest::ListDirectories { path: "~".into() }
+  );
+}
+
+#[test]
 fn rejects_unknown_remote_action_and_arbitrary_command_kinds() {
   let error = parse_remote_command_request(
     "repo",
@@ -886,6 +899,7 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
     },
     R::MachineUsage { root: repo() },
     R::MachineTools { root: repo() },
+    R::ListDirectories { path: repo() },
     R::ProbeRepo { repo: repo() },
     R::CloneRepo {
       repo_url: "git@example.com:x.git".into(),

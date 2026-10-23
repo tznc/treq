@@ -1950,8 +1950,7 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
   for selector in [
     "onboarding-remote-form",
     "remote-repository-selector",
-    "remote-repo-path",
-    "remote-repo-probe",
+    "remote-browser",
     "remote-repo-not-a-repo",
     "remote-repo-clone-url",
     "remote-repo-init",
@@ -1963,21 +1962,89 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
   assert!(!h.drawn("remote-saved-repo"));
   assert!(!h.drawn("remote-repo-open"));
   assert!(!h.drawn("remote-repo-cutoff"));
-  h.click("remote-repo-probe");
+  // Clone and init already show for the folder.
+  assert!(!h.drawn("remote-repo-use-folder"));
   h.click("remote-repo-confirm-init");
   // Initialize waits for the confirmation; Clone for a URL.
   h.click("remote-repo-init");
   h.click("remote-repo-clone");
   assert_eq!(
     h.sent(),
+    vec![ScreenAction::Field {
+      field: "remoteRepo.confirmInit".into(),
+      value: true.into()
+    }]
+  );
+}
+
+fn browsed_form(path: &str, is_repo: bool, show_hidden: bool) -> serde_json::Value {
+  serde_json::json!({
+    "endpointId": "ep-1",
+    "selector": true,
+    "path": path,
+    "showHidden": show_hidden,
+    "listing": {
+      "path": path,
+      "parent": "/home",
+      "is_repo": is_repo,
+      "entries": [
+        { "name": ".config", "path": format!("{path}/.config"), "hidden": true, "is_repo": false },
+        { "name": "app", "path": format!("{path}/app"), "hidden": false, "is_repo": true },
+      ],
+    },
+  })
+}
+
+#[gpui::test]
+fn the_remote_browser_lists_folders_and_hides_dot_folders(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(browsed_form("/home/dev", false, false)),
+    host,
+  );
+  assert!(h.drawn("remote-browse-folder-app"));
+  assert!(
+    !h.drawn("remote-browse-folder-.config"),
+    "hidden by default"
+  );
+  assert!(h.drawn("remote-repo-use-folder"));
+  assert!(!h.drawn("remote-repo-open"));
+  h.click("remote-browse-folder-app");
+  h.click("remote-browse-crumb-1");
+  h.click("remote-browse-home");
+  h.click("remote-browse-hidden");
+  h.click("remote-repo-use-folder");
+  assert_eq!(
+    h.sent(),
     vec![
-      press("remoteRepo.probe"),
-      ScreenAction::Field {
-        field: "remoteRepo.confirmInit".into(),
-        value: true.into()
-      },
+      field("remoteRepo.browse", "/home/dev/app".into()),
+      field("remoteRepo.browse", "/home".into()),
+      field("remoteRepo.browse", "~".into()),
+      field("remoteRepo.showHidden", true.into()),
+      press("remoteRepo.useFolder"),
     ]
   );
+}
+
+#[gpui::test]
+fn the_remote_browser_shows_hidden_folders_and_opens_a_repository(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(browsed_form("/home/dev/app", true, true)),
+    host,
+  );
+  assert!(h.drawn("remote-browse-folder-.config"));
+  assert!(!h.drawn("remote-repo-use-folder"));
+  h.click("remote-repo-open");
+  assert_eq!(h.sent(), vec![press("remoteRepo.open")]);
 }
 
 #[gpui::test]
