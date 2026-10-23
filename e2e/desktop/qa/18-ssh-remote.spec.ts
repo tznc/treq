@@ -104,7 +104,7 @@ test("ssh remote: connect and open a Git repository", async () => {
   await expect(page.getByRole("button", { name: "Sign in to Treq Cloud" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cloud workspace", exact: true })).toHaveCount(0);
   await shot("machines", "Overview: machines and recent repositories", [
-    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, and SSH HOSTS and DEV CONTAINERS each with a + and an empty line",
+    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, then SSH HOSTS ('No hosts yet.') and DEV CONTAINERS, each with a + beside its heading",
     "Signed out there is no TREQ CLOUD group; 'Sign in to Treq Cloud' sits at the bottom",
     "Right panel is headed 'Overview' with the Open Repository button; no recents yet says where they appear",
   ]);
