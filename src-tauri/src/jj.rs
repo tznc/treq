@@ -814,20 +814,23 @@ fn build_log_commits(
   let cached_map = local_db::get_cached_commit_diff_stats_batch(cache_repo_path, &full_commit_ids)
     .unwrap_or_default();
 
-  commits
+  let mut misses = Vec::new();
+  let built = commits
     .into_iter()
     .map(|commit| {
       build_log_commit(
-        cache_repo_path,
         repo,
         &commit,
         wc_commit_ids,
         wc_tree_override,
         is_immutable,
         &cached_map,
+        &mut misses,
       )
     })
-    .collect()
+    .collect();
+  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  built
 }
 
 /// Short ids of conflicted `commits` whose conflict no longer reaches the tip
@@ -842,6 +845,9 @@ fn conflicts_resolved_by_descendants(
   wc_commit: Option<&Commit>,
   wc_tree_override: Option<(&jj_lib::backend::CommitId, &MergedTree)>,
 ) -> HashSet<String> {
+  if !commits.iter().any(|commit| commit.tree().has_conflict()) {
+    return HashSet::new();
+  }
   let index = repo.index();
   let is_ancestor =
     |a: &Commit, b: &Commit| a.id() != b.id() && index.is_ancestor(a.id(), b.id()).unwrap_or(false);
@@ -880,8 +886,9 @@ fn conflicts_resolved_by_descendants(
     .collect()
 }
 
+/// Pushes a commit missing from `cached_map` to `misses`, for the caller to
+/// cache in one transaction.
 fn build_log_commit(
-  cache_repo_path: &str,
   repo: &Arc<ReadonlyRepo>,
   commit: &jj_lib::commit::Commit,
   wc_commit_ids: &HashSet<jj_lib::backend::CommitId>,
@@ -890,6 +897,7 @@ fn build_log_commit(
     &jj_lib::backend::CommitId,
   ) -> Result<bool, jj_lib::revset::RevsetEvaluationError>,
   cached_map: &std::collections::HashMap<String, local_db::CachedCommitDiffStat>,
+  misses: &mut Vec<local_db::CommitRow>,
 ) -> JjLogCommit {
   let tree_override = wc_tree_override
     .filter(|(wc_commit_id, _)| **wc_commit_id == *commit.id())
@@ -954,16 +962,15 @@ fn build_log_commit(
 
       let (insertions, deletions) = compute_commit_stats(repo, commit, tree_override);
 
-      let _ = local_db::cache_commit_row(
-        cache_repo_path,
-        &full_commit_id,
+      misses.push(local_db::CommitRow {
+        commit_id: full_commit_id,
         insertions,
         deletions,
-        &change_id,
-        &description,
-        &author_name,
-        &timestamp,
-      );
+        change_id: change_id.clone(),
+        description: description.clone(),
+        author_name: author_name.clone(),
+        timestamp: timestamp.clone(),
+      });
 
       JjLogCommit {
         commit_id: short_id.clone(),
@@ -4127,6 +4134,37 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
 
     Ok(changes)
   })
+}
+
+/// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
+/// the working copy is not walked again. Without one, it snapshots.
+fn snapshot_is_empty(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  snapshot: Option<&(jj_lib::backend::CommitId, MergedTree)>,
+) -> Result<bool, JjError> {
+  use futures::StreamExt as _;
+
+  let Some((wc_commit_id, tree)) = snapshot else {
+    return jj_is_working_copy_empty(workspace_path);
+  };
+  let Ok(wc_commit) = loaded.repo.store().get_commit(wc_commit_id) else {
+    return Ok(true);
+  };
+  // Against the first parent, as `jj_get_changed_files` lists changes.
+  let parent_tree = match wc_commit.parent_ids().first() {
+    None => loaded.repo.store().root_commit().tree(),
+    Some(parent_id) => match loaded.repo.store().get_commit(parent_id) {
+      Ok(parent) => parent.tree(),
+      Err(_) => return Ok(true),
+    },
+  };
+  if parent_tree.tree_ids() == tree.tree_ids() {
+    return Ok(true);
+  }
+  let matcher = repo_root_matcher();
+  let entries = block_on(parent_tree.diff_stream(tree, &matcher).collect::<Vec<_>>());
+  Ok(entries.iter().all(|entry| entry.values.is_err()))
 }
 
 /// Checks if the working copy is empty (no uncommitted changes)
@@ -7729,26 +7767,32 @@ pub fn jj_get_log(
       commit.has_conflicts = false;
     }
   }
-  let tentative_working_copy = if is_home || jj_is_working_copy_empty(workspace_path)? {
-    None
-  } else {
-    get_workspace_wc_commit(&loaded).map(|wc_commit| {
-      wc_commit.map(|commit| JjTentativeWorkingCopy {
-        workspace_label: workspace_branch.clone(),
-        commit: build_log_commit(
-          &cache_repo_path,
-          &loaded.repo,
-          &commit,
-          &wc_commit_ids,
-          wc_tree_override
-            .as_ref()
-            .map(|(commit_id, tree)| (commit_id, tree)),
-          &is_immutable,
-          &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
-        ),
-      })
-    })?
-  };
+  let tentative_working_copy =
+    if is_home || snapshot_is_empty(&loaded, workspace_path, wc_tree_override.as_ref())? {
+      None
+    } else {
+      get_workspace_wc_commit(&loaded).map(|wc_commit| {
+        wc_commit.map(|commit| {
+          let mut misses = Vec::new();
+          let commit = build_log_commit(
+            &loaded.repo,
+            &commit,
+            &wc_commit_ids,
+            wc_tree_override
+              .as_ref()
+              .map(|(commit_id, tree)| (commit_id, tree)),
+            &is_immutable,
+            &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
+            &mut misses,
+          );
+          let _ = local_db::cache_commit_rows(&cache_repo_path, &misses);
+          JjTentativeWorkingCopy {
+            workspace_label: workspace_branch.clone(),
+            commit,
+          }
+        })
+      })?
+    };
 
   Ok(JjLogResult {
     commits,
@@ -8514,15 +8558,17 @@ fn build_tentative_working_copy(
   JjTentativeWorkingCopy {
     workspace_label: workspace_label.to_string(),
     commit: {
+      let mut misses = Vec::new();
       let mut commit = build_log_commit(
-        cache_repo_path,
         repo,
         commit,
         wc_commit_ids,
         wc_tree_override,
         is_immutable,
         &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
+        &mut misses,
       );
+      let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
       commit.workspace_label = Some(workspace_label.to_string());
       commit
     },

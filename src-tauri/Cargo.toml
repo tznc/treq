@@ -195,6 +195,10 @@ name = "workspace_diff"
 harness = false
 
 [[bench]]
+name = "commits_log"
+harness = false
+
+[[bench]]
 name = "sync_workspaces"
 harness = false
 
