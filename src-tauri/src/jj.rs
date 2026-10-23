@@ -1,3 +1,8 @@
+#![allow(
+  clippy::string_slice,
+  reason = "slices hex commit/change ids and git ref names at ASCII separators"
+)]
+
 use chrono::TimeZone;
 use futures::StreamExt as _;
 use futures::TryStreamExt as _;
@@ -7640,14 +7645,11 @@ pub fn jj_get_log(
       Err(err) => last_error = Some(err),
     }
   }
-  let selected_target_ref = if revset.is_some() {
-    selected_target_ref
-  } else {
+  let Some((revset_expr, revset)) = revset else {
     return Err(
       last_error.unwrap_or_else(|| JjError::IoError("Failed to evaluate log revset".to_string())),
     );
   };
-  let (revset_expr, revset) = revset.expect("selected target ref must include a revset");
   // Home-repo immutability uses the remote tracking bookmark (e.g. `main@origin`); unpushed commits stay mutable, pushed commits immutable; falls back to local bookmark when no remote ref exists.
   let immutable_ref = if is_home_repo.unwrap_or(false) {
     let remote_symbol = RemoteRefSymbol {
@@ -8273,27 +8275,24 @@ pub fn jj_drop_autosave_ancestors(workspace_path: &str) -> Result<Vec<String>, J
   loop {
     let parents = block_on(current.parents())
       .map_err(|e| JjError::IoError(format!("Failed to load commit parents: {e}")))?;
-    if parents.len() != 1 {
+    let Ok([parent]) = <[_; 1]>::try_from(parents) else {
       break;
-    }
-    let parent = parents.into_iter().next().expect("checked length 1");
+    };
     if !is_autosave_description(parent.description()) {
       break;
     }
     autosaves.push(parent.clone());
     current = parent;
   }
-  if autosaves.is_empty() {
+  let Some(oldest) = autosaves.last() else {
     return Ok(Vec::new());
-  }
+  };
 
-  let oldest = autosaves.last().expect("non-empty autosaves");
   let oldest_parents = block_on(oldest.parents())
     .map_err(|e| JjError::IoError(format!("Failed to load autosave parents: {e}")))?;
-  if oldest_parents.len() != 1 {
+  let Ok([base]) = <[_; 1]>::try_from(oldest_parents) else {
     return Ok(Vec::new());
-  }
-  let base = oldest_parents.into_iter().next().expect("checked length 1");
+  };
 
   let dropped_ids: Vec<String> = autosaves
     .iter()
@@ -8365,7 +8364,12 @@ fn resolve_commit_by_revision(
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| JjError::IoError(format!("Failed to resolve revision '{}': {}", revision, e)))?;
   match commits.len() {
-    1 => Ok(commits.into_iter().next().expect("single commit expected")),
+    1 => commits.into_iter().next().ok_or_else(|| {
+      JjError::IoError(format!(
+        "Revision '{}' did not resolve to a commit",
+        revision
+      ))
+    }),
     0 => Err(JjError::IoError(format!(
       "Revision '{}' did not resolve to a commit",
       revision

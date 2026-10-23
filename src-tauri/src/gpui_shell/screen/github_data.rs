@@ -600,6 +600,7 @@ fn conventional_type(word: &str) -> Option<&'static str> {
   })
 }
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn humanize(slug: &str) -> String {
   regex::Regex::new(r"[-_]+")
     .expect("regex")
@@ -640,6 +641,7 @@ pub fn compare_pr_url(
 }
 
 /// `deriveConventionalPrTitle`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn conventional_pr_title(title: &str, branch: &str) -> String {
   let fallback = if title.is_empty() { branch } else { title };
   let re = regex::Regex::new(r"(?i)^([a-z]+)(\([^)]+\))?(!)?:\s*(.+)$").expect("regex");

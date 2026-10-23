@@ -150,13 +150,15 @@ fn parse_gitmodules(contents: &str) -> Vec<SubmoduleSpec> {
 
 fn unquote_config_value(value: &str) -> String {
   let trimmed = value.trim();
-  if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-    || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-  {
-    trimmed[1..trimmed.len() - 1].to_string()
-  } else {
-    trimmed.to_string()
-  }
+  ['"', '\'']
+    .into_iter()
+    .find_map(|quote| {
+      trimmed
+        .strip_prefix(quote)
+        .and_then(|inner| inner.strip_suffix(quote))
+    })
+    .unwrap_or(trimmed)
+    .to_string()
 }
 
 fn gitlinks_for_workspace(workspace_path: &str, git_repo_path: &str) -> BTreeMap<String, String> {

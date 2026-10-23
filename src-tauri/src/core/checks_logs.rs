@@ -846,10 +846,11 @@ fn validate_sql(sql: &str) -> Result<(), String> {
   }
 
   let lower = trimmed.to_lowercase();
-  if !ALLOWED_SQL_PREFIXES
-    .iter()
-    .any(|p| lower.starts_with(p) && lower[p.len()..].starts_with(char::is_whitespace))
-  {
+  if !ALLOWED_SQL_PREFIXES.iter().any(|p| {
+    lower
+      .strip_prefix(p)
+      .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+  }) {
     return Err("Only read-only queries are allowed (SELECT, WITH, VALUES, EXPLAIN)".to_string());
   }
 

@@ -29,7 +29,7 @@ use crate::gpui_shell::{
   screen::{
     code::{agent_icon, menu_panel},
     code_data::{
-      self, insert_at, mention_at, task_settings, Agent, Environment, TaskSettings,
+      self, insert_at, mention_at, replace_range, task_settings, Agent, Environment, TaskSettings,
       ENVIRONMENT_SETTING,
     },
     environment,
@@ -564,11 +564,7 @@ impl AgentPromptView {
       .as_ref()
       .map_or(self.task_text.len(), |t| t.read(cx).cursor());
     let inserted = format!("@{path} ");
-    let text = format!(
-      "{}{inserted}{}",
-      &self.task_text[..mention.anchor.min(self.task_text.len())],
-      &self.task_text[cursor.min(self.task_text.len())..]
-    );
+    let text = replace_range(&self.task_text, mention.anchor, cursor, &inserted);
     self.set_task_text(text, mention.anchor + inserted.len(), window, cx);
   }
 

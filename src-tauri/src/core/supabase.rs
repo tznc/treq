@@ -42,6 +42,10 @@ struct Package {
 }
 
 /// The `dev` or `prod` environment of `package.json`.
+#[allow(
+  clippy::expect_used,
+  reason = "package.json is embedded at build time and checked by tests"
+)]
 pub fn package_env(dev: bool) -> Env {
   let envs = serde_json::from_str::<Package>(PACKAGE_JSON)
     .expect("package.json has an `env` block")

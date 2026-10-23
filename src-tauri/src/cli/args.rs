@@ -64,6 +64,10 @@ struct CommandConfig {
   subcommands: HashMap<String, CommandConfig>,
 }
 
+#[allow(
+  clippy::expect_used,
+  reason = "tauri.conf.json is embedded at build time and checked by tests"
+)]
 fn cli_config() -> CommandConfig {
   let config: Value = serde_json::from_str(TAURI_CONFIG).expect("tauri.conf.json is valid JSON");
   serde_json::from_value(config["plugins"]["cli"].clone())

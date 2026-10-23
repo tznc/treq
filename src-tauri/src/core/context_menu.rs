@@ -219,8 +219,11 @@ pub fn workspace_relative_path(workspace_path: &str, repo_path: &str) -> String 
   if !workspace_path.starts_with('/') {
     return format!(".treq/workspaces/{workspace_path}");
   }
-  match workspace_path.strip_prefix(repo_path) {
-    Some(rest) if !repo_path.is_empty() && rest.starts_with('/') => rest[1..].to_string(),
+  match workspace_path
+    .strip_prefix(repo_path)
+    .and_then(|rest| rest.strip_prefix('/'))
+  {
+    Some(rest) if !repo_path.is_empty() => rest.to_string(),
     _ => workspace_path.to_string(),
   }
 }

@@ -200,6 +200,7 @@ pub struct LineMarks {
 }
 
 /// `handleFileClick`'s hunk parse.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn line_marks(hunks: &[JjDiffHunk]) -> LineMarks {
   let header = Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("regex");
   let mut marks = LineMarks::default();
