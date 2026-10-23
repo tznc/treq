@@ -84,16 +84,16 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   await expect(registry).toHaveCount(0, { timeout: 60_000 });
   const customize = page.getByRole("button", { name: `Customize ${SKILL}` });
   await expect(customize).toBeVisible({ timeout: 60_000 });
-  await page.getByRole("textbox", { name: "Search by name or description" }).fill(SKILL);
   await settle(page, 2000);
-  mark("Installed for all agents; Customize appears on the installed skill");
+  mark("Installed for all agents: it lists under Installed, App-wide, with Customize");
   await settle(page, 1500);
   await capture(page, {
     name: "19-skill-link-installed",
     title: "The linked skill, installed at the application level",
     expectations: [
-      "The frontend-design row shows Install level: Application and a trash icon",
-      "A Customize button with a pencil icon sits at the left of the row's bottom line",
+      "An Installed heading with App-wide (frontend-design, Install level Application) and an empty Local group",
+      "The frontend-design row has Customize on the left and a trash icon top right",
+      "A Skill registry heading follows, listing skills that are not installed",
     ],
   });
 
@@ -130,17 +130,15 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   });
 
   await skillsTab(page);
-  await page.getByRole("textbox", { name: "Search by name or description" }).fill(SKILL);
-  await settle(page, 1500);
   await expect(page.getByRole("button", { name: `Edit ${SKILL} with an agent` })).toBeVisible();
-  mark("The skill is marked Customized; catalog updates never overwrite the copy");
+  mark("Customized: it moves to Local with a badge; catalog updates never overwrite the copy");
   await settle(page, 2500);
   await capture(page, {
     name: "19-skill-link-customized",
     title: "The customized skill in the Skills tab",
     expectations: [
-      "A small 'Customized' badge next to the skill's source",
-      "The button now reads 'Edit with agent'",
+      "App-wide is empty; frontend-design now lists under Local",
+      "Its row has a 'Customized' badge and an 'Edit with agent' button",
     ],
   });
   const { repo } = fixture();

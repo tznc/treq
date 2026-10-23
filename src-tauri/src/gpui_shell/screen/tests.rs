@@ -39,6 +39,8 @@ struct FakeHost {
   setup_script: String,
   /// The skill registry, as `skill_catalog` returns it.
   skills: Vec<crate::core::skills::SkillCatalogSkillView>,
+  /// Installed skills the registry no longer lists.
+  uncatalogued: Vec<crate::core::skills::InstalledSkill>,
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
@@ -376,6 +378,7 @@ impl settings_data::SettingsHost for FakeHost {
         .skills
         .iter()
         .filter_map(|s| s.installed.clone())
+        .chain(self.uncatalogued.iter().cloned())
         .collect(),
     )
   }
@@ -2756,14 +2759,25 @@ fn settings_act(h: &mut Harness, action: ScreenAction) {
   h.cx.run_until_parked();
 }
 
+fn names(rows: &[settings::SkillRow]) -> Vec<&str> {
+  rows.iter().map(|r| r.name.as_str()).collect()
+}
+
 #[gpui::test]
-fn skills_tab_lists_and_filters_the_registry(cx: &mut TestAppContext) {
+fn skills_tab_lists_installed_apart_from_the_registry(cx: &mut TestAppContext) {
   let (mut h, host) = skills_harness(cx);
   let skills = drawn_settings(&mut h).skills.expect("skills tab");
   assert_eq!(skills.installed, 1);
-  let names: Vec<_> = skills.rows.iter().map(|r| r.name.as_str()).collect();
-  assert_eq!(names, ["PDF", "Word"]);
-  assert_eq!(skills.rows[0].installed.as_deref(), Some("application"));
+  assert_eq!(names(&skills.app_wide), ["PDF"]);
+  assert!(skills.local.is_empty());
+  assert_eq!(
+    names(&skills.rows),
+    ["Word"],
+    "the registry lists what is not installed"
+  );
+  assert_eq!(skills.app_wide[0].installed.as_deref(), Some("application"));
+  assert!(h.drawn("skills-installed-app"));
+  assert!(h.drawn("skills-installed-local"));
   assert!(h.drawn("skill-uninstall-pdf"));
   assert!(h.drawn("skill-install-docx"));
   assert_eq!(
@@ -2772,20 +2786,49 @@ fn skills_tab_lists_and_filters_the_registry(cx: &mut TestAppContext) {
   );
 
   settings_act(&mut h, field("skills.query", "WORD".into()));
-  let names: Vec<_> = drawn_settings(&mut h)
-    .skills
-    .expect("skills tab")
-    .rows
-    .into_iter()
-    .map(|r| r.name)
-    .collect();
-  assert_eq!(names, ["Word"]);
+  let skills = drawn_settings(&mut h).skills.expect("skills tab");
+  assert_eq!(names(&skills.rows), ["Word"]);
+  assert!(
+    skills.app_wide.is_empty(),
+    "the search filters installed skills too"
+  );
+}
 
-  settings_act(&mut h, field("skills.query", "".into()));
-  settings_act(&mut h, field("skills.scope", "application".into()));
-  let rows = drawn_settings(&mut h).skills.expect("skills tab").rows;
-  assert_eq!(rows.len(), 1);
-  assert_eq!(rows[0].id, "pdf");
+#[gpui::test]
+fn installed_skills_split_into_app_wide_and_local(cx: &mut TestAppContext) {
+  let mut customized = skill("pptx", "PowerPoint", Some("application"));
+  customized.customized = true;
+  let host = Arc::new(FakeHost {
+    skills: vec![
+      skill("pdf", "PDF", Some("application")),
+      skill("docx", "Word", None),
+      skill("xlsx", "Excel", Some("repository")),
+      customized,
+    ],
+    uncatalogued: vec![crate::core::skills::InstalledSkill {
+      id: "old/gone".into(),
+      name: "gone".into(),
+      checksum: "abc".into(),
+      scope: crate::core::skills::SkillInstallScope::Application,
+    }],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("skills"), host);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  let skills = drawn_settings(&mut h).skills.expect("skills tab");
+  assert_eq!(skills.installed, 4);
+  assert_eq!(names(&skills.app_wide), ["PDF", "gone"]);
+  assert_eq!(names(&skills.local), ["Excel", "PowerPoint"]);
+  assert_eq!(names(&skills.rows), ["Word"]);
+  let gone = &skills.app_wide[1];
+  assert_eq!(gone.source, "Not in the registry");
+  assert!(!gone.has_url);
+  assert!(h.drawn("skill-uninstall-old/gone"));
+  assert!(
+    !h.drawn("skill-customize-old/gone"),
+    "no catalog copy to customize from"
+  );
 }
 
 #[gpui::test]
@@ -2985,8 +3028,8 @@ fn customized_skill_shows_a_badge_and_edits_without_copying(cx: &mut TestAppCont
   let mut h = Harness::with_host(cx, settings_route("skills"), host.clone());
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
-  let rows = drawn_settings(&mut h).skills.expect("skills tab").rows;
-  assert!(rows[0].customized);
+  let local = drawn_settings(&mut h).skills.expect("skills tab").local;
+  assert!(local[0].customized, "customized skills list as local");
   assert!(h.drawn("skill-customized-pdf"));
   h.click("skill-customize-pdf");
   h.cx.run_until_parked();

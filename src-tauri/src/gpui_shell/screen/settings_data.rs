@@ -173,12 +173,10 @@ impl SettingsHost for Backend {
   }
 }
 
-/// `skillMatches` and `skillMatchesScope`: the skills the search and the
-/// install-level filter (`all`, `application` or `repository`) leave.
+/// `skillMatches`: the skills the search leaves.
 pub fn filter_skills<'a>(
   skills: &'a [SkillCatalogSkillView],
   query: &str,
-  scope: &str,
 ) -> Vec<&'a SkillCatalogSkillView> {
   let query = query.trim().to_lowercase();
   skills
@@ -194,15 +192,6 @@ pub fn filter_skills<'a>(
       )
       .to_lowercase();
       query.is_empty() || haystack.contains(&query)
-    })
-    .filter(|view| match scope {
-      "application" => {
-        matches!(&view.installed, Some(i) if i.scope == SkillInstallScope::Application)
-      }
-      "repository" => {
-        matches!(&view.installed, Some(i) if i.scope == SkillInstallScope::Repository)
-      }
-      _ => true,
     })
     .collect()
 }
