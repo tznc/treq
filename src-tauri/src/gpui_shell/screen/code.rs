@@ -219,6 +219,8 @@ pub struct CodeView {
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
   syncing_submodule: bool,
+  /// The file list shows its untouched entries.
+  show_untouched: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
   /// Text to put in the task input at its cursor on the next render.
@@ -272,6 +274,7 @@ impl CodeView {
       description_draft: None,
       saving_description: false,
       syncing_submodule: false,
+      show_untouched: false,
       starting_devcontainer: false,
       picker: None,
       insert: None,
@@ -2000,6 +2003,18 @@ impl CodeView {
     let loaded = self.overview.is_some();
     let empty = entries.is_empty();
     let unavailable = self.overview.as_ref().is_some_and(|o| o.unavailable);
+    // Untouched entries fold behind a toggle; submodule rows carry their own
+    // controls, and an entry without a status may have changed, so both stay.
+    let untouched = |e: &crate::core::WorkspaceEntry| {
+      e.submodule_pin.is_none() && e.status.as_deref() == Some("untouched")
+    };
+    let untouched_count = entries.iter().filter(|e| untouched(e)).count();
+    let show_untouched = self.show_untouched;
+    let entries: Vec<_> = entries
+      .into_iter()
+      .filter(|e| show_untouched || !untouched(e))
+      .collect();
+    let shown = entries.len();
     for (i, entry) in entries.into_iter().enumerate() {
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
@@ -2009,16 +2024,17 @@ impl CodeView {
         (None, false) => (theme::ICON_FILE, p.muted_foreground),
       };
       let pip = match entry.status.as_deref() {
-        Some("conflict") => Some(ui::Tone::Danger.color(p)),
-        Some("committed") => Some(ui::Tone::Primary.color(p)),
-        Some("workingCopy") => Some(ui::Tone::Warning.color(p)),
+        Some("conflict") => Some((ui::Tone::Danger.color(p), "Conflicted")),
+        Some("committed") => Some((ui::Tone::Primary.color(p), "Committed")),
+        Some("workingCopy") => Some((ui::Tone::Warning.color(p), "Working copy change")),
         _ => None,
       };
-      let name_color = if entry.status.is_some() {
-        p.foreground
-      } else {
-        p.muted_foreground.opacity(0.7)
+      let name_color = match (entry.status.as_deref(), pip) {
+        (Some("conflict"), _) => ui::Tone::Danger.color(p),
+        (_, Some(_)) => p.foreground,
+        _ => p.muted_foreground.opacity(0.7),
       };
+      let pip_id = SharedString::from(format!("code-entry-status-{}", entry.name));
       let id = SharedString::from(format!("code-entry-{}", entry.name));
       let selector = if submodule {
         format!("submodule-row-{}", entry.name)
@@ -2076,7 +2092,17 @@ impl CodeView {
                       )
                     }),
                 )
-                .children(pip.map(|c| div().size_2().flex_none().rounded_full().bg(c)))
+                .children(pip.map(|(color, label)| {
+                  div()
+                    .id(pip_id.clone())
+                    .role(Role::Image)
+                    .aria_label(label)
+                    .test_support()
+                    .size_2()
+                    .flex_none()
+                    .rounded_full()
+                    .bg(color)
+                }))
                 .on_click(cx.listener(move |view, _, _, cx| view.open_entry(&open, cx))),
             )
             .when(home && submodule, |this| {
@@ -2103,6 +2129,47 @@ impl CodeView {
               )
             }),
         );
+    }
+    if untouched_count > 0 {
+      let label = if show_untouched {
+        "Hide unchanged files".to_string()
+      } else if untouched_count == 1 {
+        "Show 1 unchanged file".to_string()
+      } else {
+        format!("Show {untouched_count} unchanged files")
+      };
+      list = list.child(
+        ui::text(div(), TextSize::Xs)
+          .id("code-unchanged-toggle")
+          .debug_selector(|| "code-unchanged-toggle".into())
+          .role(Role::Button)
+          .aria_label(label.clone())
+          .aria_expanded(show_untouched)
+          .test_support()
+          .when(shown > 0, |this| this.border_t_1().border_color(p.border))
+          .flex()
+          .items_center()
+          .gap_2()
+          .px_4()
+          .py_1p5()
+          .text_color(muted_fg)
+          .cursor_pointer()
+          .hover(move |s| s.bg(hover))
+          .child(ui::icon(
+            if show_untouched {
+              theme::ICON_CHEVRON_DOWN
+            } else {
+              theme::ICON_CHEVRON_RIGHT
+            },
+            12.,
+            muted_fg,
+          ))
+          .child(label)
+          .on_click(cx.listener(|view, _, _, cx| {
+            view.show_untouched = !view.show_untouched;
+            cx.notify();
+          })),
+      );
     }
     if loaded && empty {
       list = list.child(

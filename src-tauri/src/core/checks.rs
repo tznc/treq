@@ -501,7 +501,8 @@ fn store_job_result(
 /// same `workflow_runs`/`workflow_job_results` tables as regular checks, so
 /// it gets run history and browsable logs for free.
 const SETUP_SCRIPT_FILENAME: &str = "__setup__";
-const SETUP_SCRIPT_JOB_ID: &str = "setup";
+/// Job id the setup script's log is stored under.
+pub const SETUP_SCRIPT_JOB_ID: &str = "setup";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SetupScriptStatus {

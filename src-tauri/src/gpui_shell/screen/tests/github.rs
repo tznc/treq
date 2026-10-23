@@ -1050,7 +1050,10 @@ fn github_pr_detail_opens_the_setup_commands_and_output(cx: &mut TestAppContext)
   };
   let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
   assert!(h.drawn("setup-script-status"));
-  assert!(!h.drawn("setup-script-output"), "a passed setup starts closed");
+  assert!(
+    !h.drawn("setup-script-output"),
+    "a passed setup starts closed"
+  );
 
   h.click("github-setup-toggle");
   h.cx.run_until_parked();
