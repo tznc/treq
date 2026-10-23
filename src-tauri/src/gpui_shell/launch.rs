@@ -38,7 +38,7 @@ impl LaunchStore for Store<'_> {
   }
 
   fn session_count(&self, repo: &str, workspace_id: Option<i64>) -> usize {
-    crate::local_db::get_sessions(&self.0.state_scope(repo))
+    crate::core::sessions::list_sessions(&self.0.state_scope(repo))
       .unwrap_or_default()
       .iter()
       .filter(|s| s.workspace_id == workspace_id)
@@ -74,14 +74,13 @@ impl LaunchStore for Store<'_> {
     prompt: &str,
     agent: Option<&str>,
   ) -> Result<(), String> {
-    crate::local_db::add_prompt_history(
+    crate::core::sessions::add_prompt_history(
       &self.0.state_scope(repo),
       workspace_id,
-      Some(session_id),
+      session_id,
       prompt,
       agent,
     )
-    .map(|_| ())
   }
 
   fn open_issue_workspace(
@@ -234,7 +233,7 @@ pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) 
     let backend = Backend::new(app.clone(), label);
     let event = event.clone();
     std::thread::spawn(move || {
-      let workspaces = crate::local_db::get_workspaces(&event.repo_path).unwrap_or_default();
+      let workspaces = crate::core::list_all_workspaces(&event.repo_path).unwrap_or_default();
       let Some(workspace) = workspaces.iter().find(|w| w.id == event.workspace_id) else {
         return;
       };

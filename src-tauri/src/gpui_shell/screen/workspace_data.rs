@@ -24,7 +24,7 @@ use crate::{
     popover::data::{read_checks, ChecksData},
     remote_repo::{unsupported, Remote},
   },
-  jj::{self, HomeRebaseDryRunResult, JjLogResult},
+  jj::{HomeRebaseDryRunResult, JjLogResult},
   local_db,
 };
 
@@ -178,7 +178,7 @@ impl WorkspaceHost for Backend {
     let status = core::workspace_status(repo, route.workspace_id)
       .map_err(|e| warn("status", e))
       .ok();
-    let remote = crate::github::get_git_remote_url_impl(repo)
+    let remote = crate::core::github_cli::remote(repo)
       .map_err(|e| warn("remote", e))
       .ok()
       .flatten();
@@ -223,7 +223,7 @@ impl WorkspaceHost for Backend {
       0
     };
     let home_dry_run = (on_home_feature && home_ahead > 0 && !home_branch.is_empty())
-      .then(|| jj::jj_dry_run_home_repo_rebase(repo, home_branch, DEFAULT_BRANCH).ok())
+      .then(|| core::repo::dry_run_home_rebase(repo, home_branch, DEFAULT_BRANCH))
       .flatten();
     let checks = route.workspace_id.map(|id| read_checks(repo, id));
     let (linear_enabled, logs_enabled) = self.with_db(|db| {
@@ -307,7 +307,7 @@ impl WorkspaceHost for Backend {
         unsupported("Rebasing the repository branch"),
       );
     }
-    match jj::jj_rebase_home_repo_branch(repo_path, branch, DEFAULT_BRANCH) {
+    match core::repo::rebase_home_branch(repo_path, branch, DEFAULT_BRANCH) {
       Ok(result) if result.success => Outcome::ok(
         "Rebase complete",
         if result.message.is_empty() {
@@ -317,7 +317,7 @@ impl WorkspaceHost for Backend {
         },
       ),
       Ok(result) => Outcome::failed("Rebase failed", result.message),
-      Err(err) => Outcome::failed("Rebase failed", err.to_string()),
+      Err(err) => Outcome::failed("Rebase failed", err),
     }
   }
 

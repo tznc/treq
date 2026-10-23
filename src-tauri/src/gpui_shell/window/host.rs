@@ -201,7 +201,7 @@ impl WindowHost for Backend {
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
-    crate::local_db::get_sessions(&self.state_scope(repo)).unwrap_or_default()
+    crate::core::sessions::list_sessions(&self.state_scope(repo)).unwrap_or_default()
   }
 
   fn branch(&self, repo: &str) -> Option<RepoBranch> {
@@ -230,7 +230,7 @@ impl WindowHost for Backend {
     if let Some(remote) = Backend::remote(self, repo) {
       return remote.git_remote().ok().flatten();
     }
-    crate::github::get_git_remote_url_impl(repo).ok().flatten()
+    crate::core::github_cli::remote(repo).ok().flatten()
   }
 
   fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>> {

@@ -135,17 +135,13 @@ impl OpenWorkspacesHost for Backend {
     if self.remote(repo_path).is_some() {
       return;
     }
-    if let Err(err) = crate::jj::jj_git_fetch(repo_path) {
+    if let Err(err) = core::repo::fetch_repo(repo_path) {
       log::warn!("open workspaces: fetch {repo_path}: {err}");
     }
   }
 
   fn open_prs(&self, repo: &str, mine: bool, query: &str) -> Result<Vec<GhPullRequest>, String> {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_search_open_prs_impl(&gh, repo, mine, query, PR_LIMIT, &path)
+    core::github_cli::search_open_prs(repo, mine, query, PR_LIMIT)
   }
 
   fn open_workspaces(
@@ -177,9 +173,7 @@ impl OpenWorkspacesHost for Backend {
       crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, issue),
     )?;
     if opened.created {
-      if let Ok(Some(workspace)) =
-        crate::local_db::get_workspace_by_id(repo_path, opened.workspace_id)
-      {
+      if let Ok(Some(workspace)) = core::find_workspace(repo_path, opened.workspace_id) {
         crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
       }
     }

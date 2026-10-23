@@ -58,7 +58,7 @@ pub trait ModalsHost: CodeHost {
 
 impl ModalsHost for Backend {
   fn prompt_history(&self, repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
-    crate::local_db::get_prompt_history(&self.state_scope(repo_path))
+    crate::core::sessions::prompt_history(&self.state_scope(repo_path))
   }
 
   fn stashes(&self, repo_path: &str) -> Result<Vec<StashEntry>, String> {

@@ -19,16 +19,17 @@ use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, relative, App, Context, FontWeight, SharedString, Window,
 };
 
+pub use crate::core::merge_preview::Preview;
+
 use super::{rows::Rows, workspace_data::WorkspaceHost, ActionSink, ScreenAction};
 use crate::{
-  core::{self, MergeCommit},
+  core::{self, merge_preview::target_branch, MergeCommit},
   gpui_shell::{
     form::{self, Controls},
     native::{Backend, NativeEvent, ToastTone},
     theme::{self, Palette},
     ui::{self, Button, Size, TextSize, Tone, Variant},
   },
-  jj::{JjCommitsAhead, JjRevisionDiff},
   local_db::Workspace,
 };
 
@@ -73,16 +74,6 @@ impl Strategy {
   }
 }
 
-/// What the page reads from the backend.
-#[derive(Debug, Clone, Default)]
-pub struct Preview {
-  pub workspace: Option<Workspace>,
-  pub commits: Option<JjCommitsAhead>,
-  pub diff: Option<JjRevisionDiff>,
-  /// Why the commits or diff could not be read.
-  pub error: Option<String>,
-}
-
 /// What the merge preview asks of the backend; faked in tests.
 pub trait MergeHost: WorkspaceHost {
   fn merge_preview(&self, repo_path: &str, workspace_id: i64) -> Preview;
@@ -97,45 +88,12 @@ pub trait MergeHost: WorkspaceHost {
 
 /// `getFullWorkspacePath`.
 pub(super) fn full_path(workspace: &Workspace) -> String {
-  if workspace.workspace_path.starts_with('/') {
-    workspace.workspace_path.clone()
-  } else {
-    format!(
-      "{}/.treq/workspaces/{}",
-      workspace.repo_path, workspace.workspace_path
-    )
-  }
+  core::context_menu::full_workspace_path(workspace)
 }
 
 impl MergeHost for Backend {
   fn merge_preview(&self, repo_path: &str, workspace_id: i64) -> Preview {
-    let workspace = crate::local_db::get_workspace_by_id(repo_path, workspace_id)
-      .ok()
-      .flatten();
-    let Some(ws) = &workspace else {
-      return Preview {
-        error: Some(format!("Workspace {workspace_id} not found")),
-        ..Preview::default()
-      };
-    };
-    let target = target_branch(ws);
-    let commits =
-      crate::jj::jj_get_commits_ahead(&full_path(ws), target).map_err(|e| e.to_string());
-    let diff = core::workspace_diff(repo_path, workspace_id);
-    // React reads both at once and shows neither when one fails.
-    match (commits, diff) {
-      (Ok(commits), Ok(diff)) => Preview {
-        workspace,
-        commits: Some(commits),
-        diff: Some(diff),
-        error: None,
-      },
-      (Err(err), _) | (_, Err(err)) => Preview {
-        workspace,
-        error: Some(err),
-        ..Preview::default()
-      },
-    }
+    core::merge_preview::merge_preview(repo_path, workspace_id)
   }
 
   fn merge(
@@ -147,14 +105,6 @@ impl MergeHost for Backend {
   ) -> Result<(), String> {
     core::merge_workspace(repo_path, workspace_id, message, strategy.commit())
   }
-}
-
-fn target_branch(workspace: &Workspace) -> &str {
-  workspace
-    .target_branch
-    .as_deref()
-    .filter(|b| !b.is_empty())
-    .unwrap_or("main")
 }
 
 /// The message the box starts with for `strategy`.

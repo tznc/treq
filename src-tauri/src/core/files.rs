@@ -1,6 +1,23 @@
 use crate::core::WorkspaceEntry;
 use crate::jj;
+use crate::local_db;
 use std::collections::HashSet;
+
+/// The indexed files of a workspace (or the home repo) whose path matches
+/// `query`, as paths relative to it; the shortest paths first when it is empty.
+pub fn search_workspace_files(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+  query: &str,
+  limit: usize,
+) -> Result<Vec<String>, String> {
+  Ok(
+    local_db::search_workspace_files(repo_path, workspace_id, query, limit)?
+      .into_iter()
+      .map(|file| file.relative_path)
+      .collect(),
+  )
+}
 
 /// Status of a file (or, for a directory, the most severe status among its
 /// descendants) relative to the working copy and target branch.

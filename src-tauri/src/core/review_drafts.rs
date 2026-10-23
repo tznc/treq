@@ -1,6 +1,6 @@
 //! Draft comments the user writes on a reviewed target (a PR review).
 
-use crate::local_db::{self, AgentReviewComment};
+use crate::local_db::{self, AgentReviewComment, FileBrowserPendingReview, PendingReview};
 
 /// A draft comment on lines `start_line..=end_line` of a file.
 #[derive(Debug, Clone, Default)]
@@ -40,6 +40,56 @@ pub fn create_review_draft(
     comment.line_hash = draft.line_hash.clone();
   }
   Ok(comment)
+}
+
+/// Edits a draft's text and/or the hash of the lines it comments on.
+pub fn update_review_draft(
+  repo_path: &str,
+  id: &str,
+  text: Option<&str>,
+  line_hash: Option<&str>,
+) -> Result<(), String> {
+  local_db::update_agent_review_comment(repo_path, id, text, line_hash)
+}
+
+/// The review a workspace's changes page left unsent.
+pub fn pending_review(repo_path: &str, workspace_id: i64) -> Result<Option<PendingReview>, String> {
+  local_db::get_pending_review(repo_path, workspace_id)
+}
+
+pub fn save_pending_review(
+  repo_path: &str,
+  workspace_id: i64,
+  comments: &str,
+  summary: Option<&str>,
+  notes: Option<&str>,
+) -> Result<(), String> {
+  local_db::save_pending_review(repo_path, workspace_id, comments, None, summary, notes).map(|_| ())
+}
+
+pub fn clear_pending_review(repo_path: &str, workspace_id: i64) -> Result<(), String> {
+  local_db::clear_pending_review(repo_path, workspace_id)
+}
+
+/// The review a workspace's file browser left unsent.
+pub fn file_browser_review(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<FileBrowserPendingReview>, String> {
+  local_db::get_file_browser_review(repo_path, workspace_id)
+}
+
+pub fn save_file_browser_review(
+  repo_path: &str,
+  workspace_id: i64,
+  comments: &str,
+  summary: Option<&str>,
+) -> Result<(), String> {
+  local_db::save_file_browser_review(repo_path, workspace_id, comments, summary).map(|_| ())
+}
+
+pub fn clear_file_browser_review(repo_path: &str, workspace_id: i64) -> Result<(), String> {
+  local_db::clear_file_browser_review(repo_path, workspace_id)
 }
 
 #[cfg(test)]

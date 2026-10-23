@@ -392,7 +392,7 @@ impl TerminalHost for Backend {
   }
 
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String> {
-    crate::local_db::get_sessions(&self.state_scope(repo_path))
+    crate::core::sessions::list_sessions(&self.state_scope(repo_path))
   }
 
   fn supporting_repos(&self, repo_path: &str) -> Vec<String> {
@@ -410,7 +410,7 @@ impl TerminalHost for Backend {
   }
 
   fn prepare_agent(&self, start: &AgentStart) -> Result<Prepared, String> {
-    let model = crate::local_db::get_session_model(&start.repo_path, start.session_id)
+    let model = crate::core::sessions::session_model(&start.repo_path, start.session_id)
       .ok()
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();

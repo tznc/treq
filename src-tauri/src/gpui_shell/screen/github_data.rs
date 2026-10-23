@@ -205,16 +205,9 @@ pub trait GithubHost: WorkspaceHost {
   ) -> Result<Vec<crate::core::checks::JobResult>, String>;
 }
 
-fn gh() -> Result<(String, String), String> {
-  let gh = crate::binary_paths::get_binary_path("gh")
-    .or_else(|| crate::binary_paths::detect_binary("gh"))
-    .ok_or_else(|| "gh CLI not found".to_string())?;
-  Ok((gh, crate::binary_paths::get_extended_path()))
-}
-
 impl GithubHost for Backend {
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
-    crate::github::get_git_remote_url_impl(repo_path)
+    core::github_cli::remote(repo_path)
   }
 
   fn list_issues(
@@ -223,15 +216,7 @@ impl GithubHost for Backend {
     state: &str,
     after: Option<&str>,
   ) -> Result<GhListPage<GhIssue>, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_list_issues_impl(
-      &gh,
-      repo,
-      state,
-      crate::github::GH_LIST_PAGE_SIZE,
-      after,
-      &path,
-    )
+    core::github_cli::list_issues(repo, state, after)
   }
 
   fn list_prs(
@@ -240,69 +225,48 @@ impl GithubHost for Backend {
     state: &str,
     page: u32,
   ) -> Result<GhListPage<GhPullRequest>, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_list_prs_impl(
-      &gh,
-      repo,
-      state,
-      crate::github::GH_LIST_PAGE_SIZE,
-      page,
-      &path,
-    )
+    core::github_cli::list_prs(repo, state, page)
   }
 
   fn issue(&self, repo: &str, number: u64) -> Result<GhIssue, String> {
-    let (gh, path) = gh()?;
-    let mut issue = crate::github::gh_view_issue_impl(&gh, repo, number, &path)?;
-    crate::github::fill_comment_reactions(&gh, issue.comments.as_mut(), &path);
-    Ok(issue)
+    core::github_cli::issue(repo, number)
   }
 
   fn pr(&self, repo: &str, number: u64) -> Result<GhPullRequest, String> {
-    let (gh, path) = gh()?;
-    let mut pr = crate::github::gh_view_pr_impl(&gh, repo, number, &path)?;
-    crate::github::fill_comment_reactions(&gh, pr.comments.as_mut(), &path);
-    Ok(pr)
+    core::github_cli::pr(repo, number)
   }
 
   fn pr_checks(&self, repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {
-    let (gh, path) = gh()?;
-    crate::github::get_pr_checks_for_pr_impl(&gh, repo, number, &path)
+    core::github_cli::pr_checks(repo, number)
   }
 
   fn change_issue(&self, repo: &str, number: u64, change: &IssueChange) -> Result<(), String> {
-    use crate::github as g;
-    let (gh, path) = gh()?;
+    use core::github_cli as gh;
     match change {
-      IssueChange::Comment(body) => g::gh_create_issue_comment_impl(&gh, repo, number, body, &path),
-      IssueChange::Close(reason) => g::gh_close_issue_impl(&gh, repo, number, Some(reason), &path),
-      IssueChange::Reopen => g::gh_reopen_issue_impl(&gh, repo, number, &path),
-      IssueChange::Edit { title, body } => {
-        g::gh_edit_issue_impl(&gh, repo, number, title, body, &path)
-      }
-      IssueChange::Delete => g::gh_delete_issue_impl(&gh, repo, number, &path),
+      IssueChange::Comment(body) => gh::comment_on_issue(repo, number, body),
+      IssueChange::Close(reason) => gh::close_issue(repo, number, reason),
+      IssueChange::Reopen => gh::reopen_issue(repo, number),
+      IssueChange::Edit { title, body } => gh::edit_issue(repo, number, title, body),
+      IssueChange::Delete => gh::delete_issue(repo, number),
     }
   }
 
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String> {
-    use crate::github as g;
-    let (gh, path) = gh()?;
+    use core::github_cli as gh;
     match change {
-      PrChange::Comment(body) => g::gh_create_pr_comment_impl(&gh, repo, number, body, &path),
-      PrChange::Close => g::gh_close_pr_impl(&gh, repo, number, &path),
-      PrChange::Reopen => g::gh_reopen_pr_impl(&gh, repo, number, &path),
-      PrChange::Draft(draft) => g::gh_set_pr_draft_impl(&gh, repo, number, *draft, &path),
+      PrChange::Comment(body) => gh::comment_on_pr(repo, number, body),
+      PrChange::Close => gh::close_pr(repo, number),
+      PrChange::Reopen => gh::reopen_pr(repo, number),
+      PrChange::Draft(draft) => gh::set_pr_draft(repo, number, *draft),
     }
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_set_reaction_impl(&gh, comment_id, content, on, &path)
+    core::github_cli::set_reaction(comment_id, content, on)
   }
 
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_create_issue_impl(&gh, repo, title, body, &path)
+    core::github_cli::create_issue(repo, title, body)
   }
 
   fn create_pr(
@@ -314,8 +278,7 @@ impl GithubHost for Backend {
     head: &str,
     draft: bool,
   ) -> Result<u64, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_create_pr_impl(&gh, repo, title, body, base, head, draft, &path)
+    core::github_cli::create_pr(repo, title, body, base, head, draft)
   }
 
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
@@ -376,7 +339,7 @@ impl GithubHost for Backend {
       })
       .collect();
     TreqChecks {
-      trusted: crate::local_db::is_repo_trusted(repo_path),
+      trusted: core::repo::is_repo_trusted(repo_path),
       workflows,
       latest,
       setup: core::get_setup_script_status_sync(repo_path, workspace_id).ok(),
@@ -413,7 +376,7 @@ impl GithubHost for Backend {
   }
 
   fn trust_repo(&self, repo_path: &str) -> Result<(), String> {
-    crate::local_db::trust_repo(repo_path)?;
+    core::repo::trust_repo(repo_path)?;
     WorkspaceHost::notify(
       self,
       NativeEvent::WorkspaceChanged {

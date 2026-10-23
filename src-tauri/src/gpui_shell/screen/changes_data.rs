@@ -256,7 +256,7 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Option<PendingReview>, String> {
-    crate::local_db::get_pending_review(&self.state_scope(repo_path), workspace_id)
+    crate::core::review_drafts::pending_review(&self.state_scope(repo_path), workspace_id)
   }
 
   fn save_review(
@@ -268,12 +268,11 @@ impl ChangesHost for Backend {
     notes: Option<&str>,
   ) -> Result<(), String> {
     let scope = self.state_scope(repo_path);
-    crate::local_db::save_pending_review(&scope, workspace_id, comments, None, summary, notes)
-      .map(|_| ())
+    crate::core::review_drafts::save_pending_review(&scope, workspace_id, comments, summary, notes)
   }
 
   fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
-    crate::local_db::clear_pending_review(&self.state_scope(repo_path), workspace_id)
+    crate::core::review_drafts::clear_pending_review(&self.state_scope(repo_path), workspace_id)
   }
 
   fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String> {
@@ -281,38 +280,11 @@ impl ChangesHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Ok(Vec::new());
     }
-    let Some(remote) = crate::github::get_git_remote_url_impl(repo_path)? else {
-      return Ok(Vec::new());
-    };
-    let pr = crate::pr_status::global()
-      .get_cached(repo_path, branch)
-      .flatten();
-    let Some(pr) = pr else {
-      return Ok(Vec::new());
-    };
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
-    crate::github::gh_list_pr_review_threads_impl(
-      &gh,
-      &remote.owner,
-      &remote.repo,
-      pr.number,
-      &crate::binary_paths::get_extended_path(),
-    )
+    crate::core::github_cli::branch_review_threads(repo_path, branch)
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
-    crate::github::gh_set_reaction_impl(
-      &gh,
-      comment_id,
-      content,
-      on,
-      &crate::binary_paths::get_extended_path(),
-    )
+    crate::core::github_cli::set_reaction(comment_id, content, on)
   }
 
   fn agent_comments(
@@ -320,7 +292,7 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
-    crate::local_db::list_agent_review_comments(
+    crate::core::agent_review::list_comments(
       &self.state_scope(repo_path),
       super::changes_threads::WORKSPACE_DIFF,
       &workspace_id.to_string(),
@@ -328,11 +300,11 @@ impl ChangesHost for Backend {
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::local_db::resolve_agent_review_comment(&self.state_scope(repo_path), id)
+    crate::core::agent_review::resolve_comment(&self.state_scope(repo_path), id)
   }
 
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::local_db::delete_agent_review_comment(&self.state_scope(repo_path), id)
+    crate::core::agent_review::delete_comment(&self.state_scope(repo_path), id)
   }
 
   fn apply_agent_suggestion(&self, repo_path: &str, id: &str) -> Result<(), String> {
@@ -381,7 +353,7 @@ impl ChangesHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.git_remote().ok().flatten().is_some();
     }
-    crate::github::get_git_remote_url_impl(repo_path)
+    crate::core::github_cli::remote(repo_path)
       .ok()
       .flatten()
       .is_some()

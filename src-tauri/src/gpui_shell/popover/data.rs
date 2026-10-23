@@ -4,7 +4,6 @@ use crate::{
   core,
   gpui_shell::{native::Backend, screen::WorkspaceHost},
   jj::JjBranch,
-  local_db,
 };
 
 /// `getWorkspaceStartingPrompt`: the first prompt sent in the workspace.
@@ -102,7 +101,7 @@ pub trait PopoverHost: WorkspaceHost {
 
 impl PopoverHost for Backend {
   fn starting_prompt(&self, repo_path: &str, workspace_id: i64) -> Option<StartingPrompt> {
-    local_db::get_workspace_starting_prompt(repo_path, workspace_id)
+    core::sessions::workspace_starting_prompt(repo_path, workspace_id)
       .map_err(|err| log::warn!("starting prompt: {err}"))
       .ok()
       .flatten()
@@ -136,7 +135,7 @@ pub fn read_checks(repo_path: &str, workspace_id: i64) -> ChecksData {
     .collect();
   ChecksData {
     workflows,
-    trusted: local_db::is_repo_trusted(repo_path),
+    trusted: core::repo::is_repo_trusted(repo_path),
     setup: core::get_setup_script_status_sync(repo_path, workspace_id)
       .ok()
       .map(|s| Setup {

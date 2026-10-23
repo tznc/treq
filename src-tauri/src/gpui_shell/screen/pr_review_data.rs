@@ -11,6 +11,7 @@ use super::{
   commits_data::line_numbers,
 };
 use crate::{
+  core,
   github::{GhDraftReviewComment, GhPullRequest, GhReviewThread},
   gpui_shell::native::Backend,
   jj::JjDiffHunk,
@@ -66,46 +67,32 @@ pub trait PrReviewHost: ChangesHost {
   ) -> Result<(), String>;
 }
 
-fn gh() -> Result<String, String> {
-  crate::binary_paths::get_binary_path("gh")
-    .or_else(|| crate::binary_paths::detect_binary("gh"))
-    .ok_or_else(|| "gh CLI not found".to_string())
-}
-
 impl PrReviewHost for Backend {
   fn remote_full_name(&self, repo_path: &str) -> Option<String> {
-    crate::github::get_git_remote_url_impl(repo_path)
+    core::github_cli::remote(repo_path)
       .ok()
       .flatten()
       .map(|r| r.full_name)
   }
 
   fn view_pr(&self, full_name: &str, number: u64) -> Result<GhPullRequest, String> {
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_view_pr_impl(&gh()?, full_name, number, &path)
+    core::github_cli::view_pr(full_name, number)
   }
 
   fn pr_diff(&self, full_name: &str, number: u64) -> Result<String, String> {
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_pr_diff_impl(&gh()?, full_name, number, &path)
+    core::github_cli::pr_diff(full_name, number)
   }
 
   fn current_user(&self) -> Result<String, String> {
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_current_user_impl(&gh()?, &path)
+    core::github_cli::current_user()
   }
 
   fn pr_threads(&self, full_name: &str, number: u64) -> Result<Vec<GhReviewThread>, String> {
-    let Some((owner, repo)) = full_name.split_once('/') else {
-      return Ok(Vec::new());
-    };
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_list_pr_review_threads_impl(&gh()?, owner, repo, number, &path)
+    core::github_cli::pr_review_threads(full_name, number)
   }
 
   fn reply_thread(&self, thread_id: &str, body: &str) -> Result<(), String> {
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_reply_pr_review_thread_impl(&gh()?, thread_id, body, &path)
+    core::github_cli::reply_to_review_thread(thread_id, body)
   }
 
   fn submit_review(
@@ -116,12 +103,11 @@ impl PrReviewHost for Backend {
     body: &str,
     comments: &[GhDraftReviewComment],
   ) -> Result<(), String> {
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_submit_pr_review_impl(&gh()?, full_name, number, event, body, comments, &path)
+    core::github_cli::submit_pr_review(full_name, number, event, body, comments)
   }
 
   fn drafts(&self, repo_path: &str, number: u64) -> Result<Vec<AgentReviewComment>, String> {
-    crate::local_db::list_agent_review_comments(repo_path, TARGET, &number.to_string())
+    core::agent_review::list_comments(repo_path, TARGET, &number.to_string())
   }
 
   fn create_draft(&self, repo_path: &str, number: u64, draft: &NewDraft) -> Result<(), String> {
@@ -145,7 +131,7 @@ impl PrReviewHost for Backend {
     text: Option<&str>,
     line_hash: Option<&str>,
   ) -> Result<(), String> {
-    crate::local_db::update_agent_review_comment(repo_path, id, text, line_hash)
+    core::review_drafts::update_review_draft(repo_path, id, text, line_hash)
   }
 }
 
