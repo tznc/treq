@@ -323,6 +323,24 @@ pub fn write_send_review_image_bytes(
   Ok(path)
 }
 
+/// Directory for clipboard images pasted into a terminal.
+pub fn pasted_image_dir() -> PathBuf {
+  std::env::temp_dir().join("treq-pasted-images")
+}
+
+/// Save a clipboard image pasted into a terminal under `dir`, in a new file
+/// named for its format, so the agent CLI can read it from its path.
+pub fn write_pasted_image(dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
+  let ext = extension_for_media_type(MEDIA_IMAGE, bytes);
+  if ext == "bin" || ext == "svg" {
+    return Err("pasted data is not a supported image".to_string());
+  }
+  std::fs::create_dir_all(dir).map_err(|e| format!("failed to create pasted image dir: {e}"))?;
+  let path = dir.join(format!("paste-{}.{ext}", uuid::Uuid::new_v4()));
+  std::fs::write(&path, bytes).map_err(|e| format!("failed to write pasted image: {e}"))?;
+  Ok(path)
+}
+
 fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
   const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   let mut lookup = [0xffu8; 256];
@@ -516,6 +534,40 @@ mod tests {
     let err =
       write_send_review_image(temp.path().to_str().unwrap(), "a.png", "").expect_err("empty");
     assert!(err.contains("invalid") || err.contains("empty"));
+  }
+
+  const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\0";
+
+  #[test]
+  fn writes_pasted_png_under_dir_with_png_extension() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let dir = temp.path().join("pasted");
+    let path = write_pasted_image(&dir, PNG).expect("write");
+    assert_eq!(path.parent(), Some(dir.as_path()));
+    assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    assert_eq!(std::fs::read(&path).unwrap(), PNG);
+  }
+
+  #[test]
+  fn writes_each_pasted_image_to_a_new_file() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let first = write_pasted_image(temp.path(), PNG).expect("first");
+    let second = write_pasted_image(temp.path(), PNG).expect("second");
+    assert_ne!(first, second);
+  }
+
+  #[test]
+  fn names_pasted_jpeg_with_jpg_extension() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let path = write_pasted_image(temp.path(), &[0xff, 0xd8, 0xff, 0xe0]).expect("write");
+    assert_eq!(path.extension().and_then(|e| e.to_str()), Some("jpg"));
+  }
+
+  #[test]
+  fn rejects_pasted_bytes_that_are_not_an_image() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let err = write_pasted_image(temp.path(), b"hello").expect_err("not an image");
+    assert!(err.contains("image"));
   }
 
   #[test]

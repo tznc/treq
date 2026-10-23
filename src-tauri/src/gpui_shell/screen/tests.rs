@@ -1063,6 +1063,11 @@ impl terminal_data::TerminalHost for FakeHost {
     self.record(format!("write review image {name} ({} bytes)", png.len()));
     Ok(format!("{repo}/.treq/send/{name}"))
   }
+
+  fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String> {
+    self.record(format!("save pasted image ({} bytes)", bytes.len()));
+    Ok("/tmp/treq-pasted-images/paste-1.png".into())
+  }
 }
 
 impl FakeHost {
@@ -5684,6 +5689,76 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   );
 }
 
+#[gpui::test]
+fn pasting_text_into_a_terminal_types_the_text(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  h.click("terminal-body");
+  h.cx
+    .write_to_clipboard(gpui::ClipboardItem::new_string("hello agent".into()));
+  h.cx.simulate_keystrokes("cmd-v");
+  assert_eq!(
+    pty_writes(&host),
+    vec![format!("write {pty} \"hello agent\"")]
+  );
+}
+
+/// Claude Code and Codex attach an image whose path is pasted, as they do
+/// for an image file dropped onto a native terminal.
+#[gpui::test]
+fn pasting_a_clipboard_image_pastes_the_path_it_was_saved_to(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  host.output(&pty, "\x1b[?2004h");
+  h.cx.run_until_parked();
+  h.click("terminal-body");
+  let png = b"\x89PNG\r\n\x1a\n\0\0\0\0".to_vec();
+  h.cx
+    .write_to_clipboard(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
+      gpui::ImageFormat::Png,
+      png,
+    )));
+  h.cx.simulate_keystrokes("cmd-v");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"save pasted image (12 bytes)".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert_eq!(
+    pty_writes(&host),
+    vec![format!(
+      "write {pty} \"\\u{{1b}}[200~'/tmp/treq-pasted-images/paste-1.png'\\u{{1b}}[201~\""
+    )]
+  );
+}
+
+#[gpui::test]
+fn pasting_an_image_into_a_remote_session_saves_nothing(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  h.cx
+    .write_to_clipboard(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
+      gpui::ImageFormat::Png,
+      b"\x89PNG\r\n\x1a\n\0\0\0\0".to_vec(),
+    )));
+  h.cx.simulate_keystrokes("cmd-v");
+  h.cx.run_until_parked();
+  assert!(
+    !host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("save pasted image")),
+    "{:?}",
+    host.calls()
+  );
+  assert_eq!(pty_writes(&host), Vec::<String>::new());
+}
+
 /// A terminal resized while its session starts hands the PTY the new size
 /// once it runs: a program drawing for a wider PTY than the grid wraps
 /// every line, so redraws stack up and overwrite each other.
@@ -6168,6 +6243,29 @@ fn files_dropped_on_a_shell_are_typed_but_not_on_a_remote_session(cx: &mut TestA
     .center();
   drop_files(&mut h, at);
   assert_eq!(writes(&host), 0, "{:?}", host.calls());
+}
+
+/// A native terminal pastes a drop, so an agent that asked for bracketed
+/// paste attaches a dropped image path as it would a pasted one.
+#[gpui::test]
+fn files_dropped_on_an_agent_are_pasted(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  host.output(&pty, "\x1b[?2004h");
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("terminal-column-agent")
+    .expect("agent")
+    .center();
+  drop_files(&mut h, at);
+  assert_eq!(
+    pty_writes(&host),
+    vec![format!(
+      "write {pty} \"\\u{{1b}}[200~'/tmp/a b.txt'\\u{{1b}}[201~\""
+    )]
+  );
 }
 
 #[gpui::test]
