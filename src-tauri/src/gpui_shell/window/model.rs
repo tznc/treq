@@ -439,6 +439,9 @@ pub struct Model {
   pub pending_select: Option<PendingSelect>,
   /// The remote dialogs, endpoint and repository.
   pub remote: Remote,
+  /// The catalog skill a `treq://skill/install` link asked to install,
+  /// until Settings' confirmation is answered.
+  pub skill_install: Option<String>,
   /// The confirmation on screen, over everything else.
   pub confirm: Option<Confirm>,
 }
@@ -584,6 +587,15 @@ impl Model {
         tab: "repository".into(),
       });
     }
+  }
+
+  /// A `treq://skill/install` link: Settings' Skills tab confirms it.
+  pub fn open_skill_install(&mut self, skill_id: String) {
+    self.open_settings();
+    if let Page::Settings { tab } = &mut self.page {
+      *tab = "skills".into();
+    }
+    self.skill_install = Some(skill_id);
   }
 
   /// `closeSettings`.

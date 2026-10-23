@@ -114,6 +114,7 @@ fn view(model: &Model, data: &Data) -> Value {
       "tab": tab,
       "repoPath": repo,
       "currentBranch": model.default_branch(data),
+      "installRequest": model.skill_install,
     }),
     Page::Github(github) => match github.review {
       Some(number) => json!({"kind": "prReview", "repoPath": repo, "prNumber": number}),
@@ -453,6 +454,16 @@ mod tests {
     };
     assert_eq!(route.workspace_id, None);
     assert_eq!(route.show_committed, None);
+  }
+
+  #[test]
+  fn settings_route_carries_a_skill_install_request() {
+    let mut model = Model::new(Some("/repo".into()));
+    model.open_skill_install("anthropic/pdf".into());
+    let View::Settings(route) = screen(&model, &data()).unwrap().view else {
+      panic!("not settings");
+    };
+    assert_eq!(route.install_request.as_deref(), Some("anthropic/pdf"));
   }
 
   #[test]

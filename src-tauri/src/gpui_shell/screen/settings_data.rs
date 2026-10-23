@@ -8,7 +8,10 @@ use crate::{
   core::{
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
-    skills::{self, InstalledSkill, SkillCatalogSkillView, SkillInstallScope},
+    skills::{
+      self, CustomizedSkill, InstalledSkill, SkillCatalogEntry, SkillCatalogSkillView,
+      SkillInstallScope,
+    },
   },
   gpui_shell::native::{Backend, NativeEvent},
   repo_config::{self, RepoConfig},
@@ -47,6 +50,8 @@ pub trait SettingsHost: ToolsHost + AccountHost {
     scope: SkillInstallScope,
     repo_path: Option<&str>,
   ) -> Result<(), String>;
+  /// Writes a user-owned copy of an installed skill into the repository.
+  fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String>;
   /// The bytes at `url`, for the account's avatar.
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
   fn notify(&self, event: NativeEvent);
@@ -143,6 +148,15 @@ impl SettingsHost for Backend {
     self.with_db(skills::persist_app_index_setting)
   }
 
+  fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Customizing a skill",
+      ));
+    }
+    skills::customize_skill(skill_id, repo_path)
+  }
+
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
     crate::gpui_shell::block_on(async {
       let response = reqwest::get(url)
@@ -206,6 +220,50 @@ pub fn parse_scope(value: &str) -> Option<SkillInstallScope> {
     "repository" => Some(SkillInstallScope::Repository),
     _ => None,
   }
+}
+
+// Matches `DEFAULT_SKILLS_CATALOG_URL`: the catalog and its pages live there.
+const SKILL_REGISTRY_ORIGIN: &str = "https://treq.dev";
+
+/// The skill's page on the treq.dev registry, or the registry itself.
+pub fn skill_registry_url(route: Option<&str>) -> String {
+  match route {
+    Some(route) if route.starts_with("/skills/") => format!("{SKILL_REGISTRY_ORIGIN}{route}"),
+    _ => format!("{SKILL_REGISTRY_ORIGIN}/skills"),
+  }
+}
+
+fn format_bytes(bytes: u64) -> String {
+  const KB: f64 = 1024.;
+  let b = bytes as f64;
+  if b < KB {
+    format!("{bytes} B")
+  } else if b < KB * KB {
+    format!("{:.1} KB", b / KB)
+  } else {
+    format!("{:.1} MB", b / (KB * KB))
+  }
+}
+
+/// The catalog metadata a link's install confirmation lists.
+pub fn skill_details(skill: &SkillCatalogEntry) -> Vec<(String, String)> {
+  let count = skill.files.len();
+  let size: u64 = skill.files.iter().map(|f| f.size).sum();
+  let files = format!(
+    "{count} {}, {}",
+    if count == 1 { "file" } else { "files" },
+    format_bytes(size)
+  );
+  [
+    ("Catalog id", Some(skill.id.clone())),
+    ("Source", Some(skill.source.clone())),
+    ("Category", skill.category.clone()),
+    ("License", skill.license.clone()),
+    ("Files", Some(files)),
+  ]
+  .into_iter()
+  .filter_map(|(label, value)| Some((label.to_string(), value.filter(|v| !v.is_empty())?)))
+  .collect()
 }
 
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";

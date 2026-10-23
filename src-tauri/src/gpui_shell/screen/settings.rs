@@ -34,8 +34,10 @@ use super::{
 };
 use crate::{
   core::{
-    app_setup_script::AppSetupScriptStatus, feature_preview::PreviewFeature,
-    skills::SkillCatalogSkillView, PrerequisiteStatus,
+    app_setup_script::AppSetupScriptStatus,
+    feature_preview::PreviewFeature,
+    skills::{self, SkillCatalogSkillView, SkillInstallScope},
+    PrerequisiteStatus,
   },
   gpui_shell::{
     form::{self, Controls, SelectOption},
@@ -102,6 +104,9 @@ pub struct Route {
   pub repo_path: Option<String>,
   /// The home repository's branch, as the workspace header shows it.
   pub current_branch: Option<String>,
+  /// The catalog skill a `treq://skill/install` link asked to install.
+  #[serde(default)]
+  pub install_request: Option<String>,
 }
 
 /// What the screen draws.
@@ -129,6 +134,23 @@ pub struct SkillsTab {
   pub rows: Vec<SkillRow>,
   /// The skill whose install dialog is open, by name.
   pub dialog: Option<SkillDialog>,
+  /// The confirmation for a `treq://skill/install` link.
+  pub confirm: Option<SkillConfirm>,
+}
+
+/// What the user checks before a link's skill installs for all agents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillConfirm {
+  pub title: String,
+  pub description: Option<String>,
+  /// Catalog metadata, as label and value.
+  pub details: Vec<(String, String)>,
+  pub checksum: Option<String>,
+  pub registry_url: String,
+  /// Why the skill cannot install, or that the registry is loading.
+  pub notice: Option<String>,
+  pub can_install: bool,
+  pub busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,6 +163,8 @@ pub struct SkillRow {
   pub proprietary: bool,
   /// The install level, when installed.
   pub installed: Option<String>,
+  /// The repository holds a user-owned copy that catalog updates never touch.
+  pub customized: bool,
   pub busy: bool,
 }
 
@@ -644,6 +668,17 @@ impl SettingsView {
     cx: &mut Context<Self>,
     work: impl FnOnce(&dyn SettingsHost, Option<&str>) -> Result<(), String> + Send + 'static,
   ) {
+    self.skill_action_then(skill_id, None, cx, work);
+  }
+
+  /// `skill_action`, toasting `success` when the work succeeds.
+  fn skill_action_then(
+    &mut self,
+    skill_id: String,
+    success: Option<(&'static str, String)>,
+    cx: &mut Context<Self>,
+    work: impl FnOnce(&dyn SettingsHost, Option<&str>) -> Result<(), String> + Send + 'static,
+  ) {
     let Some(skills) = &mut self.skills else {
       return;
     };
@@ -656,10 +691,12 @@ impl SettingsView {
       cx,
       move |host| work(host, repo.as_deref()),
       |view, result, cx| {
-        if let Err(err) = result {
-          view
+        match (result, success) {
+          (Err(err), _) => view
             .host
-            .notify(toast(ToastTone::Error, "Skill library", err));
+            .notify(toast(ToastTone::Error, "Skill library", err)),
+          (Ok(()), Some((title, body))) => view.host.notify(toast(ToastTone::Success, title, body)),
+          (Ok(()), None) => {}
         }
         if let Some(skills) = &mut view.skills {
           skills.pending = None;
@@ -690,6 +727,7 @@ impl SettingsView {
       "skills.uninstall" => self.skill_action(id.clone(), cx, move |host, repo| {
         host.uninstall_skill(&id, repo)
       }),
+      "skills.customize" => self.customize_skill(id, cx),
       "skills.source" => {
         let url = self
           .skills
@@ -703,6 +741,161 @@ impl SettingsView {
       }
       _ => {}
     }
+  }
+
+  fn catalog_skill(&self, id: &str) -> Option<&SkillCatalogSkillView> {
+    self
+      .skills
+      .as_ref()?
+      .catalog
+      .as_ref()?
+      .as_ref()
+      .ok()?
+      .iter()
+      .find(|v| v.skill.id == id)
+  }
+
+  /// The confirmation a `treq://skill/install` link shows, from the catalog.
+  fn skill_confirm(&self) -> Option<SkillConfirm> {
+    let id = self.route.install_request.as_ref()?;
+    let skills = self.skills.as_ref()?;
+    let mut confirm = SkillConfirm {
+      title: format!("Install {id} for all agents?"),
+      description: None,
+      details: Vec::new(),
+      checksum: None,
+      registry_url: data::skill_registry_url(None),
+      notice: None,
+      can_install: false,
+      busy: skills.pending.as_deref() == Some(id.as_str()),
+    };
+    let view = match &skills.catalog {
+      None => {
+        confirm.notice = Some("Loading skill registry…".into());
+        return Some(confirm);
+      }
+      Some(Err(err)) => {
+        confirm.notice = Some(err.clone());
+        return Some(confirm);
+      }
+      Some(Ok(list)) => list.iter().find(|v| &v.skill.id == id),
+    };
+    let Some(view) = view else {
+      confirm.notice = Some(format!(
+        "{id} is not in the Treq skill catalog, so it cannot be installed."
+      ));
+      return Some(confirm);
+    };
+    let skill = &view.skill;
+    confirm.title = format!("Install {} for all agents?", skill.name);
+    confirm.description = skill.description.clone().filter(|d| !d.is_empty());
+    confirm.details = data::skill_details(skill);
+    confirm.checksum = skill.checksum.clone().filter(|c| !c.trim().is_empty());
+    confirm.registry_url = data::skill_registry_url(skill.route.as_deref());
+    confirm.notice = if skill.proprietary {
+      Some("Proprietary skills cannot be installed from the registry.".into())
+    } else {
+      view.installed.as_ref().map(|installed| {
+        format!(
+          "{} is already installed at the {} level.",
+          skill.name,
+          data::scope_value(installed.scope)
+        )
+      })
+    };
+    confirm.can_install = confirm.notice.is_none();
+    Some(confirm)
+  }
+
+  /// Customize: writes a user-owned copy of an installed skill into the
+  /// repository (once), then asks the window for an agent to edit it.
+  fn customize_skill(&mut self, id: String, cx: &mut Context<Self>) {
+    let Some(view) = self.catalog_skill(&id) else {
+      return;
+    };
+    let Some(installed) = view.installed.clone() else {
+      return;
+    };
+    if view.customized {
+      let name = installed.name;
+      let prompt = skills::customize_skill_prompt(
+        &name,
+        &format!(".agents/skills/{name}"),
+        &format!(".claude/skills/{name}"),
+      );
+      self.start_skill_agent(prompt, cx);
+      return;
+    }
+    let Some(repo) = self.route.repo_path.clone() else {
+      return;
+    };
+    let Some(skills) = &mut self.skills else {
+      return;
+    };
+    if skills.pending.is_some() {
+      return;
+    }
+    skills.pending = Some(id.clone());
+    self.spawn(
+      cx,
+      move |host| host.customize_skill(&id, &repo),
+      |view, result, cx| {
+        if let Some(skills) = &mut view.skills {
+          skills.pending = None;
+        }
+        match result {
+          Ok(copy) => {
+            let prompt = skills::customize_skill_prompt(
+              &copy.name,
+              &copy.agents_skill_path,
+              &copy.claude_skill_path,
+            );
+            view.start_skill_agent(prompt, cx);
+          }
+          Err(err) => view
+            .host
+            .notify(toast(ToastTone::Error, "Skill library", err)),
+        }
+        view.load_skills(cx);
+      },
+    );
+  }
+
+  fn start_skill_agent(&self, prompt: String, cx: &mut Context<Self>) {
+    (self.react)(
+      ScreenAction::Field {
+        field: "skills.startAgent".into(),
+        value: serde_json::json!({ "prompt": prompt }),
+      },
+      cx,
+    );
+  }
+
+  /// Answers a `treq://skill/install` link's confirmation; `install` installs
+  /// the catalog skill for all agents (application level).
+  fn answer_skill_link(&mut self, install: bool, cx: &mut Context<Self>) {
+    let Some(id) = self.route.install_request.clone() else {
+      return;
+    };
+    (self.react)(
+      ScreenAction::Press {
+        id: "skills.installRequest.close".into(),
+      },
+      cx,
+    );
+    if !install {
+      return;
+    }
+    let name = self
+      .catalog_skill(&id)
+      .map_or_else(|| id.clone(), |v| v.skill.name.clone());
+    let success = (
+      "Skill installed",
+      format!("{name} is installed for all agents. New workspaces get it automatically."),
+    );
+    self.skill_action_then(id.clone(), Some(success), cx, move |host, repo| {
+      host.install_skill(&id, SkillInstallScope::Application, repo)
+    });
   }
 
   fn write_settings(&self, values: Vec<(String, String)>, cx: &mut Context<Self>) {
@@ -832,6 +1025,13 @@ impl SettingsView {
           },
           "app.setupScript.run" => self.run_setup(cx),
           "repo.yaml.reload" => self.load_repo(cx),
+          "skills.confirm.install" => self.answer_skill_link(true, cx),
+          "skills.confirm.cancel" => self.answer_skill_link(false, cx),
+          "skills.confirm.registry" => {
+            if let Some(confirm) = self.skill_confirm() {
+              self.host.open_url(&confirm.registry_url);
+            }
+          }
           "skills.dialog.cancel" => {
             if let Some(skills) = &mut self.skills {
               skills.dialog = None;
@@ -1069,6 +1269,7 @@ impl SettingsView {
               .installed
               .as_ref()
               .map(|i| data::scope_value(i.scope).to_string()),
+            customized: view.customized,
             busy: pending == Some(view.skill.id.as_str()),
           })
           .collect();
@@ -1091,6 +1292,7 @@ impl SettingsView {
               .map_or_else(|| id.clone(), |v| v.skill.name.clone()),
             busy: pending == Some(id.as_str()),
           }),
+          confirm: self.skill_confirm(),
         }
       });
     Settings {
@@ -1328,6 +1530,11 @@ impl Render for SettingsView {
       .as_ref()
       .and_then(|skills| skills.dialog.clone())
       .map(|dialog| self.skill_dialog(&dialog, &p));
+    let confirm = s
+      .skills
+      .as_ref()
+      .and_then(|skills| skills.confirm.clone())
+      .map(|confirm| self.skill_confirm_dialog(&confirm, &p));
     let delete_dialog = match &s.account {
       Some(AccountTab::SignedIn(signed_in))
         if signed_in
@@ -1366,6 +1573,7 @@ impl Render for SettingsView {
           ),
       )
       .children(dialog)
+      .children(confirm)
       .children(delete_dialog)
   }
 }
@@ -2051,7 +2259,20 @@ impl SettingsView {
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
-                  ),
+                  )
+                  .when(row.customized, |this| {
+                    let selector = format!("skill-customized-{id}");
+                    this.child(
+                      ui::text(div(), TextSize::Xs)
+                        .debug_selector(move || selector)
+                        .px_1p5()
+                        .rounded(radius::SM)
+                        .border_1()
+                        .border_color(p.border)
+                        .text_color(p.muted_foreground)
+                        .child("Customized"),
+                    )
+                  }),
               )
               .when_some(row.description.clone(), |this, description| {
                 this.child(
@@ -2086,23 +2307,48 @@ impl SettingsView {
               .child("Proprietary skills cannot be installed from the registry."),
           )
         } else if let Some(level) = level {
+          let (customize_label, customize_aria) = if row.customized {
+            (
+              "Edit with agent",
+              format!("Edit {} with an agent", row.name),
+            )
+          } else {
+            ("Customize", format!("Customize {}", row.name))
+          };
           this.child(
             div()
+              .w_full()
               .flex()
               .items_center()
-              .justify_end()
+              .justify_between()
               .gap_2()
               .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::MEDIUM)
-                  .child("Install level"),
+                Button::new(format!("skill-customize-{id}"), p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .disabled(row.busy)
+                  .aria_label(customize_aria)
+                  .icon(theme::ICON_PENCIL, 14.)
+                  .label(customize_label)
+                  .on_click(self.press(&format!("skills.customize:{id}"))),
               )
-              .child(div().w(zpx(128.)).child(form::select_field(
-                format!("skill-level-{id}"),
-                "Install level",
-                &level,
-                row.busy,
-              ))),
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .child(
+                    ui::text(div(), TextSize::Sm)
+                      .font_weight(FontWeight::MEDIUM)
+                      .child("Install level"),
+                  )
+                  .child(div().w(zpx(128.)).child(form::select_field(
+                    format!("skill-level-{id}"),
+                    "Install level",
+                    &level,
+                    row.busy,
+                  ))),
+              ),
           )
         } else {
           this.child(
@@ -2210,6 +2456,141 @@ impl SettingsView {
                   .label("Install for repository")
                   .on_click(self.press("skills.dialog:repository")),
               ),
+          ),
+      )
+  }
+  /// A `treq://skill/install` link's confirmation: the catalog entry's
+  /// description, metadata and checksum, and its registry page.
+  fn skill_confirm_dialog(&self, confirm: &SkillConfirm, p: &Palette) -> impl IntoElement {
+    let rows = confirm.details.iter().map(|(label, value)| {
+      div()
+        .flex()
+        .gap_4()
+        .child(
+          div()
+            .w(zpx(96.))
+            .flex_none()
+            .text_color(p.muted_foreground)
+            .child(label.clone()),
+        )
+        .child(div().min_w_0().child(value.clone()))
+    });
+    let checksum = confirm.checksum.clone().map_or_else(
+      || {
+        div()
+          .text_color(p.muted_foreground)
+          .child("Not published. Treq records the checksum of the downloaded files.")
+      },
+      |sum| div().font_family(theme::MONO_FONT).text_xs().child(sum),
+    );
+    div()
+      .id("skill-confirm-dialog-backdrop")
+      .absolute()
+      .inset_0()
+      .flex()
+      .items_center()
+      .justify_center()
+      .bg(p.scrim())
+      .occlude()
+      .child(
+        div()
+          .id("skill-confirm-dialog")
+          .debug_selector(|| "skill-confirm-dialog".into())
+          .w_full()
+          .max_w(zpx(576.))
+          .mx_4()
+          .flex()
+          .flex_col()
+          .gap_4()
+          .p_6()
+          .rounded(radius::MD)
+          .border_1()
+          .border_color(p.border)
+          .bg(p.background)
+          .shadow_lg()
+          .child(
+            div()
+              .flex()
+              .flex_col()
+              .gap_2()
+              .child(
+                ui::text(div(), TextSize::Lg)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .child(confirm.title.clone()),
+              )
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child("A link asked Treq to install this skill. Treq installs the copy from its skill catalog, never content from the link."),
+              ),
+          )
+          .when_some(confirm.description.clone(), |this, description| {
+            this.child(ui::text(div(), TextSize::Sm).child(description))
+          })
+          .when(!confirm.details.is_empty(), |this| {
+            this.child(
+              ui::text(div(), TextSize::Sm)
+                .flex()
+                .flex_col()
+                .gap_1()
+                .p_3()
+                .rounded(radius::MD)
+                .border_1()
+                .border_color(p.border)
+                .children(rows)
+                .child(
+                  div()
+                    .flex()
+                    .gap_4()
+                    .child(
+                      div()
+                        .w(zpx(96.))
+                        .flex_none()
+                        .text_color(p.muted_foreground)
+                        .child("SHA-256"),
+                    )
+                    .child(div().min_w_0().flex_1().child(checksum)),
+                ),
+            )
+            .child(
+              ui::text(div(), TextSize::Xs)
+                .text_color(p.muted_foreground)
+                .child("Treq verifies the downloaded files against this checksum before installing."),
+            )
+          })
+          .when_some(confirm.notice.clone(), |this, notice| {
+            this.child(ui::text(div(), TextSize::Sm).child(notice))
+          })
+          .child(
+            div()
+              .w_full()
+              .flex()
+              .items_center()
+              .justify_between()
+              .gap_2()
+              .child(
+                Button::new("skill-confirm-registry", p)
+                  .variant(Variant::Ghost)
+                  .size(Size::Sm)
+                  .icon(theme::ICON_EXTERNAL_LINK, 14.)
+                  .label("View in skill registry")
+                  .on_click(self.press("skills.confirm.registry")),
+              )
+              .child(div().flex().items_center().gap_2().child(
+                Button::new("skill-confirm-cancel", p)
+                  .variant(Variant::Outline)
+                  .disabled(confirm.busy)
+                  .label(if confirm.can_install { "Cancel" } else { "Close" })
+                  .on_click(self.press("skills.confirm.cancel")),
+              )
+              .when(confirm.can_install, |this| {
+                this.child(
+                  Button::new("skill-confirm-install", p)
+                    .disabled(confirm.busy)
+                    .label("Install")
+                    .on_click(self.press("skills.confirm.install")),
+                )
+              })),
           ),
       )
   }

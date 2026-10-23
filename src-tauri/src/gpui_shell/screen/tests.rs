@@ -405,6 +405,25 @@ impl settings_data::SettingsHost for FakeHost {
     Ok(())
   }
 
+  fn customize_skill(
+    &self,
+    skill_id: &str,
+    repo_path: &str,
+  ) -> Result<crate::core::skills::CustomizedSkill, String> {
+    self.record(format!("customize {skill_id} {repo_path}"));
+    let name = self
+      .skills
+      .iter()
+      .find(|s| s.skill.id == skill_id)
+      .map_or_else(|| skill_id.to_string(), |s| s.skill.name.clone());
+    Ok(crate::core::skills::CustomizedSkill {
+      id: skill_id.into(),
+      agents_skill_path: format!(".agents/skills/{name}"),
+      claude_skill_path: format!(".claude/skills/{name}"),
+      name,
+    })
+  }
+
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
     self.record(format!("fetch {url}"));
     Err("offline".into())
@@ -2822,6 +2841,160 @@ fn skills_dialog_cancels(cx: &mut TestAppContext) {
   h.click("skill-dialog-cancel");
   assert!(!h.drawn("skill-install-dialog"));
   assert!(host.writes().is_empty());
+}
+
+fn skills_link_harness(cx: &mut TestAppContext, request: &str) -> (Harness, Arc<FakeHost>) {
+  let mut docx = skill("docx", "Word", None);
+  docx.skill.license = Some("MIT".into());
+  docx.skill.checksum = Some("c0ffee".into());
+  docx.skill.route = Some("/skills/anthropics/docx".into());
+  docx.skill.files = vec![crate::core::skills::SkillFile {
+    path: "SKILL.md".into(),
+    size: 2048,
+    binary: false,
+    github_url: None,
+    raw_url: None,
+  }];
+  let host = Arc::new(FakeHost {
+    skills: vec![skill("pdf", "PDF", Some("application")), docx],
+    ..FakeHost::default()
+  });
+  let route = serde_json::from_value(serde_json::json!({
+    "kind": "settings",
+    "dark": false,
+    "tab": "skills",
+    "repoPath": "/repo",
+    "currentBranch": "main",
+    "installRequest": request,
+  }))
+  .expect("parse");
+  let h = Harness::with_host(cx, route, host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  (h, host)
+}
+
+#[gpui::test]
+fn skill_link_shows_catalog_details_before_installing(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_link_harness(cx, "docx");
+  assert!(h.drawn("skill-confirm-dialog"));
+  let confirm = drawn_settings(&mut h)
+    .skills
+    .expect("skills tab")
+    .confirm
+    .expect("confirm dialog");
+  assert_eq!(confirm.title, "Install Word for all agents?");
+  assert_eq!(confirm.description.as_deref(), Some("Word helps"));
+  assert_eq!(confirm.checksum.as_deref(), Some("c0ffee"));
+  assert_eq!(
+    confirm.registry_url,
+    "https://treq.dev/skills/anthropics/docx"
+  );
+  let details: Vec<_> = confirm
+    .details
+    .iter()
+    .map(|(k, v)| format!("{k}: {v}"))
+    .collect();
+  assert_eq!(
+    details,
+    [
+      "Catalog id: docx",
+      "Source: anthropics/skills",
+      "Category: docs",
+      "License: MIT",
+      "Files: 1 file, 2.0 KB",
+    ]
+  );
+  assert!(confirm.can_install);
+
+  h.click("skill-confirm-registry");
+  h.click("skill-confirm-install");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "open https://treq.dev/skills/anthropics/docx",
+      "install docx Application Some(\"/repo\")",
+      "notify toast Skill library",
+    ]
+  );
+  assert_eq!(h.sent(), vec![press("skills.installRequest.close")]);
+}
+
+#[gpui::test]
+fn skill_link_for_unknown_skill_offers_no_install(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_link_harness(cx, "evil/payload");
+  let confirm = drawn_settings(&mut h)
+    .skills
+    .expect("skills tab")
+    .confirm
+    .expect("confirm dialog");
+  assert!(!confirm.can_install);
+  assert!(confirm
+    .notice
+    .as_deref()
+    .is_some_and(|n| n.contains("not in the Treq skill catalog")));
+  assert!(!h.drawn("skill-confirm-install"));
+  h.click("skill-confirm-cancel");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty());
+  assert_eq!(h.sent(), vec![press("skills.installRequest.close")]);
+}
+
+#[gpui::test]
+fn skill_link_for_installed_skill_says_so(cx: &mut TestAppContext) {
+  let (mut h, _) = skills_link_harness(cx, "pdf");
+  let confirm = drawn_settings(&mut h)
+    .skills
+    .expect("skills tab")
+    .confirm
+    .expect("confirm dialog");
+  assert!(!confirm.can_install);
+  assert!(confirm
+    .notice
+    .as_deref()
+    .is_some_and(|n| n.contains("already installed")));
+}
+
+#[gpui::test]
+fn customize_writes_a_copy_and_asks_for_an_agent(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_harness(cx);
+  assert!(!h.drawn("skill-customize-docx"), "only installed skills");
+  h.click("skill-customize-pdf");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["customize pdf /repo"]);
+  let sent = h.sent();
+  assert_eq!(sent.len(), 1);
+  let ScreenAction::Field { field, value } = &sent[0] else {
+    panic!("not a field: {sent:?}");
+  };
+  assert_eq!(field, "skills.startAgent");
+  let prompt = value["prompt"].as_str().expect("prompt");
+  assert!(prompt.contains(".agents/skills/PDF/"), "{prompt}");
+  assert!(prompt.contains(".claude/skills/PDF/"), "{prompt}");
+}
+
+#[gpui::test]
+fn customized_skill_shows_a_badge_and_edits_without_copying(cx: &mut TestAppContext) {
+  let mut pdf = skill("pdf", "PDF", Some("application"));
+  pdf.customized = true;
+  let host = Arc::new(FakeHost {
+    skills: vec![pdf],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("skills"), host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  let rows = drawn_settings(&mut h).skills.expect("skills tab").rows;
+  assert!(rows[0].customized);
+  assert!(h.drawn("skill-customized-pdf"));
+  h.click("skill-customize-pdf");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty(), "the copy is the user's");
+  assert!(matches!(
+    &h.sent()[..],
+    [ScreenAction::Field { field, .. }] if field == "skills.startAgent"
+  ));
 }
 
 /// Rust's account, signed out, with `patch` merged in.

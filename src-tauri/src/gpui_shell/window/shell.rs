@@ -221,6 +221,13 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   true
 }
 
+/// A `treq://skill/install` link for window `label`. Any thread.
+pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
+  if drives(label) {
+    with_controller(app, label, move |c, cx| c.open_skill_install(skill_id, cx));
+  }
+}
+
 /// Window `label` gained focus. Any thread.
 pub fn window_focused(app: &AppHandle, label: &str) {
   with_controller(app, label, |c, cx| c.focused(cx));

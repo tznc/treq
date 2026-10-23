@@ -545,6 +545,46 @@ pub fn customize_skill(skill_id: &str, repo_path: &str) -> Result<CustomizedSkil
   })
 }
 
+const MAX_SKILL_ID_LENGTH: usize = 200;
+
+/// The catalog id from a `treq://skill/install?id=...` link, or `None`. The
+/// id is only a lookup key: installing reads the catalog entry with that id,
+/// never content from the link.
+pub fn parse_skill_install_link(url: &str) -> Option<String> {
+  let parsed = url::Url::parse(url).ok()?;
+  if parsed.scheme() != "treq" || parsed.host_str() != Some("skill") || parsed.path() != "/install"
+  {
+    return None;
+  }
+  let id = parsed
+    .query_pairs()
+    .find(|(key, _)| key == "id")
+    .map(|(_, value)| value.into_owned())?;
+  let segment_ok = |part: &str| {
+    !part.is_empty()
+      && part != "."
+      && part != ".."
+      && part
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+  };
+  (id.len() <= MAX_SKILL_ID_LENGTH && id.split('/').all(segment_ok)).then_some(id)
+}
+
+/// The prompt for an agent session that edits a customized skill's copy.
+pub fn customize_skill_prompt(
+  name: &str,
+  agents_skill_path: &str,
+  claude_skill_path: &str,
+) -> String {
+  format!(
+    "Help me customize the \"{name}\" agent skill. Its user-owned copy is at {agents_skill_path}/ \
+     and is mirrored at {claude_skill_path}/. Treq no longer updates these folders from the skill \
+     catalog. Read SKILL.md, ask me what I want to change, then make the edits and keep both \
+     folders identical."
+  )
+}
+
 /// Copy every installed library skill into a workspace's agent skill folders.
 pub fn materialize_installed_skills(repo_path: &str, workspace_path: &str) -> Result<(), String> {
   let workspace = Path::new(workspace_path);
@@ -640,6 +680,49 @@ mod tests {
       catalog.skills[0].route.as_deref(),
       Some("/skills/openai/curated/x")
     );
+  }
+
+  #[test]
+  fn parse_skill_install_link_reads_the_catalog_id() {
+    assert_eq!(
+      parse_skill_install_link("treq://skill/install?id=anthropic%2Fpdf").as_deref(),
+      Some("anthropic/pdf")
+    );
+    assert_eq!(
+      parse_skill_install_link("treq://skill/install?id=openai%2F.curated%2Fx").as_deref(),
+      Some("openai/.curated/x")
+    );
+  }
+
+  #[test]
+  fn parse_skill_install_link_rejects_other_routes_and_unsafe_ids() {
+    let long = format!("treq://skill/install?id={}", "x".repeat(201));
+    for url in [
+      "treq://auth/callback?token=abc",
+      "treq://skill/uninstall?id=anthropic%2Fpdf",
+      "treq://skill/install/extra?id=anthropic%2Fpdf",
+      "https://treq.dev/skill/install?id=anthropic%2Fpdf",
+      "treq://skill/install",
+      "treq://skill/install?id=",
+      "treq://skill/install?id=..%2Fetc",
+      "treq://skill/install?id=a%2F..%2Fb",
+      "treq://skill/install?id=%2Fabs",
+      "treq://skill/install?id=a%5Cb",
+      "treq://skill/install?id=a%20b",
+      "treq://skill/install?id=a%2F",
+      long.as_str(),
+      "not a url",
+    ] {
+      assert_eq!(parse_skill_install_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn customize_prompt_names_both_copies() {
+    let prompt = customize_skill_prompt("demo", ".agents/skills/demo", ".claude/skills/demo");
+    assert!(prompt.contains("\"demo\""));
+    assert!(prompt.contains(".agents/skills/demo/"));
+    assert!(prompt.contains(".claude/skills/demo/"));
   }
 
   #[test]
