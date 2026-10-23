@@ -1112,7 +1112,7 @@ fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut Tes
     ..FakeHost::default()
   });
   let window = Window::open(cx, host.clone(), None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
