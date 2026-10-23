@@ -405,7 +405,7 @@
           }
         },
         {
-          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )"
+          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"danger\", theme::ICON_X, \"Remove\", &p)\n      .tone(Tone::Danger)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )"
         }
       ],
       "knobs": [
@@ -432,10 +432,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/light/default.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "2608e5be3e59ecf8"
+          "hash": "c01cecbe2d6b1d98"
         },
         {
           "theme": "light",
@@ -444,10 +444,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/light/size=small.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "86eba6428d81defb"
+          "hash": "4d4852d13d612951"
         },
         {
           "theme": "dark",
@@ -457,10 +457,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/dark/default.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "883e762a4641411d"
+          "hash": "6946fe572ea6b105"
         },
         {
           "theme": "dark",
@@ -469,10 +469,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/dark/size=small.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "ed40a8c74cdde475"
+          "hash": "41070760b15aaf70"
         }
       ]
     },
@@ -775,20 +775,20 @@
           "key": "",
           "is_default": true,
           "file": "snapshots/kbd/basic/light/default.png",
-          "width": 185,
+          "width": 211,
           "height": 48,
           "scale": 2.0,
-          "hash": "844888469421bd53"
+          "hash": "d4649228309d5a33"
         },
         {
           "theme": "dark",
           "key": "",
           "is_default": true,
           "file": "snapshots/kbd/basic/dark/default.png",
-          "width": 185,
+          "width": 211,
           "height": 48,
           "scale": 2.0,
-          "hash": "1fec4e0c5fd53481"
+          "hash": "3e6009c1bddd7037"
         }
       ]
     },
@@ -1163,7 +1163,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "de8244dccd857c30"
+          "hash": "964bfcd8b8c0a67f"
         },
         {
           "theme": "dark",
@@ -1173,7 +1173,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "18ea8f030c1e3346"
+          "hash": "e18ebc9995865a45"
         }
       ]
     },
@@ -1199,7 +1199,13 @@
           "knob": "conflict"
         },
         {
-          "text": " {\n        changes.dot(Tone::Danger)\n      } else {\n        changes\n      }\n    },\n    Tab::new(\"logs\", \"Logs\"),\n  ])\n  .selected(1)"
+          "text": " {\n        changes.dot(Tone::Danger)\n      } else {\n        changes\n      }\n    },\n    {\n      let logs = Tab::new(\"logs\", \"Logs\");\n      if "
+        },
+        {
+          "knob": "badge"
+        },
+        {
+          "text": " {\n        logs.badge(\"PRO\", Tone::Neutral)\n      } else {\n        logs\n      }\n    },\n  ])\n  .selected(1)"
         }
       ],
       "knobs": [
@@ -1216,6 +1222,11 @@
           "name": "conflict",
           "type": "bool",
           "default": false
+        },
+        {
+          "name": "badge",
+          "type": "bool",
+          "default": false
         }
       ],
       "themes": [
@@ -1225,8 +1236,9 @@
       "variants": [
         {
           "theme": "light",
-          "key": "style=segmented,conflict=false",
+          "key": "style=segmented,conflict=false,badge=false",
           "values": {
+            "badge": false,
             "conflict": false,
             "style": "segmented"
           },
@@ -1239,21 +1251,9 @@
         },
         {
           "theme": "light",
-          "key": "style=segmented,conflict=true",
+          "key": "style=underline,conflict=false,badge=false",
           "values": {
-            "conflict": true,
-            "style": "segmented"
-          },
-          "file": "snapshots/tabs/playground/light/conflict=true.png",
-          "width": 286,
-          "height": 58,
-          "scale": 2.0,
-          "hash": "422eaead5c367a76"
-        },
-        {
-          "theme": "light",
-          "key": "style=underline,conflict=false",
-          "values": {
+            "badge": false,
             "conflict": false,
             "style": "underline"
           },
@@ -1265,21 +1265,37 @@
         },
         {
           "theme": "light",
-          "key": "style=underline,conflict=true",
+          "key": "style=segmented,conflict=true,badge=false",
           "values": {
+            "badge": false,
             "conflict": true,
-            "style": "underline"
+            "style": "segmented"
           },
-          "file": "snapshots/tabs/playground/light/style=underline,conflict=true.png",
-          "width": 265,
-          "height": 54,
+          "file": "snapshots/tabs/playground/light/conflict=true.png",
+          "width": 286,
+          "height": 58,
           "scale": 2.0,
-          "hash": "e33aa558a7aaf52d"
+          "hash": "422eaead5c367a76"
+        },
+        {
+          "theme": "light",
+          "key": "style=segmented,conflict=false,badge=true",
+          "values": {
+            "badge": true,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/light/badge=true.png",
+          "width": 310,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "3bb232b17f215a1d"
         },
         {
           "theme": "dark",
-          "key": "style=segmented,conflict=false",
+          "key": "style=segmented,conflict=false,badge=false",
           "values": {
+            "badge": false,
             "conflict": false,
             "style": "segmented"
           },
@@ -1292,21 +1308,9 @@
         },
         {
           "theme": "dark",
-          "key": "style=segmented,conflict=true",
+          "key": "style=underline,conflict=false,badge=false",
           "values": {
-            "conflict": true,
-            "style": "segmented"
-          },
-          "file": "snapshots/tabs/playground/dark/conflict=true.png",
-          "width": 286,
-          "height": 55,
-          "scale": 2.0,
-          "hash": "c1061020c3abc287"
-        },
-        {
-          "theme": "dark",
-          "key": "style=underline,conflict=false",
-          "values": {
+            "badge": false,
             "conflict": false,
             "style": "underline"
           },
@@ -1318,16 +1322,31 @@
         },
         {
           "theme": "dark",
-          "key": "style=underline,conflict=true",
+          "key": "style=segmented,conflict=true,badge=false",
           "values": {
+            "badge": false,
             "conflict": true,
-            "style": "underline"
+            "style": "segmented"
           },
-          "file": "snapshots/tabs/playground/dark/style=underline,conflict=true.png",
-          "width": 265,
-          "height": 54,
+          "file": "snapshots/tabs/playground/dark/conflict=true.png",
+          "width": 286,
+          "height": 55,
           "scale": 2.0,
-          "hash": "1ed6f2cbc447da38"
+          "hash": "c1061020c3abc287"
+        },
+        {
+          "theme": "dark",
+          "key": "style=segmented,conflict=false,badge=true",
+          "values": {
+            "badge": true,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/dark/badge=true.png",
+          "width": 310,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "12ed505c34f35022"
         }
       ]
     },
@@ -1373,7 +1392,7 @@
       "component": "Menu",
       "code": [
         {
-          "text": "let p = p(cx);\ndiv()\n  .w(px(240.))\n  .p_1()\n  .rounded(px(theme::RADIUS_MD))\n  .border_1()\n  .border_color(p.border)\n  .bg(p.popover)\n  .child(MenuItem::new(\"copy\", \"Copy branch name\", &p).shortcut(\"secondary-c\"))\n  .child(MenuItem::new(\"rename\", \"Rename…\", &p))\n  .child(MenuItem::new(\"open-pr\", \"Open pull request\", &p).disabled(true))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"main\", \"main\", &p).checked(true))\n  .child(MenuItem::new(\"develop\", \"develop\", &p).checked(false))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"delete\", \"Delete workspace…\", &p).danger())"
+          "text": "let p = p(cx);\ndiv()\n  .w(px(240.))\n  .p_1()\n  .rounded(px(theme::RADIUS_MD))\n  .border_1()\n  .border_color(p.border)\n  .bg(p.popover)\n  .child(MenuItem::new(\"copy\", \"Copy branch name\", &p).shortcut(\"secondary-c\"))\n  .child(MenuItem::new(\"rename\", \"Rename…\", &p))\n  .child(\n    MenuItem::new(\"plan\", \"Plan\", &p)\n      .description(\"Plan the change first, without editing files\"),\n  )\n  .child(MenuItem::new(\"open-pr\", \"Open pull request\", &p).disabled(true))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"main\", \"main\", &p).checked(true))\n  .child(MenuItem::new(\"develop\", \"develop\", &p).checked(false))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"delete\", \"Delete workspace…\", &p).danger())"
         }
       ],
       "themes": [
@@ -1387,9 +1406,9 @@
           "is_default": true,
           "file": "snapshots/menu/items/light/default.png",
           "width": 272,
-          "height": 189,
+          "height": 230,
           "scale": 2.0,
-          "hash": "613f0cd401781562"
+          "hash": "ca312faa2333be81"
         },
         {
           "theme": "dark",
@@ -1397,9 +1416,9 @@
           "is_default": true,
           "file": "snapshots/menu/items/dark/default.png",
           "width": 272,
-          "height": 189,
+          "height": 230,
           "scale": 2.0,
-          "hash": "da875099bb685dfb"
+          "hash": "e0c7b11e68b777b7"
         }
       ]
     },
@@ -1510,7 +1529,7 @@
           "width": 592,
           "height": 292,
           "scale": 2.0,
-          "hash": "22990fbd0d7abce2"
+          "hash": "e2fb52f576efb791"
         },
         {
           "theme": "dark",
@@ -1520,7 +1539,7 @@
           "width": 592,
           "height": 292,
           "scale": 2.0,
-          "hash": "dc8fa7b6d79f8333"
+          "hash": "ec8c55975685409d"
         }
       ]
     }

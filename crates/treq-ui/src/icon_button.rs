@@ -2,7 +2,7 @@
 
 use gpui::{prelude::*, App, ClickEvent, MouseDownEvent, SharedString, Window};
 
-use crate::{theme::Palette, zpx, Button, Size, Variant};
+use crate::{theme::Palette, zpx, Button, Size, Tone, Variant};
 
 /// How big an [`IconButton`] is: 24 inside rows, 28 in toolbars and headers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -31,6 +31,7 @@ pub struct IconButton {
   icon: &'static str,
   size: IconButtonSize,
   selected: bool,
+  tone: Option<Tone>,
   palette: Palette,
 }
 
@@ -49,6 +50,7 @@ impl IconButton {
       icon,
       size: IconButtonSize::default(),
       selected: false,
+      tone: None,
       palette: *palette,
     }
   }
@@ -67,6 +69,13 @@ impl IconButton {
   /// A toggle that is on, such as the panel it shows being open.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
+    self
+  }
+
+  /// Colours the icon with a state, such as danger for a command that
+  /// deletes. Selected keeps the primary colour.
+  pub fn tone(mut self, tone: Tone) -> Self {
+    self.tone = Some(tone);
     self
   }
 
@@ -105,6 +114,7 @@ impl RenderOnce for IconButton {
       .icon(self.icon, icon)
       .w(zpx(side))
       .h(zpx(side))
+      .when_some(self.tone, |b, tone| b.text_color(tone.color(&p)))
       .when(self.selected, |b| b.text_color(p.primary))
   }
 }
@@ -121,9 +131,11 @@ mod tests {
       .outline()
       .size(IconButtonSize::Small)
       .selected(true)
+      .tone(Tone::Danger)
       .disabled(true);
     assert_eq!(button.size.metrics(), (24., 14.));
     assert!(button.selected);
+    assert_eq!(button.tone, Some(Tone::Danger));
     assert_eq!(IconButtonSize::default().metrics(), (28., 16.));
   }
 }

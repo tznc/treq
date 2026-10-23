@@ -41,7 +41,7 @@ fn styleguide() -> Styleguide {
     .describe(
       "IconButton",
       "An icon-only button, 24 in rows and 28 in toolbars. Its label is required: it is the \
-       accessible name and the tooltip.",
+       accessible name and the tooltip. A tone colours the icon for state, such as danger.",
     )
     .describe(
       "SplitButton",
@@ -60,7 +60,7 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Kbd",
-      "Shortcuts in the platform's glyphs: ⌘K on macOS, Ctrl K elsewhere.",
+      "Shortcuts in the platform's names with \" + \" between keys: ⌘ + K on macOS, Ctrl + K elsewhere.",
     )
     .describe(
       "Alert",
@@ -69,8 +69,8 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Tabs",
-      "Segmented switches views of one thing; underline switches panels. Counts trail the \
-       label; a problem is a dot.",
+      "Segmented switches views of one thing; underline switches panels. A badge labels \
+       the tab (a plan chip), counts trail the label, and a problem is a dot.",
     )
     .describe(
       "Row",
@@ -79,7 +79,8 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Menu",
-      "Rows 28 tall: icon, label, shortcut. Values get a check; destructive items go last.",
+      "Rows 28 tall: icon, label, shortcut; a description adds a muted second line. Values \
+       get a check; destructive items go last.",
     )
     .describe(
       "Dialog",
@@ -178,6 +179,11 @@ fn buttons() -> Vec<Example> {
             .size(size),
         )
         .child(
+          IconButton::new("danger", theme::ICON_X, "Remove", &p)
+            .tone(Tone::Danger)
+            .size(size),
+        )
+        .child(
           IconButton::new("disabled", theme::ICON_X, "Close", &p)
             .disabled(true)
             .size(size),
@@ -185,7 +191,7 @@ fn buttons() -> Vec<Example> {
     })
     .component("IconButton")
     .title("States")
-    .size(200., 56.),
+    .size(232., 56.),
     example!("split-button/playground", |knobs, _, cx| {
       let p = p(cx);
       SplitButton::new("push", "Push", &p)
@@ -392,7 +398,14 @@ fn navigation() -> Vec<Example> {
               changes
             }
           },
-          Tab::new("logs", "Logs"),
+          {
+            let logs = Tab::new("logs", "Logs");
+            if knobs.bool("badge", false) {
+              logs.badge("PRO", Tone::Neutral)
+            } else {
+              logs
+            }
+          },
         ])
         .selected(1)
     })
@@ -448,6 +461,10 @@ fn navigation() -> Vec<Example> {
         .bg(p.popover)
         .child(MenuItem::new("copy", "Copy branch name", &p).shortcut("secondary-c"))
         .child(MenuItem::new("rename", "Rename…", &p))
+        .child(
+          MenuItem::new("plan", "Plan", &p)
+            .description("Plan the change first, without editing files"),
+        )
         .child(MenuItem::new("open-pr", "Open pull request", &p).disabled(true))
         .child(MenuSeparator::new(&p))
         .child(MenuItem::new("main", "main", &p).checked(true))

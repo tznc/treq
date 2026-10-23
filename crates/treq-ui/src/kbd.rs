@@ -4,8 +4,8 @@ use gpui::{div, prelude::*, App, Keystroke, SharedString, Window};
 
 use crate::{text, theme::Palette, zpx, TextSize};
 
-/// A shortcut, such as `⌘K` on macOS and `Ctrl K` elsewhere: the
-/// platform's glyphs, never " + " between keys.
+/// A shortcut, such as `⌘ + K` on macOS and `Ctrl + K` elsewhere: the
+/// platform's names, with " + " between keys.
 #[derive(IntoElement)]
 pub struct Kbd {
   label: SharedString,
@@ -83,7 +83,7 @@ impl Kbd {
       .filter(|(on, _)| *on)
       .map(|(_, name)| name.to_string())
       .chain([key_name]);
-    parts.collect::<Vec<_>>().join(if mac { "" } else { " " })
+    parts.collect::<Vec<_>>().join(" + ")
   }
 }
 
@@ -117,10 +117,10 @@ mod tests {
 
   #[test]
   fn formats_with_each_platforms_glyphs() {
-    assert_eq!(format("cmd-k", true), "⌘K");
-    assert_eq!(format("cmd-shift-p", true), "⇧⌘P");
-    assert_eq!(format("ctrl-k", false), "Ctrl K");
-    assert_eq!(format("ctrl-shift-enter", false), "Ctrl Shift Enter");
+    assert_eq!(format("cmd-k", true), "⌘ + K");
+    assert_eq!(format("cmd-shift-p", true), "⇧ + ⌘ + P");
+    assert_eq!(format("ctrl-k", false), "Ctrl + K");
+    assert_eq!(format("ctrl-shift-enter", false), "Ctrl + Shift + Enter");
     assert_eq!(format("escape", true), "Esc");
     assert_eq!(format("f12", false), "F12");
   }
@@ -129,9 +129,9 @@ mod tests {
   fn test_kbd_builder() {
     let p = crate::theme::palette(false);
     let expected = if cfg!(target_os = "macos") {
-      "⌃K"
+      "⌃ + K"
     } else {
-      "Ctrl K"
+      "Ctrl + K"
     };
     assert_eq!(Kbd::new("ctrl-k", &p).label.as_ref(), expected);
   }
