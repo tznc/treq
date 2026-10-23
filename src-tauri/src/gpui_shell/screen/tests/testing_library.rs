@@ -495,8 +495,8 @@ fn code_tab_marks_each_file_status_and_hides_untouched_files(cx: &mut TestAppCon
     ("committed.txt", "Committed"),
     ("dirty.txt", "Working copy change"),
   ] {
-    expect(&screen.get_by_role(by::role(Role::Button).name(file))).to_be_visible();
-    expect(&screen.get_by_role(by::role(Role::Image).name(status))).to_be_visible();
+    expect(screen.get_by_role(by::role(Role::Button).name(file))).to_be_visible();
+    expect(screen.get_by_role(by::role(Role::Image).name(status))).to_be_visible();
   }
   assert!(screen
     .query_by_role(by::role(Role::Button).name(".gitignore"))
@@ -505,7 +505,7 @@ fn code_tab_marks_each_file_status_and_hides_untouched_files(cx: &mut TestAppCon
   let toggle = screen.get_by_role(by::role(Role::Button).name("Show 1 unchanged file"));
   expect(&toggle).to_be_collapsed();
   user.click(&toggle);
-  expect(&screen.get_by_role(by::role(Role::Button).name(".gitignore"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name(".gitignore"))).to_be_visible();
   let hide = screen.get_by_role(by::role(Role::Button).name("Hide unchanged files"));
   expect(&hide).to_be_expanded();
   user.click(&hide);
@@ -518,7 +518,7 @@ fn code_tab_marks_each_file_status_and_hides_untouched_files(cx: &mut TestAppCon
 fn code_tab_keeps_entries_without_a_status_visible(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   let screen = screen(&mut h);
-  expect(&screen.get_by_role(by::role(Role::Button).name("README.md"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name("README.md"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::Button).name("Show 1 unchanged file"))
     .is_none());

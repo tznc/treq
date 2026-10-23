@@ -1,20 +1,41 @@
 // TREQ-195 and TREQ-45: the Code tab's file list marks each top-level
 // file's status and folds untouched files behind a toggle; a PR's Treq
 // checks open the workspace setup script's commands and output.
+import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { appBinary } from "../env.ts";
 import { fixture } from "../fixture.ts";
+import { workspaceDir } from "../landing/seed.ts";
 import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, overlay, ready, settle } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
-const PRS_TAB = { x: 156, y: 62 };
+const PRS_TAB = { x: 422, y: 62 };
 const FIRST_ROW = { x: 700, y: 147 };
 
 test.describe.configure({ mode: "serial" });
 
+/**
+ * Gives the workspace a committed top-level file (blue) and an uncommitted
+ * one (yellow) beside its conflicted `packages` (red). The commit takes the
+ * workspace's uncommitted edits with it, so this spec runs after the others.
+ */
+function seedStatuses(): void {
+  const { repo, home } = fixture();
+  const dir = workspaceDir(repo, BRANCH);
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n- Handle empty event messages\n");
+  execFileSync(appBinary, ["commit", BRANCH, "-m", "docs: add a changelog"], {
+    cwd: repo,
+    env: { ...process.env, HOME: home, TREQ_APP_DATA_DIR: join(home, ".local/share/com.treq") },
+    stdio: "pipe",
+  });
+  writeFileSync(join(dir, "NOTES.md"), "Follow up on Slack retries.\n");
+}
+
 test("file-status: Code tab file list", async ({ page }) => {
+  seedStatuses();
   await openWorkspace(page, BRANCH);
   await openTab(page, "Code");
   const show = page.getByRole("button", { name: /^Show \d+ unchanged files?$/ });
@@ -25,8 +46,8 @@ test("file-status: Code tab file list", async ({ page }) => {
     name: "21-file-status-01-changed-only",
     title: "Code tab: changed files only",
     expectations: [
-      "Only changed top-level entries are listed, each with a coloured pip at the right",
-      "The conflicted entry (packages) has a red name and a red pip",
+      "packages (conflicted) has a red name and red pip; CHANGELOG.md a blue pip; NOTES.md a yellow pip",
+      "README.md and .gitignore (untouched) are not listed",
       "A 'Show N unchanged files' row with a right chevron closes the list",
     ],
   });
@@ -47,7 +68,14 @@ test("file-status: Code tab file list", async ({ page }) => {
 
 async function prDetail(page: Page): Promise<void> {
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
+  await page.keyboard.press("Escape");
+  const github = page.getByRole("button", { name: "Github", exact: true });
+  await expect(async () => {
+    await github.click();
+    await expect(page.getByRole("button", { name: "Github", selected: true })).toBeVisible({
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 20_000 });
   await settle(page, 2000);
   await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
   await settle(page, 1500);
@@ -97,7 +125,7 @@ test("setup-output: PR detail Treq checks", async ({ page, context }) => {
       title: "PR detail: setup output collapsed",
       expectations: [
         "The setup row is one line with a right chevron and the Re-run setup script button",
-        "The workflow cards follow directly below it",
+        "The commands and output blocks are gone; the rest of the Treq checks section follows directly below",
       ],
     });
   } finally {
