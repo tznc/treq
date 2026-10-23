@@ -1,5 +1,4 @@
 // Command modules
-pub mod agent_review;
 pub mod binary;
 pub mod cloud;
 pub mod github;

@@ -339,7 +339,7 @@ impl ChangesHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Err(unsupported("Applying a review suggestion"));
     }
-    crate::commands::agent_review::apply_agent_review_suggestion(repo_path.into(), id.into())
+    crate::core::agent_review::apply_agent_review_suggestion(repo_path.into(), id.into())
   }
 
   fn apply_suggestion(
@@ -353,7 +353,7 @@ impl ChangesHost for Backend {
     if self.remote_containing(workspace_path).is_some() {
       return Err(unsupported("Applying a suggestion"));
     }
-    crate::commands::agent_review::splice_lines(
+    crate::core::agent_review::splice_lines(
       workspace_path,
       path,
       start.into(),

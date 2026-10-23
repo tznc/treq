@@ -3385,7 +3385,13 @@ pub fn build_ssh_shell_command(
   }
   Ok((
     "ssh".to_string(),
-    vec![host.to_string(), "-t".to_string(), remote_command],
+    // `--` stops ssh reading the host as an option.
+    vec![
+      "-t".to_string(),
+      "--".to_string(),
+      host.to_string(),
+      remote_command,
+    ],
   ))
 }
 
@@ -3446,9 +3452,10 @@ fn validate_host_alias(host: &str) -> Result<(), String> {
   if host.trim().is_empty() {
     return Err("SSH host is required".to_string());
   }
-  if host
-    .chars()
-    .any(|c| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '`' | '$' | '<' | '>'))
+  if host.starts_with('-')
+    || !host
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | ':' | '-'))
   {
     return Err("SSH host must be a host alias from ssh config".to_string());
   }
@@ -3691,13 +3698,29 @@ mod tests {
   fn builds_ssh_shell_command_with_working_dir() {
     let (program, args) = build_ssh_shell_command("devbox", Some("/srv/my app"), None).unwrap();
     assert_eq!(program, "ssh");
-    assert_eq!(args[0], "devbox");
-    assert!(args[2].contains("cd '/srv/my app'"));
+    assert_eq!(args[..3], ["-t", "--", "devbox"]);
+    assert!(args[3].contains("cd '/srv/my app'"));
   }
 
   #[test]
   fn rejects_unsafe_host_aliases() {
-    assert!(build_ssh_shell_command("dev; rm -rf /", None, None).is_err());
+    for bad in [
+      "dev; rm -rf /",
+      "-oProxyCommand=touch /tmp/pwned",
+      "-V",
+      "dev\tbox",
+      "dev'box",
+    ] {
+      assert!(build_ssh_shell_command(bad, None, None).is_err(), "{bad}");
+    }
+    for good in [
+      "devbox",
+      "me@dev-box.example.com",
+      "dev_box:2222",
+      "10.0.0.1",
+    ] {
+      assert!(build_ssh_shell_command(good, None, None).is_ok(), "{good}");
+    }
   }
 
   #[test]
