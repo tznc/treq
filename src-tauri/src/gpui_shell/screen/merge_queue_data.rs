@@ -28,7 +28,7 @@ impl MergeQueueHost for crate::gpui_shell::native::Backend {
   fn merge_queue(&self, full_name: &str) -> Result<(bool, Vec<QueueEntry>), String> {
     let cloud = crate::commands::cloud::owned_cloud(self.app())
       .ok_or("The account is not available in this window.")?;
-    tauri::async_runtime::block_on(async {
+    crate::gpui_shell::block_on(async {
       let enabled = account::queue_enabled(&cloud.supabase, full_name).await?;
       let entries = if enabled {
         account::queue_entries(&cloud.supabase, full_name).await?
@@ -43,7 +43,7 @@ impl MergeQueueHost for crate::gpui_shell::native::Backend {
   fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String> {
     let cloud = crate::commands::cloud::owned_cloud(self.app())
       .ok_or("The account is not available in this window.")?;
-    tauri::async_runtime::block_on(account::dequeue_branches(
+    crate::gpui_shell::block_on(account::dequeue_branches(
       &cloud.supabase,
       full_name,
       branches,

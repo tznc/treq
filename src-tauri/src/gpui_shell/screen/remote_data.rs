@@ -55,7 +55,7 @@ impl RemoteHost for Backend {
   }
 
   fn probe_host_key(&self, hostname: &str, port: u16) -> Result<String, String> {
-    tauri::async_runtime::block_on(remote_ssh_host_key_probe::probe_host_key_fingerprint(
+    crate::gpui_shell::block_on(remote_ssh_host_key_probe::probe_host_key_fingerprint(
       hostname, port,
     ))
   }
@@ -76,7 +76,7 @@ impl RemoteHost for Backend {
       .app()
       .state::<crate::commands::remote_control::RemoteExecState>();
     let cancellation = CancellationToken::new();
-    tauri::async_runtime::block_on(remote::execute_remote_command::<Vec<PtySessionInfo>>(
+    crate::gpui_shell::block_on(remote::execute_remote_command::<Vec<PtySessionInfo>>(
       &exec.0,
       endpoint,
       remote::TreqCommandRequest::PtyList {

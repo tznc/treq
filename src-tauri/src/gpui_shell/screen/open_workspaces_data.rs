@@ -173,7 +173,7 @@ impl OpenWorkspacesHost for Backend {
 
   fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String> {
     self.local_only(repo_path, "Opening a Linear issue's workspace")?;
-    let opened = tauri::async_runtime::block_on(
+    let opened = crate::gpui_shell::block_on(
       crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, issue),
     )?;
     if opened.created {
