@@ -12,7 +12,10 @@ use crate::{
     account::{self, QueueAction},
     supabase::ApiError,
   },
-  gpui_shell::native::{Backend, NativeEvent, ToastTone},
+  gpui_shell::{
+    confirm::Question,
+    native::{Backend, NativeEvent, ToastTone},
+  },
 };
 
 /// What the workspace actions ask of the backend; faked in tests. All but
@@ -23,8 +26,6 @@ pub trait WorkspaceActionsHost: GithubHost + MergeQueueHost {
   fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError>;
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
-  /// A Yes/No question in a native dialog.
-  fn ask(&self, title: &str, message: &str) -> bool;
 }
 
 impl WorkspaceActionsHost for Backend {
@@ -46,10 +47,6 @@ impl WorkspaceActionsHost for Backend {
       return remote.archive_workspace(workspace_id);
     }
     core::archive_workspace_removing_directory_later(repo_path, workspace_id)
-  }
-
-  fn ask(&self, title: &str, message: &str) -> bool {
-    self.ask_native(title, message, crate::gpui_shell::question::Buttons::YesNo)
   }
 }
 
@@ -86,24 +83,24 @@ impl Removed {
   }
 }
 
-/// `handleDelete`: asks first, then deletes, toasts and tells React.
-/// Returns whether the workspace went, so its terminals close.
+/// What `handleDelete` asks before [`delete`].
+pub fn delete_question(workspace: &Removed) -> Question {
+  Question::new(
+    format!("Delete {}?", workspace.branch),
+    "Its checkout is removed from disk. This can't be undone.",
+    "Delete workspace",
+  )
+  .destructive()
+}
+
+/// `handleDelete`, once confirmed ([`delete_question`]): deletes, toasts
+/// and tells React. Returns whether the workspace went, so its terminals
+/// close.
 pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
-  if !host.ask(
-    "Delete Workspace",
-    &format!("Delete workspace {}?", workspace.branch),
-  ) {
-    return false;
-  }
   match host.delete_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
-      toast(
-        host,
-        ToastTone::Success,
-        "Workspace Deleted",
-        "Workspace has been deleted",
-      );
+      toast(host, ToastTone::Success, "Workspace deleted", "");
       true
     }
     Err(err) => {
@@ -118,12 +115,7 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
   match host.archive_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
-      toast(
-        host,
-        ToastTone::Success,
-        "Workspace Archived",
-        "Workspace directory removed; record kept",
-      );
+      toast(host, ToastTone::Success, "Workspace archived", "");
       true
     }
     Err(err) => {
@@ -151,8 +143,8 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     toast(
       host,
       ToastTone::Success,
-      &format!("{n} Workspace{s} Archived"),
-      &format!("Archived {n} workspace{s}"),
+      &format!("{n} workspace{s} archived"),
+      "",
     );
     removed(
       host,

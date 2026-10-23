@@ -48,7 +48,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
     "{writes:?}"
   );
   assert!(
-    writes.contains(&"notify toast Settings Saved".to_string()),
+    writes.contains(&"notify toast Settings saved".to_string()),
     "{writes:?}"
   );
 }

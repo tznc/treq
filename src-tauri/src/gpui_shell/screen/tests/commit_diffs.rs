@@ -145,8 +145,14 @@ fn commit_rows_open_a_context_menu(cx: &mut TestAppContext) {
     h.cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
     Some("a")
   );
-  assert!(host.calls().contains(&"notify toast Copied".to_string()));
+  assert!(host
+    .calls()
+    .contains(&"notify toast Commit ID copied".to_string()));
   h.pick("Revert commit");
-  h.cx.run_until_parked();
+  assert!(
+    !host.writes().contains(&"revert a".to_string()),
+    "asks first"
+  );
+  h.answer("Revert commit");
   assert!(host.writes().contains(&"revert a".to_string()));
 }

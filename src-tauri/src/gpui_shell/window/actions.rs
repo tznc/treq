@@ -13,8 +13,8 @@ use serde_json::{json, Value};
 use super::{
   data::Data,
   model::{
-    workspace_source, ChangeMove, Effect, FolderPurpose, GithubTab, Model, Page, PendingSelect,
-    Tab, TerminalSummary,
+    self, workspace_source, ChangeMove, Confirm, Effect, FolderPurpose, GithubTab, Model, Page,
+    PendingSelect, Tab, TerminalSummary,
   },
   sidebar, snapshots, tree,
 };
@@ -72,6 +72,13 @@ fn with(effect: Effect) -> Handled {
 impl Model {
   /// A keyboard shortcut.
   pub fn shortcut(&mut self, shortcut: Shortcut, data: &Data) -> Vec<Effect> {
+    // A confirmation takes every key until it is answered.
+    if self.confirm.is_some() {
+      return match shortcut {
+        Shortcut::Escape => self.answer(false),
+        _ => Vec::new(),
+      };
+    }
     let repo = self.has_repo();
     // One dialog at a time: Escape only reaches the one on top.
     let free = !self.dialogs.any_open();
@@ -888,9 +895,7 @@ impl Model {
           repo_path.clone(),
         ))]
       }
-      OpenRequest::RemoveRepo { repo_path } => {
-        return vec![Effect::RemoveSupporting(repo_path.clone())]
-      }
+      OpenRequest::RemoveRepo { repo_path } => self.ask(Confirm::remove_supporting(repo_path)),
       OpenRequest::RenameWorkspace {
         repo_path,
         workspace_id,
@@ -920,7 +925,7 @@ impl Model {
         self.page = Page::Workspace;
         self.open_logs("system");
       }
-      Menu::FactoryReset => return vec![Effect::FactoryReset],
+      Menu::FactoryReset => self.ask(Confirm::factory_reset()),
       Menu::ForceRebase => {
         let Some(workspace) = self.selected_workspace(data).cloned() else {
           return vec![Effect::Toast {
@@ -940,13 +945,7 @@ impl Model {
           branch,
         }];
       }
-      Menu::OpenInNewWindowInvalid => {
-        return vec![Effect::Toast {
-          tone: ToastTone::Error,
-          title: "Not a Git Repository".into(),
-          description: "Please select a folder that contains a git repository.".into(),
-        }]
-      }
+      Menu::OpenInNewWindowInvalid => return vec![model::not_a_repository()],
     }
     Vec::new()
   }

@@ -14,7 +14,10 @@ use super::{
   data::Data,
   remote::{Remote, RemoteEffect},
 };
-use crate::local_db::Workspace;
+use crate::{
+  gpui_shell::{confirm::Question, native::ToastTone},
+  local_db::Workspace,
+};
 
 /// `DEFAULT_SIDEBAR_WIDTH` and its clamp (`sidebarWidthStore`).
 pub const DEFAULT_SIDEBAR_WIDTH: f32 = 280.;
@@ -288,17 +291,27 @@ pub enum Effect {
     /// Shows the session's workspace once it starts (`launchAgentSession`).
     select: bool,
   },
-  /// Opens the repository at this path in this window (`openRepositoryAtPath`).
+  /// Opens the folder at this path in this window (`openRepositoryAtPath`),
+  /// first offering to initialize a repository in it if it has none.
   OpenRepoAt(String),
+  /// Opens the folder at this path in a new window, first offering to
+  /// initialize a repository in it if it has none.
+  OpenInNewWindow(String),
+  /// Initializes a Git repository in the folder at `path` (confirmed),
+  /// then opens it here or in a new window.
+  InitRepo {
+    path: String,
+    new_window: bool,
+  },
   /// Reads the app settings the window follows again.
   ReadPrefs,
   /// Drops a `treq send` attachment.
   DismissSendAsset(String),
-  /// Asks, then removes the supporting repository at this path.
+  /// Removes the supporting repository at this path (confirmed).
   RemoveSupporting(String),
   /// Opens the folder of the app's logs.
   OpenLogDir,
-  /// Asks, then clears the window's repository (Factory Reset).
+  /// Clears the window's repository (Factory Reset, confirmed).
   FactoryReset,
   /// Force-rebases the workspace onto `branch` (the Developer menu).
   ForceRebase {
@@ -307,7 +320,7 @@ pub enum Effect {
     branch: String,
   },
   Toast {
-    tone: super::super::native::ToastTone,
+    tone: ToastTone,
     title: String,
     description: String,
   },
@@ -319,6 +332,76 @@ pub enum Effect {
 impl From<RemoteEffect> for Effect {
   fn from(effect: RemoteEffect) -> Self {
     Self::Remote(Box::new(effect))
+  }
+}
+
+/// The toast for a folder that is not a repository and stays so.
+pub fn not_a_repository() -> Effect {
+  Effect::Toast {
+    tone: ToastTone::Error,
+    title: "Not a Git Repository".into(),
+    description: "Please select a folder that contains a git repository.".into(),
+  }
+}
+
+/// A confirmation on screen ([`crate::gpui_shell::confirm`]), and what
+/// answering it does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Confirm {
+  pub question: Question,
+  /// What the verb does.
+  pub confirmed: Effect,
+  /// What Cancel does, if anything.
+  pub declined: Option<Effect>,
+}
+
+impl Confirm {
+  /// Offers to initialize a Git repository in the folder at `path`, then
+  /// open it here or in a new window. Declined, the folder doesn't open.
+  pub fn init_repo(path: &str, new_window: bool) -> Self {
+    Self {
+      question: Question::new(
+        "Initialize a Git repository here?",
+        format!("{path} isn't a Git repository yet. Treq needs one to create workspaces."),
+        "Initialize",
+      ),
+      confirmed: Effect::InitRepo {
+        path: path.to_string(),
+        new_window,
+      },
+      declined: Some(not_a_repository()),
+    }
+  }
+
+  /// Removes the supporting repository at `path` from the window.
+  pub fn remove_supporting(path: &str) -> Self {
+    let name = path
+      .rsplit(['/', '\\'])
+      .find(|s| !s.is_empty())
+      .unwrap_or(path);
+    Self {
+      question: Question::new(
+        format!("Remove {name} from Treq?"),
+        format!("{path} leaves this window. Its files and workspaces aren't deleted."),
+        "Remove repository",
+      )
+      .destructive(),
+      confirmed: Effect::RemoveSupporting(path.to_string()),
+      declined: None,
+    }
+  }
+
+  pub fn factory_reset() -> Self {
+    Self {
+      question: Question::new(
+        "Reset Treq to factory settings?",
+        "This clears the saved repository path and returns to the start screen.",
+        "Reset",
+      )
+      .destructive(),
+      confirmed: Effect::FactoryReset,
+      declined: None,
+    }
   }
 }
 
@@ -356,6 +439,8 @@ pub struct Model {
   pub pending_select: Option<PendingSelect>,
   /// The remote dialogs, endpoint and repository.
   pub remote: Remote,
+  /// The confirmation on screen, over everything else.
+  pub confirm: Option<Confirm>,
 }
 
 /// A workspace to select once the window's data lists it.
@@ -419,6 +504,25 @@ impl Model {
     self.view = WorkspaceView::default();
     effects.push(Effect::Refresh { revision: true });
     effects
+  }
+
+  /// Puts `confirm` on screen, unless one already is, so a second click
+  /// can't stack another.
+  pub fn ask(&mut self, confirm: Confirm) {
+    if self.confirm.is_none() {
+      self.confirm = Some(confirm);
+    }
+  }
+
+  /// The confirmation answered: what its verb, or Cancel, does.
+  pub fn answer(&mut self, yes: bool) -> Vec<Effect> {
+    let Some(confirm) = self.confirm.take() else {
+      return Vec::new();
+    };
+    match yes {
+      true => vec![confirm.confirmed],
+      false => confirm.declined.into_iter().collect(),
+    }
   }
 
   /// `activateRepo`: puts a linked repository (or the main one) on screen.

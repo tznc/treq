@@ -1,12 +1,13 @@
 // A window opening on a folder that is not a repository, as a saved last
 // repository whose `.git` was deleted does: an app on its own port with
-// `TREQ_E2E_REPO` naming a plain folder. It shows onboarding and asks, in a
-// native Yes/No dialog, whether to initialize a Git repository there:
-// declined, the folder is left untouched; accepted, it opens as a repository.
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+// `TREQ_E2E_REPO` naming a plain folder. It shows onboarding and asks, in an
+// in-app confirmation, whether to initialize a Git repository there:
+// cancelled, the folder is left untouched; initialized, it opens as a
+// repository.
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
+import { chromium, expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
 import { appEnv, makeFixture, writeFakeAgent } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
@@ -74,38 +75,21 @@ async function stop({ app, browser }: App): Promise<void> {
   }
 }
 
-/** The native "Not a Git Repository" dialog's window, once it shows. */
-async function question(): Promise<string> {
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    try {
-      const id = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Not a Git Repository"], {
-        encoding: "utf8",
-      }).split("\n").filter(Boolean)[0];
-      if (id) return id;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("no 'Not a Git Repository' dialog");
-    await new Promise((r) => setTimeout(r, 300));
-  }
-}
-
-/** Clicks No (the left half of the button row) or Yes (the right half). */
-function answer(dialog: string, yes: boolean): void {
-  const geo = Object.fromEntries(
-    execFileSync("xdotool", ["getwindowgeometry", "--shell", dialog], { encoding: "utf8" })
-      .split("\n").filter(Boolean).map((l) => l.split("=")),
-  );
-  const x = Number(geo.X) + Number(geo.WIDTH) * (yes ? 0.75 : 0.25);
-  const y = Number(geo.Y) + Number(geo.HEIGHT) - 30;
-  execFileSync("xdotool", ["mousemove", "--sync", String(Math.round(x)), String(Math.round(y)), "click", "1"]);
+/** The "Initialize a Git repository here?" confirmation's buttons, once it shows. */
+async function question(page: Page): Promise<{ cancel: Locator; initialize: Locator }> {
+  const cancel = page.getByTestId("confirm-cancel");
+  const initialize = page.getByRole("button", { name: "Initialize", exact: true });
+  await expect(initialize).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Initialize a Git repository here?")).toBeVisible();
+  return { cancel, initialize };
 }
 
 test.describe.configure({ mode: "serial" });
 
-test("not-a-repository: asks, and declined leaves the folder alone", async () => {
+test("not-a-repository: asks, and cancelled leaves the folder alone", async () => {
   const run = await launch();
   try {
-    const dialog = await question();
+    const { cancel } = await question(run.page);
     await run.page.waitForTimeout(500);
     await capture(run.page, {
       name: "15-not-a-repository-01-asks",
@@ -113,16 +97,16 @@ test("not-a-repository: asks, and declined leaves the folder alone", async () =>
       screen: true,
       expectations: [
         "Onboarding shows behind the dialog, not a repository sidebar",
-        "A 'Not a Git Repository' Yes/No dialog asks to initialize the folder",
+        "An in-app 'Initialize a Git repository here?' dialog names the folder, with Cancel and Initialize",
       ],
     });
-    answer(dialog, false);
+    await cancel.click();
     const open = run.page.getByRole("button", { name: "Open Repository" });
     await expect(open).toBeVisible();
     await run.page.waitForTimeout(500);
     await capture(run.page, {
       name: "15-not-a-repository-02-declined",
-      title: "Declined: onboarding with an error",
+      title: "Cancelled: onboarding with an error",
       screen: true,
       expectations: [
         "The onboarding card shows",
@@ -139,7 +123,7 @@ test("not-a-repository: asks, and declined leaves the folder alone", async () =>
 test("not-a-repository: initialized, it opens as a repository", async () => {
   const run = await launch();
   try {
-    answer(await question(), true);
+    await (await question(run.page)).initialize.click();
     await expect(run.page.getByRole("button", { name: "Open Repository" })).toBeHidden({
       timeout: 30_000,
     });
@@ -150,7 +134,7 @@ test("not-a-repository: initialized, it opens as a repository", async () => {
       screen: true,
       expectations: [
         "The repository view shows, named plain-folder in the sidebar",
-        "A 'Repository Opened' toast",
+        "An 'Opened plain-folder' toast",
       ],
     });
     expect(existsSync(join(run.folder, ".git"))).toBe(true);

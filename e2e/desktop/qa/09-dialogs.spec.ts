@@ -6,7 +6,6 @@
 //
 // The create test makes a scratch workspace and the delete test removes
 // it again, so the sidebar is back to the seed for later areas.
-import { execFileSync } from "node:child_process";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import {
@@ -133,35 +132,25 @@ test("dialogs: delete workspace", async ({ page, context }) => {
     rest: false,
     expectations: ["Only the matching workspace remains, highlighted"],
   });
-  // Picking asks first, in a native (GTK) message dialog that blocks the
-  // app until it is answered; Enter would pick its default, so the
-  // confirmation's buttons are found on the screen instead.
+  // Picking asks first, in the in-app confirmation: the question names
+  // the workspace, and the buttons are Cancel and "Delete workspace".
   await dialog.keyboard.press("Enter").catch(() => {});
-  await page.waitForTimeout(2500);
+  const question = page.getByText(/^Delete .*qa-scratch.*\?$/);
+  const remove = page.getByTestId("confirm-confirm");
+  await expect(question).toBeVisible();
+  await expect(remove).toHaveAccessibleName("Delete workspace");
+  await settle(page, 800);
   await capture(page, {
     name: "09-delete-workspace-confirm",
-    title: "Delete Workspace: native confirmation",
+    title: "Delete Workspace: in-app confirmation",
     screen: true,
     rest: false,
-    expectations: ["The question names the workspace; Yes/No (or Delete/Cancel) buttons"],
+    expectations: [
+      "The title asks 'Delete <workspace>?' and the message says what is removed",
+      "Cancel and a red 'Delete workspace' button, bottom right",
+    ],
   });
-  // The GTK dialog sits at the screen's origin (no window manager): its
-  // Yes button is the right half of the bottom button row.
-  const ask = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "^Delete Workspace$"])
-    .toString()
-    .trim()
-    .split("\n")[0];
-  const g = Object.fromEntries(
-    execFileSync("xdotool", ["getwindowgeometry", "--shell", ask])
-      .toString()
-      .trim()
-      .split("\n")
-      .map((l) => l.split("=")),
-  );
-  const [x, y, w, h] = ["X", "Y", "WIDTH", "HEIGHT"].map((k) => Number(g[k]));
-  execFileSync("xdotool", [
-    "mousemove", String(x + Math.round(w * 0.75)), String(y + h - 30), "click", "1",
-  ]);
+  await remove.click();
   await page.waitForTimeout(2500);
   await capture(page, {
     name: "09-delete-workspace-deleted",
@@ -169,7 +158,7 @@ test("dialogs: delete workspace", async ({ page, context }) => {
     screen: true,
     rest: false,
     expectations: [
-      "'Workspace Deleted' toast; the row left the sidebar",
+      "'Workspace deleted' toast; the row left the sidebar",
       "The app lands on a sensible view (home), not an empty workspace",
     ],
   });

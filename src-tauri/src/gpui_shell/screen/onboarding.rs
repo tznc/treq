@@ -1,9 +1,10 @@
 //! `Onboarding`: the window with no repository open.
 //!
-//! Drawn from the backend directly: GPUI runs the prerequisite check and
-//! opens the repository itself, then tells React (see `native`). Only the
-//! remote button still goes to React, which opens the remote dialog GPUI
-//! draws (`screen/remote.rs`).
+//! Drawn from the backend directly: GPUI runs the prerequisite check
+//! itself. Open Repository goes to the window model, which asks for the
+//! folder, offers to initialize one that is not a repository, and opens it
+//! ([`open_repo_at`]); the remote button opens the remote dialog GPUI draws
+//! (`screen/remote.rs`).
 
 use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc};
@@ -16,7 +17,6 @@ use super::onboarding_remote;
 use super::{
   checklist::{self, Checklist, ToolsHost},
   settings_data::SettingsHost,
-  workspace_ops::WorkspaceActionsHost,
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
@@ -54,17 +54,11 @@ pub struct Onboarding {
 /// What the onboarding screen asks of the backend; faked in tests.
 pub trait OnboardingHost: ToolsHost {
   fn remote_ssh_enabled(&self) -> bool;
-  /// Asks for a folder, then opens it in this window.
-  fn pick_repo(&self);
 }
 
 impl OnboardingHost for Backend {
   fn remote_ssh_enabled(&self) -> bool {
     self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::RemoteSsh))
-  }
-
-  fn pick_repo(&self) {
-    pick_repo(self.clone());
   }
 }
 
@@ -149,7 +143,6 @@ impl OnboardingView {
 
   fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
     match action {
-      ScreenAction::OpenRepo => self.host.pick_repo(),
       ScreenAction::RecheckPrerequisites => self.check(cx),
       ScreenAction::OpenUrl { url } => self.host.open_url(&url),
       other => (self.react)(other, cx),
@@ -201,25 +194,6 @@ impl Render for OnboardingView {
   }
 }
 
-/// Asks for a folder, then opens it in this window.
-fn pick_repo(backend: Backend) {
-  // Tauri calls must not run inside the GPUI click that asked for this.
-  tauri::async_runtime::spawn(async move {
-    let app = backend.app().clone();
-    let _ = app.run_on_main_thread(move || {
-      use tauri_plugin_dialog::DialogExt;
-      let dialog = backend.app().dialog().file().set_title("Select Folder");
-      dialog.pick_folder(move |folder| {
-        let Some(path) = folder.and_then(|folder| folder.into_path().ok()) else {
-          return;
-        };
-        let path = path.to_string_lossy().into_owned();
-        tauri::async_runtime::spawn_blocking(move || open_repo_at(&backend, &path));
-      });
-    });
-  });
-}
-
 /// Opens the repository at `path` in this window, as React's
 /// `openRepositoryAtPath` does, and tells React it is open. Blocks.
 pub fn open_repo_at(backend: &Backend, path: &str) {
@@ -228,10 +202,12 @@ pub fn open_repo_at(backend: &Backend, path: &str) {
 
 /// `openRepositoryAtPath` through `host`; `shown` records the path as the
 /// window's (`setWindowRepoPath`). A folder that fails to open is not
-/// remembered as the last one.
+/// remembered as the last one. The window model has already offered to
+/// initialize a folder that is not a repository, so one still without a
+/// repository was declined.
 pub(super) fn open_repo<H>(host: &H, path: &str, shown: impl FnOnce(&str))
 where
-  H: SettingsHost + WorkspaceActionsHost + ?Sized,
+  H: SettingsHost + ?Sized,
 {
   let toast = |tone, title: &str, description: String| {
     SettingsHost::notify(
@@ -245,19 +221,12 @@ where
     )
   };
   if !core::is_repository(path) {
-    let question = format!("{path} is not a Git repository. Initialize one here?");
-    if !host.ask("Not a Git Repository", &question) {
-      toast(
-        ToastTone::Error,
-        "Not a Git Repository",
-        "Please select a folder that contains a git repository.".into(),
-      );
-      return;
-    }
-    if let Err(err) = core::init_git_repository(path) {
-      toast(ToastTone::Error, "Failed to open repository", err);
-      return;
-    }
+    toast(
+      ToastTone::Error,
+      "Not a Git Repository",
+      "Please select a folder that contains a git repository.".into(),
+    );
+    return;
   }
   if let Err(err) = core::init(path) {
     toast(
@@ -282,11 +251,7 @@ where
     .rsplit('/')
     .find(|part| !part.is_empty())
     .unwrap_or(path);
-  toast(
-    ToastTone::Success,
-    "Repository Opened",
-    format!("Now viewing {name}"),
-  );
+  toast(ToastTone::Success, &format!("Opened {name}"), String::new());
 }
 
 pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {

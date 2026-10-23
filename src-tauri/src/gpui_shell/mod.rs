@@ -18,6 +18,7 @@ use tauri_plugin_gpui::{
 };
 
 mod checks_run;
+mod confirm;
 #[cfg(feature = "e2e")]
 pub mod e2e;
 mod form;
@@ -31,7 +32,6 @@ pub mod native;
 mod overlay;
 mod popover;
 mod popup;
-pub(crate) mod question;
 pub mod remote_repo;
 mod screen;
 mod shortcuts;
@@ -106,6 +106,9 @@ struct Shell {
   os_dark: Option<bool>,
   /// Hands the window's shortcuts to its model.
   shortcuts: Option<gpui::Subscription>,
+  /// Focused while the model's confirmation shows, so it hears Enter and
+  /// Escape.
+  confirm_focus: Option<gpui::FocusHandle>,
 }
 
 impl Shell {
@@ -181,6 +184,7 @@ impl Render for Shell {
     let app = self.app.clone();
     ui::apply_zoom(window, cx);
     self.watch_shortcuts(window, cx);
+    let confirm = self.confirm(window, dark, cx);
     gpui::div()
       .size_full()
       .flex()
@@ -233,6 +237,37 @@ impl Render for Shell {
             this.child(gpui::div().flex_1().min_h_0().child(screen))
           }),
       )
+      .children(confirm)
+  }
+}
+
+impl Shell {
+  /// The model's confirmation, over everything; it takes the focus as it
+  /// opens.
+  fn confirm(
+    &mut self,
+    window: &mut gpui::Window,
+    dark: bool,
+    cx: &mut gpui::Context<Self>,
+  ) -> Option<ui::ConfirmDialog> {
+    let Some(question) = self.presented.as_ref().and_then(|p| p.confirm.clone()) else {
+      self.confirm_focus = None;
+      return None;
+    };
+    let focus = self
+      .confirm_focus
+      .get_or_insert_with(|| {
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
+        focus
+      })
+      .clone();
+    let label = self.label.to_string();
+    Some(
+      question.dialog(&focus, window, &theme::palette(dark), move |yes, _, cx| {
+        window::answer(&label, yes, cx)
+      }),
+    )
   }
 }
 
@@ -283,6 +318,7 @@ pub fn open_window(
       presented: None,
       os_dark: None,
       shortcuts: None,
+      confirm_focus: None,
     });
     cx.default_global::<Shells>()
       .0
