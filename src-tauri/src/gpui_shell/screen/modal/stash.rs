@@ -93,11 +93,7 @@ fn line_prefix(line: &str) -> &'static str {
 
 /// A diff line without its `+`, `-` or space marker.
 fn line_text(line: &str) -> &str {
-  if line.starts_with(['+', '-', ' ']) {
-    &line[1..]
-  } else {
-    line
-  }
+  line.strip_prefix(['+', '-', ' ']).unwrap_or(line)
 }
 
 /// `files_changed.length` as the list writes it.

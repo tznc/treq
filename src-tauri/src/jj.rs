@@ -1,3 +1,8 @@
+#![allow(
+  clippy::string_slice,
+  reason = "slices hex commit/change ids and git ref names at ASCII separators"
+)]
+
 use chrono::TimeZone;
 use futures::StreamExt as _;
 use futures::TryStreamExt as _;
@@ -814,20 +819,23 @@ fn build_log_commits(
   let cached_map = local_db::get_cached_commit_diff_stats_batch(cache_repo_path, &full_commit_ids)
     .unwrap_or_default();
 
-  commits
+  let mut misses = Vec::new();
+  let built = commits
     .into_iter()
     .map(|commit| {
       build_log_commit(
-        cache_repo_path,
         repo,
         &commit,
         wc_commit_ids,
         wc_tree_override,
         is_immutable,
         &cached_map,
+        &mut misses,
       )
     })
-    .collect()
+    .collect();
+  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  built
 }
 
 /// Short ids of conflicted `commits` whose conflict no longer reaches the tip
@@ -842,6 +850,9 @@ fn conflicts_resolved_by_descendants(
   wc_commit: Option<&Commit>,
   wc_tree_override: Option<(&jj_lib::backend::CommitId, &MergedTree)>,
 ) -> HashSet<String> {
+  if !commits.iter().any(|commit| commit.tree().has_conflict()) {
+    return HashSet::new();
+  }
   let index = repo.index();
   let is_ancestor =
     |a: &Commit, b: &Commit| a.id() != b.id() && index.is_ancestor(a.id(), b.id()).unwrap_or(false);
@@ -880,8 +891,9 @@ fn conflicts_resolved_by_descendants(
     .collect()
 }
 
+/// Pushes a commit missing from `cached_map` to `misses`, for the caller to
+/// cache in one transaction.
 fn build_log_commit(
-  cache_repo_path: &str,
   repo: &Arc<ReadonlyRepo>,
   commit: &jj_lib::commit::Commit,
   wc_commit_ids: &HashSet<jj_lib::backend::CommitId>,
@@ -890,6 +902,7 @@ fn build_log_commit(
     &jj_lib::backend::CommitId,
   ) -> Result<bool, jj_lib::revset::RevsetEvaluationError>,
   cached_map: &std::collections::HashMap<String, local_db::CachedCommitDiffStat>,
+  misses: &mut Vec<local_db::CommitRow>,
 ) -> JjLogCommit {
   let tree_override = wc_tree_override
     .filter(|(wc_commit_id, _)| **wc_commit_id == *commit.id())
@@ -954,16 +967,15 @@ fn build_log_commit(
 
       let (insertions, deletions) = compute_commit_stats(repo, commit, tree_override);
 
-      let _ = local_db::cache_commit_row(
-        cache_repo_path,
-        &full_commit_id,
+      misses.push(local_db::CommitRow {
+        commit_id: full_commit_id,
         insertions,
         deletions,
-        &change_id,
-        &description,
-        &author_name,
-        &timestamp,
-      );
+        change_id: change_id.clone(),
+        description: description.clone(),
+        author_name: author_name.clone(),
+        timestamp: timestamp.clone(),
+      });
 
       JjLogCommit {
         commit_id: short_id.clone(),
@@ -4129,6 +4141,37 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
   })
 }
 
+/// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
+/// the working copy is not walked again. Without one, it snapshots.
+fn snapshot_is_empty(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  snapshot: Option<&(jj_lib::backend::CommitId, MergedTree)>,
+) -> Result<bool, JjError> {
+  use futures::StreamExt as _;
+
+  let Some((wc_commit_id, tree)) = snapshot else {
+    return jj_is_working_copy_empty(workspace_path);
+  };
+  let Ok(wc_commit) = loaded.repo.store().get_commit(wc_commit_id) else {
+    return Ok(true);
+  };
+  // Against the first parent, as `jj_get_changed_files` lists changes.
+  let parent_tree = match wc_commit.parent_ids().first() {
+    None => loaded.repo.store().root_commit().tree(),
+    Some(parent_id) => match loaded.repo.store().get_commit(parent_id) {
+      Ok(parent) => parent.tree(),
+      Err(_) => return Ok(true),
+    },
+  };
+  if parent_tree.tree_ids() == tree.tree_ids() {
+    return Ok(true);
+  }
+  let matcher = repo_root_matcher();
+  let entries = block_on(parent_tree.diff_stream(tree, &matcher).collect::<Vec<_>>());
+  Ok(entries.iter().all(|entry| entry.values.is_err()))
+}
+
 /// Checks if the working copy is empty (no uncommitted changes)
 pub fn jj_is_working_copy_empty(workspace_path: &str) -> Result<bool, JjError> {
   let changed_files = jj_get_changed_files(workspace_path)?;
@@ -6155,6 +6198,24 @@ pub fn get_conflicted_files(
   workspace_path: &str,
   target_branch: Option<&str>,
 ) -> Result<Vec<String>, JjError> {
+  conflicted_files(workspace_path, target_branch, true)
+}
+
+/// [`get_conflicted_files`] for a caller that has just snapshotted the
+/// working copy (e.g. through [`jj_get_changed_files`]): skips the second
+/// filesystem walk unless importing Git state moved the operation.
+pub fn get_conflicted_files_after_snapshot(
+  workspace_path: &str,
+  target_branch: Option<&str>,
+) -> Result<Vec<String>, JjError> {
+  conflicted_files(workspace_path, target_branch, false)
+}
+
+fn conflicted_files(
+  workspace_path: &str,
+  target_branch: Option<&str>,
+  snapshot: bool,
+) -> Result<Vec<String>, JjError> {
   // Validate workspace path
   if workspace_path.is_empty() {
     return Err(JjError::IoError("Workspace path is empty".to_string()));
@@ -6176,7 +6237,10 @@ pub fn get_conflicted_files(
   }
 
   // 1. Proactively check and update if stale
+  let mut snapshot = snapshot;
   if let Ok(true) = is_workspace_stale(workspace_path) {
+    // Updating rewrites the working copy, so an earlier snapshot is out of date.
+    snapshot = true;
     if let Err(update_err) = jj_workspace_update_stale(workspace_path) {
       tracing::warn!(
         "Failed to update stale workspace in get_conflicted_files for {}: {}",
@@ -6190,18 +6254,25 @@ pub fn get_conflicted_files(
     Some(branch) => branch.to_string(),
     None => get_default_branch(&workspace_repo_path(workspace_path))?,
   };
-  get_conflicted_files_from_branch_diff(workspace_path, &effective_target)
+  get_conflicted_files_from_branch_diff(workspace_path, &effective_target, snapshot)
 }
 
 fn get_conflicted_files_from_branch_diff(
   workspace_path: &str,
   _target_branch: &str,
+  snapshot: bool,
 ) -> Result<Vec<String>, JjError> {
   let mut loaded = load_workspace_repo(workspace_path)?;
+  let loaded_op_id = loaded.repo.op_id().clone();
   import_colocated_git_state(&mut loaded, workspace_path)?;
 
-  let snapshotted_tree_override =
-    snapshot_working_copy_tree(&mut loaded, workspace_path)?.map(|(_, tree)| tree);
+  // A Git import can move the working-copy commit, so the caller's snapshot
+  // no longer covers it.
+  let snapshotted_tree_override = if snapshot || loaded.repo.op_id() != &loaded_op_id {
+    snapshot_working_copy_tree(&mut loaded, workspace_path)?.map(|(_, tree)| tree)
+  } else {
+    None
+  };
 
   let wc_commit_id = loaded
     .repo
@@ -7640,14 +7711,11 @@ pub fn jj_get_log(
       Err(err) => last_error = Some(err),
     }
   }
-  let selected_target_ref = if revset.is_some() {
-    selected_target_ref
-  } else {
+  let Some((revset_expr, revset)) = revset else {
     return Err(
       last_error.unwrap_or_else(|| JjError::IoError("Failed to evaluate log revset".to_string())),
     );
   };
-  let (revset_expr, revset) = revset.expect("selected target ref must include a revset");
   // Home-repo immutability uses the remote tracking bookmark (e.g. `main@origin`); unpushed commits stay mutable, pushed commits immutable; falls back to local bookmark when no remote ref exists.
   let immutable_ref = if is_home_repo.unwrap_or(false) {
     let remote_symbol = RemoteRefSymbol {
@@ -7729,26 +7797,32 @@ pub fn jj_get_log(
       commit.has_conflicts = false;
     }
   }
-  let tentative_working_copy = if is_home || jj_is_working_copy_empty(workspace_path)? {
-    None
-  } else {
-    get_workspace_wc_commit(&loaded).map(|wc_commit| {
-      wc_commit.map(|commit| JjTentativeWorkingCopy {
-        workspace_label: workspace_branch.clone(),
-        commit: build_log_commit(
-          &cache_repo_path,
-          &loaded.repo,
-          &commit,
-          &wc_commit_ids,
-          wc_tree_override
-            .as_ref()
-            .map(|(commit_id, tree)| (commit_id, tree)),
-          &is_immutable,
-          &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
-        ),
-      })
-    })?
-  };
+  let tentative_working_copy =
+    if is_home || snapshot_is_empty(&loaded, workspace_path, wc_tree_override.as_ref())? {
+      None
+    } else {
+      get_workspace_wc_commit(&loaded).map(|wc_commit| {
+        wc_commit.map(|commit| {
+          let mut misses = Vec::new();
+          let commit = build_log_commit(
+            &loaded.repo,
+            &commit,
+            &wc_commit_ids,
+            wc_tree_override
+              .as_ref()
+              .map(|(commit_id, tree)| (commit_id, tree)),
+            &is_immutable,
+            &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
+            &mut misses,
+          );
+          let _ = local_db::cache_commit_rows(&cache_repo_path, &misses);
+          JjTentativeWorkingCopy {
+            workspace_label: workspace_branch.clone(),
+            commit,
+          }
+        })
+      })?
+    };
 
   Ok(JjLogResult {
     commits,
@@ -8273,27 +8347,24 @@ pub fn jj_drop_autosave_ancestors(workspace_path: &str) -> Result<Vec<String>, J
   loop {
     let parents = block_on(current.parents())
       .map_err(|e| JjError::IoError(format!("Failed to load commit parents: {e}")))?;
-    if parents.len() != 1 {
+    let Ok([parent]) = <[_; 1]>::try_from(parents) else {
       break;
-    }
-    let parent = parents.into_iter().next().expect("checked length 1");
+    };
     if !is_autosave_description(parent.description()) {
       break;
     }
     autosaves.push(parent.clone());
     current = parent;
   }
-  if autosaves.is_empty() {
+  let Some(oldest) = autosaves.last() else {
     return Ok(Vec::new());
-  }
+  };
 
-  let oldest = autosaves.last().expect("non-empty autosaves");
   let oldest_parents = block_on(oldest.parents())
     .map_err(|e| JjError::IoError(format!("Failed to load autosave parents: {e}")))?;
-  if oldest_parents.len() != 1 {
+  let Ok([base]) = <[_; 1]>::try_from(oldest_parents) else {
     return Ok(Vec::new());
-  }
-  let base = oldest_parents.into_iter().next().expect("checked length 1");
+  };
 
   let dropped_ids: Vec<String> = autosaves
     .iter()
@@ -8365,7 +8436,12 @@ fn resolve_commit_by_revision(
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| JjError::IoError(format!("Failed to resolve revision '{}': {}", revision, e)))?;
   match commits.len() {
-    1 => Ok(commits.into_iter().next().expect("single commit expected")),
+    1 => commits.into_iter().next().ok_or_else(|| {
+      JjError::IoError(format!(
+        "Revision '{}' did not resolve to a commit",
+        revision
+      ))
+    }),
     0 => Err(JjError::IoError(format!(
       "Revision '{}' did not resolve to a commit",
       revision
@@ -8514,15 +8590,17 @@ fn build_tentative_working_copy(
   JjTentativeWorkingCopy {
     workspace_label: workspace_label.to_string(),
     commit: {
+      let mut misses = Vec::new();
       let mut commit = build_log_commit(
-        cache_repo_path,
         repo,
         commit,
         wc_commit_ids,
         wc_tree_override,
         is_immutable,
         &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
+        &mut misses,
       );
+      let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
       commit.workspace_label = Some(workspace_label.to_string());
       commit
     },

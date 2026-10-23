@@ -3,7 +3,7 @@
 //! unified diff as files and hunks, review drafts kept in the local
 //! database as line comments, and drafts back to a GitHub review.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use super::{
   changes_data::{ChangedFile, ChangesHost},
@@ -120,6 +120,7 @@ impl PrReviewHost for Backend {
       side: Some(side_name(draft.side).into()),
       comment_text: draft.text.clone(),
       line_hash: draft.line_hash.clone(),
+      quoted_text: None,
     };
     crate::core::review_drafts::create_review_draft(repo_path, &draft).map(|_| ())
   }
@@ -157,6 +158,7 @@ pub struct ParsedDiff {
 }
 
 /// `parseUnifiedDiff`: `gh pr diff` output as changed files and hunks.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
   let mut out = ParsedDiff::default();
   let mut file: Option<ChangedFile> = None;
@@ -168,7 +170,9 @@ pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
       out.files.push(f);
     }
   };
-  let git = regex::Regex::new(r"^diff --git a/(.*) b/(.*)$").expect("diff header regex");
+  static GIT: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^diff --git a/(.*) b/(.*)$").expect("diff header regex"));
+  let git = &*GIT;
   for line in diff.split('\n') {
     if let Some(rest) = line.strip_prefix("diff --git ") {
       flush(&mut file, &mut hunks);

@@ -9,7 +9,7 @@
 //! timeline draws its own stretch of the rule.
 
 use crate::gpui_shell::ui::radius;
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset, ListState,
@@ -101,6 +101,26 @@ pub(super) struct Feed {
   conflicted: Vec<String>,
   /// The rem size the rows were measured at.
   rem: Pixels,
+  /// What the rows were laid out from, so an unchanged frame keeps them.
+  key: Option<Key>,
+}
+
+/// Every input of `layout_rows`. The history and the diffs are too large to
+/// compare, so `CommitsView::layout_gen` stands for them: it is bumped
+/// wherever either one changes.
+#[derive(PartialEq)]
+struct Key {
+  generation: u64,
+  home: bool,
+  home_limit: usize,
+  target_limit: usize,
+  hide_tentative: bool,
+  removed: HashSet<String>,
+  expanded: HashSet<String>,
+  /// The commit, file and line the comment box is under.
+  comment: Option<(String, String, (usize, usize))>,
+  /// Day labels are relative ("Today"), so a new day relabels them.
+  today: chrono::NaiveDate,
 }
 
 impl Feed {
@@ -123,6 +143,7 @@ impl Default for Feed {
       shift: false,
       conflicted: Vec::new(),
       rem: px(0.),
+      key: None,
     }
   }
 }
@@ -157,6 +178,23 @@ fn ident<'a>(
 }
 
 impl CommitsView {
+  fn layout_key(&self) -> Key {
+    Key {
+      generation: self.layout_gen,
+      home: self.home(),
+      home_limit: self.home_limit,
+      target_limit: self.target_limit,
+      hide_tentative: self.hide_tentative,
+      removed: self.removed.clone(),
+      expanded: self.expanded.clone(),
+      comment: self
+        .comment
+        .as_ref()
+        .map(|c| (c.commit_id.clone(), c.target.file_path.clone(), c.target.at)),
+      today: chrono::Local::now().date_naive(),
+    }
+  }
+
   /// The commits the list shows, and the banners over them.
   fn layout_rows(&mut self) -> Feed {
     let mut feed = Feed::default();
@@ -306,12 +344,17 @@ impl CommitsView {
   /// Brings the list up to date with the rows, keeping the measured
   /// heights of the rows that did not change.
   pub(super) fn sync_rows(&mut self, window: &mut Window) {
-    let mut feed = self.layout_rows();
     let rem = window.rem_size();
     if rem != self.feed.rem {
       self.feed.rem = rem;
       self.feed.list.remeasure();
     }
+    let key = self.layout_key();
+    if self.feed.key.as_ref() == Some(&key) {
+      return;
+    }
+    let mut feed = self.layout_rows();
+    feed.key = Some(key);
     let old = &self.feed;
     let same = |a: (Row, u8), b: (Row, u8)| {
       a == b && ident(&old.entries, &old.days, a.0) == ident(&feed.entries, &feed.days, b.0)

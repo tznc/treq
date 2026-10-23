@@ -174,3 +174,22 @@ fn commits_perf(cx: &mut TestAppContext) {
     .collect();
   report("scroll 200px", &mut scroll);
 }
+
+#[gpui::test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn commits_steady_perf(cx: &mut TestAppContext) {
+  let mut host = large_host();
+  let commits: Vec<_> = (0..100).map(|i| commit(&format!("c{i}"), 10, 4)).collect();
+  host.history = serde_json::from_value(serde_json::json!({
+    "commits": commits,
+    "target_branch": "main",
+    "workspace_branch": "feature/login"
+  }))
+  .ok();
+  let (mut h, _) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-c0");
+  h.cx.run_until_parked();
+  assert!(h.drawn("commit-file-row"));
+  let mut steady: Vec<_> = (0..20).map(|_| frame(&mut h)).collect();
+  report("steady frame, 100 commits", &mut steady);
+}

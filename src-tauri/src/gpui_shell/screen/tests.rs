@@ -5764,7 +5764,7 @@ fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext)
   assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
 
   // A third window on it finds none left to show.
-  let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host.clone());
+  let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host);
   third.cx.run_until_parked();
   assert!(!third.drawn("terminal-column-shell"));
 }

@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::expect_used,
+  clippy::string_slice,
+  reason = "test code"
+)]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::path::PathBuf;
 use std::process::Command;
@@ -61,7 +66,7 @@ fn bench_sync_workspaces(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("5_created_2_forgotten_1_deleted", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_sync_workspaces_repo,
       |repo| {
         treq_lib::core::sync_workspaces(std::hint::black_box(&repo.repo_path))

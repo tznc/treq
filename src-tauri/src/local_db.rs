@@ -1318,48 +1318,62 @@ pub fn get_cached_commit_diff_stats_batch(
   Ok(out)
 }
 
-#[allow(
-  clippy::too_many_arguments,
-  reason = "flat argument list kept to match callers"
-)]
-pub fn cache_commit_row(
-  repo_path: &str,
-  commit_id: &str,
-  insertions: u32,
-  deletions: u32,
-  change_id: &str,
-  description: &str,
-  author_name: &str,
-  timestamp: &str,
-) -> Result<(), String> {
-  let conn = get_connection(repo_path)?;
-  conn
-    .execute(
-      "INSERT INTO commit_diff_stats
-             (commit_id, insertions, deletions, updated_at,
-              change_id, description, author_name, timestamp)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT(commit_id) DO UPDATE SET
-            insertions = excluded.insertions,
-            deletions = excluded.deletions,
-            updated_at = excluded.updated_at,
-            change_id = excluded.change_id,
-            description = excluded.description,
-            author_name = excluded.author_name,
-            timestamp = excluded.timestamp",
-      params![
-        commit_id,
-        insertions,
-        deletions,
-        Utc::now().to_rfc3339(),
-        change_id,
-        description,
-        author_name,
-        timestamp,
-      ],
-    )
-    .map_err(|e| format!("Failed to cache commit row: {}", e))?;
-  Ok(())
+/// A commit's diff stat and log fields, as the log caches them.
+#[derive(Debug, Clone)]
+pub struct CommitRow {
+  pub commit_id: String,
+  pub insertions: u32,
+  pub deletions: u32,
+  pub change_id: String,
+  pub description: String,
+  pub author_name: String,
+  pub timestamp: String,
+}
+
+/// Caches `rows` in one transaction.
+pub fn cache_commit_rows(repo_path: &str, rows: &[CommitRow]) -> Result<(), String> {
+  if rows.is_empty() {
+    return Ok(());
+  }
+  let mut conn = get_connection(repo_path)?;
+  let tx = conn
+    .transaction()
+    .map_err(|e| format!("Failed to start commit row transaction: {}", e))?;
+  {
+    let mut stmt = tx
+      .prepare(
+        "INSERT INTO commit_diff_stats
+               (commit_id, insertions, deletions, updated_at,
+                change_id, description, author_name, timestamp)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+           ON CONFLICT(commit_id) DO UPDATE SET
+              insertions = excluded.insertions,
+              deletions = excluded.deletions,
+              updated_at = excluded.updated_at,
+              change_id = excluded.change_id,
+              description = excluded.description,
+              author_name = excluded.author_name,
+              timestamp = excluded.timestamp",
+      )
+      .map_err(|e| format!("Failed to prepare commit row cache: {}", e))?;
+    let updated_at = Utc::now().to_rfc3339();
+    for row in rows {
+      stmt
+        .execute(params![
+          row.commit_id,
+          row.insertions,
+          row.deletions,
+          updated_at,
+          row.change_id,
+          row.description,
+          row.author_name,
+          row.timestamp,
+        ])
+        .map_err(|e| format!("Failed to cache commit row: {}", e))?;
+    }
+  }
+  tx.commit()
+    .map_err(|e| format!("Failed to commit commit row cache: {}", e))
 }
 
 /// Get all workspaces targeting a specific branch
@@ -2095,20 +2109,23 @@ pub fn resolve_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Str
   Ok(())
 }
 
-/// Edit a comment's text and/or record its line hash; `None` keeps the value.
+/// Edit a comment's text, or record the hash and text of the lines it
+/// covers (PR review drafts); `None` keeps the stored value.
 pub fn update_agent_review_comment(
   repo_path: &str,
   id: &str,
   comment_text: Option<&str>,
   line_hash: Option<&str>,
+  quoted_text: Option<&str>,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
   conn
     .execute(
       "UPDATE agent_review_comments
-         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash)
+         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash),
+             quoted_text = COALESCE(?4, quoted_text)
        WHERE id = ?1",
-      params![id, comment_text, line_hash],
+      params![id, comment_text, line_hash, quoted_text],
     )
     .map_err(|e| format!("Failed to update agent review comment: {e}"))?;
   Ok(())
@@ -2441,19 +2458,21 @@ mod tests {
     .unwrap();
     assert_eq!(comment.line_hash, None);
 
-    update_agent_review_comment(repo, &comment.id, None, Some("h1")).unwrap();
+    update_agent_review_comment(repo, &comment.id, None, Some("h1"), Some("+a\n+b")).unwrap();
     let stored = get_agent_review_comment(repo, &comment.id)
       .unwrap()
       .unwrap();
     assert_eq!(stored.comment_text, "first");
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
 
-    update_agent_review_comment(repo, &comment.id, Some("second"), None).unwrap();
+    update_agent_review_comment(repo, &comment.id, Some("second"), None, None).unwrap();
     let stored = get_agent_review_comment(repo, &comment.id)
       .unwrap()
       .unwrap();
     assert_eq!(stored.comment_text, "second");
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
     assert_eq!(stored.source, "local-human");
   }
 
@@ -2481,6 +2500,7 @@ mod tests {
       &draft.id,
       Some("Trim before matching."),
       Some("abc123"),
+      None,
     )
     .unwrap();
 
