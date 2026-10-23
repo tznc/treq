@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use crate::{
   core::{
-    remote::{RemoteRepoProbe, RepositoryInspection, TreqCommandRequest},
+    remote::{DirectoryListing, RemoteRepoProbe, RepositoryInspection, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
     remote_pty::{PtyLaunchSpec, RemoteAgentId},
     remote_records::{self, RestoreFailure, SavedRepository},
@@ -25,8 +25,8 @@ use crate::{
   },
 };
 
-/// `explicitEndpointRepoPath`'s first value.
-pub const DEFAULT_PATH: &str = "~/src/project";
+/// Where browsing starts on a machine: its user's home.
+pub const HOME: &str = "~";
 
 /// `REMOTE_MERGE_REASON`: the one action a remote repository lacks
 /// (`capabilityNoticeMessages(remoteCapabilities())`).
@@ -50,7 +50,14 @@ pub struct UserManagedValues {
 pub struct RepoForm {
   pub saved: Vec<SavedRepository>,
   pub selected_id: Option<String>,
+  /// The directory browsed to, absolute once listed.
   pub path: String,
+  /// What the host listed at `path`.
+  pub listing: Option<DirectoryListing>,
+  /// Hidden directories show in the listing.
+  pub show_hidden: bool,
+  /// A listing is on its way.
+  pub browsing: bool,
   pub probe: Option<RemoteRepoProbe>,
   pub clone_url: String,
   pub confirm_init: bool,
@@ -67,7 +74,10 @@ impl Default for RepoForm {
     Self {
       saved: Vec::new(),
       selected_id: None,
-      path: DEFAULT_PATH.into(),
+      path: HOME.into(),
+      listing: None,
+      show_hidden: false,
+      browsing: false,
       probe: None,
       clone_url: String::new(),
       confirm_init: false,
@@ -84,6 +94,8 @@ impl Default for RepoForm {
 pub struct Remote {
   /// `RemoteSetupDialog` is open.
   pub setup: bool,
+  /// The screen it opened on (`managed`, `ownVm`) rather than the choice.
+  pub setup_screen: Option<&'static str>,
   /// The "Your own VM" endpoint the form confirmed is being registered.
   pub registering: bool,
   /// `RemoteTerminalDialog` is open.
@@ -123,8 +135,8 @@ pub enum RemoteEffect {
   },
   /// `handleRegisterUserManaged`.
   RegisterUserManaged(UserManagedValues),
-  /// `handleProbeExplicitEndpointRepo`.
-  Probe { endpoint: SshEndpoint, path: String },
+  /// Lists the directories at `path` on the endpoint.
+  Browse { endpoint: SshEndpoint, path: String },
   Open {
     endpoint: SshEndpoint,
     generation: u64,
@@ -140,6 +152,11 @@ pub enum RemoteEffect {
   },
   /// The last-opened remote repository, at launch with no local one.
   RestoreLast,
+  /// The Overview screen's machine: connect to it and show its
+  /// repository form, or the setup dialog if it cannot be reached.
+  Connect { endpoint_id: String },
+  /// A recent repository on a machine, by its saved id.
+  OpenSaved { id: String },
   /// A cloud workspace action ([`crate::core::cloud`]).
   Cloud(CloudAction),
   /// Routes the backend's reads and changes for the repository over SSH
@@ -281,7 +298,45 @@ impl Remote {
     self.set_endpoint(endpoint, generation);
     self.form.connected = false;
     self.setup = false;
-    self.load_saved().into_iter().collect()
+    let path = self.form.path.clone();
+    self
+      .load_saved()
+      .into_iter()
+      .chain(self.browse(path))
+      .collect()
+  }
+
+  /// Lists `path` on the endpoint for the form's directory browser.
+  fn browse(&mut self, path: String) -> Option<RemoteEffect> {
+    let endpoint = self.endpoint.clone()?;
+    self.form.browsing = true;
+    Some(RemoteEffect::Browse { endpoint, path })
+  }
+
+  /// The host listed a directory: the browser moves into it.
+  pub fn browsed(&mut self, endpoint_id: &str, result: Result<DirectoryListing, String>) {
+    if self.endpoint.as_ref().map(|e| e.id.as_str()) != Some(endpoint_id) {
+      return;
+    }
+    self.form.browsing = false;
+    match result {
+      Ok(listing) => {
+        self.form.path = listing.path.clone();
+        self.form.listing = Some(listing);
+        self.form.selected_id = None;
+        self.form.probe = None;
+        self.form.confirm_init = false;
+        self.form.error = None;
+      }
+      Err(error) => self.form.error = Some(error),
+    }
+  }
+
+  /// A machine the Overview screen picked is connected: the
+  /// form shows for it.
+  pub fn connect(&mut self, endpoint: SshEndpoint, generation: u64) -> Vec<RemoteEffect> {
+    self.form = RepoForm::default();
+    self.list_repositories(endpoint, generation)
   }
 
   /// The saved repositories of the endpoint, unless it changed meanwhile.
@@ -365,14 +420,6 @@ impl Remote {
     self.form.error = Some(error);
   }
 
-  pub fn probed(&mut self, result: Result<RemoteRepoProbe, String>) {
-    self.form.busy = false;
-    match result {
-      Ok(probe) => self.form.probe = Some(probe),
-      Err(error) => self.form.error = Some(error),
-    }
-  }
-
   /// A saved repository did not restore.
   pub fn restore_failed(&mut self, failure: RestoreFailure) {
     self.form.busy = false;
@@ -396,12 +443,25 @@ impl Remote {
       "remoteRepo.reauthenticate" => RemoteEffect::Cloud(CloudAction::Reauthenticate {
         endpoint_id: endpoint.id.clone(),
       }),
-      "remoteRepo.probe" => {
-        self.form.busy = true;
-        RemoteEffect::Probe {
-          endpoint: endpoint.clone(),
-          path,
-        }
+      "remoteRepo.up" => {
+        let parent = self.form.listing.as_ref().and_then(|l| l.parent.clone());
+        return parent
+          .and_then(|parent| self.browse(parent))
+          .into_iter()
+          .collect();
+      }
+      // A folder that holds no repository: offer to clone or initialize
+      // one there, as a probe of it would.
+      "remoteRepo.useFolder" => {
+        self.form.probe = Some(RemoteRepoProbe {
+          host: String::new(),
+          path: path.clone(),
+          exists: true,
+          is_repo: false,
+          needs_clone: true,
+        });
+        self.form.error = None;
+        return Vec::new();
       }
       "remoteRepo.open" => open(OpenHow::Existing),
       "remoteRepo.clone" => {
@@ -448,12 +508,13 @@ impl Remote {
           transition: self.form.transition,
         }];
       }
-      "remoteRepo.path" => {
-        self.form.path = value.as_str().unwrap_or_default().to_string();
-        self.form.selected_id = None;
-        self.form.probe = None;
-        self.form.connected = false;
+      "remoteRepo.browse" => {
+        let Some(path) = value.as_str().filter(|p| !p.is_empty()) else {
+          return Vec::new();
+        };
+        return self.browse(path.to_string()).into_iter().collect();
       }
+      "remoteRepo.showHidden" => self.form.show_hidden = value.as_bool().unwrap_or(false),
       "remoteRepo.cloneUrl" => self.form.clone_url = value.as_str().unwrap_or_default().into(),
       "remoteRepo.confirmInit" => self.form.confirm_init = value.as_bool().unwrap_or(false),
       _ => {}
@@ -471,6 +532,7 @@ impl Remote {
     let form = &self.form;
     let cutoff = self.cutoffs.get(&endpoint.id);
     Some(json!({
+      "endpointId": endpoint.id,
       "cutoff": cutoff,
       "selector": cutoff.is_none() && !form.connected,
       "saved": form.saved.iter().map(|r| json!({
@@ -480,6 +542,9 @@ impl Remote {
       })).collect::<Vec<_>>(),
       "selectedId": form.selected_id,
       "path": form.path,
+      "listing": form.listing,
+      "showHidden": form.show_hidden,
+      "browsing": form.browsing,
       "probe": form.probe.as_ref().map(|p| json!({"is_repo": p.is_repo, "needs_clone": p.needs_clone})),
       "cloneUrl": form.clone_url,
       "confirmInit": form.confirm_init,
@@ -526,6 +591,12 @@ pub trait RemoteHost: Send + Sync {
   /// The last-opened remote repository and the endpoint and generation it
   /// would reconnect on, when there is one to try.
   fn last_remote(&self) -> Option<(SavedRepository, SshEndpoint, u64)>;
+  /// The saved repository `id` and the endpoint and generation it would
+  /// reconnect on, while that endpoint can be reached.
+  fn saved_remote(&self, id: &str) -> Option<(SavedRepository, SshEndpoint, u64)>;
+  /// The endpoint `id` names (a saved SSH host, or the cloud workspace
+  /// while it runs) and its generation.
+  fn machine_endpoint(&self, id: &str) -> Option<(SshEndpoint, u64)>;
   /// Starts a cloud workspace action; it reports through the account.
   fn cloud_action(&self, action: CloudAction);
   /// `remote_repo::set_window` for this window.
@@ -556,6 +627,22 @@ fn inspect_and_register(
     inspection,
     endpoint: endpoint.clone(),
   })
+}
+
+/// The directories at `path` on `endpoint` (`~` is its home).
+pub fn list_directories(
+  host: &dyn RemoteHost,
+  endpoint: &SshEndpoint,
+  path: &str,
+) -> Result<DirectoryListing, String> {
+  host
+    .remote_read(
+      endpoint,
+      TreqCommandRequest::ListDirectories {
+        path: path.to_string(),
+      },
+    )
+    .and_then(parse)
 }
 
 /// `handleProbeExplicitEndpointRepo`: what is at `path` on `endpoint`.
@@ -621,6 +708,20 @@ pub fn open(
     })?,
   }
   inspect_and_register(host, endpoint, generation, path).map_err(|e| (None, e))
+}
+
+/// The saved repository `id`, restored on its endpoint; `Err(None)` when
+/// the endpoint cannot be reached.
+pub fn open_saved(host: &dyn RemoteHost, id: &str) -> Result<Opened, Option<RestoreFailure>> {
+  let (descriptor, endpoint, generation) = host.saved_remote(id).ok_or(None)?;
+  let (descriptor, inspection) = host
+    .restore_remote(&descriptor, &endpoint, generation, false)
+    .map_err(Some)?;
+  Ok(Opened {
+    descriptor,
+    inspection,
+    endpoint,
+  })
 }
 
 /// The last-opened remote repository, restored only once its endpoint

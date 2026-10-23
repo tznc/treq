@@ -43,7 +43,7 @@ use crate::{
     popup::PopupSink,
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, IconButton, Size, TextSize, Variant},
   },
 };
 
@@ -77,6 +77,9 @@ impl Route {
 pub struct SetupRoute {
   /// Whether the "Your own VM" path is offered (the `remoteSsh` preview).
   pub allow_user_managed: bool,
+  /// The screen to open on instead of the choice: `managed` (the machines
+  /// page's cloud row) or `ownVm` (its SSH Hosts +).
+  pub screen: Option<String>,
   /// The window is registering the endpoint the form confirmed.
   pub registering: bool,
 }
@@ -354,6 +357,11 @@ impl RemoteView {
   }
 
   fn first_mode(setup: &SetupRoute) -> Mode {
+    match setup.screen.as_deref() {
+      Some("managed") => return Mode::Managed,
+      Some("ownVm") if setup.allow_user_managed => return Mode::UserManaged,
+      _ => {}
+    }
     if setup.allow_user_managed {
       Mode::Choice
     } else {
@@ -651,6 +659,9 @@ impl RemoteView {
       "cloud.upgrade" => self
         .host
         .open_url(&format!("{}/dashboard", native::web_url())),
+      "account.signIn" => self
+        .host
+        .open_url(&format!("{}/sign-in?source=desktop", native::web_url())),
       "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
@@ -716,6 +727,14 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> Option<AnyElement> {
     let route = self.route.setup.clone()?;
+    // Opened straight on "Your own VM": its form, as choosing it makes.
+    if self
+      .setup
+      .as_ref()
+      .is_some_and(|s| s.mode == Mode::UserManaged && s.form.is_none())
+    {
+      self.set_mode(Mode::UserManaged, window, cx);
+    }
     let setup = self.setup.as_ref()?;
     let (mode, confirming) = (setup.mode, setup.confirming_delete);
     let content = match mode {
@@ -723,16 +742,18 @@ impl RemoteView {
       Mode::Managed => self.managed(&route, p, cx).into_any_element(),
       Mode::UserManaged => self.user_managed(window, p, cx).into_any_element(),
     };
-    let content = div().relative().child(content).child(
-      div().absolute().top(zpx(-8.)).right(zpx(-8.)).child(
-        Button::new("remote-setup-close", p)
-          .variant(Variant::Ghost)
-          .size(Size::IconXs)
-          .aria_label("Close")
-          .icon(theme::ICON_X, 16.)
-          .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
-      ),
-    );
+    // The own-VM form ends in an action pair, so it has no X.
+    let content = div()
+      .relative()
+      .child(content)
+      .when(mode != Mode::UserManaged, |d| {
+        d.child(
+          div().absolute().top(zpx(-8.)).right(zpx(-8.)).child(
+            IconButton::new("remote-setup-close", theme::ICON_X, "Close", p)
+              .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
+          ),
+        )
+      });
     let frame = Frame {
       id: "remote-setup-dialog",
       max_width: 576.,
@@ -823,10 +844,15 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let confirming = self.setup.as_ref().is_some_and(|s| s.confirming_delete);
-    let cloud = account_data::account(cx).cloud.unwrap_or_default();
-    let card = cloud_card(&cloud, confirming);
+    let account = account_data::account(cx);
     let press = Self::cloud_press(cx);
-    let card = cloud_card_element(&card, p, &self.tips, &press, cx);
+    let card = if account.user.is_some() {
+      let cloud = account.cloud.clone().unwrap_or_default();
+      let card = cloud_card(&cloud, confirming);
+      cloud_card_element(&card, p, &self.tips, &press, cx).into_any_element()
+    } else {
+      Self::sign_in(&account, &press, p).into_any_element()
+    };
     div()
       .child(header(
         "Treq-managed cloud workspace",
@@ -834,7 +860,9 @@ impl RemoteView {
         p,
       ))
       .child(div().mt_4().child(card))
-      .when(route.allow_user_managed, |this| {
+      // Opened on this screen from the Overview, there is no choice to go
+      // back to.
+      .when(route.allow_user_managed && route.screen.is_none(), |this| {
         this.child(
           div().mt_6().child(
             Button::new("remote-setup-back", p)
@@ -844,6 +872,42 @@ impl RemoteView {
           ),
         )
       })
+  }
+
+  /// Before the account is signed in: the cloud workspace belongs to an
+  /// account, so sign in first.
+  fn sign_in(
+    account: &super::settings::AccountRoute,
+    press: &impl Fn(&str) -> ClickFn,
+    p: &Palette,
+  ) -> Div {
+    let busy = account.loading || account.signing_in;
+    div()
+      .debug_selector(|| "remote-setup-signed-out".into())
+      .flex()
+      .flex_col()
+      .items_start()
+      .gap_3()
+      .child(hint(
+        "Sign in to Treq to create your cloud workspace. The browser opens the sign-in page and brings you back here.",
+        p,
+      ))
+      .child(
+        Button::new("remote-setup-sign-in", p)
+          .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., p.primary_foreground))
+          .label(if account.signing_in {
+            "Signing in…"
+          } else {
+            "Sign in with Browser"
+          })
+          .disabled(busy)
+          .on_click(press("account.signIn")),
+      )
+      .children(account.sign_in_error.clone().map(|error| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .child(format!("Sign-in failed: {error}"))
+      }))
   }
 
   /// A text field whose `<datalist>` suggests the `~/.ssh/config` aliases
@@ -938,6 +1002,12 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let two_columns = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
+    // Opened on this form from the Overview: Cancel closes it.
+    let direct = self
+      .route
+      .setup
+      .as_ref()
+      .is_some_and(|r| r.screen.is_some());
     let Some(form) = self.setup.as_ref().and_then(|s| s.form.as_ref()) else {
       return div();
     };
@@ -1143,11 +1213,11 @@ impl RemoteView {
       .children(trust)
       .when(!probe_error.is_empty(), |this| {
         this.child(
-          div()
-            .debug_selector(|| "remote-probe-error".into())
-            .mt_4()
-            .text_color(p.destructive)
-            .child(probe_error),
+          div().mt_4().child(
+            ui::Alert::new("remote-probe-error", "Couldn't reach the host", p)
+              .severity(ui::Severity::Danger)
+              .message(probe_error),
+          ),
         )
       })
       .child(
@@ -1155,19 +1225,24 @@ impl RemoteView {
           .mt_6()
           .flex()
           .justify_between()
-          .child(
+          .child(if direct {
+            Button::new("remote-setup-cancel", p)
+              .variant(Variant::Ghost)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx)))
+          } else {
             Button::new("remote-setup-back", p)
               .variant(Variant::Ghost)
               .disabled(busy)
               .label("Back")
-              .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx))),
-          )
+              .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx)))
+          })
           .when(show_continue, |this| {
             this.child(
               Button::new("remote-continue", p)
                 .disabled(!valid || busy || probing)
                 .label(if probing {
-                  "Checking host key..."
+                  "Checking host key…"
                 } else {
                   "Continue"
                 })

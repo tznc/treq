@@ -264,8 +264,8 @@ fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), St
         }
       }
     }
-    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "host-check"
-    | "switch-branch" => handle_remote_review_command("repo", matches, format),
+    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "tools" | "dirs"
+    | "host-check" | "switch-branch" => handle_remote_review_command("repo", matches, format),
     other => Err(format!("unknown repo action '{other}'")),
   }
 }
@@ -360,12 +360,13 @@ pub(crate) fn parse_remote_command_request(
   use crate::core::remote::{FileRevision, TreqCommandRequest};
   let action =
     get_arg_value(matches, "action").ok_or_else(|| format!("{command} action is required"))?;
-  let repo = absolute_repo_arg(
-    &get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?,
-  );
+  let raw_repo = get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?;
+  let repo = absolute_repo_arg(&raw_repo);
   // A workspace path means its home repo (no stray local.db in the workspace).
   let repo = match (command, action.as_str()) {
-    ("repo", "init" | "clone" | "usage") => repo,
+    // `~` is the host's home, which only the listing resolves.
+    ("repo", "dirs") => raw_repo,
+    ("repo", "init" | "clone" | "usage" | "tools") => repo,
     _ => crate::jj::derive_repo_path_from_workspace(&repo).unwrap_or(repo),
   };
   let workspace = get_arg_value(matches, "workspace");
@@ -406,6 +407,8 @@ pub(crate) fn parse_remote_command_request(
     ("repo", "branches") => Ok(TreqCommandRequest::ListBranches { repo }),
     ("repo", "probe") => Ok(TreqCommandRequest::ProbeRepo { repo }),
     ("repo", "usage") => Ok(TreqCommandRequest::MachineUsage { root: repo }),
+    ("repo", "tools") => Ok(TreqCommandRequest::MachineTools { root: repo }),
+    ("repo", "dirs") => Ok(TreqCommandRequest::ListDirectories { path: repo }),
     ("repo", "host-check") => Ok(TreqCommandRequest::HostCheck { root: repo }),
     ("repo", "switch-branch") => Ok(TreqCommandRequest::SwitchRepoBranch {
       repo,
