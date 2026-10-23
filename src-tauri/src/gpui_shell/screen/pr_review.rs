@@ -707,7 +707,10 @@ impl PrReviewView {
           })
           .child(dot.when(disabled, |this| this.opacity(0.5)))
           .child(
+            // flex_1 + min_w_0 so a long hint wraps inside the popover.
             div()
+              .flex_1()
+              .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
                 ui::text(div(), TextSize::Xs)
