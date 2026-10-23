@@ -1,5 +1,6 @@
 //! `KeyboardShortcutsModal`: the "?" reference of the app's shortcuts.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
@@ -59,24 +60,6 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   ),
 ];
 
-/// `ui/kbd.tsx`'s `Kbd`: `h-5 min-w-5 rounded-sm px-1 text-xs font-medium
-/// bg-muted text-muted-foreground`.
-fn kbd(p: &Palette, key: &str) -> gpui::Div {
-  ui::text(div(), TextSize::Xs)
-    .flex()
-    .flex_none()
-    .items_center()
-    .justify_center()
-    .h(zpx(20.))
-    .min_w(zpx(20.))
-    .px_1()
-    .rounded(zpx(6.))
-    .bg(p.muted)
-    .text_color(p.muted_foreground)
-    .font_weight(gpui::FontWeight::MEDIUM)
-    .child(SharedString::from(key.to_string()))
-}
-
 /// A `<section>`: its uppercase heading, then one row per shortcut.
 fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
   div()
@@ -120,7 +103,7 @@ fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
                         .child("+"),
                     )
                   })
-                  .child(kbd(p, key))
+                  .child(ui::Kbd::from_label(key.to_string(), p))
               }),
             ))
         })),
@@ -151,7 +134,7 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     .max_h(viewport.height * 0.85)
     .overflow_y_scroll()
     .p_6()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -160,7 +143,6 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     .occlude()
     .child(
       ui::text(div(), TextSize::Lg)
-        .line_height(zpx(TextSize::Lg.metrics().0))
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .child("Keyboard shortcuts"),
     )

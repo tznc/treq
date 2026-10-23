@@ -11,6 +11,7 @@
 
 mod rows;
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::{HashMap, HashSet},
@@ -22,8 +23,8 @@ use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context,
-  Div, Entity, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful,
-  Subscription, Window,
+  Div, Entity, FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful, Subscription,
+  Window,
 };
 
 use super::{
@@ -38,9 +39,10 @@ use super::{
 };
 use crate::{
   gpui_shell::{
+    confirm::{self, Question},
     native::{self, NativeEvent, ToastAction, ToastTone},
     popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     time,
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
@@ -153,6 +155,8 @@ enum Kind {
 
 pub struct CommitsView {
   host: Host,
+  /// The open confirmation (delete, undo or revert a commit).
+  confirm: Option<confirm::Pending<Self>>,
   react: ActionSink,
   pub(super) parent: Parent,
   dark: bool,
@@ -219,6 +223,7 @@ impl CommitsView {
       selection: None,
       comment: None,
       dialog: None,
+      confirm: None,
       requested: scroll_to.clone(),
       scroll_to,
       feed: rows::Feed::default(),
@@ -510,20 +515,26 @@ impl CommitsView {
     .detach();
   }
 
-  /// `ask`, then `act` off the main thread.
+  fn confirm_slot(view: &mut Self) -> &mut Option<confirm::Pending<Self>> {
+    &mut view.confirm
+  }
+
+  /// Asks `question`; its verb runs `act` off the main thread, unless the
+  /// tab has moved to another workspace meanwhile.
   fn confirmed<T: Send + 'static>(
-    &self,
-    title: &'static str,
-    message: String,
+    &mut self,
+    question: Question,
     act: impl FnOnce(&dyn CommitsHost, &Parent) -> T + Send + 'static,
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
-    self.run(
-      move |host, parent| host.confirm(title, &message).then(|| act(host, parent)),
-      move |view, result, cx| {
-        if let Some(result) = result {
-          apply(view, result, cx);
+    let key = self.parent.key();
+    confirm::ask(
+      &mut self.confirm,
+      question,
+      move |view, cx| {
+        if view.parent.key() == key {
+          view.run(act, apply, cx);
         }
       },
       cx,
@@ -532,15 +543,18 @@ impl CommitsView {
 
   fn abandon(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
     let ws = self.parent.workspace_id();
-    let message = format!(
-      "Abandon commit {} — {}?",
-      commit.short_id,
-      first_line(&commit)
-    );
+    let question = Question::new(
+      format!("Delete commit {}?", commit.short_id),
+      format!(
+        "\u{201c}{}\u{201d} is abandoned. You can undo it from the toast that follows.",
+        first_line(&commit)
+      ),
+      "Delete commit",
+    )
+    .destructive();
     let change = commit.change_id.clone();
     self.confirmed(
-      "Delete Commit",
-      message,
+      question,
       move |host, parent| host.abandon(&parent.repo_path, ws, &change),
       move |view, result, cx| match result {
         Ok(operation) => {
@@ -552,11 +566,7 @@ impl CommitsView {
             let event = match host.undo_operation(&parent.repo_path, ws, &operation) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                toast_event(
-                  ToastTone::Success,
-                  "Restored",
-                  format!("Restored commit {short}"),
-                )
+                toast_event(ToastTone::Success, &format!("Restored commit {short}"), "")
               }
               Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
             };
@@ -586,15 +596,11 @@ impl CommitsView {
     self.run(
       move |host, parent| host.stash(&parent.repo_path, parent.workspace_id(), &change),
       move |view, result, cx| match result {
-        Ok(short) => {
+        Ok(_) => {
           view.remove_later(commit.commit_id.clone(), cx);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           Self::changed(view.host.as_ref(), &view.parent);
-          view.toast(
-            ToastTone::Success,
-            "Commit stashed",
-            format!("Parked {short} — apply it onto another workspace from Stashed Changes"),
-          );
+          view.toast(ToastTone::Success, "Commit stashed", "");
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to stash commit", err),
       },
@@ -606,15 +612,17 @@ impl CommitsView {
     let Some(ws) = self.parent.workspace_id() else {
       return;
     };
-    let message = format!(
-      "Undo commit {} — {}? Its changes will be returned to your working copy.",
-      commit.short_id,
-      first_line(&commit)
+    let question = Question::new(
+      format!("Undo commit {}?", commit.short_id),
+      format!(
+        "\u{201c}{}\u{201d} is undone and its changes return to your working copy.",
+        first_line(&commit)
+      ),
+      "Undo commit",
     );
     let change = commit.change_id.clone();
     self.confirmed(
-      "Undo Commit",
-      message,
+      question,
       move |host, parent| host.undo_commit(&parent.repo_path, ws, &change),
       move |view, result, cx| match result {
         Ok(()) => {
@@ -622,8 +630,8 @@ impl CommitsView {
           Self::changed(view.host.as_ref(), &view.parent);
           view.toast(
             ToastTone::Success,
-            "Commit undone",
-            format!("Undid commit {}", commit.short_id),
+            &format!("Undid commit {}", commit.short_id),
+            "",
           );
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to undo commit", err),
@@ -634,23 +642,25 @@ impl CommitsView {
 
   fn revert(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
     let ws = self.parent.workspace_id();
-    let message = format!(
-      "Revert commit {} — {}? This creates a new commit that reverses its changes.",
-      commit.short_id,
-      first_line(&commit)
+    let question = Question::new(
+      format!("Revert commit {}?", commit.short_id),
+      format!(
+        "A new commit reverses the changes of \u{201c}{}\u{201d}.",
+        first_line(&commit)
+      ),
+      "Revert commit",
     );
     let change = commit.change_id.clone();
     self.confirmed(
-      "Revert Commit",
-      message,
+      question,
       move |host, parent| host.revert(&parent.repo_path, ws, &change),
       move |view, result, _| match result {
         Ok(()) => {
           Self::changed(view.host.as_ref(), &view.parent);
           view.toast(
             ToastTone::Success,
-            "Commit reverted",
-            format!("Reverted commit {}", commit.short_id),
+            &format!("Reverted commit {}", commit.short_id),
+            "",
           );
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to revert commit", err),
@@ -684,11 +694,7 @@ impl CommitsView {
         view.shifting = false;
         match result {
           Ok(()) => {
-            view.toast(
-              ToastTone::Success,
-              "Timestamps updated",
-              "Mutable commits on this branch now end at the current time",
-            );
+            view.toast(ToastTone::Success, "Timestamps updated", "");
             Self::changed(view.host.as_ref(), &view.parent);
             if from_dialog {
               view.dialog = None;
@@ -728,11 +734,7 @@ impl CommitsView {
             let event = match host.restore_snapshot(&path, &snapshot) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                toast_event(
-                  ToastTone::Success,
-                  "Restored",
-                  "Working copy changes were restored",
-                )
+                toast_event(ToastTone::Success, "Changes restored", "")
               }
               Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
             };
@@ -929,11 +931,7 @@ impl CommitsView {
       },
       |view, result, _cx| match result {
         Ok(_) => {
-          view.toast(
-            ToastTone::Success,
-            "Comment sent to agent",
-            "Created new agent session and sent comment",
-          );
+          view.toast(ToastTone::Success, "Comment sent to agent", "");
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to create agent", err),
       },
@@ -984,21 +982,13 @@ impl CommitsView {
     }
     *saving = true;
     cx.notify();
-    let (change, short, description) = (
-      commit.change_id.clone(),
-      commit.short_id.clone(),
-      text.clone(),
-    );
+    let (change, description) = (commit.change_id.clone(), text.clone());
     self.run(
       move |host, parent| host.describe(&parent.repo_path, ws, &change, &description),
       move |view, result, _| match result {
         Ok(()) => {
           view.dialog = None;
-          view.toast(
-            ToastTone::Success,
-            "Description updated",
-            format!("Updated commit {short}"),
-          );
+          view.toast(ToastTone::Success, "Description updated", "");
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1050,17 +1040,13 @@ impl CommitsView {
     *saving = true;
     *error = None;
     cx.notify();
-    let (change, short) = (commit.change_id.clone(), commit.short_id.clone());
+    let change = commit.change_id.clone();
     self.run(
       move |host, parent| host.shift_timestamp(&parent.repo_path, ws, &change, &shift),
       move |view, result, _| match result {
         Ok(()) => {
           view.dialog = None;
-          view.toast(
-            ToastTone::Success,
-            "Timestamp updated",
-            format!("Updated commit {short} and repaired later commits on this lineage"),
-          );
+          view.toast(ToastTone::Success, "Timestamp updated", "");
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1166,16 +1152,9 @@ impl CommitsView {
         ))
       },
       |view, result, _cx| match result {
-        Ok((_, count)) => {
+        Ok(_) => {
           view.dialog = None;
-          view.toast(
-            ToastTone::Success,
-            "Resolve session started",
-            format!(
-              "{count} resolve director{} ready for the agent",
-              if count == 1 { "y" } else { "ies" }
-            ),
-          );
+          view.toast(ToastTone::Success, "Resolve session started", "");
         }
         Err(err) => {
           if let Some(Dialog::Resolve { submitting, .. }) = &mut view.dialog {
@@ -1382,14 +1361,14 @@ pub(super) fn dialog_panel(
     .flex()
     .items_center()
     .justify_center()
-    .bg(gpui::black().opacity(0.4))
+    .bg(p.scrim())
     .occlude();
   let panel = div()
     .debug_selector(move || id.into())
     .w_full()
     .max_w(zpx(max_width))
     .p_6()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -1400,7 +1379,6 @@ pub(super) fn dialog_panel(
 
 pub(super) fn dialog_title(title: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(title)
 }
@@ -1409,37 +1387,6 @@ pub(super) fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> 
   ui::text(div(), TextSize::Sm)
     .text_color(p.muted_foreground)
     .child(text.into())
-}
-
-/// A pill badge (`px-1.5 py-0.5 rounded-full border font-medium`).
-fn badge(text: &'static str, fg: Hsla, bg: Hsla, border: Hsla) -> Div {
-  div()
-    .px(zpx(6.))
-    .py(zpx(2.))
-    .rounded_full()
-    .bg(bg)
-    .text_color(fg)
-    .border_1()
-    .border_color(border)
-    .font_weight(FontWeight::MEDIUM)
-    .child(text)
-}
-
-/// A `DropdownMenuItem`.
-fn menu_item(id: impl Into<SharedString>, label: &'static str, p: &Palette) -> Stateful<Div> {
-  let id: SharedString = id.into();
-  let selector = id.to_string();
-  let hover = p.menu_accent;
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || selector)
-    .px_2()
-    .py(zpx(6.))
-    .rounded(zpx(6.))
-    .whitespace_nowrap()
-    .cursor_pointer()
-    .hover(move |s| s.bg(hover))
-    .child(label)
 }
 
 impl Render for CommitsView {
@@ -1495,7 +1442,11 @@ impl Render for CommitsView {
       );
     }
     let dialog = self.dialog_view(window, &p, cx);
-    root.child(self.feed_list(cx)).children(dialog)
+    let confirm = confirm::render(Self::confirm_slot, self, window, &p, cx);
+    root
+      .child(self.feed_list(cx))
+      .children(dialog)
+      .children(confirm)
   }
 }
 
@@ -1515,7 +1466,7 @@ impl CommitsView {
               Button::new("shift-commits-to-now", p)
                 .variant(Variant::Outline)
                 .size(Size::Sm)
-                .gap(zpx(6.))
+                .gap_1p5()
                 .disabled(self.shifting)
                 .child(if self.shifting {
                   ui::spinner("shift-spin", 16., p.foreground).into_any_element()
@@ -1529,47 +1480,26 @@ impl CommitsView {
       })
       .when(n > 0, |this| {
         this.child(
-          div()
-            .debug_selector(|| "resolve-conflicts-banner".into())
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .rounded(zpx(8.))
-            .border_1()
-            .border_color(p.destructive.opacity(0.4))
-            .bg(p.destructive.opacity(0.05))
-            .px_3()
-            .py_2()
-            .child(
-              div()
-                .min_w_0()
-                .child(
-                  ui::text(div(), TextSize::Sm)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(p.destructive)
-                    .child(format!(
-                      "{n} conflicted commit{}",
-                      if n == 1 { "" } else { "s" }
-                    )),
-                )
-                .child(
-                  ui::text(div(), TextSize::Xs)
-                    .text_color(p.muted_foreground)
-                    .child(
-                      "Resolve in place via a short-lived resolve workspace — no extra commit.",
-                    ),
-                ),
-            )
-            .child(
-              Button::new("resolve-conflicts-button", p)
-                .variant(Variant::Destructive)
-                .size(Size::Sm)
-                .gap(zpx(6.))
-                .icon(theme::ICON_MERGE, 16.)
-                .label("Resolve conflicts…")
-                .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
+          ui::Alert::new(
+            "resolve-conflicts-banner",
+            format!(
+              "{n} commit{} conflicts",
+              if n == 1 { " has" } else { "s have" }
             ),
+            p,
+          )
+          .severity(ui::Severity::Danger)
+          .message("Resolve them in place with a short-lived resolve workspace.")
+          .action(
+            Button::new("resolve-conflicts-button", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .gap_1p5()
+              .icon(theme::ICON_MERGE, 16.)
+              .label("Resolve…")
+              .aria_label("Resolve conflicts…")
+              .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
+          ),
         )
       })
   }
@@ -1598,7 +1528,7 @@ impl CommitsView {
           this
             .flex()
             .items_center()
-            .gap(zpx(6.))
+            .gap_1p5()
             .child(ui::spinner(
               SharedString::from(format!("{id}-spin")),
               12.,
@@ -1625,23 +1555,16 @@ impl CommitsView {
     let first = matches!(kind, Kind::Own { first: true }) || tentative;
     let expanded = self.expanded.contains(&commit.commit_id);
     let dot = if tentative {
-      tw::color(tw::YELLOW_500)
+      ui::Tone::Warning.color(p)
     } else if first {
       p.primary
     } else {
       p.muted_foreground
     };
-    let (yellow, yellow_hover) = if self.dark {
-      (
-        tw::color(tw::YELLOW_950).opacity(0.2),
-        tw::color(tw::YELLOW_950).opacity(0.3),
-      )
-    } else {
-      (
-        tw::color(tw::YELLOW_50).opacity(0.8),
-        tw::color(tw::YELLOW_100).opacity(0.8),
-      )
-    };
+    let (yellow, yellow_hover) = (
+      ui::Tone::Warning.tint(p),
+      ui::Tone::Warning.color(p).opacity(0.25),
+    );
     let ts = commit.timestamp.clone();
     let time = self.tips.wrap(
       format!("commits-time-{}", commit.commit_id),
@@ -1711,7 +1634,7 @@ impl CommitsView {
       .px_2()
       .mx_neg_2()
       .w_full()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .cursor_pointer()
       .when(tentative, |this| this.bg(yellow))
       .hover(move |s| s.bg(hover))
@@ -1729,12 +1652,12 @@ impl CommitsView {
         div()
           .flex_1()
           .min_w_0()
-          .pt(zpx(2.))
+          .pt_0p5()
           .child(
             div()
               .flex()
               .items_center()
-              .gap(zpx(6.))
+              .gap_1p5()
               .child(ui::icon(
                 if expanded {
                   theme::ICON_CHEVRON_DOWN
@@ -1752,24 +1675,21 @@ impl CommitsView {
               .flex()
               .items_center()
               .gap_2()
-              .mt(zpx(2.))
+              .mt_0p5()
               .pl_5()
               .when(commit.has_conflicts, |this| {
                 this.child(
-                  badge(
-                    "Conflict",
-                    p.destructive,
-                    p.destructive.opacity(0.1),
-                    p.destructive.opacity(0.3),
-                  )
-                  .debug_selector({
-                    let id = format!("commit-conflict-badge-{}", commit.change_id);
-                    move || id
-                  }),
+                  div()
+                    .flex_none()
+                    .debug_selector({
+                      let id = format!("commit-conflict-badge-{}", commit.change_id);
+                      move || id
+                    })
+                    .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
                 )
               })
               .when(commit.is_immutable, |this| {
-                this.child(badge("Immutable", p.muted_foreground, p.muted, p.border))
+                this.child(ui::Badge::new("Immutable", p))
               })
               .child(time)
               .children(edit_timestamp)
@@ -1780,13 +1700,13 @@ impl CommitsView {
                     .flex()
                     .child(
                       div()
-                        .text_color(tw::color(tw::GREEN_600))
+                        .text_color(ui::Tone::GitOpen.text(p))
                         .child(format!("+{}", commit.insertions)),
                     )
                     .child("\u{a0}")
                     .child(
                       div()
-                        .text_color(tw::color(tw::RED_600))
+                        .text_color(ui::Tone::GitClosed.text(p))
                         .child(format!("-{}", commit.deletions)),
                     ),
                 )
@@ -1834,7 +1754,7 @@ impl CommitsView {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .gap(zpx(6.))
+        .gap_1p5()
         .icon(icon, 16.)
         .label(label)
         .aria_label(name)
@@ -1885,7 +1805,7 @@ impl CommitsView {
           .left_0()
           .min_w(zpx(128.))
           .p_1()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -1893,11 +1813,11 @@ impl CommitsView {
           .shadow_md()
           .occlude()
           .child(
-            menu_item("move-commit-new", "Move to New Workspace", p)
+            ui::MenuItem::new("move-commit-new", "Move to New Workspace", p)
               .on_click(cx.listener(move |view, _, _, cx| view.move_commit(&to_new, false, cx))),
           )
           .child(
-            menu_item("move-commit-existing", "Move to Existing Workspace", p).on_click(
+            ui::MenuItem::new("move-commit-existing", "Move to Existing Workspace", p).on_click(
               cx.listener(move |view, _, _, cx| view.move_commit(&to_existing, true, cx)),
             ),
           )
@@ -2014,7 +1934,7 @@ impl CommitsView {
         div()
           .border_1()
           .border_color(p.border)
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .overflow_hidden()
           .child(content),
       )
@@ -2036,7 +1956,7 @@ impl CommitsView {
       NativeMenuItem::item(label, move |cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
         let _ = view.update(cx, |view, _| {
-          view.toast(ToastTone::Success, "Copied", format!("Copied {what}"))
+          view.toast(ToastTone::Success, &format!("{what} copied"), "")
         });
       })
       .icon(MenuIcon::Copy)
@@ -2051,8 +1971,8 @@ impl CommitsView {
     let workspace = self.parent.workspace.is_some();
     let removing = self.removing.contains(&commit.commit_id);
     let mut items = vec![
-      copy("Copy commit ID", commit.commit_id.clone(), "commit ID"),
-      copy("Copy change ID", commit.change_id.clone(), "change ID"),
+      copy("Copy commit ID", commit.commit_id.clone(), "Commit ID"),
+      copy("Copy change ID", commit.change_id.clone(), "Change ID"),
       copy(
         "Copy message",
         commit.description.trim().to_string(),
@@ -2172,7 +2092,7 @@ impl CommitsView {
             div()
               .id(SharedString::from(format!("load-diff-{}", file.path)))
               .debug_selector(|| "load-deferred-diff".into())
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(p.border)
               .px_2()
@@ -2200,15 +2120,9 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let (fg, bg) = match file.status.as_str() {
-      "A" => (
-        tw::color(tw::GREEN_600),
-        tw::color(tw::GREEN_500).opacity(0.1),
-      ),
-      "M" => (
-        tw::color(tw::BLUE_600),
-        tw::color(tw::BLUE_500).opacity(0.1),
-      ),
-      "D" => (tw::color(tw::RED_600), tw::color(tw::RED_500).opacity(0.1)),
+      "A" => (ui::Tone::GitOpen.text(p), ui::Tone::GitOpen.tint(p)),
+      "M" => (ui::Tone::Primary.text(p), ui::Tone::Primary.tint(p)),
+      "D" => (ui::Tone::GitClosed.text(p), ui::Tone::GitClosed.tint(p)),
       _ => (p.foreground, gpui::transparent_black()),
     };
     let hover = p.muted.opacity(0.4);
@@ -2223,7 +2137,7 @@ impl CommitsView {
       .items_center()
       .gap_2()
       .px_3()
-      .py(zpx(6.))
+      .py_1p5()
       .w_full()
       .cursor_pointer()
       .hover(move |s| s.bg(hover))
@@ -2248,9 +2162,9 @@ impl CommitsView {
       .child(
         div()
           .font_weight(FontWeight::MEDIUM)
-          .px(zpx(6.))
-          .py(zpx(2.))
-          .rounded(zpx(4.))
+          .px_1p5()
+          .py_0p5()
+          .rounded(radius::SM)
           .text_color(fg)
           .bg(bg)
           .child(file.status.clone()),
@@ -2270,7 +2184,7 @@ impl CommitsView {
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .mx_2()
       .my_1()
       .px_4()
@@ -2278,7 +2192,7 @@ impl CommitsView {
       .font_family(theme::SANS_FONT)
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_comment(cx);
         } else if k.key == "enter"
@@ -2338,7 +2252,7 @@ impl CommitsView {
     let viewport = window.viewport_size();
     let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
       let k = &e.keystroke;
-      if k.key == "escape" {
+      if ui::is_escape(k) {
         cx.stop_propagation();
         view.close_dialog(cx);
       } else if k.key == "enter"
@@ -2372,7 +2286,7 @@ impl CommitsView {
             div()
               .flex()
               .flex_col()
-              .gap(zpx(6.))
+              .gap_1p5()
               .child(dialog_title("Edit Commit Description"))
               .child(dialog_description(
                 format!("Editing {}", commit.short_id),
@@ -2450,7 +2364,7 @@ impl CommitsView {
           div()
             .flex()
             .flex_col()
-            .gap(zpx(6.))
+            .gap_1p5()
             .child(
               ui::text(div(), TextSize::Sm)
                 .font_weight(FontWeight::MEDIUM)
@@ -2495,7 +2409,7 @@ impl CommitsView {
             div()
               .flex()
               .flex_col()
-              .gap(zpx(6.))
+              .gap_1p5()
               .child(dialog_title("Edit commit timestamp"))
               .child(dialog_description(
                 format!(
@@ -2621,7 +2535,7 @@ impl CommitsView {
             div()
               .flex()
               .items_center()
-              .gap(zpx(6.))
+              .gap_1p5()
               .child(dialog_title("Resolve commit conflicts in place"))
               .child(help),
           )

@@ -10,13 +10,14 @@
 //!
 //! [`workspace_data`]: super::workspace_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, rgb, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
+  self, div, prelude::*, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
   FontWeight, Hsla, MouseDownEvent, Pixels, SharedString, Stateful, Task, Window,
 };
 
@@ -248,47 +249,6 @@ pub struct TabRow {
   pub loc: Option<Loc>,
 }
 
-/// Tailwind colors the header uses outside the theme tokens.
-mod tw {
-  use super::*;
-
-  pub fn color(hex: u32) -> Hsla {
-    rgb(hex).into()
-  }
-
-  pub const GREEN_400: u32 = 0x4ade80;
-  pub const GREEN_500: u32 = 0x22c55e;
-  pub const GREEN_600: u32 = 0x16a34a;
-  pub const GREEN_700: u32 = 0x15803d;
-  pub const RED_400: u32 = 0xf87171;
-  pub const RED_500: u32 = 0xef4444;
-  pub const RED_600: u32 = 0xdc2626;
-  pub const YELLOW_400: u32 = 0xfacc15;
-  pub const YELLOW_500: u32 = 0xeab308;
-  pub const YELLOW_600: u32 = 0xca8a04;
-  pub const YELLOW_950: u32 = 0x422006;
-  pub const BLUE_600: u32 = 0x2563eb;
-  pub const BLUE_700: u32 = 0x1d4ed8;
-  /// GitHub's button: `bg-[#24292f] hover:bg-[#1b1f23]`.
-  pub const GITHUB: u32 = 0x24292f;
-  pub const GITHUB_HOVER: u32 = 0x1b1f23;
-
-  /// GitHub's PR state label fills, `[light, light hover, dark, dark hover]`.
-  pub const PR_OPEN: [u32; 4] = [0x1f883d, 0x1a7f37, 0x238636, 0x2ea043];
-  pub const PR_DRAFT: [u32; 4] = [0x6e7781, 0x57606a, 0x6e7681, 0x8b949e];
-  pub const PR_CLOSED: [u32; 4] = [0xcf222e, 0xa40e26, 0xda3633, 0xf85149];
-  pub const PR_MERGED: [u32; 4] = [0x8250df, 0x6639ba, 0x8957e5, 0xa371f7];
-
-  /// The fill and hover fill of a PR state in the theme.
-  pub fn pr_state(dark: bool, [bg, hover, dark_bg, dark_hover]: [u32; 4]) -> (Hsla, Hsla) {
-    if dark {
-      (color(dark_bg), color(dark_hover))
-    } else {
-      (color(bg), color(hover))
-    }
-  }
-}
-
 /// How often the branch's pull request is re-read from the PR poller's
 /// cache, which the poller itself refreshes.
 const PR_POLL: Duration = Duration::from_secs(5);
@@ -300,6 +260,8 @@ pub struct WorkspaceView {
   actions: Arc<dyn super::workspace_ops::WorkspaceActionsHost>,
   /// Those actions in flight.
   busy: actions::Busy,
+  /// The open confirmation (Delete workspace).
+  confirm: Option<crate::gpui_shell::confirm::Pending<Self>>,
   popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
   /// The header popover that shows in the modal window, if one does.
@@ -392,6 +354,7 @@ impl WorkspaceView {
       host: host.clone(),
       actions: host.clone(),
       busy: actions::Busy::default(),
+      confirm: None,
       popover_host: host.clone(),
       popover: None,
       window: None,
@@ -820,7 +783,6 @@ impl WorkspaceView {
   }
 
   fn header(&self, h: &Header, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let dark = self.dark;
     let mono_title = |text: &str| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -852,7 +814,7 @@ impl WorkspaceView {
             .items_center()
             .gap_1()
             .px_2()
-            .py(zpx(2.))
+            .py_0p5()
             .rounded_full()
             .bg(p.muted)
             .font_weight(FontWeight::MEDIUM)
@@ -947,7 +909,7 @@ impl WorkspaceView {
           );
         if let Some(rebase) = &home_target.rebase {
           if let Some(files) = &rebase.conflicts {
-            let warning = tw::color(if dark { tw::YELLOW_400 } else { tw::YELLOW_600 });
+            let warning = ui::Tone::Warning.text(p);
             let content = if files.is_empty() {
               TooltipContent::Text("Potential conflicts detected".into())
             } else {
@@ -1015,13 +977,9 @@ impl WorkspaceView {
       .min_w_0()
       .ml_auto();
     if let Some(push) = &h.push {
-      let blue = tw::color(tw::BLUE_600);
-      let hover = tw::color(tw::BLUE_700);
       let button = Button::new("workspace-push", p)
         .size(Size::Sm)
         .disabled(push.disabled)
-        .bg(blue)
-        .hover_bg(hover)
         .icon(theme::ICON_UPLOAD, 16.)
         .label("Push")
         .on_click(self.press("workspace.push"));
@@ -1054,7 +1012,7 @@ impl WorkspaceView {
           .debug_selector(|| "workspace-status-skeleton".into())
           .h(zpx(24.))
           .w(zpx(56.))
-          .rounded(zpx(4.))
+          .rounded(radius::SM)
           .bg(p.muted.opacity(0.6))
           .with_animation("workspace-status-pulse", pulse(), |el, delta| {
             el.opacity(pulse_opacity(delta))
@@ -1085,8 +1043,8 @@ impl WorkspaceView {
       ));
     }
     if let Some(merge) = &h.merge {
-      let green = tw::color(tw::GREEN_600);
-      let hover = tw::color(tw::GREEN_700);
+      let green = ui::Tone::Success.color(p);
+      let hover = green.opacity(0.85);
       let button = Button::new("workspace-merge", p)
         .aria_label("Merge...")
         .variant(if merge.passing {
@@ -1098,11 +1056,11 @@ impl WorkspaceView {
         .gap_1()
         .disabled(merge.disabled)
         .when(merge.passing, |b| {
-          b.bg(green).text_color(gpui::white()).hover_bg(hover)
+          b.bg(green).text_color(p.primary_foreground).hover_bg(hover)
         })
         .map(|b| {
           let fg = if merge.passing {
-            gpui::white()
+            p.primary_foreground
           } else {
             b.foreground()
           };
@@ -1164,64 +1122,44 @@ impl WorkspaceView {
       )
   }
 
-  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    // The button reads the PR's status, a pill filled as GitHub fills its state label.
+  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+    // The PR's state as GitHub labels it, as a pill that is also the button:
+    // the label opens the PR in Treq, the trailing half on GitHub.
     let draft = pr.draft && pr.state == PrState::Open;
-    let (label, icon, state) = match pr.state {
-      _ if draft => ("Draft", theme::ICON_PR_DRAFT, tw::PR_DRAFT),
-      PrState::Open => ("Open", theme::ICON_PR, tw::PR_OPEN),
-      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, tw::PR_CLOSED),
-      PrState::Merged => ("Merged", theme::ICON_MERGE, tw::PR_MERGED),
+    let (label, icon, tone) = match pr.state {
+      _ if draft => ("Draft", theme::ICON_PR_DRAFT, ui::Tone::Neutral),
+      PrState::Open => ("Open", theme::ICON_PR, ui::Tone::GitOpen),
+      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, ui::Tone::GitClosed),
+      PrState::Merged => ("Merged", theme::ICON_MERGE, ui::Tone::GitMerged),
     };
-    let (bg, hover) = tw::pr_state(self.dark, state);
-    let white = gpui::white();
-    let styled = |b: Button| b.size(Size::Sm).bg(bg).text_color(white).hover_bg(hover);
-    let view = styled(Button::new("workspace-view-pr", p))
-      .gap_1()
-      .rounded_l_full()
-      .rounded_r_none()
-      .font_weight(gpui::FontWeight::BOLD)
-      .child(ui::icon(icon, 16., white))
-      .child(label)
+    let copy = self.copy_link(self.pr_url());
+    let pill = ui::SplitButton::new("workspace-view-pr", label, p)
+      .pill(tone)
+      .icon(icon)
       .aria_label(view_pr_name(pr))
+      .menu_label("Open PR on web")
+      .menu_icon(theme::ICON_EXTERNAL_LINK)
       .on_click(self.press("workspace.viewPr"))
-      .on_right_click(self.copy_link(self.pr_url()));
-    let web = styled(Button::new("workspace-view-pr-web", p))
-      .rounded_l_none()
-      .rounded_r_full()
-      .border_l_1()
-      .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
-      .px_2()
-      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., white))
-      .aria_label("Open PR on web")
-      .on_click(self.press("workspace.viewPrWeb"))
-      .on_right_click(self.copy_link(self.pr_url()));
-    div()
-      .flex()
-      .flex_none()
-      .items_center()
-      .child(self.with_tooltip(
-        "workspace-view-pr",
-        Some(TooltipContent::Text(
-          format!("View pull request #{} in Treq", pr.number).into(),
-        )),
-        view,
-        cx,
-      ))
-      .child(self.with_tooltip(
-        "workspace-view-pr-web",
-        Some(TooltipContent::Text(
-          format!("Open pull request #{} on GitHub", pr.number).into(),
-        )),
-        web,
-        cx,
-      ))
+      .on_menu(self.press("workspace.viewPrWeb"))
+      .on_right_click(move |e, w, cx| copy(e, w, cx));
+    self.with_tooltip(
+      "workspace-view-pr",
+      Some(TooltipContent::Text(
+        format!(
+          "Pull request #{}: view in Treq, or open on GitHub",
+          pr.number
+        )
+        .into(),
+      )),
+      pill,
+      cx,
+    )
   }
 
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let bg = tw::color(tw::GITHUB);
-    let hover = tw::color(tw::GITHUB_HOVER);
-    let white = gpui::white();
+    let bg = p.github();
+    let hover = bg.opacity(0.85);
+    let white = p.primary_foreground;
     let styled = |b: Button| {
       b.size(Size::Sm)
         .disabled(create.disabled)
@@ -1244,8 +1182,11 @@ impl WorkspaceView {
     let menu = styled(Button::new("workspace-create-pr-menu", p))
       .rounded_l_none()
       .border_l_1()
-      .border_color(white.opacity(if self.dark { 0.3 } else { 0.2 }))
-      .px(zpx(6.))
+      .border_color(
+        p.primary_foreground
+          .opacity(if self.dark { 0.3 } else { 0.2 }),
+      )
+      .px_1p5()
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
       .aria_label("More Create PR options")
       .on_click(self.press("workspace.createPrMenu"));
@@ -1272,7 +1213,7 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    let dot = tw::color(tw::YELLOW_600);
+    let dot = ui::Tone::Warning.color(p);
     let button = Button::new("workspace-sync", p)
       .aria_label("Sync with remote")
       .variant(if sync.ahead > 0 {
@@ -1284,8 +1225,6 @@ impl WorkspaceView {
       .h(zpx(24.))
       .gap_1()
       .px_2()
-      .text_size(zpx(11.))
-      .line_height(zpx(16.))
       .text_color(p.muted_foreground)
       .disabled(sync.disabled)
       .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
@@ -1324,8 +1263,8 @@ impl WorkspaceView {
 
   fn checks(&self, checks: &Checks, p: &Palette) -> Button {
     let icon = match checks.status.as_deref() {
-      Some("passed") => ui::icon(theme::ICON_CIRCLE_CHECK, 14., tw::color(tw::GREEN_500)),
-      Some("failed") => ui::icon(theme::ICON_CIRCLE_X, 14., tw::color(tw::RED_500)),
+      Some("passed") => ui::icon(theme::ICON_CIRCLE_CHECK, 14., ui::Tone::Success.color(p)),
+      Some("failed") => ui::icon(theme::ICON_CIRCLE_X, 14., ui::Tone::Danger.color(p)),
       Some(_) => ui::icon(theme::ICON_SPINNER, 14., p.muted_foreground),
       None => ui::icon(theme::ICON_CIRCLE_DOT, 14., p.muted_foreground),
     };
@@ -1336,7 +1275,7 @@ impl WorkspaceView {
     Button::new("workspace-checks", p)
       .variant(Variant::Outline)
       .size(Size::Sm)
-      .gap(zpx(6.))
+      .gap_1p5()
       .px_2()
       .map(|b| {
         if running {
@@ -1356,22 +1295,17 @@ impl WorkspaceView {
   }
 
   fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
-    let dark = self.dark;
+    // Counts are neutral; a conflict shows once, as a danger dot.
     let pill = |count: u32, tone: Tone, id: &'static str| {
-      let (bg, fg) = match tone {
-        Tone::Muted => (p.muted, p.muted_foreground),
-        Tone::Conflict => (p.destructive.opacity(0.2), p.destructive),
-        Tone::Uncommitted => (tw::color(tw::YELLOW_500), tw::color(tw::YELLOW_950)),
-      };
-      ui::text(div(), TextSize::Xs)
+      div()
         .debug_selector(move || id.into())
-        .rounded_full()
-        .px_2()
-        .py(zpx(2.))
-        .font_weight(FontWeight::MEDIUM)
-        .bg(bg)
-        .text_color(fg)
-        .child(count.to_string())
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .child(ui::Count::new(count as usize, p))
+        .when(tone == Tone::Conflict, |el| {
+          el.child(ui::Dot::new(ui::Tone::Danger, p))
+        })
     };
     let mut tabs: Vec<(Tab, &'static str, &'static str, Option<Div>)> = vec![
       (Tab::Overview, theme::ICON_CODE, "Code", None),
@@ -1383,7 +1317,7 @@ impl WorkspaceView {
           CommitsLabel::Count { count, tone } => pill(*count, *tone, "commits-tab-count"),
           CommitsLabel::HomeConflict => div()
             .debug_selector(|| "commits-tab-conflict-icon".into())
-            .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 14., p.destructive)),
+            .child(ui::Dot::new(ui::Tone::Danger, p)),
         }),
       ),
       (
@@ -1406,7 +1340,7 @@ impl WorkspaceView {
       .flex_wrap()
       .gap_1()
       .p_1()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .bg(p.muted)
       .children(tabs.into_iter().map(|(tab, icon, label, extra)| {
         let active = tab == row.tab;
@@ -1427,10 +1361,10 @@ impl WorkspaceView {
           .test_support()
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .px_3()
           .py_1()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1468,7 +1402,7 @@ impl WorkspaceView {
       );
     }
     if let Some(loc) = &row.loc {
-      status = status.child(loc_marker(loc, p, dark));
+      status = status.child(loc_marker(loc, p));
     }
 
     div()
@@ -1498,7 +1432,7 @@ fn pulse_opacity(delta: f32) -> f32 {
 }
 
 /// `LocDiffMarker`: green `+N`, a centered insertion/deletion bar, red `-N`.
-fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
+fn loc_marker(loc: &Loc, p: &Palette) -> Div {
   const HALF: f32 = 14.;
   let scale = loc.insertions.max(loc.deletions) as f32;
   let width = |n: u32| {
@@ -1508,8 +1442,8 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
       ((n as f32 / scale) * HALF).round().max(1.)
     }
   };
-  let green = tw::color(if dark { tw::GREEN_400 } else { tw::GREEN_600 });
-  let red = tw::color(if dark { tw::RED_400 } else { tw::RED_600 });
+  let (added, removed) = (ui::Tone::GitOpen, ui::Tone::GitClosed);
+  let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla| {
     ui::text(div(), TextSize::Xs)
       .font_family(theme::MONO_FONT)
@@ -1520,8 +1454,8 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
     .debug_selector(|| "loc-diff-marker".into())
     .flex()
     .items_center()
-    .gap(zpx(6.))
-    .child(count(format!("+{}", loc.insertions), green))
+    .gap_1p5()
+    .child(count(format!("+{}", loc.insertions), added.text(p)))
     .child(
       div()
         .flex()
@@ -1545,7 +1479,7 @@ fn loc_marker(loc: &Loc, p: &Palette, dark: bool) -> Div {
             .child(div().h_full().w(zpx(width(loc.deletions))).bg(red)),
         ),
     )
-    .child(count(format!("-{}", loc.deletions), red))
+    .child(count(format!("-{}", loc.deletions), removed.text(p)))
 }
 
 /// The tabs' actions that start an agent session, which the view handles
@@ -1599,13 +1533,7 @@ impl WorkspaceView {
         if value["useIdleAgent"].as_bool() == Some(true) {
           match self.send_to_idle(&markdown, cx) {
             None => return (self.react)(ScreenAction::Field { field, value }, cx),
-            Some(true) => {
-              return self.toast(
-                ToastTone::Success,
-                "Review sent to agent",
-                "Sent review to the idle agent",
-              )
-            }
+            Some(true) => return self.toast(ToastTone::Success, "Review sent to agent", ""),
             Some(false) => {}
           }
         }
@@ -1622,19 +1550,10 @@ impl WorkspaceView {
         let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
         match self.send_to_idle(&prompt, cx) {
           None => return (self.react)(ScreenAction::Field { field, value }, cx),
-          Some(true) => {
-            return self.toast(
-              ToastTone::Success,
-              "Comment sent to agent",
-              "Sent review comment to the idle agent",
-            )
-          }
+          Some(true) => return self.toast(ToastTone::Success, "Comment sent to agent", ""),
           Some(false) => {}
         }
-        let done = (
-          "Comment sent to agent",
-          "Created new agent session and sent review comment",
-        );
+        let done = ("Comment sent to agent", "");
         self.start(cx, Some(done), "Failed to create agent", move |_| {
           request("Review Comment", prompt, "acceptEdits", None)
         });
@@ -1944,6 +1863,7 @@ impl Render for WorkspaceView {
     self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
     let p = theme::palette(self.dark);
+    let confirm = crate::gpui_shell::confirm::render(Self::confirm_slot, self, window, &p, cx);
     let snapshot = self.snapshot.clone();
     let header = match &snapshot {
       Some(snapshot) => self.header(&snapshot.header, &p, cx),
@@ -2025,6 +1945,7 @@ impl Render for WorkspaceView {
           .text_color(p.foreground)
           .children(strip)
           .child(pane_area)
+          .children(confirm)
           .into_any_element();
       }
       // The tab alone, while no terminal pane shows.
@@ -2057,6 +1978,7 @@ impl Render for WorkspaceView {
             d.child(super::remote_chrome::cutoff_overlay(&p))
           }),
       )
+      .children(confirm)
       .into_any_element()
   }
 }

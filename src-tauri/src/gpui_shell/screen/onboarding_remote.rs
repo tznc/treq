@@ -9,18 +9,19 @@
 //! draws what the route says and sends what is typed and pressed
 //! (`remoteRepo.*`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, Subscription, Window,
+  div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, Subscription, Window,
 };
 
 use super::{ActionSink, ScreenAction};
 use crate::gpui_shell::{
-  theme::{self, tw, Palette},
-  ui::{self, Button, Size, TextSize},
+  theme::{self, Palette},
+  ui::{self, Button, Size, TextSize, Tone},
 };
 
 /// A saved repository on the endpoint (`SavedRemoteRepositoryRecord`).
@@ -228,7 +229,7 @@ fn input(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl Into
     .px_2()
     .flex()
     .items_center()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
@@ -308,16 +309,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     .gap_2()
     .cursor_pointer()
     .on_click(field(react, "remoteRepo.showHidden", (!show_hidden).into()))
-    .child(super::workspace_modal::checkbox(
-      "remote-browse-hidden-box",
-      if show_hidden {
-        super::workspace_modal::Check::On
-      } else {
-        super::workspace_modal::Check::Off
-      },
-      false,
-      p,
-    ))
+    .child(ui::Checkbox::new("remote-browse-hidden-box", p).checked(show_hidden))
     .child("Show hidden")
     .test_support();
   let folders: Vec<_> = form
@@ -420,14 +412,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     )
 }
 
-fn selector(
-  form: &Form,
-  inputs: &Inputs,
-  react: &ActionSink,
-  dark: bool,
-  p: &Palette,
-  cx: &App,
-) -> Div {
+fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &App) -> Div {
   let here_is_repo = form.listing.as_ref().is_some_and(|l| l.is_repo);
   let listed = form.listing.is_some();
   let clone_url = inputs
@@ -468,7 +453,7 @@ fn selector(
         .flex()
         .flex_col()
         .gap_2()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_3()
@@ -505,16 +490,7 @@ fn selector(
             .gap_2()
             .cursor_pointer()
             .on_click(field(react, "remoteRepo.confirmInit", (!confirm).into()))
-            .child(super::workspace_modal::checkbox(
-              "remote-repo-confirm-init-box",
-              if confirm {
-                super::workspace_modal::Check::On
-              } else {
-                super::workspace_modal::Check::Off
-              },
-              false,
-              p,
-            ))
+            .child(ui::Checkbox::new("remote-repo-confirm-init-box", p).checked(confirm))
             .child("Initialize an empty repository in this folder"),
         )
         .child(
@@ -530,7 +506,7 @@ fn selector(
   let error = form.error.clone().map(|error| {
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "remote-repo-error".into())
-      .text_color(tw::color(if dark { tw::RED_400 } else { tw::RED_600 }))
+      .text_color(Tone::Danger.text(p))
       .child(error)
   });
   div()
@@ -549,24 +525,23 @@ pub fn render(
   form: &Form,
   inputs: &Inputs,
   react: &ActionSink,
-  dark: bool,
+  _dark: bool,
   p: &Palette,
   cx: &App,
 ) -> Div {
   let cutoff = form.cutoff.as_ref().map(|reason| {
-    let red: gpui::Hsla = tw::color(tw::RED_500);
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "remote-repo-cutoff".into())
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
-      .border_color(red.opacity(0.4))
-      .bg(red.opacity(0.1))
+      .border_color(Tone::Danger.border(p))
+      .bg(Tone::Danger.tint(p))
       .px_3()
       .py_2()
       .child(
         div()
           .font_weight(FontWeight::MEDIUM)
-          .text_color(tw::color(if dark { tw::RED_300 } else { tw::RED_700 }))
+          .text_color(Tone::Danger.text(p))
           .child(cutoff_title(reason)),
       )
       .child(div().mt_1().text_color(p.muted_foreground).child(
@@ -589,7 +564,7 @@ pub fn render(
     .gap_3()
     .children(cutoff)
     .when(show_selector, |d| {
-      d.child(selector(form, inputs, react, dark, p, cx))
+      d.child(selector(form, inputs, react, p, cx))
     })
 }
 

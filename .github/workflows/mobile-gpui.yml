@@ -17,6 +17,7 @@ on:
     paths:
       - "mobile-gpui/**"
       - "src-tauri/**"
+      - "crates/**"
       - "package.json"
       - ".github/workflows/mobile-gpui.yml"
   pull_request:

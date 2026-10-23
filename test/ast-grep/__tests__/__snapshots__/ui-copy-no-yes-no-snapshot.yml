@@ -1,0 +1,104 @@
+id: ui-copy-no-yes-no
+snapshots:
+  ? |
+    fn confirm() -> String {
+      "Are you sure you want to delete this?".to_string()
+    }
+  : labels:
+    - source: '"Are you sure you want to delete this?"'
+      style: primary
+      start: 27
+      end: 66
+  ? |
+    fn done() -> String {
+      "Branch deleted successfully".to_string()
+    }
+  : labels:
+    - source: '"Branch deleted successfully"'
+      style: primary
+      start: 24
+      end: 53
+  ? |
+    fn done_cased() -> String {
+      "Successfully merged".to_string()
+    }
+  : labels:
+    - source: '"Successfully merged"'
+      style: primary
+      start: 30
+      end: 51
+  ? |
+    fn no() -> Button {
+      ui::Button::new("a", p).label("No")
+    }
+  : labels:
+    - source: '"No"'
+      style: primary
+      start: 52
+      end: 56
+    - source: label
+      style: secondary
+      start: 46
+      end: 51
+    - source: ui::Button::new("a", p).label
+      style: secondary
+      start: 22
+      end: 51
+    - source: ui::Button::new("a", p).label("No")
+      style: secondary
+      start: 22
+      end: 57
+    - source: ("No")
+      style: secondary
+      start: 51
+      end: 57
+  ? |
+    fn ok() -> Button {
+      ui::Button::new("a", p).label("OK")
+    }
+  : labels:
+    - source: '"OK"'
+      style: primary
+      start: 52
+      end: 56
+    - source: label
+      style: secondary
+      start: 46
+      end: 51
+    - source: ui::Button::new("a", p).label
+      style: secondary
+      start: 22
+      end: 51
+    - source: ui::Button::new("a", p).label("OK")
+      style: secondary
+      start: 22
+      end: 57
+    - source: ("OK")
+      style: secondary
+      start: 51
+      end: 57
+  ? |
+    fn yes() -> Button {
+      ui::Button::new("a", p).label("Yes")
+    }
+  : labels:
+    - source: '"Yes"'
+      style: primary
+      start: 53
+      end: 58
+    - source: label
+      style: secondary
+      start: 47
+      end: 52
+    - source: ui::Button::new("a", p).label
+      style: secondary
+      start: 23
+      end: 52
+    - source: ui::Button::new("a", p).label("Yes")
+      style: secondary
+      start: 23
+      end: 59
+    - source: ("Yes")
+      style: secondary
+      start: 52
+      end: 59

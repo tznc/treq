@@ -9,6 +9,7 @@
 //!
 //! [`code_data`]: super::code_data
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{sync::Arc, time::Duration};
 
@@ -20,9 +21,8 @@ use gpui_kit::component::{
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, prelude::*, px, relative, rems, rgb, Animation, AnimationExt as _,
-  App, Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task,
-  Window,
+  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _, App,
+  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -969,23 +969,9 @@ fn pulse(el: Div, id: &'static str) -> impl IntoElement {
   )
 }
 
-pub(super) fn tw(color: u32) -> Hsla {
-  rgb(color).into()
-}
-
-pub(super) const BLUE_400: u32 = 0x60a5fa;
-pub(super) const BLUE_500: u32 = 0x3b82f6;
-const GREEN_400: u32 = 0x4ade80;
-pub(super) const GREEN_500: u32 = 0x22c55e;
-pub(super) const GREEN_600: u32 = 0x16a34a;
-const RED_400: u32 = 0xf87171;
-const RED_500: u32 = 0xef4444;
-pub(super) const RED_600: u32 = 0xdc2626;
-const YELLOW_500: u32 = 0xeab308;
-
 /// `rounded-lg border` around a section.
 fn section(p: &Palette) -> Div {
-  div().rounded(zpx(12.)).border_1().border_color(p.border)
+  div().rounded(radius::LG).border_1().border_color(p.border)
 }
 
 /// A dropdown's panel (`DropdownMenuContent`), drawn over the tab.
@@ -995,80 +981,13 @@ pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
     .debug_selector(move || id.into())
     .absolute()
     .p_1()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
     .bg(p.popover)
     .text_color(p.popover_foreground)
     .shadow_md()
     .occlude()
-}
-
-/// A `DropdownMenuItem`.
-pub(super) fn menu_item(id: impl Into<SharedString>, p: &Palette, disabled: bool) -> Stateful<Div> {
-  let id: SharedString = id.into();
-  let selector = id.to_string();
-  let hover = p.menu_accent;
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || selector)
-    .flex()
-    .items_center()
-    .gap_2()
-    .px_2()
-    .py(zpx(6.))
-    .rounded(zpx(6.))
-    .when(disabled, |this| this.opacity(0.5))
-    .when(!disabled, |this| {
-      this.cursor_pointer().hover(move |s| s.bg(hover))
-    })
-}
-
-/// A native `<input type="checkbox">`, 14px, in `accent`.
-pub(super) fn checkbox(
-  id: impl Into<SharedString>,
-  checked: bool,
-  accent: Hsla,
-  p: &Palette,
-) -> Stateful<Div> {
-  let id: SharedString = id.into();
-  let selector = id.to_string();
-  div()
-    .id(id)
-    .debug_selector(move || selector)
-    .size(zpx(13.))
-    .flex_none()
-    .flex()
-    .items_center()
-    .justify_center()
-    .rounded(zpx(3.))
-    .when(checked, |this| {
-      this
-        .bg(accent)
-        .child(ui::icon(theme::ICON_CHECK, 11., gpui::white()))
-    })
-    .when(!checked, |this| {
-      this
-        .border_1()
-        .border_color(p.muted_foreground)
-        .bg(p.background)
-    })
-}
-
-/// `ui/kbd.tsx`.
-pub(super) fn kbd(p: &Palette, text: &str) -> Div {
-  ui::text(div(), TextSize::Xs)
-    .h(zpx(20.))
-    .min_w(zpx(20.))
-    .px_1()
-    .flex()
-    .items_center()
-    .justify_center()
-    .rounded(zpx(6.))
-    .bg(p.muted)
-    .text_color(p.muted_foreground)
-    .font_weight(FontWeight::MEDIUM)
-    .child(text.to_string())
 }
 
 pub(super) fn agent_icon(agent: Agent) -> &'static str {
@@ -1080,16 +999,22 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
   }
 }
 
-/// `MarkdownContent`'s prose, at `size`/`line` (16/28 for `prose`, 14/24
-/// for `prose-sm`).
+/// `MarkdownContent`'s prose, at the type scale step nearest `size` (`Lg`
+/// for `prose`, `Sm` for `prose-sm`); the step sets the line height.
 pub(super) fn markdown(
   id: impl Into<SharedString>,
   text: &str,
   size: f32,
-  line: f32,
   dark: bool,
 ) -> impl IntoElement {
   let id: SharedString = id.into();
+  let text_size = match size {
+    s if s <= 12. => TextSize::Xs,
+    s if s <= 14. => TextSize::Sm,
+    s if s <= 17. => TextSize::Lg,
+    _ => TextSize::Xl,
+  };
+  let size = text_size.metrics().0;
   let style = TextViewStyle {
     is_dark: dark,
     ..TextViewStyle::default()
@@ -1107,10 +1032,7 @@ pub(super) fn markdown(
     .expect("regex")
     .replace_all(text, "");
   let text = super::code_data::emojify(&text);
-  div()
-    .text_size(zpx(size))
-    .line_height(zpx(line))
-    .child(TextView::markdown(id, text).style(style).selectable(true))
+  ui::text(div(), text_size).child(TextView::markdown(id, text).style(style).selectable(true))
 }
 
 impl Render for CodeView {
@@ -1164,18 +1086,24 @@ impl Render for CodeView {
 }
 
 fn skeleton(p: &Palette) -> impl IntoElement {
-  let bar = |h: f32| div().h(zpx(h)).rounded(zpx(4.)).bg(p.muted.opacity(0.4));
+  let bar = |h: f32| div().h(zpx(h)).rounded(radius::SM).bg(p.muted.opacity(0.4));
   div()
     .debug_selector(|| "workspace-overview-skeleton".into())
     .flex()
     .flex_col()
     .gap_4()
     .child(pulse(
-      div().h(zpx(40.)).rounded(zpx(12.)).bg(p.muted.opacity(0.5)),
+      div()
+        .h(zpx(40.))
+        .rounded(radius::LG)
+        .bg(p.muted.opacity(0.5)),
       "sk-1",
     ))
     .child(pulse(
-      div().h(zpx(40.)).rounded(zpx(12.)).bg(p.muted.opacity(0.5)),
+      div()
+        .h(zpx(40.))
+        .rounded(radius::LG)
+        .bg(p.muted.opacity(0.5)),
       "sk-2",
     ))
     .child(
@@ -1188,7 +1116,7 @@ fn skeleton(p: &Palette) -> impl IntoElement {
           div()
             .h(zpx(16.))
             .w(zpx(128.))
-            .rounded(zpx(4.))
+            .rounded(radius::SM)
             .bg(p.muted.opacity(0.5)),
           "sk-3",
         ))
@@ -1204,64 +1132,37 @@ impl CodeView {
     if count == 0 {
       return None;
     }
-    let red = p.destructive;
     let react = self.react.clone();
     Some(
-      div()
-        .debug_selector(|| "code-conflicts".into())
-        .rounded(zpx(8.))
-        .border_1()
-        .border_color(red.opacity(0.3))
-        .bg(red.opacity(0.05))
-        .p_4()
-        .flex()
-        .items_start()
-        .gap_3()
-        .child(
-          div()
-            .mt(zpx(2.))
-            .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 20., red)),
-        )
-        .child(
-          div()
-            .flex_1()
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(red)
-                .child(format!(
-                  "{count} {} detected",
-                  if count == 1 { "conflict" } else { "conflicts" }
-                )),
-            )
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .mt_1()
-                .text_color(p.muted_foreground)
-                .child("Some files have conflicts that need to be resolved"),
-            ),
-        )
-        .child(
-          Button::new("code-view-conflicts", p)
-            .variant(Variant::Outline)
-            .size(Size::Sm)
-            .border_color(red.opacity(0.3))
-            .text_color(red)
-            .hover_bg(red.opacity(0.1))
-            .label("View conflicts")
-            .on_click(move |_, _, cx| {
-              let react = react.clone();
-              cx.defer(move |cx| {
-                react(
-                  ScreenAction::Field {
-                    field: "workspace.tab".into(),
-                    value: "changes".into(),
-                  },
-                  cx,
-                )
-              });
-            }),
+      ui::Alert::new(
+        "code-conflicts",
+        format!(
+          "{count} {} {} conflicts",
+          if count == 1 { "file" } else { "files" },
+          if count == 1 { "has" } else { "have" }
         ),
+        p,
+      )
+      .severity(ui::Severity::Danger)
+      .message("Resolve them before you push or merge.")
+      .action(
+        Button::new("code-view-conflicts", p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .label("Resolve…")
+          .on_click(move |_, _, cx| {
+            let react = react.clone();
+            cx.defer(move |cx| {
+              react(
+                ScreenAction::Field {
+                  field: "workspace.tab".into(),
+                  value: "changes".into(),
+                },
+                cx,
+              )
+            });
+          }),
+      ),
     )
   }
 
@@ -1272,7 +1173,7 @@ impl CodeView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let task = self.task_input(window, cx);
-    let border = if self.focused { tw(BLUE_400) } else { p.border };
+    let border = if self.focused { p.primary } else { p.border };
     let mention = self.mention.clone().filter(|m| !m.results.is_empty());
     div()
       .debug_selector(|| "agent-task-input".into())
@@ -1283,7 +1184,7 @@ impl CodeView {
         div()
           .id("task-card")
           .min_h(zpx(112.))
-          .rounded(zpx(16.))
+          .rounded(radius::LG)
           .border_1()
           .border_color(border)
           .bg(p.background)
@@ -1331,14 +1232,13 @@ impl CodeView {
               .pb_1()
               .min_h(zpx(44.))
               .max_h(zpx(200.))
-              .child(
+              .child(ui::text(
                 Textarea::new(&task)
                   .appearance(false)
                   .bordered(false)
-                  .xsmall()
-                  .text_size(zpx(13.))
-                  .line_height(zpx(20.)),
-              ),
+                  .xsmall(),
+                TextSize::Sm,
+              )),
           )
           .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
           .child(div().mt_auto().child(self.toolbar(p, cx))),
@@ -1356,7 +1256,7 @@ impl CodeView {
       .debug_selector(|| "task-mentions".into())
       .mx_2()
       .mb_1()
-      .rounded(zpx(12.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border)
       .bg(p.muted.opacity(0.5))
@@ -1380,7 +1280,7 @@ impl CodeView {
           .debug_selector(move || selector)
           .w_full()
           .px_3()
-          .py(zpx(6.))
+          .py_1p5()
           .flex()
           .items_center()
           .gap_2()
@@ -1445,7 +1345,7 @@ impl CodeView {
           .ml_1()
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(form::switch_sized(
             "task-new-workspace",
             "Run in a new workspace",
@@ -1480,10 +1380,10 @@ impl CodeView {
           .id("task-save-default")
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .cursor_pointer()
           .text_color(p.muted_foreground)
-          .child(checkbox("task-save-default-box", checked, tw(BLUE_500), p))
+          .child(ui::Checkbox::new("task-save-default-box", p).checked(checked))
           .child("Set as default for this repo")
           .on_click(cx.listener(move |view, _, _, cx| {
             view.save_default = !checked;
@@ -1500,22 +1400,11 @@ impl CodeView {
         .flex()
         .items_center()
         .child(
-          ui::text(div(), TextSize::Xs)
-            .id("task-agent")
-            .debug_selector(|| "task-agent".into())
-            .h(zpx(28.))
-            .px_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .rounded(zpx(8.))
-            .border_1()
-            .border_color(p.border)
-            .bg(p.background)
-            .cursor_pointer()
-            .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-            .child(agent.label())
-            .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., p.muted_foreground))
+          ui::Picker::new("task-agent", p)
+            .placement(ui::PickerPlacement::Toolbar)
+            .icon(agent_icon(agent))
+            .value(agent.label())
+            .open(self.menu == Some(Menu::Agent))
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
         )
         .when(self.menu == Some(Menu::Agent), |this| {
@@ -1545,7 +1434,7 @@ impl CodeView {
       "task-submit",
       Side::Top,
       Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
       )),
       submit,
       cx,
@@ -1559,8 +1448,8 @@ impl CodeView {
             .disabled(disabled)
             .rounded_l_none()
             .border_l_1()
-            .border_color(gpui::white().opacity(0.2))
-            .px(zpx(6.))
+            .border_color(p.primary_foreground.opacity(0.2))
+            .px_1p5()
             .icon(theme::ICON_CHEVRON_DOWN, 14.)
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
         )
@@ -1600,15 +1489,13 @@ impl CodeView {
       .left_0()
       .min_w(zpx(128.))
       .child(
-        menu_item("task-add-file", p, false)
-          .child(ui::icon(theme::ICON_PLUS, 16., p.popover_foreground))
-          .child("File")
+        ui::MenuItem::new("task-add-file", "File", p)
+          .icon(theme::ICON_PLUS)
           .on_click(cx.listener(|view, _, _, cx| view.open_picker(cx))),
       )
       .child(
-        menu_item("task-add-attach", p, false)
-          .child(ui::icon(theme::ICON_PAPERCLIP, 16., p.popover_foreground))
-          .child("Attach")
+        ui::MenuItem::new("task-add-attach", "Attach", p)
+          .icon(theme::ICON_PAPERCLIP)
           .on_click(cx.listener(|view, _, _, cx| view.attach(cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
@@ -1620,22 +1507,8 @@ impl CodeView {
       .right_0()
       .w(zpx(224.))
       .child(
-        menu_item("task-plan", p, false)
-          .items_start()
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .flex()
-              .flex_col()
-              .gap(zpx(2.))
-              .child(div().font_weight(FontWeight::MEDIUM).child("Plan"))
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Plan the change first, without editing files"),
-              ),
-          )
+        ui::MenuItem::new("task-plan", "Plan", p)
+          .description("Plan the change first, without editing files")
           .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
@@ -1646,13 +1519,11 @@ impl CodeView {
       .top(zpx(32.))
       .right_0()
       .min_w(zpx(128.))
+      .child(ui::MenuLabel::new("Agent", p))
       .children(Agent::ALL.into_iter().map(|agent| {
-        menu_item(format!("task-agent-{}", agent.id()), p, false)
-          .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-          .child(div().flex_1().child(agent.label()))
-          .when(agent == selected, |this| {
-            this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
-          })
+        ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
+          .icon(agent_icon(agent))
+          .checked(agent == selected)
           .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
       }));
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
@@ -1664,14 +1535,9 @@ impl CodeView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let button = environment::trigger(
-      "task-environment",
-      env,
-      self.starting_devcontainer,
-      environment::TASK_TRIGGER,
-      p,
-    )
-    .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
+    let button = environment::picker("task-environment", env, p)
+      .open(self.menu == Some(Menu::Environment))
+      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
     div()
       .relative()
       .child(button)
@@ -1705,8 +1571,7 @@ impl CodeView {
   fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let title = display_title(self.parent.workspace.as_ref()?);
     let heading = |el: Div| {
-      el.text_size(zpx(24.))
-        .line_height(zpx(30.))
+      ui::text(el, TextSize::Xl)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(p.foreground)
     };
@@ -1812,13 +1677,7 @@ impl CodeView {
       let shown = if looks_like_markdown(&text) {
         div()
           .pr_8()
-          .child(markdown(
-            "workspace-description-md",
-            &text,
-            14.,
-            24.,
-            self.dark,
-          ))
+          .child(markdown("workspace-description-md", &text, 14., self.dark))
           .into_any_element()
       } else {
         ui::text(div(), TextSize::Sm)
@@ -1938,7 +1797,7 @@ impl CodeView {
     let header = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .font_weight(FontWeight::SEMIBOLD)
       .text_color(p.muted_foreground)
       .mb_4()
@@ -1963,7 +1822,7 @@ impl CodeView {
       .child(
         div()
           .flex_none()
-          .mt(zpx(2.))
+          .mt_0p5()
           .size(zpx(14.))
           .flex()
           .items_center()
@@ -2040,7 +1899,7 @@ impl CodeView {
       .py_2()
       .px_2()
       .mx_neg_2()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .cursor_pointer()
       .when(row.current, |this| {
         this
@@ -2062,7 +1921,7 @@ impl CodeView {
               .flex()
               .items_center()
               .gap_2()
-              .mt(zpx(2.))
+              .mt_0p5()
               .flex_wrap()
               .child(time)
               .when(ins > 0 || del > 0, |this| {
@@ -2071,7 +1930,6 @@ impl CodeView {
                   del,
                   max,
                   (plus_ch, minus_ch),
-                  self.dark,
                   p,
                 )))
               }),
@@ -2097,7 +1955,7 @@ impl CodeView {
         .py_2()
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(12.))
+        .rounded(radius::LG)
         .bg(p.background)
         .hover(move |s| s.bg(hover))
         .cursor_pointer()
@@ -2110,7 +1968,7 @@ impl CodeView {
             .text_color(p.muted_foreground)
             .child("Go to file"),
         )
-        .child(kbd(p, &crate::gpui_shell::keys::hint("⌘ + P")))
+        .child(ui::Kbd::new("secondary-p", p))
         .on_click(move |_, _, cx| {
           let react = react.clone();
           cx.defer(move |cx| {
@@ -2143,14 +2001,14 @@ impl CodeView {
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
       let icon = match (&pin, entry.is_directory) {
-        (Some(_), _) => (theme::ICON_FOLDER_GIT, tw(BLUE_500)),
-        (None, true) => (theme::ICON_FOLDER, tw(BLUE_500)),
+        (Some(_), _) => (theme::ICON_FOLDER_GIT, ui::Tone::Primary.color(p)),
+        (None, true) => (theme::ICON_FOLDER, ui::Tone::Primary.color(p)),
         (None, false) => (theme::ICON_FILE, p.muted_foreground),
       };
       let pip = match entry.status.as_deref() {
-        Some("conflict") => Some(tw(RED_500)),
-        Some("committed") => Some(tw(BLUE_500)),
-        Some("workingCopy") => Some(tw(YELLOW_500)),
+        Some("conflict") => Some(ui::Tone::Danger.color(p)),
+        Some("committed") => Some(ui::Tone::Primary.color(p)),
+        Some("workingCopy") => Some(ui::Tone::Warning.color(p)),
         _ => None,
       };
       let name_color = if entry.status.is_some() {
@@ -2224,19 +2082,14 @@ impl CodeView {
                   .id(SharedString::from(format!("submodule-sync-{path}")))
                   .flex()
                   .items_center()
-                  .gap(zpx(6.))
+                  .gap_1p5()
                   .flex_none()
                   .pr_4()
                   .pl_2()
                   .text_color(p.muted_foreground)
                   .cursor_pointer()
                   .when(syncing, |this| this.opacity(0.5))
-                  .child(checkbox(
-                    format!("submodule-sync-box-{path}"),
-                    synced,
-                    p.primary,
-                    p,
-                  ))
+                  .child(ui::Checkbox::new(format!("submodule-sync-box-{path}"), p).checked(synced))
                   .child("Sync")
                   .when(!syncing, |this| {
                     let path = path.clone();
@@ -2286,7 +2139,7 @@ impl CodeView {
               .mb_4()
               .child("README.md"),
           )
-          .child(markdown("code-readme-md", &text, 16., 28., self.dark))
+          .child(markdown("code-readme-md", &text, 16., self.dark))
           .into_any_element(),
         None => ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
@@ -2343,7 +2196,7 @@ impl CodeView {
           .mt_1()
           .w(zpx(360.))
           .p_2()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -2357,14 +2210,15 @@ impl CodeView {
             cx.stop_propagation();
           }))
           .child(
-            Textarea::new(&text)
-              .readonly(true)
-              .aria_label("Commit read error")
-              .px_3()
-              .py_2()
-              .text_size(zpx(12.))
-              .line_height(zpx(18.))
-              .font_family(theme::MONO_FONT),
+            ui::text(
+              Textarea::new(&text)
+                .readonly(true)
+                .aria_label("Commit read error")
+                .px_3()
+                .py_2(),
+              TextSize::Code,
+            )
+            .font_family(theme::MONO_FONT),
           ),
       ),
     )
@@ -2502,7 +2356,7 @@ impl CodeView {
             this
               .flex()
               .items_center()
-              .gap(zpx(6.))
+              .gap_1p5()
               .child(ui::spinner("history-loading", 12., p.muted_foreground))
               .child("Loading...")
           })
@@ -2576,18 +2430,11 @@ impl CodeView {
     let tentative = matches!(kind, Kind::Tentative(_));
     let target = matches!(kind, Kind::Target);
     let title = headline(commit, tentative);
-    let (yellow_bg, yellow_hover) = if self.dark {
-      (tw(0x422006).opacity(0.2), tw(0x422006).opacity(0.3))
-    } else {
-      (tw(0xfefce8).opacity(0.8), tw(0xfef9c3).opacity(0.8))
-    };
-    let yellow_border = if self.dark {
-      tw(0x713f12).opacity(0.6)
-    } else {
-      tw(0xfef08a).opacity(0.7)
-    };
+    let warning = ui::Tone::Warning;
+    let (yellow_bg, yellow_hover) = (warning.tint(p), warning.tint(p).opacity(1.5));
+    let yellow_border = warning.border(p);
     let dot = if tentative {
-      tw(YELLOW_500)
+      warning.color(p)
     } else if target {
       p.muted_foreground.opacity(0.5)
     } else if first {
@@ -2605,7 +2452,7 @@ impl CodeView {
         .child(time::relative(&ts)),
       cx,
     );
-    let (green, red) = (tw(GREEN_600), tw(RED_600));
+    let (green, red) = (ui::Tone::GitOpen.text(p), ui::Tone::GitClosed.text(p));
     let change = commit.change_id.clone();
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
     let selector = id.to_string();
@@ -2620,8 +2467,8 @@ impl CodeView {
       .debug_selector(move || selector)
       .flex_1()
       .min_w_0()
-      .pt(zpx(2.))
-      .rounded(zpx(8.))
+      .pt_0p5()
+      .rounded(radius::MD)
       .cursor_pointer()
       .when(first && !target && !tentative, |this| {
         // Opaque over the column's `bg-muted/20`, or the shadow shows through.
@@ -2647,7 +2494,7 @@ impl CodeView {
         |this, label| {
           this.child(
             ui::text(div(), TextSize::Sm)
-              .mt(zpx(2.))
+              .mt_0p5()
               .font_family(theme::MONO_FONT)
               .text_color(p.muted_foreground)
               .truncate()
@@ -2660,13 +2507,13 @@ impl CodeView {
           .flex()
           .items_center()
           .gap_2()
-          .mt(zpx(2.))
+          .mt_0p5()
           .flex_wrap()
           .when(commit.is_immutable, |this| {
             this.child(
               ui::text(div(), TextSize::Xs)
-                .px(zpx(6.))
-                .py(zpx(2.))
+                .px_1p5()
+                .py_0p5()
                 .rounded_full()
                 .bg(p.muted)
                 .text_color(p.muted_foreground)
@@ -2707,7 +2554,7 @@ impl CodeView {
       .py_2()
       .px_2()
       .mx_neg_2()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .hover(move |s| s.bg(row_hover))
       .when(tentative, |this| {
         this.bg(yellow_bg).border_1().border_color(yellow_border)
@@ -2752,7 +2599,7 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
       .h(zpx(1.))
       .overflow_hidden()
       .flex()
-      .gap(zpx(3.))
+      .gap_1()
       .children((0..60).map(|_| div().flex_none().w(zpx(3.)).h(zpx(1.)).bg(p.border)))
   };
   div().my_4().pl_7().child(
@@ -2773,7 +2620,7 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
 
 /// `StackDot`.
 fn stack_dot(highlighted: bool, p: &Palette) -> impl IntoElement {
-  div().flex_none().mt(zpx(2.)).child(
+  div().flex_none().mt_0p5().child(
     div()
       .size(zpx(14.))
       .rounded_full()
@@ -2794,7 +2641,6 @@ fn loc_indicator(
   deletions: u32,
   max: u32,
   (plus_ch, minus_ch): (usize, usize),
-  dark: bool,
   p: &Palette,
 ) -> impl IntoElement {
   const HALF: f32 = 14.;
@@ -2807,8 +2653,8 @@ fn loc_indicator(
       ((n as f32 / max as f32) * HALF).round().max(1.)
     }
   };
-  let green = tw(if dark { GREEN_400 } else { GREEN_600 });
-  let red = tw(if dark { RED_400 } else { RED_600 });
+  let (added, removed) = (ui::Tone::GitOpen, ui::Tone::GitClosed);
+  let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla, ch: usize| {
     ui::text(div(), TextSize::Xs)
       .flex_none()
@@ -2822,9 +2668,9 @@ fn loc_indicator(
     .debug_selector(|| "workspace-loc-indicator".into())
     .flex()
     .items_center()
-    .gap(zpx(6.))
+    .gap_1p5()
     .child(
-      count(format!("+{insertions}"), green, plus_ch)
+      count(format!("+{insertions}"), added.text(p), plus_ch)
         .flex()
         .justify_end(),
     )
@@ -2851,5 +2697,5 @@ fn loc_indicator(
             .child(div().h_full().w(zpx(width(deletions))).bg(red)),
         ),
     )
-    .child(count(format!("-{deletions}"), red, minus_ch))
+    .child(count(format!("-{deletions}"), removed.text(p), minus_ch))
 }

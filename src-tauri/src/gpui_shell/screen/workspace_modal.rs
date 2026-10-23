@@ -7,13 +7,14 @@
 //! through the backend; it hands back only what React still owns: closing
 //! the dialog, opening the workspace it made, and deleting a workspace.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, Context, Div, Entity, FontWeight, Hsla, Pixels, SharedString, Stateful,
+  self, div, prelude::*, Context, Div, Entity, FontWeight, Pixels, SharedString, Stateful,
 };
 
 use super::{
@@ -179,14 +180,14 @@ pub fn dialog_panel(
     .flex()
     .items_center()
     .justify_center()
-    .bg(gpui::black().opacity(0.4))
+    .bg(p.scrim())
     .occlude();
   let panel = div()
     .debug_selector(move || id.into())
     .w_full()
     .max_w(zpx(max_width))
     .p_6()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -199,7 +200,6 @@ pub fn dialog_panel(
 /// `DialogTitle`: `text-lg font-semibold leading-none`.
 pub fn dialog_title(title: impl Into<SharedString>) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(title.into())
 }
@@ -217,7 +217,7 @@ pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
   div()
     .flex()
     .flex_col()
-    .gap(zpx(6.))
+    .gap_1p5()
     // `DialogTitle` is the dialog's heading.
     .child(
       div()
@@ -233,7 +233,6 @@ pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
 /// `<Label className="text-xs">`: `font-medium leading-none`.
 pub fn label_xs(text: impl Into<SharedString>) -> Div {
   ui::text(div(), TextSize::Xs)
-    .line_height(zpx(11.))
     .font_weight(FontWeight::MEDIUM)
     .child(text.into())
 }
@@ -246,37 +245,12 @@ pub enum Check {
   Some,
 }
 
-/// A native `<input type="checkbox" className="rounded">`: 13px, the
-/// webview's blue accent when checked.
-pub fn checkbox(
-  id: impl Into<SharedString>,
-  state: Check,
-  disabled: bool,
-  p: &Palette,
-) -> Stateful<Div> {
-  let id: SharedString = id.into();
-  let selector = id.to_string();
-  let accent: Hsla = gpui::rgb(theme::tw::BLUE_500).into();
-  div()
-    .id(id)
-    .debug_selector(move || selector)
-    .size(zpx(13.))
-    .flex_none()
-    .flex()
-    .items_center()
-    .justify_center()
-    .rounded(zpx(3.))
-    .when(disabled, |this| this.opacity(0.5))
-    .map(|this| match state {
-      Check::On => this
-        .bg(accent)
-        .child(ui::icon(theme::ICON_CHECK, 11., gpui::white())),
-      Check::Some => this
-        .bg(accent)
-        .child(ui::icon(theme::ICON_MINUS, 11., gpui::white())),
-      Check::Off => this
-        .border_1()
-        .border_color(p.muted_foreground)
-        .bg(p.background),
-    })
+impl From<Check> for ui::CheckState {
+  fn from(check: Check) -> Self {
+    match check {
+      Check::On => ui::CheckState::On,
+      Check::Off => ui::CheckState::Off,
+      Check::Some => ui::CheckState::Mixed,
+    }
+  }
 }

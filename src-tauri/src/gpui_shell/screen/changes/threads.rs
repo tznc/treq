@@ -2,6 +2,7 @@
 //! comments, drawn in the Changes tab's diff (`GithubCommentCard`,
 //! `GithubThreadsInlineList`, `AgentReviewCommentCard`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::time::Duration;
 
@@ -222,7 +223,7 @@ impl ChangesView {
 
   /// What a diff line carries from others: agent comments, then threads.
   /// `ReviewActionBar`'s count of the open local agent comments.
-  pub(super) fn agent_count(&self) -> Option<Div> {
+  pub(super) fn agent_count(&self, p: &Palette) -> Option<Div> {
     let open = self
       .threads
       .agent
@@ -232,11 +233,7 @@ impl ChangesView {
     (open > 0).then(|| {
       ui::text(div(), TextSize::Xs)
         .debug_selector(|| "agent-review-comment-count".into())
-        .text_color(tw::color(if self.dark {
-          tw::VIOLET_400
-        } else {
-          tw::VIOLET_600
-        }))
+        .text_color(Tone::GitMerged.color(p))
         .child(count_label(open, "local review comment"))
     })
   }
@@ -261,8 +258,8 @@ impl ChangesView {
       let mut list = div()
         .debug_selector(|| "agent-review-inline-list".into())
         .border_y_1()
-        .border_color(violet(0.3))
-        .bg(violet(0.03))
+        .border_color(violet(p, 0.3))
+        .bg(violet(p, 0.03))
         .px_4()
         .py_2()
         .flex()
@@ -304,8 +301,8 @@ impl ChangesView {
     let mut section = div()
       .debug_selector(|| "github-outdated-threads".into())
       .border_b_1()
-      .border_color(sky(0.4))
-      .bg(sky(0.05))
+      .border_color(sky(p, 0.4))
+      .bg(sky(p, 0.05))
       .px_4()
       .py_3()
       .flex()
@@ -342,7 +339,7 @@ impl ChangesView {
     let first = thread.comments.first();
     let muted = p.muted_foreground;
     let id = thread.id.clone();
-    let toggle_hover = sky(0.1);
+    let toggle_hover = sky(p, 0.1);
     let mut toggle = div()
       .id(SharedString::from(format!("github-thread-{}", thread.id)))
       .debug_selector(|| "github-thread-toggle".into())
@@ -352,7 +349,7 @@ impl ChangesView {
       .items_center()
       .gap_2()
       .px_3()
-      .py(zpx(6.))
+      .py_1p5()
       .cursor_pointer()
       .hover(move |s| s.bg(toggle_hover))
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
@@ -377,9 +374,9 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_1()
-          .px(zpx(6.))
-          .py(zpx(2.))
-          .rounded(zpx(4.))
+          .px_1p5()
+          .py_0p5()
+          .rounded(radius::SM)
           .bg(p.muted)
           .text_color(muted)
           .font_weight(FontWeight::MEDIUM)
@@ -406,10 +403,10 @@ impl ChangesView {
       );
     }
     let mut card = div()
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
-      .border_color(sky(0.3))
-      .bg(sky(0.05))
+      .border_color(sky(p, 0.3))
+      .bg(sky(p, 0.05))
       .overflow_hidden()
       .font_family(theme::SANS_FONT)
       .child(toggle);
@@ -446,9 +443,9 @@ impl ChangesView {
       .group("github-comment")
       .relative()
       .bg(p.background)
-      .rounded(zpx(6.))
-      .p(zpx(10.))
-      .pr(zpx(36.))
+      .rounded(radius::MD)
+      .p_2p5()
+      .pr_9()
       .border_1()
       .border_color(p.border.opacity(0.6))
       .child(
@@ -456,7 +453,7 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .mb(zpx(6.))
+          .mb_1p5()
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
@@ -464,18 +461,13 @@ impl ChangesView {
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
           )
-          .child(ui::icon(
-            theme::ICON_GITHUB,
-            14.,
-            tw::color(if self.dark { tw::SKY_400 } else { tw::SKY_600 }),
-          )),
+          .child(ui::icon(theme::ICON_GITHUB, 14., Tone::Primary.text(p))),
       )
       .child(div().debug_selector(|| "github-comment-body".into()).child(
         super::super::code::markdown(
           format!("github-comment-{}", comment.id),
           &comment.body,
           13.,
-          20.,
           self.dark,
         ),
       ))
@@ -498,7 +490,7 @@ impl ChangesView {
             .top_2()
             .right_2()
             .p_1()
-            .rounded(zpx(4.))
+            .rounded(radius::SM)
             .cursor_pointer()
             .opacity(0.)
             .group_hover("github-comment", |s| s.opacity(1.))
@@ -530,10 +522,10 @@ impl ChangesView {
     let mut card = div()
       .debug_selector(|| "agent-review-comment-card".into())
       .font_family(theme::MONO_FONT)
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
-      .border_color(violet(0.4))
-      .bg(violet(0.05))
+      .border_color(violet(p, 0.4))
+      .bg(violet(p, 0.05))
       .p_3()
       .flex()
       .flex_col()
@@ -543,15 +535,11 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(theme::ICON_BOT, 14., tw::color(tw::VIOLET_500)))
+          .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
             ui::text(div(), TextSize::Xs)
               .font_weight(FontWeight::MEDIUM)
-              .text_color(tw::color(if self.dark {
-                tw::VIOLET_400
-              } else {
-                tw::VIOLET_600
-              }))
+              .text_color(Tone::GitMerged.color(p))
               .child("Local"),
           )
           .child(
@@ -575,7 +563,7 @@ impl ChangesView {
       actions = actions.child(
         Button::new(SharedString::from(format!("agent-apply-{id}")), p)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_WAND, 12.)
           .label("Apply")
@@ -590,7 +578,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-send-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_TERMINAL, 12.)
           .label("Send to agent")
@@ -601,7 +589,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-resolve-{id}")), p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(busy)
           .icon(theme::ICON_CHECK, 12.)
           .label("Resolve")
@@ -613,7 +601,7 @@ impl ChangesView {
         Button::new(SharedString::from(format!("agent-delete-{id}")), p)
           .variant(Variant::Ghost)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .text_color(muted)
           .disabled(busy)
           .icon(theme::ICON_TRASH, 12.)
@@ -633,12 +621,12 @@ enum AgentAction {
   Apply,
 }
 
-fn sky(alpha: f32) -> Hsla {
-  tw::color(tw::SKY_500).opacity(alpha)
+fn sky(p: &Palette, alpha: f32) -> Hsla {
+  Tone::Primary.color(p).opacity(alpha)
 }
 
-fn violet(alpha: f32) -> Hsla {
-  tw::color(tw::VIOLET_500).opacity(alpha)
+fn violet(p: &Palette, alpha: f32) -> Hsla {
+  Tone::GitMerged.color(p).opacity(alpha)
 }
 
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
@@ -707,13 +695,9 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
         .font_family(theme::MONO_FONT);
       for row in rows {
         let (marker, bg, mark) = match row.kind {
-          RowKind::Removed => ("-", Some(tw::color(tw::RED_500).opacity(0.1)), tw::RED_500),
-          RowKind::Added => (
-            "+",
-            Some(tw::color(tw::GREEN_500).opacity(0.1)),
-            tw::GREEN_500,
-          ),
-          RowKind::Unchanged => (" ", None, tw::GREEN_500),
+          RowKind::Removed => ("-", Some(Tone::GitClosed.tint(p)), Tone::GitClosed),
+          RowKind::Added => ("+", Some(Tone::GitOpen.tint(p)), Tone::GitOpen),
+          RowKind::Unchanged => (" ", None, Tone::GitOpen),
         };
         let mut text = String::new();
         let mut highlights = Vec::new();
@@ -724,7 +708,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
             highlights.push((
               start..text.len(),
               gpui::HighlightStyle {
-                background_color: Some(tw::color(mark).opacity(0.3)),
+                background_color: Some(mark.color(p).opacity(0.3)),
                 strikethrough: (row.kind == RowKind::Removed).then(|| StrikethroughStyle {
                   thickness: px(1.),
                   color: None,
@@ -739,7 +723,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
             .flex()
             .items_start()
             .px_2()
-            .py(zpx(1.))
+            .py_px()
             .when_some(bg, |this, bg| this.bg(bg))
             .child(
               div()
@@ -762,13 +746,13 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       .debug_selector(|| "agent-review-suggestion".into())
       .font_family(theme::MONO_FONT)
       .px_2()
-      .py(zpx(6.))
-      .bg(tw::color(tw::GREEN_500).opacity(0.1))
+      .py_1p5()
+      .bg(Tone::GitOpen.tint(p))
       .child(suggested.to_string())
       .into_any_element(),
   };
   div()
-    .rounded(zpx(4.))
+    .rounded(radius::SM)
     .border_1()
     .border_color(p.border.opacity(0.6))
     .overflow_hidden()

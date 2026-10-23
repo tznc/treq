@@ -1,15 +1,16 @@
 //! `NewPrDialog`: a pull request from a workspace (`CreatePrFromWorkspaceForm`)
 //! or from any branch (`CreatePrForm`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
-  anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
-  MouseButton, SharedString, Window,
+  anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, MouseButton,
+  SharedString, Window,
 };
 
 use super::{
   parts::{self, named},
-  tab_trigger, tabs_list, GithubView, Popover,
+  GithubView, Popover,
 };
 use crate::{
   gpui_shell::{
@@ -20,7 +21,7 @@ use crate::{
       workspace_modal::{dialog_panel, dialog_title},
     },
     theme::{self, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, EscapeExt as _, Size, TextSize, Variant},
   },
   local_db::Workspace,
 };
@@ -301,31 +302,28 @@ impl GithubView {
   ) -> impl IntoElement {
     let tab = self.new_pr.as_ref().map_or(NewPrTab::Workspace, |n| n.tab);
     let (backdrop, panel) = dialog_panel("github-new-pr-dialog", 576., window.viewport_size(), p);
-    let trigger =
-      |id: &'static str, label: &'static str, which: NewPrTab, cx: &mut Context<Self>| {
-        tab_trigger(id, tab == which, p)
-          .on_click(cx.listener(move |view, _, _, cx| {
+    let view = cx.weak_entity();
+    let tabs = ui::Tabs::new("github-new-pr-tabs", p)
+      .tab(ui::Tab::new(
+        "github-new-pr-tab-workspace",
+        "From workspace",
+      ))
+      .tab(ui::Tab::new("github-new-pr-tab-branch", "From branch"))
+      .selected(match tab {
+        NewPrTab::Workspace => 0,
+        NewPrTab::Branch => 1,
+      })
+      .on_select(move |ix, _, cx| {
+        view
+          .update(cx, |view, cx| {
             if let Some(new_pr) = &mut view.new_pr {
-              new_pr.tab = which;
+              new_pr.tab = [NewPrTab::Workspace, NewPrTab::Branch][ix];
             }
             view.popover = None;
             cx.notify();
-          }))
-          .child(label)
-      };
-    let tabs = tabs_list(p)
-      .child(trigger(
-        "github-new-pr-tab-workspace",
-        "From workspace",
-        NewPrTab::Workspace,
-        cx,
-      ))
-      .child(trigger(
-        "github-new-pr-tab-branch",
-        "From branch",
-        NewPrTab::Branch,
-        cx,
-      ));
+          })
+          .ok();
+      });
     let content = match tab {
       NewPrTab::Workspace => self.workspace_form(p, window, cx).into_any_element(),
       NewPrTab::Branch => self.branch_form(p, window, cx).into_any_element(),
@@ -351,13 +349,11 @@ impl GithubView {
             panel
               .id("github-new-pr-panel")
               .track_focus(self.dialog_focus())
-              .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
-                if e.keystroke.key == "escape" {
-                  if view.popover.take().is_some() {
-                    cx.notify();
-                  } else {
-                    view.cancel_new_pr(cx);
-                  }
+              .on_escape(cx.listener(|view, _, _, cx| {
+                if view.popover.take().is_some() {
+                  cx.notify();
+                } else {
+                  view.cancel_new_pr(cx);
                 }
               }))
               .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
@@ -397,7 +393,7 @@ impl GithubView {
           .id("github-new-pr-workspaces")
           .max_h(zpx(240.))
           .overflow_y_scroll()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .children(list.iter().enumerate().map(|(i, ws)| {
@@ -411,7 +407,7 @@ impl GithubView {
                 d.border_b_1().border_color(p.border)
               })
               .cursor_pointer()
-              .when(picked, |d| d.bg(p.primary.opacity(0.1)))
+              .when(picked, |d| d.bg(p.selected()))
               .when(!picked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
               .on_click(cx.listener(move |view, _, _, cx| view.pick_workspace(id, cx)))
               .child(
@@ -611,8 +607,8 @@ impl GithubView {
       .size(Size::Sm)
       .rounded_l_none()
       .border_l_1()
-      .border_color(gpui_kit::white().opacity(0.2))
-      .px(zpx(6.))
+      .border_color(p.primary_foreground.opacity(0.2))
+      .px_1p5()
       .disabled(pending)
       .icon(theme::ICON_CHEVRON_DOWN, 16.)
       .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::PrType, cx)));
@@ -642,11 +638,11 @@ impl GithubView {
             .relative()
             .flex()
             .flex_col()
-            .gap(zpx(2.))
-            .py(zpx(6.))
+            .gap_0p5()
+            .py_1p5()
             .pl_8()
             .pr_2()
-            .rounded(zpx(4.))
+            .rounded(radius::SM)
             .cursor_pointer()
             .hover(move |s| s.bg(accent))
             .child(

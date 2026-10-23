@@ -305,7 +305,9 @@ fn file_browser_tree_menu_copies_paths(cx: &mut TestAppContext) {
     h.cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
     Some("README.md")
   );
-  assert!(host.calls().contains(&"notify toast Copied".to_string()));
+  assert!(host
+    .calls()
+    .contains(&"notify toast Relative path copied".to_string()));
 }
 
 #[gpui::test]

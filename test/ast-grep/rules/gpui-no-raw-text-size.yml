@@ -1,0 +1,28 @@
+id: gpui-no-raw-text-size
+language: rust
+severity: error
+message: >
+  Do not set a text size or line height by hand. Use
+  `ui::text(el, TextSize::..)`, which sets both from the type scale.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # The file list's font follows the user's font-size setting.
+  - "src-tauri/src/gpui_shell/screen/code.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: field_expression
+    has:
+      field: field
+      regex: ^(text_size|line_height)$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

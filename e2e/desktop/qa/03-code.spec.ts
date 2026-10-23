@@ -48,7 +48,7 @@ test("code: workspace Code tab, prompt menus, tree and file view", async ({ page
     title: "Code tab of a stacked workspace with a conflict",
     expectations: [
       "Header: branch → base picker, View PR, Checks GH 2/4 (red), Merge… disabled, Details, overflow",
-      "Red '1 conflict detected' banner with View conflicts; tab badges Commits 2 / Changes 3",
+      "Red '1 file has conflicts' alert with Resolve…; tab badges Commits 2 / Changes 3",
       "Stack panel lists feat/empty-event-message over feat/event-ingest over main, with +/- bars",
     ],
   });

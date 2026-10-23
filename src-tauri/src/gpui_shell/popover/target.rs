@@ -1,6 +1,7 @@
 //! The target branch popover: `TargetBranchSelector`'s search over the
 //! repository's branches (`w-[300px] p-0`, a cmdk list).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, KeyDownEvent, SharedString, Window,
@@ -235,7 +236,7 @@ impl Popover {
               .id(id)
               .debug_selector(move || selector)
               .px_3()
-              .py(zpx(6.))
+              .py_1p5()
               .flex()
               .items_center()
               .gap_2()
@@ -267,7 +268,7 @@ impl Popover {
       .id("target-branch-popover")
       .debug_selector(|| "target-branch-popover".into())
       .w(zpx(WIDTH))
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.background)

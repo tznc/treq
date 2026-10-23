@@ -1,0 +1,265 @@
+id: gpui-no-zpx-spacing
+snapshots:
+  ? |
+    fn gap() -> Div {
+      div().gap(zpx(6.))
+    }
+  : labels:
+    - source: div().gap(zpx(6.))
+      style: primary
+      start: 20
+      end: 38
+    - source: gap
+      style: secondary
+      start: 26
+      end: 29
+    - source: div().gap
+      style: secondary
+      start: 20
+      end: 29
+    - source: zpx
+      style: secondary
+      start: 30
+      end: 33
+    - source: '6.'
+      style: secondary
+      start: 34
+      end: 36
+    - source: '6.'
+      style: secondary
+      start: 34
+      end: 36
+    - source: zpx(6.)
+      style: secondary
+      start: 30
+      end: 37
+    - source: zpx(6.)
+      style: secondary
+      start: 30
+      end: 37
+  ? |
+    fn gap_axis() -> Div {
+      div().gap_x(zpx(6.)).gap_y(zpx(2.))
+    }
+  : labels:
+    - source: div().gap_x(zpx(6.)).gap_y(zpx(2.))
+      style: primary
+      start: 25
+      end: 60
+    - source: gap_y
+      style: secondary
+      start: 46
+      end: 51
+    - source: div().gap_x(zpx(6.)).gap_y
+      style: secondary
+      start: 25
+      end: 51
+    - source: zpx
+      style: secondary
+      start: 52
+      end: 55
+    - source: '2.'
+      style: secondary
+      start: 56
+      end: 58
+    - source: '2.'
+      style: secondary
+      start: 56
+      end: 58
+    - source: zpx(2.)
+      style: secondary
+      start: 52
+      end: 59
+    - source: zpx(2.)
+      style: secondary
+      start: 52
+      end: 59
+  ? |
+    fn margin() -> Div {
+      div().mt(zpx(4.))
+    }
+  : labels:
+    - source: div().mt(zpx(4.))
+      style: primary
+      start: 23
+      end: 40
+    - source: mt
+      style: secondary
+      start: 29
+      end: 31
+    - source: div().mt
+      style: secondary
+      start: 23
+      end: 31
+    - source: zpx
+      style: secondary
+      start: 32
+      end: 35
+    - source: '4.'
+      style: secondary
+      start: 36
+      end: 38
+    - source: '4.'
+      style: secondary
+      start: 36
+      end: 38
+    - source: zpx(4.)
+      style: secondary
+      start: 32
+      end: 39
+    - source: zpx(4.)
+      style: secondary
+      start: 32
+      end: 39
+  ? |
+    fn negative_margin() -> Div {
+      div().mx(zpx(-8.))
+    }
+  : labels:
+    - source: div().mx(zpx(-8.))
+      style: primary
+      start: 32
+      end: 50
+    - source: mx
+      style: secondary
+      start: 38
+      end: 40
+    - source: div().mx
+      style: secondary
+      start: 32
+      end: 40
+    - source: zpx
+      style: secondary
+      start: 41
+      end: 44
+    - source: '8.'
+      style: secondary
+      start: 46
+      end: 48
+    - source: '-8.'
+      style: secondary
+      start: 45
+      end: 48
+    - source: '-8.'
+      style: secondary
+      start: 45
+      end: 48
+    - source: zpx(-8.)
+      style: secondary
+      start: 41
+      end: 49
+    - source: zpx(-8.)
+      style: secondary
+      start: 41
+      end: 49
+  ? |
+    fn padding() -> Div {
+      div().px(zpx(10.))
+    }
+  : labels:
+    - source: div().px(zpx(10.))
+      style: primary
+      start: 24
+      end: 42
+    - source: px
+      style: secondary
+      start: 30
+      end: 32
+    - source: div().px
+      style: secondary
+      start: 24
+      end: 32
+    - source: zpx
+      style: secondary
+      start: 33
+      end: 36
+    - source: '10.'
+      style: secondary
+      start: 37
+      end: 40
+    - source: '10.'
+      style: secondary
+      start: 37
+      end: 40
+    - source: zpx(10.)
+      style: secondary
+      start: 33
+      end: 41
+    - source: zpx(10.)
+      style: secondary
+      start: 33
+      end: 41
+  ? |
+    fn radius() -> Div {
+      div().rounded(zpx(6.))
+    }
+  : labels:
+    - source: div().rounded(zpx(6.))
+      style: primary
+      start: 23
+      end: 45
+    - source: rounded
+      style: secondary
+      start: 29
+      end: 36
+    - source: div().rounded
+      style: secondary
+      start: 23
+      end: 36
+    - source: zpx
+      style: secondary
+      start: 37
+      end: 40
+    - source: '6.'
+      style: secondary
+      start: 41
+      end: 43
+    - source: '6.'
+      style: secondary
+      start: 41
+      end: 43
+    - source: zpx(6.)
+      style: secondary
+      start: 37
+      end: 44
+    - source: zpx(6.)
+      style: secondary
+      start: 37
+      end: 44
+  ? |
+    fn radius_corner() -> Div {
+      div().rounded_tl(zpx(6.))
+    }
+  : labels:
+    - source: div().rounded_tl(zpx(6.))
+      style: primary
+      start: 30
+      end: 55
+    - source: rounded_tl
+      style: secondary
+      start: 36
+      end: 46
+    - source: div().rounded_tl
+      style: secondary
+      start: 30
+      end: 46
+    - source: zpx
+      style: secondary
+      start: 47
+      end: 50
+    - source: '6.'
+      style: secondary
+      start: 51
+      end: 53
+    - source: '6.'
+      style: secondary
+      start: 51
+      end: 53
+    - source: zpx(6.)
+      style: secondary
+      start: 47
+      end: 54
+    - source: zpx(6.)
+      style: secondary
+      start: 47
+      end: 54

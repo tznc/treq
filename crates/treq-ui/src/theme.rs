@@ -5,7 +5,9 @@ use std::{borrow::Cow, rc::Rc};
 
 use gpui_kit::component as kit;
 
-use tauri_plugin_gpui::gpui::{self, hsla, rgb, App, AssetSource, Hsla, SharedString};
+use gpui::{hsla, rgb, App, AssetSource, Hsla, SharedString};
+
+use crate as ui;
 
 /// Lucide icons (ISC license), the same set the React app draws with, as
 /// `icons/<name>.svg` asset paths and their bundled bytes.
@@ -13,7 +15,7 @@ macro_rules! icons {
   ($($konst:ident => $name:literal),* $(,)?) => {
     $(pub const $konst: &str = concat!("icons/", $name, ".svg");)*
     const ICONS: &[(&str, &[u8])] = &[
-      $(($konst, include_bytes!(concat!("../../assets/gpui-icons/", $name, ".svg"))),)*
+      $(($konst, include_bytes!(concat!("../../../src-tauri/assets/gpui-icons/", $name, ".svg"))),)*
     ];
   };
 }
@@ -141,11 +143,12 @@ const INTER_SEMIBOLD: &[u8] =
 /// The React app's mono face, converted from its web font
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
 const JETBRAINS_MONO_REGULAR: &[u8] =
-  include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+  include_bytes!("../../../src-tauri/assets/fonts/JetBrainsMono-Regular.ttf");
 /// For `font-mono font-semibold` text. The web app ships no bolder mono
 /// face, so the webview synthesizes one from Regular; JetBrains' Bold (same
 /// subset), registered as weight 600, looks closest to that.
-const JETBRAINS_MONO_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf");
+const JETBRAINS_MONO_SEMIBOLD: &[u8] =
+  include_bytes!("../../../src-tauri/assets/fonts/JetBrainsMono-Bold.ttf");
 
 pub const MONO_FONT: &str = "JetBrains Mono";
 
@@ -175,7 +178,7 @@ impl AssetSource for Assets {
 
 /// gpui-kit's theme in the React app's colors, light and dark (generated
 /// from its default theme with the tokens of `src/index.css`).
-const KIT_THEME: &str = include_str!("../../assets/gpui-theme.json");
+const KIT_THEME: &str = include_str!("../../../src-tauri/assets/gpui-theme.json");
 
 /// App-level GPUI setup: fonts, the default text style, and gpui-kit with
 /// the app's theme.
@@ -197,6 +200,7 @@ pub fn init(cx: &mut App) {
     .with_interval(CARET_BLINK)
     .install(cx);
   init_kit_theme(cx);
+  install(false, 1., cx);
 }
 
 /// How long the caret in a focused input stays shown, then hidden.
@@ -220,25 +224,194 @@ fn init_kit_theme(cx: &mut App) {
     }
   }
   kit::Theme::change(kit::ThemeMode::Light, None, cx);
-  let theme = kit::Theme::global_mut(cx);
-  theme.font_family = SANS_FONT.into();
-  theme.font_size = gpui::px(13.);
-  theme.mono_font_family = MONO_FONT.into();
-  theme.mono_font_size = gpui::px(13.);
-  theme.radius = gpui::px(8.);
-  theme.radius_lg = gpui::px(12.);
+  set_kit_metrics(cx);
 }
 
-/// Puts gpui-kit's widgets in React's light or dark theme.
-pub fn set_kit_dark(dark: bool, cx: &mut App) {
+/// How big gpui-kit's widgets draw text: 13 on the desktop, 15 on a phone,
+/// which is read at arm's length and tapped rather than clicked.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Density {
+  #[default]
+  Desktop,
+  Touch,
+}
+
+impl gpui::Global for Density {}
+
+impl Density {
+  /// gpui-kit's body and mono text sizes.
+  pub fn font_sizes(self) -> (f32, f32) {
+    match self {
+      Density::Desktop => (13., 13.),
+      Density::Touch => (15., 12.),
+    }
+  }
+}
+
+/// Sizes gpui-kit's widgets for `density`.
+pub fn set_density(density: Density, cx: &mut App) {
+  cx.set_global(density);
+  set_kit_metrics(cx);
+}
+
+/// The fonts and radii treq gives gpui-kit's widgets over its theme file.
+fn set_kit_metrics(cx: &mut App) {
+  let (body, mono) = cx
+    .try_global::<Density>()
+    .copied()
+    .unwrap_or_default()
+    .font_sizes();
+  let theme = kit::Theme::global_mut(cx);
+  theme.font_family = SANS_FONT.into();
+  theme.font_size = gpui::px(body);
+  theme.mono_font_family = MONO_FONT.into();
+  theme.mono_font_size = gpui::px(mono);
+  theme.radius = gpui::px(RADIUS_MD);
+  theme.radius_lg = gpui::px(RADIUS_LG);
+}
+
+/// The installed theme's palette.
+pub fn current(cx: &App) -> Palette {
+  palette(cx.try_global::<Installed>().is_some_and(|i| i.dark))
+}
+
+/// Puts the app's widgets, gpui-kit's and gpui-bootstrap's, in the light or
+/// dark theme at the app's zoom. Cheap when neither changed.
+pub fn set_dark(dark: bool, cx: &mut App) {
+  install(dark, ui::zoom_factor(cx), cx);
+}
+
+/// Re-sizes gpui-bootstrap's theme after the app's zoom changed, as its
+/// lengths are pixels rather than the rems `ui::zpx` gives.
+pub fn sync_zoom(cx: &mut App) {
+  let dark = cx.try_global::<Installed>().is_some_and(|i| i.dark);
+  install(dark, ui::zoom_factor(cx), cx);
+}
+
+/// The light/dark mode and zoom the installed themes were built for.
+#[derive(Clone, Copy, PartialEq)]
+struct Installed {
+  dark: bool,
+  zoom: f32,
+}
+
+impl gpui::Global for Installed {}
+
+fn install(dark: bool, zoom: f32, cx: &mut App) {
+  let next = Installed { dark, zoom };
+  if cx.try_global::<Installed>() == Some(&next) {
+    return;
+  }
+  cx.set_global(next);
+  // Writes its colors over gpui-kit's theme, so gpui-kit's own theme file
+  // goes back on after it: kit widgets keep the colors they had.
+  bootstrap(dark, zoom).apply(cx);
   let mode = if dark {
     kit::ThemeMode::Dark
   } else {
     kit::ThemeMode::Light
   };
-  if kit::Theme::global(cx).mode != mode {
-    kit::Theme::change(mode, None, cx);
-  }
+  kit::Theme::change(mode, None, cx);
+  set_kit_metrics(cx);
+}
+
+/// Corner radii: `sm` for kbd, checkboxes and menu rows; `md` for buttons,
+/// inputs, menus, popovers and tooltips; `lg` for cards, toasts and dialogs.
+pub const RADIUS_SM: f32 = 4.;
+pub const RADIUS_MD: f32 = 8.;
+pub const RADIUS_LG: f32 = 12.;
+
+/// Control heights: `sm` inside rows, `md` in toolbars and headers (the
+/// default), `lg` in dialog footers and forms.
+pub const CONTROL_SM: f32 = 24.;
+pub const CONTROL_MD: f32 = 28.;
+pub const CONTROL_LG: f32 = 32.;
+
+/// gpui-bootstrap's theme in treq's tokens, at `zoom` (1.0 at 100%).
+///
+/// Every gpui-bootstrap component the `ui` facade builds on reads it: its
+/// colors come from [`palette`], its type scale is `ui::TextSize`'s, and its
+/// control sizes are [`CONTROL_SM`], [`CONTROL_MD`] and [`CONTROL_LG`].
+pub fn bootstrap(dark: bool, zoom: f32) -> gpui_bootstrap::Theme {
+  use gpui_bootstrap::{ColorMode, ControlSize, ControlSizes, Platform, Radii, Theme, Typography};
+
+  let p = palette(dark);
+  let z = |v: f32| gpui::px(v * zoom);
+  let mode = if dark {
+    ColorMode::Dark
+  } else {
+    ColorMode::Light
+  };
+  let mut theme = Theme::platform(Platform::Web, mode);
+  let c = &mut theme.colors;
+  c.primary = p.primary;
+  c.secondary = p.muted_foreground;
+  c.success = p.success;
+  c.info = p.primary;
+  c.warning = p.warning;
+  c.danger = p.destructive;
+  c.light = p.muted;
+  c.dark = p.foreground;
+  c.body_bg = p.background;
+  c.body_color = p.foreground;
+  c.emphasis_color = p.foreground;
+  c.secondary_color = p.muted_foreground;
+  c.secondary_bg = p.muted;
+  c.tertiary_color = p.muted_foreground;
+  c.tertiary_bg = p.accent;
+  c.border_color = p.border;
+  c.border_color_translucent = p.border;
+  c.link_color = p.primary;
+  c.link_hover_color = p.primary;
+  c.backdrop = gpui::black().opacity(if dark { 0.55 } else { 0.4 });
+  theme.radius = Radii {
+    sm: z(RADIUS_SM),
+    base: z(RADIUS_MD),
+    lg: z(RADIUS_LG),
+    xl: z(RADIUS_LG),
+    xxl: z(RADIUS_LG),
+    pill: z(9999.),
+  };
+  let (body, body_line) = ui::TextSize::Sm.metrics();
+  let (caption, _) = ui::TextSize::Xs.metrics();
+  let (title, _) = ui::TextSize::Lg.metrics();
+  theme.typography = Typography {
+    font_family: SANS_FONT.into(),
+    font_family_mono: MONO_FONT.into(),
+    font_size_base: z(body),
+    // Small controls keep body text; captions are for badges and meta.
+    font_size_sm: z(body),
+    font_size_lg: z(title),
+    line_height: body_line / body,
+    font_weight_normal: gpui::FontWeight::NORMAL,
+    font_weight_medium: gpui::FontWeight::MEDIUM,
+    font_weight_semibold: gpui::FontWeight::SEMIBOLD,
+    font_weight_bold: gpui::FontWeight::BOLD,
+    headings: [z(20.), z(title), z(body), z(body), z(body), z(caption)],
+    headings_font_weight: gpui::FontWeight::SEMIBOLD,
+  };
+  let control = |height: f32, padding_x: f32| ControlSize {
+    padding_x: z(padding_x),
+    padding_y: z((height - body_line) / 2. - 1.),
+    min_height: z(height),
+  };
+  theme.controls = ControlSizes {
+    small: control(CONTROL_SM, 8.),
+    medium: control(CONTROL_MD, 10.),
+    large: control(CONTROL_LG, 12.),
+    button_radius: Some(z(RADIUS_MD)),
+  };
+  theme.spacer = z(16.);
+  theme.border_width = gpui::px(1.);
+  theme.focus_ring_width = z(2.);
+  theme.focus_ring_opacity = 0.55;
+  // The `ui` facade gives disabled controls muted colors instead of fading
+  // the whole element, which washed labels out over translucent fills.
+  theme.disabled_opacity = 1.;
+  // White on the primary blue is about 3.9:1, Bootstrap's 4.5 would pick
+  // black; treq's buttons have always been white on blue.
+  theme.min_contrast_ratio = 3.;
+  theme
 }
 
 /// The font family GPUI views use for regular text.
@@ -290,6 +463,43 @@ pub struct Palette {
 }
 
 /// A CSS `hsl(h s% l%)` token.
+impl Palette {
+  /// The one hover fill: rows, ghost buttons and menu items.
+  pub fn hover(&self) -> Hsla {
+    self.accent
+  }
+
+  /// The one selected fill: rows, toggles and open triggers.
+  pub fn selected(&self) -> Hsla {
+    self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
+  }
+
+  /// Behind every modal dialog, and behind controls laid over an image.
+  pub fn scrim(&self) -> Hsla {
+    gpui::black().opacity(if self.dark { 0.55 } else { 0.4 })
+  }
+
+  /// Behind file contents and code blocks: `--code-background`.
+  pub fn code_background(&self) -> Hsla {
+    if self.dark {
+      token(0., 0., 14.)
+    } else {
+      token(220., 13., 94.)
+    }
+  }
+
+  /// The GitHub button's fill, GitHub's own near-black in both themes.
+  pub fn github(&self) -> Hsla {
+    tw::color(tw::GITHUB)
+  }
+}
+
+/// A color that arrives with the data, such as a GitHub or Linear label's,
+/// or a terminal's color scheme. UI chrome uses [`Palette`] tokens instead.
+pub fn data_color(hex: u32) -> Hsla {
+  rgb(hex).into()
+}
+
 fn token(h: f32, s: f32, l: f32) -> Hsla {
   hsla(h / 360., s / 100., l / 100., 1.)
 }
@@ -370,7 +580,8 @@ mod tests {
 
   #[test]
   fn serves_every_bundled_icon() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gpui-icons");
+    let dir =
+      std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/assets/gpui-icons");
     for entry in std::fs::read_dir(dir).expect("icon dir") {
       let name = entry.expect("entry").file_name();
       let path = format!("icons/{}", name.to_string_lossy());
@@ -378,6 +589,44 @@ mod tests {
       assert!(bytes.is_some(), "{path} is not registered in ICONS");
     }
     assert!(Assets.load("icons/missing.svg").expect("load").is_none());
+  }
+
+  #[test]
+  fn bootstrap_theme_uses_the_palette_at_the_zoom() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let theme = bootstrap(dark, 1.5);
+      assert_eq!(theme.colors.primary, p.primary);
+      assert_eq!(theme.colors.body_bg, p.background);
+      assert_eq!(theme.colors.danger, p.destructive);
+      assert_eq!(theme.radius.base, gpui::px(RADIUS_MD * 1.5));
+      assert_eq!(theme.controls.medium.min_height, gpui::px(CONTROL_MD * 1.5));
+      // White text on the primary blue, as treq's buttons have always had.
+      assert_eq!(
+        theme.button(gpui_bootstrap::Variant::Primary).color,
+        theme.colors.white
+      );
+    }
+  }
+
+  #[gpui::test]
+  fn bootstrap_theme_leaves_gpui_kits_colors(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      gpui_kit::init(cx);
+      init_kit_theme(cx);
+      let light = kit::Theme::global(cx).colors;
+      install(false, 1.25, cx);
+      assert_eq!(kit::Theme::global(cx).colors, light);
+      assert_eq!(kit::Theme::global(cx).radius, gpui::px(RADIUS_MD));
+      let bootstrap = gpui_bootstrap::Theme::global(cx);
+      assert_eq!(bootstrap.radius.base, gpui::px(RADIUS_MD * 1.25));
+      install(true, 1.25, cx);
+      assert!(kit::Theme::global(cx).mode.is_dark());
+      assert_eq!(
+        gpui_bootstrap::Theme::global(cx).colors.body_bg,
+        palette(true).background
+      );
+    });
   }
 
   #[test]
@@ -410,6 +659,7 @@ pub mod tw {
     rgb(hex).into()
   }
 
+  pub const GITHUB: u32 = 0x24292f;
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;

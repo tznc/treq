@@ -2,17 +2,18 @@
 //! picks the workspace; React asks for confirmation and deletes it, as it
 //! does from the workspace header.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, rgba, Context, Entity, FontWeight,
-  MouseButton, SharedString, Subscription, Window,
+  anchored, deferred, div, point, prelude::*, px, Context, Entity, FontWeight, MouseButton,
+  SharedString, Subscription, Window,
 };
 
 use super::{workspace_modal::press, ActionSink, ScreenAction};
 use crate::gpui_shell::{
-  theme::{self, Palette},
+  theme,
   ui::{self, TextSize},
 };
 
@@ -224,16 +225,6 @@ impl WorkspaceDeletion {
   }
 }
 
-/// A `<kbd className="px-1.5 py-0.5 bg-muted rounded text-xs">`.
-fn kbd(p: &Palette, key: &str) -> gpui::Div {
-  ui::text(div(), TextSize::Xs)
-    .px(zpx(6.))
-    .py(zpx(2.))
-    .rounded(zpx(4.))
-    .bg(p.muted)
-    .child(key.to_string())
-}
-
 impl Render for WorkspaceDeletion {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     if self.dismissed {
@@ -263,9 +254,9 @@ impl Render for WorkspaceDeletion {
             .id(id)
             .debug_selector(move || selector)
             .px_3()
-            .py(zpx(6.))
+            .py_1p5()
             .mx_2()
-            .rounded(zpx(8.))
+            .rounded(radius::MD)
             .flex()
             .items_center()
             .gap_3()
@@ -313,7 +304,7 @@ impl Render for WorkspaceDeletion {
       .id("workspace-deletion")
       .debug_selector(|| "workspace-deletion".into())
       .w(viewport.width * 0.4)
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border)
       .bg(p.background)
@@ -380,9 +371,27 @@ impl Render for WorkspaceDeletion {
           .items_center()
           .gap_3()
           .text_color(p.muted_foreground)
-          .child(div().flex().gap_1().child(kbd(&p, "↑↓")).child("Navigate"))
-          .child(div().flex().gap_1().child(kbd(&p, "↵")).child("Delete"))
-          .child(div().flex().gap_1().child(kbd(&p, "Esc")).child("Cancel")),
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(ui::Kbd::new("↑↓", &p))
+              .child("Navigate"),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(ui::Kbd::new("↵", &p))
+              .child("Delete"),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(ui::Kbd::new("Esc", &p))
+              .child("Cancel"),
+          ),
       )
       .when(no_deletable, |this| {
         this.child(
@@ -407,7 +416,7 @@ impl Render for WorkspaceDeletion {
           .id("workspace-deletion-backdrop")
           .w(viewport.width)
           .h(viewport.height)
-          .bg(rgba(0x00000099))
+          .bg(p.scrim())
           .flex()
           .flex_col()
           .items_center()

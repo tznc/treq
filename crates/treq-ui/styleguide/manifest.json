@@ -1,0 +1,1715 @@
+{
+  "version": 1,
+  "examples": [
+    {
+      "id": "button/playground",
+      "title": "Playground",
+      "component": "Button",
+      "code": [
+        {
+          "text": "let p = p(cx);\nButton::new(\"button\", &p)\n  .variant(variant_knob(knobs))\n  .size(treq_ui::Size::Sm)\n  .icon(theme::ICON_CHECK, 16.)\n  .label("
+        },
+        {
+          "knob": "label"
+        },
+        {
+          "text": ")\n  .gap_1p5()\n  .disabled("
+        },
+        {
+          "knob": "disabled"
+        },
+        {
+          "text": ")\n  .selected("
+        },
+        {
+          "knob": "selected"
+        },
+        {
+          "text": ")"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "variant",
+          "type": "select",
+          "options": [
+            "default",
+            "outline",
+            "ghost",
+            "destructive",
+            "secondary",
+            "link"
+          ],
+          "default": "default"
+        },
+        {
+          "name": "label",
+          "type": "text",
+          "samples": [
+            "Merge"
+          ],
+          "default": "Merge"
+        },
+        {
+          "name": "disabled",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "selected",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "variant=default,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "default"
+          },
+          "is_default": true,
+          "file": "snapshots/button/playground/light/default.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "3e3fb091a9a8aa3a"
+        },
+        {
+          "theme": "light",
+          "key": "variant=outline,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "outline"
+          },
+          "file": "snapshots/button/playground/light/variant=outline.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "936bcd868092d8b9"
+        },
+        {
+          "theme": "light",
+          "key": "variant=ghost,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "ghost"
+          },
+          "file": "snapshots/button/playground/light/variant=ghost.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "bf4c937d806bf8e9"
+        },
+        {
+          "theme": "light",
+          "key": "variant=destructive,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "destructive"
+          },
+          "file": "snapshots/button/playground/light/variant=destructive.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "81b221a1e83d2918"
+        },
+        {
+          "theme": "light",
+          "key": "variant=secondary,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "secondary"
+          },
+          "file": "snapshots/button/playground/light/variant=secondary.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "88c529e3a79d2d99"
+        },
+        {
+          "theme": "light",
+          "key": "variant=link,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "link"
+          },
+          "file": "snapshots/button/playground/light/variant=link.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "f63d2701eed67bb7"
+        },
+        {
+          "theme": "light",
+          "key": "variant=default,label=Merge,disabled=true,selected=false",
+          "values": {
+            "disabled": true,
+            "label": "Merge",
+            "selected": false,
+            "variant": "default"
+          },
+          "file": "snapshots/button/playground/light/disabled=true.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "41cf946eeb8ef710"
+        },
+        {
+          "theme": "light",
+          "key": "variant=default,label=Merge,disabled=false,selected=true",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": true,
+            "variant": "default"
+          },
+          "file": "snapshots/button/playground/light/selected=true.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "3e3fb091a9a8aa3a"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=default,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "default"
+          },
+          "is_default": true,
+          "file": "snapshots/button/playground/dark/default.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "52cf77566572480a"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=outline,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "outline"
+          },
+          "file": "snapshots/button/playground/dark/variant=outline.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "73f3a10adbd5b2fb"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=ghost,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "ghost"
+          },
+          "file": "snapshots/button/playground/dark/variant=ghost.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "37d7eab40e6f025b"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=destructive,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "destructive"
+          },
+          "file": "snapshots/button/playground/dark/variant=destructive.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "d7e7e8d1c10ad094"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=secondary,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "secondary"
+          },
+          "file": "snapshots/button/playground/dark/variant=secondary.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "6b8dda6f998382a8"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=link,label=Merge,disabled=false,selected=false",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": false,
+            "variant": "link"
+          },
+          "file": "snapshots/button/playground/dark/variant=link.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "4a752be5d093b0d6"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=default,label=Merge,disabled=true,selected=false",
+          "values": {
+            "disabled": true,
+            "label": "Merge",
+            "selected": false,
+            "variant": "default"
+          },
+          "file": "snapshots/button/playground/dark/disabled=true.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "5ca2d2d146e5e507"
+        },
+        {
+          "theme": "dark",
+          "key": "variant=default,label=Merge,disabled=false,selected=true",
+          "values": {
+            "disabled": false,
+            "label": "Merge",
+            "selected": true,
+            "variant": "default"
+          },
+          "file": "snapshots/button/playground/dark/selected=true.png",
+          "width": 272,
+          "height": 96,
+          "scale": 2.0,
+          "hash": "52cf77566572480a"
+        }
+      ]
+    },
+    {
+      "id": "button/variants",
+      "title": "Variants",
+      "component": "Button",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet disabled = "
+        },
+        {
+          "knob": "disabled"
+        },
+        {
+          "text": ";\ndiv().flex().flex_wrap().gap_2().children(\n  [\n    (\"Merge\", Variant::Default),\n    (\"Rename…\", Variant::Outline),\n    (\"Add\", Variant::Ghost),\n    (\"Delete\", Variant::Destructive),\n    (\"Open docs\", Variant::Link),\n  ]\n  .map(|(label, variant)| {\n    Button::new(label, &p)\n      .variant(variant)\n      .size(treq_ui::Size::Sm)\n      .label(label)\n      .disabled(disabled)\n  }),\n)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "disabled",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "disabled=false",
+          "values": {
+            "disabled": false
+          },
+          "is_default": true,
+          "file": "snapshots/button/variants/light/default.png",
+          "width": 338,
+          "height": 65,
+          "scale": 2.0,
+          "hash": "dd28abf1acd7d05b"
+        },
+        {
+          "theme": "light",
+          "key": "disabled=true",
+          "values": {
+            "disabled": true
+          },
+          "file": "snapshots/button/variants/light/disabled=true.png",
+          "width": 338,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "386ec47b242dbff2"
+        },
+        {
+          "theme": "dark",
+          "key": "disabled=false",
+          "values": {
+            "disabled": false
+          },
+          "is_default": true,
+          "file": "snapshots/button/variants/dark/default.png",
+          "width": 338,
+          "height": 62,
+          "scale": 2.0,
+          "hash": "3a1127a4b7442fca"
+        },
+        {
+          "theme": "dark",
+          "key": "disabled=true",
+          "values": {
+            "disabled": true
+          },
+          "file": "snapshots/button/variants/dark/disabled=true.png",
+          "width": 338,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "b8ed5f2663982179"
+        }
+      ]
+    },
+    {
+      "id": "icon-button/states",
+      "title": "States",
+      "component": "IconButton",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet size = "
+        },
+        {
+          "knob": "size",
+          "code": {
+            "medium": "IconButtonSize::Medium",
+            "small": "IconButtonSize::Small"
+          }
+        },
+        {
+          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"danger\", theme::ICON_X, \"Remove\", &p)\n      .tone(Tone::Danger)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "size",
+          "type": "select",
+          "options": [
+            "medium",
+            "small"
+          ],
+          "default": "medium"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "size=medium",
+          "values": {
+            "size": "medium"
+          },
+          "is_default": true,
+          "file": "snapshots/icon-button/states/light/default.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "c01cecbe2d6b1d98"
+        },
+        {
+          "theme": "light",
+          "key": "size=small",
+          "values": {
+            "size": "small"
+          },
+          "file": "snapshots/icon-button/states/light/size=small.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "4d4852d13d612951"
+        },
+        {
+          "theme": "dark",
+          "key": "size=medium",
+          "values": {
+            "size": "medium"
+          },
+          "is_default": true,
+          "file": "snapshots/icon-button/states/dark/default.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "6946fe572ea6b105"
+        },
+        {
+          "theme": "dark",
+          "key": "size=small",
+          "values": {
+            "size": "small"
+          },
+          "file": "snapshots/icon-button/states/dark/size=small.png",
+          "width": 264,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "41070760b15aaf70"
+        }
+      ]
+    },
+    {
+      "id": "split-button/playground",
+      "title": "Playground",
+      "component": "SplitButton",
+      "code": [
+        {
+          "text": "let p = p(cx);\nSplitButton::new(\"push\", \"Push\", &p)\n  .icon(theme::ICON_CHEVRON_UP)\n  .when("
+        },
+        {
+          "knob": "outline"
+        },
+        {
+          "text": ", |b| b.outline())\n  .open("
+        },
+        {
+          "knob": "open"
+        },
+        {
+          "text": ")\n  .disabled("
+        },
+        {
+          "knob": "disabled"
+        },
+        {
+          "text": ")"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "outline",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "open",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "disabled",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "outline=false,open=false,disabled=false",
+          "values": {
+            "disabled": false,
+            "open": false,
+            "outline": false
+          },
+          "is_default": true,
+          "file": "snapshots/split-button/playground/light/default.png",
+          "width": 123,
+          "height": 62,
+          "scale": 2.0,
+          "hash": "4f26665047134af6"
+        },
+        {
+          "theme": "light",
+          "key": "outline=true,open=false,disabled=false",
+          "values": {
+            "disabled": false,
+            "open": false,
+            "outline": true
+          },
+          "file": "snapshots/split-button/playground/light/outline=true.png",
+          "width": 118,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "cddb8b6af9c91eea"
+        },
+        {
+          "theme": "light",
+          "key": "outline=false,open=true,disabled=false",
+          "values": {
+            "disabled": false,
+            "open": true,
+            "outline": false
+          },
+          "file": "snapshots/split-button/playground/light/open=true.png",
+          "width": 123,
+          "height": 62,
+          "scale": 2.0,
+          "hash": "4f26665047134af6"
+        },
+        {
+          "theme": "light",
+          "key": "outline=false,open=false,disabled=true",
+          "values": {
+            "disabled": true,
+            "open": false,
+            "outline": false
+          },
+          "file": "snapshots/split-button/playground/light/disabled=true.png",
+          "width": 117,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "9bf4b9b6d28c1502"
+        },
+        {
+          "theme": "dark",
+          "key": "outline=false,open=false,disabled=false",
+          "values": {
+            "disabled": false,
+            "open": false,
+            "outline": false
+          },
+          "is_default": true,
+          "file": "snapshots/split-button/playground/dark/default.png",
+          "width": 121,
+          "height": 59,
+          "scale": 2.0,
+          "hash": "4b8952b0a661efd4"
+        },
+        {
+          "theme": "dark",
+          "key": "outline=true,open=false,disabled=false",
+          "values": {
+            "disabled": false,
+            "open": false,
+            "outline": true
+          },
+          "file": "snapshots/split-button/playground/dark/outline=true.png",
+          "width": 118,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "caf4be0682bdf21a"
+        },
+        {
+          "theme": "dark",
+          "key": "outline=false,open=true,disabled=false",
+          "values": {
+            "disabled": false,
+            "open": true,
+            "outline": false
+          },
+          "file": "snapshots/split-button/playground/dark/open=true.png",
+          "width": 121,
+          "height": 59,
+          "scale": 2.0,
+          "hash": "4b8952b0a661efd4"
+        },
+        {
+          "theme": "dark",
+          "key": "outline=false,open=false,disabled=true",
+          "values": {
+            "disabled": true,
+            "open": false,
+            "outline": false
+          },
+          "file": "snapshots/split-button/playground/dark/disabled=true.png",
+          "width": 117,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "3cb9e176690a3713"
+        }
+      ]
+    },
+    {
+      "id": "split-button/pill",
+      "title": "Status pill",
+      "component": "SplitButton",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet (label, icon, tone) = "
+        },
+        {
+          "knob": "state",
+          "code": {
+            "closed": "(\"Closed\", theme::ICON_PR_CLOSED, Tone::GitClosed)",
+            "draft": "(\"Draft\", theme::ICON_PR_DRAFT, Tone::Neutral)",
+            "merged": "(\"Merged\", theme::ICON_MERGE, Tone::GitMerged)",
+            "open": "(\"Open\", theme::ICON_PR, Tone::GitOpen)"
+          }
+        },
+        {
+          "text": ";\nSplitButton::new(\"pr\", label, &p)\n  .pill(tone)\n  .icon(icon)\n  .aria_label(format!(\"View PR (#42, {})\", label.to_lowercase()))\n  .menu_label(\"Open PR on web\")\n  .menu_icon(theme::ICON_EXTERNAL_LINK)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "state",
+          "type": "select",
+          "options": [
+            "open",
+            "draft",
+            "merged",
+            "closed"
+          ],
+          "default": "open"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "state=open",
+          "values": {
+            "state": "open"
+          },
+          "is_default": true,
+          "file": "snapshots/split-button/pill/light/default.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "1c6cd2a5773ef80a"
+        },
+        {
+          "theme": "light",
+          "key": "state=draft",
+          "values": {
+            "state": "draft"
+          },
+          "file": "snapshots/split-button/pill/light/state=draft.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "192ee82ad677c88e"
+        },
+        {
+          "theme": "light",
+          "key": "state=merged",
+          "values": {
+            "state": "merged"
+          },
+          "file": "snapshots/split-button/pill/light/state=merged.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "9a997ab281adaf33"
+        },
+        {
+          "theme": "light",
+          "key": "state=closed",
+          "values": {
+            "state": "closed"
+          },
+          "file": "snapshots/split-button/pill/light/state=closed.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "a02671b884b79e35"
+        },
+        {
+          "theme": "dark",
+          "key": "state=open",
+          "values": {
+            "state": "open"
+          },
+          "is_default": true,
+          "file": "snapshots/split-button/pill/dark/default.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "fe967b551749833c"
+        },
+        {
+          "theme": "dark",
+          "key": "state=draft",
+          "values": {
+            "state": "draft"
+          },
+          "file": "snapshots/split-button/pill/dark/state=draft.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "92e26ef0a9d7d0fe"
+        },
+        {
+          "theme": "dark",
+          "key": "state=merged",
+          "values": {
+            "state": "merged"
+          },
+          "file": "snapshots/split-button/pill/dark/state=merged.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "9150212873a7d70a"
+        },
+        {
+          "theme": "dark",
+          "key": "state=closed",
+          "values": {
+            "state": "closed"
+          },
+          "file": "snapshots/split-button/pill/dark/state=closed.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "e047e30c96a892d9"
+        }
+      ]
+    },
+    {
+      "id": "picker/placements",
+      "title": "Form and toolbar",
+      "component": "Picker",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet open = "
+        },
+        {
+          "knob": "open"
+        },
+        {
+          "text": ";\ndiv()\n  .w(px(260.))\n  .flex()\n  .flex_col()\n  .gap_2()\n  .child(\n    Picker::new(\"target\", &p)\n      .label(\"Target branch\")\n      .value(\"main\")\n      .open(open),\n  )\n  .child(\n    Picker::new(\"empty\", &p)\n      .label(\"Agent\")\n      .placeholder(\"Pick an agent\"),\n  )\n  .child(\n    Picker::new(\"toolbar\", &p)\n      .label(\"Model\")\n      .value(\"Default\")\n      .placement(PickerPlacement::Toolbar),\n  )\n  .child(\n    Picker::new(\"disabled\", &p)\n      .label(\"Target branch\")\n      .value(\"main\")\n      .disabled(true),\n  )"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "open",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "open=false",
+          "values": {
+            "open": false
+          },
+          "is_default": true,
+          "file": "snapshots/picker/placements/light/default.png",
+          "width": 292,
+          "height": 152,
+          "scale": 2.0,
+          "hash": "4994867a482f7105"
+        },
+        {
+          "theme": "light",
+          "key": "open=true",
+          "values": {
+            "open": true
+          },
+          "file": "snapshots/picker/placements/light/open=true.png",
+          "width": 292,
+          "height": 152,
+          "scale": 2.0,
+          "hash": "44bee452997d6359"
+        },
+        {
+          "theme": "dark",
+          "key": "open=false",
+          "values": {
+            "open": false
+          },
+          "is_default": true,
+          "file": "snapshots/picker/placements/dark/default.png",
+          "width": 292,
+          "height": 152,
+          "scale": 2.0,
+          "hash": "244dfee10a8e8c7a"
+        },
+        {
+          "theme": "dark",
+          "key": "open=true",
+          "values": {
+            "open": true
+          },
+          "file": "snapshots/picker/placements/dark/open=true.png",
+          "width": 292,
+          "height": 152,
+          "scale": 2.0,
+          "hash": "b0afdd7a7baa5963"
+        }
+      ]
+    },
+    {
+      "id": "badge/tones",
+      "title": "Badge, Count and Dot",
+      "component": "Badge",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().flex().flex_col().gap_3().children([\n  div().flex().items_center().gap_2().children(\n    [\n      (\"PRO\", Tone::Neutral),\n      (\"Open\", Tone::GitOpen),\n      (\"Merged\", Tone::GitMerged),\n      (\"Closed\", Tone::GitClosed),\n      (\"Draft\", Tone::Neutral),\n      (\"Failing\", Tone::Danger),\n    ]\n    .map(|(label, tone)| Badge::new(label, &p).tone(tone).into_any_element()),\n  ),\n  div()\n    .flex()\n    .items_center()\n    .gap_2()\n    .children([0, 3, 42, 1500].map(|n| Count::new(n, &p).into_any_element())),\n  div().flex().items_center().gap_2().children(\n    [\n      Tone::Neutral,\n      Tone::Primary,\n      Tone::Success,\n      Tone::Warning,\n      Tone::Danger,\n    ]\n    .map(|tone| Dot::new(tone, &p).into_any_element()),\n  ),\n])"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/badge/tones/light/default.png",
+          "width": 282,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "505d2d93b0a10fa2"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/badge/tones/dark/default.png",
+          "width": 282,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "2af9eebbac04177c"
+        }
+      ]
+    },
+    {
+      "id": "kbd/basic",
+      "title": "Shortcuts",
+      "component": "Kbd",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().flex().gap_2().children(\n  [\"secondary-k\", \"secondary-shift-p\", \"escape\", \"enter\"].map(|key| Kbd::new(key, &p)),\n)"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/kbd/basic/light/default.png",
+          "width": 211,
+          "height": 48,
+          "scale": 2.0,
+          "hash": "d4649228309d5a33"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/kbd/basic/dark/default.png",
+          "width": 211,
+          "height": 48,
+          "scale": 2.0,
+          "hash": "3e6009c1bddd7037"
+        }
+      ]
+    },
+    {
+      "id": "checkbox/states",
+      "title": "Checkbox",
+      "component": "Checkbox",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().flex().items_center().gap_3().children(\n  [\n    (\"off\", CheckState::Off, false),\n    (\"on\", CheckState::On, false),\n    (\"mixed\", CheckState::Mixed, false),\n    (\"disabled\", CheckState::On, true),\n  ]\n  .map(|(id, state, disabled)| Checkbox::new(id, &p).checked(state).disabled(disabled)),\n)"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/states/light/default.png",
+          "width": 152,
+          "height": 64,
+          "scale": 2.0,
+          "hash": "81cb226405b697da"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/states/dark/default.png",
+          "width": 152,
+          "height": 64,
+          "scale": 2.0,
+          "hash": "272a4ba6349300b8"
+        }
+      ]
+    },
+    {
+      "id": "checkbox/labels",
+      "title": "With labels",
+      "component": "Checkbox",
+      "code": [
+        {
+          "text": "let p = p(cx);\n// The label sits in the row that takes the click, so it toggles too.\nlet row = |id: &'static str, state: CheckState, label: &'static str, disabled: bool| {\n  div()\n    .id(id)\n    .flex()\n    .items_center()\n    .gap_2()\n    .h(px(28.))\n    .child(\n      Checkbox::new(format!(\"{id}-box\"), &p)\n        .checked(state)\n        .disabled(disabled),\n    )\n    .child(\n      treq_ui::text(div(), treq_ui::TextSize::Sm)\n        .text_color(if disabled {\n          p.muted_foreground\n        } else {\n          p.foreground\n        })\n        .child(label),\n    )\n};\ndiv()\n  .w(px(300.))\n  .flex()\n  .flex_col()\n  .child(row(\"all\", CheckState::Mixed, \"All files\", false))\n  .child(\n    div()\n      .pl_5()\n      .child(row(\"src\", CheckState::On, \"src/main.rs\", false))\n      .child(row(\"lock\", CheckState::Off, \"Cargo.lock\", false)),\n  )\n  .child(row(\"viewed\", CheckState::On, \"Viewed\", false))\n  .child(row(\n    \"locked\",\n    CheckState::On,\n    \"Pushed commits (locked)\",\n    true,\n  ))\n  .child(\n    div()\n      .id(\"notify\")\n      .flex()\n      .items_start()\n      .gap_2()\n      .py_1()\n      .child(\n        div()\n          .pt(px(3.))\n          .child(Checkbox::new(\"notify-box\", &p).checked(true)),\n      )\n      .child(\n        div()\n          .flex()\n          .flex_col()\n          .child(\n            treq_ui::text(div(), treq_ui::TextSize::Sm)\n              .text_color(p.foreground)\n              .child(\"Notify when the agent finishes\"),\n          )\n          .child(\n            treq_ui::text(div(), treq_ui::TextSize::Xs)\n              .text_color(p.muted_foreground)\n              .child(\"A desktop notification, only while Treq is in the background.\"),\n          ),\n      ),\n  )"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/labels/light/default.png",
+          "width": 372,
+          "height": 262,
+          "scale": 2.0,
+          "hash": "e0f5d5518540fef9"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/labels/dark/default.png",
+          "width": 372,
+          "height": 262,
+          "scale": 2.0,
+          "hash": "3d3f137e84984049"
+        }
+      ]
+    },
+    {
+      "id": "alert/playground",
+      "title": "Playground",
+      "component": "Alert",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv().w(px(440.)).child(\n  Alert::new(\"conflicts\", "
+        },
+        {
+          "knob": "title"
+        },
+        {
+          "text": ", &p)\n    .message(\"Resolve them before you push or merge.\")\n    .severity("
+        },
+        {
+          "knob": "severity",
+          "code": {
+            "danger": "Severity::Danger",
+            "info": "Severity::Info",
+            "warning": "Severity::Warning"
+          }
+        },
+        {
+          "text": ")\n    .when("
+        },
+        {
+          "knob": "dismiss"
+        },
+        {
+          "text": ", |a| {\n      a.action(\n        Button::new(\"dismiss\", &p)\n          .variant(Variant::Ghost)\n          .size(treq_ui::Size::Xs)\n          .label(\"Not now\"),\n      )\n    })\n    .when("
+        },
+        {
+          "knob": "action"
+        },
+        {
+          "text": ", |a| {\n      a.action(\n        Button::new(\"resolve\", &p)\n          .variant(Variant::Outline)\n          .size(treq_ui::Size::Xs)\n          .label(\"Resolve…\"),\n      )\n    }),\n)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "title",
+          "type": "text",
+          "samples": [
+            "1 file has conflicts"
+          ],
+          "default": "1 file has conflicts"
+        },
+        {
+          "name": "severity",
+          "type": "select",
+          "options": [
+            "info",
+            "warning",
+            "danger"
+          ],
+          "default": "danger"
+        },
+        {
+          "name": "dismiss",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "action",
+          "type": "bool",
+          "default": true
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "is_default": true,
+          "file": "snapshots/alert/playground/light/default.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "e9b50d995d3cac4e"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=info,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "info",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/severity=info.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "889060d28f988a73"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=warning,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "warning",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/severity=warning.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "3825d2ac286af317"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=true,action=true",
+          "values": {
+            "action": true,
+            "dismiss": true,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/dismiss=true.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "5d1fdd6787535996"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=false",
+          "values": {
+            "action": false,
+            "dismiss": false,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/action=false.png",
+          "width": 472,
+          "height": 79,
+          "scale": 2.0,
+          "hash": "7b86a5b3a335ddfd"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "is_default": true,
+          "file": "snapshots/alert/playground/dark/default.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "872fcc5ba14ccf99"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=info,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "info",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/severity=info.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "18535d75655baaf7"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=warning,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "warning",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/severity=warning.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "1661c6ac3d057718"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=true,action=true",
+          "values": {
+            "action": true,
+            "dismiss": true,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/dismiss=true.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "11d8b331fbbbc9a8"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=false",
+          "values": {
+            "action": false,
+            "dismiss": false,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/action=false.png",
+          "width": 472,
+          "height": 79,
+          "scale": 2.0,
+          "hash": "1156db93eca336e2"
+        }
+      ]
+    },
+    {
+      "id": "empty-state/playground",
+      "title": "Empty and error",
+      "component": "EmptyState",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet error = "
+        },
+        {
+          "knob": "error"
+        },
+        {
+          "text": ";\nEmptyState::new(\n  \"prs\",\n  if error {\n    \"Couldn't load pull requests\"\n  } else {\n    \"No pull requests\"\n  },\n  &p,\n)\n.icon(if error {\n  theme::ICON_CIRCLE_ALERT\n} else {\n  theme::ICON_CIRCLE_DOT\n})\n.error(error)\n.message(if error {\n  \"gh isn't signed in. Run gh auth login, then retry.\"\n} else {\n  \"Push a branch to open one.\"\n})\n.when(error, |e| {\n  e.action(\n    Button::new(\"retry\", &p)\n      .variant(Variant::Outline)\n      .size(treq_ui::Size::Xs)\n      .label(\"Retry\"),\n  )\n})"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "error",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "error=false",
+          "values": {
+            "error": false
+          },
+          "is_default": true,
+          "file": "snapshots/empty-state/playground/light/default.png",
+          "width": 452,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "afbd7855728f2e7b"
+        },
+        {
+          "theme": "light",
+          "key": "error=true",
+          "values": {
+            "error": true
+          },
+          "file": "snapshots/empty-state/playground/light/error=true.png",
+          "width": 452,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "ea3cb054d2c5c23b"
+        },
+        {
+          "theme": "dark",
+          "key": "error=false",
+          "values": {
+            "error": false
+          },
+          "is_default": true,
+          "file": "snapshots/empty-state/playground/dark/default.png",
+          "width": 452,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "de5472ae913271fc"
+        },
+        {
+          "theme": "dark",
+          "key": "error=true",
+          "values": {
+            "error": true
+          },
+          "file": "snapshots/empty-state/playground/dark/error=true.png",
+          "width": 452,
+          "height": 252,
+          "scale": 2.0,
+          "hash": "721dcd7da875f7df"
+        }
+      ]
+    },
+    {
+      "id": "empty-state/loading",
+      "title": "Loading",
+      "component": "EmptyState",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv()\n  .w(px(280.))\n  .flex()\n  .flex_col()\n  .gap_4()\n  .child(Loading::new(\"loading\", &p).label(\"Loading commits\"))\n  .child(Skeleton::new(\"skeleton\", 4, &p))"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/empty-state/loading/light/default.png",
+          "width": 352,
+          "height": 192,
+          "scale": 2.0,
+          "hash": "3a33ee02e9a21626"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/empty-state/loading/dark/default.png",
+          "width": 352,
+          "height": 192,
+          "scale": 2.0,
+          "hash": "41c07d4b0a122fcf"
+        }
+      ]
+    },
+    {
+      "id": "tabs/playground",
+      "title": "Playground",
+      "component": "Tabs",
+      "code": [
+        {
+          "text": "let p = p(cx);\nTabs::new(\"views\", &p)\n  .style("
+        },
+        {
+          "knob": "style",
+          "code": {
+            "segmented": "TabsStyle::Segmented",
+            "underline": "TabsStyle::Underline"
+          }
+        },
+        {
+          "text": ")\n  .tabs([\n    Tab::new(\"code\", \"Code\"),\n    Tab::new(\"commits\", \"Commits\").count(2),\n    {\n      let changes = Tab::new(\"changes\", \"Changes\").count(3);\n      if "
+        },
+        {
+          "knob": "conflict"
+        },
+        {
+          "text": " {\n        changes.dot(Tone::Danger)\n      } else {\n        changes\n      }\n    },\n    {\n      let logs = Tab::new(\"logs\", \"Logs\");\n      if "
+        },
+        {
+          "knob": "badge"
+        },
+        {
+          "text": " {\n        logs.badge(\"PRO\", Tone::Neutral)\n      } else {\n        logs\n      }\n    },\n  ])\n  .selected(1)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "style",
+          "type": "select",
+          "options": [
+            "segmented",
+            "underline"
+          ],
+          "default": "segmented"
+        },
+        {
+          "name": "conflict",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "badge",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "style=segmented,conflict=false,badge=false",
+          "values": {
+            "badge": false,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "is_default": true,
+          "file": "snapshots/tabs/playground/light/default.png",
+          "width": 276,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "39ad5256b49a5e1e"
+        },
+        {
+          "theme": "light",
+          "key": "style=underline,conflict=false,badge=false",
+          "values": {
+            "badge": false,
+            "conflict": false,
+            "style": "underline"
+          },
+          "file": "snapshots/tabs/playground/light/style=underline.png",
+          "width": 255,
+          "height": 54,
+          "scale": 2.0,
+          "hash": "cc5d9d7dbca332a5"
+        },
+        {
+          "theme": "light",
+          "key": "style=segmented,conflict=true,badge=false",
+          "values": {
+            "badge": false,
+            "conflict": true,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/light/conflict=true.png",
+          "width": 286,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "422eaead5c367a76"
+        },
+        {
+          "theme": "light",
+          "key": "style=segmented,conflict=false,badge=true",
+          "values": {
+            "badge": true,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/light/badge=true.png",
+          "width": 310,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "3bb232b17f215a1d"
+        },
+        {
+          "theme": "dark",
+          "key": "style=segmented,conflict=false,badge=false",
+          "values": {
+            "badge": false,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "is_default": true,
+          "file": "snapshots/tabs/playground/dark/default.png",
+          "width": 276,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "835941254f55fbaf"
+        },
+        {
+          "theme": "dark",
+          "key": "style=underline,conflict=false,badge=false",
+          "values": {
+            "badge": false,
+            "conflict": false,
+            "style": "underline"
+          },
+          "file": "snapshots/tabs/playground/dark/style=underline.png",
+          "width": 255,
+          "height": 54,
+          "scale": 2.0,
+          "hash": "d10b9f8c9d4061d0"
+        },
+        {
+          "theme": "dark",
+          "key": "style=segmented,conflict=true,badge=false",
+          "values": {
+            "badge": false,
+            "conflict": true,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/dark/conflict=true.png",
+          "width": 286,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "c1061020c3abc287"
+        },
+        {
+          "theme": "dark",
+          "key": "style=segmented,conflict=false,badge=true",
+          "values": {
+            "badge": true,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/dark/badge=true.png",
+          "width": 310,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "12ed505c34f35022"
+        }
+      ]
+    },
+    {
+      "id": "row/densities",
+      "title": "Densities and selection",
+      "component": "Row",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv()\n  .w(px(360.))\n  .flex()\n  .flex_col()\n  .child(\n    Row::new(\"ws-1\", &p)\n      .icon(theme::ICON_CIRCLE_DOT)\n      .title(\"feat/event-ingest\")\n      .trailing(Dot::new(Tone::GitOpen, &p)),\n  )\n  .child(\n    Row::new(\"ws-2\", &p)\n      .icon(theme::ICON_CIRCLE_DOT)\n      .title(\"feat/keyvalues-cache\")\n      .selected(true)\n      .trailing(Count::new(3, &p)),\n  )\n  .child(\n    Row::new(\"ws-3\", &p)\n      .density(RowDensity::Comfortable)\n      .title(\"main\")\n      .meta(\"default branch\"),\n  )\n  .child(\n    Row::new(\"commit\", &p)\n      .density(RowDensity::TwoLine)\n      .title(\"feat: keyvalues cache\")\n      .meta(\"just now · +9 −0\")\n      .actions(\n        IconButton::new(\"commit-more\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n          .size(IconButtonSize::Small),\n        32.,\n      ),\n  )"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/row/densities/light/default.png",
+          "width": 392,
+          "height": 131,
+          "scale": 2.0,
+          "hash": "4c4d30ef670217a1"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/row/densities/dark/default.png",
+          "width": 392,
+          "height": 131,
+          "scale": 2.0,
+          "hash": "8ee89de92f6f8337"
+        }
+      ]
+    },
+    {
+      "id": "menu/items",
+      "title": "Commands, values and danger",
+      "component": "Menu",
+      "code": [
+        {
+          "text": "let p = p(cx);\ndiv()\n  .w(px(240.))\n  .p_1()\n  .rounded(px(theme::RADIUS_MD))\n  .border_1()\n  .border_color(p.border)\n  .bg(p.popover)\n  .child(MenuItem::new(\"copy\", \"Copy branch name\", &p).shortcut(\"secondary-c\"))\n  .child(MenuItem::new(\"rename\", \"Rename…\", &p))\n  .child(\n    MenuItem::new(\"plan\", \"Plan\", &p)\n      .description(\"Plan the change first, without editing files\"),\n  )\n  .child(MenuItem::new(\"open-pr\", \"Open pull request\", &p).disabled(true))\n  .child(MenuSeparator::new(&p))\n  .child(MenuLabel::new(\"Target branch\", &p))\n  .child(MenuItem::new(\"main\", \"main\", &p).checked(true))\n  .child(MenuItem::new(\"develop\", \"develop\", &p).checked(false))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"delete\", \"Delete workspace…\", &p).danger())"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/menu/items/light/default.png",
+          "width": 272,
+          "height": 251,
+          "scale": 2.0,
+          "hash": "d5ebeb5f3761f3aa"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/menu/items/dark/default.png",
+          "width": 272,
+          "height": 251,
+          "scale": 2.0,
+          "hash": "c67c5ebc663cd7b5"
+        }
+      ]
+    },
+    {
+      "id": "dialog/confirm",
+      "title": "Confirmation",
+      "component": "Dialog",
+      "code": [
+        {
+          "text": "let p = p(cx);\nConfirmDialog::new(\n  \"init-repo\",\n  \"Initialize a Git repository here?\",\n  if "
+        },
+        {
+          "knob": "destructive"
+        },
+        {
+          "text": " {\n    \"Delete workspace\"\n  } else {\n    \"Initialize\"\n  },\n  &p,\n)\n.message(\"~/plain-folder isn't a Git repository yet. Treq needs one to create workspaces.\")\n.when("
+        },
+        {
+          "knob": "destructive"
+        },
+        {
+          "text": ", |d| d.destructive())"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "destructive",
+          "type": "bool",
+          "default": false
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "destructive=false",
+          "values": {
+            "destructive": false
+          },
+          "is_default": true,
+          "file": "snapshots/dialog/confirm/light/default.png",
+          "width": 592,
+          "height": 312,
+          "scale": 2.0,
+          "hash": "4aa5e307e89eae25"
+        },
+        {
+          "theme": "light",
+          "key": "destructive=true",
+          "values": {
+            "destructive": true
+          },
+          "file": "snapshots/dialog/confirm/light/destructive=true.png",
+          "width": 592,
+          "height": 312,
+          "scale": 2.0,
+          "hash": "5e983743dfa77995"
+        },
+        {
+          "theme": "dark",
+          "key": "destructive=false",
+          "values": {
+            "destructive": false
+          },
+          "is_default": true,
+          "file": "snapshots/dialog/confirm/dark/default.png",
+          "width": 592,
+          "height": 312,
+          "scale": 2.0,
+          "hash": "b610a615583ba4ee"
+        },
+        {
+          "theme": "dark",
+          "key": "destructive=true",
+          "values": {
+            "destructive": true
+          },
+          "file": "snapshots/dialog/confirm/dark/destructive=true.png",
+          "width": 592,
+          "height": 312,
+          "scale": 2.0,
+          "hash": "6a955eb8ea5c5716"
+        }
+      ]
+    },
+    {
+      "id": "dialog/close",
+      "title": "Information",
+      "component": "Dialog",
+      "code": [
+        {
+          "text": "let p = p(cx);\nDialog::new(\"shortcuts\", &p)\n  .title(\"Keyboard shortcuts\")\n  .description(\"No action pair, so an X closes it.\")\n  .on_close(|_, _| {})\n  .child(\n    div()\n      .flex()\n      .justify_between()\n      .child(\"Open command palette\")\n      .child(Kbd::new(\"secondary-k\", &p)),\n  )"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/dialog/close/light/default.png",
+          "width": 592,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "e2fb52f576efb791"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/dialog/close/dark/default.png",
+          "width": 592,
+          "height": 292,
+          "scale": 2.0,
+          "hash": "ec8c55975685409d"
+        }
+      ]
+    }
+  ]
+}

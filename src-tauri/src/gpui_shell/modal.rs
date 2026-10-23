@@ -172,7 +172,7 @@ pub fn update(
   };
   let opened = tauri_plugin_gpui::with_app(move |cx| {
     // The search field's colors.
-    theme::set_kit_dark(snapshot.dark, cx);
+    theme::set_dark(snapshot.dark, cx);
     root
       .update(cx, |root, cx| {
         let reuse = root
@@ -210,7 +210,7 @@ pub fn show_popover(app: &AppHandle, owner: &str, popover: Entity<Popover>, dark
   };
   let _ = tauri_plugin_gpui::with_app(move |cx| {
     // The search field's colors.
-    theme::set_kit_dark(dark, cx);
+    theme::set_dark(dark, cx);
     let _ = root.update(cx, |root, cx| {
       root.overlay = None;
       root.popover = Some(popover);

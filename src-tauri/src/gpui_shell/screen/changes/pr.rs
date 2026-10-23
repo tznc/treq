@@ -3,6 +3,7 @@
 //! the PR's, the comments are review drafts kept in the local database
 //! (`github_pr`), and the review threads take replies.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{sync::Arc, time::Duration};
 
@@ -504,11 +505,11 @@ impl ChangesView {
         .debug_selector(|| "github-thread-reply-box".into())
         .flex()
         .flex_col()
-        .gap(zpx(6.))
+        .gap_1p5()
         .font_family(theme::SANS_FONT)
         .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
           let k = &e.keystroke;
-          if k.key == "escape" {
+          if ui::is_escape(k) {
             cx.stop_propagation();
             view.open_reply(&close, false, cx);
           } else if k.key == "enter"
@@ -549,7 +550,7 @@ impl ChangesView {
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-send-{id}")))
                 .debug_selector(|| "github-thread-reply-send".into())
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .bg(p.primary)
                 .text_color(p.primary_foreground)
                 .px_2()

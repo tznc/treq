@@ -269,10 +269,7 @@ impl WorkspaceHost for Backend {
       None => core::push_workspace_to_remote(repo_path, workspace_id),
     };
     match pushed {
-      Ok(_) => Outcome::ok(
-        "Pushed to remote",
-        "Changes pushed successfully".to_string(),
-      ),
+      Ok(_) => Outcome::ok("Pushed to remote", "Changes pushed".to_string()),
       Err(err) => Outcome::failed("Push failed", err),
     }
   }

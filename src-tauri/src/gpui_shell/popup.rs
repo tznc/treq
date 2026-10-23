@@ -8,6 +8,7 @@
 //! then moved and resized.
 
 use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{self, radius, TextSize};
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -41,8 +42,8 @@ const TOOLTIP_OFFSET: f32 = 6.;
 /// How close a tooltip may come to the window's edge, as base-ui's
 /// collision padding.
 const EDGE_PADDING: f32 = 5.;
-/// `text-sm`: 14px on a 20px line.
-const TEXT_SIZE: f32 = 14.;
+/// `TextSize::Sm`: 13px on a 20px line.
+const TEXT_SIZE: f32 = 13.;
 const LINE_HEIGHT: f32 = 20.;
 /// A text tooltip's widest box: `max-w-xs`. Longer text wraps.
 const TOOLTIP_MAX_WIDTH: f32 = 320.;
@@ -67,12 +68,20 @@ const MENU_MIN_WIDTH: f32 = 128.;
 /// The toast stack's corner: `fixed bottom-4 left-4`, and its `gap-2`.
 const TOAST_INSET: f32 = 16.;
 const TOAST_GAP: f32 = 8.;
+/// A success toast with nothing but a title is one short line with no close
+/// button; it dismisses itself.
+pub(crate) fn is_compact(toast: &Toast) -> bool {
+  toast.kind == ToastKind::Success && toast.description.is_none() && toast.action.is_none()
+}
+
 /// A toast's width: `min-w-[320px] max-w-sm`.
 const TOAST_MIN_WIDTH: f32 = 320.;
 const TOAST_MAX_WIDTH: f32 = 384.;
 /// Everything in a toast's row but its text: `p-4` and a border, the
 /// `h-4 w-4` icon and the `p-1` close button with `gap-3` between them.
 const TOAST_CHROME: f32 = 2. + 32. + 16. + 12. + 12. + 24.;
+/// The same without the close button and its `gap-3`.
+const COMPACT_CHROME: f32 = 2. + 32. + 16. + 12.;
 
 /// What a tooltip shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -312,8 +321,8 @@ pub fn copy_link_menu(
   let item = NativeMenuItem::item("Copy link", move |cx| {
     cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
     notify(NativeEvent::Toast {
-      title: "Copied".into(),
-      description: "Link copied to clipboard".into(),
+      title: "Link copied".into(),
+      description: String::new(),
       tone: ToastTone::Success,
       action: None,
     });
@@ -706,6 +715,9 @@ fn toast_width(cx: &App, toast: &Toast) -> f32 {
   if let Some(action) = &toast.action {
     text = text.max(weighted_text_width(cx, action, gpui::FontWeight::MEDIUM));
   }
+  if is_compact(toast) {
+    return (text + COMPACT_CHROME).min(TOAST_MAX_WIDTH).ceil();
+  }
   (text + TOAST_CHROME)
     .clamp(TOAST_MIN_WIDTH, TOAST_MAX_WIDTH)
     .ceil()
@@ -724,7 +736,9 @@ fn toast_height(cx: &App, toast: &Toast, width: f32) -> f32 {
     // `mt-1` on the button.
     text += 4. + 4. + LINE_HEIGHT;
   }
-  text.max(24.) + 32. + 2.
+  // The close button is the tallest part of a toast that has one.
+  let floor = if is_compact(toast) { 0. } else { 24. };
+  text.max(floor) + 32. + 2.
 }
 
 /// The toast stack's size: toasts one above another with `gap-2`.
@@ -838,7 +852,7 @@ impl PopupView {
         .gap(zpx(KBD_GAP))
         .child(text.clone())
         .child(
-          div()
+          ui::text(div(), TextSize::Xs)
             .debug_selector(|| "tooltip-kbd".into())
             .h(zpx(KBD_HEIGHT))
             .min_w(zpx(KBD_HEIGHT))
@@ -846,11 +860,9 @@ impl PopupView {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .bg(palette.muted)
             .text_color(palette.muted_foreground)
-            .text_size(zpx(LIST_ITEM_SIZE))
-            .line_height(zpx(LIST_ITEM_LINE))
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(keys.clone()),
         )
@@ -867,7 +879,7 @@ impl PopupView {
           div()
             .flex()
             .items_center()
-            .gap(zpx(6.))
+            .gap_1p5()
             .font_family(theme::MONO_FONT)
             .child(
               svg()
@@ -903,13 +915,11 @@ impl PopupView {
             .child(title.clone()),
         )
         .child(
-          div()
+          ui::text(div(), TextSize::Xs)
             .flex()
             .flex_col()
-            .gap(zpx(2.))
+            .gap_0p5()
             .font_family(theme::MONO_FONT)
-            .text_size(zpx(LIST_ITEM_SIZE))
-            .line_height(zpx(LIST_ITEM_LINE))
             .children(items.iter().cloned()),
         )
         .into_any_element(),
@@ -1035,9 +1045,8 @@ impl PopupView {
           .debug_selector(move || format!("menu-submenu-{index}"))
           .when_some(detail.clone(), |row, detail| {
             row.child(
-              div()
+              ui::text(div(), TextSize::Xs)
                 .ml(zpx(DETAIL_GAP))
-                .text_size(zpx(LIST_ITEM_SIZE))
                 .text_color(palette.muted_foreground)
                 .whitespace_nowrap()
                 .child(detail),
@@ -1127,6 +1136,7 @@ impl PopupView {
       };
       let id = toast.id.clone();
       let close_id = toast.id.clone();
+      let compact = is_compact(toast);
       // `flex items-start gap-3 rounded-lg border bg-popover p-4 shadow-lg`
       let item = div()
         .id(SharedString::from(format!("toast-{}", toast.id)))
@@ -1143,7 +1153,7 @@ impl PopupView {
           svg()
             .path(icon)
             .size(zpx(16.))
-            .mt(zpx(2.))
+            .when(!compact, |this| this.mt_0p5())
             .flex_none()
             .text_color(icon_color),
         )
@@ -1155,9 +1165,8 @@ impl PopupView {
             .flex_col()
             .gap_1()
             .child(
-              div()
+              ui::text(div(), TextSize::Sm)
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .line_height(zpx(TEXT_SIZE))
                 .child(SharedString::from(toast.title.clone())),
             )
             .when_some(toast.description.clone(), |this, description| {
@@ -1183,26 +1192,28 @@ impl PopupView {
               )
             }),
         )
-        .child(
-          // `rounded-md p-1 text-muted-foreground/70 hover:bg-accent
-          // hover:text-foreground`
-          div()
-            .id("close")
-            .group("close")
-            .flex_none()
-            .p_1()
-            .rounded_md()
-            .hover(|style| style.bg(palette.menu_accent))
-            .cursor_pointer()
-            .child(
-              svg()
-                .path(theme::ICON_X)
-                .size(zpx(16.))
-                .text_color(palette.muted_foreground.opacity(0.7))
-                .group_hover("close", |style| style.text_color(palette.foreground)),
-            )
-            .on_click(cx.listener(move |this, _, _, _| this.click_toast(&close_id, false))),
-        );
+        .when(!compact, |this| {
+          this.child(
+            // `rounded-md p-1 text-muted-foreground/70 hover:bg-accent
+            // hover:text-foreground`
+            div()
+              .id("close")
+              .group("close")
+              .flex_none()
+              .p_1()
+              .rounded_md()
+              .hover(|style| style.bg(palette.menu_accent))
+              .cursor_pointer()
+              .child(
+                svg()
+                  .path(theme::ICON_X)
+                  .size(zpx(16.))
+                  .text_color(palette.muted_foreground.opacity(0.7))
+                  .group_hover("close", |style| style.text_color(palette.foreground)),
+              )
+              .on_click(cx.listener(move |this, _, _, _| this.click_toast(&close_id, false))),
+          )
+        });
       stack = stack.child(item);
     }
     stack.into_any_element()
@@ -1265,19 +1276,17 @@ impl Render for PopupView {
     let body = match self.content.clone() {
       Content::Empty => None,
       Content::Toasts(toasts) => {
-        return div()
+        return ui::text(div(), TextSize::Sm)
           .size_full()
           .p(zpx(shadow_margin()))
           .font_family(theme::SANS_FONT)
-          .text_size(zpx(TEXT_SIZE))
-          .line_height(zpx(LINE_HEIGHT))
           .child(self.render_toasts(&toasts, cx));
       }
       // `px-3 py-1.5 shadow-md`
       Content::Tooltip(content) => Some(
         div()
           .px_3()
-          .py(zpx(6.))
+          .py_1p5()
           .shadow_md()
           .child(self.render_tooltip(&content, cx)),
       ),
@@ -1295,12 +1304,10 @@ impl Render for PopupView {
     };
     let composited = composited();
     let body = body.map(|body| if composited { body } else { body.shadow_none() });
-    div()
+    ui::text(div(), TextSize::Sm)
       .size_full()
       .p(zpx(shadow_margin()))
       .font_family(theme::SANS_FONT)
-      .text_size(zpx(TEXT_SIZE))
-      .line_height(zpx(LINE_HEIGHT))
       .when_some(body, |this, body| {
         // `rounded-md border bg-popover text-popover-foreground`
         this.child(
@@ -1952,8 +1959,15 @@ mod tests {
         kind: ToastKind::Success,
         action: None,
       };
+      // One line with no close button hugs its text.
+      let (width, height) = toasts_size(cx, std::slice::from_ref(&short));
+      assert!(width < 320. && height < 58.);
       // `min-w-[320px]`, and the close button's height in `p-4`.
-      assert_eq!(toasts_size(cx, std::slice::from_ref(&short)), (320., 58.));
+      let error = Toast {
+        kind: ToastKind::Error,
+        ..short.clone()
+      };
+      assert_eq!(toasts_size(cx, std::slice::from_ref(&error)), (320., 58.));
       let long = Toast {
         description: Some("word ".repeat(40)),
         action: Some("Retry".into()),

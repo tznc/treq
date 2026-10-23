@@ -46,6 +46,7 @@ jobs:
           filters: |
             rust:
               - "src-tauri/**"
+              - "crates/**"
               - "Cargo.toml"
               - "Cargo.lock"
               - ".config/nextest.toml"
@@ -118,7 +119,7 @@ jobs:
       - name: rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
         working-directory: src-tauri
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
   # Heavy jobs skip draft PRs; marking the PR ready for review runs them.
   #
@@ -233,8 +234,8 @@ jobs:
         # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
         uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
         with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
-          version: webkit-4.1-gpui-1
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev mesa-vulkan-drivers
+          version: webkit-4.1-gpui-2
           execute_install_scripts: true
 
       # Runners already ship git + gh. Only jj needs installing; cache the
@@ -332,7 +333,7 @@ jobs:
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       # Runs even when clippy fails, so one push reports both.
       - name: Run Rust tests
@@ -340,4 +341,19 @@ jobs:
         working-directory: src-tauri
         env:
           RUST_BACKTRACE: 1
-        run: cargo nextest run --locked --profile ci
+        run: cargo nextest run --locked --workspace --profile ci
+
+      # The design system's visual regression check: re-renders the
+      # styleguide (crates/treq-ui) offscreen and compares it with the
+      # committed snapshots. Spinners animate from their first paint, so the
+      # loading example gets a looser tolerance.
+      - name: Styleguide snapshots match
+        if: ${{ !cancelled() }}
+        working-directory: crates/treq-ui
+        run: |
+          cargo build --locked -p treq-ui --example styleguide
+          styleguide=../../target/debug/examples/styleguide
+          for example in $($styleguide list | grep -vx empty-state/loading); do
+            $styleguide check --filter "$example" --tolerance 0.01
+          done
+          $styleguide check --filter empty-state/loading --tolerance 0.05

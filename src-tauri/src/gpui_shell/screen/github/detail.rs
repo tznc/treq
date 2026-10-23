@@ -1,6 +1,7 @@
 //! `PrDetailPanel`, `IssueDetailPanel` and their actions, and the PR's
 //! workspace checks (`PrWorkspaceChecks`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
@@ -24,9 +25,9 @@ use crate::{
       github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab, SETUP_KEY},
       workspace_modal::{dialog_description, dialog_header, dialog_panel},
     },
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     time,
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, EscapeExt as _, Size, TextSize, Tone, Variant},
   },
   local_db::Workspace,
 };
@@ -328,11 +329,9 @@ impl GithubView {
   }
 
   fn title(title: &str) -> Div {
-    div()
+    ui::text(div(), TextSize::Xl)
       .flex_1()
       .min_w_0()
-      .text_size(zpx(20.))
-      .line_height(zpx(28.))
       .font_weight(FontWeight::SEMIBOLD)
       .child(title.to_string())
   }
@@ -342,13 +341,12 @@ impl GithubView {
     Some(
       div()
         .bg(p.muted.opacity(0.3))
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .p_3()
         .child(markdown(
           SharedString::from(id.to_string()),
           body,
           13.,
-          20.,
           self.dark,
         )),
     )
@@ -379,7 +377,6 @@ impl GithubView {
               SharedString::from(format!("github-comment-{}", c.id)),
               &c.body,
               13.,
-              20.,
               self.dark,
             )
             .into_any_element(),
@@ -532,7 +529,7 @@ impl GithubView {
           .child(
             Button::new("github-agent", p)
               .size(Size::Sm)
-              .gap(zpx(6.))
+              .gap_1p5()
               .icon(theme::ICON_SPARKLES, 16.)
               .label("Agent...")
               .on_click(cx.listener(move |view, _, _, cx| {
@@ -615,7 +612,7 @@ impl GithubView {
             .size(Size::Sm)
             .rounded_l_none()
             .border_l_0()
-            .px(zpx(6.))
+            .px_1p5()
             .disabled(closing)
             .icon(theme::ICON_CHEVRON_DOWN, 16.)
             .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::CloseIssue, cx))),
@@ -632,20 +629,20 @@ impl GithubView {
                   view.close_popover(Popover::CloseIssue, cx)
                 })
                 .children(CLOSE_REASONS.iter().map(|&(reason, label)| {
-                  parts::menu_item(
+                  ui::MenuItem::new(
                     format!("github-close-{}", reason.replace(' ', "-")),
                     label,
                     p,
-                    Box::new(cx.listener(move |view, _, _, cx| {
-                      view.popover = None;
-                      view.change_issue(
-                        Busy::Close,
-                        "Failed to close issue",
-                        IssueChange::Close(reason.into()),
-                        cx,
-                      )
-                    })),
                   )
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    view.popover = None;
+                    view.change_issue(
+                      Busy::Close,
+                      "Failed to close issue",
+                      IssueChange::Close(reason.into()),
+                      cx,
+                    )
+                  }))
                 })),
             )
             .with_priority(1),
@@ -821,11 +818,7 @@ impl GithubView {
             panel
               .id("github-delete-panel")
               .track_focus(self.dialog_focus())
-              .on_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-                if e.keystroke.key == "escape" {
-                  cancel(view, cx);
-                }
-              }))
+              .on_escape(cx.listener(move |view, _, _, cx| cancel(view, cx)))
               .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
           ),
       ),
@@ -873,7 +866,7 @@ impl GithubView {
       .child(
         Button::new("github-review", p)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .icon(theme::ICON_FILE_DIFF, 16.)
           .label("Review changes")
           .on_click(
@@ -884,7 +877,7 @@ impl GithubView {
         Button::new("github-workspace", p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .gap(zpx(6.))
+          .gap_1p5()
           .disabled(opening)
           .child(workspace_icon)
           .label(if existing.is_some() {
@@ -954,7 +947,7 @@ impl GithubView {
           div()
             .border_1()
             .border_color(p.border)
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .overflow_hidden()
             .children(
               data::by_severity(&c.checks)
@@ -1054,31 +1047,12 @@ impl GithubView {
   /// `CiStatusButton`: the passed/total pill and its checks popover.
   fn ci_button(&self, ci: &PrCiStatus, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let state = CiState::parse(&ci.state);
-    let (border, text) = match state {
-      CiState::Success => (
-        if p.dark { tw::GREEN_500 } else { tw::GREEN_600 },
-        if p.dark { tw::GREEN_400 } else { tw::GREEN_700 },
-      ),
-      CiState::Failure => (
-        if p.dark { tw::RED_500 } else { tw::RED_600 },
-        if p.dark { tw::RED_400 } else { tw::RED_700 },
-      ),
-      CiState::Pending => (
-        if p.dark {
-          tw::YELLOW_500
-        } else {
-          tw::YELLOW_600
-        },
-        if p.dark { tw::YELLOW_400 } else { 0xa16207 },
-      ),
+    let tone = match state {
+      CiState::Success => Tone::Success,
+      CiState::Failure => Tone::Danger,
+      CiState::Pending => Tone::Warning,
     };
-    let (border, text) = (tw::color(border), tw::color(text));
-    let hover = tw::color(match state {
-      CiState::Success => tw::GREEN_600,
-      CiState::Failure => tw::RED_600,
-      CiState::Pending => tw::YELLOW_600,
-    })
-    .opacity(0.1);
+    let (border, text, hover) = (tone.color(p), tone.text(p), tone.tint(p));
     let summary = format!(
       "{}: {}/{} checks passed",
       state.label(),
@@ -1133,7 +1107,7 @@ impl GithubView {
             .right_0()
             .w(zpx(320.))
             .p_2()
-            .rounded(zpx(8.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.border)
             .bg(p.popover)
@@ -1217,7 +1191,7 @@ impl GithubView {
         div()
           .border_1()
           .border_color(p.border)
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .overflow_hidden()
           .child(self.checks_panel(ws, p, cx)),
       )
@@ -1266,19 +1240,19 @@ impl GithubView {
       .gap_3()
       .p_4();
     if !checks.workflows.is_empty() && !checks.trusted {
-      let (border, bg, fg) = if p.dark {
-        (0x78350f, tw::color(0x451a03), tw::color(tw::AMBER_200))
-      } else {
-        (tw::AMBER_200, tw::color(0xfffbeb), tw::color(tw::AMBER_800))
-      };
+      let (border, bg, fg) = (
+        Tone::Warning.border(p),
+        Tone::Warning.tint(p),
+        Tone::Warning.text(p),
+      );
       panel = panel.child(
         ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
           .justify_between()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
-          .border_color(tw::color(border))
+          .border_color(border)
           .bg(bg)
           .px_4()
           .py_3()
@@ -1327,7 +1301,7 @@ impl GithubView {
           .items_center()
           .justify_between()
           .gap_2()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .px_4()
@@ -1491,7 +1465,7 @@ impl GithubView {
       let history = latest.map(|_| self.run_history(w, &wf.filename, p, cx));
       panel = panel.child(
         named(div(), format!("workflow-card-{w}"))
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.card)
@@ -1568,7 +1542,7 @@ impl GithubView {
               .items_center()
               .gap_2()
               .px_6()
-              .py(zpx(6.))
+              .py_1p5()
               .cursor_pointer()
               .hover(move |s| s.bg(muted.opacity(0.5)))
               .child(chevron(open, p))
@@ -1672,7 +1646,7 @@ impl GithubView {
           )
           .max_h(zpx(256.))
           .overflow_y_scroll()
-          .rounded(zpx(4.))
+          .rounded(radius::SM)
           .bg(p.muted)
           .p_2()
           .font_family(theme::MONO_FONT)
@@ -1722,10 +1696,10 @@ fn status_icon(
 ) -> gpui::AnyElement {
   match status {
     Some("passed") => {
-      ui::icon(theme::ICON_CIRCLE_CHECK, size, tw::color(tw::GREEN_500)).into_any_element()
+      ui::icon(theme::ICON_CIRCLE_CHECK, size, Tone::Success.color(p)).into_any_element()
     }
     Some("failed") => {
-      ui::icon(theme::ICON_CIRCLE_X, size, tw::color(tw::RED_500)).into_any_element()
+      ui::icon(theme::ICON_CIRCLE_X, size, Tone::Danger.color(p)).into_any_element()
     }
     Some("running" | "pending") => {
       ui::spinner(gpui::ElementId::Name(id.into()), size, p.muted_foreground).into_any_element()

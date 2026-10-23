@@ -71,11 +71,11 @@ pub fn run() {
         GpuiConfig::new()
           .assets(gpui_kit::assets::Assets)
           .on_launch(|cx| {
-            gpui_kit::init(cx);
+            // Initializes gpui-kit too.
+            ui::theme::init(cx);
             // tauri-plugin-gpui draws Android's own selection toolbar and handles.
             #[cfg(target_os = "android")]
             gpui_kit::component::input::set_native_touch_selection(true, cx);
-            ui::theme::init(cx);
           }),
       )?;
       let window = tauri::WindowBuilder::new(app, "main")

@@ -164,7 +164,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     expectations: [
       "Sidebar lists treq/retry-flaky-webhook-tests, chore/bump-deps, fix/slack-retry and the ENG-142 branch as new workspaces",
       "treq/retry-flaky-webhook-tests (the first line) is selected",
-      "A 'Workspaces opened' toast reports what was created",
+      "A one-line toast (\"Created N workspaces\") reports what was created",
     ],
   });
 

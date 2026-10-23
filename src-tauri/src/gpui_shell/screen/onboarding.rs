@@ -25,12 +25,12 @@ use super::{
   checklist::{self, Checklist},
   machines::{Listing, Machine, MachinesHost, Place, Recent},
   settings_data::SettingsHost,
-  workspace_ops::WorkspaceActionsHost,
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
   core::{self, PrerequisiteStatus},
   gpui_shell::{
+    confirm::{self, Question},
     native::{Backend, NativeEvent, ToastTone},
     theme::{self, Palette},
     ui::{self, Button, DismissExt as _, Size, TextSize, Variant},
@@ -53,16 +53,9 @@ pub struct Route {
 }
 
 /// What the onboarding screen asks of the backend; faked in tests.
-pub trait OnboardingHost: MachinesHost {
-  /// Asks for a folder, then opens it in this window.
-  fn pick_repo(&self);
-}
+pub trait OnboardingHost: MachinesHost {}
 
-impl OnboardingHost for Backend {
-  fn pick_repo(&self) {
-    pick_repo(self.clone());
-  }
-}
+impl OnboardingHost for Backend {}
 
 /// A machine's tools: the last check's result and whether one runs.
 #[derive(Debug, Clone, Default)]
@@ -94,6 +87,8 @@ pub struct OnboardingView {
   /// Signed in, and the cloud workspace's status, as the cloud row last
   /// showed them.
   cloud_seen: (bool, Option<String>),
+  /// Remove Host's confirmation, while open.
+  confirm: Option<confirm::Pending<Self>>,
 }
 
 /// What of the account the cloud row shows.
@@ -127,6 +122,7 @@ impl OnboardingView {
       route: Route::default(),
       inputs: onboarding_remote::Inputs::default(),
       cloud_seen: cloud_seen(cx),
+      confirm: None,
     };
     // Signing in, or the cloud workspace changing state, changes its row.
     cx.observe_global::<super::account_data::Account>(|view, cx| {
@@ -204,7 +200,6 @@ impl OnboardingView {
 
   fn handle(&mut self, action: ScreenAction, cx: &mut Context<Self>) {
     let press = match action {
-      ScreenAction::OpenRepo => return self.host.pick_repo(),
       // The open popover's "Check again", or this computer's.
       ScreenAction::RecheckPrerequisites => {
         let id = self.popover.clone().unwrap_or_else(|| "local".into());
@@ -238,10 +233,23 @@ impl OnboardingView {
           return;
         };
         self.popover = None;
-        if self.host.remove_machine(&machine.place) {
-          self.tools.remove(&machine.id);
-          self.load(cx);
-        }
+        let question = Question::new(
+          format!("Remove {}?", machine.name),
+          "Treq forgets this SSH host. Nothing on the host is deleted.",
+          "Remove host",
+        )
+        .destructive();
+        confirm::ask(
+          &mut self.confirm,
+          question,
+          move |view, cx| {
+            if view.host.remove_machine(&machine.place) {
+              view.tools.remove(&machine.id);
+              view.load(cx);
+            }
+          },
+          cx,
+        );
         cx.notify();
       }
       _ => (self.react)(ScreenAction::Press { id: press.clone() }, cx),
@@ -282,7 +290,7 @@ impl OnboardingView {
   fn open_on(&mut self, machine: &Machine, cx: &mut Context<Self>) {
     let press = |id: String| ScreenAction::Press { id };
     match &machine.place {
-      Place::Local => self.host.pick_repo(),
+      Place::Local => (self.react)(ScreenAction::OpenRepo, cx),
       Place::Ssh { endpoint_id } => {
         (self.react)(press(format!("machines.connect:{endpoint_id}")), cx)
       }
@@ -868,6 +876,7 @@ impl Render for OnboardingView {
     };
     let machines = self.machines_panel(&ctx, cx);
     let recents = self.recents_panel(&ctx, window, cx);
+    let confirm = confirm::render(Self::confirm_slot, self, window, &p, cx);
     div()
       .size_full()
       .flex()
@@ -875,26 +884,14 @@ impl Render for OnboardingView {
       .text_color(p.foreground)
       .child(machines)
       .child(recents)
+      .children(confirm)
   }
 }
 
-/// Asks for a folder, then opens it in this window.
-fn pick_repo(backend: Backend) {
-  // Tauri calls must not run inside the GPUI click that asked for this.
-  tauri::async_runtime::spawn(async move {
-    let app = backend.app().clone();
-    let _ = app.run_on_main_thread(move || {
-      use tauri_plugin_dialog::DialogExt;
-      let dialog = backend.app().dialog().file().set_title("Select Folder");
-      dialog.pick_folder(move |folder| {
-        let Some(path) = folder.and_then(|folder| folder.into_path().ok()) else {
-          return;
-        };
-        let path = path.to_string_lossy().into_owned();
-        tauri::async_runtime::spawn_blocking(move || open_repo_at(&backend, &path));
-      });
-    });
-  });
+impl OnboardingView {
+  fn confirm_slot(view: &mut Self) -> &mut Option<confirm::Pending<Self>> {
+    &mut view.confirm
+  }
 }
 
 /// Opens the repository at `path` in this window, as React's
@@ -908,10 +905,12 @@ pub fn open_repo_at(backend: &Backend, path: &str) {
 
 /// `openRepositoryAtPath` through `host`; `shown` records the path as the
 /// window's (`setWindowRepoPath`). A folder that fails to open is not
-/// remembered as the last one.
+/// remembered as the last one. The window model has already offered to
+/// initialize a folder that is not a repository, so one still without a
+/// repository was declined.
 pub(super) fn open_repo<H>(host: &H, path: &str, shown: impl FnOnce(&str))
 where
-  H: SettingsHost + WorkspaceActionsHost + ?Sized,
+  H: SettingsHost + ?Sized,
 {
   let toast = |tone, title: &str, description: String| {
     SettingsHost::notify(
@@ -925,19 +924,12 @@ where
     )
   };
   if !core::is_repository(path) {
-    let question = format!("{path} is not a Git repository. Initialize one here?");
-    if !host.ask("Not a Git Repository", &question) {
-      toast(
-        ToastTone::Error,
-        "Not a Git Repository",
-        "Please select a folder that contains a git repository.".into(),
-      );
-      return;
-    }
-    if let Err(err) = core::init_git_repository(path) {
-      toast(ToastTone::Error, "Failed to open repository", err);
-      return;
-    }
+    toast(
+      ToastTone::Error,
+      "Not a Git Repository",
+      "Please select a folder that contains a git repository.".into(),
+    );
+    return;
   }
   if let Err(err) = core::init(path) {
     toast(
@@ -962,9 +954,5 @@ where
     .rsplit('/')
     .find(|part| !part.is_empty())
     .unwrap_or(path);
-  toast(
-    ToastTone::Success,
-    "Repository Opened",
-    format!("Now viewing {name}"),
-  );
+  toast(ToastTone::Success, &format!("Opened {name}"), String::new());
 }

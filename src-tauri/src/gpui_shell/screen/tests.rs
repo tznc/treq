@@ -92,8 +92,6 @@ struct FakeHost {
   exits: Mutex<Vec<(String, ExitSink)>>,
   /// What `PtyList` says of a remote session (`None`: the host is down).
   remote_running: Mutex<Option<bool>>,
-  /// Whether confirmations are cancelled.
-  decline: bool,
   /// What the dialogs read: the prompt history, and the stashes and their diff.
   prompts: Vec<crate::local_db::PromptHistoryEntry>,
   stash_list: Mutex<Vec<crate::local_db::StashEntry>>,
@@ -279,7 +277,7 @@ impl machines::MachinesHost for FakeHost {
 
   fn remove_machine(&self, place: &machines::Place) -> bool {
     self.record(format!("remove {place:?}"));
-    !self.decline
+    true
   }
 
   fn pick_folder(&self) -> Option<String> {
@@ -292,11 +290,7 @@ impl machines::MachinesHost for FakeHost {
   }
 }
 
-impl onboarding::OnboardingHost for FakeHost {
-  fn pick_repo(&self) {
-    self.record("pick_repo".into());
-  }
-}
+impl onboarding::OnboardingHost for FakeHost {}
 
 impl settings_data::SettingsHost for FakeHost {
   fn settings(&self, keys: &[String]) -> Result<settings_data::Values, String> {
@@ -437,7 +431,7 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn push(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
     self.record(format!("push {workspace_id:?}"));
-    workspace_data::Outcome::ok("Pushed to remote", "Changes pushed successfully".into())
+    workspace_data::Outcome::ok("Pushed to remote", "Changes pushed".into())
   }
 
   fn sync(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
@@ -1326,11 +1320,6 @@ impl commits_data::CommitsHost for FakeHost {
     self.record(format!("restore {path} {snapshot_id}"));
     Ok(())
   }
-
-  fn confirm(&self, title: &str, _: &str) -> bool {
-    self.record(format!("confirm {title}"));
-    !self.decline
-  }
 }
 
 impl modal::ModalsHost for FakeHost {
@@ -1535,6 +1524,28 @@ impl Harness {
   fn drawn(&mut self, selector: &'static str) -> bool {
     self.cx.run_until_parked();
     self.cx.debug_bounds(selector).is_some()
+  }
+
+  /// Clicks `button` in the confirmation on screen, found by role and
+  /// name, as the user would.
+  fn answer(&mut self, button: &str) {
+    use gpui_testing_library::prelude::*;
+    assert!(
+      self.drawn(crate::gpui_shell::confirm::ID),
+      "no confirmation"
+    );
+    let window = self.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&self.cx, window);
+    screen.redraw();
+    // The row behind it may hold a button of the same name.
+    let panel = gpui::ElementId::from(format!("{}-panel", crate::gpui_shell::confirm::ID));
+    let target = screen
+      .get_all_by_role(by::role(gpui::Role::Button).name(button))
+      .into_iter()
+      .find(|b| b.path().contains(&panel))
+      .unwrap_or_else(|| panic!("no {button} button in the confirmation"));
+    screen.user().click(&target);
+    self.cx.run_until_parked();
   }
 
   fn click(&mut self, selector: &'static str) {
@@ -1776,11 +1787,11 @@ fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
       "check",
       "check",
       "open https://git-scm.com/downloads",
-      "pick_repo",
       "open_local /home/me/app",
     ]
   );
-  assert!(h.sent().is_empty());
+  // The window model asks for the folder.
+  assert_eq!(h.sent(), vec![ScreenAction::OpenRepo]);
 }
 
 #[gpui::test]
@@ -1816,13 +1827,11 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
     vec![
       press("machines.openSaved:r1"),
       press("machines.connect:ep-1"),
+      ScreenAction::OpenRepo,
       press("machines.cloud"),
     ]
   );
-  assert_eq!(
-    host.calls(),
-    ["check", "open_local /home/me/web", "pick_repo"]
-  );
+  assert_eq!(host.calls(), ["check", "open_local /home/me/web"]);
 }
 
 #[gpui::test]
@@ -1883,6 +1892,12 @@ fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext)
   // Removing the host closes the popover and lists the machines again.
   h.click("machine-remove");
   assert!(!h.drawn("machine-tools-popover"));
+  // In-app confirmation first: Cancel keeps the host.
+  h.answer("Cancel");
+  assert!(!host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-remove");
+  h.answer("Remove host");
   assert!(host.calls().iter().any(|c| c.starts_with("remove Ssh")));
 }
 
@@ -2240,7 +2255,7 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
       "notify settingsChanged",
       "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true terminal_font_size=16 ui_zoom=120",
       "notify settingsChanged",
-      "notify toast Settings Saved",
+      "notify toast Settings saved",
     ]
   );
 }
@@ -2567,7 +2582,7 @@ fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   for selector in [
     "workspace-view-pr",
-    "workspace-view-pr-web",
+    "workspace-view-pr-menu",
     "workspace-merge",
     "workspace-more",
   ] {
@@ -2593,7 +2608,7 @@ fn workspace_header_github_buttons_copy_their_link(cx: &mut TestAppContext) {
   let pr = "https://github.com/tznc/treq/pull/42";
   for (selector, url) in [
     ("workspace-view-pr", pr.to_string()),
-    ("workspace-view-pr-web", pr.to_string()),
+    ("workspace-view-pr-menu", pr.to_string()),
     ("workspace-checks", format!("{pr}/checks")),
   ] {
     h.right_click(selector);
@@ -2602,7 +2617,7 @@ fn workspace_header_github_buttons_copy_their_link(cx: &mut TestAppContext) {
     assert_eq!(copied.as_deref(), Some(url.as_str()), "{selector}");
   }
   assert!(h.sent().is_empty());
-  assert_eq!(host.writes(), vec!["notify toast Copied"; 3]);
+  assert_eq!(host.writes(), vec!["notify toast Link copied"; 3]);
 }
 
 #[gpui::test]
@@ -4082,7 +4097,7 @@ fn commits_tab_rewrites_commits_in_the_home_repo(cx: &mut TestAppContext) {
     assert!(h.drawn(selector), "{selector}");
   }
   h.click("revert-commit-a");
-  h.cx.run_until_parked();
+  h.answer("Revert commit");
   assert!(host.writes().contains(&"revert a".to_string()));
   h.click("edit-description-a");
   assert!(h.drawn("edit-description-dialog"));
@@ -4091,14 +4106,12 @@ fn commits_tab_rewrites_commits_in_the_home_repo(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn commits_tab_abandons_once_confirmed(cx: &mut TestAppContext) {
-  let mut declined = commits_host();
-  declined.decline = true;
-  let (mut h, host) = workspace_harness(cx, declined, commits_route());
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
   h.click("delete-commit-a");
-  h.cx.run_until_parked();
-  assert!(host.writes().contains(&"confirm Delete Commit".to_string()));
+  h.answer("Cancel");
   assert!(!host.writes().iter().any(|w| w.starts_with("abandon")));
+  assert!(!h.drawn("confirm"));
 }
 
 #[gpui::test]
@@ -4106,7 +4119,8 @@ fn commits_tab_removes_an_abandoned_commit(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
   h.click("delete-commit-a");
-  h.cx.run_until_parked();
+  assert!(!host.writes().iter().any(|w| w.starts_with("abandon")));
+  h.answer("Delete commit");
   assert!(host.writes().contains(&"abandon a".to_string()));
   h.cx
     .executor()
@@ -6527,7 +6541,10 @@ fn prompt_history_copies_and_runs_prompts(cx: &mut TestAppContext) {
   assert!(all.contains("\n\n---\n\n[Home repo] "), "{all}");
   assert_eq!(
     host.writes(),
-    ["notify toast Copied", "notify toast Copied"]
+    [
+      "notify toast Prompt copied",
+      "notify toast All prompts copied"
+    ]
   );
   h.click("prompt-history-item-2");
   h.click("prompt-history-run");
@@ -7607,42 +7624,13 @@ impl workspace_ops::WorkspaceActionsHost for FakeHost {
     }
     Ok(())
   }
-
-  fn ask(&self, _: &str, message: &str) -> bool {
-    self.record(format!("ask {message}"));
-    !self.decline
-  }
 }
 
-/// `open-non-git-folder.test.tsx`: `openRepositoryAtPath` on a folder
-/// without `.git` offers to initialize one; declined, it toasts, creates no
-/// `.treq` and remembers nothing.
+/// `open-non-git-folder.test.tsx`: the window model offers to initialize
+/// a folder without `.git` first (see the window tests); one that still
+/// has none toasts, creates no `.treq` and remembers nothing.
 #[test]
-fn declining_to_initialize_a_folder_that_is_not_a_repository_remembers_nothing() {
-  let dir = tempfile::TempDir::new().unwrap();
-  let path = dir.path().to_str().unwrap();
-  let host = FakeHost {
-    decline: true,
-    ..FakeHost::default()
-  };
-  let mut shown = Vec::new();
-
-  onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
-
-  assert_eq!(
-    host.calls(),
-    [
-      format!("ask {path} is not a Git repository. Initialize one here?"),
-      "notify toast Not a Git Repository".into(),
-    ]
-  );
-  assert!(shown.is_empty(), "not the window's repository");
-  assert!(!dir.path().join(".treq").exists());
-  assert!(!dir.path().join(".git").exists());
-}
-
-#[test]
-fn initializing_a_folder_that_is_not_a_repository_opens_it() {
+fn a_folder_that_is_not_a_repository_is_not_opened() {
   let dir = tempfile::TempDir::new().unwrap();
   let path = dir.path().to_str().unwrap();
   let host = FakeHost::default();
@@ -7650,17 +7638,10 @@ fn initializing_a_folder_that_is_not_a_repository_opens_it() {
 
   onboarding::open_repo(&host, path, |p| shown.push(p.to_string()));
 
-  assert!(gix::open(dir.path()).is_ok(), "a Git repository now");
-  assert_eq!(
-    host.calls(),
-    [
-      format!("ask {path} is not a Git repository. Initialize one here?"),
-      format!("set last_opened_repo_path={path}"),
-      "notify repoOpened".into(),
-      "notify toast Repository Opened".into(),
-    ]
-  );
-  assert_eq!(shown, [path]);
+  assert_eq!(host.calls(), ["notify toast Not a Git Repository"]);
+  assert!(shown.is_empty(), "not the window's repository");
+  assert!(!dir.path().join(".treq").exists());
+  assert!(!dir.path().join(".git").exists());
 }
 
 #[test]
@@ -7678,7 +7659,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
     [
       format!("set last_opened_repo_path={path}"),
       "notify repoOpened".into(),
-      "notify toast Repository Opened".into(),
+      format!("notify toast Opened {}", path.rsplit('/').next().unwrap()),
     ]
   );
   assert_eq!(shown, [path]);

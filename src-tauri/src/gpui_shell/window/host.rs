@@ -64,6 +64,8 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn save_setting(&self, key: &str, value: &str);
   /// Whether `path` is a Git or jj repository, without writing to it.
   fn is_repo(&self, path: &str) -> bool;
+  /// Initializes a Git repository in the folder at `path`.
+  fn init_repo(&self, path: &str) -> Result<(), String>;
   /// `init-repo`: sets the repository up, records it as the window's and
   /// starts polling its pull requests.
   fn prepare_repo(&self, main_repo: &str);
@@ -77,8 +79,6 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn open_in_new_window(&self, path: &str);
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String>;
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String>;
-  /// A Yes/No question in a native dialog.
-  fn ask(&self, title: &str, message: &str) -> bool;
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String>;
   fn toast(&self, tone: ToastTone, title: &str, description: &str);
   fn open_url(&self, url: &str);
@@ -270,6 +270,10 @@ impl WindowHost for Backend {
     core::is_repository(path)
   }
 
+  fn init_repo(&self, path: &str) -> Result<(), String> {
+    core::init_git_repository(path)
+  }
+
   fn prepare_repo(&self, main_repo: &str) {
     if let Err(err) = core::init(main_repo) {
       log::error!("Failed to init repo: {err}");
@@ -308,18 +312,6 @@ impl WindowHost for Backend {
   }
 
   fn open_in_new_window(&self, path: &str) {
-    if !core::is_repository(path)
-      && WindowHost::ask(
-        self,
-        "Not a Git Repository",
-        &format!("{path} is not a Git repository. Initialize one here?"),
-      )
-    {
-      if let Err(err) = core::init_git_repository(path) {
-        self.toast(ToastTone::Error, "Failed to open repository", &err);
-        return;
-      }
-    }
     if !core::init(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,
@@ -346,10 +338,6 @@ impl WindowHost for Backend {
 
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
     supporting_repos::remove(main_repo, path)
-  }
-
-  fn ask(&self, title: &str, message: &str) -> bool {
-    crate::gpui_shell::screen::workspace_ops::WorkspaceActionsHost::ask(self, title, message)
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {

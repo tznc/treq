@@ -4,6 +4,7 @@
 //! session (`startAgentTask`, in `core::agent_launch`): it opens the issue's
 //! workspaces, records the prompt and tells React which session to show.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::time::Duration;
 
@@ -26,7 +27,7 @@ use crate::gpui_shell::{
   native::{NativeEvent, ToastTone},
   popup::{Side, TooltipContent},
   screen::{
-    code::{agent_icon, checkbox, menu_item, menu_panel, tw, BLUE_400, BLUE_500},
+    code::{agent_icon, menu_panel},
     code_data::{
       self, insert_at, mention_at, task_settings, Agent, Environment, TaskSettings,
       ENVIRONMENT_SETTING,
@@ -825,7 +826,7 @@ impl AgentPromptView {
               .gap_2()
               .px_2()
               .py_2()
-              .rounded(zpx(4.))
+              .rounded(radius::SM)
               .cursor_pointer()
               .when(i == index, |this| this.bg(accent))
               .child(
@@ -850,7 +851,7 @@ impl AgentPromptView {
           .top(zpx(44.))
           .left_0()
           .w(zpx(288.))
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -909,26 +910,14 @@ impl AgentPromptView {
   /// `IssueChip`.
   fn issue_chip(&self, issue: &Issue, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let color = match issue.source {
-      IssueSource::Github => {
-        if self.dark {
-          tw(0x4ade80)
-        } else {
-          tw(0x16a34a)
-        }
-      }
-      IssueSource::Linear => {
-        if self.dark {
-          tw(0xa78bfa)
-        } else {
-          tw(0x7c3aed)
-        }
-      }
+      IssueSource::Github => ui::Tone::Success.text(p),
+      IssueSource::Linear => ui::Tone::GitMerged.text(p),
     };
     div()
       .flex()
       .flex_wrap()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .px_3()
       .pt_3()
       .child(
@@ -937,12 +926,12 @@ impl AgentPromptView {
           .flex()
           .items_center()
           .gap_1()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.muted.opacity(0.5))
           .px_2()
-          .py(zpx(2.))
+          .py_0p5()
           .child(ui::icon(theme::ICON_CIRCLE_DOT, 12., color))
           .child(div().font_weight(FontWeight::MEDIUM).child(format!(
             "{} {}",
@@ -953,9 +942,9 @@ impl AgentPromptView {
             div()
               .id("issue-chip-remove")
               .debug_selector(|| "issue-chip-remove".into())
-              .ml(zpx(2.))
-              .p(zpx(2.))
-              .rounded(zpx(4.))
+              .ml_0p5()
+              .p_0p5()
+              .rounded(radius::SM)
               .cursor_pointer()
               .hover({
                 let muted = p.muted;
@@ -977,7 +966,7 @@ impl AgentPromptView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let task = self.task_input(window, cx);
-    let border = if self.focused { tw(BLUE_400) } else { p.border };
+    let border = if self.focused { p.primary } else { p.border };
     let mention = self.mention.clone().filter(|m| !m.results.is_empty());
     let issue = self.issue.clone();
     div()
@@ -989,7 +978,7 @@ impl AgentPromptView {
         div()
           .id("task-card")
           .min_h(zpx(112.))
-          .rounded(zpx(16.))
+          .rounded(radius::LG)
           .border_1()
           .border_color(border)
           .bg(p.background)
@@ -1039,14 +1028,13 @@ impl AgentPromptView {
               .pb_1()
               .min_h(zpx(44.))
               .max_h(zpx(200.))
-              .child(
+              .child(ui::text(
                 Textarea::new(&task)
                   .appearance(false)
                   .bordered(false)
-                  .xsmall()
-                  .text_size(zpx(13.))
-                  .line_height(zpx(20.)),
-              ),
+                  .xsmall(),
+                TextSize::Sm,
+              )),
           )
           .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
           .child(div().mt_auto().child(self.toolbar(p, cx))),
@@ -1064,7 +1052,7 @@ impl AgentPromptView {
       .debug_selector(|| "task-mentions".into())
       .mx_2()
       .mb_1()
-      .rounded(zpx(12.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border)
       .bg(p.muted.opacity(0.5))
@@ -1088,7 +1076,7 @@ impl AgentPromptView {
           .debug_selector(move || selector)
           .w_full()
           .px_3()
-          .py(zpx(6.))
+          .py_1p5()
           .flex()
           .items_center()
           .gap_2()
@@ -1167,10 +1155,10 @@ impl AgentPromptView {
           .test_support()
           .flex()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .cursor_pointer()
           .text_color(p.muted_foreground)
-          .child(checkbox("task-save-default-box", checked, tw(BLUE_500), p))
+          .child(ui::Checkbox::new("task-save-default-box", p).checked(checked))
           .child("Set as default for this repo")
           .on_click(cx.listener(move |view, _, _, cx| {
             view.save_default = !checked;
@@ -1187,7 +1175,9 @@ impl AgentPromptView {
         .flex()
         .items_center()
         .child(
-          ui::text(div(), TextSize::Xs)
+          // The wrapper keeps the combobox name, value and click; the
+          // picker inside draws it.
+          div()
             .id("task-agent")
             .debug_selector(|| "task-agent".into())
             .role(gpui::Role::ComboBox)
@@ -1195,19 +1185,13 @@ impl AgentPromptView {
             .aria_value(agent.label())
             .aria_expanded(self.menu == Some(Menu::Agent))
             .test_support()
-            .h(zpx(28.))
-            .px_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .rounded(zpx(8.))
-            .border_1()
-            .border_color(p.border)
-            .bg(p.background)
-            .cursor_pointer()
-            .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-            .child(agent.label())
-            .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., p.muted_foreground))
+            .child(
+              ui::Picker::new("task-agent-picker", p)
+                .placement(ui::PickerPlacement::Toolbar)
+                .icon(agent_icon(agent))
+                .value(agent.label())
+                .open(self.menu == Some(Menu::Agent)),
+            )
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
         )
         .when(self.menu == Some(Menu::Agent), |this| {
@@ -1237,7 +1221,7 @@ impl AgentPromptView {
       "task-submit",
       Side::Top,
       Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘+Enter").into(),
+        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
       )),
       submit,
       cx,
@@ -1251,8 +1235,8 @@ impl AgentPromptView {
             .disabled(disabled)
             .rounded_l_none()
             .border_l_1()
-            .border_color(gpui::white().opacity(0.2))
-            .px(zpx(6.))
+            .border_color(p.primary_foreground.opacity(0.2))
+            .px_1p5()
             .icon(theme::ICON_CHEVRON_DOWN, 14.)
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
         )
@@ -1294,15 +1278,13 @@ impl AgentPromptView {
       .left_0()
       .min_w(zpx(128.))
       .child(
-        menu_item("task-add-file", p, false)
-          .child(ui::icon(theme::ICON_PLUS, 16., p.popover_foreground))
-          .child("File")
+        ui::MenuItem::new("task-add-file", "File", p)
+          .icon(theme::ICON_PLUS)
           .on_click(cx.listener(|view, _, _, cx| view.open_file_picker(cx))),
       )
       .child(
-        menu_item("task-add-attach", p, false)
-          .child(ui::icon(theme::ICON_PAPERCLIP, 16., p.popover_foreground))
-          .child("Attach")
+        ui::MenuItem::new("task-add-attach", "Attach", p)
+          .icon(theme::ICON_PAPERCLIP)
           .on_click(cx.listener(|view, _, _, cx| view.attach(cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
@@ -1314,25 +1296,8 @@ impl AgentPromptView {
       .right_0()
       .w(zpx(224.))
       .child(
-        menu_item("task-plan", p, false)
-          .role(gpui::Role::MenuItem)
-          .aria_label("Plan")
-          .test_support()
-          .items_start()
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .flex()
-              .flex_col()
-              .gap(zpx(2.))
-              .child(div().font_weight(FontWeight::MEDIUM).child("Plan"))
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Plan the change first, without editing files"),
-              ),
-          )
+        ui::MenuItem::new("task-plan", "Plan", p)
+          .description("Plan the change first, without editing files")
           .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
@@ -1343,22 +1308,17 @@ impl AgentPromptView {
       .top(zpx(32.))
       .right_0()
       .min_w(zpx(128.))
+      .child(ui::MenuLabel::new("Agent", p))
       // Agents that aren't installed are left out, unless already chosen.
       .children(
         Agent::ALL
           .into_iter()
           .filter(|agent| *agent == selected || !self.missing.contains(agent))
           .map(|agent| {
-            menu_item(format!("task-agent-{}", agent.id()), p, false)
-              .role(gpui::Role::MenuItem)
-              .aria_label(agent.label())
+            ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
+              .icon(agent_icon(agent))
+              .checked(agent == selected)
               .aria_selected(agent == selected)
-              .test_support()
-              .child(ui::icon(agent_icon(agent), 14., p.muted_foreground))
-              .child(div().flex_1().child(agent.label()))
-              .when(agent == selected, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground))
-              })
               .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
           }),
       );
@@ -1371,14 +1331,9 @@ impl AgentPromptView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let button = environment::trigger(
-      "task-environment",
-      env,
-      self.starting_devcontainer,
-      environment::TASK_TRIGGER,
-      p,
-    )
-    .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
+    let button = environment::picker("task-environment", env, p)
+      .open(self.menu == Some(Menu::Environment))
+      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
     div()
       .relative()
       .child(button)
@@ -1426,7 +1381,7 @@ impl Render for AgentPromptView {
     let card = self.task_card(&p, window, cx);
     let picker = self.workspace_picker(&p, cx);
     let keys = cx.listener(|view, e: &gpui::KeyDownEvent, window, cx| {
-      if e.keystroke.key != "escape" || view.file_picker.is_some() {
+      if !ui::is_escape(&e.keystroke) || view.file_picker.is_some() {
         return;
       }
       cx.stop_propagation();

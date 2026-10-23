@@ -1,0 +1,32 @@
+id: gpui-no-raw-color
+language: rust
+severity: error
+message: >
+  Do not write a raw color. Use a theme token, a `Palette` field such as
+  `p.text` or `p.border`, so the color follows the theme.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Syntax and ANSI palettes are content colors, not UI tokens.
+  - "src-tauri/src/gpui_shell/screen/highlight.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal_emu.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    - kind: call_expression
+      has:
+        field: function
+        regex: "^(gpui(_kit)?::)?(rgb|rgba|hsla|black|white)$"
+    - kind: scoped_identifier
+      regex: "(^|::)tw::"
+      not:
+        inside:
+          kind: scoped_identifier
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end
