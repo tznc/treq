@@ -5,7 +5,11 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+  collections::HashMap,
+  path::{Path, PathBuf},
+  time::Duration,
+};
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 
@@ -359,6 +363,7 @@ impl WindowHost for Backend {
       return None;
     }
     let (tx, changes) = unbounded();
+    let mut gitignore = GitignoreFilter::new(Path::new(path));
     let mut watcher = notify_debouncer_full::new_debouncer(
       WATCH_SETTLE,
       None,
@@ -367,7 +372,7 @@ impl WindowHost for Backend {
           if events
             .iter()
             .flat_map(|e| e.paths.iter())
-            .any(|p| !is_ignored(p))
+            .any(|p| !is_ignored(p) && !gitignore.ignores(p))
           {
             let _ = tx.unbounded_send(());
           }
@@ -633,9 +638,101 @@ fn is_ignored(path: &Path) -> bool {
     .is_some_and(|p| p.ends_with(".swp") || p.ends_with('~'))
 }
 
+/// Applies the checkout's gitignore rules, so `dist/`, `.next/` and other
+/// ignored output stop triggering reloads of the Changes tab. Rules come from
+/// every `.gitignore` between the changed path and the root, plus
+/// `.git/info/exclude` and the user's global ignore file, with git's
+/// precedence (deeper files win).
+struct GitignoreFilter {
+  root: PathBuf,
+  /// Lowest precedence first: global ignore file, then `.git/info/exclude`.
+  base: Vec<ignore::gitignore::Gitignore>,
+  /// Each directory's own `.gitignore`, read on first use.
+  dirs: HashMap<PathBuf, Option<ignore::gitignore::Gitignore>>,
+}
+
+impl GitignoreFilter {
+  fn new(root: &Path) -> Self {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut exclude = ignore::gitignore::GitignoreBuilder::new(&root);
+    exclude.add(root.join(".git").join("info").join("exclude"));
+    let base = [
+      Some(ignore::gitignore::Gitignore::global().0),
+      exclude.build().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Self {
+      root,
+      base,
+      dirs: HashMap::new(),
+    }
+  }
+
+  fn ignores(&mut self, path: &Path) -> bool {
+    if path.file_name().is_some_and(|name| name == ".gitignore") {
+      // The rules themselves changed: drop what was read and let it reload.
+      self.dirs.clear();
+      return false;
+    }
+    let Ok(relative) = path.strip_prefix(&self.root) else {
+      return false;
+    };
+    let is_dir = path.is_dir();
+    // Deepest directory first: its rules override its ancestors'.
+    let dirs: Vec<PathBuf> = relative
+      .ancestors()
+      .skip(1)
+      .map(|dir| self.root.join(dir))
+      .collect();
+    for dir in dirs {
+      let matcher = self.dirs.entry(dir.clone()).or_insert_with(|| {
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(&dir);
+        builder.add(dir.join(".gitignore"));
+        builder.build().ok()
+      });
+      if let Some(matcher) = matcher {
+        match matcher.matched_path_or_any_parents(path, is_dir) {
+          ignore::Match::Ignore(_) => return true,
+          ignore::Match::Whitelist(_) => return false,
+          ignore::Match::None => {}
+        }
+      }
+    }
+    for matcher in self.base.iter().rev() {
+      match matcher.matched_path_or_any_parents(path, is_dir) {
+        ignore::Match::Ignore(_) => return true,
+        ignore::Match::Whitelist(_) => return false,
+        ignore::Match::None => {}
+      }
+    }
+    false
+  }
+}
+
 #[cfg(test)]
 mod watch_tests {
   use super::*;
+
+  #[test]
+  fn gitignore_filter_follows_nested_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("sub/dist")).unwrap();
+    std::fs::write(root.join(".gitignore"), "dist/\n*.log\n").unwrap();
+    std::fs::write(root.join("sub/.gitignore"), "!keep.log\n").unwrap();
+    let mut filter = GitignoreFilter::new(&root);
+    assert!(filter.ignores(&root.join("dist/app.js")));
+    assert!(filter.ignores(&root.join("sub/dist/app.js")));
+    assert!(filter.ignores(&root.join("debug.log")));
+    assert!(!filter.ignores(&root.join("sub/keep.log")));
+    assert!(!filter.ignores(&root.join("src/main.rs")));
+    // Editing a `.gitignore` is a change worth reloading for.
+    assert!(!filter.ignores(&root.join(".gitignore")));
+    // Paths outside the root are never filtered out.
+    assert!(!filter.ignores(Path::new("/elsewhere/dist/app.js")));
+  }
 
   #[test]
   fn ignores_vcs_state_and_build_output() {

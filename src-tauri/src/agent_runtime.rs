@@ -254,109 +254,107 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
 }
 
 pub(crate) fn start_instance_registry_heartbeat(app: AppHandle) {
-  std::thread::spawn(move || loop {
-    let state = app.state::<AppState>();
-    let now = agent_dispatch::now_millis();
+  std::thread::spawn(move || {
+    let mut last_written: HashMap<String, (Vec<agent_dispatch::InstanceWindowSnapshot>, u64)> =
+      HashMap::new();
+    loop {
+      let state = app.state::<AppState>();
+      let now = agent_dispatch::now_millis();
 
-    let repo_map = state.window_repo_paths.lock().ok().map(|m| m.clone());
-    let supporting_map = state
-      .window_supporting_repo_paths
-      .lock()
-      .ok()
-      .map(|m| m.clone())
-      .unwrap_or_default();
-    let Ok(mut focus_map) = state.window_last_focused_at.lock() else {
+      let repo_map = state.window_repo_paths.lock().ok().map(|m| m.clone());
+      let supporting_map = state
+        .window_supporting_repo_paths
+        .lock()
+        .ok()
+        .map(|m| m.clone())
+        .unwrap_or_default();
+      let Ok(mut focus_map) = state.window_last_focused_at.lock() else {
+        std::thread::sleep(std::time::Duration::from_millis(
+          agent_dispatch::HEARTBEAT_INTERVAL_MS,
+        ));
+        continue;
+      };
+      let windows = app.windows();
+      let mut snapshots = Vec::new();
+      if let Some(repo_map) = repo_map {
+        for (label, repo_path) in repo_map {
+          let focused = windows
+            .get(&label)
+            .and_then(|w| w.is_focused().ok())
+            .unwrap_or(false);
+          if focused {
+            focus_map.insert(label.clone(), now);
+          }
+          let last_focused_at = focus_map.get(&label).copied();
+          for supporting_path in supporting_map.get(&label).into_iter().flatten() {
+            snapshots.push(agent_dispatch::InstanceWindowSnapshot {
+              window_label: label.clone(),
+              normalized_repo_path: agent_dispatch::normalize_repo_path(supporting_path),
+              focused,
+              last_focused_at,
+              supporting: true,
+            });
+          }
+          snapshots.push(agent_dispatch::InstanceWindowSnapshot {
+            window_label: label,
+            normalized_repo_path: agent_dispatch::normalize_repo_path(&repo_path),
+            focused,
+            last_focused_at,
+            supporting: false,
+          });
+        }
+      }
+      drop(focus_map);
+      let mut windows_by_repo: HashMap<String, Vec<agent_dispatch::InstanceWindowSnapshot>> =
+        HashMap::new();
+      for snapshot in snapshots {
+        windows_by_repo
+          .entry(snapshot.normalized_repo_path.clone())
+          .or_default()
+          .push(snapshot);
+      }
+
+      for (repo_path, mut windows) in windows_by_repo {
+        // Map iteration order is arbitrary; sort so the change check is stable.
+        windows
+          .sort_by(|a, b| (&a.window_label, a.supporting).cmp(&(&b.window_label, b.supporting)));
+        if repo_path.is_empty() {
+          log::warn!("Skipping instance heartbeat for empty repo path");
+          continue;
+        }
+        // Liveness is judged against `HEARTBEAT_TIMEOUT_MS`, so an unchanged
+        // window set only needs a refresh well inside that window.
+        if last_written.get(&repo_path).is_some_and(|(written, at)| {
+          *written == windows && now.saturating_sub(*at) < agent_dispatch::HEARTBEAT_TIMEOUT_MS / 3
+        }) {
+          continue;
+        }
+        if let Err(error) = local_db::heartbeat_instance_registry(
+          &repo_path,
+          now,
+          agent_dispatch::HEARTBEAT_TIMEOUT_MS,
+          agent_dispatch::RegisteredInstance {
+            instance_id: state.dispatch_instance_id.clone(),
+            pid: std::process::id(),
+            started_at: state.dispatch_started_at,
+            last_heartbeat_at: now,
+            endpoint: state.dispatch_endpoint.clone(),
+            windows: windows.clone(),
+          },
+        ) {
+          log::warn!(
+            "Failed writing instance heartbeat for repo {}: {}",
+            repo_path,
+            error
+          );
+          continue;
+        }
+        last_written.insert(repo_path, (windows, now));
+      }
+
       std::thread::sleep(std::time::Duration::from_millis(
         agent_dispatch::HEARTBEAT_INTERVAL_MS,
       ));
-      continue;
-    };
-    let windows = app.windows();
-    let mut snapshots = Vec::new();
-    if let Some(repo_map) = repo_map {
-      for (label, repo_path) in repo_map {
-        let focused = windows
-          .get(&label)
-          .and_then(|w| w.is_focused().ok())
-          .unwrap_or(false);
-        if focused {
-          focus_map.insert(label.clone(), now);
-        }
-        let last_focused_at = focus_map.get(&label).copied();
-        for supporting_path in supporting_map.get(&label).into_iter().flatten() {
-          snapshots.push(agent_dispatch::InstanceWindowSnapshot {
-            window_label: label.clone(),
-            normalized_repo_path: agent_dispatch::normalize_repo_path(supporting_path),
-            focused,
-            last_focused_at,
-            supporting: true,
-          });
-        }
-        snapshots.push(agent_dispatch::InstanceWindowSnapshot {
-          window_label: label,
-          normalized_repo_path: agent_dispatch::normalize_repo_path(&repo_path),
-          focused,
-          last_focused_at,
-          supporting: false,
-        });
-      }
     }
-    drop(focus_map);
-    let mut windows_by_repo: HashMap<String, Vec<agent_dispatch::InstanceWindowSnapshot>> =
-      HashMap::new();
-    for snapshot in snapshots {
-      windows_by_repo
-        .entry(snapshot.normalized_repo_path.clone())
-        .or_default()
-        .push(snapshot);
-    }
-
-    for (repo_path, windows) in windows_by_repo {
-      if repo_path.is_empty() {
-        log::warn!("Skipping instance heartbeat for empty repo path");
-        continue;
-      }
-      if let Err(error) = local_db::init_local_db(&repo_path) {
-        log::warn!(
-          "Skipping instance heartbeat for repo {}: {}",
-          repo_path,
-          error
-        );
-        continue;
-      }
-      if let Err(error) = local_db::prune_stale_instance_registry(
-        &repo_path,
-        now,
-        agent_dispatch::HEARTBEAT_TIMEOUT_MS,
-      ) {
-        log::warn!(
-          "Failed pruning stale instance registry rows for repo {}: {}",
-          repo_path,
-          error
-        );
-        continue;
-      }
-      if let Err(error) = local_db::upsert_instance_registry(
-        &repo_path,
-        agent_dispatch::RegisteredInstance {
-          instance_id: state.dispatch_instance_id.clone(),
-          pid: std::process::id(),
-          started_at: state.dispatch_started_at,
-          last_heartbeat_at: now,
-          endpoint: state.dispatch_endpoint.clone(),
-          windows,
-        },
-      ) {
-        log::warn!(
-          "Failed upserting instance registry row for repo {}: {}",
-          repo_path,
-          error
-        );
-      }
-    }
-
-    std::thread::sleep(std::time::Duration::from_millis(
-      agent_dispatch::HEARTBEAT_INTERVAL_MS,
-    ));
   });
 }

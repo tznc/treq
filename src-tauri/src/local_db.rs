@@ -44,6 +44,11 @@ pub struct Session {
 
 static INITIALIZED_DBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+/// Schema version stored in `PRAGMA user_version`. Bump it whenever
+/// `init_local_db` gains a table, column, index or migration so existing
+/// databases re-run it once; databases at this version skip it entirely.
+const SCHEMA_VERSION: i64 = 1;
+
 fn workspace_from_row(repo_path: &str, row: &Row<'_>) -> rusqlite::Result<Workspace> {
   let moved_files_json: Option<String> = row.get(10)?;
   let moved_files =
@@ -249,6 +254,15 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
   }
 
   let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open local db: {}", e))?;
+
+  // Every remote request cold-starts `treq` and lands here, so the common
+  // case (schema already current) must cost one pragma read, not ~70 statements.
+  let current_version: i64 = conn
+    .query_row("PRAGMA user_version", [], |row| row.get(0))
+    .map_err(|e| format!("Failed to read local db schema version: {}", e))?;
+  if current_version >= SCHEMA_VERSION {
+    return Ok(db_path);
+  }
 
   conn
     .execute(
@@ -901,6 +915,10 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     }
   }
 
+  conn
+    .pragma_update(None, "user_version", SCHEMA_VERSION)
+    .map_err(|e| format!("Failed to record local db schema version: {}", e))?;
+
   Ok(db_path)
 }
 
@@ -935,6 +953,11 @@ fn get_connection(repo_path: &str) -> Result<Connection, String> {
   conn
     .pragma_update(None, "journal_mode", "WAL")
     .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
+  // NORMAL is crash-safe under WAL (it can lose the last commits on power
+  // loss, never corrupt) and avoids an fsync per commit.
+  conn
+    .pragma_update(None, "synchronous", "NORMAL")
+    .map_err(|e| format!("Failed to set synchronous mode: {}", e))?;
   conn
     .busy_timeout(std::time::Duration::from_secs(5))
     .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
@@ -946,6 +969,13 @@ pub fn upsert_instance_registry(
   instance: RegisteredInstance,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
+  upsert_instance_registry_row(&conn, instance)
+}
+
+fn upsert_instance_registry_row(
+  conn: &Connection,
+  instance: RegisteredInstance,
+) -> Result<(), String> {
   let windows_json = serde_json::to_string(&instance.windows)
     .map_err(|e| format!("Failed to serialize instance windows: {}", e))?;
   let updated_at = Utc::now().to_rfc3339();
@@ -1028,6 +1058,14 @@ pub fn prune_stale_instance_registry(
   timeout_ms: u64,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
+  prune_stale_instance_registry_rows(&conn, now, timeout_ms)
+}
+
+fn prune_stale_instance_registry_rows(
+  conn: &Connection,
+  now: u64,
+  timeout_ms: u64,
+) -> Result<(), String> {
   let threshold = now.saturating_sub(timeout_ms) as i64;
   conn
     .execute(
@@ -1036,6 +1074,24 @@ pub fn prune_stale_instance_registry(
     )
     .map_err(|e| format!("Failed to prune stale instance registry rows: {}", e))?;
   Ok(())
+}
+
+/// Prunes stale rows and upserts this instance's row in one transaction on
+/// one connection, so a heartbeat costs a single commit.
+pub fn heartbeat_instance_registry(
+  repo_path: &str,
+  now: u64,
+  timeout_ms: u64,
+  instance: RegisteredInstance,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start heartbeat transaction: {}", e))?;
+  prune_stale_instance_registry_rows(&tx, now, timeout_ms)?;
+  upsert_instance_registry_row(&tx, instance)?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit heartbeat transaction: {}", e))
 }
 
 const WORKSPACE_SELECT_COLUMNS: &str = "id, workspace_name, workspace_path, branch_name, created_at, refreshed_at, metadata, target_branch, COALESCE(not_on_remote, 0), COALESCE(title, branch_name), moved_files, description, sparse_patterns, COALESCE(archived, 0)";
@@ -1454,6 +1510,10 @@ pub fn upsert_workspace_discovery(
   Ok(id)
 }
 
+/// Upserts discovered workspaces and returns the persisted rows. A row is
+/// written only when discovery changed it (or it was never refreshed), so the
+/// periodic poll commits nothing in the steady state; `refreshed_at` is the
+/// time of the last such change.
 pub fn sync_discovered_workspaces(
   repo_path: &str,
   discovered: &[DiscoveredWorkspace],
@@ -1483,7 +1543,10 @@ pub fn sync_discovered_workspaces(
              ON CONFLICT(workspace_path) DO UPDATE SET
                  workspace_name = CASE WHEN ?6 THEN excluded.workspace_name ELSE workspaces.workspace_name END,
                  branch_name = CASE WHEN ?7 THEN excluded.branch_name ELSE workspaces.branch_name END,
-                 refreshed_at = excluded.refreshed_at",
+                 refreshed_at = excluded.refreshed_at
+             WHERE workspaces.refreshed_at IS NULL
+                 OR (?6 AND workspaces.workspace_name IS NOT excluded.workspace_name)
+                 OR (?7 AND workspaces.branch_name IS NOT excluded.branch_name)",
             params![
                 workspace.workspace_name,
                 workspace.workspace_path,
@@ -2616,6 +2679,129 @@ mod tests {
       )
       .expect("sqlite_master")
       > 0
+  }
+
+  fn user_version(db_path: &PathBuf) -> i64 {
+    Connection::open(db_path)
+      .expect("open database")
+      .query_row("PRAGMA user_version", [], |row| row.get(0))
+      .expect("user_version")
+  }
+
+  #[test]
+  fn init_records_schema_version_and_second_init_is_a_noop() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let db_path = init_local_db(&repo_path).expect("fresh init");
+    assert_eq!(user_version(&db_path), SCHEMA_VERSION);
+
+    // Drop a table the init would recreate: a skipped init leaves it missing.
+    let conn = Connection::open(&db_path).expect("open database");
+    conn.execute("DROP TABLE repo_trust", []).unwrap();
+    drop(conn);
+    init_local_db(&repo_path).expect("second init");
+    let conn = Connection::open(&db_path).expect("reopen database");
+    assert!(!table_exists(&conn, "repo_trust"));
+  }
+
+  #[test]
+  fn init_migrates_legacy_database_at_version_zero() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let (repo_path, db_path) = open_legacy_db(
+      &temp_dir,
+      "CREATE TABLE workspaces (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_name TEXT NOT NULL,
+         workspace_path TEXT NOT NULL UNIQUE,
+         branch_name TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         metadata TEXT,
+         target_branch TEXT
+       );",
+    );
+    assert_eq!(user_version(&db_path), 0);
+
+    init_local_db(&repo_path).expect("migrate legacy database");
+
+    let conn = Connection::open(&db_path).expect("reopen database");
+    assert!(table_exists(&conn, "repo_trust"));
+    assert!(conn
+      .prepare("SELECT refreshed_at, archived FROM workspaces")
+      .is_ok());
+    assert_eq!(user_version(&db_path), SCHEMA_VERSION);
+  }
+
+  #[test]
+  fn heartbeat_prunes_stale_rows_and_upserts_in_one_call() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let instance = |id: &str, beat: u64| RegisteredInstance {
+      instance_id: id.to_string(),
+      pid: 1,
+      started_at: 0,
+      last_heartbeat_at: beat,
+      endpoint: "127.0.0.1:1".to_string(),
+      windows: Vec::new(),
+    };
+    upsert_instance_registry(&repo_path, instance("stale", 1_000)).unwrap();
+    heartbeat_instance_registry(&repo_path, 100_000, 15_000, instance("me", 100_000)).unwrap();
+    let ids: Vec<String> = list_instance_registry(&repo_path)
+      .unwrap()
+      .into_iter()
+      .map(|i| i.instance_id)
+      .collect();
+    assert_eq!(ids, vec!["me".to_string()]);
+  }
+
+  /// `cargo test --lib init_local_db_cost -- --ignored --nocapture`
+  #[test]
+  #[ignore]
+  fn init_local_db_cost() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let first = std::time::Instant::now();
+    let db_path = init_local_db(&repo_path).unwrap();
+    println!("first init: {:?}", first.elapsed());
+    let n = 200;
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      init_local_db(&repo_path).unwrap();
+    }
+    println!("gated init avg: {:?}", started.elapsed() / n);
+    Connection::open(&db_path)
+      .unwrap()
+      .pragma_update(None, "user_version", 0)
+      .unwrap();
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      Connection::open(&db_path)
+        .unwrap()
+        .pragma_update(None, "user_version", 0)
+        .unwrap();
+      init_local_db(&repo_path).unwrap();
+    }
+    println!("ungated init avg: {:?}", started.elapsed() / n);
+
+    let instance = || RegisteredInstance {
+      instance_id: "me".to_string(),
+      pid: 1,
+      started_at: 0,
+      last_heartbeat_at: 1,
+      endpoint: "127.0.0.1:1".to_string(),
+      windows: Vec::new(),
+    };
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      init_local_db(&repo_path).unwrap();
+      prune_stale_instance_registry(&repo_path, 1, 15_000).unwrap();
+      upsert_instance_registry(&repo_path, instance()).unwrap();
+    }
+    println!("old heartbeat tick avg: {:?}", started.elapsed() / n);
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      heartbeat_instance_registry(&repo_path, 1, 15_000, instance()).unwrap();
+    }
+    println!("new heartbeat tick avg: {:?}", started.elapsed() / n);
   }
 
   #[test]
