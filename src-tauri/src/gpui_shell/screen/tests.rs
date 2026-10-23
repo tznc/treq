@@ -2278,7 +2278,7 @@ fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   for selector in [
     "workspace-view-pr",
-    "workspace-view-pr-web",
+    "workspace-view-pr-menu",
     "workspace-merge",
     "workspace-more",
   ] {
@@ -2304,7 +2304,7 @@ fn workspace_header_github_buttons_copy_their_link(cx: &mut TestAppContext) {
   let pr = "https://github.com/tznc/treq/pull/42";
   for (selector, url) in [
     ("workspace-view-pr", pr.to_string()),
-    ("workspace-view-pr-web", pr.to_string()),
+    ("workspace-view-pr-menu", pr.to_string()),
     ("workspace-checks", format!("{pr}/checks")),
   ] {
     h.right_click(selector);

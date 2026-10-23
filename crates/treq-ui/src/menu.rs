@@ -155,6 +155,37 @@ impl RenderOnce for MenuItem {
   }
 }
 
+/// A group's heading, such as `Target branch` over a group of values: muted
+/// caption text in sentence case, aligned with the item labels. Give every
+/// group of checked values one, so the check column doesn't appear unexplained.
+#[derive(IntoElement)]
+pub struct MenuLabel {
+  palette: Palette,
+  label: SharedString,
+}
+
+impl MenuLabel {
+  pub fn new(label: impl Into<SharedString>, palette: &Palette) -> Self {
+    Self {
+      palette: *palette,
+      label: label.into(),
+    }
+  }
+}
+
+impl RenderOnce for MenuLabel {
+  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    text(div(), TextSize::Xs)
+      .px_2()
+      .pt_1p5()
+      .pb_1()
+      .font_weight(FontWeight::MEDIUM)
+      .text_color(self.palette.muted_foreground)
+      .truncate()
+      .child(self.label)
+  }
+}
+
 /// The line between groups of menu items.
 #[derive(IntoElement)]
 pub struct MenuSeparator {
@@ -194,5 +225,7 @@ mod tests {
       Some("Removes its worktree too")
     );
     assert_eq!(item.shortcut.as_deref(), Some("secondary-backspace"));
+    let label = MenuLabel::new("Target branch", &p);
+    assert_eq!(label.label.as_ref(), "Target branch");
   }
 }

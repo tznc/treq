@@ -14,16 +14,20 @@ pub enum Severity {
 }
 
 /// One red (or amber, or blue) signal: the icon and a tinted surface carry
-/// the severity, the text stays in body color, and the one action is a
-/// normal outline [`crate::Button`]. The title states the fact; the message
-/// says what to do.
+/// the severity, the text stays in body color, and the actions are normal
+/// [`crate::Button`]s, aligned to the bottom right under the text. The
+/// title states the fact; the message says what to do.
+///
+/// One action is an outline button. With more, add them in reading order:
+/// the dismissive one first (ghost), the one that resolves it last
+/// (outline), so it sits in the corner.
 #[derive(IntoElement)]
 pub struct Alert {
   id: SharedString,
   title: SharedString,
   message: Option<SharedString>,
   severity: Severity,
-  action: Option<AnyElement>,
+  actions: Vec<AnyElement>,
   palette: Palette,
 }
 
@@ -38,7 +42,7 @@ impl Alert {
       title: title.into(),
       message: None,
       severity: Severity::default(),
-      action: None,
+      actions: Vec::new(),
       palette: *palette,
     }
   }
@@ -53,9 +57,18 @@ impl Alert {
     self
   }
 
-  /// The one action, an outline button whose label is a verb.
+  /// Adds an action, a button whose label is a verb. Call again for more;
+  /// they lay out left to right, ending in the bottom-right corner.
   pub fn action(mut self, action: impl IntoElement) -> Self {
-    self.action = Some(action.into_any_element());
+    self.actions.push(action.into_any_element());
+    self
+  }
+
+  /// Adds several actions at once, in order.
+  pub fn actions<E: IntoElement>(mut self, actions: impl IntoIterator<Item = E>) -> Self {
+    self
+      .actions
+      .extend(actions.into_iter().map(IntoElement::into_any_element));
     self
   }
 }
@@ -102,11 +115,19 @@ impl RenderOnce for Alert {
                 .text_color(p.muted_foreground)
                 .child(message),
             )
+          })
+          .when(!self.actions.is_empty(), |el| {
+            el.child(
+              div()
+                .mt_2()
+                .flex()
+                .flex_wrap()
+                .justify_end()
+                .gap_2()
+                .children(self.actions),
+            )
           }),
       )
-      .when_some(self.action, |el, action| {
-        el.child(div().flex_none().child(action))
-      })
   }
 }
 
@@ -122,6 +143,10 @@ mod tests {
       .severity(Severity::Danger)
       .action(div());
     assert_eq!(alert.severity, Severity::Danger);
-    assert!(alert.action.is_some());
+    assert_eq!(alert.actions.len(), 1);
+    let two = Alert::new("conflicts", "1 file has conflicts", &p)
+      .actions([div(), div()])
+      .action(div());
+    assert_eq!(two.actions.len(), 3);
   }
 }

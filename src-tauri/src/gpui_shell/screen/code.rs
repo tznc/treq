@@ -1519,6 +1519,7 @@ impl CodeView {
       .top(zpx(32.))
       .right_0()
       .min_w(zpx(128.))
+      .child(ui::MenuLabel::new("Agent", p))
       .children(Agent::ALL.into_iter().map(|agent| {
         ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
           .icon(agent_icon(agent))
