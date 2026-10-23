@@ -13,6 +13,7 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { publishMergeQueueCommand } from "../_shared/merge-queue/commands-queue.ts";
+import { isServiceRoleRequest } from "../_shared/auth/service-role.ts";
 import type { MergeQueueCommand } from "../_shared/merge-queue/messages.ts";
 
 const CI_RUN_TIMEOUT_MINUTES = 120;
@@ -139,6 +140,9 @@ async function driveIdleQueues(supabase: SupabaseClient): Promise<number> {
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
+  }
+  if (!isServiceRoleRequest(req, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "")) {
+    return new Response("Forbidden", { status: 403 });
   }
 
   const supabase = createClient(

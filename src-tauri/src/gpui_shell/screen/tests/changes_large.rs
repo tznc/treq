@@ -115,7 +115,11 @@ pub(super) fn leak(s: String) -> &'static str {
 
 /// The large working copy with every file's diff shown.
 pub(super) fn expanded(cx: &mut TestAppContext) -> Harness {
-  let (mut h, _) = workspace_harness(cx, large_host(), changes_route());
+  expanded_with(cx, large_host())
+}
+
+fn expanded_with(cx: &mut TestAppContext, host: FakeHost) -> Harness {
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
   if h.drawn("view-large-changeset") {
     h.click("view-large-changeset");
   }
@@ -201,12 +205,71 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
   assert!(!h.drawn(gutter(0, 0)));
 }
 
+/// `large_host` under review: a kept review of `COMMENTS` line comments and
+/// `THREADS` GitHub review threads on every file.
+fn reviewed_host() -> FakeHost {
+  const COMMENTS: usize = 20;
+  const THREADS: usize = 5;
+  let mut host = large_host();
+  // New-side numbers run to `pairs() * 11 / 10`; spread the lines over them.
+  let step = (pairs() * 11 / 10 / COMMENTS).max(1);
+  let comments: Vec<_> = (0..FILES)
+    .flat_map(|f| {
+      (0..COMMENTS).map(move |c| {
+        let line = 1 + c * step;
+        serde_json::json!({
+          "id": format!("c{f}-{c}"), "file_path": format!("src/module_{f}.rs"),
+          "hunk_id": "h", "start_line": line, "end_line": line,
+          "line_content": [], "text": "Kept", "created_at": "", "side": "new"
+        })
+      })
+    })
+    .collect();
+  *host.review.lock().unwrap() = Some(serde_json::Value::Array(comments).to_string());
+  host.threads = (0..FILES)
+    .flat_map(|f| {
+      (0..THREADS).map(move |t| {
+        let mut thread = gh_thread(&format!("t{f}-{t}"), (3 + t * step * 4) as i64, false);
+        thread.path = format!("src/module_{f}.rs");
+        thread
+      })
+    })
+    .collect();
+  host
+}
+
+/// Opens find and applies `query`.
+fn search(h: &mut Harness, query: &str) {
+  h.cx.simulate_keystrokes("cmd-f");
+  h.cx.simulate_input(query);
+  h.cx.executor().advance_clock(Duration::from_millis(150));
+  h.cx.run_until_parked();
+}
+
 #[gpui::test]
 #[ignore = "benchmark; run with --ignored --nocapture"]
 fn changes_perf(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
-  assert!(h.drawn(gutter(0, 0)));
+  measure(&mut h);
+}
+
+/// `changes_perf` with line comments, review threads and an applied find.
+#[gpui::test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn changes_review_perf(cx: &mut TestAppContext) {
+  let mut h = expanded_with(cx, reviewed_host());
+  assert!(h.drawn("inline-comment-card") || h.drawn("github-comment-card"));
+  println!("-- with comments and threads");
+  measure(&mut h);
+  search(&mut h, "value_1");
+  println!("-- and a find applied");
   let mut full: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
+  report("full frame", &mut full);
+}
+
+fn measure(h: &mut Harness) {
+  assert!(h.drawn(gutter(0, 0)));
+  let mut full: Vec<_> = (0..10).map(|_| frame(h)).collect();
   report("full frame", &mut full);
 
   let origin = h
@@ -220,9 +283,7 @@ fn changes_perf(cx: &mut TestAppContext) {
         origin.x + gpui::px(300.),
         origin.y + gpui::px(i as f32 * 7.),
       );
-      timed(&mut h, |h| {
-        h.cx.simulate_mouse_move(at, None, Modifiers::none())
-      })
+      timed(h, |h| h.cx.simulate_mouse_move(at, None, Modifiers::none()))
     })
     .collect();
   report("hover a line", &mut hover);
@@ -230,7 +291,7 @@ fn changes_perf(cx: &mut TestAppContext) {
   let mut click: Vec<_> = (0..5)
     .map(|i| {
       let at = gpui::point(origin.x, origin.y + gpui::px(i as f32 * 20.));
-      timed(&mut h, |h| {
+      timed(h, |h| {
         h.cx
           .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
         h.cx
@@ -241,13 +302,13 @@ fn changes_perf(cx: &mut TestAppContext) {
   report("click a line", &mut click);
 
   let mut keys: Vec<_> = (0..20)
-    .map(|_| timed(&mut h, |h| h.cx.simulate_keystrokes("down")))
+    .map(|_| timed(h, |h| h.cx.simulate_keystrokes("down")))
     .collect();
   report("arrow down", &mut keys);
 
   let mut scroll: Vec<_> = (0..20)
     .map(|_| {
-      timed(&mut h, |h| {
+      timed(h, |h| {
         h.cx.simulate_event(gpui::ScrollWheelEvent {
           position: origin,
           delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-200.))),

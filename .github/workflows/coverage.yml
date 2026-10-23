@@ -1,0 +1,150 @@
+name: Coverage
+
+# Line and region coverage of the Rust tests (cargo-llvm-cov over the same
+# nextest run test-rust does). Runs after merge, not on PRs: the
+# instrumented build is a second full build and would double test-rust's
+# time. The lcov and HTML reports are uploaded as an artifact, and the
+# per-file table goes to the run summary. Run it locally with
+# scripts/coverage.sh.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/coverage.yml"
+  # Only PRs that change this workflow run it, to check the change.
+  pull_request:
+    paths:
+      - ".github/workflows/coverage.yml"
+  workflow_dispatch:
+
+# A newer merge supersedes the previous report.
+concurrency:
+  group: coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rust:
+    name: coverage / rust / ubuntu-22.04
+    runs-on: ubuntu-22.04
+    # A cold instrumented build plus the suite; warm runs take far less.
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          components: llvm-tools-preview
+          toolchain: stable
+
+      - name: Install cargo-nextest and cargo-llvm-cov
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+
+      - name: Use mold linker
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+
+      # Same packages and cache version as ci.yml test-rust.
+      - name: install dependencies (ubuntu only)
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
+          version: webkit-4.1-gpui-1
+          execute_install_scripts: true
+
+      - name: Resolve jj release tag
+        id: jj
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/jj-vcs/jj/releases/latest | jq -r .tag_name)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # Shares the key ci.yml test-rust saves.
+      - name: Restore jj CLI cache
+        id: jj-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .ci-bin
+          key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
+
+      - name: Install jj CLI
+        if: steps.jj-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          JJ_TAG: ${{ steps.jj.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-bin
+          tmp=$(mktemp -d)
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/jj-${JJ_TAG}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$tmp"
+          jj_bin=$(find "$tmp" -type f -name jj | head -n 1)
+          test -n "$jj_bin"
+          install -m 755 "$jj_bin" .ci-bin/jj
+
+      - name: Add jj to PATH
+        run: echo "$GITHUB_WORKSPACE/.ci-bin" >> "$GITHUB_PATH"
+
+      # Instrumented artifacts never match test-rust's, so this job keeps
+      # its own cache.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: coverage
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: |
+            . -> target
+
+      # retries=1 (profile ci) as in test-rust. A failing test still fails
+      # the job, but the report steps below run anyway.
+      - name: Run Rust tests with coverage
+        working-directory: src-tauri
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo llvm-cov nextest --locked --profile ci --no-report
+
+      - name: Write reports
+        if: ${{ !cancelled() }}
+        working-directory: src-tauri
+        run: |
+          mkdir -p ../coverage
+          cargo llvm-cov report --lcov --output-path ../coverage/lcov.info
+          cargo llvm-cov report --html --output-dir ../coverage
+          cargo llvm-cov report --summary-only > ../coverage/summary.txt
+          {
+            echo "## Rust coverage"
+            echo
+            echo '```'
+            tail -n 1 ../coverage/summary.txt
+            echo '```'
+            echo
+            echo "<details><summary>Per-file</summary>"
+            echo
+            echo '```'
+            cat ../coverage/summary.txt
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage
+          path: coverage
+          retention-days: 30
