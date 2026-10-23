@@ -22,6 +22,8 @@ treq = { path = "../src-tauri", features = ["embed"] }
 tauri = { version = "2.12", features = ["unstable"] }
 tauri-plugin-gpui = { git = "https://github.com/ziinc/tauri-gpui", branch = "main", features = ["mobile"] }
 gpui-kit = "0.7.1"
+# treq's design system, shared with the desktop app.
+treq-ui = { path = "../crates/treq-ui" }
 tauri-plugin-deep-link = "2.4.7"
 tauri-plugin-opener = "2.5.2"
 anyhow = "1"

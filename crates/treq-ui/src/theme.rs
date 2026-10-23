@@ -227,13 +227,45 @@ fn init_kit_theme(cx: &mut App) {
   set_kit_metrics(cx);
 }
 
+/// How big gpui-kit's widgets draw text: 13 on the desktop, 15 on a phone,
+/// which is read at arm's length and tapped rather than clicked.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Density {
+  #[default]
+  Desktop,
+  Touch,
+}
+
+impl gpui::Global for Density {}
+
+impl Density {
+  /// gpui-kit's body and mono text sizes.
+  pub fn font_sizes(self) -> (f32, f32) {
+    match self {
+      Density::Desktop => (13., 13.),
+      Density::Touch => (15., 12.),
+    }
+  }
+}
+
+/// Sizes gpui-kit's widgets for `density`.
+pub fn set_density(density: Density, cx: &mut App) {
+  cx.set_global(density);
+  set_kit_metrics(cx);
+}
+
 /// The fonts and radii treq gives gpui-kit's widgets over its theme file.
 fn set_kit_metrics(cx: &mut App) {
+  let (body, mono) = cx
+    .try_global::<Density>()
+    .copied()
+    .unwrap_or_default()
+    .font_sizes();
   let theme = kit::Theme::global_mut(cx);
   theme.font_family = SANS_FONT.into();
-  theme.font_size = gpui::px(13.);
+  theme.font_size = gpui::px(body);
   theme.mono_font_family = MONO_FONT.into();
-  theme.mono_font_size = gpui::px(13.);
+  theme.mono_font_size = gpui::px(mono);
   theme.radius = gpui::px(RADIUS_MD);
   theme.radius_lg = gpui::px(RADIUS_LG);
 }

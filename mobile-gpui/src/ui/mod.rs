@@ -15,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, IconName, Sizable, Theme,
+    h_flex, v_flex, ActiveTheme, IconName, Sizable,
   },
   *,
 };
@@ -155,8 +155,9 @@ impl Root {
     });
     cx.set_global(Model(model.clone()));
     cx.observe(&model, |_, _, cx| cx.notify()).detach();
+    theme::sync_appearance(window, cx);
     cx.observe_window_appearance(window, |_, window, cx| {
-      Theme::sync_system_appearance(Some(window), cx);
+      theme::sync_appearance(window, cx);
     })
     .detach();
 
@@ -362,13 +363,10 @@ fn cutoff_overlay(reason: String, managed: bool, cx: &App) -> impl IntoElement {
 
 pub fn sign_in(cx: &mut App) {
   use tauri_plugin_opener::OpenerExt;
-  let result = backend::get()
-    .app
-    .opener()
-    .open_url(
-      treq_lib::core::auth::sign_in_url(&crate::config::env().web_url),
-      None::<&str>,
-    );
+  let result = backend::get().app.opener().open_url(
+    treq_lib::core::auth::sign_in_url(&crate::config::env().web_url),
+    None::<&str>,
+  );
   if let Err(error) = result {
     model(cx).update(cx, |m, cx| {
       m.auth_error = Some(error.to_string());
