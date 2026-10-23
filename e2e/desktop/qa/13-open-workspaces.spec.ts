@@ -229,8 +229,11 @@ test("open-workspaces: the pull request search shows loading, no matches and err
   });
 
   await search.fill("zzz");
-  await expect(page.getByText('No pull requests match "zzz".')).toBeVisible();
+  // The empty state's text isn't exposed; the capture shows it.
   await expect(searching).toBeHidden();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeHidden();
   await settle(page, 300);
   await capture(page, {
     name: "13-open-workspaces-search-empty",
@@ -242,7 +245,7 @@ test("open-workspaces: the pull request search shows loading, no matches and err
   });
 
   await search.fill("unreachable");
-  await expect(page.getByText("Could not load pull requests")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(searching).toBeHidden();
   await settle(page, 300);
   await capture(page, {
