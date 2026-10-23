@@ -1245,7 +1245,7 @@ fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut Tes
     no_repo: true,
     ..FakeHost::default()
   });
-  let window = Window::open(cx, host.clone(), None);
+  let window = Window::open(cx, host, None);
   window.press(cx, "machines.addSsh");
   window.field(
     cx,
@@ -1307,7 +1307,7 @@ fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_machine_shows_its_repository_form_or_the_setup(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
-  let window = Window::open(cx, host.clone(), None);
+  let window = Window::open(cx, host, None);
   assert!(window.press(cx, &format!("machines.connect:{}", endpoint().id)));
   let View::Onboarding(route) = window.screen_snapshot().view else {
     panic!("not onboarding");

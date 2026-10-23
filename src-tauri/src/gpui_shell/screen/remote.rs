@@ -847,7 +847,7 @@ impl RemoteView {
     let account = account_data::account(cx);
     let press = Self::cloud_press(cx);
     let card = if account.user.is_some() {
-      let cloud = account.cloud.clone().unwrap_or_default();
+      let cloud = account.cloud.unwrap_or_default();
       let card = cloud_card(&cloud, confirming);
       cloud_card_element(&card, p, &self.tips, &press, cx).into_any_element()
     } else {
