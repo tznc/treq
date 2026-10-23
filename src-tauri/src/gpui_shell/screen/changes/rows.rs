@@ -11,6 +11,7 @@ use std::{
   collections::{HashMap, HashSet},
   ops::Range,
   rc::Rc,
+  sync::Arc,
 };
 
 use tauri_plugin_gpui::gpui::{
@@ -84,19 +85,17 @@ impl Row {
 
 /// Line numbers and character marks of one file's hunks.
 struct Prepared {
-  /// The headers and lines these were derived from.
-  source: Vec<(String, Vec<String>)>,
+  /// The hunks these were derived from; a reload swaps the `Arc`.
+  source: Option<Arc<Vec<JjDiffHunk>>>,
   numbers: Vec<Vec<(Option<u32>, Option<u32>)>>,
   changed: Vec<HashMap<usize, Vec<Range<usize>>>>,
 }
 
 impl Prepared {
-  fn new(hunks: &[JjDiffHunk]) -> Self {
+  fn new(source: Option<&Arc<Vec<JjDiffHunk>>>) -> Self {
+    let hunks = source.map_or(&[][..], |h| h.as_slice());
     Self {
-      source: hunks
-        .iter()
-        .map(|h| (h.header.clone(), h.lines.clone()))
-        .collect(),
+      source: source.cloned(),
       numbers: hunks.iter().map(line_numbers).collect(),
       changed: hunks
         .iter()
@@ -105,13 +104,12 @@ impl Prepared {
     }
   }
 
-  fn matches(&self, hunks: &[JjDiffHunk]) -> bool {
-    self.source.len() == hunks.len()
-      && self
-        .source
-        .iter()
-        .zip(hunks)
-        .all(|((header, lines), h)| *header == h.header && *lines == h.lines)
+  fn matches(&self, source: Option<&Arc<Vec<JjDiffHunk>>>) -> bool {
+    match (&self.source, source) {
+      (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+      (None, None) => true,
+      _ => false,
+    }
   }
 }
 
@@ -215,9 +213,10 @@ impl ChangesView {
       if kind == Body::Hunks {
         let hunks = data.map(|d| d.hunks.as_slice()).unwrap_or_default();
         let key = (card.path.clone(), committed);
+        let source = data.map(|d| &d.hunks);
         let prep = match prepared.remove(&key) {
-          Some(p) if p.matches(hunks) => p,
-          _ => Rc::new(Prepared::new(hunks)),
+          Some(p) if p.matches(source) => p,
+          _ => Rc::new(Prepared::new(source)),
         };
         card.regions = conflicts(&card.path, hunks);
         self.hunk_rows(c, &card, hunks, &prep, &mut rows);
