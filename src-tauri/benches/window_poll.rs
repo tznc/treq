@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, reason = "test code")]
 //! What a repo window reads every 10 s (`Read::POLL`): the workspace list
 //! and the sidebar statuses, with 5 and 25 workspaces. Each workspace has
 //! an uncommitted file, as an agent at work leaves it.
