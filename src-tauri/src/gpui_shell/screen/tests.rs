@@ -441,6 +441,11 @@ impl workspace_data::WorkspaceHost for FakeHost {
     workspace_data::Outcome::failed("Sync failed", "offline".into())
   }
 
+  fn reset_to_remote(&self, _: &str, workspace_id: i64) -> workspace_data::Outcome {
+    self.record(format!("reset {workspace_id}"));
+    workspace_data::Outcome::ok("Reset to remote", "Dropped 2 local commits".into())
+  }
+
   fn rebase_home(&self, _: &str, branch: &str) -> workspace_data::Outcome {
     self.record(format!("rebase {branch}"));
     workspace_data::Outcome::ok("Rebase complete", "Branch rebased onto target".into())

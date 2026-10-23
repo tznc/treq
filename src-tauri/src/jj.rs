@@ -5337,6 +5337,92 @@ pub fn jj_edit_bookmark(repo_path: &str, bookmark_name: &str) -> Result<String, 
   Ok(format!("Switched to {}", bookmark_name))
 }
 
+/// Points `branch_name` at `<branch>@origin` and gives the workspace a clean
+/// working copy on top of it, like `git reset --hard origin/<branch>`. The
+/// commits only this branch had, uncommitted changes included, are
+/// abandoned; ones another bookmark or working copy builds on are kept.
+/// Returns how many commits were abandoned, not counting the working copy.
+pub fn jj_reset_bookmark_to_remote(
+  workspace_path: &str,
+  branch_name: &str,
+) -> Result<usize, JjError> {
+  if !Path::new(workspace_path).exists() {
+    return Ok(0);
+  }
+  validate_branch_name(branch_name, "workspace")?;
+  let mut loaded = load_workspace_repo_for_history_edit(workspace_path)?;
+  snapshot_loaded_working_copy(&mut loaded, workspace_path)?;
+  let upstream = RemoteRefSymbol {
+    name: RefName::new(branch_name),
+    remote: RemoteName::new("origin"),
+  };
+  if !loaded
+    .repo
+    .view()
+    .get_remote_bookmark(upstream)
+    .is_present()
+  {
+    return Err(JjError::IoError(format!(
+      "origin/{branch_name} does not exist"
+    )));
+  }
+  let remote = format_revset_symbol(&format!("{branch_name}@origin"));
+  // The fetch leaves the bookmark conflicted when it diverged, so name its
+  // targets by id.
+  let local = loaded
+    .repo
+    .view()
+    .get_local_bookmark(RefName::new(branch_name))
+    .added_ids()
+    .map(|id| id.hex())
+    .chain(["@".to_string()])
+    .collect::<Vec<_>>()
+    .join(" | ");
+  let remote_commit = resolve_commit_by_revision(&loaded, &remote)?;
+  let old_wc = get_workspace_wc_commit(&loaded)?;
+  let kept = format!("::((bookmarks() | remote_bookmarks() | working_copies()) ~ ({local}))");
+  let dropped = evaluate_revset(&loaded, &format!("({remote}..({local})) ~ {kept}"))?
+    .iter()
+    .commits(loaded.repo.store())
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| JjError::IoError(format!("Failed to list local commits: {}", e)))?;
+
+  let workspace_name = loaded.workspace.workspace_name().to_owned();
+  let mut tx = loaded.repo.start_transaction();
+  let new_wc = block_on(
+    tx.repo_mut()
+      .new_commit(vec![remote_commit.id().clone()], remote_commit.tree())
+      .write(),
+  )
+  .map_err(|e| JjError::IoError(format!("Failed to create working copy commit: {}", e)))?;
+  tx.repo_mut()
+    .set_wc_commit(workspace_name, new_wc.id().clone())
+    .map_err(|e| JjError::IoError(format!("Failed to move working copy: {}", e)))?;
+  for commit in &dropped {
+    tx.repo_mut().record_abandoned_commit(commit);
+  }
+  set_local_bookmark_target(tx.repo_mut(), branch_name, remote_commit.id().clone());
+  block_on(tx.repo_mut().rebase_descendants())
+    .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
+  let _ = git::export_refs(tx.repo_mut());
+  let new_repo = block_on(tx.commit(format!("reset {branch_name} to origin")))
+    .map_err(|e| JjError::IoError(format!("Failed to commit reset: {}", e)))?;
+  update_workspace_after_history_edit(
+    &mut loaded,
+    &new_repo,
+    old_wc.as_ref(),
+    CheckoutMode::Immediate,
+  )?;
+
+  let old_wc_id = old_wc.map(|commit| commit.id().clone());
+  Ok(
+    dropped
+      .iter()
+      .filter(|c| Some(c.id()) != old_wc_id.as_ref())
+      .count(),
+  )
+}
+
 /// Derive repo_path from workspace_path
 /// Workspace paths are: {repo_path}/.treq/workspaces/{workspace_name}
 pub fn derive_repo_path_from_workspace(workspace_path: &str) -> Option<String> {
