@@ -94,8 +94,8 @@ impl Default for RepoForm {
 pub struct Remote {
   /// `RemoteSetupDialog` is open.
   pub setup: bool,
-  /// It opened on the cloud workspace's screen rather than the choice.
-  pub setup_managed: bool,
+  /// The screen it opened on (`managed`, `ownVm`) rather than the choice.
+  pub setup_screen: Option<&'static str>,
   /// The "Your own VM" endpoint the form confirmed is being registered.
   pub registering: bool,
   /// `RemoteTerminalDialog` is open.
@@ -152,7 +152,7 @@ pub enum RemoteEffect {
   },
   /// The last-opened remote repository, at launch with no local one.
   RestoreLast,
-  /// The Open a Repository screen's machine: connect to it and show its
+  /// The Overview screen's machine: connect to it and show its
   /// repository form, or the setup dialog if it cannot be reached.
   Connect { endpoint_id: String },
   /// A recent repository on a machine, by its saved id.
@@ -332,7 +332,7 @@ impl Remote {
     }
   }
 
-  /// A machine the Open a Repository screen picked is connected: the
+  /// A machine the Overview screen picked is connected: the
   /// form shows for it.
   pub fn connect(&mut self, endpoint: SshEndpoint, generation: u64) -> Vec<RemoteEffect> {
     self.form = RepoForm::default();

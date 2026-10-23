@@ -76,8 +76,9 @@ impl Route {
 pub struct SetupRoute {
   /// Whether the "Your own VM" path is offered (the `remoteSsh` preview).
   pub allow_user_managed: bool,
-  /// Open on the cloud workspace's screen (the machines page's cloud row).
-  pub managed: bool,
+  /// The screen to open on instead of the choice: `managed` (the machines
+  /// page's cloud row) or `ownVm` (its SSH Hosts +).
+  pub screen: Option<String>,
   /// The window is registering the endpoint the form confirmed.
   pub registering: bool,
 }
@@ -379,7 +380,12 @@ impl RemoteView {
   }
 
   fn first_mode(setup: &SetupRoute) -> Mode {
-    if setup.allow_user_managed && !setup.managed {
+    match setup.screen.as_deref() {
+      Some("managed") => return Mode::Managed,
+      Some("ownVm") if setup.allow_user_managed => return Mode::UserManaged,
+      _ => {}
+    }
+    if setup.allow_user_managed {
       Mode::Choice
     } else {
       Mode::Managed
@@ -740,6 +746,14 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> Option<AnyElement> {
     let route = self.route.setup.clone()?;
+    // Opened straight on "Your own VM": its form, as choosing it makes.
+    if self
+      .setup
+      .as_ref()
+      .is_some_and(|s| s.mode == Mode::UserManaged && s.form.is_none())
+    {
+      self.set_mode(Mode::UserManaged, window, cx);
+    }
     let setup = self.setup.as_ref()?;
     let (mode, confirming) = (setup.mode, setup.confirming_delete);
     let content = match mode {

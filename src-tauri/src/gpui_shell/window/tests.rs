@@ -992,7 +992,7 @@ fn opens_a_picked_folder_in_this_window(cx: &mut TestAppContext) {
 #[gpui::test]
 fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  assert!(window.press(cx, "machines.addSsh"));
   assert!(window.screen_snapshot().remote.setup.is_some());
   assert!(window.press(cx, "remote.setup.close"));
   assert!(window.screen_snapshot().remote.setup.is_none());
@@ -1006,7 +1006,7 @@ fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
 #[gpui::test]
 fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  assert!(window.press(cx, "machines.addSsh"));
   window
     .controller
     .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
@@ -1017,7 +1017,7 @@ fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
 /// A window that registered `endpoint()` and opened `/srv/app` on it.
 fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
   let window = Window::open(cx, host, None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
@@ -1039,7 +1039,7 @@ fn registers_an_endpoint_and_opens_a_repository_on_it(cx: &mut TestAppContext) {
     vec![workspace(1, "a", Some("main"))],
   ));
   let window = Window::open(cx, host.clone(), None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
@@ -1142,13 +1142,21 @@ fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut Tes
 #[gpui::test]
 fn the_cloud_row_opens_setup_on_the_cloud_workspace(cx: &mut TestAppContext) {
   let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  let screen = |window: &Window| {
+    let setup = window.screen_snapshot().remote.setup.expect("setup open");
+    setup.screen
+  };
   assert!(window.press(cx, "machines.cloud"));
-  let setup = window.screen_snapshot().remote.setup.expect("setup open");
-  assert!(setup.managed);
+  assert_eq!(screen(&window).as_deref(), Some("managed"));
   window.press(cx, "remote.setup.close");
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
-  let setup = window.screen_snapshot().remote.setup.expect("setup open");
-  assert!(!setup.managed, "Open via SSH starts at the choice");
+  assert!(window.press(cx, "machines.addSsh"));
+  assert_eq!(screen(&window).as_deref(), Some("ownVm"));
+  window.press(cx, "remote.setup.close");
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::OpenSsh, cx));
+  cx.run_until_parked();
+  assert_eq!(screen(&window), None, "Open via SSH starts at the choice");
 }
 
 #[gpui::test]

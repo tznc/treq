@@ -1,4 +1,4 @@
-//! What the Open a Repository screen lists: the machines Treq opens
+//! What the Overview screen lists: the machines Treq opens
 //! repositories on (this computer, saved SSH hosts, the Treq Cloud
 //! workspace and dev containers), the tools installed on each, and the
 //! repositories opened recently on each.
@@ -28,7 +28,7 @@ pub enum Place {
   },
   /// The account's Treq Cloud workspace (a managed Sprite); its endpoint
   /// is known while it runs. `status` is the instance's, or
-  /// [`CLOUD_SIGNED_OUT`] / [`CLOUD_NOT_CREATED`] before there is one.
+  /// [`CLOUD_NOT_CREATED`] before there is one.
   Cloud {
     endpoint_id: Option<String>,
     status: String,
@@ -84,6 +84,12 @@ pub struct Recent {
 pub struct Listing {
   pub machines: Vec<Machine>,
   pub recents: Vec<Recent>,
+  /// Not signed in to Treq: no cloud row, a sign-in button instead.
+  pub signed_out: bool,
+  /// The SSH Hosts section shows, with its + (the Remote SSH preview).
+  pub ssh: bool,
+  /// The Dev Containers section shows, with its + (the preview).
+  pub containers: bool,
 }
 
 /// What the screen asks of the backend; faked in tests. Blocking calls run
@@ -97,6 +103,10 @@ pub trait MachinesHost: ToolsHost {
   fn open_local(&self, path: &str);
   /// Asks, then forgets the saved SSH host; whether it did.
   fn remove_machine(&self, place: &Place) -> bool;
+  /// Blocks: asks for a folder; `None` when cancelled.
+  fn pick_folder(&self) -> Option<String>;
+  /// Blocks: builds and starts Treq's dev container for the repository.
+  fn start_dev_container(&self, repo_path: &str) -> Result<(), String>;
 }
 
 fn last_segment(path: &str) -> &str {
@@ -107,13 +117,17 @@ fn last_segment(path: &str) -> &str {
     .unwrap_or(path)
 }
 
-/// The cloud row's status before signing in.
-pub const CLOUD_SIGNED_OUT: &str = "signed_out";
 /// The cloud row's status while signed in with no workspace yet.
 pub const CLOUD_NOT_CREATED: &str = "not_created";
 
-/// The Treq Cloud row: always there, so signing in and creating the
-/// workspace start from it. Its endpoint is known while the workspace runs.
+/// Whether the account can sign in here and has not.
+fn signed_out(backend: &Backend) -> bool {
+  crate::commands::cloud::owned_cloud(backend.app())
+    .is_some_and(|cloud| cloud.snapshot().auth.session.is_none())
+}
+
+/// The Treq Cloud row while signed in, so creating the workspace starts
+/// from it. Its endpoint is known while the workspace runs.
 fn cloud_machine(backend: &Backend) -> Option<Machine> {
   let cloud = crate::commands::cloud::owned_cloud(backend.app())?;
   let snapshot = cloud.snapshot();
@@ -126,9 +140,7 @@ fn cloud_machine(backend: &Backend) -> Option<Machine> {
     name: "Cloud workspace".into(),
     detail: detail.into(),
   };
-  if snapshot.auth.session.is_none() {
-    return Some(before(CLOUD_SIGNED_OUT, "Sign in to create one"));
-  }
+  snapshot.auth.session.as_ref()?;
   let Some(status) = snapshot.cloud.instance_status else {
     return Some(before(CLOUD_NOT_CREATED, "Not created yet"));
   };
@@ -204,6 +216,9 @@ impl MachinesHost for Backend {
       _ => None,
     });
     listing.machines.extend(cloud);
+    listing.signed_out = signed_out(self);
+    listing.ssh = remote_ssh;
+    listing.containers = containers;
     // Most recently opened first, then the rest in saved order.
     let rank = |id: &str| {
       recent_ids
@@ -271,9 +286,6 @@ impl MachinesHost for Backend {
         endpoint_id: Some(endpoint_id),
         status,
       } if status == "ready" => endpoint_id,
-      Place::Cloud { status, .. } if status == CLOUD_SIGNED_OUT => {
-        return Err("Sign in to Treq to use a cloud workspace.".into())
-      }
       Place::Cloud { status, .. } if status == CLOUD_NOT_CREATED => {
         return Err("Create the cloud workspace to check what is installed on it.".into())
       }
@@ -304,6 +316,28 @@ impl MachinesHost for Backend {
   fn open_local(&self, path: &str) {
     let (backend, path) = (self.clone(), path.to_string());
     tauri::async_runtime::spawn_blocking(move || super::onboarding::open_repo_at(&backend, &path));
+  }
+
+  fn pick_folder(&self) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    self
+      .app()
+      .dialog()
+      .file()
+      .set_title("Select Repository")
+      .blocking_pick_folder()
+      .and_then(|folder| folder.into_path().ok())
+      .map(|path| path.to_string_lossy().into_owned())
+  }
+
+  fn start_dev_container(&self, repo_path: &str) -> Result<(), String> {
+    let claude_code = self.with_db(|db| {
+      db.get_repo_setting(repo_path, devcontainer::CLAUDE_CODE_SETTING)
+        .ok()
+        .flatten()
+        .is_none_or(|value| value != "false")
+    });
+    devcontainer::up(repo_path, claude_code).map(|_| ())
   }
 
   fn remove_machine(&self, place: &Place) -> bool {

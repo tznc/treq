@@ -1,5 +1,5 @@
 //! Dashboard's explicit-endpoint repository form, under its machine's group
-//! on the Open a Repository screen while an SSH endpoint is connected but no
+//! on the Overview screen while an SSH endpoint is connected but no
 //! repository is open: the cut-off notice with Reauthenticate, or
 //! a directory browser that starts at the host's home, with clone and init
 //! for a folder that holds no repository. The group lists the endpoint's

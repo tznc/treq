@@ -39,7 +39,7 @@ impl Model {
   /// opens.
   pub fn open_remote_setup(&mut self) {
     self.remote.setup = true;
-    self.remote.setup_managed = false;
+    self.remote.setup_screen = None;
   }
 
   /// `invalidateRemoteRepositoryData` and `refreshRemoteRepository`.
@@ -94,12 +94,18 @@ impl Model {
       "remote.cloud.delete" => cloud(CloudAction::Delete),
       "remote.cloud.openRepositories" => cloud(CloudAction::OpenRepositories),
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
-      // The Open a Repository screen's machines and recent repositories.
+      // The Overview screen's machines and recent repositories.
       // The cloud row before its workspace runs: the setup dialog, on the
       // cloud workspace's screen.
       "machines.cloud" => {
         self.remote.setup = true;
-        self.remote.setup_managed = true;
+        self.remote.setup_screen = Some("managed");
+        Vec::new()
+      }
+      // The SSH Hosts section's +: the "Your own VM" form.
+      "machines.addSsh" => {
+        self.remote.setup = true;
+        self.remote.setup_screen = Some("ownVm");
         Vec::new()
       }
       id if id.starts_with("machines.connect:") => {

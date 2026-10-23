@@ -1,4 +1,4 @@
-//! `Onboarding`: the window with no repository open, "Open a Repository".
+//! `Onboarding`: the window with no repository open, "Overview".
 //!
 //! Two panels: the machines Treq opens repositories on (this computer,
 //! saved SSH hosts, the Treq Cloud workspace and dev containers), each with
@@ -29,11 +29,7 @@ use super::{
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
-  core::{
-    self,
-    feature_preview::{self, PreviewFeature},
-    PrerequisiteStatus,
-  },
+  core::{self, PrerequisiteStatus},
   gpui_shell::{
     native::{Backend, NativeEvent, ToastTone},
     theme::{self, Palette},
@@ -58,16 +54,11 @@ pub struct Route {
 
 /// What the onboarding screen asks of the backend; faked in tests.
 pub trait OnboardingHost: MachinesHost {
-  fn remote_ssh_enabled(&self) -> bool;
   /// Asks for a folder, then opens it in this window.
   fn pick_repo(&self);
 }
 
 impl OnboardingHost for Backend {
-  fn remote_ssh_enabled(&self) -> bool {
-    self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::RemoteSsh))
-  }
-
   fn pick_repo(&self) {
     pick_repo(self.clone());
   }
@@ -87,8 +78,9 @@ pub struct OnboardingView {
   react: ActionSink,
   /// This view's own handler, which the drawn buttons call.
   sink: ActionSink,
-  pub(super) remote_label: String,
   listing: Listing,
+  /// A dev container is starting, or why the last one did not.
+  container: Option<Result<String, String>>,
   /// By machine id.
   tools: HashMap<String, Tools>,
   /// The machine whose tools popover is open.
@@ -125,13 +117,8 @@ impl OnboardingView {
     let mut this = Self {
       react,
       sink,
-      remote_label: if host.remote_ssh_enabled() {
-        "Open via SSH"
-      } else {
-        "Open cloud workspace"
-      }
-      .to_string(),
       listing: Listing::default(),
+      container: None,
       tools: HashMap::new(),
       popover: None,
       popover_closed: None,
@@ -233,6 +220,7 @@ impl OnboardingView {
     let (name, arg) = press.split_once(':').unwrap_or((press.as_str(), ""));
     match name {
       "machines.tools" => self.toggle_popover(arg, cx),
+      "machines.addContainer" => self.add_container(cx),
       "machines.open" => {
         let Some(machine) = self.machine(arg).cloned() else {
           return;
@@ -240,6 +228,10 @@ impl OnboardingView {
         self.popover = None;
         self.open_on(&machine, cx);
       }
+      "machines.signIn" => self.host.open_url(&format!(
+        "{}/sign-in?source=desktop",
+        crate::gpui_shell::native::web_url()
+      )),
       "machines.openLocal" => self.host.open_local(arg),
       "machines.remove" => {
         let Some(machine) = self.machine(arg).cloned() else {
@@ -254,6 +246,36 @@ impl OnboardingView {
       }
       _ => (self.react)(ScreenAction::Press { id: press.clone() }, cx),
     }
+  }
+
+  /// The Dev Containers section's +: a repository's container, started.
+  fn add_container(&mut self, cx: &mut Context<Self>) {
+    if matches!(self.container, Some(Ok(_))) {
+      return;
+    }
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let picker = host.clone();
+      let Some(path) = cx
+        .background_spawn(async move { picker.pick_folder() })
+        .await
+      else {
+        return;
+      };
+      let _ = this.update(cx, |view, cx| {
+        view.container = Some(Ok(path.clone()));
+        cx.notify();
+      });
+      let result = cx
+        .background_spawn(async move { host.start_dev_container(&path) })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        view.container = result.err().map(Err);
+        view.load(cx);
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   /// A machine's row: open a repository on it.
@@ -500,6 +522,47 @@ impl OnboardingView {
         None => sections.push((section, vec![row])),
       }
     }
+    // Sections with a + show even with nothing in them yet.
+    let ssh = Place::Ssh {
+      endpoint_id: String::new(),
+    }
+    .section();
+    if self.listing.ssh && !sections.iter().any(|(s, _)| *s == ssh) {
+      sections.insert(sections.len().min(1), (ssh, Vec::new()));
+    }
+    let containers = Place::DevContainer {
+      container_id: String::new(),
+      repo_path: String::new(),
+      running: false,
+    }
+    .section();
+    if self.listing.containers && !sections.iter().any(|(s, _)| *s == containers) {
+      sections.push((containers, Vec::new()));
+    }
+    let add = |section: &str| match section {
+      s if s == ssh => Some(("machines-add-ssh", "Add SSH host", "machines.addSsh")),
+      s if s == containers => Some((
+        "machines-add-container",
+        "Add dev container",
+        "machines.addContainer",
+      )),
+      _ => None,
+    };
+    let mut container_status = self.container.clone().map(|status| {
+      let (text, color) = match status {
+        Ok(path) => (
+          format!("Starting {}…", path.rsplit('/').next().unwrap_or(&path)),
+          p.muted_foreground,
+        ),
+        Err(error) => (error, p.destructive),
+      };
+      ui::text(div(), TextSize::Xs)
+        .debug_selector(|| "machines-container-status".into())
+        .px_2()
+        .py_1()
+        .text_color(color)
+        .child(text)
+    });
     div()
       .debug_selector(|| "onboarding-machines".into())
       .flex_none()
@@ -527,33 +590,75 @@ impl OnboardingView {
           .overflow_y_scroll()
           .px_2()
           .children(sections.into_iter().map(|(section, rows)| {
+            let empty = rows.is_empty();
             div()
               .pb_3()
               .child(
-                ui::text(div(), TextSize::Xs)
+                div()
+                  .flex()
+                  .items_center()
+                  .justify_between()
                   .px_2()
                   .pb_1()
-                  .text_color(p.muted_foreground)
-                  .child(section),
+                  .child(
+                    ui::text(div(), TextSize::Xs)
+                      .text_color(p.muted_foreground)
+                      .child(section),
+                  )
+                  .children(add(section).map(|(id, label, action)| {
+                    div()
+                      .id(id)
+                      .debug_selector(move || id.into())
+                      .role(gpui::Role::Button)
+                      .aria_label(label)
+                      .p_0p5()
+                      .rounded(zpx(4.))
+                      .cursor_pointer()
+                      .hover(|s| s.bg(p.accent))
+                      .on_click(ctx.send(ScreenAction::Press { id: action.into() }))
+                      .child(ui::icon(theme::ICON_PLUS, 14., p.muted_foreground))
+                      .test_support()
+                  })),
               )
               .children(rows)
+              .when(section == containers, |d| {
+                d.children(container_status.take())
+              })
+              .when(
+                empty && !(section == containers && self.container.is_some()),
+                |d| {
+                  d.child(
+                    ui::text(div(), TextSize::Xs)
+                      .px_2()
+                      .text_color(p.muted_foreground)
+                      .child(if section == ssh {
+                        "No hosts yet."
+                      } else {
+                        "No containers yet."
+                      }),
+                  )
+                },
+              )
           })),
       )
-      .child(
-        div().p_3().border_t_1().border_color(p.border).child(
-          Button::new("onboarding-open-remote", &p)
-            .variant(Variant::Outline)
-            .w_full()
-            .child(
-              div()
-                .flex()
-                .mr_2()
-                .child(ui::icon(theme::ICON_PLUS, 16., p.foreground)),
-            )
-            .label(self.remote_label.clone())
-            .on_click(ctx.send(ScreenAction::OpenRemote)),
-        ),
-      )
+      // Signed out there is no cloud row: signing in adds it.
+      .when(self.listing.signed_out, |d| {
+        d.child(
+          div().p_3().border_t_1().border_color(p.border).child(
+            Button::new("onboarding-sign-in", &p)
+              .w_full()
+              .child(div().flex().mr_2().child(ui::icon(
+                theme::ICON_CLOUD,
+                16.,
+                p.primary_foreground,
+              )))
+              .label("Sign in to Treq Cloud")
+              .on_click(ctx.send(ScreenAction::Press {
+                id: "machines.signIn".into(),
+              })),
+          ),
+        )
+      })
   }
 
   fn recent_row(&self, i: usize, recent: &Recent, ctx: &Ctx) -> AnyElement {
@@ -711,7 +816,7 @@ impl OnboardingView {
               .child(
                 ui::text(div(), TextSize::Lg)
                   .font_weight(FontWeight::SEMIBOLD)
-                  .child("Open a Repository"),
+                  .child("Overview"),
               )
               .child(
                 ui::text(div(), TextSize::Sm)

@@ -335,6 +335,20 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
     });
 }
 
+/// Go > Overview: always a new window on the start screen, the machines
+/// and recent repositories.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn open_overview_window(app: &AppHandle) {
+  let label = open_new_window::new_repo_window_label();
+  let handle = app.clone();
+  let _ = app.run_on_main_thread(move || {
+    if let Err(err) = open_repo_window(&handle, &label, None, "Treq - Overview") {
+      log::error!("failed to open overview window: {err}");
+    }
+  });
+}
+
 /// Opens a window on repository `repo` (`None`: the start screen) in the
 /// GPUI shell (see `gpui_shell`).
 #[cfg(feature = "gui")]
@@ -715,6 +729,8 @@ pub fn run() {
             .build()?;
 
           // Go menu items
+          let overview_item = MenuItemBuilder::with_id("overview", "Overview").build(app)?;
+
           let dashboard_item = MenuItemBuilder::with_id("dashboard", "Dashboard")
             .accelerator("CmdOrCtrl+D")
             .build(app)?;
@@ -724,6 +740,8 @@ pub fn run() {
             .build(app)?;
 
           let go_menu = SubmenuBuilder::new(app, "Go")
+            .item(&overview_item)
+            .separator()
             .item(&dashboard_item)
             .item(&settings_item)
             .build()?;
@@ -820,6 +838,8 @@ pub fn run() {
             .build()?;
 
           // Go menu items
+          let overview_item = MenuItemBuilder::with_id("overview", "Overview").build(app)?;
+
           let dashboard_item = MenuItemBuilder::with_id("dashboard", "Dashboard")
             .accelerator("CmdOrCtrl+D")
             .build(app)?;
@@ -829,6 +849,8 @@ pub fn run() {
             .build(app)?;
 
           let go_menu = SubmenuBuilder::new(app, "Go")
+            .item(&overview_item)
+            .separator()
             .item(&dashboard_item)
             .item(&settings_item)
             .build()?;
@@ -878,6 +900,7 @@ pub fn run() {
 
         // Handle menu events: only the focused window's
         app.on_menu_event(move |app, event| match event.id().as_ref() {
+          "overview" => open_overview_window(app),
           "dashboard" => menu_to_focused(app, "navigate-to-dashboard"),
           "settings" => menu_to_focused(app, "navigate-to-settings"),
           "open" => schedule_open_repo(app.clone()),
