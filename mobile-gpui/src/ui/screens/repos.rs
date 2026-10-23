@@ -18,7 +18,8 @@ use crate::{
 };
 
 pub fn open(cx: &mut App) {
-  nav::push("Repositories", Location::default(), cx, |window, cx| {
+  let title = crate::ui::machine_name(cx).unwrap_or_else(|| "Repositories".into());
+  nav::push(title, Location::default(), cx, |window, cx| {
     cx.new(|cx| ReposScreen::new(window, cx))
   });
 }
@@ -66,6 +67,12 @@ impl ReposScreen {
         this.probing = false;
         match result {
           Ok(probe) if probe.exists && probe.is_repo => {
+            // The host expands `~`, so the saved path works for every command.
+            let path = if probe.path.is_empty() {
+              path
+            } else {
+              probe.path
+            };
             if let Ok(endpoint) = backend::get().endpoint() {
               store::upsert_saved_repository(
                 &endpoint.id,
@@ -75,8 +82,8 @@ impl ReposScreen {
             }
             workspaces::open(path, cx);
           }
-          Ok(_) => this.error = Some(format!("No repository found at {path} on this host.")),
-          Err(error) => this.error = Some(error),
+          Ok(_) => this.error = Some(format!("No repository found at {path} on this machine.")),
+          Err(error) => this.error = Some(crate::errors::describe(&error).message),
         }
       },
     );
@@ -105,7 +112,7 @@ impl Render for ReposScreen {
       .track_scroll(&self.scroll)
       .child(
         widgets::page()
-          .child(widgets::section("Repositories on this host", cx).child(saved_list))
+          .child(widgets::section("Repositories", cx).child(saved_list))
           .child(
             widgets::section("Open by path", cx).child(
               widgets::card(cx)

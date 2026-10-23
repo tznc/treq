@@ -72,10 +72,8 @@ pub async fn connect(progress: impl Fn(&'static str) + Send + Sync) -> Result<Co
 
   if instance.status == "suspended" {
     progress("Waking the managed instance");
-    let key = control_plane::wake_idempotency_key(
-      &instance.instance_id,
-      &uuid::Uuid::new_v4().to_string(),
-    );
+    let key =
+      control_plane::wake_idempotency_key(&instance.instance_id, &uuid::Uuid::new_v4().to_string());
     control_plane::wake(supabase, &instance.instance_id, &key)
       .await
       .map_err(|e| e.to_string())?;
@@ -107,7 +105,13 @@ async fn issue(instance_id: &str) -> Result<(Lease, SshEndpoint), String> {
   )
   .await
   .map_err(|e| e.to_string())?;
-  shared::issue(supabase, instance_id, &key.id, DEVICE_KEYSTORE_KEY_REFERENCE).await
+  shared::issue(
+    supabase,
+    instance_id,
+    &key.id,
+    DEVICE_KEYSTORE_KEY_REFERENCE,
+  )
+  .await
 }
 
 async fn activate(lease: Lease, endpoint: SshEndpoint) {
@@ -122,10 +126,10 @@ async fn activate(lease: Lease, endpoint: SshEndpoint) {
     });
     TASKS.lock().unwrap().relay_sync = Some(sync);
   }
-  backend::get().set_connection(Some(Connection {
+  backend::get().put_connection(Connection {
     endpoint,
     kind: ConnectionKind::Managed,
-  }));
+  });
   let renewal = tokio::spawn(shared::renewal_loop(
     backend::get().supabase.clone(),
     lease.clone(),
@@ -178,7 +182,7 @@ pub async fn reauthenticate() -> Result<(), String> {
     .map(|l| l.instance_id.clone())
     .or_else(|| {
       backend::get()
-        .connection()
+        .connection_to(backend::MANAGED_MACHINE)
         .and_then(|c| c.endpoint.instance_id)
     })
     .ok_or("This host is not a managed instance.")?;

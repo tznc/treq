@@ -59,7 +59,9 @@ pub enum RemoteAgentId {
 }
 
 impl RemoteAgentId {
-  fn binary_name(self) -> &'static str {
+  pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::CursorAgent];
+
+  pub fn binary_name(self) -> &'static str {
     match self {
       Self::Claude => "claude",
       Self::Codex => "codex",

@@ -48,10 +48,32 @@ pub enum ConnectionKind {
   UserManaged { id: String },
 }
 
+/// The machine id of the Treq Cloud machine. An SSH host's is its record id.
+pub const MANAGED_MACHINE: &str = "managed";
+
 #[derive(Debug, Clone)]
 pub struct Connection {
   pub endpoint: SshEndpoint,
   pub kind: ConnectionKind,
+}
+
+impl Connection {
+  /// Which machine this connects to: [`MANAGED_MACHINE`] or the SSH host's id.
+  pub fn machine(&self) -> &str {
+    match &self.kind {
+      ConnectionKind::Managed => MANAGED_MACHINE,
+      ConnectionKind::UserManaged { id } => id,
+    }
+  }
+}
+
+/// Every machine connected this session, and which one the screens act on.
+/// The pool keeps each endpoint's SSH connection, so switching machines
+/// leaves the others connected.
+#[derive(Default)]
+struct Connections {
+  all: Vec<Connection>,
+  active: Option<String>,
 }
 
 pub struct Backend {
@@ -62,7 +84,7 @@ pub struct Backend {
   pub ptys: RemotePtyManager,
   pub supabase: Arc<Supabase>,
   pub auth: Arc<Auth>,
-  connection: Mutex<Option<Connection>>,
+  connections: Mutex<Connections>,
   events: mpsc::UnboundedSender<AppEvent>,
 }
 
@@ -96,7 +118,10 @@ pub fn init(
     .build()?;
   let pool = Arc::new(new_pool(&app));
   let (events, receiver) = mpsc::unbounded();
-  let supabase = Arc::new(Supabase::new(&config::env().supabase, Arc::new(SettingsStore)));
+  let supabase = Arc::new(Supabase::new(
+    &config::env().supabase,
+    Arc::new(SettingsStore),
+  ));
   // Sign-in changes reach the UI as `Auth(email)`.
   supabase.auth.subscribe(|status| {
     let email = status
@@ -115,7 +140,7 @@ pub fn init(
     pool,
     auth: supabase.auth.clone(),
     supabase,
-    connection: Mutex::new(None),
+    connections: Mutex::new(Connections::default()),
     events,
   });
   BACKEND
@@ -188,8 +213,25 @@ impl Backend {
     }
   }
 
+  /// The machine the screens act on.
   pub fn connection(&self) -> Option<Connection> {
-    self.connection.lock().unwrap().clone()
+    let connections = self.connections.lock().unwrap();
+    let active = connections.active.as_deref()?;
+    connections
+      .all
+      .iter()
+      .find(|c| c.machine() == active)
+      .cloned()
+  }
+
+  /// The connection to `machine`, active or not.
+  pub fn connection_to(&self, machine: &str) -> Option<Connection> {
+    let connections = self.connections.lock().unwrap();
+    connections
+      .all
+      .iter()
+      .find(|c| c.machine() == machine)
+      .cloned()
   }
 
   pub fn endpoint(&self) -> Result<SshEndpoint, String> {
@@ -199,16 +241,40 @@ impl Backend {
       .ok_or_else(|| "Not connected to a host.".to_string())
   }
 
-  pub fn set_connection(&self, connection: Option<Connection>) {
-    *self.connection.lock().unwrap() = connection;
+  /// Adds or replaces the connection to its machine, without changing
+  /// which machine is active.
+  pub fn put_connection(&self, connection: Connection) {
+    let mut connections = self.connections.lock().unwrap();
+    connections
+      .all
+      .retain(|c| c.machine() != connection.machine());
+    connections.all.push(connection);
+  }
+
+  /// Makes `machine` the one the screens act on (`None`: no machine).
+  pub fn set_active(&self, machine: Option<&str>) {
+    self.connections.lock().unwrap().active = machine.map(str::to_string);
+  }
+
+  /// Forgets the connection to `machine`, returning it.
+  pub fn remove_connection(&self, machine: &str) -> Option<Connection> {
+    let mut connections = self.connections.lock().unwrap();
+    if connections.active.as_deref() == Some(machine) {
+      connections.active = None;
+    }
+    let index = connections
+      .all
+      .iter()
+      .position(|c| c.machine() == machine)?;
+    Some(connections.all.remove(index))
   }
 
   /// Swaps in a renewed certificate, keeping the endpoint id (the pool
   /// keeps its open connections).
   pub fn update_endpoint(&self, endpoint: SshEndpoint) {
-    if let Some(connection) = self.connection.lock().unwrap().as_mut() {
+    for connection in &mut self.connections.lock().unwrap().all {
       if connection.endpoint.id == endpoint.id {
-        connection.endpoint = endpoint;
+        connection.endpoint = endpoint.clone();
       }
     }
   }

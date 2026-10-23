@@ -75,6 +75,18 @@ pub fn row_with(
   trailing: Option<AnyElement>,
   cx: &App,
 ) -> Stateful<Div> {
+  row_full(id, None, title, detail, trailing, cx)
+}
+
+/// [`row_with`] with a status (a dot or spinner) before the title.
+pub fn row_full(
+  id: impl Into<ElementId>,
+  leading: Option<AnyElement>,
+  title: impl Into<SharedString>,
+  detail: Option<SharedString>,
+  trailing: Option<AnyElement>,
+  cx: &App,
+) -> Stateful<Div> {
   let theme = cx.theme();
   h_flex()
     .id(id)
@@ -86,6 +98,7 @@ pub fn row_with(
     .border_b_1()
     .border_color(theme.border)
     .active(|s| s.bg(theme.accent))
+    .children(leading)
     .child(
       v_flex()
         .flex_1()

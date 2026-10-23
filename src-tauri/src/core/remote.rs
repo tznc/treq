@@ -188,6 +188,13 @@ pub enum TreqCommandRequest {
   MachineUsage {
     root: String,
   },
+  /// What the host can run: the treq version, a terminal multiplexer for
+  /// persistent sessions, and which agent CLIs are installed. `root` is the
+  /// folder repositories are opened from (`~` for the home folder). See
+  /// [`RemoteHostCheck`].
+  HostCheck {
+    root: String,
+  },
   // -- Phase 5: probe/clone/init as typed commands ---------------------------
   ProbeRepo {
     repo: String,
@@ -511,7 +518,8 @@ impl TreqCommandRequest {
       | Self::PtyList { .. }
       | Self::PtyAttachCommand { .. }
       | Self::WorkspaceChangeMarker { .. }
-      | Self::MachineUsage { .. } => false,
+      | Self::MachineUsage { .. }
+      | Self::HostCheck { .. } => false,
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
       | Self::InitRepo { .. }
@@ -590,6 +598,7 @@ impl TreqCommandRequest {
       | Self::SearchFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
+      | Self::HostCheck { .. }
       | Self::ProbeRepo { .. }
       | Self::UpdateWorkspace { .. }
       | Self::DeleteWorkspace { .. }
@@ -633,6 +642,7 @@ impl TreqCommandRequest {
       Self::SearchFiles { .. } => "SearchFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
       Self::MachineUsage { .. } => "MachineUsage",
+      Self::HostCheck { .. } => "HostCheck",
       Self::ProbeRepo { .. } => "ProbeRepo",
       Self::CloneRepo { .. } => "CloneRepo",
       Self::InitRepo { .. } => "InitRepo",
@@ -691,6 +701,7 @@ impl TreqCommandRequest {
     "ListConflicts",
     "WorkspaceChangeMarker",
     "MachineUsage",
+    "HostCheck",
     "ProbeRepo",
     "CloneRepo",
     "InitRepo",
@@ -1372,6 +1383,7 @@ impl TreqCommandRequest {
       Self::ListBranches { repo } => ("repo", "branches", repo),
       Self::ProbeRepo { repo } => ("repo", "probe", repo),
       Self::MachineUsage { root } => ("repo", "usage", root),
+      Self::HostCheck { root } => ("repo", "host-check", root),
       Self::InitRepo {
         repo,
         idempotency_key,
@@ -2080,6 +2092,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       json(crate::core::workspaces::list_workspaces(&repo))
     }
     TreqCommandRequest::MachineUsage { root } => json(machine_usage(&root)),
+    TreqCommandRequest::HostCheck { root } => json(Ok::<_, String>(host_check(&root))),
     TreqCommandRequest::InspectWorkspace { repo, workspace } => json(
       crate::core::workspaces::workspace_status(&repo, workspace_id(Some(&workspace))?),
     ),
@@ -2844,12 +2857,15 @@ fn probe_repo_path(repo_path: &str) -> Result<RemoteRepoProbe, String> {
   if trimmed.is_empty() {
     return Err("Remote path is required".to_string());
   }
-  let path = Path::new(trimmed);
+  // The returned `path` is the expanded one, so callers open the repository
+  // by a path every later command reads the same way.
+  let expanded = expand_home(trimmed, std::env::var("HOME").ok().as_deref());
+  let path = Path::new(&expanded);
   let exists = path.exists();
   let is_repo = exists && (path.join(".jj").is_dir() || path.join(".git").exists());
   Ok(RemoteRepoProbe {
     host: String::new(),
-    path: trimmed.to_string(),
+    path: expanded.clone(),
     exists,
     is_repo,
     needs_clone: !is_repo,
@@ -2880,6 +2896,55 @@ fn directory_usage_bytes(root: &Path) -> u64 {
     }
   }
   total
+}
+
+/// Expands a leading `~` or `~/` to `home`. Commands run without a shell, so
+/// nothing else would; `~user` and paths without a home are left as typed.
+pub(crate) fn expand_home(path: &str, home: Option<&str>) -> String {
+  let Some(home) = home.filter(|h| !h.is_empty()) else {
+    return path.to_string();
+  };
+  let home = home.trim_end_matches('/');
+  match path.strip_prefix('~') {
+    Some("") => home.to_string(),
+    Some(rest) if rest.starts_with('/') => format!("{home}{rest}"),
+    _ => path.to_string(),
+  }
+}
+
+/// What a host can run, returned by [`TreqCommandRequest::HostCheck`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteHostCheck {
+  /// This treq CLI's version.
+  pub treq_version: String,
+  /// `root` with `~` expanded, and whether it exists.
+  pub root: String,
+  pub root_exists: bool,
+  /// `tmux` or `screen`, which persistent terminals and agents need.
+  pub terminal: Option<String>,
+  /// The allow-listed agent CLIs installed on the host.
+  pub agents: Vec<crate::core::remote_pty::RemoteAgentId>,
+}
+
+fn host_check(root: &str) -> RemoteHostCheck {
+  use crate::core::{pty_remote_supervisor::PtyBackend, remote_pty::RemoteAgentId};
+  let root = expand_home(root.trim(), std::env::var("HOME").ok().as_deref());
+  RemoteHostCheck {
+    treq_version: env!("CARGO_PKG_VERSION").to_string(),
+    root_exists: Path::new(&root).is_dir(),
+    root,
+    terminal: crate::core::pty_remote_supervisor::detect_backend().map(|b| {
+      match b {
+        PtyBackend::Tmux => "tmux",
+        PtyBackend::Screen => "screen",
+      }
+      .to_string()
+    }),
+    agents: RemoteAgentId::ALL
+      .into_iter()
+      .filter(|agent| crate::binary_paths::detect_binary(agent.binary_name()).is_some())
+      .collect(),
+  }
 }
 
 /// Machine-wide usage returned by [`TreqCommandRequest::MachineUsage`].
@@ -3670,6 +3735,36 @@ mod tests {
     .cli_args()
     .unwrap_err();
     assert_eq!(error, "Remote file path is required");
+  }
+
+  #[test]
+  fn expands_a_leading_tilde_to_the_home_folder() {
+    let home = Some("/home/dev/");
+    assert_eq!(expand_home("~", home), "/home/dev");
+    assert_eq!(expand_home("~/src/app", home), "/home/dev/src/app");
+    assert_eq!(expand_home("/srv/app", home), "/srv/app");
+    assert_eq!(expand_home("~other/app", home), "~other/app");
+    assert_eq!(expand_home("~/src/app", None), "~/src/app");
+  }
+
+  #[test]
+  fn probe_reports_the_expanded_path() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let probe = probe_repo_path("~").unwrap();
+    assert_eq!(probe.path, home.trim_end_matches('/'));
+  }
+
+  #[test]
+  fn builds_host_check_arguments() {
+    assert_eq!(
+      TreqCommandRequest::HostCheck { root: "~".into() }
+        .cli_args()
+        .unwrap(),
+      vec!["repo", "host-check", "--repo", "~", "--format", "json"]
+    );
+    let check = host_check("/");
+    assert!(check.root_exists);
+    assert_eq!(check.treq_version, env!("CARGO_PKG_VERSION"));
   }
 
   #[test]
@@ -4619,7 +4714,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 56);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 57);
   }
 
   #[test]
