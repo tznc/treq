@@ -1240,6 +1240,7 @@ pub fn cache_git_user_config(
   repo_path: &str,
 ) -> Result<(String, String), JjError> {
   let (name, email) = read_git_user_config_from_git(repo_path);
+  forget_user_settings(repo_path);
   db.set_repo_setting(repo_path, "git_user_name", &name)
     .map_err(|e| JjError::ConfigError(format!("Failed to cache user.name: {}", e)))?;
   db.set_repo_setting(repo_path, "git_user_email", &email)
@@ -1270,9 +1271,40 @@ fn get_git_user_config(repo_path: &str) -> (String, String) {
   read_git_user_config_from_git(repo_path)
 }
 
+/// `UserSettings` built per repo path. Every jj operation needs them, and
+/// building them opens the local db and parses a config layer. The git
+/// identity behind them only changes through `cache_git_user_config`, which
+/// forgets the entry.
+fn user_settings_cache() -> &'static std::sync::Mutex<HashMap<String, UserSettings>> {
+  static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, UserSettings>>> =
+    std::sync::OnceLock::new();
+  CACHE.get_or_init(Default::default)
+}
+
+fn forget_user_settings(repo_path: &str) {
+  if let Ok(mut cache) = user_settings_cache().lock() {
+    cache.remove(repo_path);
+  }
+}
+
+fn create_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
+  if let Some(settings) = user_settings_cache()
+    .lock()
+    .ok()
+    .and_then(|cache| cache.get(repo_path).cloned())
+  {
+    return Ok(settings);
+  }
+  let settings = build_user_settings(repo_path)?;
+  if let Ok(mut cache) = user_settings_cache().lock() {
+    cache.insert(repo_path.to_string(), settings.clone());
+  }
+  Ok(settings)
+}
+
 /// Create UserSettings with reasonable defaults for Treq
 /// Uses git config values if available, otherwise uses defaults
-fn create_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
+fn build_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
   // Get user info from git config
   let (user_name, user_email) = get_git_user_config(repo_path);
 
