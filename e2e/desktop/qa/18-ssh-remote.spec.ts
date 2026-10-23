@@ -102,11 +102,11 @@ test("ssh remote: connect and open a Git repository", async () => {
   const open = page.getByRole("button", { name: "Add SSH host" });
   await expect(open).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Sign in to Treq Cloud" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Cloud workspace", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("listitem", { name: "Cloud workspace", exact: true })).toHaveCount(0);
   await shot("machines", "Overview: machines and recent repositories", [
     "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, then SSH HOSTS ('No hosts yet.') and DEV CONTAINERS, each with a + beside its heading",
     "Signed out there is no TREQ CLOUD group; 'Sign in to Treq Cloud' sits at the bottom",
-    "Right panel is headed 'Overview' with the Open Repository button; no recents yet says where they appear",
+    "Right panel is headed 'Overview' with the Open repository… button; no recents yet says where they appear",
   ]);
   await page.getByRole("button", { name: /on This computer$/ }).click();
   await shot("local-tools", "This computer's tools popover", [
@@ -133,7 +133,7 @@ test("ssh remote: connect and open a Git repository", async () => {
   ]);
   await page.getByRole("button", { name: "Trust and connect" }).click();
   const repoName = env.repo.split("/").pop()!;
-  const repoFolder = page.getByRole("button", { name: repoName, exact: true });
+  const repoFolder = page.getByRole("listitem", { name: repoName, exact: true });
   await expect(repoFolder).toBeVisible({ timeout: 30_000 });
   await shot("connected", "Connected: browsing the host from its home", [
     "'QA container' is listed under SSH HOSTS with user@host:port",
@@ -141,15 +141,15 @@ test("ssh remote: connect and open a Git repository", async () => {
     "No dot folders while Show hidden is off; the plain home folder offers Use this folder",
   ]);
   await page.getByRole("checkbox", { name: "Show hidden folders" }).click();
-  await expect(page.getByRole("button", { name: ".ssh", exact: true })).toBeVisible({ timeout: 30_000 });
-  await shot("hidden", "Show hidden folders", ["Dot folders such as .ssh now show, dimmed"]);
+  await expect(page.getByRole("listitem", { name: ".ssh", exact: true })).toBeVisible({ timeout: 30_000 });
+  await shot("hidden", "Show hidden folders", ["Dot folders such as .ssh now show"]);
   await page.getByRole("checkbox", { name: "Show hidden folders" }).click();
   await page.getByRole("button", { name: /on QA container$/ }).click();
-  await expect(page.getByRole("button", { name: "Remove Host" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Remove host…" })).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(3000);
   await shot("host-tools", "The SSH host's tools popover", [
     "Asked over SSH (`treq repo tools`): Git, Jujutsu and tmux are installed",
-    "Claude Code is not installed yet; Remove Host at the bottom",
+    "Claude Code is not installed yet; Remove host… at the bottom",
   ]);
   await page.keyboard.press("Escape");
   await repoFolder.click();
