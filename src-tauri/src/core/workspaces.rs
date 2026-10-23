@@ -1370,7 +1370,8 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
   // Conflicted bookmarks break tip/PR revsets (`Revision '…' doesn't exist` /
   // ambiguous). Resolve them automatically with linear, lossless history before
   // the sidebar reads identity or conflict state.
-  for workspace in &discovered {
+  let mut resolved_any = false;
+  for workspace in discovered.iter().filter(|w| w.bookmark_conflicted) {
     let workspace_dir = Path::new(repo_path)
       .join(".treq")
       .join("workspaces")
@@ -1378,9 +1379,7 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
     let Some(workspace_dir_str) = workspace_dir.to_str() else {
       continue;
     };
-    if !jj::jj_is_bookmark_conflicted(workspace_dir_str, &workspace.branch_name) {
-      continue;
-    }
+    resolved_any = true;
     let remote_ref = format!("{}@origin", workspace.branch_name);
     match jj::jj_resolve_bookmark_conflict_losslessly(
       workspace_dir_str,
@@ -1406,12 +1405,18 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
     }
   }
 
-  let discovered = jj::discover_workspaces_with_conflicts(repo_path).map_err(|e| {
-    format!(
-      "Failed to rediscover workspaces after bookmark resolve: {}",
-      e
-    )
-  })?;
+  // Discovery loads the repository once for every workspace; only a
+  // resolution above changes what it saw.
+  let discovered = if resolved_any {
+    jj::discover_workspaces_with_conflicts(repo_path).map_err(|e| {
+      format!(
+        "Failed to rediscover workspaces after bookmark resolve: {}",
+        e
+      )
+    })?
+  } else {
+    discovered
+  };
   let refreshed_at = chrono::Utc::now().to_rfc3339();
   let conflict_by_path: HashMap<String, bool> = discovered
     .iter()
@@ -1445,21 +1450,9 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
         .get(&current.workspace_path)
         .cloned()
         .flatten();
-      let workspace_dir = Path::new(repo_path)
-        .join(".treq")
-        .join("workspaces")
-        .join(&current.workspace_path);
-      let workspace_dir_str = workspace_dir
-        .to_str()
-        .ok_or("Failed to convert workspace path to string")?;
-      let unresolved_has_conflicts = jj::workspace_has_unresolved_conflicts(workspace_dir_str)
-        .map_err(|e| {
-          format!(
-            "Failed to inspect conflict state for sidebar workspace {}: {}",
-            current.workspace_path, e
-          )
-        })?;
-      let has_conflicts = discovered_has_conflicts || unresolved_has_conflicts;
+      // Discovery's flag already covers the working-copy tree's conflicts
+      // (`workspace_has_unresolved_conflicts`), from the same load.
+      let has_conflicts = discovered_has_conflicts;
       Ok(WorkspaceSidebarStatus {
         current,
         has_conflicts,
@@ -4023,9 +4016,10 @@ fn workspace_diff_with_conflict_style(
   if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
     return Ok(empty);
   }
-  let base_revision =
-    resolve_workspace_diff_base_revision(repo_path, &workspace, workspace_dir_str)?;
-  let tip_revision = resolve_workspace_diff_tip_revision(repo_path, &workspace, workspace_dir_str)?;
+  let repo = jj::WorkspaceRepo::load(workspace_dir_str)
+    .map_err(|e| format!("Failed to load workspace repo: {}", e))?;
+  let base_revision = resolve_workspace_diff_base_revision(repo_path, &workspace, &repo)?;
+  let tip_revision = resolve_workspace_diff_tip_revision(&workspace, &repo)?;
   // Diff from the fork point, not the base tip: when the target moves ahead
   // (e.g. a remote merge is fetched) before the workspace is rebased, a
   // two-dot diff shows the target's new commits as reverted Committed files.
@@ -4035,13 +4029,9 @@ fn workspace_diff_with_conflict_style(
     jj::fork_point_revset(&base_revision, &tip_revision)
   };
 
-  let mut diff = jj::jj_get_merge_diff_between_revisions(
-    workspace_dir_str,
-    &base_revision,
-    &tip_revision,
-    conflict_marker_style,
-  )
-  .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
+  let mut diff = repo
+    .merge_diff_between_revisions(&base_revision, &tip_revision, conflict_marker_style)
+    .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
 
   let uncommitted_files = jj::jj_get_changed_files(workspace_dir_str)
     .map_err(|e| format!("Failed to get uncommitted workspace changes: {}", e))?;
@@ -4069,7 +4059,7 @@ fn workspace_diff_with_conflict_style(
 fn resolve_workspace_diff_base_revision(
   repo_path: &str,
   workspace: &local_db::Workspace,
-  workspace_dir_str: &str,
+  repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
   let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
   let last_rebased_target_commit =
@@ -4081,16 +4071,18 @@ fn resolve_workspace_diff_base_revision(
   if base_revision != target_branch {
     let workspace_revision = resolve_workspace_diff_workspace_revision(
       &workspace.branch_name,
-      jj::jj_is_bookmark_conflicted(workspace_dir_str, &workspace.branch_name),
+      repo.is_bookmark_conflicted(&workspace.branch_name),
     );
-    let current_tip = jj::jj_get_commit_id(workspace_dir_str, &workspace_revision)
+    let current_tip = repo
+      .commit_id(&workspace_revision)
       .map_err(|e| format!("Failed to resolve workspace tip: {}", e))?;
     if current_tip != base_revision {
       return Ok(base_revision);
     }
   }
   if workspace.branch_name == target_branch {
-    let committed_ahead = jj::jj_get_commits_ahead(workspace_dir_str, target_branch)
+    let committed_ahead = repo
+      .commits_ahead(target_branch)
       .map_err(|e| format!("Failed to get workspace commits ahead: {}", e))?;
     if committed_ahead.total_count == 0 {
       return Ok("@".to_string());
@@ -4101,12 +4093,12 @@ fn resolve_workspace_diff_base_revision(
 }
 
 fn resolve_workspace_diff_tip_revision(
-  _repo_path: &str,
   workspace: &local_db::Workspace,
-  workspace_dir_str: &str,
+  repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
   let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
-  let committed_ahead = jj::jj_get_commits_ahead(workspace_dir_str, &workspace.branch_name)
+  let committed_ahead = repo
+    .commits_ahead(&workspace.branch_name)
     .map_err(|e| format!("Failed to get workspace commits ahead: {}", e))?;
   let tip_revision = resolve_workspace_diff_tip_revision_from_workspace_state(
     &workspace.branch_name,
@@ -4116,7 +4108,7 @@ fn resolve_workspace_diff_tip_revision(
   if tip_revision == workspace.branch_name {
     Ok(resolve_workspace_diff_workspace_revision(
       &workspace.branch_name,
-      jj::jj_is_bookmark_conflicted(workspace_dir_str, &workspace.branch_name),
+      repo.is_bookmark_conflicted(&workspace.branch_name),
     ))
   } else {
     Ok(tip_revision)

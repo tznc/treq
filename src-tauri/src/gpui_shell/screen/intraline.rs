@@ -25,6 +25,7 @@ type Marks = Vec<Range<usize>>;
 /// by the line's index in the hunk.
 pub fn changed_ranges(lines: &[String]) -> HashMap<usize, Marks> {
   let mut out = HashMap::new();
+  let mut table = Vec::new();
   let mut i = 0;
   while i < lines.len() {
     let removed_start = i;
@@ -42,7 +43,7 @@ pub fn changed_ranges(lines: &[String]) -> HashMap<usize, Marks> {
     }
     for k in 0..removed.min(added) {
       let (r, a) = (removed_start + k, added_start + k);
-      if let Some((old, new)) = pair(text(&lines[r]), text(&lines[a])) {
+      if let Some((old, new)) = pair(text(&lines[r]), text(&lines[a]), &mut table) {
         if !old.is_empty() {
           out.insert(r, old);
         }
@@ -61,7 +62,7 @@ fn text(line: &str) -> &str {
 
 /// The changed ranges of a removed and an added line, `None` when they
 /// share too little to be worth marking.
-fn pair(old: &str, new: &str) -> Option<(Marks, Marks)> {
+fn pair(old: &str, new: &str, table: &mut Vec<u16>) -> Option<(Marks, Marks)> {
   if old == new {
     return None;
   }
@@ -78,7 +79,7 @@ fn pair(old: &str, new: &str) -> Option<(Marks, Marks)> {
   let (mut old_marks, mut new_marks) = if am.len() > MAX_MIDDLE || bm.len() > MAX_MIDDLE {
     (vec![0..am.len()], vec![0..bm.len()])
   } else {
-    lcs_marks(am, bm)
+    lcs_marks(am, bm, table)
   };
   join_close(&mut old_marks);
   join_close(&mut new_marks);
@@ -94,19 +95,23 @@ fn pair(old: &str, new: &str) -> Option<(Marks, Marks)> {
 }
 
 /// Char-index runs of each side that the longest common subsequence
-/// leaves out.
-fn lcs_marks(a: &[(usize, char)], b: &[(usize, char)]) -> (Marks, Marks) {
+/// leaves out. `table` is scratch space, reused across pairs.
+fn lcs_marks(a: &[(usize, char)], b: &[(usize, char)], table: &mut Vec<u16>) -> (Marks, Marks) {
   let (n, m) = (a.len(), b.len());
-  let mut lcs = vec![vec![0u16; m + 1]; n + 1];
+  let w = m + 1;
+  table.clear();
+  table.resize((n + 1) * w, 0);
   for i in (0..n).rev() {
+    let (head, below) = table[i * w..].split_at_mut(w);
     for j in (0..m).rev() {
-      lcs[i][j] = if a[i].1 == b[j].1 {
-        lcs[i + 1][j + 1] + 1
+      head[j] = if a[i].1 == b[j].1 {
+        below[j + 1] + 1
       } else {
-        lcs[i + 1][j].max(lcs[i][j + 1])
+        below[j].max(head[j + 1])
       };
     }
   }
+  let lcs = |i: usize, j: usize| table[i * w + j];
   let (mut old, mut new) = (Vec::new(), Vec::new());
   let push = |marks: &mut Marks, at: usize| match marks.last_mut() {
     Some(r) if r.end == at => r.end += 1,
@@ -117,7 +122,7 @@ fn lcs_marks(a: &[(usize, char)], b: &[(usize, char)]) -> (Marks, Marks) {
     if i < n && j < m && a[i].1 == b[j].1 {
       i += 1;
       j += 1;
-    } else if j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j]) {
+    } else if j < m && (i == n || lcs(i, j + 1) >= lcs(i + 1, j)) {
       push(&mut new, j);
       j += 1;
     } else {
