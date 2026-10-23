@@ -124,6 +124,13 @@ fn repo_windows(app: &AppHandle) -> HashMap<String, tauri::Window> {
     .collect()
 }
 
+/// Whether closing window `closed` leaves no repo window open, given the
+/// repo windows still listed (which may include `closed` itself).
+#[cfg(feature = "gui")]
+fn is_last_repo_window<'a>(closed: &str, open: impl IntoIterator<Item = &'a String>) -> bool {
+  !closed.starts_with("gpui-popup-") && open.into_iter().all(|label| label == closed)
+}
+
 /// Picks which window a menu event targets: the currently focused window,
 /// falling back to the most recently focused one that still exists.
 #[cfg(feature = "gui")]
@@ -496,24 +503,25 @@ pub fn run() {
         }
       }
       // Fires once, after the window is actually gone (not on a
-      // cancellable close request), for every window this app opens —
-      // "main" and any later "Open in New Window" targets alike — so
-      // this is the one place that reliably closes a window's own
-      // terminals without touching another window's, regardless of
-      // which UI path (dashboard unmount, native "Close Window", the
-      // OS window-close button) tore it down.
+      // cancellable close request), whichever UI path closed it. A
+      // window's terminals outlive it while another repo window is open,
+      // so another window can show them; the last repo window closes
+      // every terminal.
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
         #[cfg(feature = "gpui-shell")]
         #[cfg(desktop)]
         gpui_shell::forget_window(&label);
         let app_handle = window.app_handle().clone();
-        if let Some(state) = app_handle.try_state::<AppState>() {
-          state.pty_manager.close_all_for_window(&label);
-        }
-        if let Some(state) = app_handle.try_state::<commands::remote_pty_commands::RemotePtyState>()
-        {
-          tauri::async_runtime::block_on(state.0.close_all_for_window(&label));
+        if is_last_repo_window(&label, repo_windows(&app_handle).keys()) {
+          if let Some(state) = app_handle.try_state::<AppState>() {
+            state.pty_manager.close_all();
+          }
+          if let Some(state) =
+            app_handle.try_state::<commands::remote_pty_commands::RemotePtyState>()
+          {
+            tauri::async_runtime::block_on(state.0.close_all());
+          }
         }
       }
     })
@@ -953,6 +961,7 @@ mod tests {
     build_agent_deep_link_url, extract_repo_from_agent_deep_link, parse_agent_request_from_url,
   };
   use super::is_cli_process;
+  use super::is_last_repo_window;
   use super::menu_item_url;
   use super::{edit_menu_keystroke, EDIT_MENU};
 
@@ -965,6 +974,16 @@ mod tests {
       let typed = keystroke.replace('-', "+").to_lowercase();
       assert_eq!(accelerator.to_lowercase(), typed, "{id}");
     }
+  }
+
+  #[test]
+  fn terminals_close_only_with_the_last_repo_window() {
+    let labels = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(!is_last_repo_window("main", &labels(&["treq-1"])));
+    assert!(!is_last_repo_window("main", &labels(&["main", "treq-1"])));
+    assert!(is_last_repo_window("main", &labels(&[])));
+    assert!(is_last_repo_window("main", &labels(&["main"])));
+    assert!(!is_last_repo_window("gpui-popup-modal-main", &labels(&[])));
   }
 
   #[test]
