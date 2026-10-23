@@ -74,6 +74,7 @@ struct Harness {
 
 impl Harness {
   fn new(cx: &mut TestAppContext, snapshot: SidebarSnapshot) -> Self {
+    cx.update(crate::gpui_shell::theme::init);
     let sent = Rc::new(RefCell::new(Vec::new()));
     let sink: ActionSink = {
       let sent = sent.clone();

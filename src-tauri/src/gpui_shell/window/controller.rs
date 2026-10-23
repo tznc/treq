@@ -13,7 +13,7 @@ use super::{
   actions::{Menu, Shortcut},
   data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
   host::{read_repo, FileWatch, WindowHost},
-  model::{self, Effect, FolderPurpose, Model},
+  model::{self, Confirm, Effect, FolderPurpose, Model},
   remote::{self, Opened, RemoteEffect},
   sidebar, snapshots,
 };
@@ -22,6 +22,7 @@ use crate::{
     agent_launch::LaunchRequest, cloud::ManagedEndpointEvent, supporting_repos::SupportingRepo,
   },
   gpui_shell::{
+    confirm::Question,
     native::{NativeEvent, ToastTone},
     overlay::OverlaySnapshot,
     screen::{file_picker::Scope, Modal, ScreenAction, ScreenSnapshot},
@@ -36,6 +37,8 @@ pub struct Presentation {
   pub screen: Option<ScreenSnapshot>,
   pub modal: Option<Modal>,
   pub overlay: Option<OverlaySnapshot>,
+  /// The confirmation over everything ([`crate::gpui_shell::confirm`]).
+  pub confirm: Option<Question>,
   /// Cmd+P's "Jump to File", over the whole window.
   pub file_picker: Option<Scope>,
   /// `ui_zoom`, in percent.
@@ -173,6 +176,12 @@ impl WindowController {
 
   pub fn shortcut(&mut self, shortcut: Shortcut, cx: &mut Context<Self>) {
     let effects = self.model.shortcut(shortcut, &self.data);
+    self.run(effects, cx);
+  }
+
+  /// The confirmation answered: `yes` for its verb, false for Cancel.
+  pub fn answer(&mut self, yes: bool, cx: &mut Context<Self>) {
+    let effects = self.model.answer(yes);
     self.run(effects, cx);
   }
 
@@ -395,11 +404,27 @@ impl WindowController {
           cx,
         );
       }
-      Effect::OpenRepoAt(path) => {
-        let host = self.host.clone();
-        cx.background_spawn(async move { host.open_repo_at(&path) })
-          .detach();
-      }
+      Effect::OpenRepoAt(path) => self.open_folder_at(path, false, cx),
+      Effect::OpenInNewWindow(path) => self.open_folder_at(path, true, cx),
+      Effect::InitRepo { path, new_window } => self.background(
+        move |host| {
+          host.init_repo(&path)?;
+          match new_window {
+            true => host.open_in_new_window(&path),
+            false => host.open_repo_at(&path),
+          }
+          Ok(())
+        },
+        |this, result: Result<(), String>, cx| {
+          if let Err(err) = result {
+            this.run(
+              vec![toast(ToastTone::Error, "Failed to open repository", &err)],
+              cx,
+            );
+          }
+        },
+        cx,
+      ),
       Effect::ReadPrefs => {
         let keys = settings_keys(&main);
         self.background(
@@ -427,17 +452,10 @@ impl WindowController {
       }
       Effect::RemoveSupporting(path) => self.background(
         move |host| {
-          let message =
-            format!("Remove {path} from this window? Its files and workspaces are not deleted.");
-          if !host.ask("Remove Repository", &message) {
-            return None;
-          }
-          Some((path.clone(), host.remove_supporting(&main, &path)))
+          let result = host.remove_supporting(&main, &path);
+          (path, result)
         },
-        |this, removed, cx| {
-          let Some((path, result)) = removed else {
-            return;
-          };
+        |this, (path, result), cx| {
           let effects = match result {
             Ok(()) => {
               if this.model.supporting.as_deref() == Some(path.as_str()) {
@@ -458,30 +476,15 @@ impl WindowController {
           .detach();
       }
       Effect::FactoryReset => self.background(
-        |host| {
-          let confirmed = host.ask(
-            "Factory Reset",
-            "Clear the saved repository path and return to the start screen?",
+        |host| host.factory_reset(),
+        |this, (), cx| {
+          this.model.reset();
+          this.data.clear();
+          this.host.show_remote(None);
+          this.run(
+            vec![toast(ToastTone::Success, "Factory reset complete", "")],
+            cx,
           );
-          if confirmed {
-            host.factory_reset();
-          }
-          confirmed
-        },
-        |this, confirmed, cx| {
-          if confirmed {
-            this.model.reset();
-            this.data.clear();
-            this.host.show_remote(None);
-            this.run(
-              vec![toast(
-                ToastTone::Success,
-                "Factory Reset Complete",
-                "Repository path cleared.",
-              )],
-              cx,
-            );
-          }
         },
         cx,
       ),
@@ -660,16 +663,35 @@ impl WindowController {
     self.run(effects, cx);
   }
 
+  /// Opens the folder at `path`, here or in a new window; one that is not
+  /// a repository first asks to initialize one.
+  fn open_folder_at(&mut self, path: String, new_window: bool, cx: &mut Context<Self>) {
+    self.background(
+      move |host| {
+        let repo = host.is_repo(&path);
+        match (repo, new_window) {
+          (false, _) => {}
+          (true, true) => host.open_in_new_window(&path),
+          (true, false) => host.open_repo_at(&path),
+        }
+        (repo, path)
+      },
+      move |this, (repo, path), cx| {
+        if !repo {
+          this.model.ask(Confirm::init_repo(&path, new_window));
+          this.present(cx);
+        }
+      },
+      cx,
+    );
+  }
+
   /// A folder the user picked for `purpose`.
   fn picked(&mut self, purpose: FolderPurpose, path: String, cx: &mut Context<Self>) {
     let main = self.model.main_repo.clone();
     match purpose {
       FolderPurpose::OpenRepo => self.run(vec![Effect::OpenRepoAt(path)], cx),
-      FolderPurpose::OpenInNewWindow => {
-        let host = self.host.clone();
-        cx.background_spawn(async move { host.open_in_new_window(&path) })
-          .detach();
-      }
+      FolderPurpose::OpenInNewWindow => self.run(vec![Effect::OpenInNewWindow(path)], cx),
       FolderPurpose::AddSupporting | FolderPurpose::LocateSupporting(_) => {
         let replaced = match purpose {
           FolderPurpose::LocateSupporting(old) => Some(old),
@@ -690,11 +712,7 @@ impl WindowController {
                   .find(|s| !s.is_empty())
                   .unwrap_or(&added)
                   .to_string();
-                toast(
-                  ToastTone::Success,
-                  "Repository Added",
-                  &format!("{name} is now a supporting repository"),
-                )
+                toast(ToastTone::Success, &format!("Added {name}"), "")
               }
               Err(err) => toast(ToastTone::Error, "Failed to add repository", &err),
             };
@@ -811,6 +829,7 @@ impl WindowController {
       screen: snapshots::screen(&self.model, &self.data),
       modal: snapshots::modal(&self.model, &self.data),
       overlay: snapshots::overlay(&self.model, &self.data),
+      confirm: self.model.confirm.as_ref().map(|c| c.question.clone()),
       file_picker: self.file_picker(),
       zoom: self.model.prefs.zoom,
       dark: self.model.prefs.dark(),

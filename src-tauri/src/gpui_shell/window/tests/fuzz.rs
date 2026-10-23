@@ -41,6 +41,9 @@ enum Op {
   Advance(u64),
   /// Every read in flight lands.
   Park,
+  /// The confirmation on screen, if any, is answered: its verb, unless
+  /// every confirmation is declined, or Cancel.
+  Answer(bool),
 }
 
 /// Ids around the backend's: some listed, some never, some deleted later.
@@ -214,11 +217,12 @@ fn op() -> impl Strategy<Value = Op> {
     1 => Just(Op::PrsChanged),
     2 => (0u64..25_000).prop_map(Op::Advance),
     3 => Just(Op::Park),
+    2 => any::<bool>().prop_map(Op::Answer),
   ]
 }
 
-fn fuzz_host(decline: bool) -> Arc<FakeHost> {
-  let host = FakeHost::on(
+fn fuzz_host() -> Arc<FakeHost> {
+  Arc::new(FakeHost::on(
     "/repo",
     vec![
       workspace(1, "a", Some("main")),
@@ -226,11 +230,10 @@ fn fuzz_host(decline: bool) -> Arc<FakeHost> {
       workspace(3, "c", Some("b")),
       workspace(4, "x", Some("main")),
     ],
-  );
-  Arc::new(FakeHost { decline, ..host })
+  ))
 }
 
-fn run(window: &Window, host: &FakeHost, op: &Op, cx: &mut TestAppContext) {
+fn run(window: &Window, host: &FakeHost, op: &Op, decline: bool, cx: &mut TestAppContext) {
   let controller = &window.controller;
   match op {
     Op::Shortcut(s) => controller.update(cx, |c, cx| c.shortcut(*s, cx)),
@@ -287,6 +290,15 @@ fn run(window: &Window, host: &FakeHost, op: &Op, cx: &mut TestAppContext) {
         .advance_clock(std::time::Duration::from_millis(*ms));
     }
     Op::Park => cx.run_until_parked(),
+    Op::Answer(yes) => {
+      let yes = *yes && !decline;
+      let asked = controller.read_with(cx, |c, _| c.model().confirm.clone());
+      if let Some(confirm) = asked {
+        let answer = if yes { "confirm" } else { "cancel" };
+        host.record(format!("{answer} {}", confirm.question.question));
+        controller.update(cx, |c, cx| c.answer(yes, cx));
+      }
+    }
   }
 }
 
@@ -341,7 +353,7 @@ fn check(window: &Window, host: &FakeHost, decline: bool, cx: &mut TestAppContex
     if destructive {
       assert!(!decline, "{call} although every confirmation was declined");
       assert!(
-        calls[..i].iter().any(|c| c.starts_with("ask ")),
+        calls[..i].iter().any(|c| c.starts_with("confirm ")),
         "{call} without asking: {calls:?}"
       );
     }
@@ -375,10 +387,10 @@ fn the_window_survives_random_actions() {
     64,
     (vec(op(), 1..40), any::<bool>()),
     |cx, (ops, decline)| {
-      let host = fuzz_host(decline);
+      let host = fuzz_host();
       let window = Window::open(cx, host.clone(), Some("/repo"));
       for op in &ops {
-        run(&window, &host, op, cx);
+        run(&window, &host, op, decline, cx);
         check(&window, &host, decline, cx);
         if matches!(op, Op::Park) {
           check_settled(&window, cx);

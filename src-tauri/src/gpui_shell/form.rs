@@ -27,7 +27,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   screen::{ActionSink, ScreenAction},
   theme::{self, Palette},
-  ui,
+  ui::{self, TextSize},
 };
 
 /// One `<option>` of a `<select>`.
@@ -296,8 +296,7 @@ pub fn textarea_field(
   mono: bool,
   disabled: bool,
 ) -> impl IntoElement {
-  Textarea::new(state)
-    .text_size(zpx(13.))
+  ui::text(Textarea::new(state), TextSize::Sm)
     .disabled(disabled)
     .when(mono, |this| this.font_family(theme::MONO_FONT))
 }

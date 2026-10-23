@@ -9,7 +9,7 @@
 //! new workspace. Each dialog covers the whole window, sidebar included, as
 //! React's `Dialog` did.
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::radius;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -159,7 +159,7 @@ pub fn dialog(
     .flex()
     .items_center()
     .justify_center()
-    .bg(gpui::black().opacity(0.4))
+    .bg(p.scrim())
     .occlude();
   let panel = div()
     .debug_selector(move || id.into())
@@ -170,7 +170,7 @@ pub fn dialog(
     .flex()
     .flex_col()
     .gap_4()
-    .rounded(zpx(16.))
+    .rounded(radius::LG)
     .border_1()
     .border_color(p.border.opacity(0.5))
     .bg(p.popover)
@@ -192,7 +192,6 @@ pub fn overlay(backdrop: Stateful<Div>, panel: impl IntoElement) -> impl IntoEle
 /// `DialogTitle`: `text-lg font-semibold leading-none`.
 pub fn title(text: impl IntoElement) -> Div {
   ui::text(div(), TextSize::Lg)
-    .line_height(zpx(15.))
     .font_weight(FontWeight::SEMIBOLD)
     .child(text)
 }

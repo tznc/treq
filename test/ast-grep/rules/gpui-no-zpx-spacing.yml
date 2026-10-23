@@ -1,0 +1,49 @@
+id: gpui-no-zpx-spacing
+language: rust
+severity: error
+message: >
+  Do not pass a literal `zpx(..)` to a gap, padding, margin or radius
+  method. Use GPUI's spacing helpers (`gap_1p5`, `px_3`, ..), which follow UI
+  zoom, or `ui::radius` tokens. A computed length (an indent per depth, a
+  const shared with width math) may still use `zpx`.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        kind: field_expression
+        has:
+          field: field
+          regex: ^(gap|gap_x|gap_y|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|rounded|rounded_(t|b|l|r|tl|tr|bl|br))$
+    - has:
+        field: arguments
+        has:
+          kind: call_expression
+          all:
+            - has:
+                field: function
+                kind: identifier
+                regex: ^zpx$
+            - has:
+                field: arguments
+                has:
+                  any:
+                    - kind: float_literal
+                    - kind: integer_literal
+                    - kind: unary_expression
+                      has:
+                        any:
+                          - kind: float_literal
+                          - kind: integer_literal
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

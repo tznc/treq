@@ -3,31 +3,21 @@
 //! agent prompt dialog and the terminal pane each show one.
 
 use crate::gpui_shell::ui::zpx;
-use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, FontWeight, Stateful};
+use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, Stateful};
 
-use super::{
-  code::{menu_item, menu_panel, tw, GREEN_500},
-  code_data::Environment,
-};
+use super::{code::menu_panel, code_data::Environment};
 use crate::gpui_shell::{
   theme::{self, Palette},
   ui::{self, Button, Size, TextSize, Variant},
 };
 
-/// How big the trigger draws: the task input's (`h-7`, 14px icons) or the
-/// terminal pane's (`h-5 px-1.5`, 12px icons).
+/// How big the pane's trigger draws (`h-5 px-1.5`, 12px icons).
 #[derive(Clone, Copy)]
 pub(crate) struct TriggerSize {
   pub height: f32,
   pub padding: f32,
   pub icon: f32,
 }
-
-pub(crate) const TASK_TRIGGER: TriggerSize = TriggerSize {
-  height: 28.,
-  padding: 8.,
-  icon: 14.,
-};
 
 pub(crate) const PANE_TRIGGER: TriggerSize = TriggerSize {
   height: 20.,
@@ -57,7 +47,7 @@ pub(crate) fn trigger(
     .size(Size::Sm)
     .h(zpx(size.height))
     .px(zpx(size.padding))
-    .gap(zpx(6.))
+    .gap_1p5()
     .child(ui::icon(icon, size.icon, p.foreground))
     .child(ui::text(div(), TextSize::Xs).child(label))
     .when(devcontainer, |b| {
@@ -69,12 +59,25 @@ pub(crate) fn trigger(
         ))
       } else {
         b.child(div().size(zpx(6.)).rounded_full().bg(if running {
-          tw(GREEN_500)
+          crate::gpui_shell::ui::Tone::Success.color(p)
         } else {
           p.muted_foreground.opacity(0.5)
         }))
       }
     })
+}
+
+/// The selector as a toolbar picker: it shows a value, so it reads as one.
+pub(crate) fn picker(id: &'static str, env: &Environment, p: &Palette) -> ui::Picker {
+  let (icon, label) = if env.devcontainer {
+    (theme::ICON_BOX, "Devcontainer")
+  } else {
+    (theme::ICON_LAPTOP, "Local")
+  };
+  ui::Picker::new(id, p)
+    .placement(ui::PickerPlacement::Toolbar)
+    .icon(icon)
+    .value(label)
 }
 
 /// The selector's menu (`DropdownMenuContent`, `w-64`), unpositioned:
@@ -105,45 +108,16 @@ pub(crate) fn menu<V: 'static>(
               detail: &str,
               selected: bool,
               disabled: bool| {
-    menu_item(id, p, disabled)
-      .items_start()
-      .child(
-        div()
-          .mt(zpx(2.))
-          .child(ui::icon(icon, 14., p.popover_foreground)),
-      )
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .flex()
-          .flex_col()
-          .gap(zpx(2.))
-          .child(div().font_weight(FontWeight::MEDIUM).child(title))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child(detail.to_string()),
-          ),
-      )
-      .when(selected, |this| {
-        this.child(
-          div()
-            .mt(zpx(2.))
-            .child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground)),
-        )
-      })
+    ui::MenuItem::new(id, title, p)
+      .icon(icon)
+      .description(detail.to_string())
+      .checked(selected)
+      .disabled(disabled)
   };
   let devcontainer = env.devcontainer;
   let mut panel = menu_panel(id, p)
     .w(zpx(256.))
-    .child(
-      ui::text(div(), TextSize::Xs)
-        .px_2()
-        .py(zpx(6.))
-        .text_color(p.muted_foreground)
-        .child("New terminals and agents run in"),
-    )
+    .child(ui::MenuLabel::new("New terminals and agents run in", p))
     .child(
       item(
         "environment-local",
@@ -172,9 +146,9 @@ pub(crate) fn menu<V: 'static>(
     panel = panel
       .child(div().h_px().my_1().mx_neg_1().bg(p.border))
       .child(
-        menu_item("environment-start", p, starting)
-          .child(ui::icon(theme::ICON_PLAY, 14., p.popover_foreground))
-          .child("Start devcontainer")
+        ui::MenuItem::new("environment-start", "Start devcontainer", p)
+          .icon(theme::ICON_PLAY)
+          .disabled(starting)
           .when(!starting, |this| {
             this.on_click(cx.listener(move |view, _, _, cx| start(view, cx)))
           }),

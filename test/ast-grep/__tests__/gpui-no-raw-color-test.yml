@@ -1,0 +1,52 @@
+id: gpui-no-raw-color
+valid:
+  - |
+    fn themed(p: &Palette) -> Div {
+      div().bg(p.surface).border_color(p.border)
+    }
+  - |
+    fn other_name() -> u32 {
+      let rgb_value = 3;
+      other::rgbish(rgb_value)
+    }
+  - |
+    fn opacity_of_token(p: &Palette) -> Hsla {
+      p.text.opacity(0.5)
+    }
+invalid:
+  - |
+    fn raw_rgb() -> Div {
+      div().bg(rgb(0x112233))
+    }
+  - |
+    fn raw_rgba() -> Div {
+      div().bg(rgba(0x11223380))
+    }
+  - |
+    fn raw_hsla() -> Div {
+      div().bg(hsla(0.5, 0.5, 0.5, 1.0))
+    }
+  - |
+    fn tailwind() -> Div {
+      div().bg(tw::RED_500)
+    }
+  - |
+    fn tailwind_fn() -> Div {
+      div().bg(tw::color(tw::RED_500, 0.5))
+    }
+  - |
+    fn scrim() -> Div {
+      div().bg(black().opacity(0.4))
+    }
+  - |
+    fn glow() -> Div {
+      div().bg(white().opacity(0.1))
+    }
+  - |
+    fn theme_tailwind() -> Div {
+      div().bg(theme::tw::RED_500)
+    }
+  - |
+    fn scoped_white() -> Div {
+      div().text_color(gpui::white()).bg(gpui::black().opacity(0.4))
+    }

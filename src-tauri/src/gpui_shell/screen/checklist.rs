@@ -79,7 +79,7 @@ pub fn render(list: &Checklist, ctx: &Ctx) -> impl IntoElement {
           .variant(Variant::Ghost)
           .size(Size::Sm)
           .disabled(list.validating)
-          .mr(zpx(-8.))
+          .mr_neg_2()
           .h(zpx(24.))
           .gap_1()
           .px_2(),

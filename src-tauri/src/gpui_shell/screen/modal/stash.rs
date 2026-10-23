@@ -1,6 +1,7 @@
 //! `StashModal`: the repository's stashed changes, each one's diff, and
 //! applying, copying and deleting them.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
@@ -13,10 +14,7 @@ use super::{dialog, message, overlay, title, Env};
 use crate::{
   gpui_shell::{
     native::ToastTone,
-    screen::{
-      code::{menu_item, menu_panel, tw, GREEN_600, RED_600},
-      rows::Rows,
-    },
+    screen::{code::menu_panel, rows::Rows},
     theme::{self, Palette},
     time,
     ui::{self, Button, Size, TextSize, Variant},
@@ -326,11 +324,7 @@ impl StashView {
         match patch {
           Ok(patch) => {
             cx.write_to_clipboard(ClipboardItem::new_string(patch));
-            view.env.toast(
-              ToastTone::Success,
-              "Copied",
-              "Git patch copied to clipboard",
-            );
+            view.env.toast(ToastTone::Success, "Patch copied", "");
           }
           Err(err) => view
             .env
@@ -367,11 +361,7 @@ impl StashView {
             }
             view.env.workspace_changed(&repo);
             view.load(cx);
-            view.env.toast(
-              ToastTone::Success,
-              "Stash deleted",
-              format!("Removed stash {}", entry.short_commit_id),
-            );
+            view.env.toast(ToastTone::Success, "Stash deleted", "");
           }
           Err(err) => view
             .env
@@ -388,11 +378,6 @@ impl StashView {
     self.pending = Some(format!("apply-{}", entry.id));
     self.close_apply(cx);
     cx.notify();
-    let label = self
-      .targets()
-      .into_iter()
-      .find(|t| t.branch == target)
-      .map_or_else(|| target.clone(), |t| t.label);
     let (host, repo, id) = (
       self.env.host.clone(),
       self.route.repo_path.clone(),
@@ -410,11 +395,7 @@ impl StashView {
         match result {
           Ok(()) => {
             view.env.workspace_changed(&repo);
-            view.env.toast(
-              ToastTone::Success,
-              "Stash applied",
-              format!("Copied onto {label}"),
-            );
+            view.env.toast(ToastTone::Success, "Stash applied", "");
           }
           Err(err) => view
             .env
@@ -439,7 +420,7 @@ impl StashView {
 
 impl StashView {
   fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-    let (accent, muted) = (p.menu_accent, p.muted_foreground);
+    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
     div()
       .debug_selector(|| "stash-list".into())
       .w(zpx(288.))
@@ -467,12 +448,10 @@ impl StashView {
               .flex_none()
               .px_2()
               .py_2()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .cursor_pointer()
-              .when(selected, |this| this.bg(accent))
-              .when(!selected, |this| {
-                this.hover(move |s| s.bg(accent.opacity(0.5)))
-              })
+              .when(selected, |this| this.bg(selected_bg))
+              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
               .child(
                 div()
                   .font_family(theme::MONO_FONT)
@@ -482,7 +461,7 @@ impl StashView {
               )
               .child(
                 div()
-                  .mt(zpx(2.))
+                  .mt_0p5()
                   .flex()
                   .items_center()
                   .gap_2()
@@ -502,12 +481,12 @@ impl StashView {
                   .gap_2()
                   .child(
                     div()
-                      .text_color(tw(GREEN_600))
+                      .text_color(ui::Tone::GitOpen.text(p))
                       .child(format!("+{}", entry.additions)),
                   )
                   .child(
                     div()
-                      .text_color(tw(RED_600))
+                      .text_color(ui::Tone::GitClosed.text(p))
                       .child(format!("-{}", entry.deletions)),
                   )
                   .child(
@@ -545,8 +524,8 @@ impl StashView {
       .pending
       .as_deref()
       .is_some_and(|a| !a.starts_with("apply-"));
-    let green = tw(GREEN_600);
-    let red = tw(RED_600);
+    let green = ui::Tone::GitOpen.text(p);
+    let red = ui::Tone::GitClosed.text(p);
 
     let info = ui::text(div(), TextSize::Xs)
       .min_w_0()
@@ -565,7 +544,7 @@ impl StashView {
           .flex()
           .flex_wrap()
           .gap_x_3()
-          .gap_y(zpx(2.))
+          .gap_y_0p5()
           .text_color(p.muted_foreground)
           .child(
             div()
@@ -576,7 +555,7 @@ impl StashView {
           .child(
             div()
               .flex()
-              .gap(zpx(4.))
+              .gap_1()
               .child(
                 div()
                   .text_color(green)
@@ -629,7 +608,7 @@ impl StashView {
       .flex_none()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .child(
         div()
           .relative()
@@ -675,17 +654,15 @@ impl StashView {
       .right_0()
       .min_w(zpx(128.))
       .child(
-        menu_item("stash-copy-patch", p, false)
-          .child(ui::icon(theme::ICON_COPY, 14., p.popover_foreground))
-          .child("Copy as git patch")
+        ui::MenuItem::new("stash-copy-patch", "Copy as git patch", p)
+          .icon(theme::ICON_COPY)
           .on_click(cx.listener(move |view, _, _, cx| view.copy_patch(&patch, cx))),
       )
       .child(div().h_px().my_1().mx_neg_1().bg(p.border))
       .child(
-        menu_item("stash-delete", p, false)
-          .text_color(p.destructive)
-          .child(ui::icon(theme::ICON_TRASH, 14., p.destructive))
-          .child("Delete stash")
+        ui::MenuItem::new("stash-delete", "Delete stash", p)
+          .icon(theme::ICON_TRASH)
+          .danger()
           .on_click(cx.listener(move |view, _, _, cx| view.delete(&delete, cx))),
       )
       .on_mouse_down_out(cx.listener(|view, _, _, cx| {
@@ -716,8 +693,8 @@ impl StashView {
         .items_center()
         .gap_2()
         .px_2()
-        .py(zpx(6.))
-        .rounded(zpx(6.))
+        .py_1p5()
+        .rounded(radius::MD)
         .cursor_pointer()
         .when(active, |this| this.bg(accent))
     };
@@ -734,7 +711,7 @@ impl StashView {
         .child(
           ui::text(div(), TextSize::Xs)
             .px_2()
-            .py(zpx(6.))
+            .py_1p5()
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
             .child("Apply to"),
@@ -759,7 +736,7 @@ impl StashView {
       .top(zpx(32.))
       .right_0()
       .w(zpx(288.))
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -895,7 +872,7 @@ impl StashView {
         .child(
           div()
             .px_2()
-            .py(zpx(6.))
+            .py_1p5()
             .border_b_1()
             .border_color(p.border)
             .bg(p.background.opacity(0.95))
@@ -905,7 +882,7 @@ impl StashView {
         .into_any_element(),
       Row::HunkHeader(f, h) => text
         .px_2()
-        .py(zpx(2.))
+        .py_0p5()
         .text_color(p.muted_foreground)
         .bg(p.muted.opacity(0.4))
         .child(hunk(f, h).map(|h| h.header.clone()).unwrap_or_default())
@@ -921,10 +898,10 @@ impl StashView {
           .whitespace_nowrap()
           .overflow_hidden()
           .when(line.starts_with('+'), |this| {
-            this.bg(gpui::rgba(0x10b98133))
+            this.bg(ui::Tone::GitOpen.tint(&p))
           })
           .when(line.starts_with('-'), |this| {
-            this.bg(gpui::rgba(0xef444433))
+            this.bg(ui::Tone::GitClosed.tint(&p))
           })
           .child(
             div()
@@ -997,7 +974,7 @@ impl Render for StashView {
         .into_any_element(),
     };
     let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if e.keystroke.key == "escape" {
+      if ui::is_escape(&e.keystroke) {
         cx.stop_propagation();
         if view.apply.is_some() || view.more_open {
           view.close_menus(cx);

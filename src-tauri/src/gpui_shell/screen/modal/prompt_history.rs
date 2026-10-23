@@ -1,6 +1,7 @@
 //! `PromptHistoryModal`: every prompt sent in the repository, newest first,
 //! and the selected one in full.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use serde::Deserialize;
 use serde_json::json;
@@ -131,7 +132,7 @@ impl PromptHistoryView {
   /// `handleCopy`.
   fn copy(&self, text: String, description: &str, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.env.toast(ToastTone::Success, "Copied", description);
+    self.env.toast(ToastTone::Success, description, "");
   }
 
   fn close(&self, cx: &mut Context<Self>) {
@@ -168,7 +169,7 @@ impl PromptHistoryView {
 
   fn rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let p = theme::palette(self.dark);
-    let (accent, muted) = (p.menu_accent, p.muted_foreground);
+    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
     let Some(entries) = self.entries.clone() else {
       return Vec::new();
     };
@@ -188,12 +189,10 @@ impl PromptHistoryView {
               .w_full()
               .px_2()
               .py_2()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .cursor_pointer()
-              .when(selected, |this| this.bg(accent))
-              .when(!selected, |this| {
-                this.hover(move |s| s.bg(accent.opacity(0.5)))
-              })
+              .when(selected, |this| this.bg(selected_bg))
+              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
               .child(
                 div()
                   .font_family(theme::MONO_FONT)
@@ -269,7 +268,7 @@ impl PromptHistoryView {
               .rounded_full()
               .bg(p.muted)
               .px_2()
-              .py(zpx(2.))
+              .py_0p5()
               .child(agent)
           })),
       )
@@ -281,10 +280,10 @@ impl PromptHistoryView {
           .h(zpx(24.))
           .px_2()
           .child(ui::icon(theme::ICON_COPY, 12., p.foreground).mr_1())
-          .child(div().text_size(zpx(11.)).child("Copy"))
-          .on_click(cx.listener(move |view, _, _, cx| {
-            view.copy(text.clone(), "Prompt copied to clipboard", cx)
-          })),
+          .child(ui::text(div(), TextSize::Xs).child("Copy"))
+          .on_click(
+            cx.listener(move |view, _, _, cx| view.copy(text.clone(), "Prompt copied", cx)),
+          ),
       );
     let entry = entry.clone();
     pane.child(
@@ -305,7 +304,7 @@ impl PromptHistoryView {
           div().child(
             Button::new("prompt-history-run", p)
               .size(Size::Sm)
-              .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr(zpx(6.)))
+              .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr_1p5())
               .label("Run prompt...")
               .on_click(cx.listener(move |view, _, _, cx| view.run(&entry, cx))),
           ),
@@ -335,10 +334,10 @@ impl Render for PromptHistoryView {
       Button::new("prompt-history-copy-all", &p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr(zpx(6.)))
+        .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr_1p5())
         .label("Copy all")
         .on_click(cx.listener(move |view, _, _, cx| {
-          view.copy(format_for_copy(&all), "All prompts copied to clipboard", cx)
+          view.copy(format_for_copy(&all), "All prompts copied", cx)
         }))
     });
     let header = div()
@@ -375,7 +374,7 @@ impl Render for PromptHistoryView {
         .into_any_element(),
     };
     let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if e.keystroke.key == "escape" {
+      if ui::is_escape(&e.keystroke) {
         cx.stop_propagation();
         view.close(cx);
       }

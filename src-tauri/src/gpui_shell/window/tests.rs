@@ -9,7 +9,8 @@ use std::{
 };
 
 use futures::channel::mpsc::UnboundedSender;
-use gpui::{prelude::*, Entity, TestAppContext};
+use gpui::{prelude::*, Entity, FocusHandle, Role, TestAppContext};
+use gpui_testing_library::prelude::*;
 use tauri_plugin_gpui::gpui;
 
 use super::{
@@ -33,6 +34,7 @@ use crate::{
   },
   github::{GitRemoteInfo, PrInfo},
   gpui_shell::{
+    confirm::Question,
     native::{NativeEvent, ToastTone},
     remote_repo::{Mutation, RemoteRepository},
     screen::{account_data::CloudAction, ScreenAction, View},
@@ -50,7 +52,6 @@ struct FakeHost {
   settings: Mutex<HashMap<String, String>>,
   /// The folder `pick_folder` answers with.
   folder: Option<String>,
-  decline: bool,
   /// The remote repository `last_remote` restores.
   last_remote: Option<SavedRepository>,
   /// What a probe finds: a repository, unless set.
@@ -178,6 +179,11 @@ impl WindowHost for FakeHost {
     !self.not_a_repo
   }
 
+  fn init_repo(&self, path: &str) -> Result<(), String> {
+    self.record(format!("init {path}"));
+    Ok(())
+  }
+
   fn prepare_repo(&self, repo: &str) {
     self.record(format!("prepare {repo}"));
   }
@@ -211,11 +217,6 @@ impl WindowHost for FakeHost {
     self.record(format!("remove {path}"));
     self.supporting.lock().unwrap().retain(|r| r.path != path);
     Ok(())
-  }
-
-  fn ask(&self, title: &str, _: &str) -> bool {
-    self.record(format!("ask {title}"));
-    !self.decline
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {
@@ -467,6 +468,58 @@ impl Window {
   }
 }
 
+/// The window's confirmation, drawn as the shell draws it and answering
+/// the controller.
+struct ConfirmView {
+  controller: Entity<WindowController>,
+  question: Question,
+  focus: FocusHandle,
+}
+
+impl gpui::Render for ConfirmView {
+  fn render(&mut self, window: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+    let controller = self.controller.clone();
+    let p = crate::gpui_shell::theme::palette(false);
+    gpui::div().size_full().child(self.question.dialog(
+      &self.focus,
+      window,
+      &p,
+      move |yes, _, cx| {
+        controller.update(cx, |c, cx| c.answer(yes, cx));
+      },
+    ))
+  }
+}
+
+impl Window {
+  /// The confirmation on screen: its question.
+  fn asked(&self) -> Option<String> {
+    self.last().confirm.map(|c| c.question)
+  }
+
+  /// Clicks `button` in the confirmation on screen, found by role and
+  /// name, as the user would.
+  fn click_in_confirm(&self, cx: &mut TestAppContext, button: &str) {
+    let question = self.last().confirm.expect("no confirmation shown");
+    cx.update(crate::gpui_shell::theme::init);
+    let controller = self.controller.clone();
+    let (_, vcx) = cx.add_window_view(|_, cx| ConfirmView {
+      controller,
+      focus: cx.focus_handle(),
+      question: question.clone(),
+    });
+    vcx.run_until_parked();
+    let handle = vcx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(vcx, handle);
+    screen.redraw();
+    assert!(vcx.debug_bounds("confirm").is_some(), "the dialog is drawn");
+    screen
+      .user()
+      .click(&screen.get_by_role(by::role(Role::Button).name(button)));
+    cx.run_until_parked();
+  }
+}
+
 fn repo_host() -> Arc<FakeHost> {
   Arc::new(FakeHost::on(
     "/repo",
@@ -513,13 +566,64 @@ fn a_folder_that_is_not_a_repository_shows_onboarding_and_offers_to_open_it(
     window.last().screen.unwrap().view,
     View::Onboarding(_)
   ));
-  // Opening it asks to initialize one, and remembers it once opened.
-  assert_eq!(host.count("open /plain"), 1);
   assert!(host
     .calls()
     .contains(&"save last_opened_repo_path=".to_string()));
   assert_eq!(host.count("prepare /plain"), 0, "nothing set up in it");
   assert_eq!(host.count("workspaces /plain"), 0, "nothing read from it");
+  // Opening it asks to initialize one first.
+  assert_eq!(
+    window.asked().as_deref(),
+    Some("Initialize a Git repository here?")
+  );
+  assert_eq!(host.count("open /plain"), 0, "not before the answer");
+  window.click_in_confirm(cx, "Initialize");
+  let calls = host.calls();
+  let init = calls.iter().position(|c| c == "init /plain");
+  let open = calls.iter().position(|c| c == "open /plain");
+  assert!(init.is_some() && init < open, "{calls:?}");
+  assert_eq!(window.asked(), None);
+}
+
+#[gpui::test]
+fn declining_to_initialize_a_folder_leaves_it_alone(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    not_a_repo: true,
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), Some("/plain"));
+  window.click_in_confirm(cx, "Cancel");
+  assert_eq!(host.count("init /plain"), 0);
+  assert_eq!(host.count("open /plain"), 0);
+  assert_eq!(host.count("toast Not a Git Repository"), 1);
+  assert_eq!(window.asked(), None);
+}
+
+#[gpui::test]
+fn a_folder_opened_in_a_new_window_is_initialized_once_confirmed(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    not_a_repo: true,
+    folder: Some("/plain".into()),
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  window.controller.update(cx, |c, cx| {
+    c.overlay_action(
+      &ScreenAction::Press {
+        id: "palette.open-repository-new-window".into(),
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  assert_eq!(
+    window.asked().as_deref(),
+    Some("Initialize a Git repository here?")
+  );
+  assert_eq!(host.count("new window /plain"), 0);
+  window.click_in_confirm(cx, "Initialize");
+  assert_eq!(host.count("init /plain"), 1);
+  assert_eq!(host.count("new window /plain"), 1);
 }
 
 #[gpui::test]
@@ -854,10 +958,15 @@ fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
     .controller
     .update(cx, |c, cx| c.menu(Menu::FactoryReset, cx));
   cx.run_until_parked();
+  assert_eq!(
+    window.asked().as_deref(),
+    Some("Reset Treq to factory settings?")
+  );
+  assert_eq!(host.count("factory reset"), 0, "not before the answer");
+  window.click_in_confirm(cx, "Reset");
   let calls = host.calls();
-  assert!(calls.contains(&"ask Factory Reset".to_string()));
   assert!(calls.contains(&"factory reset".to_string()));
-  assert!(calls.contains(&"toast Factory Reset Complete".to_string()));
+  assert!(calls.contains(&"toast Factory reset complete".to_string()));
   assert!(matches!(
     window.last().screen.unwrap().view,
     View::Onboarding(_)
@@ -867,17 +976,40 @@ fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_declined_factory_reset_changes_nothing(cx: &mut TestAppContext) {
-  let host = Arc::new(FakeHost {
-    decline: true,
-    ..FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))])
-  });
+  let host = Arc::new(FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]));
   let window = Window::open(cx, host.clone(), Some("/repo"));
   window
     .controller
     .update(cx, |c, cx| c.menu(Menu::FactoryReset, cx));
   cx.run_until_parked();
+  window.click_in_confirm(cx, "Cancel");
   assert!(!host.calls().contains(&"factory reset".to_string()));
   assert!(window.last().sidebar.is_some());
+  assert_eq!(window.asked(), None);
+}
+
+#[gpui::test]
+fn a_confirmation_takes_the_keys_and_escape_cancels_it(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::FactoryReset, cx));
+  // Asked again while open: still one question.
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::FactoryReset, cx));
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::Palette, cx));
+  cx.run_until_parked();
+  assert!(window.last().overlay.is_none(), "no palette over it");
+  window
+    .controller
+    .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
+  cx.run_until_parked();
+  assert_eq!(window.asked(), None);
+  assert_eq!(host.count("factory reset"), 0);
 }
 
 #[gpui::test]
@@ -891,7 +1023,7 @@ fn adds_and_removes_supporting_repositories(cx: &mut TestAppContext) {
     .controller
     .update(cx, |c, cx| c.menu(Menu::AddRepository, cx));
   cx.run_until_parked();
-  assert!(host.calls().contains(&"toast Repository Added".to_string()));
+  assert!(host.calls().contains(&"toast Added other".to_string()));
   let repos = window.last().sidebar.unwrap().repos;
   assert_eq!(
     repos.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
@@ -908,7 +1040,9 @@ fn adds_and_removes_supporting_repositories(cx: &mut TestAppContext) {
     )
   });
   cx.run_until_parked();
-  assert!(host.calls().contains(&"ask Remove Repository".to_string()));
+  assert_eq!(window.asked().as_deref(), Some("Remove other from Treq?"));
+  assert_eq!(window.last().sidebar.unwrap().repos.len(), 2, "not yet");
+  window.click_in_confirm(cx, "Remove repository");
   assert_eq!(window.last().sidebar.unwrap().repos.len(), 1);
 }
 

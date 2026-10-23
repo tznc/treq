@@ -689,7 +689,7 @@ fn renames_once_the_dry_run_passes(cx: &mut TestAppContext) {
       "rename 7 -> taken (dry run)",
       "rename 7 -> treq/signin (dry run)",
       "rename 7 -> treq/signin",
-      "notify toast Workspace renamed",
+      "notify toast Renamed to treq/signin",
       "notify workspaceChanged",
     ]
   );
@@ -734,19 +734,23 @@ fn deletion_lists_what_can_be_deleted(cx: &mut TestAppContext) {
   // GPUI deletes it itself, closing the dialog first as `handleDelete` does.
   assert_eq!(h.sent(), vec![press("workspaceDeletion.close")]);
   assert!(!h.drawn("workspace-deletion"));
+  // Then asks, and Enter confirms.
+  assert!(h.drawn("confirm"));
+  assert!(!host.calls().iter().any(|c| c.starts_with("delete")));
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
   let calls: Vec<String> = host
     .calls()
     .into_iter()
-    .filter(|c| c.starts_with("ask") || c.starts_with("delete") || c.starts_with("notify"))
+    .filter(|c| c.starts_with("delete") || c.starts_with("notify"))
     .collect();
   assert_eq!(
     calls,
     [
-      "ask Delete workspace treq/signup?",
       "delete workspace 8",
       "notify workspaceChanged",
       "notify workspacesRemoved",
-      "notify toast Workspace Deleted",
+      "notify toast Workspace deleted",
     ]
   );
 }

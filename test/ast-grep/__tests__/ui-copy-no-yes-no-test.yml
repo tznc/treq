@@ -1,0 +1,39 @@
+id: ui-copy-no-yes-no
+valid:
+  - |
+    fn verbs() -> Button {
+      ui::Button::new("delete", p).label("Delete branch")
+    }
+  - |
+    fn text_child() -> Div {
+      div().child("Yes")
+    }
+  - |
+    fn plain_result() -> String {
+      "Merged into main".to_string()
+    }
+invalid:
+  - |
+    fn yes() -> Button {
+      ui::Button::new("a", p).label("Yes")
+    }
+  - |
+    fn no() -> Button {
+      ui::Button::new("a", p).label("No")
+    }
+  - |
+    fn ok() -> Button {
+      ui::Button::new("a", p).label("OK")
+    }
+  - |
+    fn confirm() -> String {
+      "Are you sure you want to delete this?".to_string()
+    }
+  - |
+    fn done() -> String {
+      "Branch deleted successfully".to_string()
+    }
+  - |
+    fn done_cased() -> String {
+      "Successfully merged".to_string()
+    }

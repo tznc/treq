@@ -1,0 +1,107 @@
+id: gpui-escape-via-layers
+snapshots:
+  ? |
+    fn field(k: &Keystroke) -> bool {
+      k.key == "escape"
+    }
+  : labels:
+    - source: k.key == "escape"
+      style: primary
+      start: 36
+      end: 53
+    - source: ==
+      style: secondary
+      start: 42
+      end: 44
+    - source: '"escape"'
+      style: secondary
+      start: 45
+      end: 53
+  ? |
+    fn match_arm(key: &str) {
+      match key {
+        "escape" => close(),
+        _ => {}
+      }
+    }
+  : labels:
+    - source: '"escape"'
+      style: primary
+      start: 44
+      end: 52
+    - source: '"escape"'
+      style: secondary
+      start: 44
+      end: 52
+  ? |
+    fn matches_macro(key: &str) -> bool {
+      matches!(key, "escape" | "enter")
+    }
+  : labels:
+    - source: '"escape"'
+      style: primary
+      start: 54
+      end: 62
+    - source: matches
+      style: secondary
+      start: 40
+      end: 47
+    - source: matches!(key, "escape" | "enter")
+      style: secondary
+      start: 40
+      end: 73
+    - source: (key, "escape" | "enter")
+      style: secondary
+      start: 48
+      end: 73
+  ? |
+    fn nested(event: &KeyDownEvent) -> bool {
+      event.keystroke.key == "escape"
+    }
+  : labels:
+    - source: event.keystroke.key == "escape"
+      style: primary
+      start: 44
+      end: 75
+    - source: ==
+      style: secondary
+      start: 64
+      end: 66
+    - source: '"escape"'
+      style: secondary
+      start: 67
+      end: 75
+  ? |
+    fn not_equal(k: &Keystroke) -> bool {
+      k.key != "escape"
+    }
+  : labels:
+    - source: k.key != "escape"
+      style: primary
+      start: 40
+      end: 57
+    - source: '!='
+      style: secondary
+      start: 46
+      end: 48
+    - source: '"escape"'
+      style: secondary
+      start: 49
+      end: 57
+  ? |
+    fn reversed(k: &Keystroke) -> bool {
+      "escape" == k.key
+    }
+  : labels:
+    - source: '"escape" == k.key'
+      style: primary
+      start: 39
+      end: 56
+    - source: ==
+      style: secondary
+      start: 48
+      end: 50
+    - source: '"escape"'
+      style: secondary
+      start: 39
+      end: 47

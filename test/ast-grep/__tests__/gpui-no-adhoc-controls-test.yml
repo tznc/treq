@@ -1,0 +1,35 @@
+id: gpui-no-adhoc-controls
+valid:
+  - |
+    fn row(p: &Palette) -> Button {
+      ui::Button::new("save", p).label("Save")
+    }
+  - |
+    fn menu_row() -> Div {
+      div()
+    }
+  - |
+    fn other_closure() {
+      let make = |p: &Palette| ui::Badge::new(p);
+    }
+invalid:
+  - |
+    fn menu_item(p: &Palette) -> Div {
+      div()
+    }
+  - |
+    pub(crate) fn checkbox(checked: bool) -> Div {
+      div()
+    }
+  - |
+    pub fn empty_state(title: &str) -> Div {
+      div()
+    }
+  - |
+    fn spinner() -> Div {
+      div()
+    }
+  - |
+    fn closure() {
+      let icon_button = |name: &str| div().child(name);
+    }

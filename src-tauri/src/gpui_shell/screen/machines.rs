@@ -101,7 +101,7 @@ pub trait MachinesHost: ToolsHost {
   fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String>;
   /// Opens the local repository at `path` in this window.
   fn open_local(&self, path: &str);
-  /// Asks, then forgets the saved SSH host; whether it did.
+  /// Forgets the saved SSH host; whether it did.
   fn remove_machine(&self, place: &Place) -> bool;
   /// Blocks: asks for a folder; `None` when cancelled.
   fn pick_folder(&self) -> Option<String>;
@@ -344,13 +344,6 @@ impl MachinesHost for Backend {
     let Place::Ssh { endpoint_id } = place else {
       return false;
     };
-    if !super::workspace_ops::WorkspaceActionsHost::ask(
-      self,
-      "Remove SSH Host",
-      "Treq forgets this host. Nothing on the host is deleted.",
-    ) {
-      return false;
-    }
     self.with_db(|db| remote_records::remove_user_managed_endpoint(db, endpoint_id));
     true
   }

@@ -1,0 +1,49 @@
+id: gpui-escape-via-layers
+language: rust
+severity: error
+message: >
+  Do not handle Escape by comparing the key. Close a dialog or panel with
+  `ui::EscapeExt::on_escape`, a menu with `ui::DismissExt::dismiss_with`,
+  and test a routed key with `ui::is_escape`, so Escape closes the topmost
+  layer only.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Encodes Escape as a terminal byte; not a dismiss.
+  - "src-tauri/src/gpui_shell/screen/terminal_emu.rs"
+  # The window's key router, which hands Escape to the layers.
+  - "src-tauri/src/gpui_shell/window/keys.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    - kind: binary_expression
+      all:
+        - has:
+            field: operator
+            regex: ^[!=]=$
+        - has:
+            kind: string_literal
+            regex: ^"escape"$
+            stopBy: neighbor
+    - kind: string_literal
+      regex: ^"escape"$
+      any:
+        - inside:
+            kind: match_pattern
+        - inside:
+            kind: or_pattern
+        - inside:
+            kind: token_tree
+            inside:
+              kind: macro_invocation
+              has:
+                field: macro
+                regex: ^matches$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

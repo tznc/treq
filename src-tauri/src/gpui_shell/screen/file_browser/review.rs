@@ -2,6 +2,7 @@
 //! Finish review popover and the Discard dialog.
 
 use super::*;
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 
 impl FileBrowserView {
@@ -13,7 +14,7 @@ impl FileBrowserView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let mut section = div()
+    let mut section = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "file-comment-section".into())
       .border_b_1()
       .border_color(p.border)
@@ -23,9 +24,7 @@ impl FileBrowserView {
       .flex()
       .flex_col()
       .gap_3()
-      .font_family(theme::SANS_FONT)
-      .text_size(zpx(13.))
-      .line_height(zpx(20.));
+      .font_family(theme::SANS_FONT);
     for c in comments {
       section = section.child(self.comment_card(c, p, cx));
     }
@@ -44,7 +43,7 @@ impl FileBrowserView {
     let box_ = || {
       div()
         .bg(p.background)
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .p_3()
         .border_1()
         .border_color(p.border.opacity(0.6))
@@ -76,7 +75,7 @@ impl FileBrowserView {
           .gap_2()
           .child(
             div()
-              .mt(zpx(2.))
+              .mt_0p5()
               .flex_none()
               .opacity(0.)
               .group_hover("comment-card", |s| s.opacity(1.))
@@ -93,7 +92,7 @@ impl FileBrowserView {
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .cursor_pointer()
                 .hover(move |s| s.bg(accent))
                 .child(ui::icon(theme::ICON_X, 12., muted))
@@ -123,7 +122,7 @@ impl FileBrowserView {
       .gap_2()
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_edit(cx);
         } else if k.key == "enter"
@@ -178,13 +177,13 @@ impl FileBrowserView {
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .px_4()
       .py_3()
       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_draft(cx);
         } else if k.key == "enter"
@@ -235,26 +234,6 @@ impl FileBrowserView {
       0
     };
     let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let accent = p.accent;
-    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
-      div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .size_5()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(zpx(2.))
-        .text_color(muted)
-        .when(disabled, |this| this.opacity(0.5))
-        .when(!disabled, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.bg(accent).text_color(fg))
-        })
-        .child(ui::icon(icon, 16., muted))
-    };
     Some(
       div()
         .id("file-search")
@@ -265,12 +244,12 @@ impl FileBrowserView {
         .bg(p.background)
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .shadow_lg()
-        .p(zpx(2.))
+        .p_0p5()
         .flex()
         .items_center()
-        .gap(zpx(2.))
+        .gap_0p5()
         .font_family(theme::SANS_FONT)
         .capture_action(cx.listener(|view, _: &Escape, _, cx| {
           view.close_search(cx);
@@ -284,7 +263,7 @@ impl FileBrowserView {
             .px_2()
             .flex()
             .items_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.input)
             .child(ui::input(&input).appearance(false).bordered(false)),
@@ -297,30 +276,47 @@ impl FileBrowserView {
             .text_color(muted)
             .child(format!("{shown} of {total}")),
         )
-        .child(self.tip(
-          "file-search-prev-tip",
-          "Previous (Shift+Enter)",
-          Side::Top,
-          icon_button("file-search-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
-          }),
-          cx,
-        ))
-        .child(self.tip(
-          "file-search-next-tip",
-          "Next (Enter)",
-          Side::Top,
-          icon_button("file-search-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
-          }),
-          cx,
-        ))
+        .child(
+          self.tip(
+            "file-search-prev-tip",
+            "Previous (Shift+Enter)",
+            Side::Top,
+            ui::IconButton::new(
+              "file-search-prev",
+              theme::ICON_CHEVRON_UP,
+              "Previous match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx))),
+            cx,
+          ),
+        )
+        .child(
+          self.tip(
+            "file-search-next-tip",
+            "Next (Enter)",
+            Side::Top,
+            ui::IconButton::new(
+              "file-search-next",
+              theme::ICON_CHEVRON_DOWN,
+              "Next match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx))),
+            cx,
+          ),
+        )
         .child(
           self.tip(
             "file-search-close-tip",
             "Close (Esc)",
             Side::Top,
-            icon_button("file-search-close", theme::ICON_X, false)
+            ui::IconButton::new("file-search-close", theme::ICON_X, "Close search", p)
+              .size(ui::IconButtonSize::Small)
               .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
             cx,
           ),
@@ -347,12 +343,12 @@ impl FileBrowserView {
       .debug_selector(|| "use-idle-agent".into())
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .cursor_pointer()
       .child(
         div()
           .size(zpx(14.))
-          .rounded(zpx(3.))
+          .rounded(radius::SM)
           .border_1()
           .border_color(if checked { p.primary } else { p.border })
           .bg(if checked { p.primary } else { p.background })
@@ -382,7 +378,7 @@ impl FileBrowserView {
       .w(zpx(width))
       .relative()
       .p_4()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -488,14 +484,14 @@ impl FileBrowserView {
       .w_full()
       .max_w(zpx(512.))
       .p_6()
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
       .text_color(p.popover_foreground)
       .shadow_2xl()
       .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if e.keystroke.key == "escape" {
+        if ui::is_escape(&e.keystroke) {
           cx.stop_propagation();
           close(view, cx);
         }
@@ -505,10 +501,9 @@ impl FileBrowserView {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(zpx(15.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Discard review?"),
           )
@@ -551,7 +546,7 @@ impl FileBrowserView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::black().opacity(0.4))
+            .bg(p.scrim())
             .occlude()
             .on_mouse_down(
               MouseButton::Left,

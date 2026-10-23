@@ -4,6 +4,7 @@
 //! issue picked from the integrations beside it, all at once and stacked on
 //! one branch.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   collections::{HashMap, HashSet},
@@ -30,9 +31,7 @@ use super::{
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
-  workspace_modal::{
-    checkbox, dialog_description, dialog_header, dialog_panel, label_xs, press, Check,
-  },
+  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -595,7 +594,11 @@ impl OpenWorkspacesDialog {
     }
     let opened = summary(created, reused);
     if self.errors.is_empty() {
-      self.toast(ToastTone::Success, "Workspaces opened", opened);
+      self.toast(
+        ToastTone::Success,
+        opened.trim_end_matches('.'),
+        String::new(),
+      );
       if let Some((repo_path, id)) = first {
         (self.sink)(
           ScreenAction::Field {
@@ -757,7 +760,7 @@ impl OpenWorkspacesDialog {
         .flex_col()
         .flex_1()
         .min_w_0()
-        .gap(zpx(6.))
+        .gap_1p5()
         .child(label_xs(label))
         .child(
           div()
@@ -868,7 +871,7 @@ impl OpenWorkspacesDialog {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(label_xs("Workspaces"))
           .child(
             div()
@@ -978,8 +981,8 @@ impl OpenWorkspacesDialog {
           .gap_1()
           .px_2()
           .py_1()
-          .ml(zpx(-8.))
-          .rounded(zpx(6.))
+          .ml_neg_2()
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .child(status)
           .when(rows > 0, |this| {
@@ -1057,7 +1060,7 @@ impl OpenWorkspacesDialog {
           .flex()
           .flex_col()
           .gap_1()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.popover)
@@ -1094,7 +1097,7 @@ impl OpenWorkspacesDialog {
       .flex()
       .gap_1()
       .p_1()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .bg(p.muted)
       .children(self.integrations().into_iter().map(|tab| {
         let (icon, label, picked) = match tab {
@@ -1116,32 +1119,23 @@ impl OpenWorkspacesDialog {
           .flex_1()
           .justify_center()
           .items_center()
-          .gap(zpx(6.))
+          .gap_1p5()
           .px_3()
           .py_1()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
           .map(|this| {
             if active {
-              this.bg(p.background).shadow_sm()
+              this.bg(p.selected())
             } else {
               this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
             }
           })
           .child(ui::icon(icon, 14., color))
           .child(label)
-          .when(picked > 0, |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .rounded_full()
-                .bg(p.primary)
-                .px(zpx(6.))
-                .text_color(p.primary_foreground)
-                .child(picked.to_string()),
-            )
-          })
+          .when(picked > 0, |this| this.child(ui::Count::new(picked, p)))
           .on_click(cx.listener(move |view, _, _, cx| {
             view.picked = Some(tab);
             cx.notify();
@@ -1180,7 +1174,13 @@ impl OpenWorkspacesDialog {
       "Open issues"
     };
     let list: gpui::AnyElement = if self.issues.loading {
-      parts::loading("open-workspaces-issues-loading", p).into_any_element()
+      div()
+        .py_12()
+        .child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-issues-loading",
+          p,
+        ))
+        .into_any_element()
     } else if let Some(err) = &self.issues.error {
       parts::error_state(
         "open-workspaces-issues",
@@ -1191,7 +1191,9 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if items.is_empty() {
-      parts::empty_state(theme::ICON_LINEAR, "No open issues.", p).into_any_element()
+      crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues.", p)
+        .icon(theme::ICON_LINEAR)
+        .into_any_element()
     } else {
       div()
         .children(items.into_iter().map(|issue| self.issue_row(issue, p, cx)))
@@ -1217,7 +1219,13 @@ impl OpenWorkspacesDialog {
       "Open pull requests"
     };
     let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
-      parts::loading("open-workspaces-prs-loading", p).into_any_element()
+      div()
+        .py_12()
+        .child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-prs-loading",
+          p,
+        ))
+        .into_any_element()
     } else if let Some(err) = &self.prs.error {
       parts::error_state(
         "open-workspaces-prs",
@@ -1228,7 +1236,13 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if self.prs.items.is_empty() {
-      parts::empty_state(theme::ICON_PR, "No open pull requests.", p).into_any_element()
+      crate::gpui_shell::ui::EmptyState::new(
+        "open-workspaces-no-open-pull-requests",
+        "No open pull requests.",
+        p,
+      )
+      .icon(theme::ICON_PR)
+      .into_any_element()
     } else {
       div()
         .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
@@ -1360,7 +1374,7 @@ fn pick_row(
   item: Div,
   p: &Palette,
 ) -> gpui::Stateful<Div> {
-  let muted = p.muted;
+  let hover = p.hover();
   div()
     .id(SharedString::from(format!("{id}-row")))
     .role(gpui::Role::CheckBox)
@@ -1372,21 +1386,22 @@ fn pick_row(
     })
     .w_full()
     .px_3()
-    .py(zpx(10.))
+    .py_2p5()
     .border_b_1()
     .border_color(p.border)
     .flex()
     .items_start()
     .gap_2()
     .cursor_pointer()
-    .when(checked, |d| d.bg(p.primary.opacity(0.1)))
-    .when(!checked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
-    .child(div().mt(zpx(4.)).child(checkbox(
-      SharedString::from(format!("{id}-check")),
-      if checked { Check::On } else { Check::Off },
-      disabled,
-      p,
-    )))
+    .when(checked, |d| d.bg(p.selected()))
+    .when(!checked, |d| d.hover(move |s| s.bg(hover)))
+    .child(
+      div().mt_1().child(
+        ui::Checkbox::new(SharedString::from(format!("{id}-check")), p)
+          .checked(checked)
+          .disabled(disabled),
+      ),
+    )
     .child(item)
 }
 
@@ -1587,15 +1602,7 @@ fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -
   );
   let detail = detail.join(" · ");
   row(id, format!("{}: {detail}", target.branch), p)
-    .child(ui::icon(
-      theme::ICON_CHECK,
-      14.,
-      if target.existing {
-        p.muted_foreground
-      } else {
-        p.success
-      },
-    ))
+    .child(ui::icon(theme::ICON_CHECK, 14., p.muted_foreground))
     .child(mono(&target.branch))
     .child(
       div()
@@ -1670,7 +1677,7 @@ impl Render for OpenWorkspacesDialog {
     let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
       let k = &e.keystroke;
       let held = crate::gpui_shell::keys::held(k.modifiers);
-      if k.key == "escape" {
+      if ui::is_escape(k) {
         cx.stop_propagation();
         if view.lines_open {
           view.close_lines(cx);

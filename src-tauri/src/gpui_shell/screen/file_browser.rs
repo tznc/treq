@@ -10,6 +10,7 @@
 
 mod review;
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::RefCell,
@@ -38,8 +39,7 @@ use super::{
   file_browser_data::{
     comment_counts, comment_target, dir_status, file_name, filter_hidden, flatten, is_binary,
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
-    status_bg_hex, status_text_hex, status_title, too_large, FileBrowserHost, LineMarks,
-    COMMENT_HUNK,
+    status_title, too_large, FileBrowserHost, LineMarks, COMMENT_HUNK,
   },
   highlight, ActionSink, ScreenAction,
 };
@@ -48,7 +48,7 @@ use crate::{
   gpui_shell::{
     native::{NativeEvent, ToastTone},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     time,
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
@@ -61,9 +61,9 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// How long "Copied" shows.
 const COPIED_FOR: Duration = Duration::from_millis(2000);
-/// `text-sm leading-normal` in the app's type scale.
-const CODE_FONT: f32 = 13.;
-const LINE_HEIGHT: f32 = CODE_FONT * 1.5;
+/// `TextSize::Code`'s size and line height.
+const CODE_FONT: f32 = 12.;
+const LINE_HEIGHT: f32 = 18.;
 /// JetBrains Mono's advance, for `ch` widths.
 const CH: f32 = CODE_FONT * 0.6;
 
@@ -84,15 +84,6 @@ pub struct Route {
 pub struct Opening {
   pub route: Route,
   pub revision: u64,
-}
-
-/// `--code-background`.
-fn code_background(dark: bool) -> Hsla {
-  if dark {
-    gpui::hsla(0., 0., 0.14, 1.)
-  } else {
-    gpui::hsla(220. / 360., 0.13, 0.94, 1.)
-  }
 }
 
 /// The open file's text, split as React splits it.
@@ -892,11 +883,7 @@ impl FileBrowserView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(
-      ToastTone::Success,
-      "Review canceled",
-      "All comments have been discarded",
-    );
+    self.toast(ToastTone::Success, "Review canceled", "");
   }
 
   fn input_for(
@@ -1115,9 +1102,9 @@ impl FileBrowserView {
 
   // Menus.
 
-  fn copy_toast(&self, text: String, description: String, cx: &mut App) {
+  fn copy_toast(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, "Copied", description);
+    self.toast(ToastTone::Success, &title, "");
   }
 
   /// `FileTreeContextMenu`.
@@ -1125,11 +1112,11 @@ impl FileBrowserView {
     let rel = self.rel(path);
     let full = path.to_string();
     let entity = cx.entity().downgrade();
-    let copy = |text: String, description: String| {
+    let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
         let _ = entity.update(cx, |view, cx| {
-          view.copy_toast(text.clone(), description.clone(), cx)
+          view.copy_toast(text.clone(), title.clone(), cx)
         });
       }
     };
@@ -1155,12 +1142,12 @@ impl FileBrowserView {
     let items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(rel.clone(), format!("Copied relative path: {rel}")),
+        copy(rel.clone(), "Relative path copied".to_string()),
       )
       .icon(MenuIcon::Copy),
       NativeMenuItem::item(
         "Copy full path",
-        copy(full.clone(), format!("Copied full path: {full}")),
+        copy(full.clone(), "Full path copied".to_string()),
       )
       .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
@@ -1309,7 +1296,7 @@ impl FileBrowserView {
                 .debug_selector(|| "file-browser-pending".into())
                 .flex()
                 .items_center()
-                .gap(zpx(6.))
+                .gap_1p5()
                 .text_color(muted)
                 .child(ui::icon(theme::ICON_MESSAGE, 16., p.primary))
                 .child(format!("{} pending", count_label(n, "comment"))),
@@ -1412,7 +1399,7 @@ impl FileBrowserView {
       .px_2()
       .py_1()
       .pl(zpx(depth as f32 * 16. + 8.))
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .cursor_pointer()
       .hover(move |s| s.bg(hover))
       .on_mouse_down(
@@ -1426,7 +1413,7 @@ impl FileBrowserView {
       let open = self.expanded.contains(&entry.path);
       let rel = self.rel(&entry.path);
       let status = dir_status(&self.changed, &rel);
-      let color = status.map_or(p.foreground, |s| tw::color(status_text_hex(s)));
+      let color = status.map_or(p.foreground, |s| status_tone(s).text(p));
       return row
         .child(ui::icon(
           if open {
@@ -1443,7 +1430,7 @@ impl FileBrowserView {
             format!("dir-changes-{rel}"),
             "Contains modified files",
             Side::Top,
-            div().size_2().rounded_full().bg(tw::color(tw::YELLOW_500)),
+            div().size_2().rounded_full().bg(ui::Tone::Warning.color(p)),
             cx,
           )))
         })
@@ -1458,7 +1445,7 @@ impl FileBrowserView {
       .unwrap_or(0);
     let color = status
       .as_deref()
-      .map_or(p.foreground, |s| tw::color(status_text_hex(s)));
+      .map_or(p.foreground, |s| status_tone(s).text(p));
     let selected = self.selected.as_deref() == Some(entry.path.as_str());
     let primary = p.primary;
     row
@@ -1478,7 +1465,7 @@ impl FileBrowserView {
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
-                .gap(zpx(2.))
+                .gap_0p5()
                 .text_color(primary)
                 .child(ui::icon(theme::ICON_MESSAGE, 12., primary))
                 .child(count.to_string()),
@@ -1488,7 +1475,7 @@ impl FileBrowserView {
         )
       })
       .when_some(status, |this, status| {
-        let bg = status_bg_hex(&status).map_or(p.muted, tw::color);
+        let bg = status_dot(&status).map_or(p.muted, |tone| tone.color(p));
         this.child(div().ml_auto().flex_none().child(self.tip(
           format!("status-{rel}"),
           status_title(&status),
@@ -1555,7 +1542,6 @@ impl FileBrowserView {
           "file-markdown",
           &opened.content,
           14.,
-          20.,
           self.dark,
         ))
         .into_any_element()
@@ -1583,7 +1569,7 @@ impl FileBrowserView {
       .size_full()
       .flex()
       .flex_col()
-      .bg(code_background(self.dark))
+      .bg(theme::palette(self.dark).code_background())
       .child(self.content_header(&path, markdown, previewing, p, cx))
       .child(div().flex_1().min_h_0().overflow_hidden().child(body))
       .into_any_element()
@@ -1600,26 +1586,6 @@ impl FileBrowserView {
     let rel = self.rel(path);
     let muted = p.muted_foreground;
     let fg = p.foreground;
-    let hover = p.muted;
-    let green = tw::color(tw::GREEN_500);
-    let icon_button = |id: &'static str, copied: bool, bordered: bool| {
-      div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .p_1()
-        .rounded(zpx(4.))
-        .cursor_pointer()
-        .text_color(muted)
-        .hover(move |s| s.bg(hover).text_color(fg))
-        .when(bordered, |this| {
-          this.border_1().border_color(p.border.opacity(0.5))
-        })
-        .child(if copied {
-          ui::icon(theme::ICON_CHECK, 16., green)
-        } else {
-          ui::icon(theme::ICON_COPY, 16., muted)
-        })
-    };
     let left = div()
       .flex()
       .items_center()
@@ -1637,8 +1603,14 @@ impl FileBrowserView {
           "copy-file-path",
           "Copy file path",
           Side::Top,
-          icon_button("copy-file-path", self.copied_path, false)
-            .on_click(cx.listener(|view, _, _, cx| view.copy_path(cx))),
+          copy_button(
+            "copy-file-path",
+            "Copy file path",
+            self.copied_path,
+            false,
+            p,
+          )
+          .on_click(cx.listener(|view, _, _, cx| view.copy_path(cx))),
           cx,
         ),
       );
@@ -1668,8 +1640,8 @@ impl FileBrowserView {
           .items_center()
           .gap_1()
           .px_2()
-          .py(zpx(2.))
-          .rounded(zpx(6.))
+          .py_0p5()
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .text_color(color)
@@ -1681,9 +1653,9 @@ impl FileBrowserView {
       right = right.child(
         div()
           .flex()
-          .gap(zpx(2.))
-          .p(zpx(2.))
-          .rounded(zpx(8.))
+          .gap_0p5()
+          .p_0p5()
+          .rounded(radius::MD)
           .bg(p.muted)
           .child(
             tab("markdown-code", theme::ICON_CODE, "Code", !previewing).on_click(cx.listener(
@@ -1712,8 +1684,14 @@ impl FileBrowserView {
         "copy-file-contents",
         "Copy file contents",
         Side::Top,
-        icon_button("copy-file-contents", self.copied, true)
-          .on_click(cx.listener(|view, _, _, cx| view.copy_contents(cx))),
+        copy_button(
+          "copy-file-contents",
+          "Copy file contents",
+          self.copied,
+          true,
+          p,
+        )
+        .on_click(cx.listener(|view, _, _, cx| view.copy_contents(cx))),
         cx,
       ),
     );
@@ -1726,7 +1704,7 @@ impl FileBrowserView {
       .pt_2()
       .pb_2()
       .border_b_1()
-      .border_color(tw::color(tw::ZINC_700))
+      .border_color(p.border)
       .child(left)
       .child(right)
   }
@@ -1750,17 +1728,17 @@ impl FileBrowserView {
     let selected = self.selection.is_some_and(|(s, e)| n >= s && n <= e);
     let width = line_number_width(opened.lines.len());
     let bg = if selected {
-      Some(tw::color(tw::BLUE_500).opacity(0.2))
+      Some(p.selected())
     } else if added {
-      Some(tw::color(tw::EMERALD_500).opacity(0.1))
+      Some(ui::Tone::GitOpen.tint(&p))
     } else {
       None
     };
     let hover = p.muted.opacity(0.3);
     let selecting = self.selecting;
-    let blue = tw::color(tw::BLUE_600);
-    let blue_hover = tw::color(tw::BLUE_700);
-    let line = div()
+    let accent = p.primary;
+    let accent_hover = p.primary.opacity(0.85);
+    let line = ui::text(div(), TextSize::Code)
       .id(SharedString::from(format!("code-line-{n}")))
       .debug_selector(move || format!("code-line-{n}"))
       .group("code-line")
@@ -1769,8 +1747,6 @@ impl FileBrowserView {
       .items_start()
       .overflow_hidden()
       .min_h(zpx(18.))
-      .line_height(zpx(LINE_HEIGHT))
-      .text_size(zpx(CODE_FONT))
       .when_some(bg, |this, bg| this.bg(bg))
       .when(bg.is_none(), |this| this.hover(move |s| s.bg(hover)))
       .on_mouse_move(cx.listener(move |view, _, _, cx| view.drag_line(n, cx)))
@@ -1782,7 +1758,7 @@ impl FileBrowserView {
             .top_0()
             .w_1()
             .h_full()
-            .bg(tw::color(tw::EMERALD_500)),
+            .bg(ui::Tone::GitOpen.color(&p)),
         )
       })
       .when(deleted, |this| {
@@ -1794,7 +1770,7 @@ impl FileBrowserView {
             .bottom(zpx(-1.5))
             .w_2()
             .h(zpx(3.))
-            .bg(tw::color(tw::RED_500)),
+            .bg(ui::Tone::GitClosed.color(&p)),
         )
       })
       .child(
@@ -1854,13 +1830,13 @@ impl FileBrowserView {
                       .flex()
                       .items_center()
                       .justify_center()
-                      .rounded(zpx(4.))
-                      .bg(blue)
+                      .rounded(radius::SM)
+                      .bg(accent)
                       .cursor_pointer()
                       .opacity(0.)
                       .group_hover("code-line", |s| s.opacity(1.))
-                      .hover(move |s| s.bg(blue_hover))
-                      .child(ui::icon(theme::ICON_PLUS, 16., gpui::white()))
+                      .hover(move |s| s.bg(accent_hover))
+                      .child(ui::icon(theme::ICON_PLUS, 16., p.primary_foreground))
                       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                       .on_click(cx.listener(move |view, _, _, cx| {
                         cx.stop_propagation();
@@ -1902,5 +1878,46 @@ impl FileBrowserView {
       })
       .collect();
     highlight::styled_marked(text, self.language, self.dark, &marks).into_any_element()
+  }
+}
+
+/// The change a file status letter stands for, as the file row's name colour.
+fn status_tone(status: &str) -> ui::Tone {
+  match status {
+    "A" => ui::Tone::Success,
+    "D" => ui::Tone::Danger,
+    _ => ui::Tone::Warning,
+  }
+}
+
+/// The dot after a file's name; `None` for a neutral one.
+fn status_dot(status: &str) -> Option<ui::Tone> {
+  match status {
+    "??" | "A" => Some(ui::Tone::Success),
+    "D" => Some(ui::Tone::Danger),
+    "M" => Some(ui::Tone::Warning),
+    "R" => Some(ui::Tone::Primary),
+    _ => None,
+  }
+}
+
+/// A copy button that shows a check for a moment after it copied.
+fn copy_button(
+  id: &'static str,
+  label: &'static str,
+  copied: bool,
+  bordered: bool,
+  p: &Palette,
+) -> ui::IconButton {
+  let icon = if copied {
+    theme::ICON_CHECK
+  } else {
+    theme::ICON_COPY
+  };
+  let button = ui::IconButton::new(id, icon, label, p).size(ui::IconButtonSize::Small);
+  if bordered {
+    button.outline()
+  } else {
+    button
   }
 }

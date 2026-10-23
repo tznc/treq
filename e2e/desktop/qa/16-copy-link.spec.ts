@@ -37,7 +37,7 @@ for (const [name, what, suffix] of [
       title: `After Copy link on the ${what} button`,
       screen: true,
       rest: false,
-      expectations: ["The menu is gone and a 'Copied' toast reads 'Link copied to clipboard'"],
+      expectations: ["The menu is gone and a one-line 'Link copied' toast shows"],
     });
     const copied = execFileSync("xclip", ["-o", "-selection", "clipboard"], {
       encoding: "utf8",

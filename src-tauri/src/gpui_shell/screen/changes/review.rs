@@ -3,6 +3,7 @@
 //! conflicts, the pending review the backend keeps, and sending it to an
 //! agent through React.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{ops::Range, time::Duration};
 
@@ -580,11 +581,7 @@ impl ChangesView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(
-      ToastTone::Success,
-      "Review canceled",
-      "All comments have been discarded",
-    );
+    self.toast(ToastTone::Success, "Review canceled", "");
   }
 
   /// A refreshed list that adds, removes or changes a file waits while a
@@ -723,11 +720,8 @@ impl ChangesView {
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
     self.toast(
       ToastTone::Success,
-      "Copied",
-      format!(
-        "{} copied to clipboard",
-        count_label(all.len(), "outdated comment")
-      ),
+      &format!("{} copied", count_label(all.len(), "outdated comment")),
+      "",
     );
   }
 
@@ -755,13 +749,9 @@ impl ChangesView {
     };
     let items = vec![
       NativeMenuItem::item("Add comment", add).icon(MenuIcon::MessageSquare),
-      NativeMenuItem::item(
-        "Copy line location",
-        copy(location, "Line location copied to clipboard"),
-      )
-      .icon(MenuIcon::Copy),
-      NativeMenuItem::item("Copy lines", copy(lines, "Lines copied to clipboard"))
+      NativeMenuItem::item("Copy line location", copy(location, "Line location copied"))
         .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy lines", copy(lines, "Lines copied")).icon(MenuIcon::Copy),
     ];
     self.popup(
       PopupRequest::ShowMenu {
@@ -889,18 +879,18 @@ impl ChangesView {
       .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
     let bg = if selected {
-      Some(tw::color(tw::BLUE_500).opacity(if self.dark { 0.25 } else { 0.1 }))
+      Some(p.selected())
     } else {
       match kind {
-        LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-        LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
+        LineKind::Added => Some(Tone::GitOpen.tint(p)),
+        LineKind::Removed => Some(Tone::GitClosed.tint(p)),
         LineKind::Context => None,
       }
     };
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
-      LineKind::Removed => tw::color(tw::RED_500),
-      _ => tw::color(tw::EMERALD_500),
+      LineKind::Removed => Tone::GitClosed.color(p),
+      _ => Tone::GitOpen.color(p),
     }
     .opacity(0.45);
     let changed: Vec<(Range<usize>, Hsla)> = changed.iter().map(|r| (r.clone(), mark)).collect();
@@ -1019,8 +1009,8 @@ impl ChangesView {
                     let id = format!("add-comment-{path}-{h}-{l}");
                     move || id
                   })
-                  .p(zpx(2.))
-                  .rounded(zpx(4.))
+                  .p_0p5()
+                  .rounded(radius::SM)
                   .bg(p.primary)
                   .cursor_pointer()
                   .opacity(0.)
@@ -1049,7 +1039,7 @@ impl ChangesView {
           .flex_1()
           .min_w_0()
           .px_2()
-          .py(zpx(2.))
+          .py_0p5()
           .child(self.marked_text(
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
@@ -1111,7 +1101,7 @@ impl ChangesView {
     let box_ = || {
       div()
         .bg(p.background)
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .p_3()
         .border_1()
         .border_color(p.border.opacity(0.6))
@@ -1149,7 +1139,7 @@ impl ChangesView {
           .gap_2()
           .child(
             div()
-              .mt(zpx(2.))
+              .mt_0p5()
               .flex_none()
               .opacity(0.)
               .group_hover("comment-card", |s| s.opacity(1.))
@@ -1165,7 +1155,7 @@ impl ChangesView {
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .cursor_pointer()
                 .hover(move |s| s.bg(accent))
                 .child(ui::icon(theme::ICON_X, 12., muted))
@@ -1249,7 +1239,7 @@ impl ChangesView {
       .font_family(theme::SANS_FONT)
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_edit(cx);
         } else if k.key == "enter"
@@ -1316,7 +1306,7 @@ impl ChangesView {
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .mx_2()
       .my_1()
       .px_4()
@@ -1325,7 +1315,7 @@ impl ChangesView {
       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
       .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let k = &e.keystroke;
-        if k.key == "escape" {
+        if ui::is_escape(k) {
           cx.stop_propagation();
           view.cancel_draft(cx);
         } else if k.key == "enter"
@@ -1343,7 +1333,7 @@ impl ChangesView {
           div()
             .mb_2()
             .border_l_2()
-            .border_color(tw::color(tw::SKY_500).opacity(0.5))
+            .border_color(Tone::Primary.border(p))
             .pl_3()
             .italic()
             .text_color(p.muted_foreground)
@@ -1351,7 +1341,7 @@ impl ChangesView {
               ui::text(div(), TextSize::Xs)
                 .font_weight(FontWeight::MEDIUM)
                 .not_italic()
-                .mb(zpx(2.))
+                .mb_0p5()
                 .child(format!("Quoting @{}", quote.author)),
             )
             .child(d.line_content.join(" ")),
@@ -1459,13 +1449,12 @@ impl ChangesView {
     if outdated.is_empty() {
       return None;
     }
-    let shade = |light: u32, dark: u32| tw::color(if self.dark { dark } else { light });
-    let amber = tw::color(tw::AMBER_500);
+    let tone = Tone::Warning;
     let mut section = div()
       .debug_selector(|| "outdated-comments".into())
       .border_b_1()
-      .border_color(amber.opacity(0.4))
-      .bg(amber.opacity(0.05))
+      .border_color(tone.border(p))
+      .bg(tone.tint(p))
       .px_4()
       .py_3()
       .flex()
@@ -1477,10 +1466,10 @@ impl ChangesView {
       section = section.child(
         div()
           .bg(p.background)
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .p_3()
           .border_1()
-          .border_color(amber.opacity(0.3))
+          .border_color(tone.border(p))
           .child(
             div()
               .flex()
@@ -1495,11 +1484,11 @@ impl ChangesView {
                   .gap_2()
                   .child(
                     ui::text(div(), TextSize::Xs)
-                      .px(zpx(6.))
-                      .py(zpx(2.))
-                      .rounded(zpx(4.))
-                      .bg(amber.opacity(0.25))
-                      .text_color(shade(tw::AMBER_700, tw::AMBER_300))
+                      .px_1p5()
+                      .py_0p5()
+                      .rounded(radius::SM)
+                      .bg(tone.tint(p))
+                      .text_color(tone.text(p))
                       .font_weight(FontWeight::MEDIUM)
                       .child("Outdated"),
                   )
@@ -1513,7 +1502,7 @@ impl ChangesView {
                 div()
                   .id(SharedString::from(format!("delete-outdated-{id}")))
                   .p_1()
-                  .rounded(zpx(4.))
+                  .rounded(radius::SM)
                   .cursor_pointer()
                   .hover(move |s| s.bg(accent))
                   .child(ui::icon(theme::ICON_X, 12., p.muted_foreground))
@@ -1524,7 +1513,7 @@ impl ChangesView {
             this.child(
               ui::text(div(), TextSize::Xs)
                 .bg(p.muted.opacity(0.6))
-                .rounded(zpx(4.))
+                .rounded(radius::SM)
                 .px_2()
                 .py_1()
                 .mb_2()
@@ -1672,7 +1661,7 @@ impl ChangesView {
               .text_color(p.muted_foreground)
               .child(format!("{} pending", count_label(total, "comment"))),
           )
-          .children(self.agent_count()),
+          .children(self.agent_count(p)),
       )
       .child(
         div()
@@ -1734,8 +1723,7 @@ impl ChangesView {
     if self.review.stale.is_empty() {
       return None;
     }
-    let shade = |light: u32, dark: u32| tw::color(if self.dark { dark } else { light });
-    let amber = tw::color(tw::AMBER_500);
+    let tone = Tone::Warning;
     let n = self.review.stale.len();
     let outdated = self
       .review
@@ -1752,13 +1740,13 @@ impl ChangesView {
         )
       })
       .count();
-    let fg = shade(tw::AMBER_800, tw::AMBER_200);
+    let fg = tone.text(p);
     let button = |id: &'static str, icon: &'static str, label: String| {
       Button::new(id, p)
         .variant(Variant::Outline)
         .size(Size::Sm)
-        .gap(zpx(6.))
-        .border_color(amber.opacity(0.6))
+        .gap_1p5()
+        .border_color(tone.border(p))
         .text_color(fg)
         .icon(icon, 12.)
         .label(label)
@@ -1771,26 +1759,22 @@ impl ChangesView {
         .justify_between()
         .px_4()
         .py_2()
-        .bg(amber.opacity(0.15))
+        .bg(tone.tint(p))
         .border_b_1()
-        .border_color(amber.opacity(0.4))
+        .border_color(tone.border(p))
         .child(
           div()
             .flex()
             .items_center()
             .gap_2()
-            .child(ui::icon(
-              theme::ICON_TRIANGLE_ALERT,
-              16.,
-              shade(tw::AMBER_700, tw::AMBER_300),
-            ))
+            .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 16., tone.text(p)))
             .child(div().text_color(fg).child(format!(
               "{} changed since you started reviewing",
               count_label(n, "file")
             )))
             .child(
               div()
-                .text_color(shade(tw::AMBER_700, tw::AMBER_300).opacity(0.8))
+                .text_color(tone.text(p).opacity(0.8))
                 .child(stale_names(&self.review.stale)),
             ),
         )
@@ -1839,12 +1823,12 @@ impl ChangesView {
         .debug_selector(|| "use-idle-agent".into())
         .flex()
         .items_center()
-        .gap(zpx(6.))
+        .gap_1p5()
         .cursor_pointer()
         .child(
           div()
             .size(zpx(14.))
-            .rounded(zpx(3.))
+            .rounded(radius::SM)
             .border_1()
             .border_color(if checked { p.primary } else { p.border })
             .bg(if checked { p.primary } else { p.background })
@@ -1871,7 +1855,7 @@ impl ChangesView {
       .w(zpx(width))
       .relative()
       .p_4()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)
@@ -1996,14 +1980,14 @@ impl ChangesView {
       .w_full()
       .max_w(zpx(512.))
       .p_6()
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
       .text_color(p.popover_foreground)
       .shadow_2xl()
       .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if e.keystroke.key == "escape" {
+        if ui::is_escape(&e.keystroke) {
           cx.stop_propagation();
           close(view, cx);
         }
@@ -2013,10 +1997,9 @@ impl ChangesView {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(zpx(15.))
               .font_weight(FontWeight::SEMIBOLD)
               .child("Discard review?"),
           )
@@ -2059,7 +2042,7 @@ impl ChangesView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::black().opacity(0.4))
+            .bg(p.scrim())
             .occlude()
             .on_mouse_down(
               MouseButton::Left,

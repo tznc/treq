@@ -10,6 +10,7 @@
 //! [`account_data`]: crate::gpui_shell::screen::account_data
 //! [`Account`]: crate::gpui_shell::screen::account_data::Account
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -25,9 +26,9 @@ use crate::gpui_shell::{
     account_data::{self, CloudAction},
     ScreenAction,
   },
-  theme::{self, tw, Palette},
+  theme::{self, Palette},
   tooltips::{HasTooltips, Tooltips},
-  ui::{self, Button, Size, TextSize, Variant},
+  ui::{self, Button, Size, TextSize, Tone, Variant},
 };
 
 /// The repository setting the Linear API key is stored under.
@@ -1012,9 +1013,9 @@ fn section_header(icon: &'static str, name: &'static str, note: &str, p: &Palett
     .child(div().text_color(p.muted_foreground).child(note.to_string()))
 }
 
-/// `text-red-600 dark:text-red-400`.
+/// Error text.
 fn red(p: &Palette) -> gpui::Hsla {
-  tw::color(if p.dark { tw::RED_400 } else { tw::RED_600 })
+  Tone::Danger.text(p)
 }
 
 /// A click handler that presses the button `id` of a view.
@@ -1041,7 +1042,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .variant(Variant::Outline)
         .size(Size::Sm)
         .h(zpx(28.))
-        .gap(zpx(6.))
+        .gap_1p5()
         .disabled(c.submitting)
         .child(ui::icon(theme::ICON_WRENCH, 14., p.foreground))
         .label("Repair")
@@ -1102,7 +1103,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         } => div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             div()
               .flex()
@@ -1205,10 +1206,9 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     (None, None) => div().into_any_element(),
   };
 
-  let green = tw::color(tw::GREEN_500);
   div()
     .debug_selector(|| "cloud-workspace-card".into())
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
     .p_4()
@@ -1233,20 +1233,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .flex()
           .items_center()
           .gap_2()
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .rounded(zpx(4.))
-              .bg(green.opacity(0.2))
-              .px(zpx(6.))
-              .py(zpx(2.))
-              .font_weight(FontWeight::SEMIBOLD)
-              .text_color(tw::color(if p.dark {
-                tw::GREEN_400
-              } else {
-                tw::GREEN_700
-              }))
-              .child("PRO"),
-          )
+          .child(ui::Badge::new("PRO", p))
           .child(
             div()
               .flex_1()
@@ -1286,7 +1273,7 @@ pub(in crate::gpui_shell::screen) fn cloud_delete_dialog_element(
     .flex()
     .items_center()
     .justify_center()
-    .bg(gpui::black().opacity(0.5))
+    .bg(p.scrim())
     .occlude()
     .child(
       div()
@@ -1299,7 +1286,7 @@ pub(in crate::gpui_shell::screen) fn cloud_delete_dialog_element(
         .flex_col()
         .gap_4()
         .p_6()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border)
         .bg(p.background)
@@ -1420,7 +1407,6 @@ impl SettingsView {
       window,
       cx,
     );
-    let yellow = tw::color(tw::YELLOW_500);
     div()
       .w_full()
       .max_w(zpx(384.))
@@ -1428,18 +1414,14 @@ impl SettingsView {
       .p_3()
       .border_1()
       .border_dashed()
-      .border_color(yellow.opacity(0.5))
-      .rounded(zpx(8.))
-      .bg(yellow.opacity(0.05))
+      .border_color(Tone::Warning.border(p))
+      .rounded(radius::MD)
+      .bg(Tone::Warning.tint(p))
       .child(
         ui::text(div(), TextSize::Xs)
           .mb_2()
           .font_weight(FontWeight::MEDIUM)
-          .text_color(tw::color(if p.dark {
-            tw::YELLOW_400
-          } else {
-            tw::YELLOW_600
-          }))
+          .text_color(Tone::Warning.text(p))
           .child("Dev: Paste callback URL"),
       )
       .child(
@@ -1464,7 +1446,7 @@ impl SettingsView {
       .when_some(dev.error.clone(), |this, error| {
         this.child(
           ui::text(div().mt_1(), TextSize::Xs)
-            .text_color(tw::color(tw::RED_500))
+            .text_color(Tone::Danger.color(p))
             .child(error),
         )
       })
@@ -1497,7 +1479,7 @@ impl SettingsView {
       div()
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .p_4()
     };
     let row = |name: String, value: AnyElement| {
@@ -1533,7 +1515,7 @@ impl SettingsView {
       .gap_1()
       .font_weight(FontWeight::MEDIUM)
       .when(s.pro, |this| {
-        this.child(ui::icon(theme::ICON_CROWN, 12., tw::color(tw::YELLOW_500)))
+        this.child(ui::icon(theme::ICON_CROWN, 12., Tone::Warning.color(p)))
       })
       .child(if s.pro { "Pro" } else { "Free" });
     let subscription = card()
@@ -1554,12 +1536,8 @@ impl SettingsView {
           .child(row("Plan".into(), plan.into_any_element()))
           .when_some(s.status.clone(), |this, (status, tone)| {
             let color = match tone {
-              StatusTone::Good => tw::color(if p.dark { tw::GREEN_400 } else { tw::GREEN_600 }),
-              StatusTone::Warn => tw::color(if p.dark {
-                tw::YELLOW_400
-              } else {
-                tw::YELLOW_600
-              }),
+              StatusTone::Good => Tone::Success.text(p),
+              StatusTone::Warn => Tone::Warning.text(p),
               StatusTone::Muted => p.muted_foreground,
             };
             this.child(row(
@@ -1692,7 +1670,7 @@ impl SettingsView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .py(zpx(6.))
+                    .py_1p5()
                     .child(div().font_family(theme::MONO_FONT).child(name.clone()))
                     .child(div().text_color(p.muted_foreground).child(if *private {
                       "Private"

@@ -7,8 +7,6 @@ use gpui_kit::{
   *,
 };
 
-use super::theme::BRAND_BLUE;
-
 // The blue "T" mark, shared with the website and desktop app.
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo.imageset/logo@3x.png");
 
@@ -21,14 +19,14 @@ pub fn logo(size: f32) -> Img {
   img(LOGO.clone()).size(px(size))
 }
 
-/// The lowercase "treq" wordmark in bold brand-blue monospace.
+/// The lowercase "treq" wordmark in bold primary-blue monospace.
 pub fn wordmark(size: f32, cx: &App) -> Div {
   div()
     .font_family(cx.theme().mono_font_family.clone())
     .font_weight(FontWeight::BOLD)
     .text_size(px(size))
     .line_height(relative(1.))
-    .text_color(rgb(BRAND_BLUE))
+    .text_color(treq_ui::theme::current(cx).primary)
     .child("treq")
 }
 
