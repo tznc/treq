@@ -20,9 +20,13 @@ use gpui_kit::{
   *,
 };
 
+use std::collections::HashMap;
+
+use treq_lib::core::remote::RemoteHostCheck;
+
 use crate::{
-  backend::{self, AppEvent, Connection, ConnectionKind},
-  managed, store,
+  backend::{self, AppEvent, Connection, ConnectionKind, MANAGED_MACHINE},
+  managed, remote, store,
 };
 
 pub use load::Load;
@@ -39,17 +43,79 @@ pub struct AppModel {
   pub user: Option<String>,
   pub auth_busy: bool,
   pub auth_error: Option<String>,
-  /// The connected endpoint, if any.
+  /// The machine the screens act on, if any.
   pub connection: Option<Connection>,
-  /// The step text while connecting.
-  pub connecting: Option<&'static str>,
-  pub connect_error: Option<String>,
-  /// Why the connected endpoint is cut off, if it is.
-  pub cutoff: Option<String>,
+  /// Each machine's state this session, by machine id
+  /// ([`MANAGED_MACHINE`] or an SSH host's record id).
+  pub machines: HashMap<String, MachineState>,
   /// Bumped when every screen should refetch (reconnect, resume).
   pub epoch: usize,
   /// Set while the launch snapshot is being restored.
   restoring: bool,
+}
+
+impl AppModel {
+  pub fn machine(&self, id: &str) -> MachineState {
+    self.machines.get(id).cloned().unwrap_or_default()
+  }
+
+  /// Why the active machine is cut off, if it is.
+  pub fn cutoff(&self) -> Option<String> {
+    let id = self.connection.as_ref()?.machine();
+    match &self.machines.get(id)?.status {
+      MachineStatus::CutOff(reason) => Some(reason.clone()),
+      _ => None,
+    }
+  }
+
+  fn set_status(&mut self, id: &str, status: MachineStatus) {
+    self.machines.entry(id.to_string()).or_default().status = status;
+  }
+}
+
+/// One machine's connection state.
+#[derive(Clone, Default)]
+pub struct MachineState {
+  pub status: MachineStatus,
+  /// What the host can run, from the last connect. `None` before one, or
+  /// when the host's treq predates host checks.
+  pub check: Option<RemoteHostCheck>,
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub enum MachineStatus {
+  /// Not connected this session.
+  #[default]
+  Idle,
+  /// Connecting, with the step shown.
+  Connecting(&'static str),
+  Ready,
+  /// The last connect failed, with the raw error.
+  Failed(String),
+  /// The device's access ended (Treq Cloud), with the reason.
+  CutOff(String),
+}
+
+impl MachineStatus {
+  pub fn is_connecting(&self) -> bool {
+    matches!(self, Self::Connecting(_))
+  }
+}
+
+/// A machine to connect to.
+#[derive(Clone)]
+pub enum Machine {
+  Managed,
+  Host(store::UserManagedEndpoint),
+}
+
+impl Machine {
+  pub fn id(&self) -> &str {
+    match self {
+      Machine::Managed => MANAGED_MACHINE,
+      Machine::Host(record) => &record.id,
+    }
+  }
 }
 
 /// Where a page is, for the restore snapshot.
@@ -189,7 +255,7 @@ impl Root {
     let root = Self {
       model,
       stack: vec![Page {
-        title: "Treq".into(),
+        title: "Machines".into(),
         view: home.into(),
         location: Location::default(),
       }],
@@ -232,16 +298,28 @@ impl Root {
       AppEvent::Cutoff {
         endpoint_id,
         reason,
-      } => self.model.update(cx, |m, cx| {
-        if m
-          .connection
-          .as_ref()
-          .is_some_and(|c| c.endpoint.id == endpoint_id)
-        {
-          m.cutoff = reason;
-          cx.notify();
+      } => {
+        let machine = [MANAGED_MACHINE.to_string()]
+          .into_iter()
+          .chain(store::user_managed_endpoints().into_iter().map(|e| e.id))
+          .find(|id| {
+            backend::get()
+              .connection_to(id)
+              .is_some_and(|c| c.endpoint.id == endpoint_id)
+          });
+        if let Some(machine) = machine {
+          self.model.update(cx, |m, cx| {
+            m.set_status(
+              &machine,
+              match reason {
+                Some(reason) => MachineStatus::CutOff(reason),
+                None => MachineStatus::Ready,
+              },
+            );
+            cx.notify();
+          });
         }
-      }),
+      }
       AppEvent::Resumed => resume(cx),
     }
   }
@@ -257,7 +335,7 @@ impl Render for Root {
     let model = self.model.read(cx);
     // The landing page brings its own branding, so it drops the title bar.
     let landing = !can_go_back && is_landing(model.user.as_deref(), model.connection.is_some());
-    let blocked = model.cutoff.clone();
+    let blocked = model.cutoff();
     let managed = model
       .connection
       .as_ref()
@@ -348,11 +426,11 @@ fn cutoff_overlay(reason: String, managed: bool, cx: &App) -> impl IntoElement {
             )
           })
           .child(
-            Button::new("switch-host")
+            Button::new("switch-machine")
               .outline()
               .large()
-              .label("Switch host")
-              .on_click(|_, _, cx| disconnect(cx)),
+              .label("Other machines")
+              .on_click(|_, _, cx| show_machines(cx)),
           )
           .into_any_element(),
       ]),
@@ -396,138 +474,234 @@ pub fn sign_out(cx: &mut App) {
   });
   cx.spawn(async move |cx| {
     let _ = done.await;
-    model.update(cx, |m, cx| {
+    backend::get().remove_connection(MANAGED_MACHINE);
+    let was_active = model.update(cx, |m, cx| {
       m.auth_busy = false;
-      if m
+      m.machines.remove(MANAGED_MACHINE);
+      let was_active = m
         .connection
         .as_ref()
-        .is_some_and(|c| c.kind == ConnectionKind::Managed)
-      {
+        .is_some_and(|c| c.kind == ConnectionKind::Managed);
+      if was_active {
         m.connection = None;
-        m.cutoff = None;
       }
       cx.notify();
+      was_active
     });
-    cx.update(nav::home);
+    if was_active {
+      cx.update(nav::home);
+    }
   })
   .detach();
 }
 
-/// Connects to the managed instance, then opens the repository picker.
-pub fn connect_managed(cx: &mut App) {
-  connect(cx, None)
-}
-
-pub fn connect_user_managed(endpoint: store::UserManagedEndpoint, cx: &mut App) {
-  connect(cx, Some(endpoint))
-}
-
-fn connect(cx: &mut App, user_managed: Option<store::UserManagedEndpoint>) {
+/// Opens `machine`: straight back to its last repository when it's
+/// connected, otherwise after connecting.
+pub fn open_machine(machine: Machine, cx: &mut App) {
   let model = model(cx);
+  let state = model.read(cx).machine(machine.id());
+  match (&state.status, backend::get().connection_to(machine.id())) {
+    (MachineStatus::Connecting(_), _) => {}
+    (MachineStatus::Ready, Some(connection)) => {
+      activate(connection, &model, cx);
+      open_location(cx);
+    }
+    _ => connect(machine, true, cx),
+  }
+}
+
+/// Connects to `machine` and checks what it can run. With `open`, then
+/// opens its last repository (or the repository picker).
+pub fn connect(machine: Machine, open: bool, cx: &mut App) {
+  let model = model(cx);
+  let id = machine.id().to_string();
   model.update(cx, |m, cx| {
-    m.connecting = Some(if user_managed.is_some() {
-      "Connecting"
-    } else {
-      "Checking the managed instance"
-    });
-    m.connect_error = None;
+    m.set_status(
+      &id,
+      MachineStatus::Connecting(match machine {
+        Machine::Managed => "Checking the machine",
+        Machine::Host(_) => "Connecting",
+      }),
+    );
     cx.notify();
   });
   let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<&'static str>();
   let result = backend::spawn(async move {
-    match user_managed {
-      Some(record) => {
-        managed::stop();
+    let connection = match machine {
+      Machine::Host(record) => {
         let connection = Connection {
           endpoint: record.to_endpoint(),
           kind: ConnectionKind::UserManaged {
             id: record.id.clone(),
           },
         };
-        backend::get().set_connection(Some(connection.clone()));
-        Ok(connection)
+        backend::get().put_connection(connection.clone());
+        connection
       }
-      None => {
+      Machine::Managed => {
+        let tx = progress_tx.clone();
         managed::connect(move |step| {
-          let _ = progress_tx.unbounded_send(step);
+          let _ = tx.unbounded_send(step);
         })
-        .await
+        .await?
       }
-    }
+    };
+    let _ = progress_tx.unbounded_send("Checking the machine");
+    let check = remote::host_check(&connection.endpoint).await?;
+    Ok::<_, String>((connection, check))
   });
   let progress_model = model.clone();
+  let progress_id = id.clone();
   cx.spawn(async move |cx| {
     while let Some(step) = progress_rx.next().await {
       progress_model.update(cx, |m, cx| {
-        m.connecting = Some(step);
-        cx.notify();
+        if m.machine(&progress_id).status.is_connecting() {
+          m.set_status(&progress_id, MachineStatus::Connecting(step));
+          cx.notify();
+        }
       });
     }
   })
   .detach();
   cx.spawn(async move |cx| {
     let Ok(result) = result.await else { return };
-    let connected = result.is_ok();
-    model.update(cx, |m, cx| {
-      m.connecting = None;
-      match result {
-        Ok(connection) => {
-          m.connection = Some(connection);
-          m.cutoff = None;
-          m.epoch += 1;
-        }
-        Err(error) => m.connect_error = Some(error),
+    match result {
+      Ok((connection, check)) => {
+        model.update(cx, |m, cx| {
+          let state = m.machines.entry(id.clone()).or_default();
+          state.status = MachineStatus::Ready;
+          state.check = check;
+          cx.notify();
+        });
+        cx.update(|cx| {
+          // A background reconnect leaves another active machine alone.
+          let current = model
+            .read(cx)
+            .connection
+            .as_ref()
+            .map(|c| c.machine().to_string());
+          if open || current.is_none() || current.as_deref() == Some(id.as_str()) {
+            activate(connection, &model, cx);
+          }
+          if open && !model.read(cx).restoring {
+            open_location(cx);
+          }
+        });
       }
-      cx.notify();
-    });
-    if connected {
-      cx.update(|cx| {
-        let restoring = model.read(cx).restoring;
-        if !restoring {
-          open_repositories(cx);
-        }
-      });
+      Err(error) => model.update(cx, |m, cx| {
+        m.set_status(&id, MachineStatus::Failed(error));
+        cx.notify();
+      }),
     }
   })
   .detach();
 }
 
-fn open_repositories(cx: &mut App) {
-  nav::home(cx);
-  screens::repos::open(cx);
+/// Makes `connection`'s machine the one the screens act on.
+fn activate(connection: Connection, model: &Entity<AppModel>, cx: &mut App) {
+  backend::get().set_active(Some(connection.machine()));
+  model.update(cx, |m, cx| {
+    m.connection = Some(connection);
+    m.epoch += 1;
+    cx.notify();
+  });
 }
 
-pub fn disconnect(cx: &mut App) {
-  managed::stop();
-  backend::get().set_connection(None);
+/// The active machine's last repository, or its repository picker.
+fn open_location(cx: &mut App) {
+  nav::home(cx);
+  screens::repos::open(cx);
+  if let Some(repo) = last_repository(cx) {
+    screens::workspaces::open(repo, cx);
+  }
+}
+
+/// The repository last opened on the active machine.
+pub fn last_repository(cx: &App) -> Option<String> {
+  let connection = model(cx).read(cx).connection.clone()?;
+  last_repository_on(&connection.endpoint)
+}
+
+pub fn last_repository_on(
+  endpoint: &treq_lib::core::remote_control_plane::SshEndpoint,
+) -> Option<String> {
+  store::saved_repositories(&endpoint.id, store::endpoint_generation(endpoint))
+    .into_iter()
+    .next()
+    .map(|r| r.canonical_remote_path)
+}
+
+/// The active machine's name, for page titles.
+pub fn machine_name(cx: &App) -> Option<String> {
+  match &model(cx).read(cx).connection.as_ref()?.kind {
+    ConnectionKind::Managed => Some("Cloud machine".into()),
+    ConnectionKind::UserManaged { id } => store::user_managed_endpoints()
+      .into_iter()
+      .find(|e| &e.id == id)
+      .map(|e| e.display_name),
+  }
+}
+
+/// Back to the machine list. Every machine stays connected.
+pub fn show_machines(cx: &mut App) {
+  backend::get().set_active(None);
   store::save_session_snapshot(None);
   model(cx).update(cx, |m, cx| {
     m.connection = None;
-    m.cutoff = None;
-    m.connect_error = None;
     cx.notify();
   });
   nav::home(cx);
 }
 
+/// Removes a saved SSH host and drops its connection and terminals.
+pub fn forget_host(id: &str, cx: &mut App) {
+  store::remove_user_managed_endpoint(id);
+  if let Some(connection) = backend::get().remove_connection(id) {
+    backend::spawn_detached(async move {
+      let backend = backend::get();
+      backend.pool.mark_dead(&connection.endpoint).await;
+      backend
+        .ptys
+        .close_all_for_endpoint(&connection.endpoint.id)
+        .await;
+    });
+  }
+  let id = id.to_string();
+  model(cx).update(cx, |m, cx| {
+    m.machines.remove(&id);
+    if m.connection.as_ref().is_some_and(|c| c.machine() == id) {
+      m.connection = None;
+    }
+    cx.notify();
+  });
+}
+
 pub fn reauthenticate(cx: &mut App) {
   let model = model(cx);
   model.update(cx, |m, cx| {
-    m.connecting = Some("Reauthenticating");
+    m.set_status(
+      MANAGED_MACHINE,
+      MachineStatus::Connecting("Reauthenticating"),
+    );
     cx.notify();
   });
   let result = backend::spawn(managed::reauthenticate());
   cx.spawn(async move |cx| {
     let Ok(result) = result.await else { return };
     model.update(cx, |m, cx| {
-      m.connecting = None;
       match result {
         Ok(()) => {
-          m.cutoff = None;
-          m.connection = backend::get().connection();
+          m.set_status(MANAGED_MACHINE, MachineStatus::Ready);
+          if m
+            .connection
+            .as_ref()
+            .is_some_and(|c| c.kind == ConnectionKind::Managed)
+          {
+            m.connection = backend::get().connection_to(MANAGED_MACHINE);
+          }
           m.epoch += 1;
         }
-        Err(error) => m.connect_error = Some(error),
+        Err(error) => m.set_status(MANAGED_MACHINE, MachineStatus::Failed(error)),
       }
       cx.notify();
     });
@@ -539,17 +713,14 @@ pub fn reauthenticate(cx: &mut App) {
 /// have every screen refetch (PRD mobile acceptance criterion 7).
 fn resume(cx: &mut App) {
   let model = model(cx);
-  let managed = model
-    .read(cx)
-    .connection
-    .as_ref()
-    .is_some_and(|c| c.kind == ConnectionKind::Managed);
-  let busy = model.read(cx).connecting.is_some() || model.read(cx).cutoff.is_some();
-  if managed && !busy {
+  // The Treq Cloud machine may have slept, or its certificate lapsed, while
+  // the app was in the background. Only a ready one is rechecked.
+  let managed = model.read(cx).machine(MANAGED_MACHINE).status == MachineStatus::Ready;
+  if managed {
     let stale = backend::spawn(managed::is_stale());
     cx.spawn(async move |cx| {
       if let Ok(true) = stale.await {
-        cx.update(connect_managed);
+        cx.update(|cx| connect(Machine::Managed, false, cx));
       } else {
         model.update(cx, |m, cx| {
           m.epoch += 1;
@@ -579,36 +750,27 @@ fn restore(cx: &mut Context<Root>) {
       model.update(cx, |m, _| m.restoring = false);
       return;
     };
-    let connect_now = cx.update(|cx| match &snapshot.endpoint {
-      store::SessionEndpoint::Managed => {
-        let signed_in = model.read(cx).user.is_some();
-        if signed_in {
-          connect_managed(cx);
-        }
-        signed_in
-      }
-      store::SessionEndpoint::UserManaged { id } => {
-        match store::user_managed_endpoints()
-          .into_iter()
-          .find(|e| &e.id == id)
-        {
-          Some(record) => {
-            connect_user_managed(record, cx);
-            true
-          }
-          None => false,
-        }
-      }
+    let machine = cx.update(|cx| match &snapshot.endpoint {
+      store::SessionEndpoint::Managed => model.read(cx).user.is_some().then_some(Machine::Managed),
+      store::SessionEndpoint::UserManaged { id } => store::user_managed_endpoints()
+        .into_iter()
+        .find(|e| &e.id == id)
+        .map(Machine::Host),
     });
-    if !connect_now {
+    let Some(machine) = machine else {
       model.update(cx, |m, _| m.restoring = false);
       return;
-    }
+    };
+    let id = machine.id().to_string();
+    cx.update(|cx| connect(machine, true, cx));
     // Wait for the connect to finish.
     loop {
       let state = cx.update(|cx| {
         let m = model.read(cx);
-        (m.connecting.is_some(), m.connection.is_some())
+        (
+          m.machine(&id).status.is_connecting(),
+          m.connection.is_some(),
+        )
       });
       match state {
         (true, _) => {

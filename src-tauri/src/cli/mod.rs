@@ -258,9 +258,8 @@ fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), St
         }
       }
     }
-    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "switch-branch" => {
-      handle_remote_review_command("repo", matches, format)
-    }
+    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "host-check"
+    | "switch-branch" => handle_remote_review_command("repo", matches, format),
     other => Err(format!("unknown repo action '{other}'")),
   }
 }
@@ -309,11 +308,13 @@ fn require_idempotency_key(key: Option<String>) -> Result<String, String> {
     .ok_or_else(|| "invalid_arguments: --idempotency-key is required".to_string())
 }
 
-/// `--repo` as an absolute path with `.`, `..` and trailing slashes resolved
-/// lexically. Symlinks are kept, so an already-absolute path, and the DB keys
-/// stored under it, stay as they are.
+/// `--repo` as an absolute path with `~`, `.`, `..` and trailing slashes
+/// resolved lexically. Symlinks are kept, so an already-absolute path, and the
+/// DB keys stored under it, stay as they are. Remote commands run without a
+/// shell, so nothing else expands a `~` a phone sends.
 fn absolute_repo_arg(repo: &str) -> String {
-  let absolute = std::path::absolute(repo).unwrap_or_else(|_| repo.into());
+  let repo = crate::core::remote::expand_home(repo, std::env::var("HOME").ok().as_deref());
+  let absolute = std::path::absolute(&repo).unwrap_or_else(|_| repo.clone().into());
   let mut normalized = std::path::PathBuf::new();
   for component in absolute.components() {
     match component {
@@ -399,6 +400,7 @@ pub(crate) fn parse_remote_command_request(
     ("repo", "branches") => Ok(TreqCommandRequest::ListBranches { repo }),
     ("repo", "probe") => Ok(TreqCommandRequest::ProbeRepo { repo }),
     ("repo", "usage") => Ok(TreqCommandRequest::MachineUsage { root: repo }),
+    ("repo", "host-check") => Ok(TreqCommandRequest::HostCheck { root: repo }),
     ("repo", "switch-branch") => Ok(TreqCommandRequest::SwitchRepoBranch {
       repo,
       bookmark: require_value("branch name")?,
