@@ -1185,6 +1185,7 @@ impl AgentPromptView {
             .aria_value(agent.label())
             .aria_expanded(self.menu == Some(Menu::Agent))
             .test_support()
+            .cursor_pointer()
             .child(
               ui::Picker::new("task-agent-picker", p)
                 .placement(ui::PickerPlacement::Toolbar)
