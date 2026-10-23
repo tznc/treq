@@ -707,7 +707,13 @@ impl OnboardingView {
                   14.,
                   p.muted_foreground,
                 ))
-                .child(group_label(&machine.name, &p))
+                // A name the user gave: kept as typed.
+                .child(
+                  ui::text(div(), TextSize::Xs)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(p.muted_foreground)
+                    .child(machine.name.clone()),
+                )
                 .when(!machine.detail.is_empty(), |d| {
                   d.child(
                     ui::text(div(), TextSize::Xs)
