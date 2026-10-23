@@ -373,16 +373,19 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
         .test_support()
     })
     .collect();
-  let empty = folders.is_empty().then(|| {
+  // Before the first listing: loading, or nothing when it failed (the
+  // error shows under the browser).
+  let empty_text = match (&form.listing, form.browsing) {
+    (None, true) => Some("Loading folders…"),
+    (None, false) => None,
+    (Some(_), _) => Some("No folders here."),
+  };
+  let empty = empty_text.filter(|_| folders.is_empty()).map(|text| {
     ui::text(div(), TextSize::Sm)
       .px_2()
       .py_2()
       .text_color(p.muted_foreground)
-      .child(if form.listing.is_none() {
-        "Loading folders…"
-      } else {
-        "No folders here."
-      })
+      .child(text)
   });
   div()
     .debug_selector(|| "remote-browser".into())
