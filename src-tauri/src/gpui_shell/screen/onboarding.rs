@@ -180,7 +180,7 @@ impl Render for OnboardingView {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .p_6()
           .child(
             ui::text(div(), TextSize::Lg)
