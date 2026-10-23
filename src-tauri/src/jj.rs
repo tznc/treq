@@ -1098,7 +1098,7 @@ pub struct DiscoveredWorkspace {
 }
 
 /// A diff hunk from jj diff output
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct JjDiffHunk {
   pub id: String,
   pub header: String,
@@ -1111,7 +1111,7 @@ pub struct JjDiffHunk {
 }
 
 /// File change status in JJ working copy
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct JjFileChange {
   pub path: String,
   pub status: String,

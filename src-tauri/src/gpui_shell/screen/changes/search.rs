@@ -3,7 +3,6 @@
 
 use crate::gpui_shell::ui::radius;
 use std::ops::Range;
-use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{AnyElement, StyledText, Task};
@@ -21,27 +20,6 @@ pub(in crate::gpui_shell::screen) enum MatchKey {
   Conflict(String, usize),
 }
 
-/// One file's inputs to the match index: what decides the lines searched.
-struct Indexed {
-  path: String,
-  conflicted: bool,
-  body: Body,
-  hunks: Option<Arc<Vec<JjDiffHunk>>>,
-}
-
-impl PartialEq for Indexed {
-  fn eq(&self, other: &Self) -> bool {
-    self.path == other.path
-      && self.conflicted == other.conflicted
-      && self.body == other.body
-      && match (&self.hunks, &other.hunks) {
-        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-        (None, None) => true,
-        _ => false,
-      }
-  }
-}
-
 /// A match's line and where it was drawn.
 type Drawn = (MatchKey, Bounds<Pixels>);
 
@@ -55,8 +33,9 @@ pub(in crate::gpui_shell::screen) struct Search {
   /// Matches by line: the first's index overall and how many.
   index: HashMap<MatchKey, (usize, usize)>,
   pub(in crate::gpui_shell::screen) total: usize,
-  /// What `index` was built from, to skip rebuilding it.
-  indexed: Option<(String, Vec<Indexed>)>,
+  /// The query and the rows' revision `index` was built from: the rows are
+  /// laid out from everything that decides the lines searched.
+  indexed: Option<(String, u64)>,
   input: Option<Entity<InputState>>,
   focus: bool,
   /// Scroll the current match into view once it is drawn.
@@ -249,13 +228,22 @@ impl ChangesView {
   /// `searchData`: every match, in React's order (conflicts, then the
   /// working copy's files, then the committed ones shown).
   pub(super) fn index_matches(&mut self) {
-    let query = self.search.applied.clone();
-    if query.is_empty() {
+    if self.search.applied.is_empty() {
       self.search.index.clear();
       self.search.total = 0;
       self.search.indexed = None;
       return;
     }
+    let revision = self.diff.revision;
+    if self
+      .search
+      .indexed
+      .as_ref()
+      .is_some_and(|(q, r)| *q == self.search.applied && *r == revision)
+    {
+      return;
+    }
+    let query = self.search.applied.clone();
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
     let mut files: Vec<(String, String, bool)> = self
       .listed()
@@ -285,25 +273,7 @@ impl ChangesView {
         })
       })
       .collect();
-    let inputs: Vec<Indexed> = files
-      .iter()
-      .zip(&bodies)
-      .map(|((path, _, _), body)| Indexed {
-        path: path.clone(),
-        conflicted: conflicted.contains(path),
-        body: *body,
-        hunks: self.shown_hunks(path).map(|d| d.hunks.clone()),
-      })
-      .collect();
-    if self
-      .search
-      .indexed
-      .as_ref()
-      .is_some_and(|(q, last)| *q == query && *last == inputs)
-    {
-      return;
-    }
-    self.search.indexed = Some((query.clone(), inputs));
+    self.search.indexed = Some((query.clone(), revision));
     self.search.index.clear();
     self.search.total = 0;
     let mut total = 0;

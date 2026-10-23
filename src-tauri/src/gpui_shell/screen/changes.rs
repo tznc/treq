@@ -120,6 +120,9 @@ pub struct ChangesView {
   reload: bool,
   pub(super) hunks: HashMap<String, FileHunks>,
   generation: u64,
+  /// Bumped when the snapshot, the hunks, the lines read around them or
+  /// the parent change: what the diff's rows are laid out from.
+  pub(super) layout_gen: u64,
   pub(super) staging: Staging,
   pub(super) active: Option<String>,
   collapsed_sections: HashSet<Section>,
@@ -216,6 +219,7 @@ impl ChangesView {
       reload: false,
       hunks: HashMap::new(),
       generation: 0,
+      layout_gen: 0,
       staging: Staging::default(),
       active: None,
       collapsed_sections: HashSet::new(),
@@ -273,6 +277,10 @@ impl ChangesView {
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // The status's conflicts stand in until the diff lists its own.
+    if moved || self.parent.conflicted_files != parent.conflicted_files {
+      self.layout_gen += 1;
+    }
     self.parent = parent;
     self.options = options;
     if moved {
@@ -487,6 +495,7 @@ impl ChangesView {
           Err(err) => {
             view.toast(ToastTone::Error, "JJ Error", err);
             view.snapshot.get_or_insert_with(Snapshot::default);
+            view.layout_gen += 1;
           }
         }
         if std::mem::take(&mut view.reload) {
@@ -519,7 +528,12 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
-    self.snapshot = Some(snapshot);
+    // A refresh that finds the same files keeps the snapshot, and with it
+    // the committed hunks the rows were laid out from.
+    if self.snapshot.as_ref() != Some(&snapshot) {
+      self.snapshot = Some(snapshot);
+      self.layout_gen += 1;
+    }
     self.load_hunks(paths, cx);
     self.unmark_stale(cx);
   }
@@ -530,6 +544,7 @@ impl ChangesView {
     self.loaded_generated.insert(path.to_string());
     let working = self.files().iter().any(|f| f.path == path);
     if working && self.pr.is_none() && !self.hunks.contains_key(path) {
+      self.layout_gen += 1;
       self.hunks.insert(
         path.to_string(),
         FileHunks {
@@ -554,12 +569,17 @@ impl ChangesView {
   fn load_hunks(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
     self.generation += 1;
     let listed: HashSet<&String> = paths.iter().collect();
+    let before = self.hunks.len();
     self.hunks.retain(|p, _| listed.contains(p));
+    let kept = self.hunks.len();
     for path in &paths {
       self.hunks.entry(path.clone()).or_insert_with(|| FileHunks {
         loading: true,
         ..FileHunks::default()
       });
+    }
+    if self.hunks.len() != before || kept != before {
+      self.layout_gen += 1;
     }
     let mut batches: Vec<Vec<String>> = Vec::new();
     let (first, rest) = paths.split_at(paths.len().min(FIRST_BATCH));
@@ -589,6 +609,16 @@ impl ChangesView {
         match result {
           Ok(batch) => {
             for file in batch.files {
+              // A refresh reads every file again; one that reads the same
+              // keeps its hunks, so its rows and marks are not redone.
+              let same = view
+                .hunks
+                .get(&file.path)
+                .is_some_and(|d| !d.loading && d.error == file.error && *d.hunks == file.hunks);
+              if same {
+                continue;
+              }
+              view.layout_gen += 1;
               let data = FileHunks {
                 hunks: file.hunks.into(),
                 loading: false,
@@ -976,9 +1006,13 @@ impl ChangesView {
       ._subscriptions
       .push(cx.subscribe(&state, |view, state, event: &InputEvent, cx| {
         if let InputEvent::Change = event {
+          let was_empty = view.message.trim().is_empty();
           view.message = state.read(cx).value().to_string();
-          view.message_error = None;
-          cx.notify();
+          // The view draws only whether the message is empty, and the
+          // error a keystroke clears; the box redraws itself.
+          if view.message_error.take().is_some() || was_empty != view.message.trim().is_empty() {
+            cx.notify();
+          }
         }
       }));
     self.message_input = Some(state);
@@ -1084,6 +1118,7 @@ impl ChangesView {
         let Ok(lines) = result else {
           return;
         };
+        view.layout_gen += 1;
         if dir == Dir::After && lines.len() <= end - start {
           view.context_ended.insert((key.0.clone(), h));
         }
@@ -1384,9 +1419,10 @@ impl Render for ChangesView {
     self.ensure_reply_inputs(window, cx);
     self.watch_find_key(window, cx);
     self.ensure_search_input(window, cx);
+    // The rows first: the threads and the find index follow their revision.
+    self.sync_rows(window);
     self.place_threads();
     self.index_matches();
-    self.sync_rows(window);
     self.reveal_match(window, cx);
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);

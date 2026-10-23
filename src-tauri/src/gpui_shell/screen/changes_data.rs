@@ -406,7 +406,7 @@ impl ChangedFile {
 }
 
 /// The files the tab lists, from one read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
   pub files: Vec<ChangedFile>,
   /// Committed on the branch, conflicted paths included.
@@ -756,7 +756,7 @@ pub fn line_counts(hunks: &[JjDiffHunk]) -> (usize, usize) {
 }
 
 /// A file's diff as read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FileHunks {
   pub hunks: Arc<Vec<JjDiffHunk>>,
   pub loading: bool,

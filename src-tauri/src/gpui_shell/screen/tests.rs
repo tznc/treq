@@ -4749,6 +4749,36 @@ fn changes_tab_follows_edits_on_disk_outside_a_review(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_refresh_that_reads_the_same_diff_keeps_its_rows(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  // The hunks `a.rs` shows and the rows' layout revision.
+  let state = |h: &mut Harness| {
+    h.drawn("changes-diff-viewer");
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      (
+        Arc::as_ptr(&changes.hunks["a.rs"].hunks),
+        changes.layout_revision(),
+      )
+    })
+  };
+  let before = state(&mut h);
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  assert_eq!(state(&mut h), before);
+  edit_a_rs(&mut h, &host);
+  let after = state(&mut h);
+  assert_ne!(after.0, before.0, "the edited file is read again");
+  assert_ne!(after.1, before.1, "and laid out again");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+#[gpui::test]
 fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");

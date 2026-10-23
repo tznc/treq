@@ -5,7 +5,14 @@
 //! does too: a line is parsed from a fresh state, and its spans are cached
 //! by language and text because a diff redraws on every hover.
 
-use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, sync::LazyLock};
+use std::{
+  cell::RefCell,
+  collections::HashMap,
+  hash::{BuildHasher, RandomState},
+  ops::Range,
+  rc::Rc,
+  sync::LazyLock,
+};
 
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 use tauri_plugin_gpui::gpui::{
@@ -14,8 +21,8 @@ use tauri_plugin_gpui::gpui::{
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
 
-/// The cache is dropped whole past this many lines, which a long review
-/// session reaches without holding much memory.
+/// The cache holds at most this many lines, which a long review session
+/// reaches without holding much memory.
 const CACHE_MAX: usize = 20_000;
 
 /// What Prism would call a span, reduced to what the two themes color.
@@ -49,8 +56,52 @@ pub(super) enum Token {
 
 pub(super) type Spans = Rc<Vec<(Range<usize>, Token)>>;
 
+/// A highlighted line: its text, which [`styled`] draws without copying
+/// it again, and its spans.
+#[derive(Clone)]
+struct Line {
+  text: SharedString,
+  spans: Spans,
+}
+
+/// Lines by language and a hash of their text, so a hit allocates nothing.
+/// Lines go into `current`; once it holds half of [`CACHE_MAX`] it becomes
+/// `previous`, and a line found there moves back. A full cache so drops
+/// only lines not drawn for a while, never the ones on screen.
+#[derive(Default)]
+struct Cache {
+  current: HashMap<(&'static str, u64), Line>,
+  previous: HashMap<(&'static str, u64), Line>,
+  hasher: RandomState,
+}
+
+impl Cache {
+  fn get(&mut self, key: (&'static str, u64), text: &str) -> Option<Line> {
+    if let Some(line) = self.current.get(&key) {
+      // Another line with the same hash is a miss, and is replaced.
+      return (line.text.as_ref() == text).then(|| line.clone());
+    }
+    let line = self.previous.remove(&key)?;
+    if line.text.as_ref() != text {
+      return None;
+    }
+    self.insert(key, line.clone());
+    Some(line)
+  }
+
+  fn insert(&mut self, key: (&'static str, u64), line: Line) {
+    if self.current.len() >= CACHE_MAX / 2 {
+      self.previous = std::mem::take(&mut self.current);
+    }
+    self.current.insert(key, line);
+  }
+}
+
 thread_local! {
-  static CACHE: RefCell<HashMap<(&'static str, String), Spans>> = RefCell::new(HashMap::new());
+  static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+  /// What each scope maps to, by whether the file is JavaScript: a scope's
+  /// name is built and matched once.
+  static TOKENS: RefCell<HashMap<(Scope, bool), Option<Token>>> = RefCell::new(HashMap::new());
 }
 
 /// The language React's `getLanguageFromPath` picks for a file, as the
@@ -92,23 +143,29 @@ fn syntax(language: &str) -> Option<&'static SyntaxReference> {
 
 /// Token spans of one line, byte ranges into `line`.
 pub(super) fn spans(language: &'static str, line: &str) -> Spans {
-  let key = (language, line.to_string());
-  if let Some(hit) = CACHE.with(|c| c.borrow().get(&key).cloned()) {
-    return hit;
-  }
-  let spans: Spans = Rc::new(
-    syntax(language)
-      .map(|s| parse(language, s, line))
-      .unwrap_or_default(),
-  );
-  CACHE.with(|c| {
+  highlighted(language, line).spans
+}
+
+fn highlighted(language: &'static str, line: &str) -> Line {
+  let key = CACHE.with(|c| {
     let mut c = c.borrow_mut();
-    if c.len() >= CACHE_MAX {
-      c.clear();
-    }
-    c.insert(key, spans.clone());
+    let key = (language, c.hasher.hash_one(line));
+    c.get(key, line).ok_or(key)
   });
-  spans
+  let key = match key {
+    Ok(hit) => return hit,
+    Err(key) => key,
+  };
+  let hit = Line {
+    text: SharedString::from(line.to_string()),
+    spans: Rc::new(
+      syntax(language)
+        .map(|s| parse(language, s, line))
+        .unwrap_or_default(),
+    ),
+  };
+  CACHE.with(|c| c.borrow_mut().insert(key, hit.clone()));
+  hit
 }
 
 fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usize>, Token)> {
@@ -143,8 +200,17 @@ fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usi
   out
 }
 
-/// Maps a TextMate scope onto the Prism token that colors the same thing.
+/// [`token_of`], remembered.
 fn token(scope: Scope, js: bool) -> Option<Token> {
+  TOKENS.with(|t| {
+    *t.borrow_mut()
+      .entry((scope, js))
+      .or_insert_with(|| token_of(scope, js))
+  })
+}
+
+/// Maps a TextMate scope onto the Prism token that colors the same thing.
+fn token_of(scope: Scope, js: bool) -> Option<Token> {
   let scope = scope.build_string();
   let is = |prefix: &str| {
     scope == prefix
@@ -246,8 +312,8 @@ pub(super) fn color(token: Token, dark: bool) -> Option<Hsla> {
 
 /// `line` drawn with its highlights; plain when the file has no language.
 pub(super) fn styled(line: &str, language: Option<&'static str>, dark: bool) -> StyledText {
-  let text = SharedString::from(line.to_string());
-  StyledText::new(text).with_highlights(token_styles(line, language, dark))
+  let (text, styles) = text_and_styles(line, language, dark);
+  StyledText::new(text).with_highlights(styles)
 }
 
 /// [`styled`] with `marks` painted behind the text (search matches).
@@ -257,19 +323,21 @@ pub(super) fn styled_marked(
   dark: bool,
   marks: &[(Range<usize>, Hsla)],
 ) -> StyledText {
-  let text = SharedString::from(line.to_string());
-  StyledText::new(text).with_highlights(overlay(token_styles(line, language, dark), marks))
+  let (text, styles) = text_and_styles(line, language, dark);
+  StyledText::new(text).with_highlights(overlay(styles, marks))
 }
 
-fn token_styles(
+/// `line` as drawn, from the cache when it has a language, and its styles.
+fn text_and_styles(
   line: &str,
   language: Option<&'static str>,
   dark: bool,
-) -> Vec<(Range<usize>, HighlightStyle)> {
+) -> (SharedString, Vec<(Range<usize>, HighlightStyle)>) {
   let Some(language) = language else {
-    return Vec::new();
+    return (SharedString::from(line.to_string()), Vec::new());
   };
-  spans(language, line)
+  let Line { text, spans } = highlighted(language, line);
+  let styles = spans
     .iter()
     .filter_map(|(range, token)| {
       let italic = *token == Token::Italic || *token == Token::Comment && !dark;
@@ -288,7 +356,8 @@ fn token_styles(
         )
       })
     })
-    .collect()
+    .collect();
+  (text, styles)
 }
 
 /// Splits sorted, disjoint `styles` at the `marks`' edges so each piece
@@ -353,6 +422,28 @@ mod tests {
     assert_eq!(out[1].1.background_color, Some(red));
     assert_eq!(out[1].1.font_weight, Some(FontWeight::BOLD));
     assert_eq!(out[2].1.font_weight, None);
+  }
+
+  #[test]
+  fn a_full_cache_keeps_the_lines_read_since() {
+    let mut cache = Cache::default();
+    let line = |text: &str| Line {
+      text: text.to_string().into(),
+      spans: Rc::default(),
+    };
+    cache.insert(("rs", 0), line("kept"));
+    cache.insert(("rs", 1), line("dropped"));
+    for i in 2..2 * CACHE_MAX as u64 {
+      cache.insert(("rs", i), line("other"));
+      if i % 1000 == 0 {
+        assert!(cache.get(("rs", 0), "kept").is_some());
+      }
+    }
+    assert!(cache.get(("rs", 0), "kept").is_some());
+    assert!(cache.get(("rs", 1), "dropped").is_none());
+    assert!(cache.current.len() + cache.previous.len() <= CACHE_MAX);
+    // Another text with the same hash is not taken for the line.
+    assert!(cache.get(("rs", 0), "collides").is_none());
   }
 
   #[test]

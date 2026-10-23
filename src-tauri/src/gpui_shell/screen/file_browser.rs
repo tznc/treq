@@ -404,9 +404,13 @@ impl FileBrowserView {
       |view, result, cx| match result {
         Ok(entries) => {
           let first = view.root.is_none();
-          view.cache.insert(view.base(), entries.clone());
-          view.root = Some(entries);
-          view.tree_rows = None;
+          // A refresh that lists the same entries keeps the tree's rows.
+          let base = view.base();
+          if view.root.as_ref() != Some(&entries) || view.cache.get(&base) != Some(&entries) {
+            view.cache.insert(base, entries.clone());
+            view.root = Some(entries);
+            view.tree_rows = None;
+          }
           if first {
             view.open_readme(cx);
           }
@@ -463,10 +467,12 @@ impl FileBrowserView {
             Vec::new()
           }
         };
-        view.cache.insert(dir.clone(), entries);
-        view.tree_rows = None;
-        if expand {
-          view.expanded.insert(dir);
+        if view.cache.get(&dir) != Some(&entries) {
+          view.cache.insert(dir.clone(), entries);
+          view.tree_rows = None;
+        }
+        if expand && view.expanded.insert(dir) {
+          view.tree_rows = None;
         }
       },
       cx,
