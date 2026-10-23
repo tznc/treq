@@ -218,15 +218,10 @@ finding.
    even if every lint passes. Tokens alone don't change what users see.
    Moving screens onto tokens is lint debt, not a review fix.
 6. **Visible-change check.** After screens adopt the fixes, capture the same
-   QA specs on the base and on the branch, then measure:
-
-   ```sh
-   python3 .claude/skills/design-audit/review/pixel_diff.py "$BEFORE" "$AFTER"
-   ```
-
-   Every screen a review item names should change visibly. If most
-   captures change by under 0.5%, the fixes didn't reach the screens: say
-   so, and go back to step 5. Don't present the result as done.
+   QA specs on the base and on the branch. For every review item, put the
+   before and after captures side by side and look at them. If an item's
+   screen looks the same, the fix didn't reach it: go back to step 5. Don't
+   present the result as done.
 
 Deliver the review as an Artifact with these parts:
 
