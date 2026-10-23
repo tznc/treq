@@ -35,7 +35,25 @@ async function fetchLatestRelease() {
   };
 }
 
-// Writes static/version (read by the macOS updater via treq.dev/version) and
+// Fetches the release's latest.json (the signed manifest tauri-action uploads)
+// so the desktop updater can read it from treq.dev/version.json. Releases cut
+// before the updater plugin have no latest.json, which returns null.
+/** @param {{name: string, url: string}[]} assets */
+async function fetchUpdaterManifest(assets) {
+  const asset = assets.find((a) => a.name === 'latest.json');
+  if (!asset) return null;
+  const res = await fetch(asset.url, {signal: AbortSignal.timeout(15_000)});
+  if (!res.ok) throw new Error(`latest.json download returned ${res.status}`);
+  const manifest = await res.json();
+  if (typeof manifest.version !== 'string' || typeof manifest.platforms !== 'object') {
+    throw new Error('latest.json is missing version or platforms');
+  }
+  return manifest;
+}
+
+// Writes static/version (read by the pre-plugin macOS updater in builds up to
+// v0.3.0 via treq.dev/version, so they can still reach a newer release),
+// static/version.json (the updater manifest read by tauri-plugin-updater) and
 // exposes the latest release to the client as global data.
 /** @type {import('@docusaurus/types').PluginModule} */
 function latestReleasePlugin(context) {
@@ -43,9 +61,17 @@ function latestReleasePlugin(context) {
     name: 'latest-release-plugin',
     async loadContent() {
       const dest = path.join(context.siteDir, 'static', 'version');
+      const manifestDest = path.join(context.siteDir, 'static', 'version.json');
       try {
         const release = await fetchLatestRelease();
+        const manifest = await fetchUpdaterManifest(release.assets);
         fs.writeFileSync(dest, `${release.version}\n`, 'utf8');
+        if (manifest) {
+          fs.writeFileSync(manifestDest, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+        } else {
+          fs.rmSync(manifestDest, {force: true});
+          console.warn(`[latest-release] ${release.tag} has no latest.json; building without /version.json.`);
+        }
         return release;
       } catch (err) {
         // Fallback rule: a production deploy build (DOCUSAURUS_ENABLE_GTAG=true,
@@ -59,6 +85,7 @@ function latestReleasePlugin(context) {
           throw new Error(`[latest-release] cannot fetch latest release: ${reason}`);
         }
         fs.rmSync(dest, {force: true});
+        fs.rmSync(manifestDest, {force: true});
         console.warn(
           `[latest-release] cannot fetch latest release (${reason}); building without /version.`,
         );
