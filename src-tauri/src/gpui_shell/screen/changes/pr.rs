@@ -192,7 +192,7 @@ impl ChangesView {
               (
                 path,
                 FileHunks {
-                  hunks,
+                  hunks: hunks.into(),
                   ..FileHunks::default()
                 },
               )
@@ -256,7 +256,7 @@ impl ChangesView {
     let hunks: HashMap<String, Vec<JjDiffHunk>> = self
       .hunks
       .iter()
-      .map(|(p, d)| (p.clone(), d.hunks.clone()))
+      .map(|(p, d)| (p.clone(), d.hunks.to_vec()))
       .collect();
     let Some(pr) = self.pr.as_mut() else {
       return;
@@ -299,7 +299,7 @@ impl ChangesView {
     let hunks: HashMap<String, Vec<JjDiffHunk>> = self
       .hunks
       .iter()
-      .map(|(p, d)| (p.clone(), d.hunks.clone()))
+      .map(|(p, d)| (p.clone(), d.hunks.to_vec()))
       .collect();
     let probe: AgentReviewComment = serde_json::from_value(json!({
       "id": "",

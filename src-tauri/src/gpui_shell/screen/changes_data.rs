@@ -5,7 +5,7 @@
 
 use std::{
   collections::{HashMap, HashSet},
-  sync::LazyLock,
+  sync::{Arc, LazyLock},
 };
 
 use regex::Regex;
@@ -472,7 +472,7 @@ impl Snapshot {
       })
       .map(|f| {
         let hunks = FileHunks {
-          hunks: f.hunks,
+          hunks: f.hunks.into(),
           ..FileHunks::default()
         };
         (f.path, hunks)
@@ -786,7 +786,7 @@ pub fn line_counts(hunks: &[JjDiffHunk]) -> (usize, usize) {
 /// A file's diff as read.
 #[derive(Debug, Clone, Default)]
 pub struct FileHunks {
-  pub hunks: Vec<JjDiffHunk>,
+  pub hunks: Arc<Vec<JjDiffHunk>>,
   pub loading: bool,
   pub error: Option<String>,
 }
@@ -860,7 +860,7 @@ pub fn body(input: &BodyInput) -> Body {
 pub fn total_lines<'a>(files: impl Iterator<Item = &'a FileHunks>) -> usize {
   files
     .filter(|f| !f.loading)
-    .flat_map(|f| &f.hunks)
+    .flat_map(|f| f.hunks.iter())
     .map(|h| h.lines.len())
     .sum()
 }
@@ -1181,7 +1181,7 @@ mod tests {
   #[test]
   fn body_follows_the_display_rules() {
     let loaded = FileHunks {
-      hunks: vec![hunk("@@ -1 +1 @@", &["+a"])],
+      hunks: vec![hunk("@@ -1 +1 @@", &["+a"])].into(),
       ..FileHunks::default()
     };
     let input = |path, data| BodyInput {
@@ -1199,7 +1199,7 @@ mod tests {
     assert_eq!(body(&input("a.rs", None)), Body::Loading);
     assert_eq!(body(&input("a.rs", Some(&loaded))), Body::Hunks);
     let big = FileHunks {
-      hunks: vec![hunk("@@ -1 +1,251 @@", &["+a"; 251])],
+      hunks: vec![hunk("@@ -1 +1,251 @@", &["+a"; 251])].into(),
       ..FileHunks::default()
     };
     assert_eq!(body(&input("a.rs", Some(&big))), Body::Large(251));
