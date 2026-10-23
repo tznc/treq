@@ -43,12 +43,14 @@ embed = []
 e2e = ["gpui-shell", "dep:gpui-playwright"]
 
 # Clippy's default set runs in CI with -D warnings; these add checks it
-# leaves out. clippy.toml lets tests unwrap.
+# leaves out. clippy.toml lets tests unwrap and expect.
 [lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
 unwrap_used = "warn"
+expect_used = "warn"
+string_slice = "warn"
 # Output goes through tracing; only the CLI prints (allowed in cli/).
 print_stdout = "warn"
 print_stderr = "warn"
@@ -191,6 +193,10 @@ harness = false
 
 [[bench]]
 name = "workspace_diff"
+harness = false
+
+[[bench]]
+name = "commits_log"
 harness = false
 
 [[bench]]

@@ -423,7 +423,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
   let creation_retry =
     record.is_some_and(|i| i.status == "failed" && i.provider_resource_id.is_none());
   let error = cloud.provisioning_error.as_deref();
-  let pro_required = error.filter(|e| e.starts_with(PRO_REQUIRED_PREFIX));
+  let pro_required = error.and_then(|e| e.strip_prefix(PRO_REQUIRED_PREFIX));
   let creating = cloud.submitting && instance.is_none();
   let stage = cloud.provisioning_stage.clone().filter(|s| !s.is_empty());
   CloudCard {
@@ -468,7 +468,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
       spinning: creating || stage.is_some(),
       stage,
     }),
-    pro_required: pro_required.map(|e| first_line(&e[PRO_REQUIRED_PREFIX.len()..])),
+    pro_required: pro_required.map(first_line),
     error: error.filter(|_| pro_required.is_none()).map(first_line),
     submitting: cloud.submitting,
     confirming_delete,

@@ -5735,6 +5735,41 @@ fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-body");
+  h.cx.simulate_keystrokes("cmd-\\");
+  assert!(h.drawn("terminal-column-shell"));
+  let spawns = |host: &FakeHost| {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("spawn "))
+      .count()
+  };
+  let spawned = spawns(&host);
+  h.cx.update(|window, _| window.remove_window());
+  h.cx.run_until_parked();
+  drop(h);
+
+  // Another window opens on the repository: its pane shows them, running.
+  let mut other = Harness::with_host(cx, terminal_route(serde_json::json!({})), host.clone());
+  other
+    .cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  other.cx.run_until_parked();
+  assert!(other.drawn("terminal-column-agent"));
+  assert!(other.drawn("terminal-column-shell"));
+  assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
+
+  // A third window on it finds none left to show.
+  let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host);
+  third.cx.run_until_parked();
+  assert!(!third.drawn("terminal-column-shell"));
+}
+
+#[gpui::test]
 fn terminal_pane_asks_react_for_a_new_agent(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
@@ -5848,6 +5883,40 @@ fn terminal_pane_attaches_a_remote_session(cx: &mut TestAppContext) {
   assert!(host.calls().contains(&"list shell-k1".to_string()));
   assert!(h.drawn("remote-terminal-ended"));
   assert!(!h.drawn("remote-terminal-lost"));
+}
+
+#[gpui::test]
+fn a_closed_windows_remote_session_shows_again(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  let attached = host.attached();
+  h.cx.update(|window, _| window.remove_window());
+  h.cx.run_until_parked();
+  drop(h);
+
+  // Its channel still open, the next window draws it without attaching.
+  let mut other = Harness::with_host(cx, terminal_route(serde_json::json!({})), host.clone());
+  other
+    .cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  other.cx.run_until_parked();
+  assert!(other.drawn("remote-terminal-header"));
+  assert_eq!(host.attached(), attached, "{:?}", host.calls());
+  // Its channel dropped since: the column attaches to the host's session.
+  other.cx.update(|window, _| window.remove_window());
+  other.cx.run_until_parked();
+  drop(other);
+  host.ptys.lock().unwrap().clear();
+  let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host.clone());
+  third
+    .cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  third.cx.run_until_parked();
+  assert!(third.drawn("remote-terminal-header"));
+  assert_eq!(
+    host.attached(),
+    vec![attached[0].clone(), attached[0].clone()]
+  );
 }
 
 #[gpui::test]

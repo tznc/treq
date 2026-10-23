@@ -54,6 +54,7 @@ fn devcontainer_repo(
     return None;
   }
   let environment = db.get_repo_setting(&repo, ENVIRONMENT_SETTING).ok()??;
+  drop(db);
   (environment == ENVIRONMENT_DEVCONTAINER).then_some((repo, dir))
 }
 

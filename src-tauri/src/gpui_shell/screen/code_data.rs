@@ -417,10 +417,15 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
 pub use crate::core::new_workspaces::apply_branch_name_pattern;
 
 /// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
+#[allow(
+  clippy::string_slice,
+  reason = "the slug holds only [a-z0-9-], so every byte is a char boundary"
+)]
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn task_branch_slug(prompt: &str) -> String {
   const MAX: usize = 48;
-  let slug = Regex::new("[a-z0-9]+")
-    .expect("regex")
+  static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z0-9]+").expect("regex"));
+  let slug = WORD
     .find_iter(&prompt.to_lowercase())
     .map(|m| m.as_str().to_string())
     .collect::<Vec<_>>()
@@ -450,8 +455,25 @@ pub fn task_branch_name(prompt: &str, taken: &HashSet<String>, pattern: &str) ->
 
 pub use crate::core::agent_launch::session_name;
 
+/// `text` with the bytes from `start` to `end` replaced by `insertion`. Both
+/// offsets are clamped to the text and moved back to a char boundary, so a
+/// stale offset never splits a multi-byte char.
+pub fn replace_range(text: &str, start: usize, end: usize, insertion: &str) -> String {
+  let start = text.floor_char_boundary(start);
+  let end = text.floor_char_boundary(end);
+  format!(
+    "{}{insertion}{}",
+    text.get(..start).unwrap_or_default(),
+    text.get(end.max(start)..).unwrap_or_default()
+  )
+}
+
 /// The `@` being typed before `cursor` (a byte offset): its offset and the
 /// query after it, if it starts the text or follows whitespace.
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from char_indices() and a checked get(..cursor)"
+)]
 pub fn mention_at(text: &str, cursor: usize) -> Option<(usize, String)> {
   let before = text.get(..cursor)?;
   for (i, ch) in before.char_indices().rev() {
@@ -489,6 +511,7 @@ pub fn insert_at(text: &str, cursor: usize, insertion: &str) -> (String, usize) 
 /// `looksLikeMarkdown`: block syntax at a line start, or inline emphasis,
 /// code or a link.
 pub fn looks_like_markdown(text: &str) -> bool {
+  #[allow(clippy::expect_used, reason = "constant patterns")]
   static PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
       r"(?m)^#{1,6}\s",
@@ -509,6 +532,7 @@ pub fn looks_like_markdown(text: &str) -> bool {
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
 /// shortcodes stay as typed.
 pub fn emojify(text: &str) -> String {
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   static SHORTCODE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r":([a-z0-9_+-]+):").expect("regex"));
   let mut fenced = false;
@@ -793,6 +817,19 @@ mod tests {
     assert_eq!(mention_at("a@b", 3), None);
     assert_eq!(mention_at("@a b", 4), None);
     assert_eq!(mention_at("@", 1), Some((0, String::new())));
+  }
+
+  #[test]
+  fn replace_range_never_splits_a_char() {
+    assert_eq!(
+      replace_range("look @ma now", 5, 8, "@main.rs "),
+      "look @main.rs  now"
+    );
+    // Offsets inside a multi-byte char used to panic the slice.
+    assert_eq!(replace_range("你好@ma", 1, 100, "@x "), "@x ");
+    assert_eq!(replace_range("😀@ma", 4, 7, "@x "), "😀@x ");
+    assert_eq!(replace_range("😀@ma", 1, 6, "@x "), "@x a");
+    assert_eq!(replace_range("é", 1, 0, "@"), "@é");
   }
 
   #[test]

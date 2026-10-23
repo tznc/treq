@@ -4,6 +4,7 @@
 //! [`run`] does it, in line order, so a stacked line's base exists first.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -17,21 +18,28 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 /// A title's branch until the repository sets its own pattern.
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
+static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("regex"));
+static DASH_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("regex"));
+static TRAILING_DASH_LETTER: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new("-[a-z]$").expect("regex"));
+static TRAILING_SEPARATOR_LETTER: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"[/.\-][a-z]$").expect("regex"));
+static TRAILING_SEPARATORS: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
+
 /// `sanitizeForBranchName`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn sanitize_for_branch_name(text: &str) -> String {
   let lower: String = text
     .to_lowercase()
     .chars()
     .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c.is_whitespace() || *c == '-')
     .collect();
-  let dashed = Regex::new(r"\s+").expect("regex").replace_all(&lower, "-");
-  let single = Regex::new("-+").expect("regex").replace_all(&dashed, "-");
+  let dashed = WHITESPACE.replace_all(&lower, "-");
+  let single = DASH_RUN.replace_all(&dashed, "-");
   let cut: String = single.chars().take(50).collect();
   let trimmed = cut.trim_matches('-');
-  let sanitized = Regex::new("-[a-z]$")
-    .expect("regex")
-    .replace(trimmed, "")
-    .to_string();
+  let sanitized = TRAILING_DASH_LETTER.replace(trimmed, "").to_string();
   if sanitized.is_empty() {
     "unnamed".into()
   } else {
@@ -40,9 +48,10 @@ fn sanitize_for_branch_name(text: &str) -> String {
 }
 
 /// `cleanBranchNameTrailing`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn clean_branch_name_trailing(name: &str) -> String {
-  let single = Regex::new(r"[/.\-][a-z]$").expect("regex");
-  let separators = Regex::new(r"[/.\-]+$").expect("regex");
+  let single = &*TRAILING_SEPARATOR_LETTER;
+  let separators = &*TRAILING_SEPARATORS;
   let mut result = name.to_string();
   loop {
     let next = separators

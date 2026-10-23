@@ -1,3 +1,11 @@
+#![cfg_attr(
+  test,
+  allow(
+    clippy::string_slice,
+    reason = "tests slice fixed literals at known offsets"
+  )
+)]
+
 // The app side of dispatch (listener, responses) is unused by the headless CLI.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod agent_dispatch;
@@ -455,6 +463,10 @@ where
   clippy::exit,
   reason = "a CLI invocation hands its exit code to the shell, and `tauri::generate_context!` expands to an exit"
 )]
+#[allow(
+  clippy::expect_used,
+  reason = "a Tauri build failure at startup is unrecoverable"
+)]
 pub fn run() {
   telemetry::install_panic_hook();
   // CLI invocations never start Tauri: see `cli::args` for why.
@@ -533,6 +545,9 @@ pub fn run() {
         gpui_shell::forget_window(&label);
         let app_handle = window.app_handle().clone();
         if is_last_repo_window(&label, repo_windows(&app_handle).keys()) {
+          #[cfg(feature = "gpui-shell")]
+          #[cfg(desktop)]
+          gpui_shell::forget_terminals();
           if let Some(state) = app_handle.try_state::<AppState>() {
             state.pty_manager.close_all();
           }
@@ -545,19 +560,25 @@ pub fn run() {
       }
     })
     .setup(move |app| {
-      let log_dir = app.path().app_log_dir().expect("Failed to get app log dir");
-      let telemetry = telemetry::init(&log_dir).expect("Failed to initialize telemetry");
+      let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| format!("Failed to get app log dir: {e}"))?;
+      let telemetry =
+        telemetry::init(&log_dir).map_err(|e| format!("Failed to initialize telemetry: {e}"))?;
 
       let app_dir = app
         .path()
         .app_data_dir()
-        .expect("Failed to get app data dir");
-      std::fs::create_dir_all(&app_dir).expect("Failed to create app data directory");
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+      std::fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app data directory: {e}"))?;
       std::env::set_var("TREQ_APP_DATA_DIR", app_dir.to_string_lossy().to_string());
       let db_path = app_dir.join(crate::core::APP_DB_FILE_NAME);
 
-      let db = Database::new(db_path).expect("Failed to open database");
-      db.init().expect("Failed to initialize database");
+      let db = Database::new(db_path).map_err(|e| format!("Failed to open database: {e}"))?;
+      db.init()
+        .map_err(|e| format!("Failed to initialize database: {e}"))?;
 
       // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
