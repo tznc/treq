@@ -11,11 +11,20 @@ use super::{
 };
 use crate::{
   github::PrInfo,
+  gpui_shell::screen::display_title,
   gpui_shell::sidebar::{
     PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
   },
   local_db::Workspace,
 };
+
+/// The workspace's title for its sidebar row, or `None` to show the branch:
+/// a blank title, or one that repeats the branch, adds nothing.
+pub fn row_name(workspace: &Workspace) -> Option<String> {
+  let title = display_title(workspace);
+  let title = title.trim();
+  (!title.is_empty() && title != workspace.branch_name).then(|| title.to_string())
+}
 
 /// `getWorkspaceStatusIndicator`: red for conflicts, yellow for changes,
 /// spinning while an agent in the workspace streams.
@@ -180,6 +189,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
             SidebarRow {
               id: workspace.id,
               title: branch.clone(),
+              name: row_name(workspace),
               depth: node.depth,
               selected,
               conflicted: node.conflicted,
@@ -337,6 +347,46 @@ mod tests {
       .collect();
     assert_eq!(selected, [3]);
     assert_eq!(snapshot.bulk_archive, Some(1));
+  }
+
+  #[test]
+  fn names_a_row_by_its_title_and_falls_back_to_the_branch() {
+    let mut ws = workspace(1, "zn/blissful-shannon", None);
+    assert_eq!(row_name(&ws), None, "no title shows the branch");
+    ws.title = "  ".into();
+    assert_eq!(row_name(&ws), None, "a blank title shows the branch");
+    ws.title = "zn/blissful-shannon".into();
+    assert_eq!(
+      row_name(&ws),
+      None,
+      "a title that repeats the branch adds nothing"
+    );
+    ws.title = " feat(spool): fail readiness ".into();
+    assert_eq!(
+      row_name(&ws).as_deref(),
+      Some("feat(spool): fail readiness")
+    );
+    ws.title = String::new();
+    ws.metadata = Some(r#"{"title":"From the PR"}"#.into());
+    assert_eq!(
+      row_name(&ws).as_deref(),
+      Some("From the PR"),
+      "the metadata's title"
+    );
+  }
+
+  #[test]
+  fn rows_carry_the_workspace_title() {
+    let mut titled = workspace(1, "login", None);
+    titled.title = "Add login".into();
+    let data = data_with(vec![titled, workspace(3, "fix", None)]);
+    let snapshot = snapshot(&Model::new(Some("/repo".into())), &data).unwrap();
+    let rows: Vec<_> = snapshot.repos[0]
+      .workspaces
+      .iter()
+      .map(|r| (r.title.as_str(), r.name.as_deref()))
+      .collect();
+    assert_eq!(rows, [("fix", None), ("login", Some("Add login"))]);
   }
 
   #[test]

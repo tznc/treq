@@ -8,6 +8,7 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
   SidebarRow {
     id,
     title: title.into(),
+    name: None,
     depth,
     selected: false,
     conflicted: false,
@@ -198,6 +199,7 @@ fn parses_snapshot_from_react() {
   assert!(rows[0].conflicted);
   assert_eq!(rows[0].pr, Some(PrState::Draft));
   assert_eq!(rows[0].queue.as_deref(), Some("testing"));
+  assert_eq!(rows[0].name, None, "rows from before titles have none");
   // Optional row fields default when React leaves them out.
   assert!(!rows[1].conflicted && !rows[1].archiving && rows[1].queue.is_none());
 }
@@ -552,6 +554,7 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       anchor: row,
       side: Side::Right,
       content: TooltipContent::Branch {
+        name: None,
         title: "feat-a".into(),
         conflicted: false,
         pr: None,
@@ -559,6 +562,35 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       dark: false,
     }]
   );
+}
+
+#[gpui::test]
+fn titled_row_shows_its_title_and_keeps_the_branch_in_the_tooltip(cx: &mut TestAppContext) {
+  let mut titled = row(7, "zn/blissful-shannon", 0);
+  titled.name = Some("feat(spool): fail readiness".into());
+  let mut h = Harness::new(cx, snapshot(vec![titled]));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  use gpui_testing_library::prelude::*;
+  expect(screen.get_by_text("feat(spool): fail readiness")).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("feat(spool): fail readiness")))
+    .to_be_visible();
+  assert!(
+    screen.query_by_text("zn/blissful-shannon").is_none(),
+    "the branch moves to the tooltip"
+  );
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip {
+      content: TooltipContent::Branch { name: Some(name), title, .. },
+      ..
+    }] if name.as_ref() == "feat(spool): fail readiness" && title.as_ref() == "zn/blissful-shannon"
+  ));
 }
 
 #[gpui::test]
