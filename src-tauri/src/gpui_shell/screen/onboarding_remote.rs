@@ -15,7 +15,7 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, Subscription, Window,
+  self, div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, Subscription, Window,
 };
 
 use super::{ActionSink, ScreenAction};
