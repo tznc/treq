@@ -111,6 +111,7 @@ pub fn pr_review_threads(full_name: &str, number: u64) -> Result<Vec<GhReviewThr
 
 /// The review threads of the open pull request for `branch`; none when the
 /// repository has no GitHub remote or the branch no cached pull request.
+#[cfg(feature = "gui")]
 pub fn branch_review_threads(repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String> {
   let Some(remote) = remote(repo_path)? else {
     return Ok(Vec::new());
