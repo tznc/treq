@@ -1139,8 +1139,12 @@ pub fn add_workspace(
     }
   });
 
-  release_archived_workspace_path(&conn, &workspace_path)?;
-  conn.execute(
+  // Releasing the archived row's path and inserting must land together.
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  release_archived_workspace_path(&tx, &workspace_path)?;
+  tx.execute(
         "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at, description, moved_files, sparse_patterns)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
@@ -1155,8 +1159,10 @@ pub fn add_workspace(
         ],
     )
     .map_err(|e| format!("Failed to insert workspace: {}", e))?;
-
-  Ok(conn.last_insert_rowid())
+  let id = tx.last_insert_rowid();
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
+  Ok(id)
 }
 
 pub fn delete_workspace(repo_path: &str, id: i64) -> Result<(), String> {
@@ -1385,31 +1391,37 @@ pub fn upsert_workspace_discovery(
   let conn = get_connection(repo_path)?;
   let created_at = refreshed_at.to_string();
 
-  release_archived_workspace_path(&conn, workspace_path)?;
-  conn.execute(
-        "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace upsert: {}", e))?;
+  release_archived_workspace_path(&tx, workspace_path)?;
+  tx.execute(
+    "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(workspace_path) DO UPDATE SET
              workspace_name = excluded.workspace_name,
              branch_name = excluded.branch_name,
              refreshed_at = excluded.refreshed_at",
-        params![
-            workspace_name,
-            workspace_path,
-            branch_name,
-            created_at,
-            refreshed_at,
-        ],
-    )
-    .map_err(|e| format!("Failed to upsert discovered workspace: {}", e))?;
+    params![
+      workspace_name,
+      workspace_path,
+      branch_name,
+      created_at,
+      refreshed_at,
+    ],
+  )
+  .map_err(|e| format!("Failed to upsert discovered workspace: {}", e))?;
 
-  conn
+  let id = tx
     .query_row(
       "SELECT id FROM workspaces WHERE workspace_path = ?1",
       [workspace_path],
       |row| row.get(0),
     )
-    .map_err(|e| format!("Failed to fetch upserted workspace id: {}", e))
+    .map_err(|e| format!("Failed to fetch upserted workspace id: {}", e))?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace upsert: {}", e))?;
+  Ok(id)
 }
 
 pub fn sync_discovered_workspaces(
@@ -2747,6 +2759,45 @@ mod tests {
       .expect("archived row kept");
     assert!(archived.archived);
     assert_ne!(archived.workspace_path, "fix-example");
+  }
+
+  #[test]
+  fn failed_workspace_insert_keeps_the_archived_row_path() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let archived_id = add_archived_workspace(repo_path, "fix-example", "fix/example");
+    get_connection(repo_path)
+      .expect("connection")
+      .execute_batch(
+        "CREATE TRIGGER fail_insert BEFORE INSERT ON workspaces
+         BEGIN SELECT RAISE(ABORT, 'insert refused'); END;",
+      )
+      .expect("trigger");
+
+    let added = add_workspace(
+      repo_path,
+      "fix-example".to_string(),
+      "fix-example".to_string(),
+      "fix/example".to_string(),
+      None,
+      None,
+      None,
+    );
+    let discovered = upsert_workspace_discovery(
+      repo_path,
+      "fix-example",
+      "fix-example",
+      "fix/example",
+      "now",
+    );
+
+    assert!(added.is_err());
+    assert!(discovered.is_err());
+    let archived = get_workspace_by_id(repo_path, archived_id)
+      .expect("lookup archived")
+      .expect("archived row kept");
+    assert_eq!(archived.workspace_path, "fix-example");
   }
 
   #[test]
