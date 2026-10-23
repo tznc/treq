@@ -90,15 +90,12 @@ pub fn get_git_remote_url_impl(repo_path: &str) -> Result<Option<GitRemoteInfo>,
     git_dir.join(common.trim())
   } else if git_dir.join("config").is_file() {
     git_dir
-  } else if git_dir
+  } else if let Some(common) = git_dir
     .parent()
-    .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "worktrees"))
+    .filter(|parent| parent.file_name().is_some_and(|name| name == "worktrees"))
+    .and_then(Path::parent)
   {
-    git_dir
-      .parent()
-      .and_then(Path::parent)
-      .unwrap()
-      .to_path_buf()
+    common.to_path_buf()
   } else {
     git_dir
   };
@@ -1012,7 +1009,10 @@ pub struct GhDraftReviewComment {
 
 /// Submit a PR review (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`) with its
 /// inline comments in one REST call.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn gh_submit_pr_review_impl(
   gh_path: &str,
   repo_full_name: &str,
@@ -1099,7 +1099,10 @@ pub fn gh_set_pr_draft_impl(
   check_gh_output(out).map(|_| ())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn gh_create_pr_impl(
   gh_path: &str,
   repo_full_name: &str,
@@ -1944,9 +1947,8 @@ exit 1"#,
       "feat",
       "/usr/bin:/bin",
     );
-    let error = match result {
-      Err(error) => error,
-      Ok(_) => panic!("operational gh failure was treated as no PR"),
+    let Err(error) = result else {
+      panic!("operational gh failure was treated as no PR")
     };
 
     assert!(error.contains("authentication required"));
@@ -2693,9 +2695,8 @@ echo '[]'"#,
       "feat",
       "/usr/bin:/bin",
     );
-    let error = match result {
-      Err(error) => error,
-      Ok(_) => panic!("operational gh failure was treated as no checks"),
+    let Err(error) = result else {
+      panic!("operational gh failure was treated as no checks")
     };
     assert!(error.contains("authentication required"));
   }
@@ -2781,9 +2782,8 @@ echo '[{"name":"build","bucket":"pass","link":"https://x/1"}]'"#,
     let gh_path = write_fake_gh(&bin_dir, "echo 'authentication required' >&2\nexit 1");
 
     let result = get_pr_checks_for_pr_impl(&gh_path, "owner/repo", 42, "/usr/bin:/bin");
-    let error = match result {
-      Err(error) => error,
-      Ok(_) => panic!("operational gh failure was treated as no checks"),
+    let Err(error) = result else {
+      panic!("operational gh failure was treated as no checks")
     };
     assert!(error.contains("authentication required"));
   }

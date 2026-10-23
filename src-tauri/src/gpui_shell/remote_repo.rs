@@ -1137,7 +1137,7 @@ pub(crate) mod tests {
     keyed_endpoint_mutation(&transport, &endpoint, &init).unwrap();
     transport.mutations.lock().unwrap().clear();
     keyed_endpoint_mutation(&transport, &endpoint, &init).unwrap();
-    let mut other = endpoint.clone();
+    let mut other = endpoint;
     other.id = "ep-other".into();
     keyed_endpoint_mutation(&transport, &other, &init).unwrap();
     let keys = sent_keys(&transport);

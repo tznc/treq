@@ -90,9 +90,8 @@ pub fn cleanup_agent_cli_files(paths: &[String]) -> Result<(), String> {
       continue;
     }
     let candidate = Path::new(path);
-    let canonical = match candidate.canonicalize() {
-      Ok(p) => p,
-      Err(_) => continue,
+    let Ok(canonical) = candidate.canonicalize() else {
+      continue;
     };
     if !is_safe_agent_cli_temp_path(&canonical, &temp_dir) && !is_safe_project_skill_dir(&canonical)
     {
@@ -413,7 +412,10 @@ mod tests {
     let mut perms = fs::metadata(&cwd_path).expect("metadata").permissions();
     // Restore write access so the tempdir can clean itself up; this is test
     // teardown, not a security-relevant permission change.
-    #[allow(clippy::permissions_set_readonly_false)]
+    #[allow(
+      clippy::permissions_set_readonly_false,
+      reason = "test teardown restores write access so the tempdir can clean up"
+    )]
     perms.set_readonly(false);
     let _ = fs::set_permissions(&cwd_path, perms);
 

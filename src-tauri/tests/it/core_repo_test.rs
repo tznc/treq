@@ -89,7 +89,7 @@ fn test_get_repo_current_branch_repairs_detached_head_at_default_branch_tip() {
   let branch =
     get_repo_current_branch(&repo.repo_path).expect("get_repo_current_branch should succeed");
   assert_eq!(branch.current_branch, Some(default_branch.clone()));
-  assert_eq!(branch.display_ref, default_branch.clone());
+  assert_eq!(branch.display_ref, default_branch);
   assert!(!branch.is_detached);
 
   let head =

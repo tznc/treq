@@ -314,9 +314,8 @@ pub fn format_agent_message(agent: AgentType, message: &str, user_input: &str) -
 
 /// Diff two terminal snapshots; new text below shared prefix is the next agent message.
 pub fn screen_diff(old_screen: &str, new_screen: &str) -> String {
-  let old_lines: Vec<&str> = old_screen.split('\n').collect();
   let new_lines: Vec<&str> = new_screen.split('\n').collect();
-  let old_set: std::collections::HashSet<&str> = old_lines.into_iter().collect();
+  let old_set: std::collections::HashSet<&str> = old_screen.split('\n').collect();
   let first_non_matching = new_lines
     .iter()
     .position(|line| !old_set.contains(line))

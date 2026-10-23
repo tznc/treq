@@ -96,7 +96,7 @@ fn test_create_session_with_initial_command() {
   let result = manager.create_session(
     "test-initial-cmd".to_string(),
     None,
-    Some(repo.repo_path.clone()),
+    Some(repo.repo_path),
     None,
     Vec::new(),
     Some("echo HELLO_FROM_INIT".to_string()),
@@ -152,7 +152,7 @@ fn test_session_lifecycle_and_io() {
   let result = manager.create_session(
     session_id.to_string(),
     None,
-    Some(repo.repo_path.clone()),
+    Some(repo.repo_path),
     None,
     Vec::new(),
     None,
@@ -291,7 +291,7 @@ fn test_multiple_concurrent_sessions() {
     .create_session(
       "multi-c".to_string(),
       None,
-      Some(repo.repo_path.clone()),
+      Some(repo.repo_path),
       None,
       Vec::new(),
       None,
@@ -367,7 +367,7 @@ fn test_session_isolation() {
     .create_session(
       "iso-b".to_string(),
       None,
-      Some(repo.repo_path.clone()),
+      Some(repo.repo_path),
       None,
       Vec::new(),
       None,
@@ -505,7 +505,7 @@ fn test_echo_suppression_filtering() {
     .create_session(
       session_id.to_string(),
       None,
-      Some(repo.repo_path.clone()),
+      Some(repo.repo_path),
       None,
       Vec::new(),
       None,
@@ -587,7 +587,7 @@ fn test_suppress_echo_at_creation_filters_initial_prompt() {
     .create_session(
       "test-creation-filter".to_string(),
       None,
-      Some(repo.repo_path.clone()),
+      Some(repo.repo_path),
       None,
       Vec::new(),
       None,
@@ -643,7 +643,7 @@ fn run_filtered_command(session_id: &str, command: &str, until: &str) -> Vec<Str
     .create_session(
       session_id.to_string(),
       None,
-      Some(repo.repo_path.clone()),
+      Some(repo.repo_path),
       Some("/bin/sh".to_string()),
       Vec::new(),
       None,

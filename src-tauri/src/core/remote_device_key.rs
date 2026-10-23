@@ -38,7 +38,10 @@ pub struct DeviceKeyInfo {
 /// plain messages; changing that return type is out of scope here.
 pub const SECURE_STORAGE_UNAVAILABLE_PREFIX: &str = "secure_storage_unavailable:";
 
-#[cfg_attr(not(any(mobile, test)), allow(dead_code))]
+#[cfg_attr(
+  not(any(mobile, test)),
+  allow(dead_code, reason = "only used on mobile builds and in tests")
+)]
 fn generate_private_key() -> Result<PrivateKey, String> {
   let mut seed = [0u8; 32];
   getrandom::fill(&mut seed).map_err(|e| format!("failed to source randomness: {e}"))?;
@@ -47,7 +50,10 @@ fn generate_private_key() -> Result<PrivateKey, String> {
     .map_err(|e| format!("failed to generate device key: {e}"))
 }
 
-#[cfg_attr(not(any(mobile, test)), allow(dead_code))]
+#[cfg_attr(
+  not(any(mobile, test)),
+  allow(dead_code, reason = "only used on mobile builds and in tests")
+)]
 fn device_key_info(key: &PrivateKey) -> Result<DeviceKeyInfo, String> {
   let public_key = key.public_key();
   let public_key_line = public_key

@@ -270,14 +270,11 @@ pub(crate) fn start_instance_registry_heartbeat(app: AppHandle) {
       .ok()
       .map(|m| m.clone())
       .unwrap_or_default();
-    let mut focus_map = match state.window_last_focused_at.lock() {
-      Ok(guard) => guard,
-      Err(_) => {
-        std::thread::sleep(std::time::Duration::from_millis(
-          agent_dispatch::HEARTBEAT_INTERVAL_MS,
-        ));
-        continue;
-      }
+    let Ok(mut focus_map) = state.window_last_focused_at.lock() else {
+      std::thread::sleep(std::time::Duration::from_millis(
+        agent_dispatch::HEARTBEAT_INTERVAL_MS,
+      ));
+      continue;
     };
     let windows = app.windows();
     let mut snapshots = Vec::new();

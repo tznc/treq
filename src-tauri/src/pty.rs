@@ -68,7 +68,7 @@ pub fn strip_ansi_codes(s: &str) -> String {
   static ANSI_RE: OnceLock<Regex> = OnceLock::new();
   let re = ANSI_RE.get_or_init(|| {
     Regex::new(r"\x1b\[[\x20-\x3f]*[\x30-\x3f]*[\x40-\x7e]|\x1b\][^\x07]*\x07|\x1b\([A-Z]|\x1b[=>]")
-      .unwrap()
+      .expect("ANSI pattern is a valid regex")
   });
   re.replace_all(s, "").to_string()
 }
@@ -229,19 +229,23 @@ fn terminate_process_tree(root: u32, child: &mut Box<dyn Child + Send>) {
 
   fn signal_all(pids: &[u32], root: u32, signal: libc::c_int) {
     for &pid in pids {
+      // SAFETY: `kill` takes plain integers and touches no Rust memory; a
+      // pid that already exited only makes it return an error, which is ignored.
       unsafe {
         libc::kill(pid as libc::pid_t, signal);
       }
     }
+    // SAFETY: as above.
     unsafe {
       libc::kill(root as libc::pid_t, signal);
     }
   }
 
   fn any_alive(pids: &[u32]) -> bool {
-    pids
-      .iter()
-      .any(|&pid| unsafe { libc::kill(pid as libc::pid_t, 0) } == 0)
+    pids.iter().any(|&pid| {
+      // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
+      unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    })
   }
 
   let descendants = descendant_pids(root);
@@ -361,7 +365,10 @@ pub struct PtyManager {
 }
 
 impl PtyManager {
-  #[allow(clippy::new_without_default)]
+  #[allow(
+    clippy::new_without_default,
+    reason = "constructed once at startup; a Default impl would add nothing"
+  )]
   pub fn new() -> Self {
     PtyManager {
       sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -370,7 +377,10 @@ impl PtyManager {
     }
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub fn create_session(
     &self,
     session_id: String,
@@ -404,7 +414,10 @@ impl PtyManager {
     result
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn create_session_inner(
     &self,
     session_id: String,
@@ -563,13 +576,11 @@ impl PtyManager {
               guard.clone()
             };
 
-            if filter_cmd.is_none() {
+            let Some(filter_cmd) = filter_cmd else {
               // No filter active, pass through directly
               callback(data);
               continue;
-            }
-
-            let filter_cmd = filter_cmd.unwrap();
+            };
             let filter = match echo_filter.as_mut() {
               Some(filter) if filter.is_for(&filter_cmd) => filter,
               _ => echo_filter.insert(EchoFilter::new(&filter_cmd)),
@@ -695,7 +706,7 @@ impl PtyManager {
   /// (dashboard teardown, native "Close Window", full app quit).
   pub fn close_all(&self) {
     let drained: Vec<PtySession> = {
-      let mut sessions = self.sessions.lock().unwrap();
+      let mut sessions = self.sessions.lock_or_recover();
       sessions.drain().map(|(_, session)| session).collect()
     };
     for mut session in drained {
@@ -709,7 +720,11 @@ impl PtyManager {
   /// match and are never closed by this.
   pub fn close_all_for_window(&self, window_label: &str) {
     let drained: Vec<PtySession> = {
-      let mut sessions = self.sessions.lock().unwrap();
+      let mut sessions = self.sessions.lock_or_recover();
+      #[allow(
+        clippy::needless_collect,
+        reason = "ends the shared borrow before removing"
+      )]
       let ids: Vec<String> = sessions
         .iter()
         .filter(|(_, session)| session.window_label.as_deref() == Some(window_label))
@@ -1040,6 +1055,7 @@ mod tests {
     let grandchild_pid = grandchild_pid.expect("shell printed its background pid");
 
     // Alive prior to close: kill(pid, 0) checks existence without signaling.
+    // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
     assert_eq!(unsafe { libc::kill(grandchild_pid, 0) }, 0);
 
     manager.close_session("descendant").unwrap();
@@ -1047,6 +1063,7 @@ mod tests {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut still_alive = true;
     while Instant::now() < deadline {
+      // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
       if unsafe { libc::kill(grandchild_pid, 0) } != 0 {
         still_alive = false;
         break;

@@ -1739,7 +1739,7 @@ impl WorkspaceDialog {
           let message = if commit.message.is_empty() {
             "(no description)".to_string()
           } else {
-            commit.message.clone()
+            commit.message
           };
           div()
             .id(id)

@@ -73,6 +73,12 @@
 //! - `TREQ_SSH_IT_WORKSPACE_DIR`: directory created on the server for PTY
 //!   working-directory tests.
 
+#![allow(
+  clippy::unwrap_used,
+  clippy::print_stderr,
+  reason = "test code reports progress on stderr"
+)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Once;
@@ -842,7 +848,10 @@ async fn spawn_ws_to_tcp_bridge(sshd_host: String, sshd_port: u16) -> String {
       };
       let sshd_host = sshd_host.clone();
       tokio::spawn(async move {
-        #[allow(clippy::result_large_err)]
+        #[allow(
+          clippy::result_large_err,
+          reason = "the callback signature is fixed by tungstenite's handshake callback"
+        )]
         let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
           let authorized = request
             .headers()

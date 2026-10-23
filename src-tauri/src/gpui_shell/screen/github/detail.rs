@@ -226,7 +226,7 @@ impl GithubView {
             } else {
               "Workspace opened"
             };
-            view.toast(ToastTone::Success, title, head.to_string());
+            view.toast(ToastTone::Success, title, head);
             view.load_workspaces(cx);
             view.press(format!("github.openWorkspace:{id}"), cx);
           }

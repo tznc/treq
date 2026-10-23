@@ -624,7 +624,7 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<Vec<crate::jj::JjFileChange>, String> {
     self.record(format!("read changed files {workspace_id:?}"));
     let working = self.working().ok_or("no changes")?;
-    Ok(working.uncommitted_files.clone())
+    Ok(working.uncommitted_files)
   }
 
   fn workspace_diff(

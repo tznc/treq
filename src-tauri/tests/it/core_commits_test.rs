@@ -284,11 +284,7 @@ fn test_list_commits_includes_stacked_working_copies_for_dirty_chain() {
 
   assert_eq!(
     stacked_labels,
-    vec![
-      grandchild.branch_name.clone(),
-      child.branch_name.clone(),
-      root.branch_name.clone()
-    ],
+    vec![grandchild.branch_name, child.branch_name, root.branch_name],
     "Stacked working copies should be ordered from terminal workspace upward"
   );
 }
@@ -373,7 +369,7 @@ fn test_list_commits_skips_clean_branches_in_stacked_chain() {
 
   assert_eq!(
     stacked_labels,
-    vec![grandchild.branch_name.clone(), root.branch_name.clone()],
+    vec![grandchild.branch_name, root.branch_name],
     "Clean intermediate branches should be skipped without breaking ancestry traversal"
   );
 }
@@ -1263,10 +1259,9 @@ fn test_list_commits() {
   );
 
   // Should exclude working copy commits
-  let wc: Vec<_> = result
-    .commits
-    .iter()
-    .filter(|c| c.is_working_copy)
-    .collect();
-  assert_eq!(wc.len(), 0, "Should have no working copy commits");
+  assert_eq!(
+    result.commits.iter().filter(|c| c.is_working_copy).count(),
+    0,
+    "Should have no working copy commits"
+  );
 }

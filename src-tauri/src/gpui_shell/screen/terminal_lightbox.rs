@@ -605,9 +605,7 @@ impl Lightbox {
     let picked = lines
       .get(pending.start - 1..pending.end.min(lines.len()))
       .unwrap_or_default()
-      .iter()
-      .map(|l| l.to_string())
-      .collect();
+      .to_vec();
     self.next_id += 1;
     self.lines.entry(asset.id).or_default().push(LineComment {
       id: self.next_id,

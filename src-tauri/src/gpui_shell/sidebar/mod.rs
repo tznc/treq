@@ -831,7 +831,10 @@ impl Sidebar {
   }
 
   /// A square header button with a tooltip below it.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn header_button(
     &self,
     id: &'static str,
@@ -870,7 +873,10 @@ impl Sidebar {
   }
 
   /// A small action button inside a row, with a tooltip.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn row_button(
     &self,
     id: SharedString,
@@ -1032,10 +1038,10 @@ impl Sidebar {
           Some(name) if !repo.active => format!("home-{name}"),
           _ => "home".to_string(),
         };
-        move || selector.clone()
+        move || selector
       })
       .role(Role::Button)
-      .aria_label(label.clone())
+      .aria_label(label)
       .aria_selected(repo.home_selected)
       .test_support()
       .relative()
@@ -1156,7 +1162,7 @@ impl Sidebar {
     let selector = format!("group-{name}");
     ui::text(div(), TextSize::Xs)
       .id("group-label")
-      .debug_selector(move || selector.clone())
+      .debug_selector(move || selector)
       .flex()
       .items_center()
       .gap_1()
@@ -1279,7 +1285,7 @@ impl Sidebar {
     let interactive = repo_active && !row.archiving;
     let row_el = div()
       .id(("workspace", id as u64))
-      .debug_selector(move || selector.clone())
+      .debug_selector(move || selector)
       .role(Role::Button)
       .aria_label(row.title.clone())
       .aria_selected(row.selected)

@@ -1142,14 +1142,11 @@ impl FileBrowserView {
     let items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(rel.clone(), "Relative path copied".to_string()),
+        copy(rel, "Relative path copied".to_string()),
       )
       .icon(MenuIcon::Copy),
-      NativeMenuItem::item(
-        "Copy full path",
-        copy(full.clone(), "Full path copied".to_string()),
-      )
-      .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy full path", copy(full, "Full path copied".to_string()))
+        .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
         text: "Open in...".into(),

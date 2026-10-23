@@ -447,8 +447,8 @@ fn up_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
     return format!("Devcontainer failed to start: {message}");
   }
   let stderr = String::from_utf8_lossy(stderr);
-  let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
-  let tail: Vec<&str> = tail.into_iter().rev().collect();
+  let mut tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+  tail.reverse();
   format!("Devcontainer failed to start: {}", tail.join("\n"))
 }
 

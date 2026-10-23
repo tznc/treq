@@ -2072,9 +2072,8 @@ fn recover_stale_claim(request: &TreqCommandRequest) -> Result<RecoveryDecision,
   let Some(verification) = verification_for(request) else {
     return Ok(RecoveryDecision::Ambiguous);
   };
-  let observed = match execute_local_request(verification.read_request) {
-    Ok(value) => value,
-    Err(_) => return Ok(RecoveryDecision::Ambiguous),
+  let Ok(observed) = execute_local_request(verification.read_request) else {
+    return Ok(RecoveryDecision::Ambiguous);
   };
   match (verification.check)(&observed) {
     MutationVerificationOutcome::AlreadyApplied => {
@@ -2089,8 +2088,7 @@ fn resolve_workspace_path(repo: &str, id: Option<i64>) -> Result<String, String>
   match id {
     None => Ok(repo.to_string()),
     Some(id) => {
-      let workspace = crate::local_db::get_workspace_by_id(repo, id)
-        .map_err(|error| error.to_string())?
+      let workspace = crate::local_db::get_workspace_by_id(repo, id)?
         .ok_or_else(|| format!("workspace_not_found: Workspace {id} was not found"))?;
       Ok(
         Path::new(repo)
@@ -4221,7 +4219,7 @@ mod tests {
     .unwrap();
 
     let after = execute_local_request(TreqCommandRequest::WorkspaceChangeMarker {
-      repo: repo_path.clone(),
+      repo: repo_path,
       workspace: None,
     })
     .unwrap();
@@ -5177,7 +5175,6 @@ mod tests {
       .unwrap();
       let base = marker
         .working_copy_change_id
-        .clone()
         .expect("marker reports the working-copy change id");
 
       let request = TreqCommandRequest::CreateCommit {
@@ -5337,7 +5334,7 @@ mod tests {
       TestRepo::write_workspace_file(&source_path, "kept.txt", "kept\n").unwrap();
 
       let result = execute_local_request(TreqCommandRequest::MoveWorkspaceChanges {
-        repo: repo.repo_path.clone(),
+        repo: repo.repo_path,
         workspace: "feat-src".into(),
         destination: "feat-dst".into(),
         files: vec!["moved.txt".into()],

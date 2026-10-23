@@ -2259,7 +2259,7 @@ impl TerminalPane {
       let kind = Kind::Agent {
         pane_id,
         name: session.name.clone(),
-        repo_path: repo.clone(),
+        repo_path: repo,
         workspace_path,
         workspace_name: workspace.map(|w| w.branch_name),
         agent,
@@ -2563,7 +2563,7 @@ impl TerminalPane {
       };
       let drag = SendAssetDrag {
         path: asset.path.clone(),
-        title: asset.title.clone(),
+        title: asset.title,
       };
       div()
         .id(SharedString::from(format!("terminal-send-preview-{id}")))
@@ -3113,7 +3113,7 @@ impl TerminalPane {
         )
         .label("Stop")
         .on_click({
-          let view = view.clone();
+          let view = view;
           move |_, _, cx| view.update(cx, |v, cx| v.stop(cx))
         });
         let detach_id = column.id.clone();
@@ -3667,7 +3667,7 @@ impl Render for TerminalPane {
           gpui::canvas(
             |_, _, _| {},
             move |_, _, window, _| {
-              let (moved, released) = (pane.clone(), pane.clone());
+              let (moved, released) = (pane.clone(), pane);
               window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                 if phase == gpui::DispatchPhase::Bubble {
                   let _ = moved.update(cx, |pane, cx| pane.on_drag(e, cx));

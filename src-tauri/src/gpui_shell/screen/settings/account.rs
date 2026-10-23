@@ -676,9 +676,7 @@ impl SettingsView {
           let result = host.set_repo_settings(&path, &[(LINEAR_API_KEY.to_string(), key)]);
           match &result {
             Ok(()) => {
-              host.notify(NativeEvent::RepoSettingsChanged {
-                repo_path: path.clone(),
-              });
+              host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
               host.notify(toast(ToastTone::Success, "API Key saved", ""));
             }
             Err(err) => host.notify(toast(ToastTone::Error, "Error saving API key", err)),

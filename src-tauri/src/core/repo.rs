@@ -76,7 +76,7 @@ pub fn get_repo_current_branch(repo_path: &str) -> Result<RepoBranch, String> {
       .take(12)
       .collect()
   } else {
-    resolved_branch.clone()
+    resolved_branch
   };
 
   Ok(RepoBranch {

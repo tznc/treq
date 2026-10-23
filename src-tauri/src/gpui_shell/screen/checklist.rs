@@ -132,7 +132,7 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
     Some(false) => {
       let id = SharedString::from(format!("install-{}", tool.binary));
       ui::text(
-        Button::new(id.clone(), &p)
+        Button::new(id, &p)
           .variant(Variant::Link)
           .size(Size::Sm)
           .h_auto()
