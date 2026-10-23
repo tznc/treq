@@ -4,6 +4,7 @@ pub mod add_host;
 pub mod commits;
 pub mod conflicts;
 pub mod diff;
+pub mod new_workspaces;
 pub mod repos;
 pub mod terminal;
 pub mod workspace;

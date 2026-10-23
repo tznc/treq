@@ -329,7 +329,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, summaries, inspect, create, rename, update, delete, archive, move, rebase, marker, stash, snapshot, restore-all, restore-snapshot"
+              "description": "Action: list, summaries, inspect, create, plan-new, new, rename, update, delete, archive, move, rebase, marker, stash, snapshot, restore-all, restore-snapshot"
             },
             {
               "name": "repo",

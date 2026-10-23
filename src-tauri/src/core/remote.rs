@@ -123,6 +123,13 @@ pub enum TreqCommandRequest {
   WorkspaceSummaries {
     repo: String,
   },
+  /// What each line of `text` would open or make, without doing it. See
+  /// [`crate::core::new_workspaces::plan`].
+  PlanNewWorkspaces {
+    repo: String,
+    text: String,
+    stack_on: Option<String>,
+  },
   InspectWorkspace {
     repo: String,
     workspace: String,
@@ -215,6 +222,14 @@ pub enum TreqCommandRequest {
     idempotency_key: String,
   },
   // -- Phase 5: workspace mutations -------------------------------------------
+  /// Opens or makes a workspace for each line of `text`, stacked as the
+  /// lines are indented. See [`crate::core::new_workspaces::run`].
+  NewWorkspaces {
+    repo: String,
+    text: String,
+    stack_on: Option<String>,
+    idempotency_key: String,
+  },
   CreateWorkspace {
     repo: String,
     branch_name: String,
@@ -508,6 +523,7 @@ impl TreqCommandRequest {
       | Self::ListBranches { .. }
       | Self::ListWorkspaces { .. }
       | Self::WorkspaceSummaries { .. }
+      | Self::PlanNewWorkspaces { .. }
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
@@ -530,6 +546,7 @@ impl TreqCommandRequest {
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
       | Self::InitRepo { .. }
+      | Self::NewWorkspaces { .. }
       | Self::CreateWorkspace { .. }
       | Self::RenameWorkspace { .. }
       | Self::UpdateWorkspace { .. }
@@ -573,6 +590,7 @@ impl TreqCommandRequest {
     match self {
       Self::CloneRepo { .. }
       | Self::InitRepo { .. }
+      | Self::NewWorkspaces { .. }
       | Self::CreateWorkspace { .. }
       | Self::RenameWorkspace { .. }
       | Self::MoveWorkspaceChanges { .. }
@@ -594,6 +612,7 @@ impl TreqCommandRequest {
       | Self::ListBranches { .. }
       | Self::ListWorkspaces { .. }
       | Self::WorkspaceSummaries { .. }
+      | Self::PlanNewWorkspaces { .. }
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
@@ -639,6 +658,7 @@ impl TreqCommandRequest {
       Self::ListBranches { .. } => "ListBranches",
       Self::ListWorkspaces { .. } => "ListWorkspaces",
       Self::WorkspaceSummaries { .. } => "WorkspaceSummaries",
+      Self::PlanNewWorkspaces { .. } => "PlanNewWorkspaces",
       Self::InspectWorkspace { .. } => "InspectWorkspace",
       Self::ListChanges { .. } => "ListChanges",
       Self::DiffFile { .. } => "DiffFile",
@@ -655,6 +675,7 @@ impl TreqCommandRequest {
       Self::ProbeRepo { .. } => "ProbeRepo",
       Self::CloneRepo { .. } => "CloneRepo",
       Self::InitRepo { .. } => "InitRepo",
+      Self::NewWorkspaces { .. } => "NewWorkspaces",
       Self::CreateWorkspace { .. } => "CreateWorkspace",
       Self::RenameWorkspace { .. } => "RenameWorkspace",
       Self::UpdateWorkspace { .. } => "UpdateWorkspace",
@@ -703,6 +724,7 @@ impl TreqCommandRequest {
     "ListBranches",
     "ListWorkspaces",
     "WorkspaceSummaries",
+    "PlanNewWorkspaces",
     "InspectWorkspace",
     "ListChanges",
     "DiffFile",
@@ -715,6 +737,7 @@ impl TreqCommandRequest {
     "ProbeRepo",
     "CloneRepo",
     "InitRepo",
+    "NewWorkspaces",
     "CreateWorkspace",
     "RenameWorkspace",
     "UpdateWorkspace",
@@ -1419,6 +1442,26 @@ impl TreqCommandRequest {
         fields.workspace = Some(workspace);
         ("workspace", "inspect", repo)
       }
+      Self::PlanNewWorkspaces {
+        repo,
+        text,
+        stack_on,
+      } => {
+        fields.value = Some(text.clone());
+        fields.target = stack_on.as_deref();
+        ("workspace", "plan-new", repo)
+      }
+      Self::NewWorkspaces {
+        repo,
+        text,
+        stack_on,
+        idempotency_key,
+      } => {
+        fields.value = Some(text.clone());
+        fields.target = stack_on.as_deref();
+        fields.idempotency_key = Some(idempotency_key);
+        ("workspace", "new", repo)
+      }
       Self::CreateWorkspace {
         repo,
         branch_name,
@@ -2106,6 +2149,18 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       require_existing_repo(&repo)?;
       json(crate::core::workspaces::workspace_summaries(&repo))
     }
+    TreqCommandRequest::PlanNewWorkspaces {
+      repo,
+      text,
+      stack_on,
+    } => {
+      require_existing_repo(&repo)?;
+      json(crate::core::new_workspaces::plan(
+        &repo,
+        &text,
+        stack_on.as_deref(),
+      ))
+    }
     TreqCommandRequest::MachineUsage { root } => json(machine_usage(&root)),
     TreqCommandRequest::HostCheck { root } => json(Ok::<_, String>(host_check(&root))),
     TreqCommandRequest::InspectWorkspace { repo, workspace } => json(
@@ -2236,6 +2291,27 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       Some(idempotency_key.as_str()),
       request_snapshot.as_ref().expect("CloneRepo is a mutation"),
       || json(clone_repo_local(&repo_url, &destination)),
+    ),
+    TreqCommandRequest::NewWorkspaces {
+      repo,
+      text,
+      stack_on,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "workspace.new",
+      Some(idempotency_key.as_str()),
+      request_snapshot
+        .as_ref()
+        .expect("NewWorkspaces is a mutation"),
+      || {
+        require_existing_repo(&repo)?;
+        json(crate::core::new_workspaces::run(
+          &repo,
+          &text,
+          stack_on.as_deref(),
+        ))
+      },
     ),
     TreqCommandRequest::CreateWorkspace {
       repo,
@@ -4739,7 +4815,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 58);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 60);
   }
 
   #[test]
