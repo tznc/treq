@@ -27,6 +27,7 @@ gui = [
   "dep:tauri-plugin-deep-link",
   "dep:tauri-plugin-notification",
   "dep:tauri-plugin-keystore",
+  "dep:keyring",
   "dep:tauri-plugin-biometric",
   "dep:tauri-plugin-cli",
   "dep:tauri-plugin-single-instance",
@@ -79,6 +80,8 @@ two-face = { version = "0.4.5", default-features = false, features = ["syntect-f
 alacritty_terminal = { version = "0.26", default-features = false, optional = true }
 # Draws review highlights onto `treq send` images (gpui_shell terminal pane).
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# The Supabase session lives in the OS keychain (core::session_secrets).
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
 
 [dependencies]
 tauri = { version = "2.12", features = ["unstable"], optional = true }

@@ -13,6 +13,8 @@ use async_trait::async_trait;
 use tauri::{AppHandle, Manager};
 
 use super::remote_control::{self, RemoteExecState};
+#[cfg(desktop)]
+use crate::core::session_secrets::{KeychainSessionStore, KeyringSecret};
 use crate::{
   core::{
     auth::{SessionStore, SESSION_SETTING},
@@ -59,6 +61,18 @@ impl SessionStore for DbStore {
       }
     }
   }
+}
+
+/// The keychain, falling back to the app database where there is none.
+#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+fn session_store(app: &AppHandle) -> Arc<dyn SessionStore> {
+  let db = DbStore(app.clone());
+  #[cfg(desktop)]
+  match KeyringSecret::new(&app.config().identifier, SESSION_SETTING) {
+    Ok(secret) => return Arc::new(KeychainSessionStore::new(secret, db)),
+    Err(error) => log::warn!("opening the keychain: {error}"),
+  }
+  Arc::new(db)
 }
 
 struct AppEffects {
@@ -144,10 +158,7 @@ pub fn start(app: &AppHandle) {
     app: app.clone(),
     window: Mutex::new(None),
   });
-  let supabase = Arc::new(Supabase::new(
-    &desktop_env().supabase,
-    Arc::new(DbStore(app.clone())),
-  ));
+  let supabase = Arc::new(Supabase::new(&desktop_env().supabase, session_store(app)));
   let cloud = Cloud::new(supabase, effects.clone());
   app.manage(CloudState {
     cloud: cloud.clone(),

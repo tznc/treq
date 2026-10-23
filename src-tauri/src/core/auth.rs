@@ -62,7 +62,7 @@ impl User {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
   pub access_token: String,
@@ -70,6 +70,18 @@ pub struct Session {
   /// Epoch seconds.
   pub expires_at: i64,
   pub user: User,
+}
+
+/// Leaves the tokens out, so a logged session cannot leak them.
+impl std::fmt::Debug for Session {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("Session")
+      .field("access_token", &"<redacted>")
+      .field("refresh_token", &"<redacted>")
+      .field("expires_at", &self.expires_at)
+      .field("user", &self.user)
+      .finish()
+  }
 }
 
 /// Everything there is to show about signing in.
@@ -373,6 +385,23 @@ mod tests {
     assert_eq!(callback_token("treq://auth/callback?token="), None);
     assert_eq!(callback_token("treq://auth/other?token=abc"), None);
     assert_eq!(callback_token("https://auth/callback?token=abc"), None);
+  }
+
+  #[test]
+  fn debug_output_leaves_out_the_tokens() {
+    let session = Session {
+      access_token: "secret-access".into(),
+      refresh_token: "secret-refresh".into(),
+      expires_at: 1,
+      user: User {
+        id: "u".into(),
+        email: None,
+        user_metadata: Value::Null,
+      },
+    };
+    let debug = format!("{session:?}");
+    assert!(!debug.contains("secret-"), "{debug}");
+    assert!(debug.contains("expires_at: 1"), "{debug}");
   }
 
   #[test]
