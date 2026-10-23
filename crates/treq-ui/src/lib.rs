@@ -1,21 +1,48 @@
-//! Building blocks shared by GPUI screens: the sizes and colors the React
-//! app's UI primitives had, from their Tailwind classes.
+//! Treq's design system: its tokens ([`theme`]) and the components every
+//! GPUI screen builds from, on gpui-bootstrap re-themed with those tokens.
+//! Screens compose these; they don't draw controls from `div()`.
+//!
+//! `cargo run -p treq-ui --example styleguide` shows every component.
+
+pub mod alert;
+pub mod badge;
+pub mod dialog;
+pub mod empty_state;
+pub mod icon_button;
+pub mod kbd;
+pub mod menu;
+pub mod picker;
+pub mod popover;
+pub mod row;
+pub mod split_button;
+pub mod tabs;
+pub mod theme;
+
+pub use alert::{Alert, Severity};
+pub use badge::{Badge, Count, Dot, Tone};
+pub use dialog::{ConfirmDialog, Dialog};
+pub use empty_state::{EmptyState, Loading, Skeleton};
+pub use icon_button::{IconButton, IconButtonSize};
+pub use kbd::Kbd;
+pub use menu::{MenuItem, MenuSeparator};
+pub use picker::{Picker, PickerPlacement};
+pub use popover::Popover;
+pub use row::{Row, RowDensity};
+pub use split_button::SplitButton;
+pub use tabs::{Tab, Tabs, TabsStyle};
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
-use tauri_plugin_gpui::gpui::{
-  self, accesskit, div, prelude::*, svg, Animation, AnimationExt as _, AnyElement, App, Bounds,
+use gpui::{
+  accesskit, div, prelude::*, svg, Animation, AnimationExt as _, AnyElement, App, Bounds,
   ClickEvent, Context, Div, ElementId, GlobalElementId, Hsla, InspectorElementId, Interactivity,
   LayoutId, MouseButton, MouseDownEvent, Pixels, SharedString, StyleRefinement, Transformation,
   Window,
 };
 
-use gpui_kit::{
-  base::TestSupportExt as _,
-  component::input::{Input, InputState},
-};
+use gpui_kit::component::input::{Input, InputState};
 
-use super::theme::{self, Palette};
+use theme::Palette;
 
 /// The rem size at 100% `ui_zoom`, as the webview's root font size.
 pub const BASE_REM: f32 = 16.;
@@ -55,6 +82,9 @@ pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// A right-click handler, given where the pointer went down.
 pub type OnRightClick = Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>;
+
+/// Told whether the pointer is over the element, such as to show a tooltip.
+pub type OnHover = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 
 /// The app's text scale (Tailwind's names, as the React UI overrode them):
 /// size and line height in pixels.
@@ -162,6 +192,8 @@ pub struct Button {
   children: Vec<ButtonChild>,
   on_click: Option<OnClick>,
   on_right_click: Option<OnRightClick>,
+  on_hover: Option<OnHover>,
+  selected: bool,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
@@ -179,6 +211,8 @@ impl Button {
       children: Vec::new(),
       on_click: None,
       on_right_click: None,
+      on_hover: None,
+      selected: false,
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
@@ -203,6 +237,13 @@ impl Button {
 
   pub fn disabled(mut self, disabled: bool) -> Self {
     self.disabled = disabled;
+    self
+  }
+
+  /// Drawn on, in the one selected style: a toggle that is on, or the
+  /// trigger of a menu that is open.
+  pub fn selected(mut self, selected: bool) -> Self {
+    self.selected = selected;
     self
   }
 
@@ -241,18 +282,18 @@ impl Button {
     self
   }
 
+  /// Runs `f` as the pointer enters and leaves, such as to show a tooltip.
+  /// It runs while disabled too, so a tooltip can say why.
+  pub fn on_hover(mut self, f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+    self.on_hover = Some(Rc::new(f));
+    self
+  }
+
   /// The text color for this variant, muted when disabled. Set `disabled`
   /// before reading it.
   pub fn foreground(&self) -> Hsla {
     if self.disabled {
-      // Over a tinted fill the muted color alone reads as disabled; over the
-      // page it needs fading too, or an outline button looks enabled.
-      let muted = self.palette.muted_foreground;
-      if self.filled() {
-        muted
-      } else {
-        muted.opacity(0.6)
-      }
+      self.disabled_foreground()
     } else {
       self.variant_foreground()
     }
@@ -288,55 +329,77 @@ impl Styled for Button {
   }
 }
 
+impl Button {
+  /// The colors of each interaction state, as gpui-bootstrap's
+  /// `button-variant()` takes them. A disabled button keeps its shape: a
+  /// filled one fades its fill, an unfilled one its border, and the label
+  /// goes muted.
+  fn colors(&self) -> gpui_bootstrap::ButtonColors {
+    let p = &self.palette;
+    let clear = gpui::transparent_black();
+    let (bg, border, hover_bg) = match self.variant {
+      Variant::Default => (p.primary, p.primary, p.primary.opacity(0.85)),
+      Variant::Destructive => (p.destructive, p.destructive, p.destructive.opacity(0.85)),
+      Variant::Ghost => (clear, clear, p.accent),
+      Variant::Link => (clear, clear, clear),
+      Variant::Outline => (p.background, p.input, p.accent),
+      Variant::Secondary => (p.secondary, p.secondary, p.secondary.opacity(0.7)),
+    };
+    let hover_bg = self.hover_bg.unwrap_or(hover_bg);
+    let (bg, hover_bg) = if self.selected && !self.filled() {
+      (p.selected(), p.selected())
+    } else {
+      (bg, hover_bg)
+    };
+    let color = self.variant_foreground();
+    let (disabled_bg, disabled_border) = if self.filled() {
+      (
+        bg.opacity(DISABLED_FILL_OPACITY),
+        border.opacity(DISABLED_FILL_OPACITY),
+      )
+    } else {
+      (bg, border.opacity(0.5))
+    };
+    gpui_bootstrap::ButtonColors {
+      bg,
+      border,
+      color,
+      hover_bg,
+      hover_border: border,
+      hover_color: color,
+      // Pressing keeps the hover look.
+      active_bg: hover_bg,
+      active_border: border,
+      active_color: color,
+      focus_ring: p.ring.opacity(0.55),
+      disabled_bg,
+      disabled_border,
+      disabled_color: self.disabled_foreground(),
+    }
+  }
+
+  /// The label color while disabled. Over a tinted fill the muted color
+  /// alone reads as disabled; over the page it needs fading too, or an
+  /// outline button looks enabled.
+  fn disabled_foreground(&self) -> Hsla {
+    let muted = self.palette.muted_foreground;
+    if self.filled() {
+      muted
+    } else {
+      muted.opacity(0.6)
+    }
+  }
+}
+
 impl RenderOnce for Button {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-    let p = self.palette;
+    let colors = self.colors();
     let fg = self.foreground();
-    let base = div()
-      .flex()
-      .flex_none()
-      .items_center()
-      .justify_center()
-      .gap_2()
-      .whitespace_nowrap()
-      .rounded(zpx(8.))
-      .font_weight(gpui::FontWeight::MEDIUM)
-      .text_color(fg);
-    let base = match self.size {
-      Size::Default => text(base.h(zpx(40.)).px_4().py_2(), TextSize::Sm),
-      Size::Icon => base.size(zpx(40.)),
-      Size::IconXs => base.size(zpx(24.)),
-      Size::Lg => text(base.h(zpx(44.)).px_6(), TextSize::Lg),
-      Size::Sm => text(base.h(zpx(32.)).px_3(), TextSize::Sm),
-      Size::Xs => text(base.h(zpx(24.)).px_2(), TextSize::Sm),
-    };
     let disabled = self.disabled;
     let filled = self.filled();
-    let base = match self.variant {
-      Variant::Default => base.bg(p.primary).shadow_sm(),
-      Variant::Destructive => base.bg(p.destructive).shadow_sm(),
-      Variant::Ghost | Variant::Link => base,
-      Variant::Outline => base.border_1().border_color(p.input).bg(p.background),
-      Variant::Secondary => base.bg(p.secondary),
-    };
-    let hover_bg = self.hover_bg.or(match self.variant {
-      Variant::Default => Some(p.primary.opacity(0.85)),
-      Variant::Destructive => Some(p.destructive.opacity(0.85)),
-      Variant::Ghost | Variant::Outline => Some(p.accent),
-      Variant::Link => None,
-      Variant::Secondary => Some(p.secondary.opacity(0.7)),
-    });
-    let link = self.variant == Variant::Link;
-    let selector = self.id.to_string();
-    let mut el = base
-      .id(self.id)
-      .debug_selector(move || selector)
-      .role(gpui::Role::Button)
-      .when_some(self.name, |b, name| b.aria_label(name));
-    el.style().refine(&self.style);
-    if disabled {
-      // After the overrides, so a custom fill or label color is muted too.
-      let style = el.style();
+    let style = if disabled {
+      // A caller's fill or label color is muted too.
+      let mut style = self.style.clone();
       if filled {
         style.background = style.background.take().map(|fill| match fill {
           gpui::Fill::Color(bg) => gpui::Fill::Color(bg.opacity(DISABLED_FILL_OPACITY)),
@@ -345,30 +408,54 @@ impl RenderOnce for Button {
       style.border_color = style.border_color.map(|c| c.opacity(0.5));
       style.text.color = Some(fg);
       style.box_shadow = None;
-    }
+      style
+    } else {
+      self.style.clone()
+    };
     // Icons follow the label, including a `text_color` override.
-    let icon_color = el.style().text.color.unwrap_or(fg);
-    // GPUI has no text decoration on hover for a whole subtree, so a link
-    // keeps its color and only underlines its text.
-    el.when(!disabled, |b| {
-      b.hover(move |s| match hover_bg {
-        Some(bg) => s.bg(bg),
-        None if link => s.underline(),
-        None => s,
+    let icon_color = style.text.color.unwrap_or(fg);
+    let selector = self.id.to_string();
+    let mut el = gpui_bootstrap::button::Button::new(self.id)
+      .colors(colors)
+      .disabled(disabled)
+      // As before the facade: a press leaves focus in the editor or list
+      // the button acts on.
+      .focusable(false)
+      .when(self.variant == Variant::Link, |b| {
+        b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })
-    })
-    .when_some(self.on_click.filter(|_| !disabled), |b, f| {
-      b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
-    })
-    .when_some(self.on_right_click, |b, f| {
-      b.on_mouse_down(MouseButton::Right, move |e, w, cx| f(e, w, cx))
-    })
-    .children(self.children.into_iter().map(|child| match child {
-      ButtonChild::Element(el) => el,
-      ButtonChild::Icon(path, size) => icon(path, size, icon_color).into_any_element(),
-    }))
-    .a11y_disabled(disabled)
-    .test_support()
+      .when_some(self.name, |b, name| b.accessibility_label(name))
+      .debug_selector(move || selector)
+      .whitespace_nowrap()
+      .font_weight(gpui::FontWeight::MEDIUM)
+      .rounded(zpx(8.))
+      .p_0()
+      .min_h_0()
+      .when(self.variant != Variant::Outline, |b| b.border_0())
+      .map(|b| match self.size {
+        Size::Default => text(b.h(zpx(40.)).px_4(), TextSize::Sm),
+        Size::Icon => b.size(zpx(40.)),
+        Size::IconXs => b.size(zpx(24.)),
+        Size::Lg => text(b.h(zpx(44.)).px_6(), TextSize::Lg),
+        Size::Sm => text(b.h(zpx(32.)).px_3(), TextSize::Sm),
+        Size::Xs => text(b.h(zpx(24.)).px_2(), TextSize::Sm),
+      })
+      .when(filled && !disabled, |b| b.shadow_sm())
+      .when_some(self.on_click.filter(|_| !disabled), |b, f| {
+        b.cursor_pointer().on_click(move |e, w, cx| f(e, w, cx))
+      })
+      .when_some(self.on_right_click, |b, f| {
+        b.on_mouse_down(MouseButton::Right, move |e, w, cx| f(e, w, cx))
+      })
+      .when_some(self.on_hover, |b, f| {
+        b.on_hover(move |e, w, cx| f(e, w, cx))
+      })
+      .children(self.children.into_iter().map(|child| match child {
+        ButtonChild::Element(el) => el,
+        ButtonChild::Icon(path, size) => icon(path, size, icon_color).into_any_element(),
+      }));
+    el.style().refine(&style);
+    el
   }
 }
 

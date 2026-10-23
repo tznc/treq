@@ -5,9 +5,9 @@ use std::{borrow::Cow, rc::Rc};
 
 use gpui_kit::component as kit;
 
-use tauri_plugin_gpui::gpui::{self, hsla, rgb, App, AssetSource, Hsla, SharedString};
+use gpui::{hsla, rgb, App, AssetSource, Hsla, SharedString};
 
-use super::ui;
+use crate as ui;
 
 /// Lucide icons (ISC license), the same set the React app draws with, as
 /// `icons/<name>.svg` asset paths and their bundled bytes.
@@ -15,7 +15,7 @@ macro_rules! icons {
   ($($konst:ident => $name:literal),* $(,)?) => {
     $(pub const $konst: &str = concat!("icons/", $name, ".svg");)*
     const ICONS: &[(&str, &[u8])] = &[
-      $(($konst, include_bytes!(concat!("../../assets/gpui-icons/", $name, ".svg"))),)*
+      $(($konst, include_bytes!(concat!("../../../src-tauri/assets/gpui-icons/", $name, ".svg"))),)*
     ];
   };
 }
@@ -143,11 +143,12 @@ const INTER_SEMIBOLD: &[u8] =
 /// The React app's mono face, converted from its web font
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
 const JETBRAINS_MONO_REGULAR: &[u8] =
-  include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+  include_bytes!("../../../src-tauri/assets/fonts/JetBrainsMono-Regular.ttf");
 /// For `font-mono font-semibold` text. The web app ships no bolder mono
 /// face, so the webview synthesizes one from Regular; JetBrains' Bold (same
 /// subset), registered as weight 600, looks closest to that.
-const JETBRAINS_MONO_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf");
+const JETBRAINS_MONO_SEMIBOLD: &[u8] =
+  include_bytes!("../../../src-tauri/assets/fonts/JetBrainsMono-Bold.ttf");
 
 pub const MONO_FONT: &str = "JetBrains Mono";
 
@@ -177,7 +178,7 @@ impl AssetSource for Assets {
 
 /// gpui-kit's theme in the React app's colors, light and dark (generated
 /// from its default theme with the tokens of `src/index.css`).
-const KIT_THEME: &str = include_str!("../../assets/gpui-theme.json");
+const KIT_THEME: &str = include_str!("../../../src-tauri/assets/gpui-theme.json");
 
 /// App-level GPUI setup: fonts, the default text style, and gpui-kit with
 /// the app's theme.
@@ -235,6 +236,11 @@ fn set_kit_metrics(cx: &mut App) {
   theme.mono_font_size = gpui::px(13.);
   theme.radius = gpui::px(RADIUS_MD);
   theme.radius_lg = gpui::px(RADIUS_LG);
+}
+
+/// The installed theme's palette.
+pub fn current(cx: &App) -> Palette {
+  palette(cx.try_global::<Installed>().is_some_and(|i| i.dark))
 }
 
 /// Puts the app's widgets, gpui-kit's and gpui-bootstrap's, in the light or
@@ -367,6 +373,9 @@ pub fn bootstrap(dark: bool, zoom: f32) -> gpui_bootstrap::Theme {
   theme.border_width = gpui::px(1.);
   theme.focus_ring_width = z(2.);
   theme.focus_ring_opacity = 0.55;
+  // The `ui` facade gives disabled controls muted colors instead of fading
+  // the whole element, which washed labels out over translucent fills.
+  theme.disabled_opacity = 1.;
   // White on the primary blue is about 3.9:1, Bootstrap's 4.5 would pick
   // black; treq's buttons have always been white on blue.
   theme.min_contrast_ratio = 3.;
@@ -422,6 +431,23 @@ pub struct Palette {
 }
 
 /// A CSS `hsl(h s% l%)` token.
+impl Palette {
+  /// The one hover fill: rows, ghost buttons and menu items.
+  pub fn hover(&self) -> Hsla {
+    self.accent
+  }
+
+  /// The one selected fill: rows, toggles and open triggers.
+  pub fn selected(&self) -> Hsla {
+    self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
+  }
+
+  /// Behind every modal dialog.
+  pub fn scrim(&self) -> Hsla {
+    gpui::black().opacity(if self.dark { 0.55 } else { 0.4 })
+  }
+}
+
 fn token(h: f32, s: f32, l: f32) -> Hsla {
   hsla(h / 360., s / 100., l / 100., 1.)
 }
@@ -502,7 +528,8 @@ mod tests {
 
   #[test]
   fn serves_every_bundled_icon() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gpui-icons");
+    let dir =
+      std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/assets/gpui-icons");
     for entry in std::fs::read_dir(dir).expect("icon dir") {
       let name = entry.expect("entry").file_name();
       let path = format!("icons/{}", name.to_string_lossy());

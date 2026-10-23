@@ -1,0 +1,176 @@
+//! Badges, counts and status dots. Color means state: a count is always
+//! neutral, and a problem shows once, as a dot.
+
+use gpui::{div, prelude::*, App, Hsla, SharedString, Window};
+
+use crate::{text, theme::Palette, zpx, TextSize};
+
+/// What a [`Badge`] or [`Dot`] says about its object.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Tone {
+  #[default]
+  Neutral,
+  Primary,
+  Success,
+  Warning,
+  Danger,
+  /// An open pull request, or added lines.
+  GitOpen,
+  GitMerged,
+  /// A closed pull request, or removed lines.
+  GitClosed,
+}
+
+impl Tone {
+  pub fn color(self, p: &Palette) -> Hsla {
+    match self {
+      Tone::Neutral => p.muted_foreground,
+      Tone::Primary => p.primary,
+      Tone::Success => p.success,
+      Tone::Warning => p.warning,
+      Tone::Danger => p.destructive,
+      Tone::GitOpen => p.pr_open,
+      Tone::GitMerged => p.pr_merged,
+      Tone::GitClosed => p.pr_closed,
+    }
+  }
+}
+
+/// A short label in a pill, such as `Draft` or `PRO`: 20 tall, caption
+/// text, the tone's color over its tint.
+#[derive(IntoElement)]
+pub struct Badge {
+  label: SharedString,
+  tone: Tone,
+  palette: Palette,
+}
+
+impl Badge {
+  pub fn new(label: impl Into<SharedString>, palette: &Palette) -> Self {
+    Self {
+      label: label.into(),
+      tone: Tone::Neutral,
+      palette: *palette,
+    }
+  }
+
+  pub fn tone(mut self, tone: Tone) -> Self {
+    self.tone = tone;
+    self
+  }
+}
+
+impl RenderOnce for Badge {
+  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    let p = &self.palette;
+    let (fg, bg) = match self.tone {
+      Tone::Neutral => (p.foreground, p.muted),
+      tone => {
+        let color = tone.color(p);
+        (color, color.opacity(if p.dark { 0.2 } else { 0.12 }))
+      }
+    };
+    pill().px(zpx(6.)).bg(bg).text_color(fg).child(self.label)
+  }
+}
+
+/// A number of things, such as changed files on a tab: a neutral pill
+/// with tabular digits. It never takes a state's color.
+#[derive(IntoElement)]
+pub struct Count {
+  count: usize,
+  palette: Palette,
+}
+
+impl Count {
+  pub fn new(count: usize, palette: &Palette) -> Self {
+    Self {
+      count,
+      palette: *palette,
+    }
+  }
+
+  /// The count as shown, capped so the pill keeps its width.
+  pub fn label(&self) -> SharedString {
+    if self.count > 999 {
+      "999+".into()
+    } else {
+      self.count.to_string().into()
+    }
+  }
+}
+
+impl RenderOnce for Count {
+  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    let p = &self.palette;
+    pill()
+      .min_w(zpx(20.))
+      .px(zpx(6.))
+      .justify_center()
+      .bg(p.muted)
+      .text_color(p.muted_foreground)
+      .font_family(crate::theme::MONO_FONT)
+      .child(self.label())
+  }
+}
+
+/// A 6px status dot, one per object, after its name. Give its holder a
+/// tooltip saying what it means.
+#[derive(IntoElement)]
+pub struct Dot {
+  tone: Tone,
+  palette: Palette,
+}
+
+impl Dot {
+  pub fn new(tone: Tone, palette: &Palette) -> Self {
+    Self {
+      tone,
+      palette: *palette,
+    }
+  }
+}
+
+impl RenderOnce for Dot {
+  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    div()
+      .flex_none()
+      .size(zpx(6.))
+      .rounded_full()
+      .bg(self.tone.color(&self.palette))
+  }
+}
+
+fn pill() -> gpui::Div {
+  text(div(), TextSize::Xs)
+    .flex()
+    .flex_none()
+    .items_center()
+    .h(zpx(20.))
+    .rounded_full()
+    .font_weight(gpui::FontWeight::MEDIUM)
+    .whitespace_nowrap()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::theme;
+
+  #[test]
+  fn test_badge_builder() {
+    let p = theme::palette(true);
+    let badge = Badge::new("Draft", &p).tone(Tone::GitMerged);
+    assert_eq!(badge.tone, Tone::GitMerged);
+    assert_eq!(Tone::GitMerged.color(&p), p.pr_merged);
+    assert_eq!(Tone::default().color(&p), p.muted_foreground);
+  }
+
+  #[test]
+  fn counts_cap_at_three_digits() {
+    let p = theme::palette(false);
+    assert_eq!(Count::new(7, &p).label().as_ref(), "7");
+    assert_eq!(Count::new(999, &p).label().as_ref(), "999");
+    assert_eq!(Count::new(1000, &p).label().as_ref(), "999+");
+  }
+}

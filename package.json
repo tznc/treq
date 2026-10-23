@@ -49,6 +49,7 @@
     "lint:home-head": "ast-grep scan --filter '^home-git-head-history-edit-needs-test$'",
     "lint:a11y": "ast-grep scan --filter '^gpui-control-needs-accessible-name$'",
     "lint:design": "ast-grep scan --filter '^(gpui-no-raw-color|gpui-no-raw-text-size|gpui-no-zpx-spacing|gpui-escape-via-layers|gpui-no-adhoc-controls|ui-copy-no-yes-no)$'",
+    "design:audit": "node scripts/design-audit.mjs",
     "icons:generate": "node scripts/generate-icons.js && npx @tauri-apps/cli icon assets/logo-white.imageset/logo-white-rounded.svg"
   },
   "devDependencies": {
