@@ -64,6 +64,37 @@ pub(super) struct PrList {
   generation: u64,
 }
 
+impl PrList {
+  /// Starts a load, so any answer still in flight is dropped; the generation
+  /// to settle it with.
+  pub(super) fn start(&mut self) -> u64 {
+    self.generation += 1;
+    self.loading = true;
+    self.error = None;
+    self.generation
+  }
+
+  /// Takes a load's answer, unless a newer load started since.
+  pub(super) fn settle(
+    &mut self,
+    generation: u64,
+    result: Result<(Vec<GhPullRequest>, bool), String>,
+  ) -> bool {
+    if generation != self.generation {
+      return false;
+    }
+    self.loading = false;
+    match result {
+      Ok((items, mine)) => {
+        self.items = items;
+        self.mine = mine;
+      }
+      Err(err) => self.error = Some(err),
+    }
+    true
+  }
+}
+
 /// The Linear issues beside the lines.
 #[derive(Default)]
 pub(super) struct IssueList {
@@ -284,10 +315,7 @@ impl OpenWorkspacesDialog {
     let Some(repo) = self.github.clone() else {
       return;
     };
-    self.prs.generation += 1;
-    let generation = self.prs.generation;
-    self.prs.loading = true;
-    self.prs.error = None;
+    let generation = self.prs.start();
     let (host, query) = (self.host.clone(), self.query.trim().to_string());
     cx.spawn(async move |this, cx| {
       let result = cx
@@ -302,18 +330,9 @@ impl OpenWorkspacesDialog {
         })
         .await;
       let _ = this.update(cx, |view, cx| {
-        if view.prs.generation != generation {
-          return;
+        if view.prs.settle(generation, result) {
+          cx.notify();
         }
-        view.prs.loading = false;
-        match result {
-          Ok((items, mine)) => {
-            view.prs.items = items;
-            view.prs.mine = mine;
-          }
-          Err(err) => view.prs.error = Some(err),
-        }
-        cx.notify();
       });
     })
     .detach();
@@ -377,6 +396,12 @@ impl OpenWorkspacesDialog {
       return;
     }
     self.query = query;
+    if self.github.is_some() {
+      // Searching from the first keystroke: the debounce counts as the wait,
+      // and an answer for the old query no longer lands.
+      self.prs.start();
+      cx.notify();
+    }
     self._search = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
       let _ = this.update(cx, |view, cx| view.load_prs(cx));
@@ -1240,23 +1265,49 @@ impl OpenWorkspacesDialog {
       )
       .into_any_element()
     } else if self.prs.items.is_empty() {
-      crate::gpui_shell::ui::EmptyState::new(
-        "open-workspaces-no-open-pull-requests",
-        "No open pull requests.",
-        p,
-      )
-      .icon(theme::ICON_PR)
-      .into_any_element()
+      let query = self.query.trim();
+      let (id, message) = if query.is_empty() {
+        (
+          "open-workspaces-no-open-pull-requests",
+          "No open pull requests.".to_string(),
+        )
+      } else {
+        (
+          "open-workspaces-no-matching-pull-requests",
+          format!("No pull requests match \"{query}\"."),
+        )
+      };
+      crate::gpui_shell::ui::EmptyState::new(id, message, p)
+        .icon(theme::ICON_PR)
+        .into_any_element()
     } else {
+      // The last answer stays readable, dimmed, while a search replaces it.
       div()
+        .when(self.prs.loading, |d| d.opacity(0.5))
         .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
         .into_any_element()
     };
+    // The centered spinner covers a search with nothing on screen yet.
+    let searching = (self.prs.loading && !self.prs.items.is_empty()).then(|| {
+      div()
+        .id("open-workspaces-prs-searching")
+        .role(gpui::Role::ProgressIndicator)
+        .aria_label("Searching pull requests")
+        .pr_1()
+        .child(ui::spinner(
+          "open-workspaces-prs-searching-spinner",
+          14.,
+          p.muted_foreground,
+        ))
+        .test_support()
+    });
     pane(
       "open-workspaces-prs",
       heading,
       self.chosen.len(),
-      Input::new(search).aria_label("Search pull requests"),
+      Input::new(search)
+        .aria_label("Search pull requests")
+        .when_some(searching, |input, spinner| input.suffix(spinner)),
       list,
       p,
     )

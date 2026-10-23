@@ -188,6 +188,81 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   ).toBeHidden();
 });
 
+test("open-workspaces: the pull request search shows loading, no matches and errors", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspaces" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  const search = page.getByLabel("Search pull requests");
+  const searching = page.getByRole("progressbar", {
+    name: "Searching pull requests",
+  });
+
+  // The fake gh holds a search with "slow" in it for 4s.
+  await search.fill("slow runbook");
+  await expect(searching).toBeVisible();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-loading",
+    title: "Pull request search in flight",
+    expectations: [
+      "A small grey spinner sits at the right end of the 'Search pull requests' input, which reads 'slow runbook'",
+      "The previous list (octocat's PRs) still shows below, dimmed",
+    ],
+  });
+
+  await expect(searching).toBeHidden({ timeout: 10_000 });
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeVisible();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-results",
+    title: "Pull request search answered",
+    expectations: [
+      "'Matching pull requests' lists only #409 at full opacity",
+      "No spinner in the search input",
+    ],
+  });
+
+  await search.fill("zzz");
+  // The empty state's text isn't exposed; the capture shows it.
+  await expect(searching).toBeHidden();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeHidden();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-empty",
+    title: "Pull request search with no matches",
+    expectations: [
+      "The list shows a PR icon and 'No pull requests match \"zzz\".', not 'No open pull requests.'",
+      "No spinner in the search input",
+    ],
+  });
+
+  await search.fill("unreachable");
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(searching).toBeHidden();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-error",
+    title: "Pull request search failed",
+    expectations: [
+      "The list shows 'Could not load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
+      "No spinner in the search input",
+    ],
+  });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden();
+});
+
 test("open-workspaces: indented lines stack on the line above", async ({
   page,
 }) => {
