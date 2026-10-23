@@ -290,6 +290,11 @@ pub fn start_session(
           "-y",
           &rows.to_string(),
           &shell_cmd,
+          // The pane is the whole terminal: no tmux status line under it.
+          ";",
+          "set-option",
+          "status",
+          "off",
         ])
         .status()
         .map_err(|e| format!("dependency_error: Failed to spawn tmux: {e}"))?;
@@ -497,8 +502,9 @@ fn attach_command_for_backend(
   let quoted_dir = crate::core::remote::shell_quote(remote_dir);
   let quoted_name = crate::core::remote::shell_quote(name);
   match backend {
+    // The pane is the whole terminal: no tmux status line under it.
     PtyBackend::Tmux => format!(
-      "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command}"
+      "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command} \\; set-option status off"
     ),
     PtyBackend::Screen => {
       format!("cd {quoted_dir} && exec screen -xRR {quoted_name} {command}")
