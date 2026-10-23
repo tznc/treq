@@ -10,7 +10,10 @@
 //! [`code_data`]: super::code_data
 
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use std::{sync::Arc, time::Duration};
+use std::{
+  sync::{Arc, LazyLock},
+  time::Duration,
+};
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
@@ -1103,9 +1106,9 @@ pub(super) fn markdown(
   });
   // HTML comments never show, as in `MarkdownContent`; shortcodes show as
   // emoji, as on GitHub.
-  let text = regex::Regex::new(r"(?s)<!--.*?-->")
-    .expect("regex")
-    .replace_all(text, "");
+  static HTML_COMMENT: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
+  let text = HTML_COMMENT.replace_all(text, "");
   let text = super::code_data::emojify(&text);
   div()
     .text_size(zpx(size))
