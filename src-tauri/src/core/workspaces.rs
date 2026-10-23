@@ -610,7 +610,7 @@ fn existing_branch_workspace(
 
 /// Opens or creates `request`'s workspace once the repository is synced and
 /// fetched.
-fn open_or_create_synced(
+pub(crate) fn open_or_create_synced(
   repo_path: &str,
   request: &BranchWorkspaceRequest,
 ) -> Result<(local_db::Workspace, bool), String> {
@@ -1460,6 +1460,72 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
       })
     })
     .collect()
+}
+
+/// One row of a repository's workspace list on a phone: the workspace and
+/// the status the desktop sidebar shows as dots and counts, in one read.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkspaceSummary {
+  pub workspace: local_db::Workspace,
+  pub has_conflicts: bool,
+  /// Uncommitted changes in the working copy.
+  pub has_changes: bool,
+  /// Commits ahead of the target branch (or the default branch).
+  pub commits_ahead: usize,
+  /// Persistent terminals (shells and agents) running in the workspace.
+  pub terminals: usize,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub last_activity_at: Option<String>,
+}
+
+/// [`list_workspace_statuses`] plus each workspace's uncommitted changes,
+/// commits ahead and running terminals.
+pub fn workspace_summaries(repo_path: &str) -> Result<Vec<WorkspaceSummary>, String> {
+  let statuses = list_workspace_statuses(repo_path)?;
+  let default_branch = jj::get_default_branch(repo_path).unwrap_or_default();
+  let sessions =
+    crate::core::pty_remote_supervisor::list_sessions(repo_path, None).unwrap_or_default();
+  Ok(
+    statuses
+      .into_iter()
+      .filter(|s| !crate::core::resolve::is_resolve_workspace(&s.current))
+      .map(|status| {
+        let workspace = status.current;
+        let dir = Path::new(repo_path)
+          .join(".treq")
+          .join("workspaces")
+          .join(&workspace.workspace_path);
+        let dir = dir.to_string_lossy();
+        let has_changes = jj::jj_get_changed_files(&dir)
+          .map(|files| !files.is_empty())
+          .unwrap_or(false);
+        let target = workspace
+          .target_branch
+          .clone()
+          .unwrap_or_else(|| default_branch.clone());
+        let commits_ahead = if target.is_empty() {
+          0
+        } else {
+          jj::jj_get_commits_ahead(&dir, &target)
+            .map(|ahead| ahead.commits.len())
+            .unwrap_or(0)
+        };
+        let id = workspace.id.to_string();
+        let terminals = sessions
+          .iter()
+          .filter(|s| s.running && (s.workspace == id || s.workspace == workspace.workspace_name))
+          .count();
+        WorkspaceSummary {
+          workspace,
+          has_conflicts: status.has_conflicts,
+          has_changes,
+          commits_ahead,
+          terminals,
+          last_activity_at: status.last_activity_at,
+        }
+      })
+      .collect(),
+  )
 }
 
 /// Gets the status of a workspace, including parent, children, and full DAG hierarchy.

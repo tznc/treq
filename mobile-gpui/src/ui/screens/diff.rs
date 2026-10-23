@@ -1,5 +1,6 @@
 //! A changed file's diff hunks, and its working-copy content.
 
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{button::Button, v_flex, ActiveTheme, Sizable},
   *,
@@ -15,7 +16,17 @@ use crate::{
   ui::{load, nav, widgets, Load},
 };
 
+/// A working-copy file's diff, fetched from the host.
 pub fn open(target: Target, path: String, cx: &mut App) {
+  push(target, path, None, cx)
+}
+
+/// A file's diff on the workspace's branch, from hunks already fetched.
+pub fn open_hunks(target: Target, path: String, hunks: Vec<JjDiffHunk>, cx: &mut App) {
+  push(target, path, Some(hunks), cx)
+}
+
+fn push(target: Target, path: String, hunks: Option<Vec<JjDiffHunk>>, cx: &mut App) {
   let title = path.rsplit('/').next().unwrap_or(&path).to_string();
   let location = crate::ui::Location {
     repo: Some(target.repo.clone()),
@@ -25,7 +36,7 @@ pub fn open(target: Target, path: String, cx: &mut App) {
     }),
   };
   nav::push(title, location, cx, move |_, cx| {
-    cx.new(|cx| DiffScreen::new(target, path, cx))
+    cx.new(|cx| DiffScreen::new(target, path, hunks, cx))
   });
 }
 
@@ -53,18 +64,27 @@ pub struct DiffScreen {
   hunks: Load<Vec<JjDiffHunk>>,
   content: Load<JjFileLines>,
   show_content: bool,
+  /// Set when the hunks came with the page, which then never refetches.
+  fixed: bool,
   scroll: ScrollHandle,
 }
 
 impl DiffScreen {
-  fn new(target: Target, path: String, cx: &mut Context<Self>) -> Self {
+  fn new(
+    target: Target,
+    path: String,
+    hunks: Option<Vec<JjDiffHunk>>,
+    cx: &mut Context<Self>,
+  ) -> Self {
     on_epoch(cx, |this, cx| this.reload(cx));
+    let fixed = hunks.is_some();
     let mut this = Self {
       target,
       path,
-      hunks: Load::Idle,
+      hunks: hunks.map_or(Load::Idle, Load::Ready),
       content: Load::Idle,
       show_content: false,
+      fixed,
       scroll: ScrollHandle::new(),
     };
     this.reload(cx);
@@ -72,6 +92,9 @@ impl DiffScreen {
   }
 
   fn reload(&mut self, cx: &mut Context<Self>) {
+    if self.fixed {
+      return;
+    }
     self.hunks = Load::Loading;
     let request = TreqCommandRequest::DiffFile {
       repo: self.target.repo.clone(),
@@ -179,23 +202,25 @@ impl Render for DiffScreen {
         widgets::page()
           .child(widgets::muted(self.path.clone(), cx))
           .child(hunks)
-          .child(
-            Button::new("toggle-content")
-              .outline()
-              .small()
-              .label(if self.show_content {
-                "Hide working-copy content"
-              } else {
-                "Show working-copy content"
-              })
-              .on_click(cx.listener(|this, _, _, cx| {
-                this.show_content = !this.show_content;
-                if this.show_content && this.content.ready().is_none() {
-                  this.load_content(cx);
-                }
-                cx.notify();
-              })),
-          )
+          .when(!self.fixed, |page| {
+            page.child(
+              Button::new("toggle-content")
+                .outline()
+                .small()
+                .label(if self.show_content {
+                  "Hide working-copy content"
+                } else {
+                  "Show working-copy content"
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                  this.show_content = !this.show_content;
+                  if this.show_content && this.content.ready().is_none() {
+                    this.load_content(cx);
+                  }
+                  cx.notify();
+                })),
+            )
+          })
           .children(content),
       )
   }

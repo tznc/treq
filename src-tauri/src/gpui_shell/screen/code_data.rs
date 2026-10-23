@@ -419,54 +419,7 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   }
 }
 
-/// `sanitizeForBranchName`.
-fn sanitize_for_branch_name(text: &str) -> String {
-  let lower: String = text
-    .to_lowercase()
-    .chars()
-    .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c.is_whitespace() || *c == '-')
-    .collect();
-  let dashed = Regex::new(r"\s+").expect("regex").replace_all(&lower, "-");
-  let single = Regex::new("-+").expect("regex").replace_all(&dashed, "-");
-  let cut: String = single.chars().take(50).collect();
-  let trimmed = cut.trim_matches('-');
-  let sanitized = Regex::new("-[a-z]$")
-    .expect("regex")
-    .replace(trimmed, "")
-    .to_string();
-  if sanitized.is_empty() {
-    "unnamed".into()
-  } else {
-    sanitized
-  }
-}
-
-/// `cleanBranchNameTrailing`.
-fn clean_branch_name_trailing(name: &str) -> String {
-  let single = Regex::new(r"[/.\-][a-z]$").expect("regex");
-  let separators = Regex::new(r"[/.\-]+$").expect("regex");
-  let mut result = name.to_string();
-  loop {
-    let next = separators
-      .replace(&single.replace(&result, ""), "")
-      .to_string();
-    if next == result {
-      return result;
-    }
-    result = next;
-  }
-}
-
-/// `applyBranchNamePattern`.
-pub fn apply_branch_name_pattern(pattern: &str, name: &str) -> String {
-  let result =
-    clean_branch_name_trailing(&pattern.replace("{name}", &sanitize_for_branch_name(name)));
-  if result.is_empty() {
-    "unnamed".into()
-  } else {
-    result
-  }
-}
+pub use crate::core::new_workspaces::apply_branch_name_pattern;
 
 /// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
 fn task_branch_slug(prompt: &str) -> String {

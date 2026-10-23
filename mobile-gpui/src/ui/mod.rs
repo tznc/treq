@@ -6,6 +6,7 @@
 mod home;
 mod load;
 mod screens;
+pub mod sheet;
 mod terminal_view;
 pub mod theme;
 mod widgets;
@@ -132,6 +133,7 @@ pub struct Location {
 
 struct Page {
   title: SharedString,
+  header: nav::Header,
   view: AnyView,
   location: Location,
 }
@@ -139,11 +141,12 @@ struct Page {
 pub struct Root {
   model: Entity<AppModel>,
   stack: Vec<Page>,
+  sheet: Option<sheet::Sheet>,
 }
 
-struct Nav {
+pub(crate) struct Nav {
   root: WeakEntity<Root>,
-  window: AnyWindowHandle,
+  pub(crate) window: AnyWindowHandle,
 }
 impl Global for Nav {}
 
@@ -158,6 +161,15 @@ pub fn model(cx: &App) -> Entity<AppModel> {
 pub mod nav {
   use super::*;
 
+  /// What a page's title bar offers besides Back.
+  #[derive(Clone, Default)]
+  pub struct Header {
+    /// Tapping the title opens this (a switcher), shown with a chevron.
+    pub on_title: Option<sheet::Action>,
+    /// The ⋯ button at the trailing edge opens this (the page's menu).
+    pub more: Option<sheet::Action>,
+  }
+
   /// Pushes the page `build` creates. `location` names the repository
   /// and workspace it shows, for the restore snapshot.
   pub fn push<V: Render>(
@@ -166,7 +178,39 @@ pub mod nav {
     cx: &mut App,
     build: impl FnOnce(&mut Window, &mut App) -> Entity<V> + 'static,
   ) {
-    let title = title.into();
+    push_with(title, Header::default(), location, cx, build)
+  }
+
+  /// [`push`] with a title bar that offers `header`'s actions.
+  pub fn push_with<V: Render>(
+    title: impl Into<SharedString>,
+    header: Header,
+    location: Location,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> Entity<V> + 'static,
+  ) {
+    place(false, title.into(), header, location, cx, build)
+  }
+
+  /// [`push_with`] in place of the top page, as a switcher does.
+  pub fn replace_with<V: Render>(
+    title: impl Into<SharedString>,
+    header: Header,
+    location: Location,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> Entity<V> + 'static,
+  ) {
+    place(true, title.into(), header, location, cx, build)
+  }
+
+  fn place<V: Render>(
+    replace: bool,
+    title: SharedString,
+    header: Header,
+    location: Location,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> Entity<V> + 'static,
+  ) {
     let Nav { root, window } = cx.global::<Nav>();
     let (root, window) = (root.clone(), *window);
     // Deferred: callers are usually inside another entity's update.
@@ -175,8 +219,12 @@ pub mod nav {
         .update(cx, |_, window, cx| {
           let view = build(window, cx);
           root.update(cx, |root, cx| {
+            if replace && root.stack.len() > 1 {
+              root.stack.pop();
+            }
             root.stack.push(Page {
               title,
+              header,
               view: view.into(),
               location,
             });
@@ -225,6 +273,7 @@ impl Root {
       window: window.window_handle(),
     });
     cx.set_global(Model(model.clone()));
+    sheet::install(cx.weak_entity(), cx);
     cx.observe(&model, |_, _, cx| cx.notify()).detach();
     theme::sync_appearance(window, cx);
     cx.observe_window_appearance(window, |_, window, cx| {
@@ -236,7 +285,9 @@ impl Root {
     tauri_plugin_gpui::on_back(move |cx| {
       weak
         .update(cx, |root, cx| {
-          if root.stack.len() > 1 {
+          if root.sheet.take().is_some() {
+            cx.notify();
+          } else if root.stack.len() > 1 {
             root.stack.pop();
             root.stack_changed(cx);
           }
@@ -261,15 +312,18 @@ impl Root {
       model,
       stack: vec![Page {
         title: "Machines".into(),
+        header: nav::Header::default(),
         view: home.into(),
         location: Location::default(),
       }],
+      sheet: None,
     };
     restore(cx);
     root
   }
 
   fn stack_changed(&mut self, cx: &mut Context<Self>) {
+    self.sheet = None;
     tauri_plugin_gpui::set_back_enabled(self.stack.len() > 1);
     self.save_snapshot(cx);
     cx.notify();
@@ -374,20 +428,49 @@ impl Render for Root {
               )
             })
             .child(
-              div()
+              h_flex()
+                .id("page-title")
                 .flex_1()
                 .min_w_0()
                 .px_2()
-                .truncate()
-                .text_lg()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(page.title.clone()),
-            ),
+                .gap_1()
+                .items_center()
+                .child(
+                  div()
+                    .min_w_0()
+                    .truncate()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(page.title.clone()),
+                )
+                .when_some(page.header.on_title.clone(), |title, action| {
+                  title
+                    .child(
+                      div()
+                        .flex_none()
+                        .text_color(theme.muted_foreground)
+                        .child(IconName::ChevronDown),
+                    )
+                    .on_click(move |_, window, cx| action(window, cx))
+                }),
+            )
+            .when_some(page.header.more.clone(), |bar, action| {
+              bar.child(
+                Button::new("page-more")
+                  .ghost()
+                  .large()
+                  .icon(IconName::Ellipsis)
+                  .on_click(move |_, window, cx| action(window, cx)),
+              )
+            }),
         )
       })
       .child(div().flex_1().min_h_0().child(page.view.clone()))
       .when_some(blocked, |root, reason| {
         root.child(cutoff_overlay(reason, managed, cx))
+      })
+      .when_some(self.sheet.as_ref(), |root, sheet| {
+        root.child(sheet::render(sheet, viewport.height - visible.bottom(), cx))
       })
   }
 }
@@ -600,6 +683,15 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
     }
   })
   .detach();
+}
+
+/// Has every screen refetch, after a change one screen made that others
+/// show (an archived workspace leaves the list).
+pub fn refetch(cx: &mut App) {
+  model(cx).update(cx, |m, cx| {
+    m.epoch += 1;
+    cx.notify();
+  });
 }
 
 /// Makes `connection`'s machine the one the screens act on.
