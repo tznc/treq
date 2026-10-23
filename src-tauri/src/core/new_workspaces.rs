@@ -213,12 +213,14 @@ fn plan_rows(
       .get(&line)
       .and_then(|p| index.get(p))
       .map(|&i| rows[i].clone());
-    let checked = check(&parsed).and_then(|checked| match &parent {
-      Some(parent) if parent.step.is_none() => {
-        Err("Stacks on a line that can't be opened".to_string())
-      }
-      _ => Ok(checked),
-    });
+    let checked = check(&parsed)
+      .map(|checked| unique_title_branch(checked, &rows, &check))
+      .and_then(|checked| match &parent {
+        Some(parent) if parent.step.is_none() => {
+          Err("Stacks on a line that can't be opened".to_string())
+        }
+        _ => Ok(checked),
+      });
     let base = parent
       .as_ref()
       .and_then(|p| p.branch.clone())
@@ -250,6 +252,35 @@ fn plan_rows(
     rows.push(row);
   }
   rows
+}
+
+/// A new branch named after a title, made unique among the rows above:
+/// titles that differ only past the branch name's cut ("Fix the page A",
+/// "Fix the page B") would otherwise plan one branch twice, and only the
+/// first could be made.
+fn unique_title_branch(
+  checked: Checked,
+  rows: &[NewWorkspaceRow],
+  check: &impl Fn(&Line) -> Result<Checked, String>,
+) -> Checked {
+  let taken = |branch: &str| rows.iter().any(|r| r.branch.as_deref() == Some(branch));
+  if checked.title.is_none() || checked.step != NewWorkspaceStep::Create || !taken(&checked.branch)
+  {
+    return checked;
+  }
+  (2..100)
+    .map(|n| format!("{}-{n}", checked.branch))
+    .filter(|branch| !taken(branch))
+    .find_map(|branch| {
+      check(&Line::Branch(branch))
+        .ok()
+        .filter(|c| c.step == NewWorkspaceStep::Create)
+    })
+    .map(|c| Checked {
+      title: checked.title.clone(),
+      ..c
+    })
+    .unwrap_or(checked)
 }
 
 /// The repository's branch name pattern, from the app settings on this
@@ -515,6 +546,27 @@ mod tests {
       rows[1].error.as_deref(),
       Some("Stacks on a line that can't be opened")
     );
+  }
+
+  #[test]
+  fn titles_that_share_a_branch_get_numbered_branches() {
+    // The branch name drops a trailing single letter, so both titles
+    // would be treq/fix-the-page.
+    let rows = plan_rows(
+      "Fix the page A\nFix the page B\n  Add tests\n",
+      "main",
+      fake,
+    );
+    assert_eq!(
+      summary(&rows),
+      vec![
+        (0, Some("treq/fix-the-page"), Some("main")),
+        (0, Some("treq/fix-the-page-2"), Some("main")),
+        (1, Some("treq/add-tests"), Some("treq/fix-the-page-2")),
+      ]
+    );
+    assert_eq!(rows[1].title.as_deref(), Some("Fix the page B"));
+    assert_eq!(rows[1].step, Some(NewWorkspaceStep::Create));
   }
 
   #[test]
