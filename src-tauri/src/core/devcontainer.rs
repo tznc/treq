@@ -361,30 +361,107 @@ fn install_treq_cli(container_id: &str) -> Result<(), String> {
   Ok(())
 }
 
-/// Downloads the release archive once per version and architecture, into
-/// the temp dir, and returns its path.
+/// Downloads the release archive once per version and architecture into a
+/// per-user cache, checks it against the release's `.sha256`, and returns its
+/// path. A cached archive is used again only while it still matches.
 fn download_cli(version: &str, arch: &str) -> Result<PathBuf, String> {
-  let dir = std::env::temp_dir().join("treq-cli");
+  let dir = cli_cache_dir()?;
   let archive = dir.join(format!("treq-cli-{version}-linux-{arch}.tar.gz"));
-  if archive.is_file() {
-    return Ok(archive);
+  let checksum = archive.with_extension("gz.sha256");
+  if let (Ok(bytes), Ok(expected)) = (std::fs::read(&archive), std::fs::read_to_string(&checksum)) {
+    if verify_sha256(&bytes, &expected).is_ok() {
+      return Ok(archive);
+    }
   }
   let url = cli_asset_url(version, arch);
-  let runtime = tokio::runtime::Builder::new_current_thread()
-    .enable_all()
-    .build()
-    .map_err(|e| e.to_string())?;
-  let bytes = runtime.block_on(async {
-    let response = reqwest::get(&url).await?.error_for_status()?;
-    response.bytes().await
-  });
-  let bytes = bytes.map_err(|e| format!("download {url}: {e}"))?;
-  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  let checksum_url = format!("{url}.sha256");
+  let (bytes, expected) = fetch_all(&[&url, &checksum_url]).and_then(|mut bodies| {
+    let expected = String::from_utf8(bodies.pop().unwrap_or_default())
+      .map_err(|_| format!("{checksum_url} is not text"))?;
+    Ok((bodies.pop().unwrap_or_default(), expected))
+  })?;
+  verify_sha256(&bytes, &expected).map_err(|e| format!("download {url}: {e}"))?;
   // Write then rename so an interrupted download never looks complete.
   let partial = archive.with_extension("partial");
   std::fs::write(&partial, &bytes).map_err(|e| e.to_string())?;
   std::fs::rename(&partial, &archive).map_err(|e| e.to_string())?;
+  std::fs::write(&checksum, expected).map_err(|e| e.to_string())?;
   Ok(archive)
+}
+
+/// `$XDG_CACHE_HOME/treq/cli` (else `~/.cache/treq/cli`), readable only by
+/// the user: a shared temp dir would let another account plant the archive
+/// that gets copied into the container.
+fn cli_cache_dir() -> Result<PathBuf, String> {
+  let base = std::env::var_os("XDG_CACHE_HOME")
+    .filter(|v| !v.is_empty())
+    .map(PathBuf::from)
+    .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+    .ok_or("no cache directory: HOME is not set")?;
+  let dir = base.join("treq").join("cli");
+  std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+      .map_err(|e| format!("restrict {}: {e}", dir.display()))?;
+  }
+  Ok(dir)
+}
+
+/// Checks `bytes` against a `sha256sum` line (`<hex>  <file>`) or a bare hex digest.
+fn verify_sha256(bytes: &[u8], expected: &str) -> Result<(), String> {
+  use sha2::{Digest, Sha256};
+  let expected = expected
+    .split_whitespace()
+    .next()
+    .ok_or("empty checksum")?
+    .to_ascii_lowercase();
+  let actual: String = Sha256::digest(bytes)
+    .iter()
+    .map(|b| format!("{b:02x}"))
+    .collect();
+  if actual == expected {
+    Ok(())
+  } else {
+    Err(format!(
+      "checksum mismatch: expected {expected}, got {actual}"
+    ))
+  }
+}
+
+/// GETs each URL in order. Runs its own runtime on a fresh thread, so it
+/// works whether or not the caller is already inside a Tokio runtime.
+fn fetch_all(urls: &[&str]) -> Result<Vec<Vec<u8>>, String> {
+  std::thread::scope(|scope| {
+    scope
+      .spawn(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+          .enable_all()
+          .build()
+          .map_err(|e| e.to_string())?;
+        let client = reqwest::Client::builder()
+          .connect_timeout(std::time::Duration::from_secs(10))
+          .timeout(std::time::Duration::from_secs(300))
+          .build()
+          .map_err(|e| e.to_string())?;
+        runtime.block_on(async {
+          let mut bodies = Vec::with_capacity(urls.len());
+          for url in urls {
+            let body = async {
+              let response = client.get(*url).send().await?.error_for_status()?;
+              response.bytes().await
+            }
+            .await
+            .map_err(|e| format!("download {url}: {e}"))?;
+            bodies.push(body.to_vec());
+          }
+          Ok(bodies)
+        })
+      })
+      .join()
+      .map_err(|_| "download thread panicked".to_string())?
+  })
 }
 
 /// Docker creates the config volume owned by root; the container's remote
@@ -615,6 +692,16 @@ mod tests {
     assert_eq!(cli_arch("aarch64"), Some("aarch64"));
     assert_eq!(cli_arch("arm64"), Some("aarch64"));
     assert_eq!(cli_arch("riscv64"), None);
+  }
+
+  #[test]
+  fn verifies_sha256sum_lines() {
+    // sha256("abc")
+    let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    assert!(verify_sha256(b"abc", &format!("{digest}  treq-cli.tar.gz\n")).is_ok());
+    assert!(verify_sha256(b"abc", &digest.to_uppercase()).is_ok());
+    assert!(verify_sha256(b"abd", digest).is_err());
+    assert!(verify_sha256(b"abc", "").is_err());
   }
 
   #[test]

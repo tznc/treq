@@ -14,6 +14,7 @@ export default defineConfig({
       "test/merge-queue/**/*.test.ts",
       "test/linear-proxy/**/*.test.ts",
       "test/desktop-token/**/*.test.ts",
+      "test/edge-http/**/*.test.ts",
       "test/remote-ssh-traceability.test.ts",
     ],
     testTimeout: 15000,

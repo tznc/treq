@@ -7,7 +7,12 @@ async fn fetch_bytes(locator: &str) -> Result<Vec<u8>, String> {
   if !locator.contains("://") || locator.starts_with("file://") {
     return read_bytes_from_locator(locator);
   }
-  let response = reqwest::Client::new()
+  let client = reqwest::Client::builder()
+    .connect_timeout(std::time::Duration::from_secs(10))
+    .timeout(std::time::Duration::from_secs(60))
+    .build()
+    .map_err(|e| format!("Failed to fetch {locator}: {e}"))?;
+  let response = client
     .get(locator)
     .header("user-agent", "treq-skills")
     .send()

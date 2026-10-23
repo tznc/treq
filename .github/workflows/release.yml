@@ -190,4 +190,6 @@ jobs:
           VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           ASSET="treq-cli-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
           tar -czf "$ASSET" -C "$(dirname "$BIN")" treq
-          gh release upload "v${VERSION}" "$ASSET" --clobber
+          # Devcontainers verify the archive against this before installing it.
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          gh release upload "v${VERSION}" "$ASSET" "$ASSET.sha256" --clobber

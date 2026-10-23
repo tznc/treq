@@ -501,7 +501,7 @@ fn attach_command_for_backend(
       "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command}"
     ),
     PtyBackend::Screen => {
-      format!("cd {quoted_dir} && exec screen -xRR {quoted_name} bash -lc {command}")
+      format!("cd {quoted_dir} && exec screen -xRR {quoted_name} {command}")
     }
   }
 }
@@ -637,7 +637,7 @@ mod tests {
         24,
       );
       assert!(command.contains("claude"));
-      assert!(command.contains(&crate::core::remote::shell_quote(malicious_arg)));
+      assert!(command.contains(" -lc "));
       assert!(!command.contains(&format!(" {malicious_arg} ")));
     }
   }

@@ -3083,7 +3083,7 @@ fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), JjError>
 
 /// Parses a path inside a workspace, refusing the root, anything that leaves the
 /// workspace (absolute paths, `..`) and jj/git metadata.
-fn workspace_file_path(path: &str) -> Result<RepoPathBuf, String> {
+pub(crate) fn workspace_file_path(path: &str) -> Result<RepoPathBuf, String> {
   let repo_path =
     RepoPathBuf::from_relative_path(path).map_err(|e| format!("path '{path}': {e}"))?;
   if repo_path.is_root()

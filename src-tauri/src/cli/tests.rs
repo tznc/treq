@@ -900,6 +900,7 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
     R::MachineUsage { root: repo() },
     R::MachineTools { root: repo() },
     R::ListDirectories { path: repo() },
+    R::HostCheck { root: repo() },
     R::ProbeRepo { repo: repo() },
     R::CloneRepo {
       repo_url: "git@example.com:x.git".into(),
@@ -1447,6 +1448,14 @@ mod repo_arg_resolution {
     assert_eq!(parsed_repo("/srv/./x/../r"), "/srv/r");
     let cwd = std::env::current_dir().unwrap();
     assert_eq!(parsed_repo("."), cwd.to_str().unwrap());
+  }
+
+  #[test]
+  fn a_leading_tilde_is_the_home_folder() {
+    let home = std::env::var("HOME").unwrap();
+    let home = home.trim_end_matches('/');
+    assert_eq!(parsed_repo("~/src/r"), format!("{home}/src/r"));
+    assert_eq!(parsed_repo("~"), home);
   }
 
   #[test]
