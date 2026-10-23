@@ -95,6 +95,27 @@ impl PrList {
   }
 }
 
+/// What the pull request list reads.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PrQuery {
+  /// The user's own, or everyone's when they have none.
+  MineFirst,
+  /// Everyone's that match this GitHub search.
+  Search(String),
+}
+
+/// The read for a search box's `query`, narrowed to the pull requests
+/// assigned to the user when `assigned` is on.
+pub(super) fn pr_query(query: &str, assigned: bool) -> PrQuery {
+  let query = query.trim();
+  match (assigned, query.is_empty()) {
+    (false, true) => PrQuery::MineFirst,
+    (false, false) => PrQuery::Search(query.to_string()),
+    (true, true) => PrQuery::Search("assignee:@me".into()),
+    (true, false) => PrQuery::Search(format!("assignee:@me {query}")),
+  }
+}
+
 /// The Linear issues beside the lines.
 #[derive(Default)]
 pub(super) struct IssueList {
@@ -163,6 +184,9 @@ pub struct OpenWorkspacesDialog {
   pub(super) github: Option<String>,
   pub(super) prs: PrList,
   pub(super) query: String,
+  /// The list holds only pull requests assigned to the user. Off each time
+  /// the dialog opens.
+  pub(super) assigned: bool,
   _search: Option<Task<()>>,
   /// The picked pull requests, in the order picked.
   pub(super) chosen: Vec<GhPullRequest>,
@@ -219,6 +243,7 @@ impl OpenWorkspacesDialog {
       github: None,
       prs: PrList::default(),
       query: String::new(),
+      assigned: false,
       _search: None,
       chosen: Vec::new(),
       issues: IssueList::default(),
@@ -316,11 +341,11 @@ impl OpenWorkspacesDialog {
       return;
     };
     let generation = self.prs.start();
-    let (host, query) = (self.host.clone(), self.query.trim().to_string());
+    let (host, query) = (self.host.clone(), pr_query(&self.query, self.assigned));
     cx.spawn(async move |this, cx| {
       let result = cx
         .background_spawn(async move {
-          if !query.is_empty() {
+          if let PrQuery::Search(query) = query {
             return host.open_prs(&repo, false, &query).map(|prs| (prs, false));
           }
           match host.open_prs(&repo, true, "")? {
@@ -1229,6 +1254,7 @@ impl OpenWorkspacesDialog {
       heading,
       self.chosen_issues.len(),
       Input::new(search).aria_label("Search issues"),
+      None,
       list,
       p,
     )
@@ -1238,6 +1264,8 @@ impl OpenWorkspacesDialog {
   fn prs_pane(&self, search: &Entity<InputState>, p: &Palette, cx: &mut Context<Self>) -> Div {
     let heading = if !self.query.trim().is_empty() {
       "Matching pull requests"
+    } else if self.assigned {
+      "Assigned to you"
     } else if self.prs.mine {
       "Your pull requests"
     } else {
@@ -1262,7 +1290,12 @@ impl OpenWorkspacesDialog {
       .into_any_element()
     } else if self.prs.items.is_empty() {
       let query = self.query.trim();
-      let (id, message) = if query.is_empty() {
+      let (id, message) = if query.is_empty() && self.assigned {
+        (
+          "open-workspaces-no-assigned-pull-requests",
+          "No open pull requests are assigned to you.".to_string(),
+        )
+      } else if query.is_empty() {
         (
           "open-workspaces-no-open-pull-requests",
           "No open pull requests.".to_string(),
@@ -1297,6 +1330,17 @@ impl OpenWorkspacesDialog {
         ))
         .test_support()
     });
+    let assigned = Button::new("open-workspaces-assigned", p)
+      .variant(Variant::Outline)
+      .size(ui::Size::Sm)
+      .h(zpx(28.))
+      .icon(theme::ICON_USER, 12.)
+      .label("Assigned to me")
+      .pressed(self.assigned)
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.assigned = !view.assigned;
+        view.load_prs(cx);
+      }));
     pane(
       "open-workspaces-prs",
       heading,
@@ -1304,6 +1348,7 @@ impl OpenWorkspacesDialog {
       Input::new(search)
         .aria_label("Search pull requests")
         .when_some(searching, |input, spinner| input.suffix(spinner)),
+      Some(assigned.into_any_element()),
       list,
       p,
     )
@@ -1356,12 +1401,13 @@ impl OpenWorkspacesDialog {
   }
 }
 
-/// A tab's heading, search and list.
+/// A tab's heading, search with an optional filter beside it, and list.
 fn pane(
   id: &'static str,
   heading: &'static str,
   picked: usize,
   search: Input,
+  filter: Option<gpui::AnyElement>,
   list: gpui::AnyElement,
   p: &Palette,
 ) -> Div {
@@ -1394,14 +1440,23 @@ fn pane(
     )
     .child(
       div()
-        .debug_selector(move || format!("{id}-search"))
-        .child(ui::text(
-          Styled::h(
-            search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
-            zpx(28.),
-          ),
-          TextSize::Sm,
-        )),
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .debug_selector(move || format!("{id}-search"))
+            .child(ui::text(
+              Styled::h(
+                search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
+                zpx(28.),
+              ),
+              TextSize::Sm,
+            )),
+        )
+        .children(filter),
     )
     .child(
       div()
