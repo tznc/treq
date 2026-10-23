@@ -171,6 +171,8 @@ pub trait TerminalHost:
     name: &str,
     png: &[u8],
   ) -> Result<String, String>;
+  /// A clipboard image pasted into a terminal: where it was saved.
+  fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String>;
 }
 
 pub type Host = Arc<dyn TerminalHost>;
@@ -479,6 +481,11 @@ impl TerminalHost for Backend {
     png: &[u8],
   ) -> Result<String, String> {
     crate::send_dispatch::write_send_review_image_bytes(repo_path, name, png)
+      .map(|path| path.to_string_lossy().to_string())
+  }
+
+  fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String> {
+    crate::send_dispatch::write_pasted_image(&crate::send_dispatch::pasted_image_dir(), bytes)
       .map(|path| path.to_string_lossy().to_string())
   }
 }
