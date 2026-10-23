@@ -299,6 +299,54 @@ fn snapshot_fresh_working_copy(
   Ok(())
 }
 
+/// One load of a workspace's repository, for callers that make several
+/// read-only queries in a row. Each `jj_*` function loads the repository
+/// itself, which dominates their cost; the methods here share one load.
+/// Queries see the repository as of `load`, so snapshot first if needed.
+pub struct WorkspaceRepo {
+  path: String,
+  loaded: LoadedWorkspaceRepo,
+}
+
+impl WorkspaceRepo {
+  pub fn load(workspace_path: &str) -> Result<Self, JjError> {
+    Ok(Self {
+      path: workspace_path.to_string(),
+      loaded: load_workspace_repo(workspace_path)?,
+    })
+  }
+
+  /// `jj_is_bookmark_conflicted`.
+  pub fn is_bookmark_conflicted(&self, branch_name: &str) -> bool {
+    is_bookmark_conflicted_in(&self.loaded, branch_name)
+  }
+
+  /// `jj_get_commit_id`.
+  pub fn commit_id(&self, revision: &str) -> Result<String, JjError> {
+    commit_id_in(&self.loaded, &self.path, revision)
+  }
+
+  /// `jj_get_commits_ahead`.
+  pub fn commits_ahead(&self, target_branch: &str) -> Result<JjCommitsAhead, JjError> {
+    commits_ahead_in(&self.loaded, &self.path, target_branch)
+  }
+
+  /// `jj_get_merge_diff_between_revisions`.
+  pub fn merge_diff_between_revisions(
+    &self,
+    from_revision: &str,
+    to_revision: &str,
+    conflict_marker_style: &str,
+  ) -> Result<JjRevisionDiff, JjError> {
+    merge_diff_between_revisions_in(
+      &self.loaded,
+      from_revision,
+      to_revision,
+      conflict_marker_style,
+    )
+  }
+}
+
 fn load_workspace_repo(workspace_path: &str) -> Result<LoadedWorkspaceRepo, JjError> {
   let repo_path_opt = derive_repo_path_from_workspace(workspace_path);
   let settings_path = repo_path_opt.as_deref().unwrap_or(workspace_path);
@@ -6353,8 +6401,15 @@ fn collect_bookmark_conflict_info(
 /// Uses: jj log -r <revision> --no-graph -T 'commit_id.short(12)'
 /// Returns error if the bookmark is conflicted (with details about all conflicting commits)
 pub fn jj_get_commit_id(repo_path: &str, revision: &str) -> Result<String, JjError> {
-  let loaded = load_workspace_repo(repo_path)?;
-  match resolve_commit_by_revision(&loaded, revision) {
+  WorkspaceRepo::load(repo_path)?.commit_id(revision)
+}
+
+fn commit_id_in(
+  loaded: &LoadedWorkspaceRepo,
+  repo_path: &str,
+  revision: &str,
+) -> Result<String, JjError> {
+  match resolve_commit_by_revision(loaded, revision) {
     Ok(commit) => {
       let commit_id = short_commit_id(&commit);
       if commit_id.is_empty() {
@@ -7075,9 +7130,10 @@ pub fn classify_workspace_bookmark_with_import(
 ///
 /// This happens when both local and remote have diverged from a common ancestor.
 pub fn jj_is_bookmark_conflicted(workspace_path: &str, branch_name: &str) -> bool {
-  let Ok(loaded) = load_workspace_repo(workspace_path) else {
-    return false;
-  };
+  WorkspaceRepo::load(workspace_path).is_ok_and(|repo| repo.is_bookmark_conflicted(branch_name))
+}
+
+fn is_bookmark_conflicted_in(loaded: &LoadedWorkspaceRepo, branch_name: &str) -> bool {
   loaded
     .repo
     .view()
@@ -7811,26 +7867,32 @@ pub fn jj_get_commits_ahead(
   workspace_path: &str,
   target_branch: &str,
 ) -> Result<JjCommitsAhead, JjError> {
+  WorkspaceRepo::load(workspace_path)?.commits_ahead(target_branch)
+}
+
+fn commits_ahead_in(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  target_branch: &str,
+) -> Result<JjCommitsAhead, JjError> {
   if target_branch.starts_with('-') || target_branch.contains('\0') || target_branch.is_empty() {
     return Err(JjError::IoError("Invalid target branch name".to_string()));
   }
-
   let cache_repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let loaded = load_workspace_repo(workspace_path)?;
   let selected_target_ref =
-    resolve_local_target_branch_revision(&loaded, workspace_path, target_branch)?;
-  let comparison_base = resolve_tree_equivalent_workspace_base(&loaded, &selected_target_ref)
+    resolve_local_target_branch_revision(loaded, workspace_path, target_branch)?;
+  let comparison_base = resolve_tree_equivalent_workspace_base(loaded, &selected_target_ref)
     .unwrap_or_else(|| selected_target_ref.clone());
   let revset_expr = format!("({}..@-) ~ empty()", format_revset_symbol(&comparison_base));
-  let revset = evaluate_revset(&loaded, &revset_expr).map_err(|e| {
+  let revset = evaluate_revset(loaded, &revset_expr).map_err(|e| {
     JjError::IoError(format!(
       "Failed to evaluate commits-ahead revset '{}': {}",
       revset_expr, e
     ))
   })?;
   let immutable_revset = evaluate_revset(
-    &loaded,
+    loaded,
     &format!("::{}", format_revset_symbol(&selected_target_ref)),
   )?;
   let is_immutable = immutable_revset.containing_fn();
@@ -8764,11 +8826,23 @@ pub fn jj_get_merge_diff_between_revisions(
   to_revision: &str,
   _conflict_marker_style: &str,
 ) -> Result<JjRevisionDiff, JjError> {
+  WorkspaceRepo::load(workspace_path)?.merge_diff_between_revisions(
+    from_revision,
+    to_revision,
+    _conflict_marker_style,
+  )
+}
+
+fn merge_diff_between_revisions_in(
+  loaded: &LoadedWorkspaceRepo,
+  from_revision: &str,
+  to_revision: &str,
+  _conflict_marker_style: &str,
+) -> Result<JjRevisionDiff, JjError> {
   validate_branch_name(from_revision, "target")?;
   validate_branch_name(to_revision, "revision")?;
-  let loaded = load_workspace_repo(workspace_path)?;
-  let from_commit = resolve_commit_by_revision(&loaded, from_revision)?;
-  let to_commit = resolve_commit_by_revision(&loaded, to_revision)?;
+  let from_commit = resolve_commit_by_revision(loaded, from_revision)?;
+  let to_commit = resolve_commit_by_revision(loaded, to_revision)?;
   let from_tree = from_commit.tree();
   let to_tree = to_commit.tree();
 
