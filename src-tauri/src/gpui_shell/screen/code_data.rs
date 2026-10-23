@@ -24,7 +24,7 @@ use crate::{
     time,
   },
   jj::{JjLogCommit, JjLogResult},
-  local_db::{self, Workspace},
+  local_db::Workspace,
 };
 
 /// The agents treq launches (`lib/agents.ts`'s `AGENTS`), in picker order.
@@ -281,12 +281,7 @@ impl CodeHost for Backend {
       workspace_id,
       workspace_path.to_string(),
     )?;
-    Ok(
-      local_db::search_workspace_files(repo_path, workspace_id, query, limit)?
-        .into_iter()
-        .map(|file| file.relative_path)
-        .collect(),
-    )
+    core::search_workspace_files(repo_path, workspace_id, query, limit)
   }
 
   fn devcontainers_enabled(&self) -> bool {

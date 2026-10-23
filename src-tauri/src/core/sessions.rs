@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::local_db;
+use crate::local_db::{self, PromptHistoryEntry, Session};
 
 /// Returns the model a new agent session should start with: the repo's
 /// `default_model` setting, or the app-level one when the repo has none.
@@ -25,6 +25,40 @@ pub fn create_session(
     local_db::set_session_model(repo_path, id, Some(model))?;
   }
   Ok(id)
+}
+
+/// The repo's agent sessions, oldest first.
+pub fn list_sessions(repo_path: &str) -> Result<Vec<Session>, String> {
+  local_db::get_sessions(repo_path)
+}
+
+/// The model the session runs, when one was chosen.
+pub fn session_model(repo_path: &str, session_id: i64) -> Result<Option<String>, String> {
+  local_db::get_session_model(repo_path, session_id)
+}
+
+/// Records a prompt sent to an agent, so it can be recalled later.
+pub fn add_prompt_history(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+  session_id: i64,
+  prompt: &str,
+  agent: Option<&str>,
+) -> Result<(), String> {
+  local_db::add_prompt_history(repo_path, workspace_id, Some(session_id), prompt, agent).map(|_| ())
+}
+
+/// Every prompt sent in the repo, newest first.
+pub fn prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
+  local_db::get_prompt_history(repo_path)
+}
+
+/// The prompt a workspace was started with, when it has one.
+pub fn workspace_starting_prompt(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<PromptHistoryEntry>, String> {
+  local_db::get_workspace_starting_prompt(repo_path, workspace_id)
 }
 
 #[cfg(test)]

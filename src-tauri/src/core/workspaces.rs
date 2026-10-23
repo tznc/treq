@@ -1334,6 +1334,20 @@ pub fn list_workspaces(repo_path: &str) -> Result<Vec<local_db::Workspace>, Stri
   )
 }
 
+/// Every active workspace of the repo, including the ones that resolve a
+/// conflict; `list_workspaces` leaves those out.
+pub fn list_all_workspaces(repo_path: &str) -> Result<Vec<local_db::Workspace>, String> {
+  local_db::get_workspaces(repo_path)
+}
+
+/// The workspace with `workspace_id`, when the repo has one.
+pub fn find_workspace(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<local_db::Workspace>, String> {
+  local_db::get_workspace_by_id(repo_path, workspace_id)
+}
+
 /// Prunes workspaces whose `.treq/workspaces/…` directories are missing (e.g. deleted outside treq),
 /// or whose jj registration was dropped while the directory still exists (e.g. `jj workspace forget`).
 pub fn sync_workspaces(repo_path: &str) -> Result<(), String> {

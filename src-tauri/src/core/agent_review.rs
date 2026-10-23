@@ -1,6 +1,24 @@
 use std::path::{Path, PathBuf};
 
-use crate::local_db;
+use crate::local_db::{self, AgentReviewComment};
+
+/// The comments left on a reviewed target (a PR, a workspace diff, a Linear
+/// issue), ordered by file and line.
+pub fn list_comments(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+) -> Result<Vec<AgentReviewComment>, String> {
+  local_db::list_agent_review_comments(repo_path, target_type, target_id)
+}
+
+pub fn resolve_comment(repo_path: &str, id: &str) -> Result<(), String> {
+  local_db::resolve_agent_review_comment(repo_path, id)
+}
+
+pub fn delete_comment(repo_path: &str, id: &str) -> Result<(), String> {
+  local_db::delete_agent_review_comment(repo_path, id)
+}
 
 /// Replace `start_line..=end_line` of the comment's file with its suggested
 /// text. Deliberately not the generic patch-file path: a suggestion already

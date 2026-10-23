@@ -179,6 +179,45 @@ pub fn list_repo_branches(repo_path: &str) -> Result<Vec<jj::JjBranch>, String> 
   jj::get_branches(repo_path).map_err(|e| e.to_string())
 }
 
+/// Fetches the repository's remotes, returning what the fetch reported.
+pub fn fetch_repo(repo_path: &str) -> Result<String, String> {
+  jj::jj_git_fetch(repo_path).map_err(|e| e.to_string())
+}
+
+/// Whether `branch` exists locally and on `origin`.
+pub fn repo_branch_status(repo_path: &str, branch: &str) -> Result<jj::BranchStatus, String> {
+  jj::check_branch_exists(repo_path, branch).map_err(|e| e.to_string())
+}
+
+/// Whether rebasing the home repo's `branch` onto `target_branch` would
+/// likely conflict; `None` when that cannot be told.
+pub fn dry_run_home_rebase(
+  repo_path: &str,
+  branch: &str,
+  target_branch: &str,
+) -> Option<jj::HomeRebaseDryRunResult> {
+  jj::jj_dry_run_home_repo_rebase(repo_path, branch, target_branch).ok()
+}
+
+/// Rebases the home repo's `branch` onto `target_branch`.
+pub fn rebase_home_branch(
+  repo_path: &str,
+  branch: &str,
+  target_branch: &str,
+) -> Result<jj::JjRebaseResult, String> {
+  jj::jj_rebase_home_repo_branch(repo_path, branch, target_branch).map_err(|e| e.to_string())
+}
+
+/// Whether the user trusted the repo to run its workflows and scripts.
+pub fn is_repo_trusted(repo_path: &str) -> bool {
+  crate::local_db::is_repo_trusted(repo_path)
+}
+
+/// Records that the user trusts the repo.
+pub fn trust_repo(repo_path: &str) -> Result<(), String> {
+  crate::local_db::trust_repo(repo_path)
+}
+
 /// Switches the repository working copy to the given bookmark (branch).
 pub fn switch_repo_branch(repo_path: &str, bookmark_name: &str) -> Result<String, String> {
   jj::jj_edit_bookmark(repo_path, bookmark_name).map_err(|e| e.to_string())

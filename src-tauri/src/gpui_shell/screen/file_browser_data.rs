@@ -18,7 +18,7 @@ use crate::{
   core::{self, WorkspaceEntry},
   gpui_shell::native::Backend,
   jj::JjDiffHunk,
-  local_db::{self, FileBrowserPendingReview},
+  local_db::FileBrowserPendingReview,
 };
 
 /// Files longer than this (in UTF-16 code units, as `content.length`)
@@ -70,7 +70,7 @@ impl FileBrowserHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Option<FileBrowserPendingReview>, String> {
-    local_db::get_file_browser_review(repo_path, workspace_id)
+    core::review_drafts::file_browser_review(repo_path, workspace_id)
   }
 
   fn save_browser_review(
@@ -80,11 +80,11 @@ impl FileBrowserHost for Backend {
     comments: &str,
     summary: Option<&str>,
   ) -> Result<(), String> {
-    local_db::save_file_browser_review(repo_path, workspace_id, comments, summary).map(|_| ())
+    core::review_drafts::save_file_browser_review(repo_path, workspace_id, comments, summary)
   }
 
   fn clear_browser_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
-    local_db::clear_file_browser_review(repo_path, workspace_id)
+    core::review_drafts::clear_file_browser_review(repo_path, workspace_id)
   }
 }
 

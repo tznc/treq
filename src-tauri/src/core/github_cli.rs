@@ -1,0 +1,240 @@
+//! The GitHub reads and changes GPUI screens make through the `gh` CLI. Each
+//! resolves the `gh` binary (and the PATH it runs with) itself, so a caller
+//! only names the repository, as `owner/name` unless it says otherwise.
+
+use crate::binary_paths::{detect_binary, get_binary_path, get_extended_path};
+use crate::github::{
+  self, GhDraftReviewComment, GhIssue, GhListPage, GhPullRequest, GhReviewThread, GitRemoteInfo,
+  PrCiStatus, GH_LIST_PAGE_SIZE,
+};
+
+const GH_NOT_FOUND: &str = "gh CLI not found";
+
+/// The `gh` binary: the configured path, else one found on the system.
+fn resolve_gh_with(
+  configured: impl FnOnce() -> Option<String>,
+  detected: impl FnOnce() -> Option<String>,
+) -> Result<String, String> {
+  configured()
+    .or_else(detected)
+    .ok_or_else(|| GH_NOT_FOUND.to_string())
+}
+
+/// The `gh` binary's path.
+pub fn gh_path() -> Result<String, String> {
+  resolve_gh_with(|| get_binary_path("gh"), || detect_binary("gh"))
+}
+
+/// The `gh` binary and the PATH to run it with.
+fn gh() -> Result<(String, String), String> {
+  Ok((gh_path()?, get_extended_path()))
+}
+
+/// The repository's GitHub remote, when it has one.
+pub fn remote(repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
+  github::get_git_remote_url_impl(repo_path)
+}
+
+pub fn list_issues(
+  repo: &str,
+  state: &str,
+  after: Option<&str>,
+) -> Result<GhListPage<GhIssue>, String> {
+  let (gh, path) = gh()?;
+  github::gh_list_issues_impl(&gh, repo, state, GH_LIST_PAGE_SIZE, after, &path)
+}
+
+pub fn list_prs(repo: &str, state: &str, page: u32) -> Result<GhListPage<GhPullRequest>, String> {
+  let (gh, path) = gh()?;
+  github::gh_list_prs_impl(&gh, repo, state, GH_LIST_PAGE_SIZE, page, &path)
+}
+
+/// The open pull requests matching `query`, up to `limit`; with `mine`, only
+/// the signed-in user's.
+pub fn search_open_prs(
+  repo: &str,
+  mine: bool,
+  query: &str,
+  limit: u32,
+) -> Result<Vec<GhPullRequest>, String> {
+  let (gh, path) = gh()?;
+  github::gh_search_open_prs_impl(&gh, repo, mine, query, limit, &path)
+}
+
+/// An issue with its comments' reactions filled in.
+pub fn issue(repo: &str, number: u64) -> Result<GhIssue, String> {
+  let (gh, path) = gh()?;
+  let mut issue = github::gh_view_issue_impl(&gh, repo, number, &path)?;
+  github::fill_comment_reactions(&gh, issue.comments.as_mut(), &path);
+  Ok(issue)
+}
+
+/// A pull request with its comments' reactions filled in.
+pub fn pr(repo: &str, number: u64) -> Result<GhPullRequest, String> {
+  let (gh, path) = gh()?;
+  let mut pr = github::gh_view_pr_impl(&gh, repo, number, &path)?;
+  github::fill_comment_reactions(&gh, pr.comments.as_mut(), &path);
+  Ok(pr)
+}
+
+/// A pull request as `gh` reports it, without the reactions.
+pub fn view_pr(repo: &str, number: u64) -> Result<GhPullRequest, String> {
+  let (gh, path) = gh()?;
+  github::gh_view_pr_impl(&gh, repo, number, &path)
+}
+
+pub fn pr_diff(repo: &str, number: u64) -> Result<String, String> {
+  let (gh, path) = gh()?;
+  github::gh_pr_diff_impl(&gh, repo, number, &path)
+}
+
+pub fn pr_checks(repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {
+  let (gh, path) = gh()?;
+  github::get_pr_checks_for_pr_impl(&gh, repo, number, &path)
+}
+
+/// The signed-in user's login.
+pub fn current_user() -> Result<String, String> {
+  let (gh, path) = gh()?;
+  github::gh_current_user_impl(&gh, &path)
+}
+
+/// The review threads of pull request `number` in `full_name`; none when the
+/// name is not `owner/name`.
+pub fn pr_review_threads(full_name: &str, number: u64) -> Result<Vec<GhReviewThread>, String> {
+  let Some((owner, repo)) = full_name.split_once('/') else {
+    return Ok(Vec::new());
+  };
+  let (gh, path) = gh()?;
+  github::gh_list_pr_review_threads_impl(&gh, owner, repo, number, &path)
+}
+
+/// The review threads of the open pull request for `branch`; none when the
+/// repository has no GitHub remote or the branch no cached pull request.
+pub fn branch_review_threads(repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String> {
+  let Some(remote) = remote(repo_path)? else {
+    return Ok(Vec::new());
+  };
+  let pr = crate::pr_status::global()
+    .get_cached(repo_path, branch)
+    .flatten();
+  let Some(pr) = pr else {
+    return Ok(Vec::new());
+  };
+  let (gh, path) = gh()?;
+  github::gh_list_pr_review_threads_impl(&gh, &remote.owner, &remote.repo, pr.number, &path)
+}
+
+pub fn reply_to_review_thread(thread_id: &str, body: &str) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_reply_pr_review_thread_impl(&gh, thread_id, body, &path)
+}
+
+pub fn submit_pr_review(
+  repo: &str,
+  number: u64,
+  event: &str,
+  body: &str,
+  comments: &[GhDraftReviewComment],
+) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_submit_pr_review_impl(&gh, repo, number, event, body, comments, &path)
+}
+
+/// Turns the reaction `content` on or off for a comment.
+pub fn set_reaction(comment_id: &str, content: &str, on: bool) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_set_reaction_impl(&gh, comment_id, content, on, &path)
+}
+
+pub fn create_issue(repo: &str, title: &str, body: &str) -> Result<u64, String> {
+  let (gh, path) = gh()?;
+  github::gh_create_issue_impl(&gh, repo, title, body, &path)
+}
+
+pub fn comment_on_issue(repo: &str, number: u64, body: &str) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_create_issue_comment_impl(&gh, repo, number, body, &path)
+}
+
+pub fn close_issue(repo: &str, number: u64, reason: &str) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_close_issue_impl(&gh, repo, number, Some(reason), &path)
+}
+
+pub fn reopen_issue(repo: &str, number: u64) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_reopen_issue_impl(&gh, repo, number, &path)
+}
+
+pub fn edit_issue(repo: &str, number: u64, title: &str, body: &str) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_edit_issue_impl(&gh, repo, number, title, body, &path)
+}
+
+pub fn delete_issue(repo: &str, number: u64) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_delete_issue_impl(&gh, repo, number, &path)
+}
+
+pub fn create_pr(
+  repo: &str,
+  title: &str,
+  body: &str,
+  base: &str,
+  head: &str,
+  draft: bool,
+) -> Result<u64, String> {
+  let (gh, path) = gh()?;
+  github::gh_create_pr_impl(&gh, repo, title, body, base, head, draft, &path)
+}
+
+pub fn comment_on_pr(repo: &str, number: u64, body: &str) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_create_pr_comment_impl(&gh, repo, number, body, &path)
+}
+
+pub fn close_pr(repo: &str, number: u64) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_close_pr_impl(&gh, repo, number, &path)
+}
+
+pub fn reopen_pr(repo: &str, number: u64) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_reopen_pr_impl(&gh, repo, number, &path)
+}
+
+pub fn set_pr_draft(repo: &str, number: u64, draft: bool) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_set_pr_draft_impl(&gh, repo, number, draft, &path)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn prefers_the_configured_gh_over_a_detected_one() {
+    let found = resolve_gh_with(|| Some("/cfg/gh".into()), || Some("/usr/bin/gh".into()));
+    assert_eq!(found.as_deref(), Ok("/cfg/gh"));
+  }
+
+  #[test]
+  fn falls_back_to_the_detected_gh() {
+    let found = resolve_gh_with(|| None, || Some("/usr/bin/gh".into()));
+    assert_eq!(found.as_deref(), Ok("/usr/bin/gh"));
+  }
+
+  #[test]
+  fn reports_gh_not_found_when_neither_lookup_finds_it() {
+    assert_eq!(
+      resolve_gh_with(|| None, || None),
+      Err("gh CLI not found".to_string())
+    );
+  }
+
+  #[test]
+  fn lists_no_review_threads_for_a_name_without_an_owner() {
+    assert!(pr_review_threads("no-slash", 1).unwrap().is_empty());
+  }
+}

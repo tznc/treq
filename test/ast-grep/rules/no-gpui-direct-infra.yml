@@ -1,0 +1,20 @@
+id: no-gpui-direct-infra
+language: rust
+severity: error
+message: >
+  GPUI screens reach jj, the local database and GitHub through `core/`, not
+  through `crate::jj`, `crate::local_db` or `crate::github` functions. Add or
+  extend a `core/` function and call that, so the logic is testable without
+  GPUI. The types those modules define may still be imported. Tests under
+  `gpui_shell` are exempt.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: scoped_identifier
+    regex: '^(crate::)?(jj|local_db|github|db)::[a-z_][a-z0-9_]*$'

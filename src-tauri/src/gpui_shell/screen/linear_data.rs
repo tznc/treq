@@ -164,7 +164,7 @@ impl LinearHost for Backend {
     repo_path: &str,
     of: &Commented,
   ) -> Result<Vec<AgentReviewComment>, String> {
-    crate::local_db::list_agent_review_comments(repo_path, of.target_type(), of.id())
+    crate::core::agent_review::list_comments(repo_path, of.target_type(), of.id())
   }
 
   fn linear_apply_suggestion(&self, repo_path: &str, comment_id: &str) -> Result<(), String> {

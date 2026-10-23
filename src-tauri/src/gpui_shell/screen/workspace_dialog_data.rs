@@ -105,7 +105,7 @@ impl WorkspaceDialogHost for Backend {
     }
     let repo_path = repo_path.to_string();
     std::thread::spawn(move || {
-      let _ = crate::jj::jj_git_fetch(&repo_path);
+      let _ = crate::core::repo::fetch_repo(&repo_path);
     });
   }
 
@@ -140,7 +140,7 @@ impl WorkspaceDialogHost for Backend {
         remote_ref: None,
       });
     }
-    crate::jj::check_branch_exists(repo_path, branch).map_err(|e| e.to_string())
+    crate::core::repo::repo_branch_status(repo_path, branch)
   }
 
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String> {
