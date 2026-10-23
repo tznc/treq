@@ -263,10 +263,18 @@ if (group === "pr" && command === "list") {
   if (has("--draft")) list = list.filter((pr) => pr.isDraft);
   // The signed-in user is octocat.
   if (after("--author") === "@me") list = list.filter((pr) => pr.author.login === "octocat");
-  const words = (has("--search") ? after("--search") : "")
+  let words = (has("--search") ? after("--search") : "")
     .split(/\s+/)
     .filter((word) => word && !word.includes(":"))
     .map((word) => word.toLowerCase());
+  // QA hooks: "slow" holds the answer back so the search's loading state
+  // can be captured, "unreachable" fails as the network would.
+  if (words.includes("unreachable"))
+    fail("HTTP 502: Bad Gateway (https://api.github.com/graphql)");
+  if (words.includes("slow")) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4000);
+    words = words.filter((word) => word !== "slow");
+  }
   list = list.filter((pr) => words.every((word) => pr.title.toLowerCase().includes(word)));
   out(list.map((pr) => pick(pr, after("--json"))));
 }
