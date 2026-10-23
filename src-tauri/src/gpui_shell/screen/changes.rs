@@ -590,7 +590,7 @@ impl ChangesView {
           Ok(batch) => {
             for file in batch.files {
               let data = FileHunks {
-                hunks: file.hunks,
+                hunks: file.hunks.into(),
                 loading: false,
                 error: file.error,
               };

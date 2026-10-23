@@ -299,6 +299,54 @@ fn snapshot_fresh_working_copy(
   Ok(())
 }
 
+/// One load of a workspace's repository, for callers that make several
+/// read-only queries in a row. Each `jj_*` function loads the repository
+/// itself, which dominates their cost; the methods here share one load.
+/// Queries see the repository as of `load`, so snapshot first if needed.
+pub struct WorkspaceRepo {
+  path: String,
+  loaded: LoadedWorkspaceRepo,
+}
+
+impl WorkspaceRepo {
+  pub fn load(workspace_path: &str) -> Result<Self, JjError> {
+    Ok(Self {
+      path: workspace_path.to_string(),
+      loaded: load_workspace_repo(workspace_path)?,
+    })
+  }
+
+  /// `jj_is_bookmark_conflicted`.
+  pub fn is_bookmark_conflicted(&self, branch_name: &str) -> bool {
+    is_bookmark_conflicted_in(&self.loaded, branch_name)
+  }
+
+  /// `jj_get_commit_id`.
+  pub fn commit_id(&self, revision: &str) -> Result<String, JjError> {
+    commit_id_in(&self.loaded, &self.path, revision)
+  }
+
+  /// `jj_get_commits_ahead`.
+  pub fn commits_ahead(&self, target_branch: &str) -> Result<JjCommitsAhead, JjError> {
+    commits_ahead_in(&self.loaded, &self.path, target_branch)
+  }
+
+  /// `jj_get_merge_diff_between_revisions`.
+  pub fn merge_diff_between_revisions(
+    &self,
+    from_revision: &str,
+    to_revision: &str,
+    conflict_marker_style: &str,
+  ) -> Result<JjRevisionDiff, JjError> {
+    merge_diff_between_revisions_in(
+      &self.loaded,
+      from_revision,
+      to_revision,
+      conflict_marker_style,
+    )
+  }
+}
+
 fn load_workspace_repo(workspace_path: &str) -> Result<LoadedWorkspaceRepo, JjError> {
   let repo_path_opt = derive_repo_path_from_workspace(workspace_path);
   let settings_path = repo_path_opt.as_deref().unwrap_or(workspace_path);
@@ -1017,6 +1065,10 @@ pub struct DiscoveredWorkspace {
   pub has_conflicts: bool,
   /// Author timestamp of the workspace working-copy tip (RFC3339), when known.
   pub last_activity_at: Option<String>,
+  /// The local `branch_name` bookmark is conflicted, as
+  /// [`jj_is_bookmark_conflicted`] reports it.
+  #[serde(default)]
+  pub bookmark_conflicted: bool,
 }
 
 /// A diff hunk from jj diff output
@@ -1240,6 +1292,7 @@ pub fn cache_git_user_config(
   repo_path: &str,
 ) -> Result<(String, String), JjError> {
   let (name, email) = read_git_user_config_from_git(repo_path);
+  forget_user_settings(repo_path);
   db.set_repo_setting(repo_path, "git_user_name", &name)
     .map_err(|e| JjError::ConfigError(format!("Failed to cache user.name: {}", e)))?;
   db.set_repo_setting(repo_path, "git_user_email", &email)
@@ -1270,9 +1323,40 @@ fn get_git_user_config(repo_path: &str) -> (String, String) {
   read_git_user_config_from_git(repo_path)
 }
 
+/// `UserSettings` built per repo path. Every jj operation needs them, and
+/// building them opens the local db and parses a config layer. The git
+/// identity behind them only changes through `cache_git_user_config`, which
+/// forgets the entry.
+fn user_settings_cache() -> &'static std::sync::Mutex<HashMap<String, UserSettings>> {
+  static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, UserSettings>>> =
+    std::sync::OnceLock::new();
+  CACHE.get_or_init(Default::default)
+}
+
+fn forget_user_settings(repo_path: &str) {
+  if let Ok(mut cache) = user_settings_cache().lock() {
+    cache.remove(repo_path);
+  }
+}
+
+fn create_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
+  if let Some(settings) = user_settings_cache()
+    .lock()
+    .ok()
+    .and_then(|cache| cache.get(repo_path).cloned())
+  {
+    return Ok(settings);
+  }
+  let settings = build_user_settings(repo_path)?;
+  if let Ok(mut cache) = user_settings_cache().lock() {
+    cache.insert(repo_path.to_string(), settings.clone());
+  }
+  Ok(settings)
+}
+
 /// Create UserSettings with reasonable defaults for Treq
 /// Uses git config values if available, otherwise uses defaults
-fn create_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
+fn build_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
   // Get user info from git config
   let (user_name, user_email) = get_git_user_config(repo_path);
 
@@ -2025,16 +2109,7 @@ pub fn jj_apply_file_patch(
   patch: &str,
 ) -> Result<(), JjError> {
   let invalid = |message: String| JjError::IoError(format!("Invalid patch: {message}"));
-  let repo_path = RepoPathBuf::from_relative_path(file_path)
-    .map_err(|e| invalid(format!("path '{file_path}': {e}")))?;
-  if repo_path.is_root()
-    || matches!(
-      repo_path.components().next().map(|c| c.as_internal_str()),
-      Some(".jj" | ".git")
-    )
-  {
-    return Err(invalid(format!("'{file_path}' is not a workspace file")));
-  }
+  let repo_path = workspace_file_path(file_path).map_err(invalid)?;
   let patches = crate::unified_patch::parse(patch).map_err(invalid)?;
   let [file_patch] = patches.as_slice() else {
     return Err(invalid(format!(
@@ -2403,6 +2478,7 @@ struct RegisteredWorkspace {
   branch_name: String,
   has_conflicts: bool,
   last_activity_at: Option<String>,
+  bookmark_conflicted: bool,
 }
 
 fn load_home_workspace(repo_path: &str) -> Result<Workspace, JjError> {
@@ -2475,6 +2551,10 @@ fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace
     let (branch_name, bookmark_has_conflicts) =
       branch_name_for_workspace_commit(repo.as_ref(), workspace_name.as_str(), &wc_commit);
     let last_activity_at = commit_author_timestamp_rfc3339(&wc_commit);
+    let bookmark_conflicted = repo
+      .view()
+      .get_local_bookmark(RefName::new(&branch_name))
+      .has_conflict();
 
     workspaces.push(RegisteredWorkspace {
       workspace_name: workspace_name.as_str().to_string(),
@@ -2482,6 +2562,7 @@ fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace
       branch_name,
       has_conflicts: bookmark_has_conflicts || !wc_commit.tree_ids().is_resolved(),
       last_activity_at,
+      bookmark_conflicted,
     });
   }
 
@@ -2603,6 +2684,7 @@ pub fn discover_workspaces_with_conflicts(
         branch_name: workspace.branch_name,
         has_conflicts: workspace.has_conflicts,
         last_activity_at: workspace.last_activity_at,
+        bookmark_conflicted: workspace.bookmark_conflicted,
       })
       .collect(),
   )
@@ -2999,14 +3081,45 @@ fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), JjError>
   Ok(())
 }
 
+/// Parses a path inside a workspace, refusing the root, anything that leaves the
+/// workspace (absolute paths, `..`) and jj/git metadata.
+fn workspace_file_path(path: &str) -> Result<RepoPathBuf, String> {
+  let repo_path =
+    RepoPathBuf::from_relative_path(path).map_err(|e| format!("path '{path}': {e}"))?;
+  if repo_path.is_root()
+    || matches!(
+      repo_path.components().next().map(|c| c.as_internal_str()),
+      Some(".jj" | ".git")
+    )
+  {
+    return Err(format!("'{path}' is not a workspace file"));
+  }
+  Ok(repo_path)
+}
+
 fn move_paths_between_workspaces(
   source_workspace_path: &Path,
   target_workspace_path: &Path,
   paths: &[String],
 ) -> Result<(), JjError> {
-  for relative in paths {
-    let source = source_workspace_path.join(relative);
-    let target = target_workspace_path.join(relative);
+  // Validate every path before touching the disk so a bad entry moves nothing.
+  let repo_paths = paths
+    .iter()
+    .map(|path| workspace_file_path(path).map_err(|e| JjError::IoError(format!("Cannot move {e}"))))
+    .collect::<Result<Vec<_>, _>>()?;
+  for repo_path in repo_paths {
+    let source = repo_path.to_fs_path(source_workspace_path).map_err(|e| {
+      JjError::IoError(format!(
+        "Cannot move {}: {e}",
+        repo_path.as_internal_file_string()
+      ))
+    })?;
+    let target = repo_path.to_fs_path(target_workspace_path).map_err(|e| {
+      JjError::IoError(format!(
+        "Cannot move {}: {e}",
+        repo_path.as_internal_file_string()
+      ))
+    })?;
     if source.exists() {
       copy_path_recursive(&source, &target)?;
       if source.is_dir() {
@@ -6288,8 +6401,15 @@ fn collect_bookmark_conflict_info(
 /// Uses: jj log -r <revision> --no-graph -T 'commit_id.short(12)'
 /// Returns error if the bookmark is conflicted (with details about all conflicting commits)
 pub fn jj_get_commit_id(repo_path: &str, revision: &str) -> Result<String, JjError> {
-  let loaded = load_workspace_repo(repo_path)?;
-  match resolve_commit_by_revision(&loaded, revision) {
+  WorkspaceRepo::load(repo_path)?.commit_id(revision)
+}
+
+fn commit_id_in(
+  loaded: &LoadedWorkspaceRepo,
+  repo_path: &str,
+  revision: &str,
+) -> Result<String, JjError> {
+  match resolve_commit_by_revision(loaded, revision) {
     Ok(commit) => {
       let commit_id = short_commit_id(&commit);
       if commit_id.is_empty() {
@@ -7010,9 +7130,10 @@ pub fn classify_workspace_bookmark_with_import(
 ///
 /// This happens when both local and remote have diverged from a common ancestor.
 pub fn jj_is_bookmark_conflicted(workspace_path: &str, branch_name: &str) -> bool {
-  let Ok(loaded) = load_workspace_repo(workspace_path) else {
-    return false;
-  };
+  WorkspaceRepo::load(workspace_path).is_ok_and(|repo| repo.is_bookmark_conflicted(branch_name))
+}
+
+fn is_bookmark_conflicted_in(loaded: &LoadedWorkspaceRepo, branch_name: &str) -> bool {
   loaded
     .repo
     .view()
@@ -7746,26 +7867,32 @@ pub fn jj_get_commits_ahead(
   workspace_path: &str,
   target_branch: &str,
 ) -> Result<JjCommitsAhead, JjError> {
+  WorkspaceRepo::load(workspace_path)?.commits_ahead(target_branch)
+}
+
+fn commits_ahead_in(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  target_branch: &str,
+) -> Result<JjCommitsAhead, JjError> {
   if target_branch.starts_with('-') || target_branch.contains('\0') || target_branch.is_empty() {
     return Err(JjError::IoError("Invalid target branch name".to_string()));
   }
-
   let cache_repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let loaded = load_workspace_repo(workspace_path)?;
   let selected_target_ref =
-    resolve_local_target_branch_revision(&loaded, workspace_path, target_branch)?;
-  let comparison_base = resolve_tree_equivalent_workspace_base(&loaded, &selected_target_ref)
+    resolve_local_target_branch_revision(loaded, workspace_path, target_branch)?;
+  let comparison_base = resolve_tree_equivalent_workspace_base(loaded, &selected_target_ref)
     .unwrap_or_else(|| selected_target_ref.clone());
   let revset_expr = format!("({}..@-) ~ empty()", format_revset_symbol(&comparison_base));
-  let revset = evaluate_revset(&loaded, &revset_expr).map_err(|e| {
+  let revset = evaluate_revset(loaded, &revset_expr).map_err(|e| {
     JjError::IoError(format!(
       "Failed to evaluate commits-ahead revset '{}': {}",
       revset_expr, e
     ))
   })?;
   let immutable_revset = evaluate_revset(
-    &loaded,
+    loaded,
     &format!("::{}", format_revset_symbol(&selected_target_ref)),
   )?;
   let is_immutable = immutable_revset.containing_fn();
@@ -8699,11 +8826,23 @@ pub fn jj_get_merge_diff_between_revisions(
   to_revision: &str,
   _conflict_marker_style: &str,
 ) -> Result<JjRevisionDiff, JjError> {
+  WorkspaceRepo::load(workspace_path)?.merge_diff_between_revisions(
+    from_revision,
+    to_revision,
+    _conflict_marker_style,
+  )
+}
+
+fn merge_diff_between_revisions_in(
+  loaded: &LoadedWorkspaceRepo,
+  from_revision: &str,
+  to_revision: &str,
+  _conflict_marker_style: &str,
+) -> Result<JjRevisionDiff, JjError> {
   validate_branch_name(from_revision, "target")?;
   validate_branch_name(to_revision, "revision")?;
-  let loaded = load_workspace_repo(workspace_path)?;
-  let from_commit = resolve_commit_by_revision(&loaded, from_revision)?;
-  let to_commit = resolve_commit_by_revision(&loaded, to_revision)?;
+  let from_commit = resolve_commit_by_revision(loaded, from_revision)?;
+  let to_commit = resolve_commit_by_revision(loaded, to_revision)?;
   let from_tree = from_commit.tree();
   let to_tree = to_commit.tree();
 
@@ -10664,5 +10803,79 @@ mod tests {
       imported,
       jj_get_commit_id(repo_path, "master").expect("master id")
     );
+  }
+
+  #[test]
+  fn move_paths_rejects_paths_outside_the_workspace() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    let outside = TempDir::new().expect("outside");
+    fs::write(outside.path().join("keep.txt"), "keep").expect("write");
+    fs::create_dir(source.path().join(".jj")).expect("mkdir .jj");
+    fs::create_dir(target.path().join(".git")).expect("mkdir .git");
+    let escape = format!(
+      "../{}",
+      outside.path().file_name().expect("name").to_string_lossy()
+    );
+    let absolute = outside.path().to_string_lossy().into_owned();
+
+    for bad in [escape.as_str(), absolute.as_str(), ".jj", ".git", "", "."] {
+      let result = move_paths_between_workspaces(source.path(), target.path(), &[bad.to_string()]);
+      assert!(result.is_err(), "'{bad}' should be rejected");
+    }
+    assert!(outside.path().join("keep.txt").exists());
+    assert!(source.path().join(".jj").is_dir());
+    assert!(target.path().join(".git").is_dir());
+  }
+
+  #[test]
+  fn move_paths_validates_every_path_before_touching_files() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    fs::write(source.path().join("a.txt"), "a").expect("write");
+
+    let result = move_paths_between_workspaces(
+      source.path(),
+      target.path(),
+      &["a.txt".to_string(), "../escape".to_string()],
+    );
+
+    assert!(result.is_err());
+    assert!(source.path().join("a.txt").exists());
+    assert!(!target.path().join("a.txt").exists());
+  }
+
+  #[test]
+  fn move_paths_moves_files_and_directories() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    fs::create_dir_all(source.path().join("dir/nested")).expect("mkdir");
+    fs::write(source.path().join("dir/nested/b.txt"), "b").expect("write");
+    fs::write(source.path().join("a.txt"), "a").expect("write");
+    fs::write(target.path().join("gone.txt"), "x").expect("write");
+
+    move_paths_between_workspaces(
+      source.path(),
+      target.path(),
+      &[
+        "a.txt".to_string(),
+        "dir".to_string(),
+        "gone.txt".to_string(),
+      ],
+    )
+    .expect("move");
+
+    assert!(!source.path().join("a.txt").exists());
+    assert!(!source.path().join("dir").exists());
+    assert_eq!(
+      fs::read_to_string(target.path().join("a.txt")).expect("a"),
+      "a"
+    );
+    assert_eq!(
+      fs::read_to_string(target.path().join("dir/nested/b.txt")).expect("b"),
+      "b"
+    );
+    // Deleted in the source, so the move deletes it in the target too.
+    assert!(!target.path().join("gone.txt").exists());
   }
 }
