@@ -12,7 +12,7 @@ fn bench_commit_workspace(c: &mut Criterion) {
   group.sample_size(100);
 
   group.bench_function("create_commit", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       || {
         let repo = TestRepo::new().expect("failed to init test repo");
         let workspace = treq_lib::core::create_workspace(

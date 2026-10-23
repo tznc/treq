@@ -1564,6 +1564,26 @@ pub fn workspace_summaries(repo_path: &str) -> Result<Vec<WorkspaceSummary>, Str
 ///
 /// # Returns
 /// Returns a WorkspaceStatus containing the current workspace, parent, children, DAG nodes, and conflicted workspace IDs.
+/// [`workspace_status`]'s `has_changes` alone, without the ahead, conflict
+/// and remote reads the full status makes.
+pub fn workspace_has_changes(repo_path: &str, workspace_id: i64) -> Result<bool, String> {
+  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
+    .map_err(|e| format!("Failed to get workspace: {}", e))?
+    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let workspace_path = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  let workspace_path_str = workspace_path
+    .to_str()
+    .ok_or("Failed to convert workspace path to string")?;
+  Ok(
+    jj::jj_get_changed_files(workspace_path_str)
+      .map(|files| !files.is_empty())
+      .unwrap_or(false),
+  )
+}
+
 pub fn workspace_status(
   repo_path: &str,
   workspace_id: Option<i64>,

@@ -83,12 +83,12 @@ fn bench_merge_strategy(
   group.sample_size(10);
 
   group.bench_function(bench_name, |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_merge_workspace_benchmark,
       |(repo, workspace_id)| {
         treq_lib::core::merge_workspace(
           std::hint::black_box(&repo.repo_path),
-          std::hint::black_box(workspace_id),
+          std::hint::black_box(*workspace_id),
           std::hint::black_box(message),
           std::hint::black_box(strategy),
         )
