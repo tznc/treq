@@ -108,6 +108,10 @@ impl crate::gpui_shell::screen::WorkspaceHost for FakeHost {
     unreachable!()
   }
 
+  fn reset_to_remote(&self, _: &str, _: i64) -> Outcome {
+    unreachable!()
+  }
+
   fn rebase_home(&self, _: &str, _: &str) -> Outcome {
     unreachable!()
   }

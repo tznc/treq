@@ -384,6 +384,7 @@ pub enum MenuIcon {
   GitBranch,
   Link,
   Pencil,
+  RotateCcw,
   Settings,
   #[serde(rename = "trash-2")]
   Trash2,
@@ -404,6 +405,7 @@ impl MenuIcon {
       MenuIcon::GitBranch => theme::ICON_BRANCH,
       MenuIcon::Link => theme::ICON_LINK,
       MenuIcon::Pencil => theme::ICON_PENCIL,
+      MenuIcon::RotateCcw => theme::ICON_ROTATE_CCW,
       MenuIcon::Settings => theme::ICON_SETTINGS,
       MenuIcon::Trash2 => theme::ICON_TRASH,
     }

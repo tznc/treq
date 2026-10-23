@@ -4544,3 +4544,33 @@ fn commit_workspace_locked(
 
   Ok(result)
 }
+
+/// Resets a workspace's branch to `origin`: fetches, then points the bookmark
+/// at `<branch>@origin` with a clean working copy. Its local-only commits and
+/// uncommitted changes are dropped (jj's operation log still holds them).
+/// Returns how many commits were dropped.
+pub fn reset_workspace_to_remote(repo_path: &str, workspace_id: i64) -> Result<usize, String> {
+  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
+    .map_err(|e| format!("Failed to get workspace: {}", e))?
+    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let full_path = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  if !full_path.exists() {
+    return Err(format!(
+      "Workspace directory is missing: {}",
+      full_path.display()
+    ));
+  }
+  let full_path = full_path.to_string_lossy();
+  jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
+  let dropped = jj::jj_reset_bookmark_to_remote(&full_path, &workspace.branch_name)
+    .map_err(|e| e.to_string())?;
+  sync_home_and_workspace_for_branch(
+    repo_path,
+    &workspace.branch_name,
+    SyncSource::WorkspaceToHome,
+  )?;
+  Ok(dropped)
+}

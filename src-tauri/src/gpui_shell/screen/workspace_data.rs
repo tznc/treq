@@ -154,6 +154,8 @@ pub trait WorkspaceHost: ToolsHost + super::launch_data::LaunchHost {
   fn push(&self, repo_path: &str, workspace_id: Option<i64>) -> Outcome;
   fn sync(&self, repo_path: &str, workspace_id: Option<i64>) -> Outcome;
   fn rebase_home(&self, repo_path: &str, branch: &str) -> Outcome;
+  /// Fetches, then resets the workspace's branch to `origin`.
+  fn reset_to_remote(&self, repo_path: &str, workspace_id: i64) -> Outcome;
   fn notify(&self, event: NativeEvent);
 }
 
@@ -321,6 +323,19 @@ impl WorkspaceHost for Backend {
     }
   }
 
+  fn reset_to_remote(&self, repo_path: &str, workspace_id: i64) -> Outcome {
+    if self.remote_containing(repo_path).is_some() {
+      return Outcome::failed("Reset failed", unsupported("Resetting to the remote"));
+    }
+    match core::reset_workspace_to_remote(repo_path, workspace_id) {
+      Ok(dropped) => Outcome::ok(
+        "Reset to remote",
+        format!("Dropped {}", plural(dropped, "local commit")),
+      ),
+      Err(err) => Outcome::failed("Reset failed", err),
+    }
+  }
+
   fn notify(&self, event: NativeEvent) {
     Backend::notify(self, event);
   }
@@ -440,6 +455,7 @@ pub enum Pending {
   Push,
   Sync,
   HomeRebase,
+  Reset,
 }
 
 /// The workspace row's `metadata` JSON.
@@ -670,7 +686,7 @@ pub fn workspace_view(
       ahead: ahead as u32,
       behind: behind as u32,
       disabled: busy,
-      spinning: pending == Pending::Sync,
+      spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),
     checks,
     merge_queue: route

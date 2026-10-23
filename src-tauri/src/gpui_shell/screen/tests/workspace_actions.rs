@@ -1,5 +1,6 @@
 //! The workspace header's actions GPUI runs itself (`workspace/actions.rs`):
-//! checks, pull requests, retargeting, the merge queue and Delete Workspace.
+//! checks, pull requests, retargeting, the merge queue, Reset to remote and
+//! Delete Workspace.
 
 use gpui::TestAppContext;
 
@@ -177,6 +178,57 @@ fn keeps_the_workspace_when_delete_is_declined(cx: &mut TestAppContext) {
     .calls()
     .iter()
     .any(|c| c.starts_with("delete workspace")));
+}
+
+/// The labels of the menu shown last.
+fn menu_labels(h: &mut Harness) -> Vec<String> {
+  use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
+  h.cx.run_until_parked();
+  match h.popups.borrow().last() {
+    Some(PopupRequest::ShowDropdown { entries, .. }) => entries
+      .iter()
+      .filter_map(|e| match e {
+        MenuEntry::Item { text, .. } => Some(text.clone()),
+        _ => None,
+      })
+      .collect(),
+    _ => panic!("no dropdown is shown"),
+  }
+}
+
+#[gpui::test]
+fn resets_to_the_remote_from_the_more_menu(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-more");
+  assert_eq!(menu_labels(&mut h), ["Reset to remote", "Delete Workspace"]);
+  h.pick("Reset to remote");
+  assert!(calls_starting(&host, &["reset"]).is_empty(), "asks first");
+  h.answer("Reset to remote");
+  assert_eq!(
+    calls_starting(&host, &["reset", "notify toast"]),
+    ["reset 7", "notify toast Reset to remote"]
+  );
+}
+
+#[gpui::test]
+fn keeps_local_work_when_reset_is_declined(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-more");
+  h.pick("Reset to remote");
+  h.answer("Cancel");
+  assert!(!h.drawn("confirm"));
+  assert!(calls_starting(&host, &["reset"]).is_empty());
+}
+
+#[gpui::test]
+fn offers_no_reset_without_an_upstream(cx: &mut TestAppContext) {
+  let mut host = feature_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.remote_sync = crate::core::RemoteSyncStatus::NotOnRemote;
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-more");
+  assert_eq!(menu_labels(&mut h), ["Delete Workspace"]);
 }
 
 #[gpui::test]

@@ -2172,3 +2172,107 @@ fn retarget_workspace_swaps_a_conflicting_stack_without_literal_markers() {
     );
   }
 }
+
+#[test]
+fn reset_to_remote_drops_local_commits_and_uncommitted_changes() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/reset-to-remote",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("create workspace");
+  let path = repo.workspace_full_path(&workspace);
+
+  TestRepo::write_workspace_file(&path, "shared.txt", "base\n").expect("write base");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "base").expect("commit base");
+  treq_lib::core::push_workspace_to_remote(&repo.repo_path, Some(workspace.id)).expect("push");
+
+  // Two local-only commits, a commit only the remote has, and an uncommitted edit.
+  TestRepo::write_workspace_file(&path, "shared.txt", "local\n").expect("write local");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "local 1").expect("commit");
+  TestRepo::write_workspace_file(&path, "local.txt", "local\n").expect("write local");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "local 2").expect("commit");
+  repo
+    .remote_commit_on_branch(&workspace.branch_name, "remote.txt", "remote\n", "remote")
+    .expect("remote commit");
+  TestRepo::write_workspace_file(&path, "dirty.txt", "dirty\n").expect("write dirty");
+
+  let dropped =
+    treq_lib::core::reset_workspace_to_remote(&repo.repo_path, workspace.id).expect("reset");
+
+  assert_eq!(dropped, 2);
+  let status =
+    treq_lib::core::workspace_status(&repo.repo_path, Some(workspace.id)).expect("status");
+  assert!(
+    matches!(status.remote_sync, RemoteSyncStatus::InSync),
+    "got {:?}",
+    status.remote_sync
+  );
+  let dir = Path::new(&path);
+  assert_eq!(
+    std::fs::read_to_string(dir.join("shared.txt")).unwrap(),
+    "base\n"
+  );
+  assert!(dir.join("remote.txt").exists(), "fetches the remote first");
+  assert!(!dir.join("local.txt").exists());
+  assert!(!dir.join("dirty.txt").exists());
+  assert!(TestRepo::jj_working_copy_is_clean(&path));
+  let orphans = jj::jj_log_revset_commit_ids(
+    &path,
+    "visible_heads() ~ ::(working_copies() | bookmarks() | remote_bookmarks())",
+  )
+  .expect("log");
+  assert!(
+    orphans.is_empty(),
+    "abandons the local commits, left {orphans:?}"
+  );
+}
+
+#[test]
+fn reset_to_remote_keeps_commits_a_stacked_workspace_builds_on() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let parent = repo
+    .setup_workspace_with_pushed_commit("feat/reset-parent", "a.txt", "a\n")
+    .expect("parent");
+  let parent_path = repo.workspace_full_path(&parent);
+  TestRepo::write_workspace_file(&parent_path, "b.txt", "b\n").expect("write");
+  treq_lib::core::commit_workspace(&repo.repo_path, parent.id, "parent local").expect("commit");
+  let child = repo
+    .create_workspace_with_commit(
+      "feat/reset-child",
+      "c.txt",
+      "c\n",
+      Some(&parent.branch_name),
+    )
+    .expect("child");
+  let child_path = repo.workspace_full_path(&child);
+
+  treq_lib::core::reset_workspace_to_remote(&repo.repo_path, parent.id).expect("reset");
+
+  assert!(!Path::new(&parent_path).join("b.txt").exists());
+  let child_files = TestRepo::jj_files_at_revision(&child_path, "feat/reset-child").expect("files");
+  assert!(
+    child_files.iter().any(|f| f == "b.txt"),
+    "the child keeps the parent's local commit, got {child_files:?}"
+  );
+}
+
+#[test]
+fn reset_to_remote_without_an_upstream_fails_and_changes_nothing() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let workspace = repo
+    .create_workspace_with_commit("feat/never-pushed", "a.txt", "a\n", None)
+    .expect("workspace");
+  let path = repo.workspace_full_path(&workspace);
+
+  let err = treq_lib::core::reset_workspace_to_remote(&repo.repo_path, workspace.id)
+    .expect_err("no upstream");
+
+  assert!(err.contains("origin/feat/never-pushed"), "got {err}");
+  assert!(Path::new(&path).join("a.txt").exists());
+}
