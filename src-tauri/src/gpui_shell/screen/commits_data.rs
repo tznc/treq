@@ -660,8 +660,9 @@ impl ShiftForm {
   /// The shift to apply, or `None` while the form can't be submitted.
   pub fn shift(&self) -> Option<TimeShift> {
     if self.to_day {
-      let re = Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex");
-      return re
+      static DAY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex"));
+      return DAY
         .is_match(&self.day)
         .then(|| TimeShift::ToDay(self.day.clone()));
     }

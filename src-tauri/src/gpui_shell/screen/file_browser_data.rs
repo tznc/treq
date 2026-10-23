@@ -6,6 +6,7 @@
 use std::{
   cmp::Ordering,
   collections::{HashMap, HashSet},
+  sync::LazyLock,
 };
 
 use regex::Regex;
@@ -201,7 +202,9 @@ pub struct LineMarks {
 
 /// `handleFileClick`'s hunk parse.
 pub fn line_marks(hunks: &[JjDiffHunk]) -> LineMarks {
-  let header = Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("regex");
+  static HEADER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("regex"));
+  let header = &*HEADER;
   let mut marks = LineMarks::default();
   for hunk in hunks {
     let Some(start) = header
