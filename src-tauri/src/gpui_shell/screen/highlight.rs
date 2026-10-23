@@ -90,6 +90,25 @@ fn syntax(language: &str) -> Option<&'static SyntaxReference> {
     .or_else(|| SYNTAXES.find_syntax_by_token(language))
 }
 
+/// Every [`language`]'s token, for [`warm`].
+const LANGUAGES: &[&str] = &[
+  "sh", "c", "cpp", "css", "erl", "ex", "go", "html", "java", "js", "json", "md", "py", "rb", "rs",
+  "scss", "sql", "xml", "ts", "tsx", "yaml",
+];
+
+/// Loads the grammars and compiles the regexes a first line of each
+/// language needs, so the first diff drawn doesn't do it on the main
+/// thread. Grammars compile their patterns lazily and keep them in the
+/// shared [`SYNTAXES`], so parsing on any thread warms them for all.
+pub fn warm() {
+  const LINE: &str = "let x = f(\"a\", 1); // b";
+  for language in LANGUAGES {
+    if let Some(syntax) = syntax(language) {
+      parse(language, syntax, LINE);
+    }
+  }
+}
+
 /// Token spans of one line, byte ranges into `line`.
 pub(super) fn spans(language: &'static str, line: &str) -> Spans {
   let key = (language, line.to_string());
@@ -407,5 +426,41 @@ mod tests {
     assert_eq!(color(Token::Keyword, false), Some(rgb(0x0000ff).into()));
     assert_eq!(color(Token::Keyword, true), Some(rgb(0x569cd6).into()));
     assert_eq!(color(Token::Function, false), None);
+  }
+
+  #[test]
+  fn warm_covers_every_language() {
+    let extensions = [
+      "sh", "c", "cpp", "css", "erl", "ex", "go", "html", "java", "js", "json", "md", "py", "rb",
+      "rs", "scss", "sql", "xml", "ts", "tsx", "yaml",
+    ];
+    for ext in extensions {
+      let language = language(&format!("a.{ext}")).expect("a language");
+      assert!(LANGUAGES.contains(&language), "{language}");
+      assert!(syntax(language).is_some(), "{language}");
+    }
+  }
+
+  /// What the first diff line of each language costs the main thread
+  /// after [`warm`] ran elsewhere (`COLD=1`: without it). Run alone, so
+  /// nothing else warmed the syntax set:
+  /// `cargo test --features gpui-shell --lib highlight_warm_perf -- --ignored --nocapture`
+  #[test]
+  #[ignore]
+  fn highlight_warm_perf() {
+    let started = std::time::Instant::now();
+    if std::env::var_os("COLD").is_none() {
+      std::thread::spawn(warm).join().expect("warm");
+    }
+    let warm_took = started.elapsed();
+    let started = std::time::Instant::now();
+    for language in LANGUAGES {
+      spans(language, "const y = g('c', 2); # d");
+    }
+    println!(
+      "warm (background): {warm_took:?}; first line of {} languages after: {:?}",
+      LANGUAGES.len(),
+      started.elapsed()
+    );
   }
 }

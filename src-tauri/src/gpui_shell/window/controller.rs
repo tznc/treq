@@ -130,6 +130,11 @@ impl WindowController {
     this
   }
 
+  /// Workspace `id` of `repo`, as last read.
+  pub fn workspace(&self, repo: &str, id: i64) -> Option<&crate::local_db::Workspace> {
+    self.data.workspaces(repo).iter().find(|w| w.id == id)
+  }
+
   fn poll(every: std::time::Duration, read: Read, cx: &mut Context<Self>) -> Task<()> {
     cx.spawn(async move |this, cx| loop {
       cx.background_executor().timer(every).await;
