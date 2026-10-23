@@ -1747,11 +1747,11 @@ pub fn search_workspace_files(
              FROM workspace_files
              WHERE workspace_id IS ?1
                AND is_directory = 0
-               AND LOWER(relative_path) LIKE ?2 ESCAPE '^'
+               AND relative_path LIKE ?2 ESCAPE '^'
              ORDER BY
                CASE
-                 WHEN LOWER(relative_path) = ?3 OR LOWER(relative_path) LIKE ?4 ESCAPE '^' THEN 0
-                 WHEN LOWER(relative_path) LIKE ?5 ESCAPE '^' THEN 1
+                 WHEN LOWER(relative_path) = ?3 OR relative_path LIKE ?4 ESCAPE '^' THEN 0
+                 WHEN relative_path LIKE ?5 ESCAPE '^' THEN 1
                  ELSE 2
                END,
                LENGTH(relative_path)
@@ -2689,6 +2689,34 @@ mod tests {
 
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].relative_path, "src-tauri/.gitignore");
+  }
+
+  #[test]
+  fn searches_workspace_files_case_insensitively_and_ranks_filename_matches_first() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    sync_workspace_files(
+      repo_path,
+      None,
+      vec![
+        cached_file("a/b/c/xMAINx.rs"),
+        cached_file("src/Main.rs"),
+        cached_file("m/a/i/n.rs"),
+        cached_file("MAIN"),
+      ],
+    )
+    .expect("index files");
+
+    let paths = search_workspace_files(repo_path, None, "MaIn", 50)
+      .expect("search workspace files")
+      .into_iter()
+      .map(|file| file.relative_path)
+      .collect::<Vec<_>>();
+
+    assert_eq!(
+      paths,
+      ["MAIN", "src/Main.rs", "a/b/c/xMAINx.rs", "m/a/i/n.rs"]
+    );
   }
 
   fn add_archived_workspace(repo_path: &str, path: &str, branch: &str) -> i64 {
