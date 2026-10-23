@@ -117,13 +117,7 @@ pub(crate) fn menu<V: 'static>(
   let devcontainer = env.devcontainer;
   let mut panel = menu_panel(id, p)
     .w(zpx(256.))
-    .child(
-      ui::text(div(), TextSize::Xs)
-        .px_2()
-        .py_1p5()
-        .text_color(p.muted_foreground)
-        .child("New terminals and agents run in"),
-    )
+    .child(ui::MenuLabel::new("New terminals and agents run in", p))
     .child(
       item(
         "environment-local",

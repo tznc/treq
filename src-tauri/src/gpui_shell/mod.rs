@@ -34,6 +34,8 @@ mod popover;
 mod popup;
 pub mod remote_repo;
 mod screen;
+#[doc(hidden)]
+pub use screen::bench;
 mod shortcuts;
 mod sidebar;
 mod sidebar_actions;

@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{AnyElement, StyledText, Task};
@@ -20,6 +21,27 @@ pub(in crate::gpui_shell::screen) enum MatchKey {
   Conflict(String, usize),
 }
 
+/// One file's inputs to the match index: what decides the lines searched.
+struct Indexed {
+  path: String,
+  conflicted: bool,
+  body: Body,
+  hunks: Option<Arc<Vec<JjDiffHunk>>>,
+}
+
+impl PartialEq for Indexed {
+  fn eq(&self, other: &Self) -> bool {
+    self.path == other.path
+      && self.conflicted == other.conflicted
+      && self.body == other.body
+      && match (&self.hunks, &other.hunks) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+      }
+  }
+}
+
 /// A match's line and where it was drawn.
 type Drawn = (MatchKey, Bounds<Pixels>);
 
@@ -33,6 +55,8 @@ pub(in crate::gpui_shell::screen) struct Search {
   /// Matches by line: the first's index overall and how many.
   index: HashMap<MatchKey, (usize, usize)>,
   pub(in crate::gpui_shell::screen) total: usize,
+  /// What `index` was built from, to skip rebuilding it.
+  indexed: Option<(String, Vec<Indexed>)>,
   input: Option<Entity<InputState>>,
   focus: bool,
   /// Scroll the current match into view once it is drawn.
@@ -82,6 +106,28 @@ pub(in crate::gpui_shell::screen) fn match_ranges(text: &str, query: &str) -> Ve
     }
   }
   out
+}
+
+/// How many `match_ranges` `text` has. ASCII text and queries, the usual
+/// case, are counted in place: the index counts every line every frame.
+fn match_count(text: &str, query: &str) -> usize {
+  if !(text.is_ascii() && query.is_ascii()) {
+    return match_ranges(text, query).len();
+  }
+  let (text, query) = (text.as_bytes(), query.as_bytes());
+  if query.is_empty() {
+    return 0;
+  }
+  let (mut i, mut n) = (0, 0);
+  while i + query.len() <= text.len() {
+    if text[i..i + query.len()].eq_ignore_ascii_case(query) {
+      n += 1;
+      i += query.len();
+    } else {
+      i += 1;
+    }
+  }
+  n
 }
 
 /// A conflict region's lines as React searches them.
@@ -203,21 +249,13 @@ impl ChangesView {
   /// `searchData`: every match, in React's order (conflicts, then the
   /// working copy's files, then the committed ones shown).
   pub(super) fn index_matches(&mut self) {
-    self.search.index.clear();
-    self.search.total = 0;
     let query = self.search.applied.clone();
     if query.is_empty() {
+      self.search.index.clear();
+      self.search.total = 0;
+      self.search.indexed = None;
       return;
     }
-    let mut total = 0;
-    let mut index = HashMap::new();
-    let mut add = |key: MatchKey, text: &str, total: &mut usize| {
-      let n = match_ranges(text, &query).len();
-      if n > 0 {
-        index.insert(key, (*total, n));
-        *total += n;
-      }
-    };
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
     let mut files: Vec<(String, String, bool)> = self
       .listed()
@@ -231,6 +269,52 @@ impl ChangesView {
         .into_iter()
         .map(|f| (f.path, f.status, f.previous_path.is_some())),
     );
+    let bodies: Vec<Body> = files
+      .iter()
+      .map(|(path, status, renamed)| {
+        body(&BodyInput {
+          path,
+          status,
+          renamed: *renamed,
+          data: self.shown_hunks(path),
+          collapsed: self.collapsed_files.contains(path),
+          comment_activity: self.file_comment_activity(path),
+          expanded_large: self.expanded_large.contains(path),
+          generated: self.is_generated(path),
+          loaded_generated: self.loaded_generated.contains(path),
+        })
+      })
+      .collect();
+    let inputs: Vec<Indexed> = files
+      .iter()
+      .zip(&bodies)
+      .map(|((path, _, _), body)| Indexed {
+        path: path.clone(),
+        conflicted: conflicted.contains(path),
+        body: *body,
+        hunks: self.shown_hunks(path).map(|d| d.hunks.clone()),
+      })
+      .collect();
+    if self
+      .search
+      .indexed
+      .as_ref()
+      .is_some_and(|(q, last)| *q == query && *last == inputs)
+    {
+      return;
+    }
+    self.search.indexed = Some((query.clone(), inputs));
+    self.search.index.clear();
+    self.search.total = 0;
+    let mut total = 0;
+    let mut index = HashMap::new();
+    let mut add = |key: MatchKey, text: &str, total: &mut usize| {
+      let n = match_count(text, &query);
+      if n > 0 {
+        index.insert(key, (*total, n));
+        *total += n;
+      }
+    };
     for (path, _, _) in &files[..working] {
       if !conflicted.contains(path) {
         continue;
@@ -242,22 +326,11 @@ impl ChangesView {
         }
       }
     }
-    for (path, status, renamed) in &files {
-      let data = self.shown_hunks(path);
-      let input = BodyInput {
-        path,
-        status,
-        renamed: *renamed,
-        data,
-        collapsed: self.collapsed_files.contains(path),
-        comment_activity: self.file_comment_activity(path),
-        expanded_large: self.expanded_large.contains(path),
-        generated: self.is_generated(path),
-        loaded_generated: self.loaded_generated.contains(path),
-      };
-      if body(&input) != Body::Hunks {
+    for ((path, _, _), body) in files.iter().zip(&bodies) {
+      if *body != Body::Hunks {
         continue;
       }
+      let data = self.shown_hunks(path);
       let hunks = data.map_or(&[][..], |d| &d.hunks);
       let in_region = conflict_lines(&conflicts(path, hunks));
       for (h, hunk) in hunks.iter().enumerate() {
@@ -480,7 +553,7 @@ impl ChangesView {
 
 #[cfg(test)]
 mod tests {
-  use super::match_ranges;
+  use super::{match_count, match_ranges};
 
   #[test]
   fn matches_ignore_case_and_do_not_overlap() {
@@ -494,6 +567,25 @@ mod tests {
       match_ranges("ab", "abc"),
       Vec::<std::ops::Range<usize>>::new()
     );
+  }
+
+  #[test]
+  fn match_count_agrees_with_match_ranges() {
+    for (text, query) in [
+      ("Logout logout", "LOG"),
+      ("aaaa", "aa"),
+      ("aaa", "aa"),
+      ("abc", ""),
+      ("ab", "abc"),
+      ("é x É", "é"),
+      ("let value_1 = VALUE_10", "value_1"),
+    ] {
+      assert_eq!(
+        match_count(text, query),
+        match_ranges(text, query).len(),
+        "{text:?} / {query:?}"
+      );
+    }
   }
 
   #[test]

@@ -179,3 +179,12 @@ harness = false
 [[bench]]
 name = "merge_workspace"
 harness = false
+
+[[bench]]
+name = "diff_view"
+harness = false
+required-features = ["gpui-shell"]
+
+[[bench]]
+name = "window_poll"
+harness = false
