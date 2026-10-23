@@ -24,8 +24,9 @@ use gpui_kit::component::{
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
+  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
+  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful,
+  Subscription, Task, Window,
 };
 
 use super::{
@@ -41,7 +42,7 @@ use super::{
   ActionSink, ScreenAction,
 };
 use crate::{
-  core::WorkspaceEntry,
+  core::{pr_sync::SyncState, WorkspaceEntry},
   gpui_shell::{
     form,
     native::{NativeEvent, ToastTone},
@@ -129,6 +130,7 @@ struct Read {
   history: Result<JjLogResult, String>,
   stack: Option<Vec<StackRow>>,
   settings: TaskSettings,
+  pr_sync: Option<SyncState>,
 }
 
 /// The commit history column: `limit` commits of the home repository, a
@@ -218,6 +220,9 @@ pub struct CodeView {
   /// The description being edited, and its editor.
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
+  /// Which of the workspace's fields follow its pull request.
+  pr_sync: Option<SyncState>,
+  resyncing: bool,
   syncing_submodule: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
@@ -271,6 +276,8 @@ impl CodeView {
       saving_title: false,
       description_draft: None,
       saving_description: false,
+      pr_sync: None,
+      resyncing: false,
       syncing_submodule: false,
       starting_devcontainer: false,
       picker: None,
@@ -325,6 +332,10 @@ impl CodeView {
             history: read_history(host, &parent, limit),
             stack: read_stack(host, &parent),
             settings: task_settings(host, &parent.repo_path),
+            pr_sync: parent
+              .workspace
+              .as_ref()
+              .and_then(|ws| host.pr_sync(&parent.repo_path, ws)),
           };
           (parent, read)
         })
@@ -363,6 +374,7 @@ impl CodeView {
     self.set_history(read.history);
     self.stack = read.stack;
     self.settings = Some(read.settings);
+    self.pr_sync = read.pr_sync;
     cx.notify();
   }
 
@@ -889,6 +901,81 @@ impl CodeView {
       },
       cx,
     );
+  }
+
+  fn resync_from_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(ws) = &self.parent.workspace else {
+      return;
+    };
+    if self.resyncing {
+      return;
+    }
+    let id = ws.id;
+    self.resyncing = true;
+    self.read(
+      move |host, parent| host.resync_from_pr(&parent.repo_path, id),
+      |view, result, _| {
+        view.resyncing = false;
+        match result {
+          Ok(()) => tell(
+            view.host.as_ref(),
+            NativeEvent::WorkspaceChanged {
+              repo_path: view.parent.repo_path.clone(),
+            },
+          ),
+          Err(err) => view.toast(
+            ToastTone::Error,
+            "Failed to resync from the pull request",
+            err,
+          ),
+        }
+      },
+      cx,
+    );
+  }
+
+  /// Under the description: whether it follows the pull request, or a way
+  /// back to it after a local edit.
+  fn sync_note(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let sync = self.pr_sync?;
+    let note = |id: &'static str, text: String| {
+      ui::text(div(), TextSize::Xs)
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(Role::Label)
+        .aria_label(SharedString::from(text.clone()))
+        .test_support()
+        .text_color(p.muted_foreground)
+        .child(text)
+    };
+    if sync.description {
+      return Some(
+        note(
+          "workspace-description-synced",
+          format!("Synced from PR #{}", sync.pr_number),
+        )
+        .into_any_element(),
+      );
+    }
+    Some(
+      div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(note(
+          "workspace-description-edited",
+          "Edited locally".into(),
+        ))
+        .child(
+          Button::new("workspace-description-resync", p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .disabled(self.resyncing)
+            .label(format!("Resync from PR #{}", sync.pr_number))
+            .on_click(cx.listener(|view, _, _, cx| view.resync_from_pr(cx))),
+        )
+        .into_any_element(),
+    )
   }
 
   fn edit_description(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1706,6 +1793,7 @@ impl CodeView {
             ),
           )
           .child(shown)
+          .children(self.sync_note(p, cx).map(|note| div().mt_2().child(note)))
           .into_any_element(),
       );
     };

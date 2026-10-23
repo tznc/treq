@@ -376,6 +376,7 @@ pub fn run(
           base_branch: base.clone(),
           title: row.title.clone(),
           description: None,
+          pr_number: None,
         },
       )
       .map(|(w, _)| w.id),

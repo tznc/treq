@@ -55,6 +55,8 @@ struct FakeHost {
   /// Deferred file diffs `commit_file_diff` loads.
   file_diffs: Vec<crate::jj::JjFileDiff>,
   description: String,
+  /// Which of the workspace's fields follow its PR.
+  pr_sync: Option<crate::core::pr_sync::SyncState>,
   /// What the Changes tab reads, and the repository's `.gitattributes`.
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
@@ -594,6 +596,19 @@ impl code_data::CodeHost for FakeHost {
 
   fn set_title(&self, _: &str, workspace_id: i64, title: &str) -> Result<(), String> {
     self.record(format!("set title {workspace_id} {title:?}"));
+    Ok(())
+  }
+
+  fn pr_sync(
+    &self,
+    _: &str,
+    _: &crate::local_db::Workspace,
+  ) -> Option<crate::core::pr_sync::SyncState> {
+    self.pr_sync
+  }
+
+  fn resync_from_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {
+    self.record(format!("resync from PR {workspace_id}"));
     Ok(())
   }
 
@@ -2503,6 +2518,7 @@ fn open_pr() -> workspace_data::PrCache {
       base_ref_name: "main".into(),
       merge_state_status: None,
       is_draft: false,
+      body: String::new(),
     })),
     ci: Some(crate::github::PrCiStatus {
       state: "success".into(),
@@ -3969,6 +3985,52 @@ fn code_tab_saves_the_description(cx: &mut TestAppContext) {
     host.writes()
   );
   assert!(!h.drawn("workspace-description-input"));
+}
+
+fn synced(description: bool) -> Option<crate::core::pr_sync::SyncState> {
+  Some(crate::core::pr_sync::SyncState {
+    pr_number: 42,
+    title: true,
+    description,
+  })
+}
+
+#[gpui::test]
+fn code_tab_says_the_description_follows_the_pr(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(h.drawn("workspace-description-synced"));
+  assert!(!h.drawn("workspace-description-resync"));
+}
+
+#[gpui::test]
+fn code_tab_resyncs_a_locally_edited_description(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(false),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-description-synced"));
+  h.click("workspace-description-resync");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().contains(&"resync from PR 7".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
+
+#[gpui::test]
+fn code_tab_shows_no_sync_note_without_a_pr(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-description-synced"));
+  assert!(!h.drawn("workspace-description-resync"));
 }
 
 #[gpui::test]

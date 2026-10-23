@@ -154,6 +154,11 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     description: &str,
   ) -> Result<(), String>;
   fn set_title(&self, repo_path: &str, workspace_id: i64, title: &str) -> Result<(), String>;
+  /// Which of the workspace's fields follow its pull request, or `None` when
+  /// it wasn't opened from one.
+  fn pr_sync(&self, repo_path: &str, workspace: &Workspace) -> Option<core::pr_sync::SyncState>;
+  /// Copies the pull request's title and body over local edits.
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   /// Builds the file index the first time, then searches it.
   fn search_files(
     &self,
@@ -262,6 +267,20 @@ impl CodeHost for Backend {
       MaybeEmptyParam::Omitted,
     )
     .map(|_| ())
+  }
+
+  fn pr_sync(&self, repo_path: &str, workspace: &Workspace) -> Option<core::pr_sync::SyncState> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::sync_state(repo_path, workspace)
+  }
+
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Syncing from the pull request"));
+    }
+    core::pr_sync::resync_workspace(repo_path, workspace_id)
   }
 
   fn search_files(

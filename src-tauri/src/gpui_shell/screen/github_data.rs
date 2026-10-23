@@ -301,16 +301,20 @@ impl GithubHost for Backend {
   }
 
   fn open_pr_workspace(&self, repo_path: &str, pr: &GhPullRequest) -> Result<(i64, bool), String> {
-    let description = format!("From GitHub PR #{}", pr.number);
+    let body = pr.body.as_deref().map(str::trim).filter(|b| !b.is_empty());
     let (workspace, created) = core::open_or_create_workspace_from_pr(
       repo_path,
       &pr.head_ref_name,
       &pr.base_ref_name,
       Some(&pr.title),
-      Some(&description),
+      body,
+      Some(pr.number),
     )?;
     if created {
       crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
+      // The list's PRs carry no body; the poll fills it in.
+      crate::pr_status::global()
+        .queue_branch_refresh(repo_path.to_string(), pr.head_ref_name.clone());
     }
     Ok((workspace.id, created))
   }
@@ -953,6 +957,7 @@ mod tests {
       base_ref_name: String::new(),
       merge_state_status: None,
       is_draft: false,
+      body: String::new(),
     };
     let statuses = HashMap::from([
       ("open".to_string(), Some(info("OPEN"))),

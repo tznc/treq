@@ -353,7 +353,8 @@ fn test_open_or_create_workspace_from_pr_creates_from_remote_head() {
     "feature-remote",
     &default_branch,
     Some("PR title"),
-    Some("From GitHub PR #42"),
+    Some("PR body"),
+    Some(42),
   )
   .expect("should create workspace from PR head");
 
@@ -364,7 +365,11 @@ fn test_open_or_create_workspace_from_pr_creates_from_remote_head() {
     Some(default_branch.as_str())
   );
   assert_eq!(workspace.title, "PR title");
-  assert_eq!(workspace.description.as_deref(), Some("From GitHub PR #42"));
+  assert_eq!(workspace.description.as_deref(), Some("PR body"));
+  let sync = treq_lib::core::pr_sync::sync_state(&repo.repo_path, &workspace)
+    .expect("a workspace opened from a PR follows it");
+  assert_eq!(sync.pr_number, 42);
+  assert!(sync.title && sync.description);
 
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   assert!(
@@ -384,6 +389,7 @@ fn test_open_or_create_workspace_from_pr_returns_existing() {
     &default_branch,
     Some("PR title"),
     None,
+    None,
   )
   .expect("should create workspace from PR head");
   assert!(created_first);
@@ -393,6 +399,7 @@ fn test_open_or_create_workspace_from_pr_returns_existing() {
     "feature-remote",
     "some-other-base",
     Some("ignored"),
+    None,
     None,
   )
   .expect("should return existing workspace");
@@ -416,6 +423,7 @@ fn test_open_or_create_workspace_from_pr_errors_when_head_missing() {
     &repo.repo_path,
     "does-not-exist-on-remote",
     &default_branch,
+    None,
     None,
     None,
   )
