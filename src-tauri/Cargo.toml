@@ -185,3 +185,7 @@ harness = false
 name = "diff_view"
 harness = false
 required-features = ["gpui-shell"]
+
+[[bench]]
+name = "window_poll"
+harness = false
