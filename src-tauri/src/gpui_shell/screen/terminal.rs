@@ -12,12 +12,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use std::{
-  cell::Cell,
-  rc::Rc,
-  sync::Arc,
-  time::{Duration, Instant},
-};
+use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui_kit::base::TestSupportExt as _;
@@ -80,9 +75,6 @@ const MAXIMIZE_KEYS: &str = if cfg!(target_os = "macos") {
 const REMOTE_FONT_SIZE: f32 = 13.;
 /// `h-8`: a remote session's header.
 const REMOTE_HEADER_HEIGHT: f32 = 32.;
-/// `AUTO_REATTACH_COOLDOWN_MS`: one automatic reattach covers a brief
-/// drop; a session that keeps dropping waits for the user.
-const AUTO_REATTACH_COOLDOWN: Duration = Duration::from_secs(30);
 
 /// A new session's start that React keeps (`pendingSessionData`), for the
 /// sessions React still creates itself. Sessions the backend starts keep
@@ -307,7 +299,10 @@ pub struct RemoteState {
   /// The channel closed: typing goes nowhere.
   closed: bool,
   pub stopping: bool,
-  last_auto: Option<Instant>,
+  /// The automatic reattach for this drop was used; output from the
+  /// session gives it back, so every drop gets one before Reattach is
+  /// offered.
+  auto_spent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -474,23 +469,30 @@ impl TerminalView {
         if view.remote.stopping {
           return;
         }
-        let now = Instant::now();
-        let cooled = view
-          .remote
-          .last_auto
-          .is_none_or(|last| now.duration_since(last) > AUTO_REATTACH_COOLDOWN);
         match running {
-          Some(false) => view.remote.ended = Some(status),
-          Some(true) if cooled => {
-            view.remote.last_auto = Some(now);
-            view.reattach(cx);
-            return;
+          Some(false) => {
+            view.remote.ended = Some(status);
+            cx.notify();
           }
-          _ => view.remote.detached = true,
+          _ => view.lost(None, cx),
         }
-        cx.notify();
       });
     }));
+  }
+
+  /// The channel dropped or failed: reattaches once on its own, then
+  /// shows the error (or the lost channel) with Reattach and Close.
+  fn lost(&mut self, error: Option<String>, cx: &mut Context<Self>) {
+    if !self.remote.auto_spent {
+      self.remote.auto_spent = true;
+      self.reattach(cx);
+      return;
+    }
+    match error {
+      Some(error) => self.status = Status::Failed(error),
+      None => self.remote.detached = true,
+    }
+    cx.notify();
   }
 
   /// "Reattach": a fresh local id on the same persistent session, the old
@@ -632,6 +634,8 @@ impl TerminalView {
   fn on_output(&mut self, from_process: bool, cx: &mut Context<Self>) {
     (self.on_event)(TermEvent::Output { from_process }, cx);
     if from_process {
+      // The channel works again, so its next drop gets its own attempt.
+      self.remote.auto_spent = false;
       self.idle += 1;
       let idle = self.idle;
       cx.spawn(async move |this, cx| {
@@ -737,6 +741,10 @@ impl TerminalView {
       let result: Result<Option<String>, (bool, String)> = task.await;
       let _ = this.update(cx, |view, cx| {
         view.pty_size = Some((cols, rows));
+        if let (Err((false, error)), Some(_)) = (&result, view.remote_target()) {
+          view.lost(Some(error.clone()), cx);
+          return;
+        }
         view.status = match result {
           Ok(warning) => {
             if let Some(description) = warning {
@@ -751,7 +759,6 @@ impl TerminalView {
             Status::Ready
           }
           Err((true, error)) => Status::AgentFailed(error),
-          Err((false, error)) if view.remote_target().is_some() => Status::Failed(error),
           Err((false, error)) if error.contains("Session not found") => Status::Failed(
             "Terminal session is still initializing. Please wait a moment and try again.".into(),
           ),
@@ -817,8 +824,7 @@ impl TerminalView {
       log::warn!("pty write failed: {error}");
       // A remote panel shows the failure (`remotePtyWrite(...).catch(handleError)`).
       if self.remote_target().is_some() {
-        self.status = Status::Failed(error);
-        cx.notify();
+        self.lost(Some(error), cx);
       }
     }
   }
