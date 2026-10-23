@@ -70,8 +70,7 @@ export async function recordAuditEvent(
     instanceId?: string | null;
     endpointId?: string | null;
     eventType: RemoteAuditEventType;
-    // deno-lint-ignore no-explicit-any
-    detail?: Record<string, any>;
+    detail?: Record<string, unknown>;
     /** Threads the desktop request / Edge Function operation / provider call
      * together. See `_shared/remote/correlation.ts`. Optional only for call
      * sites (background reconciliation, admin actions with their own

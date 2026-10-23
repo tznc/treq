@@ -58,8 +58,7 @@ Deno.serve(async (req) => {
   } = await supabaseUser.auth.getUser();
   if (authError || !user) return json({ error: "Unauthorized" }, 401);
 
-  // deno-lint-ignore no-explicit-any
-  let body: Record<string, any>;
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {

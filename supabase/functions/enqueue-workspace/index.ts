@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
   // Find the open PR for this branch first: its base branch determines which
   // merge queue configuration applies.
   const prRes = await fetchWithTimeout(
-    `${apiBase}/pulls?head=${encodeURIComponent(repoRow.owner + ":" + branch_name)}&state=open&per_page=5`,
+    `${apiBase}/pulls?head=${encodeURIComponent(`${repoRow.owner}:${branch_name}`)}&state=open&per_page=5`,
     { headers: ghHeaders }
   );
 

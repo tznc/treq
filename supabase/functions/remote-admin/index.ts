@@ -106,8 +106,7 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   const correlationId = correlationIdFromRequest(req);
 
-  // deno-lint-ignore no-explicit-any
-  let body: Record<string, any>;
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
@@ -152,8 +151,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 async function handleAdminRevokeClientKey(
   supabase: SupabaseClient,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   operatorId: string,
   correlationId: string,
 ): Promise<Response> {
@@ -195,8 +193,7 @@ async function handleAdminRevokeClientKey(
 
 async function handleAdminRecoverInstance(
   supabase: SupabaseClient,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   operatorId: string,
   correlationId: string,
 ): Promise<Response> {
@@ -249,8 +246,7 @@ async function handleAdminRecoverInstance(
 
 async function handleListRecentFailures(
   supabase: SupabaseClient,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
 ): Promise<Response> {
   const limit = typeof body.limit === "number" && body.limit > 0 && body.limit <= 500 ? body.limit : 100;
   const { data, error } = await supabase

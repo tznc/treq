@@ -139,8 +139,7 @@ function providerErrorStatus(err: ProviderError): number {
 }
 
 export async function handleRemoteInstanceAction(
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   deps: RemoteInstanceDeps,
 ): Promise<Response> {
   const action = body.action;
@@ -377,8 +376,7 @@ class ValidationError extends Error {}
 async function handleEnsure(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
   env: ProviderEnv,
 ): Promise<Response> {
@@ -577,8 +575,7 @@ async function handleEnsure(
 async function handleWake(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
   env: ProviderEnv,
 ): Promise<Response> {
@@ -675,8 +672,7 @@ async function handleWake(
 async function handleReprovision(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
   env: ProviderEnv,
 ): Promise<Response> {
@@ -871,8 +867,7 @@ async function handleReprovision(
 async function handleDelete(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
   env: ProviderEnv,
 ): Promise<Response> {

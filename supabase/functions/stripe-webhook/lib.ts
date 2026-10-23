@@ -113,7 +113,7 @@ function planOf(items: Record<string, unknown>[]): BillingPlan | null {
     const key = price?.lookup_key;
     if (
       typeof key === "string" &&
-      Object.prototype.hasOwnProperty.call(PLAN_BY_LOOKUP_KEY, key)
+      Object.hasOwn(PLAN_BY_LOOKUP_KEY, key)
     ) {
       return PLAN_BY_LOOKUP_KEY[key];
     }

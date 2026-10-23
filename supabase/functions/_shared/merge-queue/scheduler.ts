@@ -64,9 +64,8 @@ export function planLaneStarts(
     (max, lane) => Math.max(max, lane.laneNumber),
     0,
   );
-  const topOfStack = activeLanes.length > 0
-    ? [...activeLanes].sort((a, b) => a.laneNumber - b.laneNumber).at(-1)!
-    : null;
+  const topOfStack =
+    [...activeLanes].sort((a, b) => a.laneNumber - b.laneNumber).at(-1) ?? null;
 
   const lanes: PlannedLane[] = [];
   for (let i = 0; i < capacity; i++) {

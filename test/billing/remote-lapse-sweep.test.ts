@@ -36,8 +36,13 @@ function fakeStore(
 ) {
   const hasPro =
     db.hasPro ??
-    ((owner) => rows.find((r) => r.owner_user_id === owner)!.owner_has_pro);
-  const byId = (id: string) => rows.find((r) => r.instance_id === id)!;
+    ((owner) =>
+      rows.find((r) => r.owner_user_id === owner)?.owner_has_pro ?? false);
+  const byId = (id: string) => {
+    const row = rows.find((r) => r.instance_id === id);
+    if (!row) throw new Error(`unknown instance ${id}`);
+    return row;
+  };
   const audits: Array<{ eventType: string; instanceId: string }> = [];
   const store: LapseSweepStore = {
     candidates: vi.fn(async () => rows.map((r) => ({ ...r }))),

@@ -21,7 +21,8 @@ function fakeStore(lanes: Lane[], entries: Entry[]) {
       lanes.map(({ id, test_branch }) => ({ id, test_branch })),
     ),
     cancelLane: vi.fn(async (laneId: string) => {
-      const lane = lanes.find((l) => l.id === laneId)!;
+      const lane = lanes.find((l) => l.id === laneId);
+      if (!lane) throw new Error(`unknown lane ${laneId}`);
       for (const entry of entries) {
         if (lane.entryIds.includes(entry.id)) entry.status = "queued";
       }
@@ -128,11 +129,12 @@ describe("holdQueueWithoutPro", () => {
     ]);
     expect([...comments.keys()].sort()).toEqual([11, 12, 13]);
     for (const pr of [11, 12, 13]) {
-      expect(comments.get(pr)).toHaveLength(1);
-      expect(comments.get(pr)![0]).toContain("paused");
-      expect(comments.get(pr)![0]).toContain("Pro");
+      const posted = comments.get(pr);
+      expect(posted).toHaveLength(1);
+      expect(posted?.[0]).toContain("paused");
+      expect(posted?.[0]).toContain("Pro");
     }
-    expect(comments.get(11)![0]).toContain(
+    expect(comments.get(11)?.[0]).toContain(
       `<!-- treq:${proPausedMarker("e1")} -->`,
     );
     expect([...notices].sort()).toEqual(

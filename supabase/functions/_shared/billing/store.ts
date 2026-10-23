@@ -34,6 +34,7 @@ type QueryResult = { data: unknown; error: { message: string } | null };
 export interface ServiceClientLike {
   rpc(fn: string, args: Record<string, unknown>): PromiseLike<QueryResult>;
   // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: supabase-js query builders are too generic to type structurally (see above)
   from(table: string): any;
 }
 
