@@ -1017,6 +1017,10 @@ pub struct DiscoveredWorkspace {
   pub has_conflicts: bool,
   /// Author timestamp of the workspace working-copy tip (RFC3339), when known.
   pub last_activity_at: Option<String>,
+  /// The local `branch_name` bookmark is conflicted, as
+  /// [`jj_is_bookmark_conflicted`] reports it.
+  #[serde(default)]
+  pub bookmark_conflicted: bool,
 }
 
 /// A diff hunk from jj diff output
@@ -2403,6 +2407,7 @@ struct RegisteredWorkspace {
   branch_name: String,
   has_conflicts: bool,
   last_activity_at: Option<String>,
+  bookmark_conflicted: bool,
 }
 
 fn load_home_workspace(repo_path: &str) -> Result<Workspace, JjError> {
@@ -2475,6 +2480,10 @@ fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace
     let (branch_name, bookmark_has_conflicts) =
       branch_name_for_workspace_commit(repo.as_ref(), workspace_name.as_str(), &wc_commit);
     let last_activity_at = commit_author_timestamp_rfc3339(&wc_commit);
+    let bookmark_conflicted = repo
+      .view()
+      .get_local_bookmark(RefName::new(&branch_name))
+      .has_conflict();
 
     workspaces.push(RegisteredWorkspace {
       workspace_name: workspace_name.as_str().to_string(),
@@ -2482,6 +2491,7 @@ fn list_registered_workspaces(repo_path: &str) -> Result<Vec<RegisteredWorkspace
       branch_name,
       has_conflicts: bookmark_has_conflicts || !wc_commit.tree_ids().is_resolved(),
       last_activity_at,
+      bookmark_conflicted,
     });
   }
 
@@ -2603,6 +2613,7 @@ pub fn discover_workspaces_with_conflicts(
         branch_name: workspace.branch_name,
         has_conflicts: workspace.has_conflicts,
         last_activity_at: workspace.last_activity_at,
+        bookmark_conflicted: workspace.bookmark_conflicted,
       })
       .collect(),
   )

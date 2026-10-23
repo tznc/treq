@@ -1370,7 +1370,8 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
   // Conflicted bookmarks break tip/PR revsets (`Revision '…' doesn't exist` /
   // ambiguous). Resolve them automatically with linear, lossless history before
   // the sidebar reads identity or conflict state.
-  for workspace in &discovered {
+  let mut resolved_any = false;
+  for workspace in discovered.iter().filter(|w| w.bookmark_conflicted) {
     let workspace_dir = Path::new(repo_path)
       .join(".treq")
       .join("workspaces")
@@ -1378,9 +1379,7 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
     let Some(workspace_dir_str) = workspace_dir.to_str() else {
       continue;
     };
-    if !jj::jj_is_bookmark_conflicted(workspace_dir_str, &workspace.branch_name) {
-      continue;
-    }
+    resolved_any = true;
     let remote_ref = format!("{}@origin", workspace.branch_name);
     match jj::jj_resolve_bookmark_conflict_losslessly(
       workspace_dir_str,
@@ -1406,12 +1405,18 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
     }
   }
 
-  let discovered = jj::discover_workspaces_with_conflicts(repo_path).map_err(|e| {
-    format!(
-      "Failed to rediscover workspaces after bookmark resolve: {}",
-      e
-    )
-  })?;
+  // Discovery loads the repository once for every workspace; only a
+  // resolution above changes what it saw.
+  let discovered = if resolved_any {
+    jj::discover_workspaces_with_conflicts(repo_path).map_err(|e| {
+      format!(
+        "Failed to rediscover workspaces after bookmark resolve: {}",
+        e
+      )
+    })?
+  } else {
+    discovered
+  };
   let refreshed_at = chrono::Utc::now().to_rfc3339();
   let conflict_by_path: HashMap<String, bool> = discovered
     .iter()
@@ -1445,21 +1450,9 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
         .get(&current.workspace_path)
         .cloned()
         .flatten();
-      let workspace_dir = Path::new(repo_path)
-        .join(".treq")
-        .join("workspaces")
-        .join(&current.workspace_path);
-      let workspace_dir_str = workspace_dir
-        .to_str()
-        .ok_or("Failed to convert workspace path to string")?;
-      let unresolved_has_conflicts = jj::workspace_has_unresolved_conflicts(workspace_dir_str)
-        .map_err(|e| {
-          format!(
-            "Failed to inspect conflict state for sidebar workspace {}: {}",
-            current.workspace_path, e
-          )
-        })?;
-      let has_conflicts = discovered_has_conflicts || unresolved_has_conflicts;
+      // Discovery's flag already covers the working-copy tree's conflicts
+      // (`workspace_has_unresolved_conflicts`), from the same load.
+      let has_conflicts = discovered_has_conflicts;
       Ok(WorkspaceSidebarStatus {
         current,
         has_conflicts,

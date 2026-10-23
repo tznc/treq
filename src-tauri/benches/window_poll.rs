@@ -39,8 +39,7 @@ fn bench_window_poll(c: &mut Criterion) {
     group.bench_function(format!("{count}_workspaces"), |b| {
       b.iter(|| {
         let workspaces = treq_lib::core::list_workspaces(&repo.repo_path).expect("workspaces");
-        let statuses =
-          treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("statuses");
+        let statuses = treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("statuses");
         std::hint::black_box((workspaces, statuses));
       })
     });
