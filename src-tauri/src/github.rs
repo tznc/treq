@@ -241,13 +241,33 @@ pub struct GhPullRequest {
 /// is always safe -- including for mutating `gh` subcommands.
 const ETXTBSY: i32 = 26;
 
+/// How long one `gh` call may run. A hung `gh` (network stall, credential
+/// helper) would otherwise block its caller, such as the PR status poller,
+/// for good.
+const GH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 fn spawn_with_etxtbsy_retry(
   mut cmd: std::process::Command,
 ) -> Result<std::process::Output, String> {
+  use std::process::Stdio;
+
+  // gh must never stop to ask a question: there is no one to answer it.
+  cmd
+    .env("GH_PROMPT_DISABLED", "1")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+  let child = spawn_child_with_etxtbsy_retry(&mut cmd)?;
+  wait_with_deadline(child, GH_TIMEOUT)
+}
+
+fn spawn_child_with_etxtbsy_retry(
+  cmd: &mut std::process::Command,
+) -> Result<std::process::Child, String> {
   let mut attempt = 0;
   loop {
-    match cmd.output() {
-      Ok(output) => return Ok(output),
+    match cmd.spawn() {
+      Ok(child) => return Ok(child),
       Err(e) if e.raw_os_error() == Some(ETXTBSY) && attempt < 5 => {
         attempt += 1;
         std::thread::sleep(std::time::Duration::from_millis(20 * attempt as u64));
@@ -255,6 +275,45 @@ fn spawn_with_etxtbsy_retry(
       Err(e) => return Err(e.to_string()),
     }
   }
+}
+
+/// Collects the child's output, killing it if it outlives `timeout`.
+fn wait_with_deadline(
+  mut child: std::process::Child,
+  timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+  use std::io::Read;
+
+  // One thread per pipe so neither fills up and stalls the child.
+  fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+      let mut buf = Vec::new();
+      if let Some(mut pipe) = pipe {
+        let _ = pipe.read_to_end(&mut buf);
+      }
+      buf
+    })
+  }
+  let stdout = drain(child.stdout.take());
+  let stderr = drain(child.stderr.take());
+
+  let deadline = std::time::Instant::now() + timeout;
+  let status = loop {
+    if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+      break status;
+    }
+    if std::time::Instant::now() >= deadline {
+      let _ = child.kill();
+      let _ = child.wait();
+      return Err(format!("gh timed out after {}s", timeout.as_secs()));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+  };
+  Ok(std::process::Output {
+    status,
+    stdout: stdout.join().unwrap_or_default(),
+    stderr: stderr.join().unwrap_or_default(),
+  })
 }
 
 fn run_gh(
@@ -283,20 +342,11 @@ fn run_gh_with_stdin(
   cmd
     .args(args)
     .env("PATH", extended_path)
+    .env("GH_PROMPT_DISABLED", "1")
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
-  let mut attempt = 0;
-  let mut child = loop {
-    match cmd.spawn() {
-      Ok(child) => break child,
-      Err(e) if e.raw_os_error() == Some(ETXTBSY) && attempt < 5 => {
-        attempt += 1;
-        std::thread::sleep(std::time::Duration::from_millis(20 * attempt as u64));
-      }
-      Err(e) => return Err(e.to_string()),
-    }
-  };
+  let mut child = spawn_child_with_etxtbsy_retry(&mut cmd)?;
   let mut pipe = child
     .stdin
     .take()
@@ -304,7 +354,7 @@ fn run_gh_with_stdin(
   let data = stdin.as_bytes().to_vec();
   // Separate thread: a large body must not deadlock against gh's output pipes.
   let writer = std::thread::spawn(move || pipe.write_all(&data));
-  let output = child.wait_with_output().map_err(|e| e.to_string())?;
+  let output = wait_with_deadline(child, GH_TIMEOUT)?;
   let written = writer
     .join()
     .map_err(|_| "gh stdin writer panicked".to_string())?;
@@ -1570,6 +1620,40 @@ pub fn gh_list_pr_review_threads_impl(
 
 #[cfg(test)]
 mod tests {
+  #[cfg(unix)]
+  #[test]
+  fn gh_that_hangs_is_killed_at_the_deadline() {
+    let child = std::process::Command::new("sleep")
+      .arg("30")
+      .stdout(std::process::Stdio::piped())
+      .stderr(std::process::Stdio::piped())
+      .spawn()
+      .expect("spawn sleep");
+    let started = std::time::Instant::now();
+
+    let err = super::wait_with_deadline(child, std::time::Duration::from_millis(200)).unwrap_err();
+
+    assert!(err.contains("timed out"), "{err}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn wait_with_deadline_returns_output_of_a_quick_command() {
+    let child = std::process::Command::new("sh")
+      .args(["-c", "echo out; echo err >&2; exit 3"])
+      .stdout(std::process::Stdio::piped())
+      .stderr(std::process::Stdio::piped())
+      .spawn()
+      .expect("spawn sh");
+
+    let output = super::wait_with_deadline(child, std::time::Duration::from_secs(10)).unwrap();
+
+    assert_eq!(output.stdout, b"out\n");
+    assert_eq!(output.stderr, b"err\n");
+    assert_eq!(output.status.code(), Some(3));
+  }
+
   use super::*;
   use std::fs;
   use std::io::Write;

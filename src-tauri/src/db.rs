@@ -23,6 +23,12 @@ pub struct Database {
 impl Database {
   pub fn new(db_path: PathBuf) -> Result<Self> {
     let conn = Connection::open(&db_path)?;
+    // Several handles (and treq instances) share this file. As in
+    // `local_db::get_connection`, WAL lets reads run beside a write and
+    // busy_timeout retries a write conflict instead of failing at once with
+    // "database is locked".
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(Database { conn })
   }
 
@@ -387,5 +393,34 @@ impl Database {
       [workspace_path],
     )?;
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_write_waits_for_another_handles_transaction() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("treq.db");
+    let first = Database::new(path.clone()).expect("open first");
+    first.init().expect("init");
+    let second = Database::new(path).expect("open second");
+
+    first.conn.execute_batch("BEGIN IMMEDIATE").expect("begin");
+    let release = std::thread::spawn(move || {
+      std::thread::sleep(std::time::Duration::from_millis(200));
+      first.conn.execute_batch("COMMIT").expect("commit");
+    });
+
+    second
+      .set_setting("theme", "dark")
+      .expect("write retries while the other handle holds the lock");
+    release.join().expect("release thread");
+    assert_eq!(
+      second.get_setting("theme").expect("read").as_deref(),
+      Some("dark")
+    );
   }
 }

@@ -59,7 +59,9 @@ pub enum RemoteAgentId {
 }
 
 impl RemoteAgentId {
-  fn binary_name(self) -> &'static str {
+  pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::CursorAgent];
+
+  pub fn binary_name(self) -> &'static str {
     match self {
       Self::Claude => "claude",
       Self::Codex => "codex",
@@ -139,8 +141,10 @@ impl From<SshTransportError> for RemotePtyError {
 }
 
 /// Builds just the launch program for a [`PtyLaunchSpec`] — e.g.
-/// `"${SHELL:-/bin/bash}" -l` or `claude --foo 'bar baz'` — with every
-/// dynamic component (agent binary, args) quoted with `shell_quote`. Shared
+/// `"${SHELL:-/bin/bash}" -l` or `"${SHELL:-/bin/bash}" -lc 'exec '\''claude'\'' …'`
+/// — with every dynamic component (agent binary, args) quoted with
+/// `shell_quote`. Agents run through a login shell so binaries the user's
+/// profile puts on `PATH` (Claude Code's `~/.local/bin`) are found. Shared
 /// by [`build_launch_command`] (desktop's direct-launch path) and
 /// `core::pty_remote_supervisor` (the VM-local tmux/screen supervisor's
 /// start/attach-command path), so a persistent session's launch program is
@@ -150,9 +154,15 @@ pub fn build_launch_program(spec: &PtyLaunchSpec) -> String {
   match spec {
     PtyLaunchSpec::Shell => "\"${SHELL:-/bin/bash}\" -l".to_string(),
     PtyLaunchSpec::Agent { agent, args } => {
-      let mut parts = vec![crate::core::remote::shell_quote(agent.binary_name())];
+      let mut parts = vec![
+        "exec".to_string(),
+        crate::core::remote::shell_quote(agent.binary_name()),
+      ];
       parts.extend(args.iter().map(|arg| crate::core::remote::shell_quote(arg)));
-      parts.join(" ")
+      format!(
+        "\"${{SHELL:-/bin/bash}}\" -lc {}",
+        crate::core::remote::shell_quote(&parts.join(" "))
+      )
     }
   }
 }
@@ -669,8 +679,57 @@ mod tests {
       args: vec!["--prompt".to_string(), "$(rm -rf /)".to_string()],
     };
     let command = build_launch_command("/srv/project", &spec);
-    assert!(command.contains("'$(rm -rf /)'"));
-    assert!(command.contains("'claude'"));
+    assert!(command.contains("-lc "));
+    assert!(command.contains("claude"));
+    assert!(!command.contains(" $(rm -rf /) "));
+  }
+
+  /// The agent runs through a login shell, so a binary the user's profile
+  /// puts on `PATH` is found, and every argument reaches it verbatim.
+  #[cfg(unix)]
+  #[test]
+  fn agent_launch_uses_the_login_profile_path_and_keeps_arguments_verbatim() {
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let agent = bin.join("claude");
+    std::fs::write(&agent, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+    std::fs::set_permissions(
+      &agent,
+      <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::write(
+      home.path().join(".bash_profile"),
+      "PATH=\"$HOME/.local/bin:$PATH\"\n",
+    )
+    .unwrap();
+
+    let hostile = "'; touch pwned #";
+    let spec = PtyLaunchSpec::Agent {
+      agent: RemoteAgentId::Claude,
+      args: vec![
+        "--prompt".to_string(),
+        hostile.to_string(),
+        "$(id)".to_string(),
+      ],
+    };
+    let output = std::process::Command::new("/bin/sh")
+      .arg("-c")
+      .arg(build_launch_command(home.path().to_str().unwrap(), &spec))
+      .env("HOME", home.path())
+      .env("SHELL", "/bin/bash")
+      .env("PATH", "/usr/bin:/bin")
+      .output()
+      .unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+      stdout.ends_with(&format!("--prompt\n{hostile}\n$(id)\n")),
+      "{stdout}"
+    );
+    assert!(!home.path().join("pwned").exists());
   }
 
   // -- Failing-before-manager-exists coverage is structural: RemotePtyManager

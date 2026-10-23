@@ -741,7 +741,13 @@ struct PooledConnection {
 /// connection for multiple structured commands").
 pub struct SshConnectionPool {
   connections: AsyncMutex<HashMap<PoolKey, PooledConnection>>,
+  /// One lock per key, held while that key's connection opens, so concurrent
+  /// callers share one connection instead of each dialing (and leaking) one.
+  connecting: AsyncMutex<HashMap<PoolKey, Arc<AsyncMutex<()>>>>,
   keepalive_interval: Duration,
+  /// Bounds the dial (TCP or relay plus key exchange) and, separately,
+  /// authentication, so an unresponsive host cannot hang a caller.
+  connect_timeout: Duration,
   idle_timeout: Duration,
   pub metrics: Arc<SshTransportMetrics>,
   /// Endpoint IDs currently under hard cutoff (PRD "Hard cutoff on
@@ -772,7 +778,9 @@ impl SshConnectionPool {
   pub fn new() -> Self {
     Self {
       connections: AsyncMutex::new(HashMap::new()),
+      connecting: AsyncMutex::new(HashMap::new()),
       keepalive_interval: Duration::from_secs(30),
+      connect_timeout: Duration::from_secs(20),
       idle_timeout: Duration::from_secs(600),
       metrics: Arc::new(SshTransportMetrics::default()),
       cutoffs: AsyncMutex::new(HashMap::new()),
@@ -803,6 +811,12 @@ impl SshConnectionPool {
       Ok(guard) => guard.clone(),
       Err(poisoned) => poisoned.into_inner().clone(),
     }
+  }
+
+  #[cfg(test)]
+  fn with_connect_timeout(mut self, timeout: Duration) -> Self {
+    self.connect_timeout = timeout;
+    self
   }
 
   /// Lets endpoints authenticate with [`DEVICE_KEYSTORE_KEY_REFERENCE`] by
@@ -918,23 +932,29 @@ impl SshConnectionPool {
       });
     }
     let key = PoolKey::for_endpoint(endpoint);
-    let mut is_reconnect = false;
-    {
-      let mut connections = self.connections.lock().await;
-      if let Some(existing) = connections.get_mut(&key) {
-        if existing.alive.load(Ordering::SeqCst) {
-          existing.last_used = Instant::now();
-          self
-            .metrics
-            .pooled_connection_reuse_count
-            .fetch_add(1, Ordering::Relaxed);
-          return Ok(existing.handle.clone());
-        }
-        tracing::info!(endpoint_id = %endpoint.id, "pooled ssh connection is dead, reconnecting");
-        connections.remove(&key);
-        is_reconnect = true;
-      }
+    if let Some(handle) = self.reuse(&key).await {
+      return Ok(handle);
     }
+    let key_lock = self
+      .connecting
+      .lock()
+      .await
+      .entry(key.clone())
+      .or_default()
+      .clone();
+    let _connecting = key_lock.lock().await;
+    // Another caller may have connected while this one waited.
+    if let Some(handle) = self.reuse(&key).await {
+      return Ok(handle);
+    }
+    let is_reconnect = {
+      let mut connections = self.connections.lock().await;
+      let dead = connections.remove(&key).is_some();
+      if dead {
+        tracing::info!(endpoint_id = %endpoint.id, "pooled ssh connection is dead, reconnecting");
+      }
+      dead
+    };
     if is_reconnect {
       self
         .metrics
@@ -956,6 +976,21 @@ impl SshConnectionPool {
     Ok(handle)
   }
 
+  /// The pooled connection for `key`, when it is still alive.
+  async fn reuse(&self, key: &PoolKey) -> Option<Arc<AsyncMutex<Handle<TreqSshClientHandler>>>> {
+    let mut connections = self.connections.lock().await;
+    let existing = connections.get_mut(key)?;
+    if !existing.alive.load(Ordering::SeqCst) {
+      return None;
+    }
+    existing.last_used = Instant::now();
+    self
+      .metrics
+      .pooled_connection_reuse_count
+      .fetch_add(1, Ordering::Relaxed);
+    Some(existing.handle.clone())
+  }
+
   async fn connect(
     &self,
     endpoint: &SshEndpoint,
@@ -974,7 +1009,8 @@ impl SshConnectionPool {
     let config = Arc::new(config);
 
     let dial_started = Instant::now();
-    let mut handle = match &endpoint.transport {
+    let dial = async {
+      match &endpoint.transport {
       SshTransport::Direct => {
         let address = (endpoint.hostname.as_str(), endpoint.port);
         tracing::debug!(endpoint_id = %endpoint.id, hostname = %endpoint.hostname, port = endpoint.port, "opening ssh connection");
@@ -993,8 +1029,17 @@ impl SshConnectionPool {
           .map_err(SshTransportError::ConnectionFailed)?;
         russh::client::connect_stream(config, stream, handler).await
       }
-    }
-    .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+      }
+      .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))
+    };
+    let mut handle = tokio::time::timeout(self.connect_timeout, dial)
+      .await
+      .map_err(|_| {
+        SshTransportError::ConnectionFailed(format!(
+          "timed out after {}s connecting",
+          self.connect_timeout.as_secs()
+        ))
+      })??;
     // "DNS and TCP connection duration": the interval up to a successfully
     // opened (pre-auth) transport, since `russh::client::connect` does DNS
     // resolution and the TCP dial internally and does not expose a
@@ -1002,13 +1047,22 @@ impl SshConnectionPool {
     self.metrics.dns_tcp_connect.record(dial_started.elapsed());
 
     let auth_started = Instant::now();
-    ClientAuthenticator::authenticate(
-      &mut handle,
-      &endpoint.username,
-      &endpoint.authentication,
-      self.device_key_provider.as_ref(),
+    tokio::time::timeout(
+      self.connect_timeout,
+      ClientAuthenticator::authenticate(
+        &mut handle,
+        &endpoint.username,
+        &endpoint.authentication,
+        self.device_key_provider.as_ref(),
+      ),
     )
-    .await?;
+    .await
+    .map_err(|_| {
+      SshTransportError::AuthenticationFailed(format!(
+        "timed out after {}s authenticating",
+        self.connect_timeout.as_secs()
+      ))
+    })??;
     // "SSH negotiation and authentication duration": key exchange already
     // happened inside `connect()` above, but the negotiated session is not
     // usable until authentication completes, so this is the duration a
@@ -1038,19 +1092,25 @@ impl SshConnectionPool {
   /// task; exposed here as a plain method so callers control scheduling.
   pub async fn sweep_idle(&self) {
     let now = Instant::now();
-    let mut connections = self.connections.lock().await;
-    let stale: Vec<PoolKey> = connections
-      .iter()
-      .filter(|(_, pooled)| now.duration_since(pooled.last_used) > self.idle_timeout)
-      .map(|(key, _)| key.clone())
-      .collect();
-    for key in stale {
-      if let Some(pooled) = connections.remove(&key) {
-        let handle = pooled.handle.lock().await;
-        let _ = handle
-          .disconnect(Disconnect::ByApplication, "idle timeout", "en")
-          .await;
-      }
+    // Take the stale connections out under the lock, then disconnect without
+    // it: a slow disconnect must not block every other pool user.
+    let stale: Vec<PooledConnection> = {
+      let mut connections = self.connections.lock().await;
+      let keys: Vec<PoolKey> = connections
+        .iter()
+        .filter(|(_, pooled)| now.duration_since(pooled.last_used) > self.idle_timeout)
+        .map(|(key, _)| key.clone())
+        .collect();
+      keys
+        .iter()
+        .filter_map(|key| connections.remove(key))
+        .collect()
+    };
+    for pooled in stale {
+      let handle = pooled.handle.lock().await;
+      let _ = handle
+        .disconnect(Disconnect::ByApplication, "idle timeout", "en")
+        .await;
     }
   }
 
@@ -1847,6 +1907,67 @@ mod tests {
       authentication: SshAuthentication::PublicKey { key_reference },
       transport: Default::default(),
     }
+  }
+
+  #[tokio::test]
+  async fn concurrent_callers_share_one_new_connection() {
+    let (addr, host_key) = start_mock_server(0).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(addr, &host_key, key_reference);
+    let pool = Arc::new(SshConnectionPool::new());
+
+    let calls = (0..5).map(|_| {
+      let pool = pool.clone();
+      let endpoint = endpoint.clone();
+      tokio::spawn(async move {
+        exec_command(
+          &pool,
+          &endpoint,
+          &["repo".to_string(), "inspect".to_string()],
+          ExecLimits::default(),
+          &CancellationToken::new(),
+        )
+        .await
+      })
+    });
+    for call in futures::future::join_all(calls).await {
+      call.unwrap().unwrap();
+    }
+
+    assert_eq!(pool.metrics.snapshot().dns_tcp_connect.count, 1);
+    assert_eq!(pool.pooled_connection_count().await, 1);
+  }
+
+  #[tokio::test]
+  async fn connect_times_out_when_the_host_never_answers() {
+    // Accepts TCP but never speaks SSH.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let _hold = tokio::spawn(async move {
+      let mut sockets = Vec::new();
+      while let Ok((socket, _)) = listener.accept().await {
+        sockets.push(socket);
+      }
+    });
+    let endpoint = test_endpoint(addr, &test_host_key(), "unused".to_string());
+    let pool = SshConnectionPool::new().with_connect_timeout(Duration::from_millis(200));
+
+    let error = exec_command(
+      &pool,
+      &endpoint,
+      &["repo".to_string(), "inspect".to_string()],
+      ExecLimits::default(),
+      &CancellationToken::new(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+      matches!(&error, SshTransportError::ConnectionFailed(message) if message.contains("timed out")),
+      "{error:?}"
+    );
   }
 
   #[tokio::test]

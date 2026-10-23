@@ -7,6 +7,7 @@
 // "dequeue" always works. See lib.ts.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
+import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import { getInstallationToken } from "../_shared/merge-queue/github-adapter.ts";
 import { authorizeQueueAction, queueAccessStore } from "./lib.ts";
 
@@ -81,7 +82,8 @@ Deno.serve(async (req) => {
   try {
     token = await getInstallationToken(repoRow.installation_id);
   } catch (err) {
-    return json({ error: `Failed to authenticate with GitHub: ${(err as Error).message}` }, 502);
+    console.error("[enqueue-workspace] installation token failed:", (err as Error).message);
+    return json({ error: "Failed to authenticate with GitHub" }, 502);
   }
 
   const ghHeaders = {
@@ -96,14 +98,14 @@ Deno.serve(async (req) => {
 
   // Find the open PR for this branch first: its base branch determines which
   // merge queue configuration applies.
-  const prRes = await fetch(
+  const prRes = await fetchWithTimeout(
     `${apiBase}/pulls?head=${encodeURIComponent(repoRow.owner + ":" + branch_name)}&state=open&per_page=5`,
     { headers: ghHeaders }
   );
 
   if (!prRes.ok) {
-    const text = await prRes.text();
-    return json({ error: `GitHub API error looking up PR: ${prRes.status} ${text}` }, 502);
+    console.error(`[enqueue-workspace] PR lookup failed: ${prRes.status} ${await prRes.text()}`);
+    return json({ error: `GitHub API error looking up PR (HTTP ${statusClass(prRes.status)})` }, 502);
   }
 
   const prs: { number: number; head: { ref: string }; base: { ref: string } }[] =
@@ -135,29 +137,35 @@ Deno.serve(async (req) => {
   const triggerLabel: string = configRow?.queue_trigger_label ?? "merge-queue";
 
   if (action === "enqueue") {
-    const labelRes = await fetch(`${apiBase}/issues/${pr.number}/labels`, {
+    const labelRes = await fetchWithTimeout(`${apiBase}/issues/${pr.number}/labels`, {
       method: "POST",
       headers: ghHeaders,
       body: JSON.stringify({ labels: [triggerLabel] }),
     });
     if (!labelRes.ok && labelRes.status !== 422) {
-      const text = await labelRes.text();
-      return json({ error: `Failed to add label: ${labelRes.status} ${text}` }, 502);
+      console.error(`[enqueue-workspace] add label failed: ${labelRes.status} ${await labelRes.text()}`);
+      return json({ error: `Failed to add label (HTTP ${statusClass(labelRes.status)})` }, 502);
     }
   } else {
-    const labelRes = await fetch(
+    const labelRes = await fetchWithTimeout(
       `${apiBase}/issues/${pr.number}/labels/${encodeURIComponent(triggerLabel)}`,
       { method: "DELETE", headers: ghHeaders }
     );
     // 404 = label not on PR, which is fine
     if (!labelRes.ok && labelRes.status !== 404) {
-      const text = await labelRes.text();
-      return json({ error: `Failed to remove label: ${labelRes.status} ${text}` }, 502);
+      console.error(`[enqueue-workspace] remove label failed: ${labelRes.status} ${await labelRes.text()}`);
+      return json({ error: `Failed to remove label (HTTP ${statusClass(labelRes.status)})` }, 502);
     }
   }
 
   return json({ ok: true, pr_number: pr.number, action }, 200);
 });
+
+// "4xx" / "5xx": enough for a client to tell its own mistake from an outage
+// without exposing the upstream status or body.
+function statusClass(status: number): string {
+  return `${Math.floor(status / 100)}xx`;
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

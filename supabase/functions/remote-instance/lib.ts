@@ -26,6 +26,7 @@ import {
 } from "../_shared/remote/boot-manifest.ts";
 import {
   ProviderError,
+  providerClientMessage,
   type ManagedComputeProvider,
 } from "../_shared/remote/sprites-adapter.ts";
 import { recordAuditEvent, startTimer } from "../_shared/remote/audit.ts";
@@ -177,8 +178,13 @@ export async function handleRemoteInstanceAction(
     }
   } catch (err) {
     if (err instanceof ProviderError) {
+      logWithCorrelation(
+        correlationId,
+        "error",
+        `remote-instance action=${action} provider ${err.kind}: ${err.message}`,
+      );
       return json(
-        { error: err.message, code: err.kind, provider_error: err.kind },
+        { error: providerClientMessage(err), code: err.kind, provider_error: err.kind },
         providerErrorStatus(err),
         correlationId,
       );

@@ -1,7 +1,7 @@
-//! Home: a landing page when signed out, otherwise account, managed
-//! instance and saved SSH hosts.
+//! Home: a landing page when signed out with no machines, otherwise the
+//! machine list (Treq Cloud and SSH hosts), each with its own connection.
 
-use gpui_kit::{component::Disableable as _, prelude::FluentBuilder as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     alert::Alert,
@@ -12,14 +12,59 @@ use gpui_kit::{
   },
   *,
 };
+use treq_ui::{Count, Dot, Tone};
 
-use super::{model, screens, widgets};
-use crate::{backend::ConnectionKind, managed, store};
+use super::{model, screens, widgets, Machine, MachineState, MachineStatus};
+use crate::{
+  backend::MANAGED_MACHINE,
+  errors::{self, Fix},
+  managed, store,
+};
 
 const TAGLINE: &str = "Isolates each agent and rebases stacked PRs when the base moves";
 
 pub struct HomeScreen {
   scroll: ScrollHandle,
+}
+
+/// The status line and dot for a machine row.
+fn status(state: &MachineState) -> (Option<Tone>, Option<String>) {
+  match &state.status {
+    MachineStatus::Idle => (None, None),
+    MachineStatus::Connecting(step) => (None, Some(format!("{step}…"))),
+    MachineStatus::Ready => (Some(Tone::Success), Some("Connected".into())),
+    MachineStatus::Failed(error) => (
+      Some(Tone::Danger),
+      Some(match errors::describe(error).fix {
+        Some(Fix::ReviewHostKey) => "Host key changed".into(),
+        _ => "Can't connect".into(),
+      }),
+    ),
+    MachineStatus::CutOff(_) => (Some(Tone::Warning), Some("Access ended".into())),
+  }
+}
+
+/// Repository folder name, for the row's detail line.
+fn repo_name(path: &str) -> &str {
+  path
+    .trim_end_matches('/')
+    .rsplit('/')
+    .next()
+    .unwrap_or(path)
+}
+
+/// What the host is missing, as one sentence, if anything.
+fn missing_tools(state: &MachineState) -> Option<String> {
+  let check = state.check.as_ref()?;
+  match (check.terminal.is_none(), check.agents.is_empty()) {
+    (false, false) => None,
+    (true, true) => Some(
+      "No tmux or screen, and no agent CLI (claude, codex, cursor-agent): terminals and agents won't start."
+        .into(),
+    ),
+    (true, false) => Some("No tmux or screen: terminals and agents won't start.".into()),
+    (false, true) => Some("No agent CLI found (claude, codex, cursor-agent).".into()),
+  }
 }
 
 impl HomeScreen {
@@ -30,183 +75,240 @@ impl HomeScreen {
     }
   }
 
-  fn account(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// One machine: dot, name, status or last repository, and a problem with
+  /// its fix underneath when the last connect failed.
+  fn machine_row(
+    &self,
+    machine: Machine,
+    name: String,
+    address: Option<String>,
+    trailing: Option<AnyElement>,
+    cx: &mut Context<Self>,
+  ) -> Div {
+    let state = model(cx).read(cx).machine(machine.id());
+    let palette = treq_ui::theme::current(cx);
+    let (tone, status_text) = status(&state);
+    let last_repo = crate::backend::get()
+      .connection_to(machine.id())
+      .and_then(|c| super::last_repository_on(&c.endpoint))
+      .or_else(|| match &machine {
+        Machine::Host(record) => super::last_repository_on(&record.to_endpoint()),
+        Machine::Managed => None,
+      });
+    let detail = [
+      address,
+      // A failure is explained under the row; only progress goes here.
+      status_text.filter(|_| state.status.is_connecting()),
+      last_repo.as_deref().map(|r| repo_name(r).to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    let connecting = state.status.is_connecting();
+    let id = machine.id().to_string();
+    // A fixed slot, so names line up whether or not a machine has a status.
+    let leading = div()
+      .w(px(14.))
+      .flex()
+      .justify_center()
+      .map(|slot| match (connecting, tone) {
+        (true, _) => slot.child(Spinner::new().small()),
+        (false, Some(tone)) => slot.child(Dot::new(tone, &palette)),
+        (false, None) => slot,
+      })
+      .into_any_element();
+    let row = widgets::row_full(
+      SharedString::from(format!("machine-{id}")),
+      Some(leading),
+      name,
+      (!detail.is_empty()).then(|| detail.into()),
+      trailing,
+      cx,
+    )
+    .when(!connecting, |row| {
+      let machine = machine.clone();
+      row.on_click(move |_, _, cx| super::open_machine(machine.clone(), cx))
+    });
+
+    let problem = match &state.status {
+      MachineStatus::Failed(error) => Some(errors::describe(error)),
+      MachineStatus::CutOff(reason) => Some(errors::Problem {
+        message: format!("This device's access ended ({reason}). Reauthenticate to continue."),
+        fix: Some(Fix::Reauthenticate),
+      }),
+      _ => None,
+    };
+    let warning = (state.status == MachineStatus::Ready)
+      .then(|| missing_tools(&state))
+      .flatten();
+    v_flex()
+      .child(row)
+      .when_some(problem, |col, problem| {
+        let action = problem.fix.map(|fix| {
+          let machine = machine.clone();
+          let (label, id) = match fix {
+            Fix::Retry => ("Retry", "retry"),
+            Fix::ReviewHostKey => ("Review host key", "review-key"),
+            Fix::Reauthenticate => ("Reauthenticate", "reauthenticate"),
+          };
+          Button::new(SharedString::from(format!("{id}-{}", machine.id())))
+            .outline()
+            .label(label)
+            .on_click(move |_, _, cx| match fix {
+              Fix::Retry => super::connect(machine.clone(), true, cx),
+              Fix::ReviewHostKey => {
+                if let Machine::Host(record) = &machine {
+                  screens::add_host::review_key(record.clone(), cx)
+                }
+              }
+              Fix::Reauthenticate => super::reauthenticate(cx),
+            })
+        });
+        col.child(
+          v_flex()
+            .px_4()
+            .py_2()
+            .gap_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(widgets::error_text(problem.message, cx))
+            .children(action.map(|a| h_flex().child(a))),
+        )
+      })
+      .when_some(warning, |col, warning| {
+        col.child(
+          div()
+            .px_4()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(widgets::muted(warning, cx)),
+        )
+      })
+  }
+
+  fn cloud(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
-    let content = match model.user.clone() {
-      Some(email) => h_flex()
-        .gap_3()
-        .items_center()
-        .child(
-          v_flex()
-            .flex_1()
-            .min_w_0()
-            .child(widgets::muted("Signed in as", cx))
-            .child(div().truncate().child(email)),
-        )
-        .child(
-          Button::new("sign-out")
-            .outline()
-            .label("Sign out")
-            .loading(busy)
-            .on_click(|_, _, cx| super::sign_out(cx)),
-        ),
-      None => h_flex()
-        .gap_3()
-        .items_center()
-        .child(
-          widgets::muted("Sign in to reach your Treq-managed instance.", cx)
-            .flex_1()
-            .min_w_0(),
-        )
-        .child(
-          Button::new("sign-in")
-            .primary()
-            .label("Sign in")
-            .loading(busy)
-            .on_click(|_, _, cx| super::sign_in(cx)),
-        ),
-    };
-    widgets::section("Account", cx).child(
-      widgets::card(cx)
-        .p_4()
-        .gap_2()
-        .child(content)
-        .children(error.map(|e| widgets::error_text(e, cx))),
-    )
-  }
-
-  fn connection(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let model = model(cx).read(cx);
     let signed_in = model.user.is_some();
-    let connecting = model.connecting;
-    let error = model.connect_error.clone();
-    let connection = model.connection.clone();
-
-    let body = if let Some(connection) = connection {
-      let endpoint = &connection.endpoint;
-      let kind = match connection.kind {
-        ConnectionKind::Managed => "Treq-managed instance",
-        ConnectionKind::UserManaged { .. } => "SSH host",
-      };
-      v_flex()
-        .gap_3()
-        .child(v_flex().child(widgets::muted(kind, cx)).child(format!(
-          "{}@{}:{}",
-          endpoint.username, endpoint.hostname, endpoint.port
-        )))
-        .child(
-          h_flex()
-            .gap_2()
-            .child(
-              Button::new("open-repos")
-                .primary()
-                .label("Repositories")
-                .on_click(|_, _, cx| screens::repos::open(cx)),
-            )
-            .child(
-              Button::new("disconnect")
-                .outline()
-                .label("Switch host")
-                .on_click(|_, _, cx| super::disconnect(cx)),
-            ),
-        )
-    } else {
-      v_flex()
-        .gap_3()
-        .child(
-          Button::new("connect-managed")
-            .primary()
-            .large()
-            .w_full()
-            .label("Connect to managed instance")
-            .disabled(!signed_in || connecting.is_some())
-            .on_click(|_, _, cx| super::connect_managed(cx)),
-        )
-        .when(!signed_in, |c| {
-          c.child(widgets::muted(
-            "Sign in to connect to your Treq-managed instance.",
+    let section = widgets::section("Treq Cloud", cx);
+    if !signed_in {
+      return section.child(
+        widgets::card(cx)
+          .p_4()
+          .gap_3()
+          .child(widgets::muted(
+            "Sign in to reach your Treq Cloud machine.",
             cx,
           ))
-        })
-    };
-
-    widgets::section("Remote", cx).child(
-      widgets::card(cx)
-        .p_4()
-        .gap_3()
-        .child(body)
-        .when_some(connecting, |c, step| {
-          c.child(
-            h_flex()
-              .gap_2()
-              .items_center()
-              .child(Spinner::new().small())
-              .child(widgets::muted(format!("{step}…"), cx)),
+          .child(
+            h_flex().child(
+              Button::new("sign-in")
+                .primary()
+                .label("Sign in")
+                .loading(busy)
+                .on_click(|_, _, cx| super::sign_in(cx)),
+            ),
           )
-        })
-        .when_some(error, |c, error| {
-          c.child(match error.strip_prefix(managed::SECURE_STORAGE_PREFIX) {
-            Some(detail) => Alert::warning("secure-storage", detail.trim().to_string())
-              .title("Secure storage isn't set up on this device")
-              .into_any_element(),
-            None => widgets::error_text(error, cx).into_any_element(),
-          })
-        }),
-    )
-  }
-
-  // The saved-host rows, or `None` when there are none.
-  fn host_rows(&self, cx: &mut Context<Self>) -> Option<Div> {
-    let connecting = model(cx).read(cx).connecting.is_some();
-    let hosts = store::user_managed_endpoints();
-    if hosts.is_empty() {
-      return None;
+          .children(error.map(|e| widgets::error_text(e, cx).px_4().pb_3())),
+      );
     }
-    Some(
-      widgets::card(cx).children(hosts.into_iter().enumerate().map(|(i, host)| {
-        let detail = format!("{}@{}:{}", host.username, host.hostname, host.port);
-        let id = host.id.clone();
-        let remove = Button::new(("remove-host", i))
-          .ghost()
-          .small()
-          .icon(IconName::Delete)
-          .on_click(move |_, _, cx| {
-            cx.stop_propagation();
-            store::remove_user_managed_endpoint(&id);
-            cx.refresh_windows();
-          });
-        widgets::row_with(
-          ("host", i),
-          host.display_name.clone(),
-          Some(detail.into()),
-          Some(remove.into_any_element()),
-          cx,
+    let secure_storage = match &model.machine(MANAGED_MACHINE).status {
+      MachineStatus::Failed(error) => error
+        .strip_prefix(managed::SECURE_STORAGE_PREFIX)
+        .map(|detail| detail.trim().to_string()),
+      _ => None,
+    };
+    let row = self.machine_row(Machine::Managed, "Cloud machine".into(), None, None, cx);
+    section
+      .child(widgets::card(cx).child(row))
+      .when_some(secure_storage, |section, detail| {
+        section.child(
+          Alert::warning("secure-storage", detail)
+            .title("Secure storage isn't set up on this device"),
         )
-        .when(!connecting, |row| {
-          row.on_click(move |_, _, cx| super::connect_user_managed(host.clone(), cx))
-        })
-      })),
-    )
+      })
   }
 
   fn hosts(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let list = self.host_rows(cx).unwrap_or_else(|| {
+    let hosts = store::user_managed_endpoints();
+    let palette = treq_ui::theme::current(cx);
+    let title = h_flex()
+      .gap_2()
+      .items_center()
+      .child(
+        div()
+          .text_xs()
+          .font_weight(FontWeight::SEMIBOLD)
+          .text_color(cx.theme().muted_foreground)
+          .child("SSH HOSTS"),
+      )
+      .when(!hosts.is_empty(), |t| {
+        t.child(Count::new(hosts.len(), &palette))
+      });
+    let list = if hosts.is_empty() {
       widgets::card(cx).child(widgets::centered_message(
-        "No SSH hosts saved on this device.",
+        "No SSH hosts on this device yet.",
         cx,
       ))
-    });
-    widgets::section("SSH hosts on this device", cx)
-      .child(list)
-      .child(
-        Button::new("add-host")
-          .outline()
-          .icon(IconName::Plus)
-          .label("Add SSH host")
-          .on_click(|_, _, cx| screens::add_host::open(cx)),
-      )
+    } else {
+      let rows = hosts
+        .into_iter()
+        .map(|host| {
+          let address = format!("{}@{}:{}", host.username, host.hostname, host.port);
+          let edit_record = host.clone();
+          let edit = Button::new(SharedString::from(format!("edit-{}", host.id)))
+            .ghost()
+            .small()
+            .icon(IconName::Ellipsis)
+            .on_click(move |_, _, cx| {
+              cx.stop_propagation();
+              screens::add_host::edit(edit_record.clone(), cx);
+            });
+          let name = host.display_name.clone();
+          self.machine_row(
+            Machine::Host(host),
+            name,
+            Some(address),
+            Some(edit.into_any_element()),
+            cx,
+          )
+        })
+        .collect::<Vec<_>>();
+      widgets::card(cx).children(rows)
+    };
+    v_flex().gap_3().child(title).child(list).child(
+      Button::new("add-host")
+        .outline()
+        .icon(IconName::Plus)
+        .label("Add SSH host")
+        .on_click(|_, _, cx| screens::add_host::open(cx)),
+    )
+  }
+
+  fn account(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let model = model(cx).read(cx);
+    let email = model.user.clone()?;
+    let busy = model.auth_busy;
+    Some(
+      widgets::section("Account", cx).child(
+        widgets::card(cx).p_4().child(
+          h_flex()
+            .gap_3()
+            .items_center()
+            .child(div().flex_1().min_w_0().truncate().child(email))
+            .child(
+              Button::new("sign-out")
+                .outline()
+                .label("Sign out")
+                .loading(busy)
+                .on_click(|_, _, cx| super::sign_out(cx)),
+            ),
+        ),
+      ),
+    )
   }
 
   /// The signed-out start screen: brand centered, sign-in within thumb reach.
@@ -214,10 +316,6 @@ impl HomeScreen {
     let model = model(cx).read(cx);
     let busy = model.auth_busy;
     let error = model.auth_error.clone();
-    let connecting = model.connecting;
-    let connect_error = model.connect_error.clone();
-    // Saved hosts stay reachable below the buttons.
-    let hosts = self.host_rows(cx);
     v_flex()
       .min_h_full()
       .p_6()
@@ -254,48 +352,25 @@ impl HomeScreen {
               .h(px(widgets::CTA_H))
               .label("Use your own SSH host")
               .on_click(|_, _, cx| screens::add_host::open(cx)),
-          )
-          .when_some(connecting, |c, step| {
-            c.child(
-              h_flex()
-                .gap_2()
-                .justify_center()
-                .items_center()
-                .child(Spinner::new().small())
-                .child(widgets::muted(format!("{step}…"), cx)),
-            )
-          })
-          .children(connect_error.map(|e| widgets::error_text(e, cx).text_center()))
-          .children(hosts.map(|rows| widgets::section("SSH hosts on this device", cx).child(rows))),
+          ),
       )
-  }
-
-  /// Compact brand header above the signed-in home.
-  fn brand_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    h_flex()
-      .gap_2()
-      .items_center()
-      .child(widgets::logo(28.))
-      .child(widgets::wordmark(20., cx))
   }
 }
 
 impl Render for HomeScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let model = model(cx).read(cx);
-    let landing = super::is_landing(model.user.as_deref(), model.connection.is_some());
+    let landing = super::is_landing(model.user.as_deref(), super::has_machines(model));
     let content = if landing {
       self.landing(cx).into_any_element()
     } else {
-      let header = self.brand_header(cx);
-      let account = self.account(cx);
-      let connection = self.connection(cx);
+      let cloud = self.cloud(cx);
       let hosts = self.hosts(cx);
+      let account = self.account(cx);
       widgets::page()
-        .child(header)
-        .child(account)
-        .child(connection)
         .child(hosts)
+        .child(cloud)
+        .children(account)
         .into_any_element()
     };
     div()
@@ -305,5 +380,56 @@ impl Render for HomeScreen {
       .track_scroll(&self.scroll)
       .bg(cx.theme().background)
       .child(content)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use treq_lib::core::{remote::RemoteHostCheck, remote_pty::RemoteAgentId};
+
+  fn ready(terminal: Option<&str>, agents: Vec<RemoteAgentId>) -> MachineState {
+    MachineState {
+      status: MachineStatus::Ready,
+      check: Some(RemoteHostCheck {
+        treq_version: "0.3.0".into(),
+        root: "/home/dev".into(),
+        root_exists: true,
+        terminal: terminal.map(str::to_string),
+        agents,
+      }),
+    }
+  }
+
+  #[core::prelude::v1::test]
+  fn names_what_the_host_is_missing() {
+    assert_eq!(
+      missing_tools(&ready(Some("tmux"), vec![RemoteAgentId::Claude])),
+      None
+    );
+    assert!(missing_tools(&ready(None, vec![RemoteAgentId::Claude]))
+      .unwrap()
+      .contains("tmux"));
+    assert!(missing_tools(&ready(Some("tmux"), vec![]))
+      .unwrap()
+      .contains("agent CLI"));
+    // An older treq gives no check, so nothing is claimed missing.
+    assert_eq!(missing_tools(&MachineState::default()), None);
+  }
+
+  #[core::prelude::v1::test]
+  fn rows_show_the_repository_folder() {
+    assert_eq!(repo_name("/home/dev/src/event-bus"), "event-bus");
+    assert_eq!(repo_name("/home/dev/src/event-bus/"), "event-bus");
+  }
+
+  #[core::prelude::v1::test]
+  fn status_lines() {
+    assert_eq!(status(&MachineState::default()), (None, None));
+    let failed = MachineState {
+      status: MachineStatus::Failed("x".into()),
+      check: None,
+    };
+    assert_eq!(status(&failed).0, Some(Tone::Danger));
   }
 }

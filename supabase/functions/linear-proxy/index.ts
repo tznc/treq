@@ -6,6 +6,7 @@
 // instead. The request logic lives in lib.ts so it can be unit tested.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
+import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import { userHasPro } from "../_shared/billing/entitlement.ts";
 import { linearTokenStore, proxyLinearRequest } from "./lib.ts";
 
@@ -71,7 +72,7 @@ Deno.serve(async (req) => {
   const result = await proxyLinearRequest(
     { query: body.query, variables: body.variables },
     {
-      fetch,
+      fetch: fetchWithTimeout,
       linearClient: clientId && clientSecret
         ? { id: clientId, secret: clientSecret }
         : null,

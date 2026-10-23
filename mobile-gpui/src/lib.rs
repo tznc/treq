@@ -7,6 +7,7 @@
 
 mod backend;
 mod config;
+mod errors;
 mod managed;
 mod remote;
 mod store;

@@ -9,8 +9,10 @@ use std::collections::HashMap;
 use serde::de::DeserializeOwned;
 use treq_lib::core::{
   remote::{
-    execute_remote_command, retry_after_reconnect, MutationRetryOutcome, TreqCommandRequest,
+    execute_remote_command, retry_after_reconnect, MutationRetryOutcome, RemoteHostCheck,
+    TreqCommandRequest,
   },
+  remote_control_plane::SshEndpoint,
   remote_ssh_transport::{CancellationToken, ExecLimits},
 };
 
@@ -39,21 +41,56 @@ fn note_cutoff(error: &str) {
 }
 
 pub async fn read<T: DeserializeOwned>(request: TreqCommandRequest) -> Result<T, String> {
+  let endpoint = backend::get().endpoint()?;
+  read_on(&endpoint, request).await
+}
+
+/// [`read`] on a given machine's endpoint, active or not.
+pub async fn read_on<T: DeserializeOwned>(
+  endpoint: &SshEndpoint,
+  request: TreqCommandRequest,
+) -> Result<T, String> {
   let backend = backend::get();
-  let endpoint = backend.endpoint()?;
-  let result = execute_remote_command::<T>(
-    &backend.pool,
-    &endpoint,
-    request,
-    ExecLimits::default(),
-    &CancellationToken::new(),
-  )
-  .await
-  .map_err(|e| e.to_string());
+  let cancellation = CancellationToken::new();
+  let run = || {
+    execute_remote_command::<T>(
+      &backend.pool,
+      endpoint,
+      request.clone(),
+      ExecLimits::default(),
+      &cancellation,
+    )
+  };
+  let mut result = run().await.map_err(|e| e.to_string());
+  // After the host restarts or the network changes, the pooled connection
+  // is dead but not yet known to be. A read is safe to send again, on a
+  // fresh connection.
+  if result.as_ref().is_err_and(|e| is_stale_connection(e)) {
+    backend.pool.mark_dead(endpoint).await;
+    result = run().await.map_err(|e| e.to_string());
+  }
   if let Err(error) = &result {
     note_cutoff(error);
   }
   result
+}
+
+/// Whether a read failed on a pooled connection that has since died.
+fn is_stale_connection(error: &str) -> bool {
+  error.starts_with("transport_error: ssh channel error")
+}
+
+/// What the machine can run. `None` when its treq predates host checks.
+pub async fn host_check(endpoint: &SshEndpoint) -> Result<Option<RemoteHostCheck>, String> {
+  match read_on::<RemoteHostCheck>(endpoint, TreqCommandRequest::HostCheck { root: "~".into() })
+    .await
+  {
+    Ok(check) => Ok(Some(check)),
+    Err(error) if error.contains("unknown repo action") || error.contains("unknown variant") => {
+      Ok(None)
+    }
+    Err(error) => Err(error),
+  }
 }
 
 pub async fn mutate(request: TreqCommandRequest) -> Result<Mutation, String> {
@@ -115,6 +152,17 @@ impl IdempotencyKeys {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn only_channel_errors_count_as_a_stale_connection() {
+    assert!(is_stale_connection(
+      "transport_error: ssh channel error: Channel send error"
+    ));
+    assert!(!is_stale_connection(
+      "transport_error: ssh connection failed: refused"
+    ));
+    assert!(!is_stale_connection("treq_command_failed: nope"));
+  }
 
   #[test]
   fn keys_are_reused_until_settled() {

@@ -31,8 +31,8 @@ fn setup_workspace_status_ahead() -> (TestRepo, i64) {
   let workspace_path_str = workspace_path
     .to_str()
     .expect("workspace path should be valid utf-8");
-  treq_lib::jj::jj_bookmark_track(&repo.repo_path, "main", "origin")
-    .expect("failed to track main@origin");
+  treq_lib::jj::jj_bookmark_track(&repo.repo_path, repo.default_branch(), "origin")
+    .expect("failed to track the default branch on origin");
 
   fs::write(workspace_path.join("initial.txt"), "initial content\n")
     .expect("failed to write initial file");
@@ -69,8 +69,8 @@ fn setup_workspace_status_behind() -> (TestRepo, i64) {
   let workspace_path_str = workspace_path
     .to_str()
     .expect("workspace path should be valid utf-8");
-  treq_lib::jj::jj_bookmark_track(&repo.repo_path, "main", "origin")
-    .expect("failed to track main@origin");
+  treq_lib::jj::jj_bookmark_track(&repo.repo_path, repo.default_branch(), "origin")
+    .expect("failed to track the default branch on origin");
 
   fs::write(workspace_path.join("initial.txt"), "initial content\n")
     .expect("failed to write initial file");
@@ -90,41 +90,14 @@ fn setup_workspace_status_behind() -> (TestRepo, i64) {
   )
   .expect("failed to write working copy file");
 
-  let clone_dir = repo.temp_dir.path().join("bench-clone-behind");
-  let remote_dir = repo.temp_dir.path().join("remote.git");
-  Command::new("git")
-    .args([
-      "clone",
-      remote_dir.to_str().unwrap(),
-      clone_dir.to_str().unwrap(),
-    ])
-    .output()
-    .expect("failed to clone remote");
-  Command::new("git")
-    .current_dir(&clone_dir)
-    .args(["checkout", &workspace.branch_name])
-    .output()
-    .expect("failed to checkout remote branch");
-  fs::write(
-    clone_dir.join("remote-committed.txt"),
-    "remote committed content\n",
-  )
-  .expect("failed to write remote committed file");
-  Command::new("git")
-    .current_dir(&clone_dir)
-    .args(["add", "remote-committed.txt"])
-    .output()
-    .expect("failed to git add remote file");
-  Command::new("git")
-    .current_dir(&clone_dir)
-    .args(["commit", "-m", "Remote committed change"])
-    .output()
-    .expect("failed to git commit remote file");
-  Command::new("git")
-    .current_dir(&clone_dir)
-    .args(["push", "origin", &workspace.branch_name])
-    .output()
-    .expect("failed to push remote branch change");
+  repo
+    .remote_commit_on_branch(
+      &workspace.branch_name,
+      "remote-committed.txt",
+      "remote committed content\n",
+      "Remote committed change",
+    )
+    .expect("failed to commit on the remote branch");
 
   treq_lib::jj::jj_git_fetch(&repo.repo_path).expect("failed to fetch remote state");
 

@@ -314,9 +314,12 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   if let Ok(count) = has_worktree_col {
     if count > 0 {
-      conn
-        .execute(
-          "CREATE TABLE sessions_new (
+      // Table rebuilds run in a transaction so a failure cannot strand `*_new`.
+      let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("Failed to start sessions migration: {}", e))?;
+      tx.execute(
+        "CREATE TABLE sessions_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     workspace_id INTEGER,
                     name TEXT NOT NULL,
@@ -325,23 +328,23 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
                     model TEXT,
                     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
                 )",
-          [],
-        )
-        .map_err(|e| format!("Failed to create sessions_new table: {}", e))?;
+        [],
+      )
+      .map_err(|e| format!("Failed to create sessions_new table: {}", e))?;
 
-      conn.execute(
+      tx.execute(
                 "INSERT INTO sessions_new SELECT id, worktree_id, name, created_at, last_accessed, model FROM sessions",
                 [],
             )
             .map_err(|e| format!("Failed to migrate sessions data: {}", e))?;
 
-      conn
-        .execute("DROP TABLE sessions", [])
+      tx.execute("DROP TABLE sessions", [])
         .map_err(|e| format!("Failed to drop old sessions table: {}", e))?;
 
-      conn
-        .execute("ALTER TABLE sessions_new RENAME TO sessions", [])
+      tx.execute("ALTER TABLE sessions_new RENAME TO sessions", [])
         .map_err(|e| format!("Failed to rename sessions_new to sessions: {}", e))?;
+      tx.commit()
+        .map_err(|e| format!("Failed to commit sessions migration: {}", e))?;
     }
   }
 
@@ -643,7 +646,8 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
   if prompt_history_foreign_keys_without_cascade > 0 {
     conn
       .execute_batch(
-        "CREATE TABLE prompt_history_new (
+        "BEGIN;
+          CREATE TABLE prompt_history_new (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               workspace_id INTEGER,
               session_id INTEGER,
@@ -658,9 +662,13 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
             SELECT id, workspace_id, session_id, prompt_text, agent, created_at
             FROM prompt_history;
           DROP TABLE prompt_history;
-          ALTER TABLE prompt_history_new RENAME TO prompt_history;",
+          ALTER TABLE prompt_history_new RENAME TO prompt_history;
+          COMMIT;",
       )
-      .map_err(|e| format!("Failed to migrate prompt_history cascade deletes: {}", e))?;
+      .map_err(|e| {
+        let _ = conn.execute_batch("ROLLBACK");
+        format!("Failed to migrate prompt_history cascade deletes: {}", e)
+      })?;
   }
 
   conn
@@ -733,7 +741,10 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
          ALTER TABLE stashes_new RENAME TO stashes;
          COMMIT;",
       )
-      .map_err(|e| format!("Failed to migrate stashes delete behavior: {}", e))?;
+      .map_err(|e| {
+        let _ = conn.execute_batch("ROLLBACK");
+        format!("Failed to migrate stashes delete behavior: {}", e)
+      })?;
   }
 
   conn
@@ -834,10 +845,12 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   if let Ok(count) = has_old_columns {
     if count > 0 {
+      let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("Failed to start pending_reviews migration: {}", e))?;
       // Create new table with correct schema
-      conn
-        .execute(
-          "CREATE TABLE pending_reviews_new (
+      tx.execute(
+        "CREATE TABLE pending_reviews_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     workspace_id INTEGER NOT NULL UNIQUE,
                     comments TEXT NOT NULL,
@@ -848,12 +861,12 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
                 )",
-          [],
-        )
-        .map_err(|e| format!("Failed to create pending_reviews_new table: {}", e))?;
+        [],
+      )
+      .map_err(|e| format!("Failed to create pending_reviews_new table: {}", e))?;
 
       // Migrate old pending_reviews column names to new names.
-      conn.execute(
+      tx.execute(
                 "INSERT INTO pending_reviews_new (id, workspace_id, comments, viewed_files, summary_text, created_at, updated_at)
                  SELECT id, workspace_id, comments_json, viewed_files_json, overall_comment, created_at, updated_at
                  FROM pending_reviews",
@@ -862,29 +875,29 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
             .map_err(|e| format!("Failed to migrate pending_reviews data: {}", e))?;
 
       // Drop old table
-      conn
-        .execute("DROP TABLE pending_reviews", [])
+      tx.execute("DROP TABLE pending_reviews", [])
         .map_err(|e| format!("Failed to drop old pending_reviews table: {}", e))?;
 
       // Rename new table to original name
-      conn
-        .execute(
-          "ALTER TABLE pending_reviews_new RENAME TO pending_reviews",
-          [],
+      tx.execute(
+        "ALTER TABLE pending_reviews_new RENAME TO pending_reviews",
+        [],
+      )
+      .map_err(|e| {
+        format!(
+          "Failed to rename pending_reviews_new to pending_reviews: {}",
+          e
         )
-        .map_err(|e| {
-          format!(
-            "Failed to rename pending_reviews_new to pending_reviews: {}",
-            e
-          )
-        })?;
+      })?;
 
       // Recreate the index (was dropped with old table)
-      conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_pending_reviews_workspace ON pending_reviews(workspace_id)",
-                [],
-            )
-            .map_err(|e| format!("Failed to recreate pending_reviews workspace index: {}", e))?;
+      tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pending_reviews_workspace ON pending_reviews(workspace_id)",
+        [],
+      )
+      .map_err(|e| format!("Failed to recreate pending_reviews workspace index: {}", e))?;
+      tx.commit()
+        .map_err(|e| format!("Failed to commit pending_reviews migration: {}", e))?;
     }
   }
 
@@ -1139,8 +1152,12 @@ pub fn add_workspace(
     }
   });
 
-  release_archived_workspace_path(&conn, &workspace_path)?;
-  conn.execute(
+  // Releasing the archived row's path and inserting must land together.
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  release_archived_workspace_path(&tx, &workspace_path)?;
+  tx.execute(
         "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at, description, moved_files, sparse_patterns)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
@@ -1155,8 +1172,10 @@ pub fn add_workspace(
         ],
     )
     .map_err(|e| format!("Failed to insert workspace: {}", e))?;
-
-  Ok(conn.last_insert_rowid())
+  let id = tx.last_insert_rowid();
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
+  Ok(id)
 }
 
 pub fn delete_workspace(repo_path: &str, id: i64) -> Result<(), String> {
@@ -1385,31 +1404,37 @@ pub fn upsert_workspace_discovery(
   let conn = get_connection(repo_path)?;
   let created_at = refreshed_at.to_string();
 
-  release_archived_workspace_path(&conn, workspace_path)?;
-  conn.execute(
-        "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace upsert: {}", e))?;
+  release_archived_workspace_path(&tx, workspace_path)?;
+  tx.execute(
+    "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(workspace_path) DO UPDATE SET
              workspace_name = excluded.workspace_name,
              branch_name = excluded.branch_name,
              refreshed_at = excluded.refreshed_at",
-        params![
-            workspace_name,
-            workspace_path,
-            branch_name,
-            created_at,
-            refreshed_at,
-        ],
-    )
-    .map_err(|e| format!("Failed to upsert discovered workspace: {}", e))?;
+    params![
+      workspace_name,
+      workspace_path,
+      branch_name,
+      created_at,
+      refreshed_at,
+    ],
+  )
+  .map_err(|e| format!("Failed to upsert discovered workspace: {}", e))?;
 
-  conn
+  let id = tx
     .query_row(
       "SELECT id FROM workspaces WHERE workspace_path = ?1",
       [workspace_path],
       |row| row.get(0),
     )
-    .map_err(|e| format!("Failed to fetch upserted workspace id: {}", e))
+    .map_err(|e| format!("Failed to fetch upserted workspace id: {}", e))?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace upsert: {}", e))?;
+  Ok(id)
 }
 
 pub fn sync_discovered_workspaces(
@@ -1747,11 +1772,11 @@ pub fn search_workspace_files(
              FROM workspace_files
              WHERE workspace_id IS ?1
                AND is_directory = 0
-               AND LOWER(relative_path) LIKE ?2 ESCAPE '^'
+               AND relative_path LIKE ?2 ESCAPE '^'
              ORDER BY
                CASE
-                 WHEN LOWER(relative_path) = ?3 OR LOWER(relative_path) LIKE ?4 ESCAPE '^' THEN 0
-                 WHEN LOWER(relative_path) LIKE ?5 ESCAPE '^' THEN 1
+                 WHEN LOWER(relative_path) = ?3 OR relative_path LIKE ?4 ESCAPE '^' THEN 0
+                 WHEN relative_path LIKE ?5 ESCAPE '^' THEN 1
                  ELSE 2
                END,
                LENGTH(relative_path)
@@ -2544,6 +2569,153 @@ mod tests {
       .is_err());
   }
 
+  fn open_legacy_db(temp_dir: &TempDir, schema: &str) -> (String, PathBuf) {
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let db_path = get_local_db_path(&repo_path);
+    fs::create_dir_all(db_path.parent().unwrap()).expect("create .treq directory");
+    let conn = Connection::open(&db_path).expect("open legacy database");
+    conn.execute_batch(schema).expect("create legacy schema");
+    (repo_path, db_path)
+  }
+
+  fn table_exists(conn: &Connection, name: &str) -> bool {
+    conn
+      .query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [name],
+        |row| row.get::<_, i64>(0),
+      )
+      .expect("sqlite_master")
+      > 0
+  }
+
+  #[test]
+  fn migrates_legacy_sessions_worktree_column() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let (repo_path, db_path) = open_legacy_db(
+      &temp_dir,
+      "CREATE TABLE workspaces (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_name TEXT NOT NULL,
+         workspace_path TEXT NOT NULL UNIQUE,
+         branch_name TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         metadata TEXT,
+         target_branch TEXT
+       );
+       INSERT INTO workspaces (id, workspace_name, workspace_path, branch_name, created_at)
+         VALUES (3, 'legacy', 'legacy', 'feat/legacy', 'c');
+       CREATE TABLE sessions (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         worktree_id INTEGER,
+         name TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         last_accessed TEXT NOT NULL,
+         model TEXT
+       );
+       INSERT INTO sessions VALUES (5, 3, 'legacy', 'c', 'a', 'opus');",
+    );
+
+    init_local_db(&repo_path).expect("migrate legacy database");
+
+    let conn = Connection::open(&db_path).expect("reopen migrated database");
+    let row: (i64, i64, String) = conn
+      .query_row("SELECT id, workspace_id, name FROM sessions", [], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+      })
+      .expect("migrated session");
+    assert_eq!(row, (5, 3, "legacy".to_string()));
+    assert!(!table_exists(&conn, "sessions_new"));
+  }
+
+  #[test]
+  fn migrates_legacy_prompt_history_to_cascade_deletes() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let (repo_path, db_path) = open_legacy_db(
+      &temp_dir,
+      "CREATE TABLE workspaces (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_name TEXT NOT NULL,
+         workspace_path TEXT NOT NULL UNIQUE,
+         branch_name TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         metadata TEXT,
+         target_branch TEXT
+       );
+       INSERT INTO workspaces (id, workspace_name, workspace_path, branch_name, created_at)
+         VALUES (3, 'legacy', 'legacy', 'feat/legacy', 'c');
+       CREATE TABLE sessions (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_id INTEGER,
+         name TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         last_accessed TEXT NOT NULL,
+         model TEXT
+       );
+       CREATE TABLE prompt_history (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_id INTEGER,
+         session_id INTEGER,
+         prompt_text TEXT NOT NULL,
+         agent TEXT,
+         created_at TEXT NOT NULL,
+         FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+         FOREIGN KEY (session_id) REFERENCES sessions(id)
+       );
+       INSERT INTO prompt_history VALUES (9, NULL, NULL, 'hello', 'claude', 'c');",
+    );
+
+    init_local_db(&repo_path).expect("migrate legacy database");
+
+    let conn = Connection::open(&db_path).expect("reopen migrated database");
+    let non_cascade: i64 = conn
+      .query_row(
+        "SELECT COUNT(*) FROM pragma_foreign_key_list('prompt_history') WHERE on_delete != 'CASCADE'",
+        [],
+        |row| row.get(0),
+      )
+      .expect("foreign keys");
+    assert_eq!(non_cascade, 0);
+    let prompt: String = conn
+      .query_row(
+        "SELECT prompt_text FROM prompt_history WHERE id = 9",
+        [],
+        |row| row.get(0),
+      )
+      .expect("migrated prompt");
+    assert_eq!(prompt, "hello");
+  }
+
+  #[test]
+  fn failed_pending_reviews_migration_leaves_legacy_table_intact() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    // comments_json was nullable; the new `comments` column is NOT NULL.
+    let (repo_path, db_path) = open_legacy_db(
+      &temp_dir,
+      "CREATE TABLE pending_reviews (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_id INTEGER NOT NULL UNIQUE,
+         comments_json TEXT,
+         viewed_files_json TEXT,
+         overall_comment TEXT,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+       );
+       INSERT INTO pending_reviews VALUES (1, 2, NULL, NULL, 'keep', 'c', 'u');",
+    );
+
+    assert!(init_local_db(&repo_path).is_err());
+
+    let conn = Connection::open(&db_path).expect("reopen database");
+    assert!(!table_exists(&conn, "pending_reviews_new"));
+    let summary: String = conn
+      .query_row("SELECT overall_comment FROM pending_reviews", [], |row| {
+        row.get(0)
+      })
+      .expect("legacy review");
+    assert_eq!(summary, "keep");
+  }
+
   #[test]
   fn migrates_legacy_stashes_foreign_key_to_set_null() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -2691,6 +2863,34 @@ mod tests {
     assert_eq!(matches[0].relative_path, "src-tauri/.gitignore");
   }
 
+  #[test]
+  fn searches_workspace_files_case_insensitively_and_ranks_filename_matches_first() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    sync_workspace_files(
+      repo_path,
+      None,
+      vec![
+        cached_file("a/b/c/xMAINx.rs"),
+        cached_file("src/Main.rs"),
+        cached_file("m/a/i/n.rs"),
+        cached_file("MAIN"),
+      ],
+    )
+    .expect("index files");
+
+    let paths = search_workspace_files(repo_path, None, "MaIn", 50)
+      .expect("search workspace files")
+      .into_iter()
+      .map(|file| file.relative_path)
+      .collect::<Vec<_>>();
+
+    assert_eq!(
+      paths,
+      ["MAIN", "src/Main.rs", "a/b/c/xMAINx.rs", "m/a/i/n.rs"]
+    );
+  }
+
   fn add_archived_workspace(repo_path: &str, path: &str, branch: &str) -> i64 {
     let id = add_workspace(
       repo_path,
@@ -2747,6 +2947,45 @@ mod tests {
       .expect("archived row kept");
     assert!(archived.archived);
     assert_ne!(archived.workspace_path, "fix-example");
+  }
+
+  #[test]
+  fn failed_workspace_insert_keeps_the_archived_row_path() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let archived_id = add_archived_workspace(repo_path, "fix-example", "fix/example");
+    get_connection(repo_path)
+      .expect("connection")
+      .execute_batch(
+        "CREATE TRIGGER fail_insert BEFORE INSERT ON workspaces
+         BEGIN SELECT RAISE(ABORT, 'insert refused'); END;",
+      )
+      .expect("trigger");
+
+    let added = add_workspace(
+      repo_path,
+      "fix-example".to_string(),
+      "fix-example".to_string(),
+      "fix/example".to_string(),
+      None,
+      None,
+      None,
+    );
+    let discovered = upsert_workspace_discovery(
+      repo_path,
+      "fix-example",
+      "fix-example",
+      "fix/example",
+      "now",
+    );
+
+    assert!(added.is_err());
+    assert!(discovered.is_err());
+    let archived = get_workspace_by_id(repo_path, archived_id)
+      .expect("lookup archived")
+      .expect("archived row kept");
+    assert_eq!(archived.workspace_path, "fix-example");
   }
 
   #[test]
