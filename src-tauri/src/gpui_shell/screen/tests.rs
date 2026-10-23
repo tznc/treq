@@ -86,6 +86,8 @@ struct FakeHost {
   exits: Mutex<Vec<(String, ExitSink)>>,
   /// What `PtyList` says of a remote session (`None`: the host is down).
   remote_running: Mutex<Option<bool>>,
+  /// The SSH host refuses attaches from now on.
+  attach_down: Mutex<bool>,
   /// What the dialogs read: the prompt history, and the stashes and their diff.
   prompts: Vec<crate::local_db::PromptHistoryEntry>,
   stash_list: Mutex<Vec<crate::local_db::StashEntry>>,
@@ -915,7 +917,7 @@ impl terminal_data::TerminalHost for FakeHost {
     _: u16,
   ) -> Result<(), String> {
     self.record(format!("attach {id} to {}", target.label));
-    if self.failing.contains(&"remote_attach") {
+    if self.failing.contains(&"remote_attach") || *self.attach_down.lock().unwrap() {
       return Err("ssh: connection refused".into());
     }
     self.ptys.lock().unwrap().push(id.to_string());
@@ -5545,7 +5547,7 @@ fn terminal_pane_attaches_a_remote_session(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_dropped_remote_session_reattaches_once_then_waits(cx: &mut TestAppContext) {
+fn a_dropped_remote_session_reattaches_on_every_drop(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
   *host.remote_running.lock().unwrap() = Some(true);
@@ -5555,11 +5557,27 @@ fn a_dropped_remote_session_reattaches_once_then_waits(cx: &mut TestAppContext) 
   assert_eq!(attached.len(), 2, "reattached on its own");
   assert_ne!(attached[0], attached[1], "with a fresh local id");
   assert!(host.calls().contains(&format!("close {}", attached[0])));
-  // Dropping again within the cooldown waits for the user.
+  // Once the session talks again, a later drop gets its own attempt.
+  host.output(&attached[1], "$ ");
+  h.cx.run_until_parked();
   host.exit(&attached[1], None);
   h.cx.run_until_parked();
-  assert_eq!(host.attached().len(), 2);
+  assert_eq!(host.attached().len(), 3);
+  assert!(!h.drawn("remote-terminal-lost"));
+}
+
+#[gpui::test]
+fn a_lost_host_is_retried_once_before_offering_reattach(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  // The host is unreachable: `PtyList` fails and so does the attach.
+  *host.remote_running.lock().unwrap() = None;
+  *host.attach_down.lock().unwrap() = true;
+  host.exit(&host.attached()[0], None);
+  h.cx.run_until_parked();
+  assert_eq!(host.attached().len(), 2, "tried once on its own");
   assert!(h.drawn("remote-terminal-lost"));
+  *host.attach_down.lock().unwrap() = false;
   h.click("remote-terminal-reattach");
   h.cx.run_until_parked();
   assert_eq!(host.attached().len(), 3);
@@ -5575,6 +5593,7 @@ fn an_unreachable_remote_session_offers_reattach_and_close(cx: &mut TestAppConte
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
   assert!(h.drawn("remote-terminal-lost"));
+  assert_eq!(host.attached().len(), 2, "retried once first");
   h.click("remote-terminal-close");
   h.cx.run_until_parked();
   assert!(!h.drawn("terminal-column-shell"));
@@ -5619,12 +5638,17 @@ fn a_failed_remote_write_shows_the_error_with_reattach(cx: &mut TestAppContext) 
   assert!(!h.drawn("remote-terminal-lost"));
   h.cx.simulate_input("ls");
   h.cx.run_until_parked();
+  // The first failure reattaches on its own.
+  assert_eq!(host.attached().len(), 2, "{:?}", host.calls());
+  assert!(!h.drawn("remote-terminal-lost"));
+  // Failing again before the session says anything shows the error.
+  h.cx.simulate_input("ls");
+  h.cx.run_until_parked();
   assert!(h.drawn("remote-terminal-lost"), "{:?}", host.calls());
   assert!(h.drawn("remote-terminal-reattach"));
-  // The session is replaced by a fresh attach.
   h.click("remote-terminal-reattach");
   h.cx.run_until_parked();
-  assert_eq!(host.attached().len(), 2);
+  assert_eq!(host.attached().len(), 3);
   assert!(!h.drawn("remote-terminal-lost"));
 }
 
