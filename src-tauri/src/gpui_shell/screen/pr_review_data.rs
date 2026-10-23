@@ -3,7 +3,7 @@
 //! unified diff as files and hunks, review drafts kept in the local
 //! database as line comments, and drafts back to a GitHub review.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use super::{
   changes_data::{ChangedFile, ChangesHost},
@@ -170,7 +170,9 @@ pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
       out.files.push(f);
     }
   };
-  let git = regex::Regex::new(r"^diff --git a/(.*) b/(.*)$").expect("diff header regex");
+  static GIT: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^diff --git a/(.*) b/(.*)$").expect("diff header regex"));
+  let git = &*GIT;
   for line in diff.split('\n') {
     if let Some(rest) = line.strip_prefix("diff --git ") {
       flush(&mut file, &mut hunks);

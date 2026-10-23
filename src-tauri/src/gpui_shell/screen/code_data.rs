@@ -424,8 +424,8 @@ pub use crate::core::new_workspaces::apply_branch_name_pattern;
 #[allow(clippy::expect_used, reason = "constant pattern")]
 fn task_branch_slug(prompt: &str) -> String {
   const MAX: usize = 48;
-  let slug = Regex::new("[a-z0-9]+")
-    .expect("regex")
+  static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z0-9]+").expect("regex"));
+  let slug = WORD
     .find_iter(&prompt.to_lowercase())
     .map(|m| m.as_str().to_string())
     .collect::<Vec<_>>()

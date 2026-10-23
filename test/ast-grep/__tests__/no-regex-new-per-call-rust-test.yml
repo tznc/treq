@@ -1,0 +1,39 @@
+id: no-regex-new-per-call-rust
+valid:
+  - |
+    static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z]+").expect("regex"));
+  - |
+    fn words(s: &str) -> usize {
+      static WORD: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new("[a-z]+").expect("regex"));
+      WORD.find_iter(s).count()
+    }
+  - |
+    fn strip(s: &str) -> String {
+      static RE: OnceLock<Regex> = OnceLock::new();
+      RE.get_or_init(|| Regex::new("x").expect("regex")).replace_all(s, "").to_string()
+    }
+  - |
+    #[cfg(test)]
+    mod tests {
+      #[test]
+      fn matches() {
+        assert!(Regex::new("a").unwrap().is_match("a"));
+      }
+    }
+invalid:
+  - |
+    fn words(s: &str) -> usize {
+      Regex::new("[a-z]+").expect("regex").find_iter(s).count()
+    }
+  - |
+    fn words(s: &str) -> usize {
+      regex::Regex::new("[a-z]+").expect("regex").find_iter(s).count()
+    }
+  - |
+    fn each(lines: &[&str]) {
+      for line in lines {
+        let re = Regex::new("^a").expect("regex");
+        re.is_match(line);
+      }
+    }

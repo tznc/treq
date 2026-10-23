@@ -7,7 +7,10 @@
 //! GPUI reads and changes everything else through `gh` and the local
 //! database itself.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::LazyLock,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -602,11 +605,9 @@ fn conventional_type(word: &str) -> Option<&'static str> {
 
 #[allow(clippy::expect_used, reason = "constant pattern")]
 fn humanize(slug: &str) -> String {
-  regex::Regex::new(r"[-_]+")
-    .expect("regex")
-    .replace_all(slug, " ")
-    .trim()
-    .to_string()
+  static SEPARATORS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"[-_]+").expect("regex"));
+  SEPARATORS.replace_all(slug, " ").trim().to_string()
 }
 
 /// `buildGitHubComparePrUrl`: GitHub's "Open a pull request" form for
@@ -644,8 +645,9 @@ pub fn compare_pr_url(
 #[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn conventional_pr_title(title: &str, branch: &str) -> String {
   let fallback = if title.is_empty() { branch } else { title };
-  let re = regex::Regex::new(r"(?i)^([a-z]+)(\([^)]+\))?(!)?:\s*(.+)$").expect("regex");
-  if let Some(caps) = re.captures(fallback) {
+  static CONVENTIONAL: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)^([a-z]+)(\([^)]+\))?(!)?:\s*(.+)$").expect("regex"));
+  if let Some(caps) = CONVENTIONAL.captures(fallback) {
     if let Some(kind) = conventional_type(&caps[1]) {
       let scope = caps.get(2).map_or("", |m| m.as_str());
       let breaking = caps.get(3).map_or("", |m| m.as_str());
