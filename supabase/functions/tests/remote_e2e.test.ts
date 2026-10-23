@@ -50,6 +50,12 @@ const REQUIRED_VARS = [
   "REMOTE_ADMIN_API_KEY_TEST",
 ];
 
+function requiredEnv(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value) throw new Error(`${name} is not set`);
+  return value;
+}
+
 // Every resource this suite creates is tagged with this prefix (as the test
 // user's email local-part and/or in operation detail fields it controls) so
 // `scripts/remote-e2e-cleanup.ts` can find it independent of which test
@@ -71,10 +77,10 @@ function e2eConfig(): {
     return null;
   }
   return {
-    url: Deno.env.get("SUPABASE_TEST_URL")!,
-    anonKey: Deno.env.get("SUPABASE_TEST_ANON_KEY")!,
-    serviceRoleKey: Deno.env.get("SUPABASE_TEST_SERVICE_ROLE_KEY")!,
-    adminApiKey: Deno.env.get("REMOTE_ADMIN_API_KEY_TEST")!,
+    url: requiredEnv("SUPABASE_TEST_URL"),
+    anonKey: requiredEnv("SUPABASE_TEST_ANON_KEY"),
+    serviceRoleKey: requiredEnv("SUPABASE_TEST_SERVICE_ROLE_KEY"),
+    adminApiKey: requiredEnv("REMOTE_ADMIN_API_KEY_TEST"),
   };
 }
 
@@ -114,6 +120,7 @@ async function createE2eTestUser(cfg: NonNullable<ReturnType<typeof e2eConfig>>)
   if (createError || !created.user) {
     throw new Error(`failed to create e2e test user: ${createError?.message}`);
   }
+  const testUserId = created.user.id;
 
   // ensure/wake/reprovision answer 402 `pro_required` without Pro. Grant it
   // through the RPCs the Stripe webhook calls (as service-qa's billing.ts).
@@ -161,12 +168,12 @@ async function createE2eTestUser(cfg: NonNullable<ReturnType<typeof e2eConfig>>)
      * the same tag - this call always runs from a `finally` block below. */
     async cleanup() {
       // Deleting the user does not cascade to billing rows.
-      await admin.from("billing_subscriptions").delete().eq("owner_id", created.user!.id);
-      await admin.from("billing_customers").delete().eq("owner_id", created.user!.id);
+      await admin.from("billing_subscriptions").delete().eq("owner_id", testUserId);
+      await admin.from("billing_customers").delete().eq("owner_id", testUserId);
       await admin.from("billing_events").delete().in("stripe_event_id", eventIds);
-      const { error } = await admin.auth.admin.deleteUser(created.user!.id);
+      const { error } = await admin.auth.admin.deleteUser(testUserId);
       if (error) {
-        console.error(`[remote-e2e cleanup] FAILED to delete test user ${created.user!.id}: ${error.message}`);
+        console.error(`[remote-e2e cleanup] FAILED to delete test user ${testUserId}: ${error.message}`);
       }
     },
   };
@@ -244,7 +251,8 @@ function e2eTest(
     name,
     ignore,
     fn: async () => {
-      await fn(cfg!);
+      if (cfg === null) return;
+      await fn(cfg);
     },
   });
 }
@@ -385,8 +393,7 @@ e2eTest("issues a short-lived certificate for a registered client key and reject
       public_key: openSshLine,
     });
     if (register.status !== 200) throw new Error(`register_client_key failed: ${JSON.stringify(register.json)}`);
-    // deno-lint-ignore no-explicit-any
-    const keyId = (register.json.key as any).id as string;
+    const keyId = (register.json.key as { id: string }).id;
 
     const ensure = await callFunction(cfg, "remote-instance", user.accessToken, {
       action: "ensure",
@@ -440,8 +447,7 @@ e2eTest("issued certificates carry a bounded, short expiry", async (cfg) => {
       idempotency_key: e2eTag(),
       public_key: openSshLine,
     });
-    // deno-lint-ignore no-explicit-any
-    const keyId = (register.json.key as any).id as string;
+    const keyId = (register.json.key as { id: string }).id;
 
     const ensure = await callFunction(cfg, "remote-instance", user.accessToken, {
       action: "ensure",
@@ -483,8 +489,7 @@ e2eTest("silent renewal issues a fresh certificate and is audited distinctly fro
       idempotency_key: e2eTag(),
       public_key: openSshLine,
     });
-    // deno-lint-ignore no-explicit-any
-    const keyId = (register.json.key as any).id as string;
+    const keyId = (register.json.key as { id: string }).id;
 
     const ensure = await callFunction(cfg, "remote-instance", user.accessToken, {
       action: "ensure",

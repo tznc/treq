@@ -128,7 +128,6 @@ notify-debouncer-full = "0.7"
 log = "0.4"
 regex = "1"
 emojis = { version = "0.9", optional = true }
-rayon = "1.10"
 urlencoding = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }

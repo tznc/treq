@@ -193,7 +193,7 @@ async function handleDequeue(
     // The PR's head moved: keep it queued at the new SHA, but any lane that
     // tested the old SHA (and lanes stacked above it) is invalid.
     await updateEntryStatus(ctx.supabase, entry.id, "queued", {
-      prSha: command.headSha!,
+      prSha: command.headSha,
     });
   } else {
     const reasonText = command.reason === "closed"
@@ -273,7 +273,7 @@ async function handleDrive(
   for (;;) {
     const reservation = await reserveLane(ctx, queue.id);
     if (!reservation) break;
-    await buildLane(ctx, gh, queue, config, repo, reservation);
+    await buildLane(ctx, gh, queue, config, reservation);
     started++;
     if (started > 20) {
       // Defensive bound; capacity checks should stop the loop well before.
@@ -320,7 +320,6 @@ async function buildLane(
   gh: GitHubAdapter,
   queue: QueueRow,
   config: QueueConfigRow,
-  repo: RepoMeta,
   reservation: LaneReservation,
 ): Promise<void> {
   const startKey = startLaneOperationKey(

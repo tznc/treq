@@ -179,8 +179,7 @@ export async function createProvisioningInstance(
 export async function updateInstance(
   supabase: SupabaseClient,
   instanceId: string,
-  // deno-lint-ignore no-explicit-any
-  fields: Record<string, any>,
+  fields: Record<string, unknown>,
 ): Promise<void> {
   const { error } = await supabase
     .from("remote_instances")

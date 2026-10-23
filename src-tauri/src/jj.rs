@@ -38,25 +38,48 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
   }
 }
 
-/// Serializes working-copy mutations for a single workspace, keyed by
-/// `workspace_path`, without blocking unrelated workspaces on each other.
-fn with_working_copy_lock<T>(workspace_path: &str, f: impl FnOnce() -> T) -> T {
-  use std::collections::HashMap;
-  use std::sync::{Arc, Mutex, OnceLock};
+/// Lock identity for a workspace path: canonical when it exists, otherwise the
+/// path with `.` components and trailing separators dropped, so `foo`, `foo/`
+/// and `./foo` share one lock.
+fn working_copy_lock_key(workspace_path: &str) -> std::path::PathBuf {
+  use std::path::Component;
+  let path = std::path::Path::new(workspace_path);
+  std::fs::canonicalize(path).unwrap_or_else(|_| {
+    path
+      .components()
+      .filter(|c| *c != Component::CurDir)
+      .collect()
+  })
+}
 
-  static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+/// Returns the lock shared by every caller using the same working copy. The map
+/// holds only `Weak` handles, so a lock is freed once its last user is done and
+/// dead entries are pruned on each lookup.
+fn working_copy_lock(workspace_path: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
+  use std::collections::HashMap;
+  use std::path::PathBuf;
+  use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+  static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
   let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
 
-  let workspace_lock = {
-    let mut map = locks
-      .lock()
-      .unwrap_or_else(|poisoned| poisoned.into_inner());
-    map
-      .entry(workspace_path.to_string())
-      .or_insert_with(|| Arc::new(Mutex::new(())))
-      .clone()
-  };
+  let mut map = locks
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
+  map.retain(|_, lock| lock.strong_count() > 0);
+  let key = working_copy_lock_key(workspace_path);
+  if let Some(lock) = map.get(&key).and_then(Weak::upgrade) {
+    return lock;
+  }
+  let lock = Arc::new(Mutex::new(()));
+  map.insert(key, Arc::downgrade(&lock));
+  lock
+}
 
+/// Serializes working-copy mutations for a single workspace, keyed by its
+/// normalised path, without blocking unrelated workspaces on each other.
+fn with_working_copy_lock<T>(workspace_path: &str, f: impl FnOnce() -> T) -> T {
+  let workspace_lock = working_copy_lock(workspace_path);
   let _guard = workspace_lock
     .lock()
     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -9583,6 +9606,28 @@ mod tests {
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn working_copy_lock_is_shared_across_equivalent_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_str().unwrap();
+    let plain = working_copy_lock(path);
+    assert!(Arc::ptr_eq(&plain, &working_copy_lock(&format!("{path}/"))));
+    assert!(Arc::ptr_eq(
+      &plain,
+      &working_copy_lock(&format!("{path}/."))
+    ));
+    let missing = working_copy_lock("/tmp/treq-lock-missing/foo");
+    assert!(Arc::ptr_eq(
+      &missing,
+      &working_copy_lock("/tmp/treq-lock-missing/foo/")
+    ));
+    assert!(Arc::ptr_eq(
+      &missing,
+      &working_copy_lock("/tmp/treq-lock-missing/./foo")
+    ));
+    assert!(!Arc::ptr_eq(&plain, &missing));
+  }
 
   #[test]
   fn working_copy_lock_serializes_threads_for_the_same_workspace() {
