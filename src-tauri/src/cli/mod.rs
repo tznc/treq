@@ -258,7 +258,7 @@ fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), St
         }
       }
     }
-    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "switch-branch" => {
+    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "tools" | "switch-branch" => {
       handle_remote_review_command("repo", matches, format)
     }
     other => Err(format!("unknown repo action '{other}'")),
@@ -358,7 +358,7 @@ pub(crate) fn parse_remote_command_request(
   );
   // A workspace path means its home repo (no stray local.db in the workspace).
   let repo = match (command, action.as_str()) {
-    ("repo", "init" | "clone" | "usage") => repo,
+    ("repo", "init" | "clone" | "usage" | "tools") => repo,
     _ => crate::jj::derive_repo_path_from_workspace(&repo).unwrap_or(repo),
   };
   let workspace = get_arg_value(matches, "workspace");
@@ -399,6 +399,7 @@ pub(crate) fn parse_remote_command_request(
     ("repo", "branches") => Ok(TreqCommandRequest::ListBranches { repo }),
     ("repo", "probe") => Ok(TreqCommandRequest::ProbeRepo { repo }),
     ("repo", "usage") => Ok(TreqCommandRequest::MachineUsage { root: repo }),
+    ("repo", "tools") => Ok(TreqCommandRequest::MachineTools { root: repo }),
     ("repo", "switch-branch") => Ok(TreqCommandRequest::SwitchRepoBranch {
       repo,
       bookmark: require_value("branch name")?,

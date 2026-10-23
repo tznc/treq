@@ -577,34 +577,45 @@ impl RemoteHost for Backend {
   }
 
   fn last_remote(&self) -> Option<(SavedRepository, SshEndpoint, u64)> {
-    let (descriptor, user_managed, remote_ssh) = self.with_db(|db| {
-      let descriptor = remote_records::saved_repository(db, &remote_records::last_opened_id(db)?)?;
+    let id = self.with_db(remote_records::last_opened_id)?;
+    self.saved_remote(&id)
+  }
+
+  fn saved_remote(&self, id: &str) -> Option<(SavedRepository, SshEndpoint, u64)> {
+    let descriptor = self.with_db(|db| remote_records::saved_repository(db, id))?;
+    let (endpoint, generation) = self.machine_endpoint(&descriptor.endpoint_id)?;
+    // A user-managed endpoint reconnects on the generation it was saved on.
+    let generation = match endpoint.source {
+      SshEndpointSource::UserManaged => descriptor.endpoint_generation,
+      _ => generation,
+    };
+    Some((descriptor, endpoint, generation))
+  }
+
+  fn machine_endpoint(&self, id: &str) -> Option<(SshEndpoint, u64)> {
+    let (user_managed, remote_ssh) = self.with_db(|db| {
       let user_managed = remote_records::user_managed_endpoints(db)
         .into_iter()
-        .find(|e| e.id == descriptor.endpoint_id);
+        .find(|e| e.id == id);
       let remote_ssh = feature_preview::is_enabled(db, PreviewFeature::RemoteSsh);
-      Some((descriptor, user_managed, remote_ssh))
-    })?;
-    // User-managed endpoints restore only while the preview is on; the
+      (user_managed, remote_ssh)
+    });
+    // User-managed endpoints connect only while the preview is on; the
     // cloud workspace regardless.
     if let Some(record) = user_managed.filter(|_| remote_ssh) {
-      let generation = descriptor.endpoint_generation;
-      return Some((descriptor, record.to_endpoint(), generation));
+      return Some((record.to_endpoint(), 0));
     }
     let cloud = crate::commands::cloud::owned_cloud(self.app())?;
     let status = cloud.snapshot().cloud.instance_status?;
     let endpoint: SshEndpoint = serde_json::from_value(status.endpoint.clone()?).ok()?;
-    if endpoint.id != descriptor.endpoint_id {
+    if endpoint.id != id {
       return None;
     }
     let generation = match endpoint.source {
       SshEndpointSource::Managed { generation, .. } => generation,
-      _ => status
-        .instance
-        .as_ref()
-        .map_or(descriptor.endpoint_generation, |i| i.generation),
+      _ => status.instance.as_ref().map_or(0, |i| i.generation),
     };
-    Some((descriptor, endpoint, generation))
+    Some((endpoint, generation))
   }
 
   fn cloud_action(&self, action: CloudAction) {

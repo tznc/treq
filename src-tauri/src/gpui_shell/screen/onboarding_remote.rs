@@ -1,6 +1,8 @@
-//! Dashboard's explicit-endpoint repository form, in its own card above
-//! the onboarding card while an SSH endpoint is connected but no repository is open: the
-//! cut-off notice with Reauthenticate, or `RemoteRepositorySelector`.
+//! Dashboard's explicit-endpoint repository form, under its machine's group
+//! on the Open a Repository screen while an SSH endpoint is connected but no
+//! repository is open: the cut-off notice with Reauthenticate, or
+//! `RemoteRepositorySelector`'s path, probe, clone and init. The group lists
+//! the endpoint's saved repositories.
 //!
 //! The window keeps the form's state and runs probe, open, clone and init: GPUI
 //! draws what the route says and sends what is typed and pressed
@@ -10,8 +12,7 @@ use crate::gpui_shell::ui::zpx;
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, SharedString,
-  Subscription, Window,
+  self, div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, Subscription, Window,
 };
 
 use super::{ActionSink, ScreenAction};
@@ -41,6 +42,8 @@ pub struct Probe {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Form {
+  /// The connected endpoint the form opens repositories on.
+  pub endpoint_id: String,
   /// The endpoint's cutoff reason (`session_ended`, ...), if cut off.
   pub cutoff: Option<String>,
   /// The selector shows: not cut off, and no repository connected yet.
@@ -222,51 +225,6 @@ fn selector(
     .as_ref()
     .map(|f| f.value(cx))
     .unwrap_or_default();
-  let saved = (!form.saved.is_empty()).then(|| {
-    div()
-      .flex()
-      .flex_col()
-      .gap_1()
-      .child(caption("Saved repositories"))
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1()
-          .children(form.saved.iter().map(|repo| {
-            let selected = form.selected_id.as_deref() == Some(repo.id.as_str());
-            ui::text(div(), TextSize::Sm)
-              .id(SharedString::from(format!("remote-saved-repo-{}", repo.id)))
-              .debug_selector(|| "remote-saved-repo".into())
-              .w_full()
-              .rounded(zpx(8.))
-              .border_1()
-              .px_2()
-              .py(zpx(6.))
-              .cursor_pointer()
-              .map(|d| {
-                if selected {
-                  d.border_color(p.primary).bg(p.muted.opacity(0.6))
-                } else {
-                  d.border_color(p.border.opacity(0.6))
-                }
-              })
-              .on_click(field(react, "remoteRepo.select", repo.id.clone().into()))
-              .child(
-                div()
-                  .flex()
-                  .items_baseline()
-                  .child(repo.display_name.clone())
-                  .child(
-                    ui::text(div(), TextSize::Xs)
-                      .ml_2()
-                      .text_color(p.muted_foreground)
-                      .child(repo.canonical_remote_path.clone()),
-                  ),
-              )
-          })),
-      )
-  });
   let path_input = inputs
     .path
     .as_ref()
@@ -375,7 +333,6 @@ fn selector(
     .flex()
     .flex_col()
     .gap_3()
-    .children(saved)
     .child(
       div()
         .flex()
@@ -433,8 +390,6 @@ pub fn render(
     .flex()
     .flex_col()
     .gap_3()
-    .px_6()
-    .pb_6()
     .children(cutoff)
     .when(show_selector, |d| {
       d.child(selector(form, inputs, react, dark, p, cx))

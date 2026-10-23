@@ -362,8 +362,16 @@ fn the_create_dialog_names_its_target_button(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn the_prerequisites_recheck_is_named(cx: &mut TestAppContext) {
-  let mut h = Harness::new(cx, onboarding());
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
   let screen = screen(&mut h);
+  // It is in this computer's tools popover.
+  let user = screen.user();
+  // Nothing is installed in the fake, so its button says so.
+  user.click(&screen.get_by_role(button("Tools missing on This computer")));
   expect(screen.get_by_role(button("Check again"))).to_be_visible();
 }
 

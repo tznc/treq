@@ -18,7 +18,7 @@ mod data;
 mod host;
 mod keys;
 mod model;
-mod remote;
+pub(crate) mod remote;
 mod remote_actions;
 mod shell;
 mod sidebar;

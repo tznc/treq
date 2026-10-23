@@ -376,6 +376,16 @@ impl RemoteHost for FakeHost {
     Some((descriptor, endpoint(), generation))
   }
 
+  fn saved_remote(&self, id: &str) -> Option<(SavedRepository, SshEndpoint, u64)> {
+    self
+      .last_remote()
+      .filter(|(descriptor, ..)| descriptor.id == id)
+  }
+
+  fn machine_endpoint(&self, id: &str) -> Option<(SshEndpoint, u64)> {
+    Some((endpoint(), 0)).filter(|(e, _)| e.id == id)
+  }
+
   fn cloud_action(&self, action: CloudAction) {
     self.record(format!("cloud {action:?}"));
   }
@@ -1081,6 +1091,37 @@ fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let window = Window::open(cx, host.clone(), None);
+  assert!(host.calls().contains(&"restore /srv/app".to_string()));
+  assert!(window.screen_snapshot().repository.is_some());
+}
+
+#[gpui::test]
+fn a_machine_shows_its_repository_form_or_the_setup(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let window = Window::open(cx, host.clone(), None);
+  assert!(window.press(cx, &format!("machines.connect:{}", endpoint().id)));
+  let View::Onboarding(route) = window.screen_snapshot().view else {
+    panic!("not onboarding");
+  };
+  let form = route.remote_repo.expect("no repository form");
+  assert_eq!(form.endpoint_id, endpoint().id);
+  assert!(window.screen_snapshot().remote.setup.is_none());
+  // A machine that cannot be reached opens the setup dialog instead.
+  assert!(window.press(cx, "machines.connect:gone"));
+  assert!(window.screen_snapshot().remote.setup.is_some());
+}
+
+#[gpui::test]
+fn opens_a_recent_remote_repository_by_its_saved_id(cx: &mut TestAppContext) {
+  let descriptor = saved(&endpoint().id, 0, "/srv/app");
+  let host = Arc::new(FakeHost {
+    last_remote: Some(descriptor.clone()),
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  // Launch restored it; leave it to open it again from the list.
+  host.calls.lock().unwrap().clear();
+  assert!(window.press(cx, &format!("machines.openSaved:{}", descriptor.id)));
   assert!(host.calls().contains(&"restore /srv/app".to_string()));
   assert!(window.screen_snapshot().repository.is_some());
 }

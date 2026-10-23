@@ -295,7 +295,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: inspect, status, branches, probe, init, clone, usage, switch-branch"
+              "description": "Action: inspect, status, branches, probe, init, clone, usage, tools, switch-branch"
             },
             {
               "name": "repo",

@@ -1,0 +1,314 @@
+//! What the Open a Repository screen lists: the machines Treq opens
+//! repositories on (this computer, saved SSH hosts, the Treq Cloud
+//! workspace and dev containers), the tools installed on each, and the
+//! repositories opened recently on each.
+//!
+//! The screen itself is `onboarding`; this is its data and what it asks of
+//! the backend.
+
+use crate::{
+  core::{
+    self, devcontainer,
+    feature_preview::{self, PreviewFeature},
+    remote::TreqCommandRequest,
+    remote_records, PrerequisiteStatus,
+  },
+  gpui_shell::{native::Backend, window::remote::RemoteHost},
+};
+
+use super::checklist::ToolsHost;
+
+/// Where a machine is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+  Local,
+  /// A saved SSH host (a user-managed endpoint).
+  Ssh {
+    endpoint_id: String,
+  },
+  /// The account's Treq Cloud workspace (a managed Sprite); its endpoint
+  /// is known while it runs.
+  Cloud {
+    endpoint_id: Option<String>,
+    status: String,
+  },
+  /// A container Treq started for a local repository.
+  DevContainer {
+    container_id: String,
+    repo_path: String,
+    running: bool,
+  },
+}
+
+impl Place {
+  /// Its section in the machine list.
+  pub fn section(&self) -> &'static str {
+    match self {
+      Place::Local => "This Computer",
+      Place::Ssh { .. } => "SSH Hosts",
+      Place::Cloud { .. } => "Treq Cloud",
+      Place::DevContainer { .. } => "Dev Containers",
+    }
+  }
+
+  /// Treq reaches it over SSH or `docker exec`, so jj and tmux must be
+  /// installed there too.
+  pub fn is_host(&self) -> bool {
+    !matches!(self, Place::Local)
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Machine {
+  /// Stable across reloads: `local`, `ssh:<endpoint>`, `cloud` or
+  /// `devcontainer:<container>`.
+  pub id: String,
+  pub place: Place,
+  pub name: String,
+  /// The address or state under the name.
+  pub detail: String,
+}
+
+/// A repository opened recently on a machine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Recent {
+  pub machine_id: String,
+  pub name: String,
+  pub path: String,
+  /// The remote repository's saved record, which opens it.
+  pub saved_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Listing {
+  pub machines: Vec<Machine>,
+  pub recents: Vec<Recent>,
+}
+
+/// What the screen asks of the backend; faked in tests. Blocking calls run
+/// off the main thread.
+pub trait MachinesHost: ToolsHost {
+  /// Blocks: lists the dev containers through Docker.
+  fn listing(&self) -> Listing;
+  /// Blocks: asks the machine over SSH or `docker exec`.
+  fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String>;
+  /// Opens the local repository at `path` in this window.
+  fn open_local(&self, path: &str);
+  /// Asks, then forgets the saved SSH host; whether it did.
+  fn remove_machine(&self, place: &Place) -> bool;
+}
+
+fn last_segment(path: &str) -> &str {
+  path
+    .trim_end_matches('/')
+    .rsplit('/')
+    .find(|part| !part.is_empty())
+    .unwrap_or(path)
+}
+
+/// The cloud workspace while signed in with one: its endpoint and status.
+fn cloud_machine(backend: &Backend) -> Option<Machine> {
+  let cloud = crate::commands::cloud::owned_cloud(backend.app())?;
+  let status = cloud.snapshot().cloud.instance_status?;
+  let instance = status.instance.as_ref()?;
+  let endpoint = status.endpoint_summary();
+  Some(Machine {
+    id: "cloud".into(),
+    detail: match &endpoint {
+      Some(e) if instance.status == "ready" => format!("{}@{}", e.username, e.hostname),
+      _ => instance.status.clone(),
+    },
+    place: Place::Cloud {
+      endpoint_id: endpoint.map(|e| e.id).or(instance.endpoint_id.clone()),
+      status: instance.status.clone(),
+    },
+    name: "Cloud workspace".into(),
+  })
+}
+
+impl MachinesHost for Backend {
+  fn listing(&self) -> Listing {
+    let (local, endpoints, saved, recent_ids, remote_ssh, containers) = self.with_db(|db| {
+      let mut local = remote_records::recent_local_paths(db);
+      // Before Treq kept a list, it kept only the last one.
+      if local.is_empty() {
+        local.extend(db.get_setting("last_opened_repo_path").ok().flatten());
+      }
+      (
+        local,
+        remote_records::user_managed_endpoints(db),
+        remote_records::all_saved_repositories(db),
+        remote_records::recent_repository_ids(db),
+        feature_preview::is_enabled(db, PreviewFeature::RemoteSsh),
+        feature_preview::is_enabled(db, PreviewFeature::Devcontainers),
+      )
+    });
+    let mut listing = Listing::default();
+    listing.machines.push(Machine {
+      id: "local".into(),
+      place: Place::Local,
+      name: "This computer".into(),
+      detail: hostname(),
+    });
+    listing.recents.extend(
+      local
+        .into_iter()
+        .filter(|path| std::path::Path::new(path).is_dir())
+        .map(|path| Recent {
+          machine_id: "local".into(),
+          name: last_segment(&path).to_string(),
+          path,
+          saved_id: None,
+        }),
+    );
+    if remote_ssh {
+      listing.machines.extend(endpoints.iter().map(|e| Machine {
+        id: format!("ssh:{}", e.id),
+        place: Place::Ssh {
+          endpoint_id: e.id.clone(),
+        },
+        name: e.display_name.clone(),
+        detail: match e.port {
+          22 => format!("{}@{}", e.username, e.hostname),
+          port => format!("{}@{}:{port}", e.username, e.hostname),
+        },
+      }));
+    }
+    let cloud = cloud_machine(self);
+    let cloud_endpoint = cloud.as_ref().and_then(|m| match &m.place {
+      Place::Cloud { endpoint_id, .. } => endpoint_id.clone(),
+      _ => None,
+    });
+    listing.machines.extend(cloud);
+    // Most recently opened first, then the rest in saved order.
+    let rank = |id: &str| {
+      recent_ids
+        .iter()
+        .position(|r| r == id)
+        .unwrap_or(usize::MAX)
+    };
+    let mut saved = saved;
+    saved.sort_by_key(|r| rank(&r.id));
+    listing.recents.extend(saved.into_iter().filter_map(|repo| {
+      let machine_id = if endpoints.iter().any(|e| e.id == repo.endpoint_id) {
+        remote_ssh.then(|| format!("ssh:{}", repo.endpoint_id))?
+      } else if cloud_endpoint.as_deref() == Some(repo.endpoint_id.as_str()) {
+        "cloud".to_string()
+      } else {
+        return None;
+      };
+      Some(Recent {
+        machine_id,
+        name: repo.display_name.clone(),
+        path: repo.canonical_remote_path.clone(),
+        saved_id: Some(repo.id),
+      })
+    }));
+    if containers {
+      for container in devcontainer::containers() {
+        let id = format!("devcontainer:{}", container.id);
+        let name = last_segment(&container.repo_path).to_string();
+        listing.recents.push(Recent {
+          machine_id: id.clone(),
+          name: name.clone(),
+          path: container.repo_path.clone(),
+          saved_id: None,
+        });
+        listing.machines.push(Machine {
+          id,
+          detail: if container.running {
+            "Running".into()
+          } else {
+            "Stopped".into()
+          },
+          place: Place::DevContainer {
+            container_id: container.id,
+            repo_path: container.repo_path,
+            running: container.running,
+          },
+          name,
+        });
+      }
+    }
+    listing
+  }
+
+  fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String> {
+    let endpoint_id = match place {
+      Place::Local => return Ok(core::check_prerequisites()),
+      Place::DevContainer { running: false, .. } => {
+        return Err("Start the container to check what is installed in it.".into())
+      }
+      Place::DevContainer { container_id, .. } => {
+        return devcontainer::container_tools(container_id)
+      }
+      Place::Ssh { endpoint_id } => endpoint_id,
+      Place::Cloud {
+        endpoint_id: Some(endpoint_id),
+        status,
+      } if status == "ready" => endpoint_id,
+      Place::Cloud { .. } => {
+        return Err("Wake the cloud workspace to check what is installed on it.".into())
+      }
+    };
+    let (endpoint, _) = self
+      .machine_endpoint(endpoint_id)
+      .ok_or_else(|| "This machine cannot be reached.".to_string())?;
+    let value = self.remote_read(
+      &endpoint,
+      TreqCommandRequest::MachineTools { root: "/".into() },
+    )?;
+    let mut tools: Vec<PrerequisiteStatus> =
+      serde_json::from_value(value).map_err(|e| format!("invalid_remote_json: {e}"))?;
+    // It answered, so the treq CLI is installed.
+    tools.insert(
+      0,
+      PrerequisiteStatus {
+        binary: "treq".into(),
+        installed: true,
+      },
+    );
+    Ok(tools)
+  }
+
+  fn open_local(&self, path: &str) {
+    let (backend, path) = (self.clone(), path.to_string());
+    tauri::async_runtime::spawn_blocking(move || super::onboarding::open_repo_at(&backend, &path));
+  }
+
+  fn remove_machine(&self, place: &Place) -> bool {
+    let Place::Ssh { endpoint_id } = place else {
+      return false;
+    };
+    if !super::workspace_ops::WorkspaceActionsHost::ask(
+      self,
+      "Remove SSH Host",
+      "Treq forgets this host. Nothing on the host is deleted.",
+    ) {
+      return false;
+    }
+    self.with_db(|db| remote_records::remove_user_managed_endpoint(db, endpoint_id));
+    true
+  }
+}
+
+fn hostname() -> String {
+  std::process::Command::new("hostname")
+    .output()
+    .ok()
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .filter(|h| !h.is_empty())
+    .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn names_a_repository_after_its_folder() {
+    assert_eq!(last_segment("/home/me/src/app/"), "app");
+    assert_eq!(last_segment("~/src/treq"), "treq");
+    assert_eq!(last_segment("/"), "/");
+  }
+}

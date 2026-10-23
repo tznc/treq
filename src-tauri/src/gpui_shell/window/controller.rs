@@ -611,6 +611,36 @@ impl WindowController {
         },
         cx,
       ),
+      RemoteEffect::Connect { endpoint_id } => self.background(
+        move |host| host.machine_endpoint(&endpoint_id),
+        |this, endpoint, cx| {
+          let effects = match endpoint {
+            Some((endpoint, generation)) => this.model.remote.connect(endpoint, generation),
+            None => {
+              this.model.open_remote_setup();
+              Vec::new()
+            }
+          };
+          this.run(effects.into_iter().map(Effect::from).collect(), cx);
+          this.present(cx);
+        },
+        cx,
+      ),
+      RemoteEffect::OpenSaved { id } => self.background(
+        move |host| remote::open_saved(host, &id),
+        |this, result, cx| match result {
+          Ok(opened) => this.remote_opened(&opened, cx),
+          Err(Some(failure)) => {
+            this.model.remote.restore_failed(failure);
+            this.present(cx);
+          }
+          Err(None) => {
+            this.model.open_remote_setup();
+            this.present(cx);
+          }
+        },
+        cx,
+      ),
       RemoteEffect::Cloud(action) => self.host.cloud_action(action),
       RemoteEffect::Show(repository) => self.host.show_remote(repository),
     }

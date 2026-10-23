@@ -188,6 +188,12 @@ pub enum TreqCommandRequest {
   MachineUsage {
     root: String,
   },
+  /// Which of Git, jj, tmux and the agent CLIs the machine has
+  /// ([`crate::core::prerequisites::HOST_BINARIES`]); `root` is unused but
+  /// the CLI requires `--repo`.
+  MachineTools {
+    root: String,
+  },
   // -- Phase 5: probe/clone/init as typed commands ---------------------------
   ProbeRepo {
     repo: String,
@@ -511,7 +517,8 @@ impl TreqCommandRequest {
       | Self::PtyList { .. }
       | Self::PtyAttachCommand { .. }
       | Self::WorkspaceChangeMarker { .. }
-      | Self::MachineUsage { .. } => false,
+      | Self::MachineUsage { .. }
+      | Self::MachineTools { .. } => false,
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
       | Self::InitRepo { .. }
@@ -590,6 +597,7 @@ impl TreqCommandRequest {
       | Self::SearchFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
+      | Self::MachineTools { .. }
       | Self::ProbeRepo { .. }
       | Self::UpdateWorkspace { .. }
       | Self::DeleteWorkspace { .. }
@@ -633,6 +641,7 @@ impl TreqCommandRequest {
       Self::SearchFiles { .. } => "SearchFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
       Self::MachineUsage { .. } => "MachineUsage",
+      Self::MachineTools { .. } => "MachineTools",
       Self::ProbeRepo { .. } => "ProbeRepo",
       Self::CloneRepo { .. } => "CloneRepo",
       Self::InitRepo { .. } => "InitRepo",
@@ -691,6 +700,7 @@ impl TreqCommandRequest {
     "ListConflicts",
     "WorkspaceChangeMarker",
     "MachineUsage",
+    "MachineTools",
     "ProbeRepo",
     "CloneRepo",
     "InitRepo",
@@ -1372,6 +1382,7 @@ impl TreqCommandRequest {
       Self::ListBranches { repo } => ("repo", "branches", repo),
       Self::ProbeRepo { repo } => ("repo", "probe", repo),
       Self::MachineUsage { root } => ("repo", "usage", root),
+      Self::MachineTools { root } => ("repo", "tools", root),
       Self::InitRepo {
         repo,
         idempotency_key,
@@ -2080,6 +2091,9 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       json(crate::core::workspaces::list_workspaces(&repo))
     }
     TreqCommandRequest::MachineUsage { root } => json(machine_usage(&root)),
+    TreqCommandRequest::MachineTools { .. } => json(Ok::<_, String>(
+      crate::core::prerequisites::check_host_tools(),
+    )),
     TreqCommandRequest::InspectWorkspace { repo, workspace } => json(
       crate::core::workspaces::workspace_status(&repo, workspace_id(Some(&workspace))?),
     ),
@@ -4619,7 +4633,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 56);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 57);
   }
 
   #[test]

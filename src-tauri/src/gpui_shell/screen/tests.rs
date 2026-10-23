@@ -24,6 +24,10 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 #[derive(Default)]
 struct FakeHost {
   remote_ssh: bool,
+  /// The Open a Repository screen's machines and recent repositories.
+  listing: machines::Listing,
+  /// What a host machine says is installed on it.
+  host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
   /// What `check_prerequisites` reports.
   installed: Vec<(&'static str, bool)>,
   /// App and repository settings, by key.
@@ -245,6 +249,35 @@ impl FakeHost {
       .into_iter()
       .filter(|c| !c.starts_with("check") && !c.starts_with("read"))
       .collect()
+  }
+}
+
+impl machines::MachinesHost for FakeHost {
+  fn listing(&self) -> machines::Listing {
+    self.listing.clone()
+  }
+
+  fn machine_tools(
+    &self,
+    place: &machines::Place,
+  ) -> Result<Vec<crate::core::PrerequisiteStatus>, String> {
+    if *place == machines::Place::Local {
+      return Ok(checklist::ToolsHost::check_prerequisites(self));
+    }
+    self.record(format!("tools {place:?}"));
+    self
+      .host_tools
+      .clone()
+      .unwrap_or_else(|| Err("ssh: connection refused".into()))
+  }
+
+  fn open_local(&self, path: &str) {
+    self.record(format!("open_local {path}"));
+  }
+
+  fn remove_machine(&self, place: &machines::Place) -> bool {
+    self.record(format!("remove {place:?}"));
+    !self.decline
   }
 }
 
@@ -1652,31 +1685,171 @@ fn the_ui_zoom_scales_pixel_lengths_as_css_zoom_does(cx: &mut TestAppContext) {
   );
 }
 
+/// This computer with `/home/me/app`, an SSH host with `/srv/app` saved
+/// on it, and a stopped dev container.
+fn listing() -> machines::Listing {
+  use machines::{Machine, Place, Recent};
+  machines::Listing {
+    machines: vec![
+      Machine {
+        id: "local".into(),
+        place: Place::Local,
+        name: "This computer".into(),
+        detail: "laptop".into(),
+      },
+      Machine {
+        id: "ssh:ep-1".into(),
+        place: Place::Ssh {
+          endpoint_id: "ep-1".into(),
+        },
+        name: "Dev box".into(),
+        detail: "me@devbox".into(),
+      },
+      Machine {
+        id: "devcontainer:c1".into(),
+        place: Place::DevContainer {
+          container_id: "c1".into(),
+          repo_path: "/home/me/web".into(),
+          running: false,
+        },
+        name: "web".into(),
+        detail: "Stopped".into(),
+      },
+    ],
+    recents: vec![
+      Recent {
+        machine_id: "local".into(),
+        name: "app".into(),
+        path: "/home/me/app".into(),
+        saved_id: None,
+      },
+      Recent {
+        machine_id: "ssh:ep-1".into(),
+        name: "app".into(),
+        path: "/srv/app".into(),
+        saved_id: Some("r1".into()),
+      },
+    ],
+  }
+}
+
 #[gpui::test]
 fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     installed: vec![("git", false), ("gh", true)],
+    listing: listing(),
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host.clone());
-  // The check ran as the screen opened.
+  // This computer's tools are checked as the screen opens, shown in its
+  // popover.
+  assert!(!h.drawn("install-git"));
+  h.click("machine-tools-local");
   assert!(h.drawn("install-git"));
   assert!(!h.drawn("install-gh"));
-  h.click("onboarding-open-repo");
   h.click("prerequisites-recheck");
   h.click("install-git");
-  // Only the remote dialog is still React's.
+  h.click("onboarding-open-repo");
+  h.click("recent-local-0");
+  // Only the remote dialog is the window's.
   h.click("onboarding-open-remote");
   assert_eq!(
     host.calls(),
     [
       "check",
-      "pick_repo",
       "check",
-      "open https://git-scm.com/downloads"
+      "open https://git-scm.com/downloads",
+      "pick_repo",
+      "open_local /home/me/app",
     ]
   );
   assert_eq!(h.sent(), vec![ScreenAction::OpenRemote]);
+}
+
+#[gpui::test]
+fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  for selector in [
+    "onboarding-machines",
+    "machine-local",
+    "machine-ssh:ep-1",
+    "machine-devcontainer:c1",
+    "recent-local-0",
+    "recent-ssh:ep-1-0",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(!h.drawn("onboarding-no-recents"));
+  // A remote repository opens through the window, by its saved record; a
+  // machine's row connects to it.
+  h.click("recent-ssh:ep-1-0");
+  h.click("machine-ssh:ep-1");
+  // A dev container opens its repository here.
+  h.click("machine-devcontainer:c1");
+  h.click("machine-local");
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("machines.openSaved:r1"),
+      press("machines.connect:ep-1")
+    ]
+  );
+  assert_eq!(
+    host.calls(),
+    ["check", "open_local /home/me/web", "pick_repo"]
+  );
+}
+
+#[gpui::test]
+fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![
+      crate::core::PrerequisiteStatus {
+        binary: "git".into(),
+        installed: true,
+      },
+      crate::core::PrerequisiteStatus {
+        binary: "tmux".into(),
+        installed: false,
+      },
+    ])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert_eq!(host.calls(), ["check"]);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-tools-popover"));
+  // jj and tmux are required on a host; Git is there.
+  assert!(h.drawn("install-tmux"));
+  assert!(h.drawn("install-jj"));
+  assert!(!h.drawn("install-git"));
+  assert!(host.calls().iter().any(|c| c.starts_with("tools Ssh")));
+  // Removing the host closes the popover and lists the machines again.
+  h.click("machine-remove");
+  assert!(!h.drawn("machine-tools-popover"));
+  assert!(host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_says_why_a_host_could_not_be_checked(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-tools-error"));
+}
+
+#[gpui::test]
+fn onboarding_without_recents_says_where_they_appear(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, onboarding(), Arc::new(FakeHost::default()));
+  assert!(h.drawn("onboarding-no-recents"));
 }
 
 fn onboarding_with_form(form: serde_json::Value) -> ScreenSnapshot {
@@ -1688,29 +1861,16 @@ fn onboarding_with_form(form: serde_json::Value) -> ScreenSnapshot {
   .expect("onboarding")
 }
 
-/// Scrolls the onboarding screen down to the form under the card.
-fn scroll_to_form(h: &mut Harness) {
-  h.cx.run_until_parked();
-  let at = h
-    .cx
-    .debug_bounds("onboarding-open-repo")
-    .expect("card")
-    .center();
-  h.cx.simulate_event(gpui::ScrollWheelEvent {
-    position: at,
-    delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-5000.))),
-    modifiers: Modifiers::none(),
-    touch_phase: gpui::TouchPhase::Moved,
-  });
-  h.cx.run_until_parked();
-}
-
 #[gpui::test]
 fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
-  let host = Arc::new(FakeHost::default());
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
   let mut h = Harness::with_host(
     cx,
     onboarding_with_form(serde_json::json!({
+      "endpointId": "ep-1",
       "selector": true,
       "saved": [{ "id": "r1", "display_name": "app", "canonical_remote_path": "/srv/app" }],
       "path": "/srv/new",
@@ -1722,9 +1882,8 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
     host,
   );
   for selector in [
-    "onboarding-open-repo",
+    "onboarding-remote-form",
     "remote-repository-selector",
-    "remote-saved-repo",
     "remote-repo-path",
     "remote-repo-probe",
     "remote-repo-not-a-repo",
@@ -1734,11 +1893,11 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
   ] {
     assert!(h.drawn(selector), "{selector}");
   }
+  // The group lists the saved repositories; the form only opens new ones.
+  assert!(!h.drawn("remote-saved-repo"));
   assert!(!h.drawn("remote-repo-open"));
   assert!(!h.drawn("remote-repo-cutoff"));
-  scroll_to_form(&mut h);
   h.click("remote-repo-probe");
-  h.click("remote-saved-repo");
   h.click("remote-repo-confirm-init");
   // Initialize waits for the confirmation; Clone for a URL.
   h.click("remote-repo-init");
@@ -1747,10 +1906,6 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
     h.sent(),
     vec![
       press("remoteRepo.probe"),
-      ScreenAction::Field {
-        field: "remoteRepo.select".into(),
-        value: "r1".into()
-      },
       ScreenAction::Field {
         field: "remoteRepo.confirmInit".into(),
         value: true.into()
@@ -1761,10 +1916,14 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
-  let host = Arc::new(FakeHost::default());
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
   let mut h = Harness::with_host(
     cx,
     onboarding_with_form(serde_json::json!({
+      "endpointId": "ep-1",
       "cutoff": "session_ended",
       "selector": true,
     })),
@@ -1772,7 +1931,6 @@ fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
   );
   assert!(h.drawn("remote-repo-cutoff"));
   assert!(!h.drawn("remote-repository-selector"));
-  scroll_to_form(&mut h);
   h.click("remote-repo-reauthenticate");
   assert_eq!(h.sent(), vec![press("remoteRepo.reauthenticate")]);
 }

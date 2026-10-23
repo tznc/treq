@@ -140,6 +140,11 @@ pub enum RemoteEffect {
   },
   /// The last-opened remote repository, at launch with no local one.
   RestoreLast,
+  /// The Open a Repository screen's machine: connect to it and show its
+  /// repository form, or the setup dialog if it cannot be reached.
+  Connect { endpoint_id: String },
+  /// A recent repository on a machine, by its saved id.
+  OpenSaved { id: String },
   /// A cloud workspace action ([`crate::core::cloud`]).
   Cloud(CloudAction),
   /// Routes the backend's reads and changes for the repository over SSH
@@ -282,6 +287,13 @@ impl Remote {
     self.form.connected = false;
     self.setup = false;
     self.load_saved().into_iter().collect()
+  }
+
+  /// A machine the Open a Repository screen picked is connected: the
+  /// form shows for it.
+  pub fn connect(&mut self, endpoint: SshEndpoint, generation: u64) -> Vec<RemoteEffect> {
+    self.form = RepoForm::default();
+    self.list_repositories(endpoint, generation)
   }
 
   /// The saved repositories of the endpoint, unless it changed meanwhile.
@@ -471,6 +483,7 @@ impl Remote {
     let form = &self.form;
     let cutoff = self.cutoffs.get(&endpoint.id);
     Some(json!({
+      "endpointId": endpoint.id,
       "cutoff": cutoff,
       "selector": cutoff.is_none() && !form.connected,
       "saved": form.saved.iter().map(|r| json!({
@@ -526,6 +539,12 @@ pub trait RemoteHost: Send + Sync {
   /// The last-opened remote repository and the endpoint and generation it
   /// would reconnect on, when there is one to try.
   fn last_remote(&self) -> Option<(SavedRepository, SshEndpoint, u64)>;
+  /// The saved repository `id` and the endpoint and generation it would
+  /// reconnect on, while that endpoint can be reached.
+  fn saved_remote(&self, id: &str) -> Option<(SavedRepository, SshEndpoint, u64)>;
+  /// The endpoint `id` names (a saved SSH host, or the cloud workspace
+  /// while it runs) and its generation.
+  fn machine_endpoint(&self, id: &str) -> Option<(SshEndpoint, u64)>;
   /// Starts a cloud workspace action; it reports through the account.
   fn cloud_action(&self, action: CloudAction);
   /// `remote_repo::set_window` for this window.
@@ -615,6 +634,20 @@ pub fn open(
     })?,
   }
   inspect_and_register(host, endpoint, generation, path).map_err(|e| (None, e))
+}
+
+/// The saved repository `id`, restored on its endpoint; `Err(None)` when
+/// the endpoint cannot be reached.
+pub fn open_saved(host: &dyn RemoteHost, id: &str) -> Result<Opened, Option<RestoreFailure>> {
+  let (descriptor, endpoint, generation) = host.saved_remote(id).ok_or(None)?;
+  let (descriptor, inspection) = host
+    .restore_remote(&descriptor, &endpoint, generation, false)
+    .map_err(Some)?;
+  Ok(Opened {
+    descriptor,
+    inspection,
+    endpoint,
+  })
 }
 
 /// The last-opened remote repository, restored only once its endpoint

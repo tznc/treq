@@ -309,6 +309,28 @@ pub fn recent_repository_ids(db: &Database) -> Vec<String> {
     .unwrap_or_default()
 }
 
+/// Local repositories opened most recently first, for the Open a
+/// Repository screen.
+const RECENT_LOCAL_REPOSITORIES: &str = "recent_local_repository_paths";
+
+pub fn remember_local_opened(db: &Database, path: &str) {
+  let mut recent = recent_local_paths(db);
+  recent.retain(|p| p != path);
+  recent.insert(0, path.to_string());
+  recent.truncate(10);
+  set_setting(
+    db,
+    RECENT_LOCAL_REPOSITORIES,
+    &serde_json::to_string(&recent).unwrap_or_default(),
+  );
+}
+
+pub fn recent_local_paths(db: &Database) -> Vec<String> {
+  setting(db, RECENT_LOCAL_REPOSITORIES)
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+    .unwrap_or_default()
+}
+
 /// `clearLastOpenedRemoteRepository`.
 pub fn clear_last_opened(db: &Database) {
   set_setting(db, LAST_OPENED_REMOTE_REPOSITORY, "");
@@ -424,6 +446,20 @@ mod tests {
     assert_eq!(canonicalize_remote_path("/../.."), "/");
     assert_eq!(canonicalize_remote_path("~"), "~");
     assert_eq!(canonicalize_remote_path("a\\b"), "a/b");
+  }
+
+  #[test]
+  fn keeps_the_ten_latest_local_repositories_newest_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::new(dir.path().join("treq.db")).unwrap();
+    db.init().unwrap();
+    for i in 0..12 {
+      remember_local_opened(&db, &format!("/r/{i}"));
+    }
+    remember_local_opened(&db, "/r/5");
+    let recent = recent_local_paths(&db);
+    assert_eq!(recent.len(), 10);
+    assert_eq!(recent[..3], ["/r/5", "/r/11", "/r/10"]);
   }
 
   #[test]
