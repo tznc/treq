@@ -28,6 +28,9 @@ use crate::{
   ui::{self, load, nav, sheet, widgets, Load, Location, Machine, MachineStatus},
 };
 
+/// What a workspace sheet calls after its change applied.
+pub type OnDone = std::rc::Rc<dyn Fn(&mut App)>;
+
 /// Indent per stacking level.
 const INDENT: f32 = 16.;
 
@@ -40,9 +43,12 @@ pub fn open(repo: String, cx: &mut App) {
   let switcher_repo = repo.clone();
   nav::push_with(
     title,
-    Some(std::rc::Rc::new(move |_, cx| {
-      switcher(switcher_repo.clone(), cx)
-    })),
+    nav::Header {
+      on_title: Some(std::rc::Rc::new(move |_, cx| {
+        switcher(switcher_repo.clone(), cx)
+      })),
+      more: None,
+    },
     location,
     cx,
     move |window, cx| cx.new(|cx| WorkspacesScreen::new(repo, window, cx)),
@@ -57,7 +63,7 @@ fn repo_name(path: &str) -> &str {
     .unwrap_or(path)
 }
 
-fn title_of(workspace: &Workspace) -> String {
+pub fn title_of(workspace: &Workspace) -> String {
   if workspace.title.is_empty() {
     workspace.workspace_name.clone()
   } else {
@@ -68,14 +74,14 @@ fn title_of(workspace: &Workspace) -> String {
 /// A row in display order: stacked workspaces follow their base, one level
 /// deeper.
 #[derive(Debug, PartialEq)]
-struct Entry {
-  index: usize,
-  depth: usize,
+pub struct Entry {
+  pub index: usize,
+  pub depth: usize,
 }
 
 /// Orders workspaces so each one stacked on another (its target branch is
 /// that one's branch) comes right after it, indented. Others keep their order.
-fn stack_order(list: &[WorkspaceSummary]) -> Vec<Entry> {
+pub fn stack_order(list: &[WorkspaceSummary]) -> Vec<Entry> {
   let by_branch: HashMap<&str, usize> = list
     .iter()
     .enumerate()
@@ -137,7 +143,7 @@ fn matches(summary: &WorkspaceSummary, query: &str) -> bool {
 }
 
 /// The summaries, or a plain list from a host whose treq predates them.
-async fn load_summaries(repo: String) -> Result<Vec<WorkspaceSummary>, String> {
+pub async fn load_summaries(repo: String) -> Result<Vec<WorkspaceSummary>, String> {
   match remote::read::<Vec<WorkspaceSummary>>(TreqCommandRequest::WorkspaceSummaries {
     repo: repo.clone(),
   })
@@ -397,23 +403,32 @@ impl WorkspacesScreen {
   }
 
   fn rename(&mut self, workspace: Workspace, cx: &mut Context<Self>) {
-    let repo = self.repo.clone();
     let this = cx.weak_entity();
-    sheet::open(Some("Rename workspace".into()), cx, move |window, cx| {
-      cx.new(|cx| RenameSheet::new(repo, workspace, this, window, cx))
-    });
+    rename(
+      self.repo.clone(),
+      workspace,
+      std::rc::Rc::new(move |cx| {
+        this.update(cx, |screen, cx| screen.reload(cx)).ok();
+      }),
+      cx,
+    );
   }
 
   pub fn new_workspace(&mut self, stacked_on: Option<String>, cx: &mut Context<Self>) {
-    let repo = self.repo.clone();
     let this = cx.weak_entity();
-    let title = match &stacked_on {
-      Some(branch) => format!("New workspace on {branch}"),
-      None => "New workspace".into(),
-    };
-    sheet::open(Some(title.into()), cx, move |window, cx| {
-      cx.new(|cx| NewWorkspaceSheet::new(repo, stacked_on, this, window, cx))
-    });
+    new_workspace(
+      self.repo.clone(),
+      stacked_on,
+      std::rc::Rc::new(move |cx| {
+        this
+          .update(cx, |screen, cx| {
+            screen.message = Some((true, "Workspace created.".into()));
+            screen.reload(cx);
+          })
+          .ok();
+      }),
+      cx,
+    );
   }
 
   fn toggle(&mut self, id: i64, cx: &mut Context<Self>) {
@@ -654,12 +669,31 @@ impl Render for WorkspacesScreen {
   }
 }
 
+/// Opens the sheet that renames `workspace`.
+pub fn rename(repo: String, workspace: Workspace, done: OnDone, cx: &mut App) {
+  sheet::open(Some("Rename workspace".into()), cx, move |window, cx| {
+    cx.new(|cx| RenameSheet::new(repo, workspace, done, window, cx))
+  });
+}
+
+/// Opens the sheet that creates a workspace, stacked on `stacked_on`'s
+/// branch when given.
+pub fn new_workspace(repo: String, stacked_on: Option<String>, done: OnDone, cx: &mut App) {
+  let title = match &stacked_on {
+    Some(branch) => format!("New workspace on {branch}"),
+    None => "New workspace".into(),
+  };
+  sheet::open(Some(title.into()), cx, move |window, cx| {
+    cx.new(|cx| NewWorkspaceSheet::new(repo, stacked_on, done, window, cx))
+  });
+}
+
 /// Renaming a workspace's title.
 struct RenameSheet {
   repo: String,
   workspace: Workspace,
   input: Entity<InputState>,
-  screen: WeakEntity<WorkspacesScreen>,
+  done: OnDone,
   saving: bool,
   error: Option<String>,
 }
@@ -668,7 +702,7 @@ impl RenameSheet {
   fn new(
     repo: String,
     workspace: Workspace,
-    screen: WeakEntity<WorkspacesScreen>,
+    done: OnDone,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -683,7 +717,7 @@ impl RenameSheet {
       repo,
       workspace,
       input,
-      screen,
+      done,
       saving: false,
       error: None,
     }
@@ -703,13 +737,13 @@ impl RenameSheet {
       title: Some(title),
       description: None,
     };
-    let screen = self.screen.clone();
+    let done = self.done.clone();
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       this.saving = false;
       match outcome {
         Ok(Mutation::Applied(_)) => {
           sheet::close(cx);
-          screen.update(cx, |screen, cx| screen.reload(cx)).ok();
+          done(cx);
         }
         other => this.error = Some(errors::describe(&mutation_message(&other, "").1).message),
       }
@@ -743,7 +777,7 @@ struct NewWorkspaceSheet {
   repo: String,
   branch: Entity<InputState>,
   source: Entity<InputState>,
-  screen: WeakEntity<WorkspacesScreen>,
+  done: OnDone,
   keys: IdempotencyKeys,
   creating: bool,
   error: Option<String>,
@@ -753,7 +787,7 @@ impl NewWorkspaceSheet {
   fn new(
     repo: String,
     stacked_on: Option<String>,
-    screen: WeakEntity<WorkspacesScreen>,
+    done: OnDone,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -770,7 +804,7 @@ impl NewWorkspaceSheet {
       repo,
       branch,
       source,
-      screen,
+      done,
       keys: IdempotencyKeys::default(),
       creating: false,
       error: None,
@@ -799,7 +833,7 @@ impl NewWorkspaceSheet {
       metadata: None,
       idempotency_key: key,
     };
-    let screen = self.screen.clone();
+    let done = self.done.clone();
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       this.creating = false;
       let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
@@ -807,12 +841,7 @@ impl NewWorkspaceSheet {
       match outcome {
         Ok(Mutation::Applied(_)) => {
           sheet::close(cx);
-          screen
-            .update(cx, |screen, cx| {
-              screen.message = Some((true, "Workspace created.".into()));
-              screen.reload(cx);
-            })
-            .ok();
+          done(cx);
         }
         other => this.error = Some(errors::describe(&mutation_message(&other, "").1).message),
       }
