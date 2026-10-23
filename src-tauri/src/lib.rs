@@ -434,6 +434,26 @@ where
   !first_arg.starts_with("treq://") && !first_arg.starts_with("-psn_")
 }
 
+/// The updater's verification key, when the build set a non-blank one.
+#[cfg(all(feature = "gui", desktop))]
+fn updater_pubkey(key: Option<&str>) -> Option<&str> {
+  key.filter(|k| !k.trim().is_empty())
+}
+
+/// Updater plugin keyed to `TAURI_SIGNER_PUBLIC_KEY`, read at build time so
+/// release CI supplies it alongside `TAURI_SIGNING_PRIVATE_KEY`. Builds
+/// without it keep the empty `pubkey` from tauri.conf.json, so update checks
+/// fail signature verification instead of trusting unsigned artifacts.
+#[cfg(all(feature = "gui", desktop))]
+fn updater_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config>
+{
+  let builder = tauri_plugin_updater::Builder::new();
+  match updater_pubkey(option_env!("TAURI_SIGNER_PUBLIC_KEY")) {
+    Some(pubkey) => builder.pubkey(pubkey).build(),
+    None => builder.build(),
+  }
+}
+
 #[cfg(feature = "gui")]
 #[cfg_attr(all(mobile, not(feature = "embed")), tauri::mobile_entry_point)]
 pub fn run() {
@@ -482,7 +502,10 @@ pub fn run() {
     builder
   };
   #[cfg(desktop)]
-  let builder = builder.plugin(tauri_plugin_cli::init());
+  let builder = builder
+    .plugin(tauri_plugin_cli::init())
+    .plugin(updater_plugin())
+    .plugin(tauri_plugin_process::init());
   builder
     .on_window_event(|window, event| {
       // A shell window losing focus closes its tooltips and menus, as
@@ -963,7 +986,16 @@ mod tests {
   use super::is_cli_process;
   use super::is_last_repo_window;
   use super::menu_item_url;
+  use super::updater_pubkey;
   use super::{edit_menu_keystroke, EDIT_MENU};
+
+  #[test]
+  fn updater_pubkey_ignores_missing_or_empty_keys() {
+    assert_eq!(updater_pubkey(None), None);
+    assert_eq!(updater_pubkey(Some("")), None);
+    assert_eq!(updater_pubkey(Some("  ")), None);
+    assert_eq!(updater_pubkey(Some("abc")), Some("abc"));
+  }
 
   #[test]
   fn edit_menu_items_type_their_own_shortcut() {
