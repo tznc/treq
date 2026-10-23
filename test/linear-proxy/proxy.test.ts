@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  linearTokenStore,
   proxyLinearRequest,
   RECONNECT_MESSAGE,
   type ProxyDeps,
@@ -192,5 +193,40 @@ describe("proxyLinearRequest", () => {
     expect((await run(deps)).status).toBe(200);
     expect(save).not.toHaveBeenCalled();
     expect(graphqlAuth()).toEqual(["Bearer lin_oauth_by_other_request"]);
+  });
+});
+
+describe("linearTokenStore", () => {
+  function client(data: unknown) {
+    const rpc = vi.fn(async () => ({ data, error: null }));
+    return { rpc, from: vi.fn() };
+  }
+
+  it("loads the user's tokens from Vault through linear_tokens_load", async () => {
+    const c = client([token()]);
+    await expect(linearTokenStore(c, "u1").load()).resolves.toEqual(token());
+    expect(c.rpc).toHaveBeenCalledWith("linear_tokens_load", {
+      p_user_id: "u1",
+    });
+    expect(c.from).not.toHaveBeenCalled();
+  });
+
+  it("reports no tokens for an unlinked user", async () => {
+    await expect(linearTokenStore(client([]), "u1").load()).resolves.toBeNull();
+  });
+
+  it("saves refreshed tokens through linear_tokens_save", async () => {
+    const c = client(null);
+    await linearTokenStore(c, "u1").save({
+      access_token: "a",
+      refresh_token: "r",
+      expires_at: null,
+    });
+    expect(c.rpc).toHaveBeenCalledWith("linear_tokens_save", {
+      p_user_id: "u1",
+      p_access_token: "a",
+      p_refresh_token: "r",
+      p_expires_at: null,
+    });
   });
 });
