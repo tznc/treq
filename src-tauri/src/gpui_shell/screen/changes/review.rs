@@ -15,7 +15,7 @@ use crate::gpui_shell::screen::{
     review_markdown, stale_names, suggestion_block, ConflictNote, LineComment, Pending, Side,
     Stored, FILE_HUNK,
   },
-  commits_data::{selection, LineRef},
+  commits_data::{line_number, selection, LineRef},
 };
 use gpui::{MouseDownEvent, MouseMoveEvent, Task};
 
@@ -877,7 +877,7 @@ impl ChangesView {
   ) -> Stateful<Div> {
     let hunk = &hunks[h];
     let line = &hunk.lines[l];
-    let (old, new) = line_numbers(hunk).get(l).copied().unwrap_or((None, None));
+    let (old, new) = line_number(hunk, l);
     let selected = self
       .review
       .selection

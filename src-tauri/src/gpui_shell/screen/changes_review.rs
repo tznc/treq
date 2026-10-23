@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
   changes_data::Conflict,
-  commits_data::{line_numbers, LineRef},
+  commits_data::{line_number, line_numbers, LineRef},
 };
 use crate::{jj::JjDiffHunk, local_db::PendingReview};
 
@@ -132,7 +132,11 @@ impl Pending {
 
 /// A line's number (`new ?? old ?? index+1`) and side.
 pub fn line_at(hunk: &JjDiffHunk, l: usize) -> (u32, Side) {
-  let (old, new) = line_numbers(hunk).get(l).copied().unwrap_or((None, None));
+  number_and_side(line_number(hunk, l), l)
+}
+
+/// `line_at` from line `l`'s `(old, new)` number.
+pub fn number_and_side((old, new): (Option<u32>, Option<u32>), l: usize) -> (u32, Side) {
   let side = if old.is_some() && new.is_none() {
     Side::Old
   } else {
@@ -206,8 +210,8 @@ pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool 
   let Some(hunk) = hunks.iter().find(|h| h.id == comment.hunk_id) else {
     return true;
   };
-  !(0..hunk.lines.len()).any(|l| {
-    let (number, side) = line_at(hunk, l);
+  !line_numbers(hunk).into_iter().enumerate().any(|(l, n)| {
+    let (number, side) = number_and_side(n, l);
     (comment.start_line..=comment.end_line).contains(&number)
       && comment.line_side.is_none_or(|s| s == side)
   })
