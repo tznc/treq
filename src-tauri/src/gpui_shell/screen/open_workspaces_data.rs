@@ -12,7 +12,7 @@ use super::{
 use crate::{
   core::{self, BranchWorkspaceRequest},
   github::GhPullRequest,
-  gpui_shell::native::Backend,
+  gpui_shell::{native::Backend, remote_repo::Remote},
   linear::LinearIssue,
 };
 
@@ -218,6 +218,9 @@ pub trait OpenWorkspacesHost: GithubHost + LinearHost + WorkspaceDialogHost {
 
 impl OpenWorkspacesHost for Backend {
   fn fetch(&self, repo_path: &str) {
+    if self.remote(repo_path).is_some() {
+      return;
+    }
     if let Err(err) = crate::jj::jj_git_fetch(repo_path) {
       log::warn!("open workspaces: fetch {repo_path}: {err}");
     }
@@ -236,6 +239,12 @@ impl OpenWorkspacesHost for Backend {
     repo_path: &str,
     requests: &[BranchWorkspaceRequest],
   ) -> Vec<Result<(i64, bool), String>> {
+    if let Some(remote) = self.remote(repo_path) {
+      return requests
+        .iter()
+        .map(|request| open_remote_workspace(&remote, request))
+        .collect();
+    }
     core::open_or_create_workspaces(repo_path, requests)
       .into_iter()
       .map(|result| {
@@ -249,6 +258,7 @@ impl OpenWorkspacesHost for Backend {
   }
 
   fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String> {
+    self.local_only(repo_path, "Opening a Linear issue's workspace")?;
     let opened = tauri::async_runtime::block_on(
       crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, issue),
     )?;
@@ -261,6 +271,35 @@ impl OpenWorkspacesHost for Backend {
     }
     Ok((opened.workspace_id, opened.created))
   }
+}
+
+/// Opens the workspace of an existing branch on the window's remote
+/// repository, or makes one on its base, as `open_or_create_workspaces`
+/// does locally.
+fn open_remote_workspace(
+  remote: &Remote,
+  request: &BranchWorkspaceRequest,
+) -> Result<(i64, bool), String> {
+  let head = request.head_branch.trim();
+  if let Some(existing) = remote
+    .workspaces()?
+    .into_iter()
+    .find(|w| w.branch_name == head)
+  {
+    return Ok((existing.id, false));
+  }
+  let metadata = core::WorkspaceMetadata {
+    title: request.title.clone().filter(|t| !t.trim().is_empty()),
+    description: request.description.clone(),
+    ..Default::default()
+  };
+  let metadata = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+  let id = remote.create_workspace(head, None, Some(metadata))?;
+  let base = request.base_branch.trim();
+  if !base.is_empty() {
+    remote.update_workspace(id, Some(base), None, None)?;
+  }
+  Ok((id, true))
 }
 
 /// The repositories' `owner/name`, by path; one without a GitHub remote is
