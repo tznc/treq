@@ -107,8 +107,8 @@ Deno.serve(async (req) => {
     hasPro: (ownerUserId) => userHasPro(supabase, ownerUserId),
   };
 
-  let target;
-  let upstream;
+  let target: Awaited<ReturnType<typeof authorizeRelayRequest>>;
+  let upstream: Awaited<ReturnType<typeof openUpstreamWithWake>>;
   try {
     target = await authorizeRelayRequest(req, {
       store,

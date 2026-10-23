@@ -290,6 +290,11 @@ pub fn start_session(
           "-y",
           &rows.to_string(),
           &shell_cmd,
+          // The pane is the whole terminal: no tmux status line under it.
+          ";",
+          "set-option",
+          "status",
+          "off",
         ])
         .status()
         .map_err(|e| format!("dependency_error: Failed to spawn tmux: {e}"))?;
@@ -497,8 +502,9 @@ fn attach_command_for_backend(
   let quoted_dir = crate::core::remote::shell_quote(remote_dir);
   let quoted_name = crate::core::remote::shell_quote(name);
   match backend {
+    // The pane is the whole terminal: no tmux status line under it.
     PtyBackend::Tmux => format!(
-      "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command}"
+      "cd {quoted_dir} && exec tmux new-session -A -s {quoted_name} -x {cols} -y {rows} {command} \\; set-option status off"
     ),
     PtyBackend::Screen => {
       format!("cd {quoted_dir} && exec screen -xRR {quoted_name} {command}")
@@ -665,7 +671,7 @@ mod tests {
   #[test]
   fn start_list_stop_lifecycle_round_trips_against_a_real_tmux_server() {
     if !tmux_available() {
-      eprintln!("skipping: tmux not installed in this environment");
+      tracing::warn!("skipping: tmux not installed in this environment");
       return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -730,7 +736,7 @@ mod tests {
   #[test]
   fn stop_session_does_not_kill_a_session_whose_name_extends_the_target() {
     if !tmux_available() {
-      eprintln!("skipping: tmux not installed in this environment");
+      tracing::warn!("skipping: tmux not installed in this environment");
       return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -760,7 +766,7 @@ mod tests {
   #[test]
   fn attach_command_reattaches_to_an_existing_session_without_recreating_it() {
     if !tmux_available() {
-      eprintln!("skipping: tmux not installed in this environment");
+      tracing::warn!("skipping: tmux not installed in this environment");
       return;
     }
     let dir = tempfile::tempdir().unwrap();

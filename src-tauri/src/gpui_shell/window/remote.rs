@@ -690,6 +690,12 @@ pub fn open(
         };
         return Err((Some(probe), message.into()));
       }
+      // A plain Git repository needs jj colocated before its workspaces and
+      // commits load; one that has it is left as it is.
+      change(TreqCommandRequest::InitRepo {
+        repo: canonical,
+        idempotency_key: String::new(),
+      })?;
     }
     OpenHow::Clone(url) => change(TreqCommandRequest::CloneRepo {
       repo_url: url.clone(),

@@ -151,7 +151,7 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
 
 impl Backend {
   /// `InspectRepository` of the window's remote repository `repo`.
-  fn inspect_remote(&self, repo: &str) -> Option<RepositoryInspection> {
+  pub(crate) fn inspect_remote(&self, repo: &str) -> Option<RepositoryInspection> {
     let remote = self.remote(repo)?;
     remote
       .read(TreqCommandRequest::InspectRepository {

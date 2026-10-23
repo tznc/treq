@@ -2,8 +2,6 @@
 //! names, whether it opens an existing branch or creates a new one, and the
 //! backend calls that do it.
 
-use std::collections::{HashMap, HashSet};
-
 use serde::Deserialize;
 
 use super::{
@@ -12,7 +10,7 @@ use super::{
 use crate::{
   core::{self, BranchWorkspaceRequest},
   github::GhPullRequest,
-  gpui_shell::native::Backend,
+  gpui_shell::{native::Backend, remote_repo::Remote},
   linear::LinearIssue,
 };
 
@@ -34,50 +32,7 @@ pub struct Route {
   pub stack_on: Option<String>,
 }
 
-/// What a pasted line names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Line {
-  /// A branch of the repository on screen.
-  Branch(String),
-  /// `github.com/{repo}/tree/{branch}`.
-  RepoBranch { repo: String, branch: String },
-  /// `github.com/{repo}/pull/{number}`.
-  Pr { repo: String, number: u64 },
-  /// A new workspace's title; its branch follows the repository's pattern.
-  Title(String),
-  /// Not a branch or a link the dialog reads, and why.
-  Invalid(String),
-}
-
-/// The pasted text's lines, trimmed, without blanks or repeats.
-pub fn parse_lines(text: &str) -> Vec<(String, Line)> {
-  let mut seen = HashSet::new();
-  text
-    .lines()
-    .map(str::trim)
-    .filter(|line| !line.is_empty() && seen.insert(line.to_string()))
-    .map(|line| (line.to_string(), parse_line(line)))
-    .collect()
-}
-
-/// Each indented line's parent, by trimmed line: the line above it, so an
-/// indented run stacks in order on the line it follows.
-pub fn stack_parents(text: &str) -> HashMap<String, String> {
-  let mut parents = HashMap::new();
-  let mut seen = HashSet::new();
-  let mut above: Option<&str> = None;
-  for line in text.lines().filter(|l| !l.trim().is_empty()) {
-    let trimmed = line.trim();
-    // A repeat is the first line again, so it keeps that line's parent.
-    if seen.insert(trimmed) {
-      if let Some(above) = above.filter(|_| line.starts_with(char::is_whitespace)) {
-        parents.insert(trimmed.to_string(), above.to_string());
-      }
-    }
-    above = Some(trimmed);
-  }
-  parents
-}
+pub use crate::core::new_workspaces::{parse_lines, stack_parents, Line};
 
 /// `checked` stacked on `parent`'s branch.
 pub fn stack_on_line(checked: &Checked, parent: &Checked) -> Checked {
@@ -93,47 +48,6 @@ pub fn stack_on_line(checked: &Checked, parent: &Checked) -> Checked {
   }
   target.base = Some(parent.branch.clone());
   Ok(target)
-}
-
-pub fn parse_line(line: &str) -> Line {
-  let line = line.trim();
-  let bare = line
-    .strip_prefix("https://")
-    .or_else(|| line.strip_prefix("http://"))
-    .unwrap_or(line);
-  let bare = bare.strip_prefix("www.").unwrap_or(bare);
-  if let Some(path) = bare.strip_prefix("github.com/") {
-    return parse_github_path(path);
-  }
-  if line.contains("://") {
-    return Line::Invalid("Not a GitHub link".into());
-  }
-  if line.chars().any(char::is_whitespace) {
-    return Line::Title(line.to_string());
-  }
-  let branch = line.strip_prefix("refs/heads/").unwrap_or(line);
-  let branch = branch.strip_suffix("@origin").unwrap_or(branch);
-  Line::Branch(branch.to_string())
-}
-
-fn parse_github_path(path: &str) -> Line {
-  let path = path.split(['?', '#']).next().unwrap_or_default();
-  let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-  let [owner, name, rest @ ..] = parts.as_slice() else {
-    return Line::Invalid("Not a GitHub repository link".into());
-  };
-  let repo = format!("{owner}/{}", name.trim_end_matches(".git"));
-  match rest {
-    ["pull", number, ..] => match number.parse() {
-      Ok(number) => Line::Pr { repo, number },
-      Err(_) => Line::Invalid(format!("'{number}' is not a pull request number")),
-    },
-    ["tree", branch @ ..] if !branch.is_empty() => Line::RepoBranch {
-      repo,
-      branch: branch.join("/"),
-    },
-    _ => Line::Invalid("Paste a pull request or branch link".into()),
-  }
 }
 
 /// A workspace the dialog will open.
@@ -218,6 +132,9 @@ pub trait OpenWorkspacesHost: GithubHost + LinearHost + WorkspaceDialogHost {
 
 impl OpenWorkspacesHost for Backend {
   fn fetch(&self, repo_path: &str) {
+    if self.remote(repo_path).is_some() {
+      return;
+    }
     if let Err(err) = crate::jj::jj_git_fetch(repo_path) {
       log::warn!("open workspaces: fetch {repo_path}: {err}");
     }
@@ -236,6 +153,12 @@ impl OpenWorkspacesHost for Backend {
     repo_path: &str,
     requests: &[BranchWorkspaceRequest],
   ) -> Vec<Result<(i64, bool), String>> {
+    if let Some(remote) = self.remote(repo_path) {
+      return requests
+        .iter()
+        .map(|request| open_remote_workspace(&remote, request))
+        .collect();
+    }
     core::open_or_create_workspaces(repo_path, requests)
       .into_iter()
       .map(|result| {
@@ -249,6 +172,7 @@ impl OpenWorkspacesHost for Backend {
   }
 
   fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String> {
+    self.local_only(repo_path, "Opening a Linear issue's workspace")?;
     let opened = tauri::async_runtime::block_on(
       crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, issue),
     )?;
@@ -261,6 +185,35 @@ impl OpenWorkspacesHost for Backend {
     }
     Ok((opened.workspace_id, opened.created))
   }
+}
+
+/// Opens the workspace of an existing branch on the window's remote
+/// repository, or makes one on its base, as `open_or_create_workspaces`
+/// does locally.
+fn open_remote_workspace(
+  remote: &Remote,
+  request: &BranchWorkspaceRequest,
+) -> Result<(i64, bool), String> {
+  let head = request.head_branch.trim();
+  if let Some(existing) = remote
+    .workspaces()?
+    .into_iter()
+    .find(|w| w.branch_name == head)
+  {
+    return Ok((existing.id, false));
+  }
+  let metadata = core::WorkspaceMetadata {
+    title: request.title.clone().filter(|t| !t.trim().is_empty()),
+    description: request.description.clone(),
+    ..Default::default()
+  };
+  let metadata = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+  let id = remote.create_workspace(head, None, Some(metadata))?;
+  let base = request.base_branch.trim();
+  if !base.is_empty() {
+    remote.update_workspace(id, Some(base), None, None)?;
+  }
+  Ok((id, true))
 }
 
 /// The repositories' `owner/name`, by path; one without a GitHub remote is
@@ -437,6 +390,7 @@ pub fn is_open(host: &dyn OpenWorkspacesHost, repo_path: &str, branch: &str) -> 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::core::new_workspaces::parse_line;
 
   fn branch(name: &str) -> Line {
     Line::Branch(name.into())

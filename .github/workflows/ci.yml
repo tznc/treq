@@ -55,6 +55,7 @@ jobs:
               - "*.{js,ts,mjs,cjs,mts,cts}"
               - "scripts/**"
               - "test/**"
+              - "supabase/functions/**"
               - "package.json"
               - "package-lock.json"
               - "biome.json"
@@ -102,6 +103,23 @@ jobs:
       - name: lint
         if: ${{ !cancelled() }}
         run: npm run lint
+
+      # Edge functions run on Deno: type-check them and run the Deno unit
+      # tests (remote_e2e.test.ts is the live suite in remote-e2e.yml).
+      - name: Setup Deno
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+          cache: true
+
+      - name: check:functions
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run check:functions
+
+      - name: test:functions
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run test:functions
 
       # The Supabase-side unit tests (billing, merge queue, Linear proxy).
       # They share this job's npm ci instead of paying for their own runner.

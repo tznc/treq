@@ -75,3 +75,6 @@ scripts/screenshot/.generated/
 *.pem
 # Coverage reports (scripts/coverage.sh)
 /coverage
+
+# Written by npm run check:functions / test:functions
+/deno.lock

@@ -388,7 +388,7 @@ async function handleIssueCertificate(
   const validBefore = new Date(now.getTime() + CERTIFICATE_VALIDITY_MINUTES * 60_000);
   const serial = randomSerial();
 
-  let issued;
+  let issued: Awaited<ReturnType<typeof issueEd25519UserCertificate>>;
   try {
     issued = await issueEd25519UserCertificate({
       ca,

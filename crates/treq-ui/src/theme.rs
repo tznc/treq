@@ -454,7 +454,6 @@ pub struct Palette {
   /// `--input`, the border of outline buttons and text fields.
   pub input: Hsla,
   /// `--ring`, the focus outline.
-  #[allow(dead_code)]
   pub ring: Hsla,
   /// Tailwind green-500, a passed check.
   pub success: Hsla,
