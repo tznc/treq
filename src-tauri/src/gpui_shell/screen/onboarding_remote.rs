@@ -245,6 +245,7 @@ fn caption(text: &'static str) -> impl IntoElement {
 /// The directory browser: home and the path's breadcrumbs, Show hidden,
 /// and the folders in it; a folder opens on click.
 fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
+  let hover = p.hover();
   let crumbs = crumbs(&form.path);
   let last = crumbs.len().saturating_sub(1);
   let crumb_row = div()
@@ -255,18 +256,9 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     .min_w_0()
     .flex_1()
     .child(
-      div()
-        .id("remote-browse-home")
-        .debug_selector(|| "remote-browse-home".into())
-        .role(gpui::Role::Button)
-        .aria_label("Home")
-        .p_1()
-        .rounded(zpx(4.))
-        .cursor_pointer()
-        .hover(|s| s.bg(p.accent))
-        .on_click(field(react, "remoteRepo.browse", "~".into()))
-        .child(ui::icon(theme::ICON_HOUSE, 14., p.muted_foreground))
-        .test_support(),
+      ui::IconButton::new("remote-browse-home", theme::ICON_HOUSE, "Home", p)
+        .size(ui::IconButtonSize::Small)
+        .on_click(field(react, "remoteRepo.browse", "~".into())),
     )
     .children(crumbs.into_iter().enumerate().map(|(i, (name, path))| {
       let current = i == last;
@@ -284,13 +276,13 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
             .role(gpui::Role::Button)
             .aria_label(format!("Go to {path}"))
             .px_1()
-            .rounded(zpx(4.))
+            .rounded(radius::SM)
             .font_family(theme::MONO_FONT)
             .when(current, |d| d.font_weight(FontWeight::MEDIUM))
             .when(!current, |d| {
               d.cursor_pointer()
                 .text_color(p.muted_foreground)
-                .hover(|s| s.bg(p.accent))
+                .hover(move |s| s.bg(hover))
                 .on_click(field(react, "remoteRepo.browse", path.clone().into()))
             })
             .child(name)
@@ -316,76 +308,50 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     .listing
     .iter()
     .flat_map(|listing| listing.shown(show_hidden))
-    .enumerate()
-    .map(|(i, folder)| {
-      let selector = format!("remote-browse-folder-{}", folder.name);
-      div()
-        .id(("remote-browse-folder", i))
-        .debug_selector(move || selector)
-        .role(gpui::Role::Button)
-        .aria_label(folder.name.clone())
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_2()
-        .py(zpx(5.))
-        .rounded(zpx(6.))
-        .cursor_pointer()
-        .hover(|s| s.bg(p.accent))
+    .map(|folder| {
+      ui::Row::new(format!("remote-browse-folder-{}", folder.name), p)
+        .icon(if folder.is_repo {
+          theme::ICON_FOLDER_GIT
+        } else {
+          theme::ICON_FOLDER
+        })
+        .title(folder.name.clone())
+        .when(folder.is_repo, |row| {
+          row.trailing(ui::Badge::new("Repository", p))
+        })
         .on_click(field(
           react,
           "remoteRepo.browse",
           folder.path.clone().into(),
         ))
-        .child(ui::icon(
-          if folder.is_repo {
-            theme::ICON_FOLDER_GIT
-          } else {
-            theme::ICON_FOLDER
-          },
-          16.,
-          p.muted_foreground,
-        ))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .min_w_0()
-            .flex_1()
-            .truncate()
-            .when(folder.hidden, |d| d.text_color(p.muted_foreground))
-            .child(folder.name.clone()),
-        )
-        .when(folder.is_repo, |d| {
-          d.child(
-            ui::text(div(), TextSize::Xs)
-              .flex_none()
-              .text_color(p.muted_foreground)
-              .child("Repository"),
-          )
-        })
-        .test_support()
     })
     .collect();
   // Before the first listing: loading, or nothing when it failed (the
   // error shows under the browser).
-  let empty_text = match (&form.listing, form.browsing) {
-    (None, true) => Some("Loading folders…"),
+  let empty = match (&form.listing, form.browsing) {
+    _ if !folders.is_empty() => None,
+    (None, true) => Some(
+      div()
+        .p_2()
+        .child(ui::Loading::new("remote-browse-loading", p).label("Loading folders…"))
+        .into_any_element(),
+    ),
     (None, false) => None,
-    (Some(_), _) => Some("No folders here."),
+    (Some(_), _) => Some(
+      ui::text(div(), TextSize::Sm)
+        .p_2()
+        .text_color(p.muted_foreground)
+        .child("No folders here.")
+        .into_any_element(),
+    ),
   };
-  let empty = empty_text.filter(|_| folders.is_empty()).map(|text| {
-    ui::text(div(), TextSize::Sm)
-      .px_2()
-      .py_2()
-      .text_color(p.muted_foreground)
-      .child(text)
-  });
   div()
     .debug_selector(|| "remote-browser".into())
     .flex()
     .flex_col()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
-    .border_color(p.border.opacity(0.6))
+    .border_color(p.border)
     .bg(p.background)
     .child(
       div()
