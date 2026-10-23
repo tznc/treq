@@ -4127,8 +4127,9 @@ fn workspace_diff_with_conflict_style(
     .iter()
     .map(|file| file.path.clone())
     .collect();
-  let conflicted_files = jj::get_conflicted_files(workspace_dir_str, Some(target_branch))
-    .map_err(|e| format!("Failed to get conflicted workspace files: {}", e))?;
+  let conflicted_files =
+    jj::get_conflicted_files_after_snapshot(workspace_dir_str, Some(target_branch))
+      .map_err(|e| format!("Failed to get conflicted workspace files: {}", e))?;
   let conflicted_paths: std::collections::HashSet<String> =
     conflicted_files.iter().cloned().collect();
   // Drop clean overlap with the working copy so WC-only edits (bookmark at @)
