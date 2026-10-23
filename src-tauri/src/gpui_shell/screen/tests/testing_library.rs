@@ -462,3 +462,64 @@ fn a_new_shell_takes_focus_fully_in_view(cx: &mut TestAppContext) {
     host.calls()
   );
 }
+
+// Code tab file status
+
+fn status_entry(name: &str, status: &str) -> crate::core::WorkspaceEntry {
+  crate::core::WorkspaceEntry {
+    name: name.into(),
+    path: format!("/repo/.treq/workspaces/login/{name}"),
+    is_directory: false,
+    modified_at: None,
+    submodule_pin: None,
+    submodule_synced: None,
+    status: Some(status.into()),
+  }
+}
+
+#[gpui::test]
+fn code_tab_marks_each_file_status_and_hides_untouched_files(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.overview.entries = vec![
+    status_entry("README.md", "conflict"),
+    status_entry("committed.txt", "committed"),
+    status_entry("dirty.txt", "workingCopy"),
+    status_entry(".gitignore", "untouched"),
+  ];
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  let screen = screen(&mut h);
+  let user = screen.user();
+
+  for (file, status) in [
+    ("README.md", "Conflicted"),
+    ("committed.txt", "Committed"),
+    ("dirty.txt", "Working copy change"),
+  ] {
+    expect(&screen.get_by_role(by::role(Role::Button).name(file))).to_be_visible();
+    expect(&screen.get_by_role(by::role(Role::Image).name(status))).to_be_visible();
+  }
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name(".gitignore"))
+    .is_none());
+
+  let toggle = screen.get_by_role(by::role(Role::Button).name("Show 1 unchanged file"));
+  expect(&toggle).to_be_collapsed();
+  user.click(&toggle);
+  expect(&screen.get_by_role(by::role(Role::Button).name(".gitignore"))).to_be_visible();
+  let hide = screen.get_by_role(by::role(Role::Button).name("Hide unchanged files"));
+  expect(&hide).to_be_expanded();
+  user.click(&hide);
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name(".gitignore"))
+    .is_none());
+}
+
+#[gpui::test]
+fn code_tab_keeps_entries_without_a_status_visible(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  let screen = screen(&mut h);
+  expect(&screen.get_by_role(by::role(Role::Button).name("README.md"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Show 1 unchanged file"))
+    .is_none());
+}

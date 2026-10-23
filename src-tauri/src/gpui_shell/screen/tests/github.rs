@@ -794,6 +794,7 @@ fn treq() -> TreqChecks {
       configured: true,
       status: "passed".into(),
       run_id: None,
+      script: Some("echo setup".into()),
     }),
   }
 }
@@ -1026,4 +1027,53 @@ fn github_new_pr_from_a_branch(cx: &mut TestAppContext) {
   assert!(view(&mut h, |v| v.new_pr.as_ref().and_then(|n| n.error.clone())).is_some());
   h.click("github-new-pr-cancel");
   assert_eq!(h.sent(), [press("github.close")]);
+}
+
+fn setup_checks(status: &str) -> TreqChecks {
+  TreqChecks {
+    setup: Some(SetupScriptStatus {
+      configured: true,
+      status: status.into(),
+      run_id: Some(4),
+      script: Some("npm ci\n\nnpm run build".into()),
+    }),
+    ..treq()
+  }
+}
+
+#[gpui::test]
+fn github_pr_detail_opens_the_setup_commands_and_output(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: setup_checks("passed"),
+    ..prs()
+  };
+  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(h.drawn("setup-script-status"));
+  assert!(!h.drawn("setup-script-output"), "a passed setup starts closed");
+
+  h.click("github-setup-toggle");
+  h.cx.run_until_parked();
+  assert!(h.drawn("setup-script-output"));
+  assert!(h.drawn("setup-command-0"));
+  assert!(h.drawn("setup-command-1"));
+  assert!(!h.drawn("setup-command-2"), "blank lines are not commands");
+  assert!(h.drawn("setup-script-logs"));
+  assert!(host.calls().contains(&"read logs 4 setup".to_string()));
+
+  h.click("github-setup-toggle");
+  assert!(!h.drawn("setup-script-output"));
+}
+
+#[gpui::test]
+fn github_pr_detail_opens_a_failed_setup_on_its_own(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: setup_checks("failed"),
+    ..prs()
+  };
+  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(h.drawn("setup-script-output"));
+  assert!(h.drawn("setup-script-logs"));
+  assert!(host.calls().contains(&"read logs 4 setup".to_string()));
 }
