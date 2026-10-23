@@ -34,6 +34,7 @@ mod changes_threads;
 pub(super) mod checklist;
 mod code;
 mod code_data;
+pub(super) use code_data::display_title;
 mod commits;
 mod commits_data;
 mod environment;

@@ -97,7 +97,12 @@ pub struct RepoSection {
 #[serde(rename_all = "camelCase")]
 pub struct SidebarRow {
   pub id: i64,
+  /// The workspace's branch.
   pub title: String,
+  /// The workspace's own title, drawn in place of the branch; `None` when
+  /// it has none.
+  #[serde(default)]
+  pub name: Option<String>,
   /// 0 for a stack root, +1 per level below it.
   pub depth: u32,
   pub selected: bool,
@@ -245,6 +250,8 @@ pub enum SidebarAction {
 struct DraggedWorkspace {
   id: i64,
   title: SharedString,
+  /// The title is a branch, drawn in mono as its row draws it.
+  mono: bool,
   palette: Palette,
 }
 
@@ -258,7 +265,7 @@ impl Render for DraggedWorkspace {
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
       .text_color(self.palette.sidebar_foreground)
-      .font_family(theme::MONO_FONT)
+      .when(self.mono, |this| this.font_family(theme::MONO_FONT))
       .shadow_md()
       .child(self.title.clone())
   }
@@ -1044,6 +1051,7 @@ impl Sidebar {
     };
     let shown = self.tooltip_shown(&key);
     let tip = TooltipContent::Branch {
+      name: None,
       title: label.clone().into(),
       conflicted: false,
       pr: None,
@@ -1225,7 +1233,9 @@ impl Sidebar {
       palette.muted_foreground
     };
 
+    let label = row.name.as_ref().unwrap_or(&row.title).clone();
     let tip = TooltipContent::Branch {
+      name: row.name.clone().map(Into::into),
       title: row.title.clone().into(),
       conflicted: row.conflicted,
       pr: row.pr,
@@ -1304,7 +1314,7 @@ impl Sidebar {
       .id(("workspace", id as u64))
       .debug_selector(move || selector)
       .role(Role::Button)
-      .aria_label(row.title.clone())
+      .aria_label(label.clone())
       .aria_selected(row.selected)
       .test_support()
       .group(group.clone())
@@ -1347,9 +1357,12 @@ impl Sidebar {
           .flex_1()
           .min_w_0()
           .truncate()
-          .font_family(theme::MONO_FONT)
+          // A branch is code; a title is prose.
+          .when(row.name.is_none(), |this| {
+            this.font_family(theme::MONO_FONT)
+          })
           .text_color(title_color)
-          .child(row.title.clone()),
+          .child(label.clone()),
       )
       .child(
         div()
@@ -1405,7 +1418,8 @@ impl Sidebar {
           .on_drag(
             DraggedWorkspace {
               id,
-              title: row.title.clone().into(),
+              title: label.clone().into(),
+              mono: row.name.is_none(),
               palette: *palette,
             },
             |dragged, _, _, cx| cx.new(|_| dragged.clone()),
