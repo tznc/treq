@@ -735,6 +735,27 @@ fn polls_on_swr_intervals(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_pr_poll_that_moved_stacks_reads_the_workspaces_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  window
+    .controller
+    .update(cx, |c, cx| c.prs_changed(false, cx));
+  cx.run_until_parked();
+  assert_eq!(
+    host.count("workspaces /repo"),
+    1,
+    "PR state alone reads no workspaces"
+  );
+  window
+    .controller
+    .update(cx, |c, cx| c.prs_changed(true, cx));
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 2);
+}
+
+#[gpui::test]
 fn a_workspace_change_reads_everything_again(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));

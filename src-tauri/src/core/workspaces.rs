@@ -583,6 +583,18 @@ impl BranchWorkspaceRequest {
   }
 }
 
+/// Tracks `branch@origin` when only the remote has `branch`, so a workspace
+/// can target a pull request's base that was never checked out locally.
+pub(crate) fn ensure_local_branch(repo_path: &str, branch: &str) -> Result<(), String> {
+  let status = jj::check_branch_exists(repo_path, branch)
+    .map_err(|e| format!("Failed to check branch '{branch}': {e}"))?;
+  if status.local_exists || !status.remote_exists {
+    return Ok(());
+  }
+  jj::jj_bookmark_track(repo_path, branch, "origin")
+    .map_err(|e| format!("Failed to track '{branch}@origin': {e}"))
+}
+
 /// [`open_or_create_workspace_from_pr`] for several branches of one
 /// repository, syncing and fetching once. Each request gets its own result,
 /// so one bad branch does not stop the others.
@@ -652,6 +664,7 @@ pub(crate) fn open_or_create_synced(
 
   // create_workspace may default the target to the repo default branch; retarget
   // onto the PR base so stacked rebases follow the PR's merge base.
+  ensure_local_branch(repo_path, base_branch)?;
   apply_workspace_target_branch(repo_path, workspace.id, base_branch)?;
 
   if let Some(title) = request
@@ -1683,9 +1696,17 @@ pub fn workspace_status(
   let dag_nodes = Vec::new();
   let conflicted_workspace_ids = Vec::new();
 
-  // Calculate commits ahead of target
-  let commits_ahead_of_target = if let Some(target_workspace) = &target {
-    match jj::jj_get_commits_ahead(workspace_path_str, &target_workspace.branch_name) {
+  // Commits ahead of the target branch, whether or not a workspace holds it;
+  // with no target, ahead of the repository default branch.
+  let ahead_base = current_workspace
+    .target_branch
+    .clone()
+    .filter(|target| !target.is_empty())
+    .unwrap_or_else(resolve_status_default_branch);
+  let commits_ahead_of_target = if ahead_base.is_empty() {
+    Vec::new()
+  } else {
+    match jj::jj_get_commits_ahead(workspace_path_str, &ahead_base) {
       Ok(commits_ahead) => commits_ahead
         .commits
         .iter()
@@ -1696,25 +1717,6 @@ pub fn workspace_status(
         })
         .collect(),
       Err(_) => Vec::new(),
-    }
-  } else {
-    // No target branch, commits are ahead of the repository default branch.
-    let default_branch = resolve_status_default_branch();
-    if default_branch.is_empty() {
-      Vec::new()
-    } else {
-      match jj::jj_get_commits_ahead(workspace_path_str, &default_branch) {
-        Ok(commits_ahead) => commits_ahead
-          .commits
-          .iter()
-          .map(|c| WorkspaceCommit {
-            hash: c.commit_id.clone(),
-            timestamp: c.timestamp.clone(),
-            message: c.description.clone(),
-          })
-          .collect(),
-        Err(_) => Vec::new(),
-      }
     }
   };
 

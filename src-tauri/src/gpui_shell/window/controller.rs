@@ -252,9 +252,17 @@ impl WindowController {
     });
   }
 
-  /// `pr-statuses-updated`: the PR poller's cache changed.
-  pub fn prs_changed(&mut self, cx: &mut Context<Self>) {
-    self.read(Read::default(), cx);
+  /// `pr-statuses-updated`: the PR poller's cache changed, and with
+  /// `stacks_moved` it retargeted workspaces to follow GitHub.
+  pub fn prs_changed(&mut self, stacks_moved: bool, cx: &mut Context<Self>) {
+    self.read(
+      if stacks_moved {
+        Read::POLL
+      } else {
+        Read::default()
+      },
+      cx,
+    );
   }
 
   /// `listenManagedEndpoint`: the cloud workspace connected, or its

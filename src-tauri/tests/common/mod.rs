@@ -1039,6 +1039,53 @@ impl TestRepo {
     Self::run_git(&clone_path_str, &["rev-parse", "HEAD"])
   }
 
+  /// Pushes `branch_name` to the remote, one commit adding `relative_path`
+  /// on top of `base_branch`, from a throwaway clone. The local repo only
+  /// sees the branch after a fetch, and never gets a local bookmark for it.
+  pub fn remote_branch_on(
+    &self,
+    branch_name: &str,
+    base_branch: &str,
+    relative_path: &str,
+    content: &str,
+  ) -> Result<(), String> {
+    let remote_fixture_dir = self.remote_fixture_dir();
+    let remote_path = self.remote_path();
+    let clone_path = unique_remote_clone_path(&remote_fixture_dir, "remote_clone_branch");
+    let clone_path_str = clone_path.to_string_lossy().to_string();
+
+    Self::run_git(
+      &remote_fixture_dir.to_string_lossy(),
+      &[
+        "clone",
+        remote_path.to_str().unwrap(),
+        clone_path.to_str().unwrap(),
+      ],
+    )?;
+    Self::run_git(
+      &clone_path_str,
+      &["config", "user.email", "test@example.com"],
+    )?;
+    Self::run_git(&clone_path_str, &["config", "user.name", "Test User"])?;
+    Self::run_git(
+      &clone_path_str,
+      &[
+        "checkout",
+        "-b",
+        branch_name,
+        &format!("origin/{base_branch}"),
+      ],
+    )?;
+    Self::write_file_at_path(clone_path.join(relative_path), content, false)?;
+    Self::run_git(&clone_path_str, &["add", "-A"])?;
+    Self::run_git(
+      &clone_path_str,
+      &["commit", "-m", &format!("Add {relative_path}")],
+    )?;
+    Self::run_git(&clone_path_str, &["push", "origin", branch_name])?;
+    Ok(())
+  }
+
   /// Get the path to the .treq directory.
   pub fn treq_dir(&self) -> PathBuf {
     Path::new(&self.repo_path).join(".treq")

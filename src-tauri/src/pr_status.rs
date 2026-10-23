@@ -616,10 +616,13 @@ pub fn global() -> &'static PrStatusManager {
 pub fn set_app_handle(app: tauri::AppHandle) {
   use tauri::Emitter;
   global().set_on_update(Arc::new(move |repo_path, statuses, ci_statuses| {
+    // Follow GitHub retargets and merged bases before the UI rereads stacks.
+    let stacks_moved = crate::core::pr_stacks::sync_pr_bases(repo_path, statuses);
     let payload = serde_json::json!({
         "repo_path": repo_path,
         "statuses": statuses,
         "ci_statuses": ci_statuses,
+        "stacks_moved": stacks_moved,
     });
     let _ = app.emit("pr-statuses-updated", payload);
   }));
