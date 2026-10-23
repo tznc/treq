@@ -610,7 +610,7 @@ fn existing_branch_workspace(
 
 /// Opens or creates `request`'s workspace once the repository is synced and
 /// fetched.
-fn open_or_create_synced(
+pub(crate) fn open_or_create_synced(
   repo_path: &str,
   request: &BranchWorkspaceRequest,
 ) -> Result<(local_db::Workspace, bool), String> {

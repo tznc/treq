@@ -885,6 +885,17 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       workspace: Some("1".into()),
     },
     R::WorkspaceSummaries { repo: repo() },
+    R::PlanNewWorkspaces {
+      repo: repo(),
+      text: "feat/api\n  Add the page".into(),
+      stack_on: Some("release".into()),
+    },
+    R::NewWorkspaces {
+      repo: repo(),
+      text: "feat/api\n  Add the page".into(),
+      stack_on: None,
+      idempotency_key: key(),
+    },
     R::MachineUsage { root: repo() },
     R::HostCheck { root: repo() },
     R::ProbeRepo { repo: repo() },

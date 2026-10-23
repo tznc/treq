@@ -23,7 +23,7 @@ use treq_ui::{Checkbox, Dot, Tone};
 use super::{mutation_message, on_epoch, repos, workspace};
 use crate::{
   backend, errors,
-  remote::{self, IdempotencyKeys, Mutation},
+  remote::{self, Mutation},
   store,
   ui::{self, load, nav, sheet, widgets, Load, Location, Machine, MachineStatus},
 };
@@ -422,7 +422,7 @@ impl WorkspacesScreen {
       std::rc::Rc::new(move |cx| {
         this
           .update(cx, |screen, cx| {
-            screen.message = Some((true, "Workspace created.".into()));
+            screen.message = Some((true, "Workspaces ready.".into()));
             screen.reload(cx);
           })
           .ok();
@@ -561,7 +561,7 @@ impl WorkspacesScreen {
           .w_full()
           .h(px(widgets::CTA_H - 8.))
           .icon(IconName::Plus)
-          .label("New workspace")
+          .label("New workspaces")
           .on_click(cx.listener(|this, _, _, cx| this.new_workspace(None, cx))),
       ),
     }
@@ -676,16 +676,10 @@ pub fn rename(repo: String, workspace: Workspace, done: OnDone, cx: &mut App) {
   });
 }
 
-/// Opens the sheet that creates a workspace, stacked on `stacked_on`'s
+/// Opens the sheet that creates workspaces, stacked on `stacked_on`'s
 /// branch when given.
 pub fn new_workspace(repo: String, stacked_on: Option<String>, done: OnDone, cx: &mut App) {
-  let title = match &stacked_on {
-    Some(branch) => format!("New workspace on {branch}"),
-    None => "New workspace".into(),
-  };
-  sheet::open(Some(title.into()), cx, move |window, cx| {
-    cx.new(|cx| NewWorkspaceSheet::new(repo, stacked_on, done, window, cx))
-  });
+  super::new_workspaces::open(repo, stacked_on, done, cx)
 }
 
 /// Renaming a workspace's title.
@@ -768,105 +762,6 @@ impl Render for RenameSheet {
           .label("Save")
           .loading(self.saving)
           .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
-      )
-  }
-}
-
-/// Creating one workspace: a branch, and what it starts from.
-struct NewWorkspaceSheet {
-  repo: String,
-  branch: Entity<InputState>,
-  source: Entity<InputState>,
-  done: OnDone,
-  keys: IdempotencyKeys,
-  creating: bool,
-  error: Option<String>,
-}
-
-impl NewWorkspaceSheet {
-  fn new(
-    repo: String,
-    stacked_on: Option<String>,
-    done: OnDone,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) -> Self {
-    let branch = cx.new(|cx| InputState::new(window, cx).placeholder("Branch name"));
-    let source = cx.new(|cx| {
-      let mut state = InputState::new(window, cx).placeholder("Start from (default branch)");
-      if let Some(base) = stacked_on {
-        state.set_value(base, window, cx);
-      }
-      state
-    });
-    branch.update(cx, |state, cx| state.focus(window, cx));
-    Self {
-      repo,
-      branch,
-      source,
-      done,
-      keys: IdempotencyKeys::default(),
-      creating: false,
-      error: None,
-    }
-  }
-
-  fn create(&mut self, cx: &mut Context<Self>) {
-    let branch = self.branch.read(cx).value().trim().to_string();
-    let source = self.source.read(cx).value().trim().to_string();
-    if branch.is_empty() {
-      self.error = Some("Enter a branch name.".into());
-      return cx.notify();
-    }
-    if self.creating {
-      return;
-    }
-    self.creating = true;
-    self.error = None;
-    let inputs = [self.repo.as_str(), branch.as_str(), source.as_str()];
-    let key = self.keys.key_for("create-workspace", &inputs);
-    let inputs: Vec<String> = inputs.iter().map(|s| s.to_string()).collect();
-    let request = TreqCommandRequest::CreateWorkspace {
-      repo: self.repo.clone(),
-      branch_name: branch,
-      source_branch: (!source.is_empty()).then_some(source),
-      metadata: None,
-      idempotency_key: key,
-    };
-    let done = self.done.clone();
-    load::run(cx, remote::mutate(request), move |this, outcome, cx| {
-      this.creating = false;
-      let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
-      this.keys.settle("create-workspace", &refs, &outcome);
-      match outcome {
-        Ok(Mutation::Applied(_)) => {
-          sheet::close(cx);
-          done(cx);
-        }
-        other => this.error = Some(errors::describe(&mutation_message(&other, "").1).message),
-      }
-    });
-    cx.notify();
-  }
-}
-
-impl Render for NewWorkspaceSheet {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    v_flex()
-      .px_4()
-      .pt_1()
-      .gap_3()
-      .child(Input::new(&self.branch).large())
-      .child(Input::new(&self.source).large())
-      .children(self.error.clone().map(|e| widgets::error_text(e, cx)))
-      .child(
-        Button::new("create")
-          .primary()
-          .large()
-          .w_full()
-          .label("Create workspace")
-          .loading(self.creating)
-          .on_click(cx.listener(|this, _, _, cx| this.create(cx))),
       )
   }
 }

@@ -24,6 +24,7 @@ pub mod github_issues;
 pub mod idempotency_store;
 pub mod linear_review;
 pub mod managed;
+pub mod new_workspaces;
 pub mod palette_commands;
 pub mod prerequisites;
 pub mod pty_remote_supervisor;

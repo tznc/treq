@@ -416,6 +416,17 @@ pub(crate) fn parse_remote_command_request(
     }),
     ("workspace", "list") => Ok(TreqCommandRequest::ListWorkspaces { repo }),
     ("workspace", "summaries") => Ok(TreqCommandRequest::WorkspaceSummaries { repo }),
+    ("workspace", "plan-new") => Ok(TreqCommandRequest::PlanNewWorkspaces {
+      repo,
+      text: require_value("lines")?,
+      stack_on: target,
+    }),
+    ("workspace", "new") => Ok(TreqCommandRequest::NewWorkspaces {
+      repo,
+      text: require_value("lines")?,
+      stack_on: target,
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("workspace", "inspect") => Ok(TreqCommandRequest::InspectWorkspace {
       repo,
       workspace: require_workspace()?,
