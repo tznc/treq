@@ -884,6 +884,7 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       repo: repo(),
       workspace: Some("1".into()),
     },
+    R::WorkspaceSummaries { repo: repo() },
     R::MachineUsage { root: repo() },
     R::HostCheck { root: repo() },
     R::ProbeRepo { repo: repo() },

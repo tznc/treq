@@ -117,6 +117,12 @@ pub enum TreqCommandRequest {
   ListWorkspaces {
     repo: String,
   },
+  /// The workspaces with their sidebar status (conflicts, uncommitted
+  /// changes, commits ahead, running terminals). See
+  /// [`crate::core::workspaces::WorkspaceSummary`].
+  WorkspaceSummaries {
+    repo: String,
+  },
   InspectWorkspace {
     repo: String,
     workspace: String,
@@ -501,6 +507,7 @@ impl TreqCommandRequest {
       | Self::RepositoryStatus { .. }
       | Self::ListBranches { .. }
       | Self::ListWorkspaces { .. }
+      | Self::WorkspaceSummaries { .. }
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
@@ -586,6 +593,7 @@ impl TreqCommandRequest {
       | Self::RepositoryStatus { .. }
       | Self::ListBranches { .. }
       | Self::ListWorkspaces { .. }
+      | Self::WorkspaceSummaries { .. }
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
@@ -630,6 +638,7 @@ impl TreqCommandRequest {
       Self::RepositoryStatus { .. } => "RepositoryStatus",
       Self::ListBranches { .. } => "ListBranches",
       Self::ListWorkspaces { .. } => "ListWorkspaces",
+      Self::WorkspaceSummaries { .. } => "WorkspaceSummaries",
       Self::InspectWorkspace { .. } => "InspectWorkspace",
       Self::ListChanges { .. } => "ListChanges",
       Self::DiffFile { .. } => "DiffFile",
@@ -693,6 +702,7 @@ impl TreqCommandRequest {
     "RepositoryStatus",
     "ListBranches",
     "ListWorkspaces",
+    "WorkspaceSummaries",
     "InspectWorkspace",
     "ListChanges",
     "DiffFile",
@@ -1404,6 +1414,7 @@ impl TreqCommandRequest {
         ("repo", "clone", destination)
       }
       Self::ListWorkspaces { repo } => ("workspace", "list", repo),
+      Self::WorkspaceSummaries { repo } => ("workspace", "summaries", repo),
       Self::InspectWorkspace { repo, workspace } => {
         fields.workspace = Some(workspace);
         ("workspace", "inspect", repo)
@@ -2090,6 +2101,10 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
     TreqCommandRequest::ListWorkspaces { repo } => {
       require_existing_repo(&repo)?;
       json(crate::core::workspaces::list_workspaces(&repo))
+    }
+    TreqCommandRequest::WorkspaceSummaries { repo } => {
+      require_existing_repo(&repo)?;
+      json(crate::core::workspaces::workspace_summaries(&repo))
     }
     TreqCommandRequest::MachineUsage { root } => json(machine_usage(&root)),
     TreqCommandRequest::HostCheck { root } => json(Ok::<_, String>(host_check(&root))),
@@ -3755,6 +3770,16 @@ mod tests {
   }
 
   #[test]
+  fn builds_workspace_summaries_arguments() {
+    assert_eq!(
+      TreqCommandRequest::WorkspaceSummaries { repo: "/r".into() }
+        .cli_args()
+        .unwrap(),
+      vec!["workspace", "summaries", "--repo", "/r", "--format", "json"]
+    );
+  }
+
+  #[test]
   fn builds_host_check_arguments() {
     assert_eq!(
       TreqCommandRequest::HostCheck { root: "~".into() }
@@ -4714,7 +4739,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 57);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 58);
   }
 
   #[test]

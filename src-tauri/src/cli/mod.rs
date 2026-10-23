@@ -415,6 +415,7 @@ pub(crate) fn parse_remote_command_request(
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
     ("workspace", "list") => Ok(TreqCommandRequest::ListWorkspaces { repo }),
+    ("workspace", "summaries") => Ok(TreqCommandRequest::WorkspaceSummaries { repo }),
     ("workspace", "inspect") => Ok(TreqCommandRequest::InspectWorkspace {
       repo,
       workspace: require_workspace()?,
