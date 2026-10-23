@@ -29,6 +29,7 @@ pub mod managed;
 pub mod merge_preview;
 pub mod new_workspaces;
 pub mod palette_commands;
+pub mod pr_stacks;
 pub mod prerequisites;
 pub mod pty_remote_supervisor;
 pub mod remote;

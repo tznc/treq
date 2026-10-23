@@ -75,6 +75,15 @@ When a lower workspace changes, Treq rebases the ones above it onto the new targ
 
 Treq remembers the target commit behind each rebase. That is how it spots a target that has moved and a workspace that needs updating again.
 
+A workspace opened from a pull request targets the pull request's base branch. When another workspace holds that base, the new workspace stacks on it. When none does, the workspace still targets the base branch, and its commit count and diff are measured against that branch, not the default branch.
+
+Treq keeps these stacks in step with GitHub as it polls pull request status:
+
+| GitHub change | What Treq does |
+|---|---|
+| A pull request moves to a new base | The workspace moves to the new base, unless you restacked it in Treq since the last poll |
+| The workspace below has its pull request merged | The workspace moves onto the merged workspace's own target, as it would if you deleted that workspace |
+
 This is why colocated Jujutsu is there at all. Rebasing a whole stack of workspace branches automatically is not something Git worktrees can do.
 
 ## Bookmark Conflicts

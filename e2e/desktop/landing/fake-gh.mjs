@@ -2,7 +2,8 @@
 // A stand-in `gh` for the landing capture: answers the calls the app makes
 // (PR status, checks, the GitHub panel's lists, review threads) with fixture
 // data for lorem-ipsum/event-bus. No network, no token.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const args = process.argv.slice(2);
 if (process.env.TREQ_FAKE_GH_LOG) {
@@ -76,6 +77,14 @@ const prs = [
   comments: [],
   ...pr,
 }));
+
+// QA specs change a PR on "GitHub" by writing `$HOME/fake-gh-prs.json`:
+// fields to merge over a fixture PR, by head branch.
+const overrides = join(process.env.HOME ?? "", "fake-gh-prs.json");
+if (existsSync(overrides)) {
+  const changes = JSON.parse(readFileSync(overrides, "utf8"));
+  for (const pr of prs) Object.assign(pr, changes[pr.headRefName]);
+}
 
 const issues = [
   {

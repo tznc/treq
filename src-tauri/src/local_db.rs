@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -290,6 +290,7 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
   let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN moved_files TEXT", []);
   let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN refreshed_at TEXT", []);
   let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN sparse_patterns TEXT", []);
+  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN pr_base_branch TEXT", []);
 
   conn
     .execute(
@@ -1252,6 +1253,32 @@ pub fn update_workspace_target_branch(
       params![target_branch, id],
     )
     .map_err(|e| format!("Failed to update workspace target branch: {}", e))?;
+  Ok(())
+}
+
+/// The base branch each workspace's pull request had when treq last polled
+/// it, by workspace id. Workspaces never seen with an open PR are absent.
+pub fn get_workspace_pr_bases(repo_path: &str) -> Result<HashMap<i64, String>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare("SELECT id, pr_base_branch FROM workspaces WHERE pr_base_branch IS NOT NULL")
+    .map_err(|e| format!("Failed to prepare PR base query: {}", e))?;
+  let rows = stmt
+    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+    .map_err(|e| format!("Failed to query PR bases: {}", e))?;
+  rows
+    .collect::<Result<HashMap<_, _>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+pub fn set_workspace_pr_base(repo_path: &str, id: i64, base_branch: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "UPDATE workspaces SET pr_base_branch = ?1 WHERE id = ?2",
+      params![base_branch, id],
+    )
+    .map_err(|e| format!("Failed to update workspace PR base: {}", e))?;
   Ok(())
 }
 

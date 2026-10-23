@@ -39,6 +39,7 @@ mod core_workspaces_files_test;
 mod core_workspaces_list_workspace_statuses_test;
 mod core_workspaces_merge_workspaces_test;
 mod core_workspaces_move_workspace_changes_test;
+mod core_workspaces_pr_stack_test;
 mod core_workspaces_push_test;
 mod core_workspaces_recreate_existing_test;
 mod core_workspaces_snapshot_restore_test;
