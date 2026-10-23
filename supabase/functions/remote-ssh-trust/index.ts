@@ -55,6 +55,7 @@ import { caKeyMaterialFromEnv, issueEd25519UserCertificate, randomSerial } from 
 import { installAuthorizedKeyCommand, removeAuthorizedKeyCommand } from "../_shared/remote/ssh-vm-config.ts";
 import {
   ProviderError,
+  providerClientMessage,
   SpritesProvider,
   spritesConfigFromEnv,
   type ManagedComputeProvider,
@@ -181,7 +182,10 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (err instanceof ValidationError) return json({ error: err.message }, err.status, correlationId);
     if (err instanceof UnsupportedKeyError) return json({ error: err.message }, 400, correlationId);
-    if (err instanceof ProviderError) return json({ error: err.message, provider_error: err.kind }, 502, correlationId);
+    if (err instanceof ProviderError) {
+      logWithCorrelation(correlationId, "error", `remote-ssh-trust action=${action} provider ${err.kind}: ${err.message}`);
+      return json({ error: providerClientMessage(err), provider_error: err.kind }, 502, correlationId);
+    }
     if (err instanceof KeyscanError) return json({ error: err.message, keyscan_error: err.kind }, 502, correlationId);
     logWithCorrelation(correlationId, "error", `remote-ssh-trust action=${action} failed: ${(err as Error).message}`);
     return json({ error: "Internal error" }, 500, correlationId);
