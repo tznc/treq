@@ -858,7 +858,7 @@ fn build_log_commits(
       )
     })
     .collect();
-  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  local_db::cache_commit_rows(cache_repo_path, &misses).warn_on_err("cache commit rows");
   built
 }
 
@@ -7858,7 +7858,7 @@ pub fn jj_get_log(
             &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
             &mut misses,
           );
-          let _ = local_db::cache_commit_rows(&cache_repo_path, &misses);
+          local_db::cache_commit_rows(&cache_repo_path, &misses).warn_on_err("cache commit rows");
           JjTentativeWorkingCopy {
             workspace_label: workspace_branch.clone(),
             commit,
@@ -8644,7 +8644,7 @@ fn build_tentative_working_copy(
         &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
         &mut misses,
       );
-      let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+      local_db::cache_commit_rows(cache_repo_path, &misses).warn_on_err("cache commit rows");
       commit.workspace_label = Some(workspace_label.to_string());
       commit
     },

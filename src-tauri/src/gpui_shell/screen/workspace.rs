@@ -1715,7 +1715,9 @@ impl WorkspaceView {
       let place = cx
         .background_spawn(async move { terminal_place(&*host, repo, workspace_id, home) })
         .await;
-      let _ = pane.update(cx, |pane, cx| pane.set_place(place, cx));
+      pane
+        .update(cx, |pane, cx| pane.set_place(place, cx))
+        .ignore_closed();
     });
   }
 

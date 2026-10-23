@@ -246,31 +246,31 @@ fn replace_dir(dest: &Path, build: impl FnOnce(&Path) -> Result<(), String>) -> 
     .to_string_lossy();
   let staging = parent.join(format!(".{name}.new-{}", std::process::id()));
   let backup = parent.join(format!(".{name}.old-{}", std::process::id()));
-  let _ = fs::remove_dir_all(&staging);
-  let _ = fs::remove_dir_all(&backup);
+  fs::remove_dir_all(&staging).best_effort();
+  fs::remove_dir_all(&backup).best_effort();
   if let Err(err) = fs::create_dir_all(&staging)
     .map_err(|e| format!("Failed to create skill pack dir: {e}"))
     .and_then(|()| build(&staging))
   {
-    let _ = fs::remove_dir_all(&staging);
+    fs::remove_dir_all(&staging).best_effort();
     return Err(err);
   }
   let had_old = dest.exists();
   if had_old {
     if let Err(e) = fs::rename(dest, &backup) {
-      let _ = fs::remove_dir_all(&staging);
+      fs::remove_dir_all(&staging).best_effort();
       return Err(format!("Failed to replace skill pack: {e}"));
     }
   }
   if let Err(e) = fs::rename(&staging, dest) {
     if had_old {
-      let _ = fs::rename(&backup, dest);
+      fs::rename(&backup, dest).warn_on_err("restore previous skill pack");
     }
-    let _ = fs::remove_dir_all(&staging);
+    fs::remove_dir_all(&staging).best_effort();
     return Err(format!("Failed to replace skill pack: {e}"));
   }
   if had_old {
-    let _ = fs::remove_dir_all(&backup);
+    fs::remove_dir_all(&backup).best_effort();
   }
   Ok(())
 }
