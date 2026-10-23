@@ -27,6 +27,7 @@ import {
   LeaseContentionError,
   RetryableError,
 } from "../_shared/merge-queue/errors.ts";
+import { isServiceRoleRequest } from "../_shared/auth/service-role.ts";
 import { GitHubRestAdapter } from "../_shared/merge-queue/github-adapter.ts";
 import {
   isGithubStubEnabled,
@@ -259,6 +260,9 @@ async function acquireLeaseOrThrow(
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
+  }
+  if (!isServiceRoleRequest(req, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "")) {
+    return new Response("Forbidden", { status: 403 });
   }
 
   const supabase = createClient(

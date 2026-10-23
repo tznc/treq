@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::{
-  changes_review::{line_at, Side},
+  changes_review::{number_and_side, Side},
   commits_data::line_numbers,
 };
 use crate::{github::GhReviewThread, jj::JjDiffHunk, local_db::AgentReviewComment};
@@ -29,7 +29,7 @@ pub struct Placed {
 /// ones; GitHub's `is_outdated` is ignored.
 pub fn place_threads(
   threads: &[GhReviewThread],
-  maps: &[&HashMap<String, Vec<JjDiffHunk>>],
+  maps: &[&HashMap<String, &[JjDiffHunk]>],
 ) -> Placed {
   let mut placed = Placed::default();
   for thread in threads {
@@ -45,7 +45,7 @@ pub fn place_threads(
   placed
 }
 
-fn place(thread: &GhReviewThread, maps: &[&HashMap<String, Vec<JjDiffHunk>>]) -> Option<LineKey> {
+fn place(thread: &GhReviewThread, maps: &[&HashMap<String, &[JjDiffHunk]>]) -> Option<LineKey> {
   let line = u32::try_from(thread.line?).ok()?;
   let side = if thread.diff_side == "LEFT" {
     Side::Old
@@ -56,8 +56,11 @@ fn place(thread: &GhReviewThread, maps: &[&HashMap<String, Vec<JjDiffHunk>>]) ->
     let Some(hunks) = map.get(&thread.path) else {
       continue;
     };
-    for hunk in hunks {
-      let hit = (0..hunk.lines.len()).any(|l| line_at(hunk, l) == (line, side));
+    for hunk in hunks.iter() {
+      let hit = line_numbers(hunk)
+        .into_iter()
+        .enumerate()
+        .any(|(l, n)| number_and_side(n, l) == (line, side));
       if hit {
         return Some((thread.path.clone(), hunk.id.clone(), line, side));
       }
@@ -393,10 +396,8 @@ mod tests {
 
   #[test]
   fn threads_sit_on_their_line_and_side() {
-    let working = HashMap::from([(
-      "a.rs".to_string(),
-      vec![hunk("h1", "@@ -1,2 +1,2 @@", &[" a", "-b", "+c"])],
-    )]);
+    let hunks = [hunk("h1", "@@ -1,2 +1,2 @@", &[" a", "-b", "+c"])];
+    let working = HashMap::from([("a.rs".to_string(), &hunks[..])]);
     let committed = HashMap::new();
     let threads = [
       thread("a.rs", Some(2), "RIGHT"),

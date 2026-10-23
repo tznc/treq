@@ -21,6 +21,11 @@ pub mod github;
 #[cfg(feature = "gpui-shell")]
 #[cfg(desktop)]
 mod gpui_shell;
+/// The GPUI screens' pure helpers, for `benches/diff_view.rs`.
+#[cfg(feature = "gpui-shell")]
+#[cfg(desktop)]
+#[doc(hidden)]
+pub use gpui_shell::bench as gpui_bench;
 pub mod jj;
 #[cfg(feature = "gui")]
 pub mod linear;
