@@ -12587,7 +12587,6 @@ dependencies = [
  "notify-debouncer-full",
  "portable-pty",
  "rand_core 0.10.1",
- "rayon",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",

@@ -196,10 +196,8 @@ fn split_directive(line: &str) -> (&str, &str) {
   let sep_index = line
     .find(|c: char| c.is_whitespace() || c == '=')
     .unwrap_or(line.len());
-  let keyword = &line[..sep_index];
-  let rest = line[sep_index..]
-    .trim_start_matches(['=', ' ', '\t'])
-    .trim();
+  let (keyword, rest) = line.split_at(sep_index);
+  let rest = rest.trim_start_matches(['=', ' ', '\t']).trim();
   (keyword, rest)
 }
 

@@ -10,10 +10,7 @@ use crate::AppState;
 
 pub(crate) fn extract_repo_from_agent_deep_link(url: &str) -> Option<String> {
   let prefix = "treq://agent/start?";
-  if !url.starts_with(prefix) {
-    return None;
-  }
-  let query = &url[prefix.len()..];
+  let query = url.strip_prefix(prefix)?;
   for pair in query.split('&') {
     let (key, value) = pair.split_once('=')?;
     if key != "repo" {
@@ -110,11 +107,9 @@ pub(crate) fn parse_agent_request_from_url(
   url: &str,
 ) -> Option<agent_dispatch::AgentDispatchRequest> {
   let prefix = "treq://agent/start?";
-  if !url.starts_with(prefix) {
-    return None;
-  }
+  let query = url.strip_prefix(prefix)?;
   let mut values = std::collections::HashMap::new();
-  for pair in url[prefix.len()..].split('&') {
+  for pair in query.split('&') {
     let (key, value) = pair.split_once('=')?;
     let decoded = urlencoding::decode(value).ok()?.into_owned();
     values.insert(key.to_string(), decoded);

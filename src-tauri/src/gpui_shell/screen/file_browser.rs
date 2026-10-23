@@ -40,7 +40,7 @@ use super::{
   file_browser_data::{
     comment_counts, comment_target, dir_status, file_name, filter_hidden, flatten, is_binary,
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
-    status_title, too_large, FileBrowserHost, LineMarks, COMMENT_HUNK,
+    status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
   },
   highlight, ActionSink, ScreenAction,
 };
@@ -151,6 +151,8 @@ pub struct FileBrowserView {
   pub(super) root: Option<Vec<WorkspaceEntry>>,
   cache: HashMap<String, Vec<WorkspaceEntry>>,
   pub(super) expanded: HashSet<String>,
+  /// `flatten` of the three fields above, dropped whenever one changes.
+  tree_rows: Option<Rc<Vec<TreeRow>>>,
   pub(super) changed: Vec<ChangedFile>,
   tree_scroll: UniformListScrollHandle,
   pub(super) selected: Option<String>,
@@ -224,6 +226,7 @@ impl FileBrowserView {
       editors,
       root: None,
       cache: HashMap::new(),
+      tree_rows: None,
       expanded: HashSet::new(),
       changed: Vec::new(),
       tree_scroll: UniformListScrollHandle::new(),
@@ -272,6 +275,7 @@ impl FileBrowserView {
   fn start(&mut self, route: Route, cx: &mut Context<Self>) {
     let base = self.base();
     self.expanded = HashSet::from([base]);
+    self.tree_rows = None;
     self.load_root(cx);
     self.load_changed(cx);
     self.hydrate_review(cx);
@@ -405,6 +409,7 @@ impl FileBrowserView {
           let first = view.root.is_none();
           view.cache.insert(view.base(), entries.clone());
           view.root = Some(entries);
+          view.tree_rows = None;
           if first {
             view.open_readme(cx);
           }
@@ -413,6 +418,7 @@ impl FileBrowserView {
           log::warn!("Failed to list directory: {err}");
           if view.root.is_none() {
             view.root = Some(Vec::new());
+            view.tree_rows = None;
           }
         }
       },
@@ -444,6 +450,7 @@ impl FileBrowserView {
     if !force && self.cache.contains_key(&dir) {
       if expand {
         self.expanded.insert(dir);
+        self.tree_rows = None;
         cx.notify();
       }
       return;
@@ -460,6 +467,7 @@ impl FileBrowserView {
           }
         };
         view.cache.insert(dir.clone(), entries);
+        view.tree_rows = None;
         if expand {
           view.expanded.insert(dir);
         }
@@ -483,6 +491,7 @@ impl FileBrowserView {
 
   fn click_dir(&mut self, path: String, cx: &mut Context<Self>) {
     if self.expanded.remove(&path) {
+      self.tree_rows = None;
       cx.notify();
     } else {
       self.load_dir(path, false, true, cx);
@@ -1359,7 +1368,10 @@ impl FileBrowserView {
           .child(ui::spinner("file-tree-spin", 24., p.muted_foreground)),
       );
     };
-    let rows = Rc::new(flatten(root, &self.expanded, &self.cache));
+    let rows = self
+      .tree_rows
+      .get_or_insert_with(|| Rc::new(flatten(root, &self.expanded, &self.cache)))
+      .clone();
     let count = rows.len();
     panel.child(
       uniform_list(

@@ -1,6 +1,8 @@
 #![allow(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
   reason = "test code"
 )]
 mod common;

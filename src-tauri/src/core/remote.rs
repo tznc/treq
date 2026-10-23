@@ -1377,6 +1377,10 @@ pub fn with_verification_baseline(
 /// repo-wide; this narrow helper only needs to survive a single retry path,
 /// so it round-trips through JSON rather than widening the enum's derive
 /// list for one caller.
+#[allow(
+  clippy::expect_used,
+  reason = "the request round-trips through its own JSON shape"
+)]
 fn clone_request(request: &TreqCommandRequest) -> TreqCommandRequest {
   serde_json::from_value(serde_json::to_value(request).expect("TreqCommandRequest serializes"))
     .expect("TreqCommandRequest round-trips through its own JSON shape")
@@ -1393,6 +1397,10 @@ pub struct PtyLaunchPayload {
   pub rows: u16,
 }
 
+#[allow(
+  clippy::expect_used,
+  reason = "the payload is plain data that always serializes"
+)]
 fn pty_launch_payload(
   remote_dir: &str,
   launch: &crate::core::remote_pty::PtyLaunchSpec,
@@ -2161,6 +2169,10 @@ fn workspace_id(value: Option<&String>) -> Result<Option<i64>, String> {
 }
 
 /// Dispatches typed CLI requests to the same core functions used by Tauri.
+#[allow(
+  clippy::expect_used,
+  reason = "every mutation request carries a snapshot"
+)]
 pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::Value, String> {
   request.cli_args()?;
   fn json<T: Serialize>(result: Result<T, String>) -> Result<serde_json::Value, String> {

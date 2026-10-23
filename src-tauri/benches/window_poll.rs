@@ -1,6 +1,8 @@
 #![allow(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
   reason = "test code"
 )]
 //! What a repo window reads every 10 s (`Read::POLL`): the workspace list
@@ -49,6 +51,20 @@ fn bench_window_poll(c: &mut Criterion) {
       })
     });
   }
+  // A detail read, or a new workspace, also asks whether each has changes.
+  let repo = setup(5);
+  let ids: Vec<i64> = treq_lib::core::list_workspaces(&repo.repo_path)
+    .expect("workspaces")
+    .iter()
+    .map(|w| w.id)
+    .collect();
+  group.bench_function("5_workspaces_has_changes", |b| {
+    b.iter(|| {
+      for id in &ids {
+        std::hint::black_box(treq_lib::core::workspace_has_changes(&repo.repo_path, *id).ok());
+      }
+    })
+  });
   group.finish();
 }
 

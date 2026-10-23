@@ -734,6 +734,11 @@ pub fn cutoff_cleared(app: &AppHandle, endpoint_id: &str) {
 }
 
 /// Forgets a destroyed window's shell.
+/// The last repo window closed, and every terminal with it.
+pub fn forget_terminals() {
+  screen::forget_terminals();
+}
+
 pub fn forget_window(label: &str) {
   popup::forget_owner(label);
   toasts::forget(label);

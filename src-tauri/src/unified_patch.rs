@@ -154,11 +154,15 @@ fn parse_hunk_body(
         new_seen += 1;
       }
       Some('-') => {
-        hunk.lines.push(HunkLine::Remove(line[1..].to_string()));
+        hunk
+          .lines
+          .push(HunkLine::Remove(line.get(1..).unwrap_or("").to_string()));
         old_seen += 1;
       }
       Some('+') => {
-        hunk.lines.push(HunkLine::Add(line[1..].to_string()));
+        hunk
+          .lines
+          .push(HunkLine::Add(line.get(1..).unwrap_or("").to_string()));
         new_seen += 1;
       }
       Some('\\') => {}

@@ -184,6 +184,8 @@ pub struct CommitsView {
   /// The request last seen, so a repeat of it is not scrolled to again.
   requested: Option<String>,
   feed: rows::Feed,
+  /// Bumped when the history or any diff changes, which the rows lay out.
+  layout_gen: u64,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -228,6 +230,7 @@ impl CommitsView {
       requested: scroll_to.clone(),
       scroll_to,
       feed: rows::Feed::default(),
+      layout_gen: 0,
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -261,6 +264,7 @@ impl CommitsView {
     self.parent = parent;
     if moved {
       self.history = None;
+      self.layout_gen += 1;
       self.target_limit = TARGET_PAGE;
       self.home_limit = HOME_PAGE;
       self.removed.clear();
@@ -334,10 +338,12 @@ impl CommitsView {
             // A fresh read no longer lists what was removed.
             view.removed.clear();
             view.history = Some(history);
+            view.layout_gen += 1;
           }
           Err(err) => {
             log::warn!("Failed to load commits: {err}");
             view.history.get_or_insert_with(History::default);
+            view.layout_gen += 1;
           }
         }
       },
@@ -422,6 +428,7 @@ impl CommitsView {
     if self.diffs.contains_key(commit_id) {
       return;
     }
+    self.layout_gen += 1;
     self.diffs.insert(
       commit_id.to_string(),
       DiffState {
@@ -439,6 +446,7 @@ impl CommitsView {
         })
       },
       move |view, result, _| {
+        view.layout_gen += 1;
         let state = view.diffs.entry(id).or_default();
         state.loading = false;
         match result {
@@ -475,6 +483,7 @@ impl CommitsView {
           let Some(state) = view.diffs.get_mut(&id) else {
             return;
           };
+          view.layout_gen += 1;
           state.deferred_loading.remove(&path);
           match result {
             Ok(file) => {
@@ -496,6 +505,7 @@ impl CommitsView {
 
   fn toggle_file(&mut self, commit_id: &str, path: &str, cx: &mut Context<Self>) {
     if let Some(state) = self.diffs.get_mut(commit_id) {
+      self.layout_gen += 1;
       if !state.collapsed.remove(path) {
         state.collapsed.insert(path.to_string());
       }

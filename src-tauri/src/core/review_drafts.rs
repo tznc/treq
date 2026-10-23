@@ -14,6 +14,8 @@ pub struct NewReviewDraft {
   pub comment_text: String,
   /// The hash of the commented lines, so the draft follows them.
   pub line_hash: Option<String>,
+  /// The commented diff lines, shown if the draft goes outdated.
+  pub quoted_text: Option<String>,
 }
 
 /// Saves `draft` as the user's own comment, with its line hash.
@@ -33,10 +35,10 @@ pub fn create_review_draft(
     &draft.comment_text,
     None,
     crate::review_aggregate::SOURCE_LOCAL_HUMAN,
-    None,
+    draft.quoted_text.as_deref(),
   )?;
   if let Some(hash) = draft.line_hash.as_deref() {
-    local_db::update_agent_review_comment(repo_path, &comment.id, None, Some(hash))?;
+    local_db::update_agent_review_comment(repo_path, &comment.id, None, Some(hash), None)?;
     comment.line_hash = draft.line_hash.clone();
   }
   Ok(comment)
@@ -49,7 +51,7 @@ pub fn update_review_draft(
   text: Option<&str>,
   line_hash: Option<&str>,
 ) -> Result<(), String> {
-  local_db::update_agent_review_comment(repo_path, id, text, line_hash)
+  local_db::update_agent_review_comment(repo_path, id, text, line_hash, None)
 }
 
 /// The review a workspace's changes page left unsent.
@@ -108,6 +110,7 @@ mod tests {
       side: Some("new".into()),
       comment_text: "Trim first.".into(),
       line_hash: line_hash.map(str::to_string),
+      quoted_text: Some("+a\n+b".into()),
     }
   }
 
@@ -123,6 +126,7 @@ mod tests {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, created.id);
     assert_eq!(listed[0].line_hash.as_deref(), Some("abc123"));
+    assert_eq!(listed[0].quoted_text.as_deref(), Some("+a\n+b"));
     assert_eq!(listed[0].comment_text, "Trim first.");
     assert_eq!((listed[0].start_line, listed[0].end_line), (3, 4));
     assert_eq!(listed[0].side.as_deref(), Some("new"));

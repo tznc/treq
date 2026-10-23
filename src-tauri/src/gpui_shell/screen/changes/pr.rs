@@ -299,6 +299,10 @@ impl ChangesView {
   }
 
   /// `addComment`: the draft is kept with the hash of its lines.
+  #[allow(
+    clippy::expect_used,
+    reason = "the probe is a constant JSON shape of the comment type"
+  )]
   pub(super) fn submit_pr_draft(&mut self, draft: Pending, text: String, cx: &mut Context<Self>) {
     let hunks: HashMap<String, Vec<JjDiffHunk>> = self
       .hunks

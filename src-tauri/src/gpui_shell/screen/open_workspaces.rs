@@ -645,6 +645,10 @@ impl OpenWorkspacesDialog {
     cx.notify();
   }
 
+  #[allow(
+    clippy::expect_used,
+    reason = "the fields are created before this read"
+  )]
   fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
     if self.fields.is_none() {
       let lines = cx.new(|cx| {

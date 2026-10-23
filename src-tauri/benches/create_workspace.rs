@@ -1,6 +1,8 @@
 #![allow(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
   reason = "test code"
 )]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
@@ -32,7 +34,7 @@ fn bench_create_workspace(c: &mut Criterion) {
   group.sample_size(20);
 
   group.bench_function("default", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       || TestRepo::new().expect("failed to init test repo"),
       |repo| {
         treq_lib::core::create_workspace(
@@ -58,7 +60,7 @@ fn bench_create_workspace_with_moved_files(c: &mut Criterion) {
   group.sample_size(20);
 
   group.bench_function("5_files", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       || {
         let repo = TestRepo::new().expect("failed to init test repo");
         let moved_files = create_moved_files(&repo);
@@ -70,7 +72,7 @@ fn bench_create_workspace_with_moved_files(c: &mut Criterion) {
           std::hint::black_box(&repo.repo_path),
           std::hint::black_box("feat/bench"),
           std::hint::black_box(Some("bench workspace".to_string())),
-          std::hint::black_box(Some(moved_files)),
+          std::hint::black_box(Some(moved_files.clone())),
           std::hint::black_box(None),
           std::hint::black_box(None),
           None,

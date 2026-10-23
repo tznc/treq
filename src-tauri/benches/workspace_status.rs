@@ -1,6 +1,8 @@
 #![allow(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
   reason = "test code"
 )]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
@@ -133,12 +135,12 @@ fn bench_workspace_status_ahead_remote(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("with_working_copy_and_committed_files", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_workspace_status_ahead,
       |(repo, workspace_id)| {
         treq_lib::core::workspace_status(
           std::hint::black_box(&repo.repo_path),
-          std::hint::black_box(Some(workspace_id)),
+          std::hint::black_box(Some(*workspace_id)),
         )
         .expect("workspace_status failed");
       },
@@ -154,12 +156,12 @@ fn bench_workspace_status_behind_remote(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("with_working_copy_and_committed_files", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_workspace_status_behind,
       |(repo, workspace_id)| {
         treq_lib::core::workspace_status(
           std::hint::black_box(&repo.repo_path),
-          std::hint::black_box(Some(workspace_id)),
+          std::hint::black_box(Some(*workspace_id)),
         )
         .expect("workspace_status failed");
       },

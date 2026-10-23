@@ -12,7 +12,11 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import { publishMergeQueueCommand } from "../_shared/merge-queue/commands-queue.ts";
-import { applyInstallationFacts, commandsForEvent } from "./webhook-handlers.ts";
+import {
+  applyInstallationFacts,
+  commandsForEvent,
+  type GitHubWebhookPayload,
+} from "./webhook-handlers.ts";
 
 async function verifySignature(
   secret: string,
@@ -77,8 +81,9 @@ function invokeWorkerSoon(): void {
     (res) => res.body?.cancel(),
     () => {},
   );
-  // deno-lint-ignore no-explicit-any
-  (globalThis as any).EdgeRuntime?.waitUntil(invoke);
+  (
+    globalThis as { EdgeRuntime?: { waitUntil(promise: Promise<unknown>): void } }
+  ).EdgeRuntime?.waitUntil(invoke);
 }
 
 Deno.serve(async (req) => {
@@ -109,8 +114,7 @@ Deno.serve(async (req) => {
   }
   const event = req.headers.get("x-github-event") ?? "";
 
-  // deno-lint-ignore no-explicit-any
-  let payload: Record<string, any>;
+  let payload: GitHubWebhookPayload;
   try {
     payload = JSON.parse(body);
   } catch {

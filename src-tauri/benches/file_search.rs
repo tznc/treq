@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::string_slice, reason = "test code")]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 use treq_lib::local_db::{search_workspace_files, sync_workspace_files, CachedWorkspaceFile};

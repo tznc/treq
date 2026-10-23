@@ -166,7 +166,8 @@ impl PrStatusManager {
     thread::Builder::new()
       .name("pr-status-poller".into())
       .spawn(move || background_loop(inner))
-      .expect("failed to spawn pr-status-poller thread");
+      .map(drop)
+      .unwrap_or_else(|e| log::error!("pr-status: failed to spawn poller thread: {e}"));
   }
 
   /// Start watching a repo. A newly watched repo triggers an immediate
@@ -230,7 +231,8 @@ impl PrStatusManager {
         poll_one_branch(&inner, &repo_path, &branch_name);
         inner.branch_refresh_inflight.lock_or_recover().remove(&key);
       })
-      .expect("failed to spawn pr-status-branch-refresh thread");
+      .map(drop)
+      .unwrap_or_else(|e| log::error!("pr-status: failed to spawn branch refresh thread: {e}"));
   }
 
   /// Overwrite a single branch entry (e.g. after an on-demand `gh pr view`).

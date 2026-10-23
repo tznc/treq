@@ -13,6 +13,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
+use crate::lock_ext::LockExt as _;
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
@@ -361,6 +362,9 @@ pub struct TerminalView {
   /// The cell of the last mouse report, so a move within it sends none.
   reported: Option<(usize, usize)>,
   cursor_on: bool,
+  /// Whether the last frame had focus. Only a focused cursor blinks, so an
+  /// unfocused terminal skips the blink's redraw.
+  focused: bool,
   idle: u64,
   chat_due: bool,
   search: Search,
@@ -411,6 +415,7 @@ impl TerminalView {
       selecting: false,
       reported: None,
       cursor_on: true,
+      focused: false,
       idle: 0,
       chat_due: false,
       search: Search::default(),
@@ -510,6 +515,7 @@ impl TerminalView {
     let previous = std::mem::replace(&mut self.pty, next);
     self.host.close_pty(&previous).ignore_closed();
     terminal_data::detach(&previous);
+    rekey_kept(&previous, &self.pty);
     self.live = None;
     self._exit = None;
     self._tasks.clear();
@@ -630,8 +636,12 @@ impl TerminalView {
         cx.background_executor().timer(BLINK).await;
         if this
           .update(cx, |view, cx| {
-            view.cursor_on = !view.cursor_on;
-            cx.notify();
+            if view.focused {
+              view.cursor_on = !view.cursor_on;
+              cx.notify();
+            } else {
+              view.cursor_on = true;
+            }
           })
           .is_err()
         {
@@ -1505,6 +1515,7 @@ impl Render for TerminalView {
     self.tooltips.sync(cx);
     let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
+    self.focused = focused;
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
@@ -1604,7 +1615,75 @@ enum Drag {
   },
 }
 
+/// A column the app keeps while its PTY runs, so a pane that opens on its
+/// repository after its own pane is gone (its window closed) shows it again.
+#[derive(Clone)]
+struct Kept {
+  id: String,
+  kind: Kind,
+  start: Start,
+  /// The repository the column opened in.
+  repo: String,
+  /// The pane showing it; `None` once that pane is gone.
+  owner: Option<u64>,
+  /// When it opened, in [`NEXT_KEPT`] order.
+  opened: u64,
+}
+
+type KeptColumns = std::sync::Mutex<std::collections::HashMap<String, Kept>>;
+
+/// Kept columns by PTY id.
+#[cfg(not(test))]
+fn kept() -> &'static KeptColumns {
+  static KEPT: std::sync::OnceLock<KeptColumns> = std::sync::OnceLock::new();
+  KEPT.get_or_init(Default::default)
+}
+
+/// Each test thread keeps its own columns.
+#[cfg(test)]
+fn kept() -> &'static KeptColumns {
+  thread_local! {
+    static KEPT: &'static KeptColumns = Box::leak(Box::default());
+  }
+  KEPT.with(|kept| *kept)
+}
+
+/// A kept column's PTY now has the id `next` (a remote reattach).
+fn rekey_kept(previous: &str, next: &str) {
+  let mut kept = kept().lock_or_recover();
+  if let Some(column) = kept.remove(previous) {
+    kept.insert(next.to_string(), column);
+  }
+}
+
+/// The last window closed: its terminals with it.
+pub fn forget_kept() {
+  kept().lock_or_recover().clear();
+}
+
+/// Takes the columns of `repo` no pane shows for pane `owner`.
+fn adopt_kept(repo: &str, owner: u64) -> Vec<(String, Kept)> {
+  let mut kept = kept().lock_or_recover();
+  let mut adopted: Vec<(String, Kept)> = kept
+    .iter_mut()
+    .filter(|(_, c)| c.owner.is_none() && c.repo == repo)
+    .map(|(pty, c)| {
+      c.owner = Some(owner);
+      (pty.clone(), c.clone())
+    })
+    .collect();
+  adopted.sort_by_key(|(_, c)| c.opened);
+  adopted
+}
+
+static NEXT_PANE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static NEXT_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Counts the panes that went away leaving columns behind.
+static RELEASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct TerminalPane {
+  /// Names the pane in [`Kept`] columns.
+  serial: u64,
   host: Host,
   react: ActionSink,
   popups: PopupSink,
@@ -1648,6 +1727,27 @@ pub struct TerminalPane {
   starting_devcontainer: bool,
   _environment_task: Option<Task<()>>,
   _keys: Option<Subscription>,
+  /// The repository's kept columns join the row when the pane next draws.
+  adopt_due: bool,
+  /// [`RELEASES`] when the pane last looked for kept columns.
+  releases_seen: u64,
+}
+
+impl Drop for TerminalPane {
+  /// The pane's terminals keep running for the next pane on their
+  /// repository.
+  fn drop(&mut self) {
+    let mut released = false;
+    for column in kept().lock_or_recover().values_mut() {
+      if column.owner == Some(self.serial) {
+        column.owner = None;
+        released = true;
+      }
+    }
+    if released {
+      RELEASES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+  }
 }
 
 impl HasTooltips for TerminalPane {
@@ -1677,6 +1777,9 @@ impl TerminalPane {
     let font_size =
       (get("terminal_font_size").unwrap_or(14.) * get("ui_zoom").unwrap_or(100.) / 100.).round();
     Self {
+      serial: NEXT_PANE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+      adopt_due: true,
+      releases_seen: 0,
       host,
       react,
       popups: popups.clone(),
@@ -1849,6 +1952,7 @@ impl TerminalPane {
       return;
     }
     let moved = self.place.working_directory != place.working_directory;
+    self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
     // A newly selected workspace's first terminal becomes the active one.
     if moved && !self.collapsed {
@@ -2222,18 +2326,7 @@ impl TerminalPane {
       return;
     };
     let (kind, pty, start) = kind_and_start;
-    let on_event = self.on_event(id.clone(), cx);
-    let (host, font_size) = (self.host.clone(), self.font_size);
-    let (look, popups) = ((font_size, self.dark), self.popups.clone());
-    let view = cx.new(|cx| TerminalView::new(pty, start, host, look, popups, on_event, cx));
-    self.columns.push(Column {
-      id: id.clone(),
-      view,
-      kind,
-      width: None,
-      streaming: false,
-      bounds: Rc::default(),
-    });
+    self.push_column(id.clone(), pty, kind, start, cx);
     self.publish(cx);
     self.focus_column(&id, window, cx);
   }
@@ -2362,22 +2455,8 @@ impl TerminalPane {
       millis += 1;
     }
     let id = terminal_data::shell_pty_id(&dir, millis);
-    let on_event = self.on_event(id.clone(), cx);
-    let (host, font_size, start) = (
-      self.host.clone(),
-      self.font_size,
-      Start::Shell { dir: dir.clone() },
-    );
-    let (look, popups) = ((font_size, self.dark), self.popups.clone());
-    let view = cx.new(|cx| TerminalView::new(id.clone(), start, host, look, popups, on_event, cx));
-    self.columns.push(Column {
-      id: id.clone(),
-      view,
-      kind: Kind::Shell { dir },
-      width: None,
-      streaming: false,
-      bounds: Rc::default(),
-    });
+    let start = Start::Shell { dir: dir.clone() };
+    self.push_column(id.clone(), id.clone(), Kind::Shell { dir }, start, cx);
     self.publish(cx);
     // The new shell takes focus at the end of the row, scrolled into view.
     self.focus_column(&id, window, cx);
@@ -2390,25 +2469,89 @@ impl TerminalPane {
     let millis = now_millis();
     let id = terminal_data::remote_column_id(&target.label, millis);
     let pty = terminal_data::remote_pty_id(&target, millis);
-    let on_event = self.on_event(id.clone(), cx);
-    let host = self.host.clone();
     let start = Start::Remote {
       target: target.clone(),
     };
-    let (look, popups) = ((REMOTE_FONT_SIZE, self.dark), self.popups.clone());
+    let kind = Kind::Remote {
+      target: Box::new(target),
+    };
+    self.push_column(id.clone(), pty, kind, start, cx);
+    self.publish(cx);
+    self.focus_column(&id, window, cx);
+  }
+
+  /// A column for `pty`, kept while the PTY runs.
+  fn push_column(
+    &mut self,
+    id: String,
+    pty: String,
+    kind: Kind,
+    start: Start,
+    cx: &mut Context<Self>,
+  ) {
+    kept().lock_or_recover().insert(
+      pty.clone(),
+      Kept {
+        id: id.clone(),
+        kind: kind.clone(),
+        start: start.clone(),
+        repo: self.place.repo_path.clone(),
+        owner: Some(self.serial),
+        opened: NEXT_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+      },
+    );
+    let on_event = self.on_event(id.clone(), cx);
+    let font_size = match kind {
+      Kind::Remote { .. } => REMOTE_FONT_SIZE,
+      _ => self.font_size,
+    };
+    let (host, look, popups) = (
+      self.host.clone(),
+      (font_size, self.dark),
+      self.popups.clone(),
+    );
     let view = cx.new(|cx| TerminalView::new(pty, start, host, look, popups, on_event, cx));
     self.columns.push(Column {
-      id: id.clone(),
+      id,
       view,
-      kind: Kind::Remote {
-        target: Box::new(target),
-      },
+      kind,
       width: None,
       streaming: false,
       bounds: Rc::default(),
     });
-    self.publish(cx);
-    self.focus_column(&id, window, cx);
+  }
+
+  /// Shows the repository's terminals that a closed window left running,
+  /// once the pane opens on it or draws after such a window closed.
+  /// A local one that ended meanwhile is dropped; a remote one reattaches
+  /// to its session on the host.
+  fn adopt(&mut self, cx: &mut Context<Self>) {
+    let releases = RELEASES.load(std::sync::atomic::Ordering::Relaxed);
+    let due = std::mem::take(&mut self.adopt_due) || releases != self.releases_seen;
+    self.releases_seen = releases;
+    if !due || self.place.repo_path.is_empty() {
+      return;
+    }
+    let mut shown = None;
+    for (pty, column) in adopt_kept(&self.place.repo_path, self.serial) {
+      let remote = matches!(column.kind, Kind::Remote { .. });
+      if !remote && !self.host.pty_exists(&pty) {
+        kept().lock_or_recover().remove(&pty);
+        terminal_data::detach(&pty);
+        continue;
+      }
+      if self.columns.iter().any(|c| c.id == column.id) {
+        continue;
+      }
+      shown = Some(column.id.clone());
+      self.push_column(column.id, pty, column.kind, column.start, cx);
+    }
+    if let Some(id) = shown {
+      self.collapsed = false;
+      self.reveal = Some(id.clone());
+      self.active = Some(id);
+      self.publish(cx);
+    }
   }
 
   fn close(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2422,6 +2565,7 @@ impl TerminalPane {
       log::warn!("pty close failed: {error}");
     }
     terminal_data::detach(&pty);
+    kept().lock_or_recover().remove(&pty);
     if let Kind::Agent { pane_id, .. } = column.kind {
       self.send("terminal.closeSession", pane_id.into(), cx);
     }
@@ -3584,6 +3728,7 @@ fn agent_icon(agent: &str) -> &'static str {
 impl Render for TerminalPane {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.watch_keys(window, cx);
+    self.adopt(cx);
     if let Some(route) = self.incoming.take() {
       self.apply_route(route, window, cx);
     }

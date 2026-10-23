@@ -199,6 +199,19 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
     "The prompt and output come from the server: its hostname and the workspace's path under .treq/workspaces",
     "No tmux status line at the bottom of the pane",
   ]);
+  // Away to Settings and back: the same remote shell, still attached.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await page.waitForTimeout(1500);
+  await row.click();
+  await page.waitForTimeout(3000);
+  await page.mouse.click(700, 780);
+  await page.keyboard.type("echo back from settings\n");
+  await page.waitForTimeout(2000);
+  await shot("shell-after-settings", "The remote shell after a trip to Settings", [
+    "The same shell column shows the hostname and pwd output, then 'back from settings'",
+    "No Reattach overlay: the channel stayed open while Settings showed",
+  ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();
   await page.waitForTimeout(3000);

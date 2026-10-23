@@ -32,9 +32,9 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   code_data::{
     self, conflict_count, description, diff_stats, display_title, group_by_day, headline,
-    history_commits, insert_at, looks_like_markdown, mention_at, session_name, task_branch_name,
-    task_settings, workspace_stack, Agent, CodeHost, Overview, TaskSettings, ENVIRONMENT_SETTING,
-    NEW_WORKSPACE_SETTING, REMOTE_FILE_TREE_REASON,
+    history_commits, insert_at, looks_like_markdown, mention_at, replace_range, session_name,
+    task_branch_name, task_settings, workspace_stack, Agent, CodeHost, Overview, TaskSettings,
+    ENVIRONMENT_SETTING, NEW_WORKSPACE_SETTING, REMOTE_FILE_TREE_REASON,
   },
   environment,
   file_picker::{FilePicker, FilePickerEvent, Scope},
@@ -581,11 +581,7 @@ impl CodeView {
       .as_ref()
       .map_or(self.task_text.len(), |t| t.read(cx).cursor());
     let inserted = format!("@{path} ");
-    let text = format!(
-      "{}{inserted}{}",
-      &self.task_text[..mention.anchor.min(self.task_text.len())],
-      &self.task_text[cursor.min(self.task_text.len())..]
-    );
+    let text = replace_range(&self.task_text, mention.anchor, cursor, &inserted);
     self.set_task_text(text, mention.anchor + inserted.len(), window, cx);
   }
 
@@ -1042,6 +1038,7 @@ pub(super) fn markdown(
   });
   // HTML comments never show, as in `MarkdownContent`; shortcodes show as
   // emoji, as on GitHub.
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   static HTML_COMMENT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
   let text = HTML_COMMENT.replace_all(text, "");
@@ -2079,12 +2076,10 @@ impl CodeView {
                         .child(entry.name.clone()),
                     )
                     .when_some(pin, |this, pin| {
-                      this.child(
-                        div()
-                          .flex_none()
-                          .text_color(muted_fg)
-                          .child(format!("\u{a0}@ {}", &pin[..pin.len().min(7)])),
-                      )
+                      this.child(div().flex_none().text_color(muted_fg).child(format!(
+                        "\u{a0}@ {}",
+                        pin.chars().take(7).collect::<String>()
+                      )))
                     }),
                 )
                 .children(pip.map(|c| div().size_2().flex_none().rounded_full().bg(c)))

@@ -64,6 +64,7 @@ impl Utf8StreamDecoder {
 }
 
 /// Strip ANSI escape sequences from a string.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn strip_ansi_codes(s: &str) -> String {
   // Match CSI sequences (including private modes like ?1h), OSC sequences, and charset designations
   static ANSI_RE: OnceLock<Regex> = OnceLock::new();
@@ -594,7 +595,7 @@ impl PtyManager {
               if suppressed_tail.len() > MAX_FILTER_BUFFER {
                 let start = suppressed_tail.len() - MAX_FILTER_BUFFER;
                 let start = suppressed_tail.ceil_char_boundary(start);
-                callback(suppressed_tail[start..].to_string());
+                callback(suppressed_tail.split_off(start));
                 suppressed_tail.clear();
                 line_buffer.clear();
                 *auto_command_reader.lock_or_recover() = None;
@@ -604,8 +605,7 @@ impl PtyManager {
             }
 
             while let Some(newline_pos) = line_buffer.find('\n') {
-              let line = line_buffer[..=newline_pos].to_string();
-              line_buffer = line_buffer[newline_pos + 1..].to_string();
+              let line: String = line_buffer.drain(..=newline_pos).collect();
 
               if filter.show(&strip_ansi_codes(&line)) {
                 callback(line);

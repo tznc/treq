@@ -13,13 +13,50 @@ function newCommandId(): string {
   return crypto.randomUUID();
 }
 
+// ── Payload shapes ───────────────────────────────────────────────────────────
+
+// Only the fields this module reads; GitHub sends far more.
+export interface GitHubRepositoryPayload {
+  id: number;
+  name: string;
+  full_name: string;
+  private?: boolean;
+  default_branch?: string;
+}
+
+export interface GitHubWebhookPayload {
+  action?: string;
+  installation?: {
+    id: number;
+    app_id: number;
+    account: { login: string; type: string; avatar_url?: string | null };
+  };
+  repositories?: GitHubRepositoryPayload[];
+  repositories_added?: GitHubRepositoryPayload[];
+  repositories_removed?: { id: number }[];
+  repository?: { id: number };
+  label?: { name?: string };
+  pull_request?: {
+    number: number;
+    title?: string | null;
+    merged?: boolean;
+    user?: { login?: string } | null;
+    base: { ref: string };
+    head: { sha: string; ref?: string | null };
+  };
+  check_suite?: {
+    conclusion?: string | null;
+    head_branch?: string | null;
+    head_sha?: string | null;
+  };
+}
+
 // ── Directly observable GitHub facts ─────────────────────────────────────────
 
 export async function applyInstallationFacts(
   supabase: SupabaseClient,
   event: string,
-  // deno-lint-ignore no-explicit-any
-  payload: Record<string, any>,
+  payload: GitHubWebhookPayload,
 ): Promise<void> {
   const installation = payload.installation;
   const action = payload.action as string;
@@ -70,7 +107,7 @@ export async function applyInstallationFacts(
 
   if (event === "installation_repositories") {
     await upsertRepos(supabase, installation.id, payload.repositories_added ?? []);
-    for (const r of (payload.repositories_removed ?? []) as { id: number }[]) {
+    for (const r of payload.repositories_removed ?? []) {
       await supabase.from("github_repositories").delete().eq("id", r.id);
     }
   }
@@ -79,8 +116,7 @@ export async function applyInstallationFacts(
 async function upsertRepos(
   supabase: SupabaseClient,
   installationId: number,
-  // deno-lint-ignore no-explicit-any
-  repos: any[],
+  repos: GitHubRepositoryPayload[],
 ): Promise<void> {
   if (repos.length === 0) return;
   await supabase.from("github_repositories").upsert(
@@ -103,8 +139,7 @@ async function upsertRepos(
 export async function commandsForEvent(
   supabase: SupabaseClient,
   event: string,
-  // deno-lint-ignore no-explicit-any
-  payload: Record<string, any>,
+  payload: GitHubWebhookPayload,
   deliveryId: string,
 ): Promise<MergeQueueCommand[]> {
   switch (event) {
@@ -122,8 +157,7 @@ export async function commandsForEvent(
 
 function commandsForInstallation(
   event: string,
-  // deno-lint-ignore no-explicit-any
-  payload: Record<string, any>,
+  payload: GitHubWebhookPayload,
   deliveryId: string,
 ): MergeQueueCommand[] {
   const installation = payload.installation;
@@ -154,8 +188,7 @@ function commandsForInstallation(
 
 async function commandsForPullRequest(
   supabase: SupabaseClient,
-  // deno-lint-ignore no-explicit-any
-  payload: Record<string, any>,
+  payload: GitHubWebhookPayload,
   deliveryId: string,
 ): Promise<MergeQueueCommand[]> {
   const action = payload.action as string;
@@ -274,16 +307,15 @@ async function commandsForPullRequest(
 
 async function commandsForCheckSuite(
   supabase: SupabaseClient,
-  // deno-lint-ignore no-explicit-any
-  payload: Record<string, any>,
+  payload: GitHubWebhookPayload,
   deliveryId: string,
 ): Promise<MergeQueueCommand[]> {
   if (payload.action !== "completed") return [];
 
   const suite = payload.check_suite;
-  const conclusion: string | null = suite?.conclusion;
-  const headBranch: string | null = suite?.head_branch;
-  const headSha: string | null = suite?.head_sha;
+  const conclusion = suite?.conclusion ?? null;
+  const headBranch = suite?.head_branch ?? null;
+  const headSha = suite?.head_sha ?? null;
   if (!conclusion || !headSha) return [];
   if (!headBranch || !isQueueTestBranch(headBranch)) return [];
 

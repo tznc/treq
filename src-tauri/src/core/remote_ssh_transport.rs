@@ -975,6 +975,7 @@ impl SshConnectionPool {
         alive,
       },
     );
+    drop(connections);
     Ok(handle)
   }
 
@@ -986,11 +987,13 @@ impl SshConnectionPool {
       return None;
     }
     existing.last_used = Instant::now();
+    let handle = existing.handle.clone();
+    drop(connections);
     self
       .metrics
       .pooled_connection_reuse_count
       .fetch_add(1, Ordering::Relaxed);
-    Some(existing.handle.clone())
+    Some(handle)
   }
 
   async fn connect(

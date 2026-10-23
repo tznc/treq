@@ -194,11 +194,13 @@ impl WindowHost for Backend {
   }
 
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool> {
-    let status = match self.remote(repo) {
-      Some(remote) => remote.status(Some(workspace_id)),
-      None => core::workspace_status(repo, Some(workspace_id)),
-    };
-    status.ok().map(|status| status.partial.has_changes)
+    match self.remote(repo) {
+      Some(remote) => remote
+        .status(Some(workspace_id))
+        .ok()
+        .map(|status| status.partial.has_changes),
+      None => core::workspace_has_changes(repo, workspace_id).ok(),
+    }
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {

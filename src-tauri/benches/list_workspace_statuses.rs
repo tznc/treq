@@ -1,6 +1,8 @@
 #![allow(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
   reason = "test code"
 )]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
@@ -88,7 +90,7 @@ fn bench_list_workspace_statuses_flat(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("5_flat_workspaces", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_five_flat_workspaces,
       |repo| {
         treq_lib::core::list_workspace_statuses(std::hint::black_box(&repo.repo_path))
@@ -106,7 +108,7 @@ fn bench_list_workspace_statuses_hierarchy(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("5_groups_3_levels", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_five_hierarchies_three_levels,
       |repo| {
         treq_lib::core::list_workspace_statuses(std::hint::black_box(&repo.repo_path))

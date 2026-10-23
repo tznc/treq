@@ -222,8 +222,7 @@ export type UpstreamSocketFactory = (
 // constructor, which is how the org token reaches the proxy without being
 // placed in the URL.
 export const denoUpstreamSocket: UpstreamSocketFactory = (url, headers) =>
-  // deno-lint-ignore no-explicit-any
-  new WebSocket(url, { headers } as any) as unknown as RelaySocket;
+  new WebSocket(url, { headers }) as unknown as RelaySocket;
 
 /**
  * An open proxy socket plus any bytes that arrived after the handshake but
@@ -420,8 +419,9 @@ export function pipeSockets(
     };
 
     const flushQueued = () => {
-      while (queued.length > 0 && !finished) {
-        const bytes = queued.shift()!;
+      while (!finished) {
+        const bytes = queued.shift();
+        if (!bytes) return;
         stats.bytesFromUpstream += bytes.byteLength;
         if (!deliver(client, bytes)) return;
       }

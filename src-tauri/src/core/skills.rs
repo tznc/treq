@@ -232,20 +232,62 @@ fn assert_safe_relative_path(path: &str) -> Result<(), String> {
   Ok(())
 }
 
-pub fn write_skill_pack(dest: &Path, files: &[(String, Vec<u8>)]) -> Result<(), String> {
-  if dest.exists() {
-    fs::remove_dir_all(dest).map_err(|e| format!("Failed to replace skill pack: {e}"))?;
+/// Builds a directory in a sibling staging dir, then swaps it into `dest`:
+/// the old directory is moved aside, the new one renamed in, and the old one
+/// removed. If `build` or a rename fails, the old directory is left in place.
+fn replace_dir(dest: &Path, build: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
+  let parent = dest
+    .parent()
+    .ok_or_else(|| "Invalid skill pack path".to_string())?;
+  fs::create_dir_all(parent).map_err(|e| format!("Failed to create skills dir: {e}"))?;
+  let name = dest
+    .file_name()
+    .ok_or_else(|| "Invalid skill pack path".to_string())?
+    .to_string_lossy();
+  let staging = parent.join(format!(".{name}.new-{}", std::process::id()));
+  let backup = parent.join(format!(".{name}.old-{}", std::process::id()));
+  let _ = fs::remove_dir_all(&staging);
+  let _ = fs::remove_dir_all(&backup);
+  if let Err(err) = fs::create_dir_all(&staging)
+    .map_err(|e| format!("Failed to create skill pack dir: {e}"))
+    .and_then(|()| build(&staging))
+  {
+    let _ = fs::remove_dir_all(&staging);
+    return Err(err);
   }
-  for (relative, bytes) in files {
-    assert_safe_relative_path(relative)?;
-    let path = dest.join(relative);
-    let parent = path
-      .parent()
-      .ok_or_else(|| format!("Invalid skill file path: {relative}"))?;
-    fs::create_dir_all(parent).map_err(|e| format!("Failed to create skill file dir: {e}"))?;
-    fs::write(&path, bytes).map_err(|e| format!("Failed to write skill file: {e}"))?;
+  let had_old = dest.exists();
+  if had_old {
+    if let Err(e) = fs::rename(dest, &backup) {
+      let _ = fs::remove_dir_all(&staging);
+      return Err(format!("Failed to replace skill pack: {e}"));
+    }
+  }
+  if let Err(e) = fs::rename(&staging, dest) {
+    if had_old {
+      let _ = fs::rename(&backup, dest);
+    }
+    let _ = fs::remove_dir_all(&staging);
+    return Err(format!("Failed to replace skill pack: {e}"));
+  }
+  if had_old {
+    let _ = fs::remove_dir_all(&backup);
   }
   Ok(())
+}
+
+pub fn write_skill_pack(dest: &Path, files: &[(String, Vec<u8>)]) -> Result<(), String> {
+  replace_dir(dest, |staging| {
+    for (relative, bytes) in files {
+      assert_safe_relative_path(relative)?;
+      let path = staging.join(relative);
+      let parent = path
+        .parent()
+        .ok_or_else(|| format!("Invalid skill file path: {relative}"))?;
+      fs::create_dir_all(parent).map_err(|e| format!("Failed to create skill file dir: {e}"))?;
+      fs::write(&path, bytes).map_err(|e| format!("Failed to write skill file: {e}"))?;
+    }
+    Ok(())
+  })
 }
 
 pub fn install_skill_files(
@@ -383,13 +425,7 @@ pub fn set_skill_install_scope(
   if !src.exists() {
     return Err(format!("Installed skill files missing for '{skill_id}'"));
   }
-  if dest.exists() {
-    fs::remove_dir_all(&dest).map_err(|e| format!("Failed to replace skill pack: {e}"))?;
-  }
-  if let Some(parent) = dest.parent() {
-    fs::create_dir_all(parent).map_err(|e| format!("Failed to create skills dir: {e}"))?;
-  }
-  copy_dir_recursive(&src, &dest)?;
+  replace_dir(&dest, |staging| copy_dir_recursive(&src, staging))?;
   uninstall_from_root(&src_root, skill_id)?;
   let record = InstalledSkill {
     id: current.id,
@@ -412,7 +448,18 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), String> {
       .file_type()
       .map_err(|e| format!("Failed to read skill pack: {e}"))?;
     let target = dest.join(entry.file_name());
-    if ty.is_dir() {
+    if ty.is_symlink() {
+      // Never follow a link out of the pack. A link to a file that resolves
+      // inside `src` is copied as that file; directory links are skipped (they
+      // could loop back into the tree).
+      let inside = fs::canonicalize(entry.path())
+        .ok()
+        .zip(fs::canonicalize(src).ok())
+        .is_some_and(|(resolved, root)| resolved.starts_with(root) && resolved.is_file());
+      if inside {
+        fs::copy(entry.path(), target).map_err(|e| format!("Failed to copy skill file: {e}"))?;
+      }
+    } else if ty.is_dir() {
       copy_dir_recursive(&entry.path(), &target)?;
     } else {
       fs::copy(entry.path(), target).map_err(|e| format!("Failed to copy skill file: {e}"))?;
@@ -456,10 +503,6 @@ fn install_generated_skill_copy(
   let marker = skill_dir.join(PROJECT_SKILL_MARKER);
   if skill_dir.exists() && !marker.exists() {
     return Ok(());
-  }
-  if skill_dir.exists() {
-    fs::remove_dir_all(&skill_dir)
-      .map_err(|e| format!("Failed to replace generated skill: {e}"))?;
   }
   write_skill_pack(&skill_dir, files)?;
   fs::write(&marker, "treq-library\n").map_err(|e| format!("Failed to write skill marker: {e}"))?;
@@ -713,6 +756,45 @@ mod tests {
       fs::read_to_string(user_dir.join("SKILL.md")).unwrap(),
       "user skill\n"
     );
+  }
+
+  #[test]
+  fn write_skill_pack_keeps_old_pack_when_new_files_are_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("pack");
+    write_skill_pack(&dest, &sample_files()).unwrap();
+    let bad = vec![
+      ("SKILL.md".to_string(), b"new".to_vec()),
+      ("../escape".to_string(), b"x".to_vec()),
+    ];
+    assert!(write_skill_pack(&dest, &bad).is_err());
+    assert_eq!(
+      fs::read(dest.join("SKILL.md")).unwrap(),
+      sample_files()[0].1
+    );
+    assert!(dest.join("notes.txt").exists());
+    let leftovers: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+    assert_eq!(leftovers.len(), 1, "staging dir was not cleaned up");
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn copy_dir_recursive_does_not_follow_symlinks_outside_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.txt"), "secret").unwrap();
+    fs::write(dir.path().join("outside-file.txt"), "secret").unwrap();
+    let src = dir.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("SKILL.md"), "ok").unwrap();
+    std::os::unix::fs::symlink(&outside, src.join("dir-link")).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("outside-file.txt"), src.join("file-link")).unwrap();
+    let dest = dir.path().join("dest");
+    copy_dir_recursive(&src, &dest).unwrap();
+    assert!(dest.join("SKILL.md").exists());
+    assert!(!dest.join("dir-link").exists());
+    assert!(!dest.join("file-link").exists());
   }
 
   #[test]

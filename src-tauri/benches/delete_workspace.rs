@@ -1,6 +1,8 @@
 #![allow(
   clippy::unwrap_used,
   clippy::let_underscore_must_use,
+  clippy::expect_used,
+  clippy::string_slice,
   reason = "test code"
 )]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
@@ -30,12 +32,12 @@ fn bench_delete_workspace(c: &mut Criterion) {
   group.sample_size(20);
 
   group.bench_function("default", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       setup_delete_workspace,
       |(repo, workspace_id)| {
         treq_lib::core::delete_workspace(
           std::hint::black_box(&repo.repo_path),
-          std::hint::black_box(&workspace_id),
+          std::hint::black_box(workspace_id),
         )
         .expect("delete_workspace failed");
       },

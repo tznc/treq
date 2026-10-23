@@ -19,7 +19,7 @@ use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
-  FontWeight, Hsla, MouseDownEvent, Pixels, SharedString, Stateful, Task, Window,
+  FontWeight, Hsla, MouseDownEvent, Pixels, SharedString, Stateful, Task, WeakEntity, Window,
 };
 
 use super::launch_data::LaunchRequest;
@@ -311,6 +311,7 @@ pub struct WorkspaceView {
   /// Where dropdown buttons were last drawn, in window coordinates.
   bounds: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
   _poll: Task<()>,
+  _place: Task<()>,
   /// Draws checks as running while one runs anywhere in the app.
   _running: gpui::Subscription,
 }
@@ -387,6 +388,7 @@ impl WorkspaceView {
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
       _poll: poll,
+      _place: Task::ready(()),
       _running: running,
     };
     this.load(cx);
@@ -1071,15 +1073,8 @@ impl WorkspaceView {
         .when(merge.passing, |b| {
           b.bg(green).text_color(p.primary_foreground).hover_bg(hover)
         })
-        .map(|b| {
-          let fg = if merge.passing {
-            p.primary_foreground
-          } else {
-            b.foreground()
-          };
-          b.child(ui::icon(theme::ICON_COMPARE, 16., fg))
-            .child("Merge...")
-        })
+        .icon(theme::ICON_COMPARE, 16.)
+        .label("Merge...")
         .on_click(self.press("workspace.merge"));
       right = right.child(
         self.with_tooltip(
@@ -1559,7 +1554,12 @@ impl WorkspaceView {
         let Ok(comment) = serde_json::from_value(value.clone()) else {
           return;
         };
-        let dir = self.terminal_place().working_directory;
+        let dir = self
+          .loaded
+          .as_ref()
+          .and_then(|loaded| loaded.workspace.as_ref())
+          .map(super::merge::full_path)
+          .unwrap_or_else(|| self.route.repo_path.clone());
         let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
         match self.send_to_idle(&prompt, cx) {
           None => return (self.react)(ScreenAction::Field { field, value }, cx),
@@ -1674,22 +1674,26 @@ impl WorkspaceView {
     let pane = match &self.terminal {
       Some((pane, placed)) if *placed == key => pane.clone(),
       _ => {
-        let place = self.terminal_place();
         let pane = match &self.terminal {
-          Some((pane, _)) => {
-            pane.update(cx, |pane, cx| pane.set_place(place, cx));
-            pane.clone()
-          }
+          Some((pane, _)) => pane.clone(),
           None => {
             let (host, react, popups) = (
               self.code_host.clone(),
               self.children.clone(),
               self.popups.clone(),
             );
+            // The repository's root until its workspaces are read.
+            let place = Place {
+              repo_path: self.route.repo_path.clone(),
+              working_directory: self.route.repo_path.clone(),
+              current_branch: self.route.home_branch.clone(),
+              ..Place::default()
+            };
             cx.new(|cx| TerminalPane::new(host, react, popups, place, cx))
           }
         };
         self.terminal = Some((pane.clone(), key));
+        self.place_terminal(pane.downgrade(), cx);
         pane
       }
     };
@@ -1697,29 +1701,22 @@ impl WorkspaceView {
     Some(pane)
   }
 
-  fn terminal_place(&self) -> Place {
-    let repo = self.route.repo_path.clone();
-    let workspaces =
-      super::code_data::CodeHost::workspaces(&*self.code_host, &repo).unwrap_or_default();
-    let selected = self
-      .route
-      .workspace_id
-      .and_then(|id| workspaces.iter().find(|w| w.id == id));
-    Place {
-      working_directory: selected
-        .map(super::merge::full_path)
-        .unwrap_or_else(|| repo.clone()),
-      current_branch: self.route.home_branch.clone(),
-      branches: workspaces
-        .iter()
-        .map(|w| (super::merge::full_path(w), w.branch_name.clone()))
-        .collect(),
-      workspace_ids: workspaces
-        .iter()
-        .map(|w| (super::merge::full_path(w), w.id))
-        .collect(),
-      repo_path: repo,
-    }
+  /// Places the pane in the shown workspace once its repository's
+  /// workspaces are read, off the main thread: a remote repository's go
+  /// over SSH.
+  fn place_terminal(&mut self, pane: WeakEntity<TerminalPane>, cx: &mut Context<Self>) {
+    let (host, repo, workspace_id, home) = (
+      self.code_host.clone(),
+      self.route.repo_path.clone(),
+      self.route.workspace_id,
+      self.route.home_branch.clone(),
+    );
+    self._place = cx.spawn(async move |_, cx| {
+      let place = cx
+        .background_spawn(async move { terminal_place(&*host, repo, workspace_id, home) })
+        .await;
+      let _ = pane.update(cx, |pane, cx| pane.set_place(place, cx));
+    });
   }
 
   /// The tab GPUI draws (Code or Commits), kept in step with the header.
@@ -1995,5 +1992,31 @@ impl Render for WorkspaceView {
       )
       .children(confirm)
       .into_any_element()
+  }
+}
+
+/// Where the terminal pane runs for workspace `workspace_id` of `repo`.
+fn terminal_place(
+  host: &dyn TerminalHost,
+  repo: String,
+  workspace_id: Option<i64>,
+  home_branch: String,
+) -> Place {
+  let workspaces = super::code_data::CodeHost::workspaces(host, &repo).unwrap_or_default();
+  let selected = workspace_id.and_then(|id| workspaces.iter().find(|w| w.id == id));
+  Place {
+    working_directory: selected
+      .map(super::merge::full_path)
+      .unwrap_or_else(|| repo.clone()),
+    current_branch: home_branch,
+    branches: workspaces
+      .iter()
+      .map(|w| (super::merge::full_path(w), w.branch_name.clone()))
+      .collect(),
+    workspace_ids: workspaces
+      .iter()
+      .map(|w| (super::merge::full_path(w), w.id))
+      .collect(),
+    repo_path: repo,
   }
 }

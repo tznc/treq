@@ -776,6 +776,7 @@ impl WorkspaceDialog {
     cx.notify();
   }
 
+  #[allow(clippy::expect_used, reason = "the fields are created just above")]
   fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
     if self.fields.is_none() {
       let input = |value: &str, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
