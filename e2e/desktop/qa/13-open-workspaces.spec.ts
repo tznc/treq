@@ -263,6 +263,71 @@ test("open-workspaces: the pull request search shows loading, no matches and err
   ).toBeHidden();
 });
 
+test("open-workspaces: Assigned to me narrows the pull requests to the user's assigned ones", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspaces" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  const assigned = page.getByRole("button", { name: "Assigned to me" });
+  // gpui-playwright reports a toggle's state as `checked`, not `pressed`.
+  await expect(
+    page.getByRole("button", { name: "Assigned to me", checked: false }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-off",
+    title: "Assigned to me, off",
+    expectations: [
+      "An outline 'Assigned to me' chip with a person icon sits right of the 'Search pull requests' input, the same height",
+      "'Your pull requests' lists octocat's own PRs",
+    ],
+  });
+
+  await assigned.click();
+  await expect(
+    page.getByRole("heading", { name: "Assigned to you" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Assigned to me", checked: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-on",
+    title: "Assigned to me, on",
+    expectations: [
+      "The 'Assigned to me' chip is drawn in the light selected tint",
+      "'Assigned to you' lists #421 by alice and #409 by bob, none of octocat's own",
+    ],
+  });
+
+  await page.getByLabel("Search pull requests").fill("runbook");
+  await expect(
+    page.getByRole("heading", { name: "Matching pull requests" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: /^#421 / }),
+  ).toBeHidden();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-search",
+    title: "Assigned to me with a search",
+    expectations: [
+      "The chip stays on; 'Matching pull requests' lists only #409",
+    ],
+  });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New Workspaces" }),
+  ).toBeHidden();
+});
+
 test("open-workspaces: indented lines stack on the line above", async ({
   page,
 }) => {

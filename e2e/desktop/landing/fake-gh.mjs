@@ -17,6 +17,8 @@ const field = (prefix) =>
 
 const REPO = "https://github.com/lorem-ipsum/event-bus";
 const author = (login) => ({ login, avatarUrl: null });
+/** Pull requests assigned to octocat, none of them octocat's own. */
+const ASSIGNED_TO_OCTOCAT = new Set([409, 421]);
 
 const prs = [
   {
@@ -271,6 +273,8 @@ if (group === "pr" && command === "list") {
   if (has("--draft")) list = list.filter((pr) => pr.isDraft);
   // The signed-in user is octocat.
   if (after("--author") === "@me") list = list.filter((pr) => pr.author.login === "octocat");
+  if ((after("--search") ?? "").split(/\s+/).includes("assignee:@me"))
+    list = list.filter((pr) => ASSIGNED_TO_OCTOCAT.has(pr.number));
   let words = (has("--search") ? after("--search") : "")
     .split(/\s+/)
     .filter((word) => word && !word.includes(":"))

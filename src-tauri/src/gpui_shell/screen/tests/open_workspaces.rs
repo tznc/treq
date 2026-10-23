@@ -21,6 +21,8 @@ pub(super) struct Fake {
   mine: Vec<GhPullRequest>,
   /// Everyone's.
   all: Vec<GhPullRequest>,
+  /// Those assigned to the user, which `assignee:@me` searches.
+  assigned: Vec<GhPullRequest>,
 }
 
 impl OpenWorkspacesHost for FakeHost {
@@ -34,10 +36,10 @@ impl OpenWorkspacesHost for FakeHost {
     if self.failing.contains(&"open_prs") {
       return Err("gh: API rate limit exceeded".into());
     }
-    let prs = if mine {
-      &self.open_workspaces.mine
-    } else {
-      &self.open_workspaces.all
+    let (prs, query) = match query.strip_prefix("assignee:@me") {
+      Some(rest) => (&self.open_workspaces.assigned, rest.trim()),
+      None if mine => (&self.open_workspaces.mine, query),
+      None => (&self.open_workspaces.all, query),
     };
     Ok(
       prs
@@ -329,6 +331,53 @@ fn a_failed_search_shows_its_error(cx: &mut TestAppContext) {
   assert!(!searching(&screen));
   assert!(h.cx.debug_bounds("open-workspaces-prs-error").is_some());
   expect(screen.get_by_role(by::role(Role::Button).name("Try again"))).to_be_visible();
+}
+
+#[gpui::test]
+fn assigned_to_me_searches_the_users_assigned_pull_requests(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
+  host.open_workspaces.all = vec![pr(5, "feat/mine", "main"), pr(6, "feat/theirs", "main")];
+  host.open_workspaces.assigned = vec![pr(6, "feat/theirs", "main"), pr(7, "feat/other", "main")];
+  let (mut h, host) = dialog(host, cx);
+  let screen = screen(&mut h);
+  let toggle = || by::role(Role::Button).name("Assigned to me");
+  expect(screen.get_by_role(toggle())).not().to_be_pressed();
+
+  screen.user().click(&screen.get_by_role(toggle()));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(toggle())).to_be_pressed();
+  expect(screen.get_by_role(by::role(Role::Heading).name("Assigned to you"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#7 Change 7"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#5 Change 5"))
+    .is_none());
+  assert!(host
+    .calls()
+    .contains(&"read open prs acme/treq all \"assignee:@me\"".to_string()));
+
+  // It narrows a search too.
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "6");
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#7 Change 7"))
+    .is_none());
+  assert!(host
+    .calls()
+    .contains(&"read open prs acme/treq all \"assignee:@me 6\"".to_string()));
+
+  // Off again, the search covers everyone's.
+  screen.user().click(&screen.get_by_role(toggle()));
+  let screen = self::screen(&mut h);
+  expect(screen.get_by_role(toggle())).not().to_be_pressed();
+  assert_eq!(
+    host.calls().last().map(String::as_str),
+    Some("read open prs acme/treq all \"6\"")
+  );
 }
 
 #[gpui::test]
@@ -631,5 +680,28 @@ mod pr_list {
     assert_eq!(list.error.as_deref(), Some("offline"));
     list.start();
     assert!(list.error.is_none());
+  }
+}
+
+mod pr_query {
+  use crate::gpui_shell::screen::open_workspaces::{pr_query, PrQuery};
+
+  #[test]
+  fn no_search_reads_the_users_own_first() {
+    assert_eq!(pr_query("  ", false), PrQuery::MineFirst);
+  }
+
+  #[test]
+  fn a_search_reads_everyones() {
+    assert_eq!(pr_query(" fix ", false), PrQuery::Search("fix".into()));
+  }
+
+  #[test]
+  fn assigned_to_me_adds_the_assignee_qualifier() {
+    assert_eq!(pr_query("", true), PrQuery::Search("assignee:@me".into()));
+    assert_eq!(
+      pr_query(" fix ", true),
+      PrQuery::Search("assignee:@me fix".into())
+    );
   }
 }
