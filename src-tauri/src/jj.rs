@@ -6155,6 +6155,24 @@ pub fn get_conflicted_files(
   workspace_path: &str,
   target_branch: Option<&str>,
 ) -> Result<Vec<String>, JjError> {
+  conflicted_files(workspace_path, target_branch, true)
+}
+
+/// [`get_conflicted_files`] for a caller that has just snapshotted the
+/// working copy (e.g. through [`jj_get_changed_files`]): skips the second
+/// filesystem walk unless importing Git state moved the operation.
+pub fn get_conflicted_files_after_snapshot(
+  workspace_path: &str,
+  target_branch: Option<&str>,
+) -> Result<Vec<String>, JjError> {
+  conflicted_files(workspace_path, target_branch, false)
+}
+
+fn conflicted_files(
+  workspace_path: &str,
+  target_branch: Option<&str>,
+  snapshot: bool,
+) -> Result<Vec<String>, JjError> {
   // Validate workspace path
   if workspace_path.is_empty() {
     return Err(JjError::IoError("Workspace path is empty".to_string()));
@@ -6176,7 +6194,10 @@ pub fn get_conflicted_files(
   }
 
   // 1. Proactively check and update if stale
+  let mut snapshot = snapshot;
   if let Ok(true) = is_workspace_stale(workspace_path) {
+    // Updating rewrites the working copy, so an earlier snapshot is out of date.
+    snapshot = true;
     if let Err(update_err) = jj_workspace_update_stale(workspace_path) {
       tracing::warn!(
         "Failed to update stale workspace in get_conflicted_files for {}: {}",
@@ -6190,18 +6211,25 @@ pub fn get_conflicted_files(
     Some(branch) => branch.to_string(),
     None => get_default_branch(&workspace_repo_path(workspace_path))?,
   };
-  get_conflicted_files_from_branch_diff(workspace_path, &effective_target)
+  get_conflicted_files_from_branch_diff(workspace_path, &effective_target, snapshot)
 }
 
 fn get_conflicted_files_from_branch_diff(
   workspace_path: &str,
   _target_branch: &str,
+  snapshot: bool,
 ) -> Result<Vec<String>, JjError> {
   let mut loaded = load_workspace_repo(workspace_path)?;
+  let loaded_op_id = loaded.repo.op_id().clone();
   import_colocated_git_state(&mut loaded, workspace_path)?;
 
-  let snapshotted_tree_override =
-    snapshot_working_copy_tree(&mut loaded, workspace_path)?.map(|(_, tree)| tree);
+  // A Git import can move the working-copy commit, so the caller's snapshot
+  // no longer covers it.
+  let snapshotted_tree_override = if snapshot || loaded.repo.op_id() != &loaded_op_id {
+    snapshot_working_copy_tree(&mut loaded, workspace_path)?.map(|(_, tree)| tree)
+  } else {
+    None
+  };
 
   let wc_commit_id = loaded
     .repo
