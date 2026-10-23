@@ -13,6 +13,7 @@ export default defineConfig({
       "test/billing/**/*.test.ts",
       "test/merge-queue/**/*.test.ts",
       "test/linear-proxy/**/*.test.ts",
+      "test/desktop-token/**/*.test.ts",
       "test/remote-ssh-traceability.test.ts",
     ],
     testTimeout: 15000,
