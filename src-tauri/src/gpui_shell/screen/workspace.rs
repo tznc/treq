@@ -1060,15 +1060,8 @@ impl WorkspaceView {
         .when(merge.passing, |b| {
           b.bg(green).text_color(p.primary_foreground).hover_bg(hover)
         })
-        .map(|b| {
-          let fg = if merge.passing {
-            p.primary_foreground
-          } else {
-            b.foreground()
-          };
-          b.child(ui::icon(theme::ICON_COMPARE, 16., fg))
-            .child("Merge...")
-        })
+        .icon(theme::ICON_COMPARE, 16.)
+        .label("Merge...")
         .on_click(self.press("workspace.merge"));
       right = right.child(
         self.with_tooltip(
