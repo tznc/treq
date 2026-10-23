@@ -34,6 +34,7 @@ yarn-error.log*
 
 # Version endpoint (generated at build time)
 /static/version
+/static/version.json
 
 # Search index (generated at build time)
 /static/site.db
