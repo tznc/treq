@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use crate::{
   core::{
-    remote::{RemoteRepoProbe, RepositoryInspection, TreqCommandRequest},
+    remote::{DirectoryListing, RemoteRepoProbe, RepositoryInspection, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
     remote_pty::{PtyLaunchSpec, RemoteAgentId},
     remote_records::{self, RestoreFailure, SavedRepository},
@@ -25,8 +25,8 @@ use crate::{
   },
 };
 
-/// `explicitEndpointRepoPath`'s first value.
-pub const DEFAULT_PATH: &str = "~/src/project";
+/// Where browsing starts on a machine: its user's home.
+pub const HOME: &str = "~";
 
 /// `REMOTE_MERGE_REASON`: the one action a remote repository lacks
 /// (`capabilityNoticeMessages(remoteCapabilities())`).
@@ -50,7 +50,14 @@ pub struct UserManagedValues {
 pub struct RepoForm {
   pub saved: Vec<SavedRepository>,
   pub selected_id: Option<String>,
+  /// The directory browsed to, absolute once listed.
   pub path: String,
+  /// What the host listed at `path`.
+  pub listing: Option<DirectoryListing>,
+  /// Hidden directories show in the listing.
+  pub show_hidden: bool,
+  /// A listing is on its way.
+  pub browsing: bool,
   pub probe: Option<RemoteRepoProbe>,
   pub clone_url: String,
   pub confirm_init: bool,
@@ -67,7 +74,10 @@ impl Default for RepoForm {
     Self {
       saved: Vec::new(),
       selected_id: None,
-      path: DEFAULT_PATH.into(),
+      path: HOME.into(),
+      listing: None,
+      show_hidden: false,
+      browsing: false,
       probe: None,
       clone_url: String::new(),
       confirm_init: false,
@@ -123,8 +133,8 @@ pub enum RemoteEffect {
   },
   /// `handleRegisterUserManaged`.
   RegisterUserManaged(UserManagedValues),
-  /// `handleProbeExplicitEndpointRepo`.
-  Probe { endpoint: SshEndpoint, path: String },
+  /// Lists the directories at `path` on the endpoint.
+  Browse { endpoint: SshEndpoint, path: String },
   Open {
     endpoint: SshEndpoint,
     generation: u64,
@@ -286,7 +296,38 @@ impl Remote {
     self.set_endpoint(endpoint, generation);
     self.form.connected = false;
     self.setup = false;
-    self.load_saved().into_iter().collect()
+    let path = self.form.path.clone();
+    self
+      .load_saved()
+      .into_iter()
+      .chain(self.browse(path))
+      .collect()
+  }
+
+  /// Lists `path` on the endpoint for the form's directory browser.
+  fn browse(&mut self, path: String) -> Option<RemoteEffect> {
+    let endpoint = self.endpoint.clone()?;
+    self.form.browsing = true;
+    Some(RemoteEffect::Browse { endpoint, path })
+  }
+
+  /// The host listed a directory: the browser moves into it.
+  pub fn browsed(&mut self, endpoint_id: &str, result: Result<DirectoryListing, String>) {
+    if self.endpoint.as_ref().map(|e| e.id.as_str()) != Some(endpoint_id) {
+      return;
+    }
+    self.form.browsing = false;
+    match result {
+      Ok(listing) => {
+        self.form.path = listing.path.clone();
+        self.form.listing = Some(listing);
+        self.form.selected_id = None;
+        self.form.probe = None;
+        self.form.confirm_init = false;
+        self.form.error = None;
+      }
+      Err(error) => self.form.error = Some(error),
+    }
   }
 
   /// A machine the Open a Repository screen picked is connected: the
@@ -377,14 +418,6 @@ impl Remote {
     self.form.error = Some(error);
   }
 
-  pub fn probed(&mut self, result: Result<RemoteRepoProbe, String>) {
-    self.form.busy = false;
-    match result {
-      Ok(probe) => self.form.probe = Some(probe),
-      Err(error) => self.form.error = Some(error),
-    }
-  }
-
   /// A saved repository did not restore.
   pub fn restore_failed(&mut self, failure: RestoreFailure) {
     self.form.busy = false;
@@ -408,12 +441,25 @@ impl Remote {
       "remoteRepo.reauthenticate" => RemoteEffect::Cloud(CloudAction::Reauthenticate {
         endpoint_id: endpoint.id.clone(),
       }),
-      "remoteRepo.probe" => {
-        self.form.busy = true;
-        RemoteEffect::Probe {
-          endpoint: endpoint.clone(),
-          path,
-        }
+      "remoteRepo.up" => {
+        let parent = self.form.listing.as_ref().and_then(|l| l.parent.clone());
+        return parent
+          .and_then(|parent| self.browse(parent))
+          .into_iter()
+          .collect();
+      }
+      // A folder that holds no repository: offer to clone or initialize
+      // one there, as a probe of it would.
+      "remoteRepo.useFolder" => {
+        self.form.probe = Some(RemoteRepoProbe {
+          host: String::new(),
+          path: path.clone(),
+          exists: true,
+          is_repo: false,
+          needs_clone: true,
+        });
+        self.form.error = None;
+        return Vec::new();
       }
       "remoteRepo.open" => open(OpenHow::Existing),
       "remoteRepo.clone" => {
@@ -460,12 +506,13 @@ impl Remote {
           transition: self.form.transition,
         }];
       }
-      "remoteRepo.path" => {
-        self.form.path = value.as_str().unwrap_or_default().to_string();
-        self.form.selected_id = None;
-        self.form.probe = None;
-        self.form.connected = false;
+      "remoteRepo.browse" => {
+        let Some(path) = value.as_str().filter(|p| !p.is_empty()) else {
+          return Vec::new();
+        };
+        return self.browse(path.to_string()).into_iter().collect();
       }
+      "remoteRepo.showHidden" => self.form.show_hidden = value.as_bool().unwrap_or(false),
       "remoteRepo.cloneUrl" => self.form.clone_url = value.as_str().unwrap_or_default().into(),
       "remoteRepo.confirmInit" => self.form.confirm_init = value.as_bool().unwrap_or(false),
       _ => {}
@@ -493,6 +540,9 @@ impl Remote {
       })).collect::<Vec<_>>(),
       "selectedId": form.selected_id,
       "path": form.path,
+      "listing": form.listing,
+      "showHidden": form.show_hidden,
+      "browsing": form.browsing,
       "probe": form.probe.as_ref().map(|p| json!({"is_repo": p.is_repo, "needs_clone": p.needs_clone})),
       "cloneUrl": form.clone_url,
       "confirmInit": form.confirm_init,
@@ -575,6 +625,22 @@ fn inspect_and_register(
     inspection,
     endpoint: endpoint.clone(),
   })
+}
+
+/// The directories at `path` on `endpoint` (`~` is its home).
+pub fn list_directories(
+  host: &dyn RemoteHost,
+  endpoint: &SshEndpoint,
+  path: &str,
+) -> Result<DirectoryListing, String> {
+  host
+    .remote_read(
+      endpoint,
+      TreqCommandRequest::ListDirectories {
+        path: path.to_string(),
+      },
+    )
+    .and_then(parse)
 }
 
 /// `handleProbeExplicitEndpointRepo`: what is at `path` on `endpoint`.

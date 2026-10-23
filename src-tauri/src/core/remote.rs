@@ -43,6 +43,28 @@ pub struct RemoteRepoProbe {
   pub needs_clone: bool,
 }
 
+/// The directories in one directory on a machine ([`TreqCommandRequest::ListDirectories`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryListing {
+  /// The directory, absolute (`~` resolved).
+  pub path: String,
+  /// Its parent; `None` at the root.
+  pub parent: Option<String>,
+  /// It holds a Git or jj repository.
+  pub is_repo: bool,
+  /// Its subdirectories, by name.
+  pub entries: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+  pub name: String,
+  pub path: String,
+  /// The name starts with a dot.
+  pub hidden: bool,
+  pub is_repo: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RepositoryLocation {
@@ -193,6 +215,11 @@ pub enum TreqCommandRequest {
   /// the CLI requires `--repo`.
   MachineTools {
     root: String,
+  },
+  /// The directories in `path` on the machine (`~` is its home), for
+  /// browsing to a repository. See [`DirectoryListing`].
+  ListDirectories {
+    path: String,
   },
   // -- Phase 5: probe/clone/init as typed commands ---------------------------
   ProbeRepo {
@@ -518,7 +545,8 @@ impl TreqCommandRequest {
       | Self::PtyAttachCommand { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
-      | Self::MachineTools { .. } => false,
+      | Self::MachineTools { .. }
+      | Self::ListDirectories { .. } => false,
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
       | Self::InitRepo { .. }
@@ -598,6 +626,7 @@ impl TreqCommandRequest {
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
+      | Self::ListDirectories { .. }
       | Self::ProbeRepo { .. }
       | Self::UpdateWorkspace { .. }
       | Self::DeleteWorkspace { .. }
@@ -642,6 +671,7 @@ impl TreqCommandRequest {
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
       Self::MachineUsage { .. } => "MachineUsage",
       Self::MachineTools { .. } => "MachineTools",
+      Self::ListDirectories { .. } => "ListDirectories",
       Self::ProbeRepo { .. } => "ProbeRepo",
       Self::CloneRepo { .. } => "CloneRepo",
       Self::InitRepo { .. } => "InitRepo",
@@ -701,6 +731,7 @@ impl TreqCommandRequest {
     "WorkspaceChangeMarker",
     "MachineUsage",
     "MachineTools",
+    "ListDirectories",
     "ProbeRepo",
     "CloneRepo",
     "InitRepo",
@@ -1383,6 +1414,7 @@ impl TreqCommandRequest {
       Self::ProbeRepo { repo } => ("repo", "probe", repo),
       Self::MachineUsage { root } => ("repo", "usage", root),
       Self::MachineTools { root } => ("repo", "tools", root),
+      Self::ListDirectories { path } => ("repo", "dirs", path),
       Self::InitRepo {
         repo,
         idempotency_key,
@@ -2094,6 +2126,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
     TreqCommandRequest::MachineTools { .. } => json(Ok::<_, String>(
       crate::core::prerequisites::check_host_tools(),
     )),
+    TreqCommandRequest::ListDirectories { path } => json(list_directories(&path)),
     TreqCommandRequest::InspectWorkspace { repo, workspace } => json(
       crate::core::workspaces::workspace_status(&repo, workspace_id(Some(&workspace))?),
     ),
@@ -2853,6 +2886,49 @@ fn search_files_local(
   )
 }
 
+fn is_repo_dir(path: &Path) -> bool {
+  path.join(".jj").is_dir() || path.join(".git").exists()
+}
+
+/// [`TreqCommandRequest::ListDirectories`]: `path`'s subdirectories, with
+/// `~` (or an empty path) as the user's home.
+fn list_directories(path: &str) -> Result<DirectoryListing, String> {
+  let trimmed = path.trim();
+  let home = || std::env::var_os("HOME").map(std::path::PathBuf::from);
+  let dir = match trimmed {
+    "" | "~" => home().ok_or("HOME is not set")?,
+    _ => match trimmed.strip_prefix("~/") {
+      Some(rest) => home().ok_or("HOME is not set")?.join(rest),
+      None => std::path::PathBuf::from(trimmed),
+    },
+  };
+  let dir = dir
+    .canonicalize()
+    .map_err(|e| format!("Cannot open {}: {e}", dir.display()))?;
+  let read = fs::read_dir(&dir).map_err(|e| format!("Cannot open {}: {e}", dir.display()))?;
+  let mut entries: Vec<DirectoryEntry> = read
+    .flatten()
+    .filter(|entry| entry.path().is_dir())
+    .map(|entry| {
+      let name = entry.file_name().to_string_lossy().to_string();
+      let path = entry.path();
+      DirectoryEntry {
+        hidden: name.starts_with('.'),
+        is_repo: is_repo_dir(&path),
+        path: path.to_string_lossy().to_string(),
+        name,
+      }
+    })
+    .collect();
+  entries.sort_by_key(|entry| entry.name.to_lowercase());
+  Ok(DirectoryListing {
+    path: dir.to_string_lossy().to_string(),
+    parent: dir.parent().map(|p| p.to_string_lossy().to_string()),
+    is_repo: is_repo_dir(&dir),
+    entries,
+  })
+}
+
 fn probe_repo_path(repo_path: &str) -> Result<RemoteRepoProbe, String> {
   let trimmed = repo_path.trim();
   if trimmed.is_empty() {
@@ -2860,7 +2936,7 @@ fn probe_repo_path(repo_path: &str) -> Result<RemoteRepoProbe, String> {
   }
   let path = Path::new(trimmed);
   let exists = path.exists();
-  let is_repo = exists && (path.join(".jj").is_dir() || path.join(".git").exists());
+  let is_repo = exists && is_repo_dir(path);
   Ok(RemoteRepoProbe {
     host: String::new(),
     path: trimmed.to_string(),
@@ -3415,6 +3491,47 @@ fn validate_remote_path(path: &str) -> Result<(), String> {
 mod tests {
   use super::*;
   use std::process::Command;
+
+  #[cfg(unix)]
+  #[test]
+  fn list_directories_lists_subdirectories_by_name_and_marks_repositories() {
+    let dir = tempfile::tempdir().unwrap();
+    for sub in ["beta", "Alpha/.git", ".config", "plain/.jj"] {
+      fs::create_dir_all(dir.path().join(sub)).unwrap();
+    }
+    fs::write(dir.path().join("notes.txt"), "").unwrap();
+    std::os::unix::fs::symlink(dir.path().join("beta"), dir.path().join("link")).unwrap();
+
+    let listing = list_directories(dir.path().to_str().unwrap()).unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    assert_eq!(listing.path, root.to_string_lossy());
+    assert_eq!(
+      listing.parent.as_deref(),
+      root.parent().map(|p| p.to_string_lossy()).as_deref()
+    );
+    assert!(!listing.is_repo);
+    let names: Vec<_> = listing
+      .entries
+      .iter()
+      .map(|e| (e.name.as_str(), e.hidden, e.is_repo))
+      .collect();
+    assert_eq!(
+      names,
+      [
+        (".config", true, false),
+        ("Alpha", false, true),
+        ("beta", false, false),
+        ("link", false, false),
+        ("plain", false, true),
+      ]
+    );
+    assert!(
+      list_directories(dir.path().join("Alpha").to_str().unwrap())
+        .unwrap()
+        .is_repo
+    );
+    assert!(list_directories(dir.path().join("gone").to_str().unwrap()).is_err());
+  }
 
   #[test]
   fn workspace_id_rejects_zero_and_negative_ids() {
@@ -4633,7 +4750,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 57);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 58);
   }
 
   #[test]

@@ -616,7 +616,7 @@ impl OnboardingView {
               ui::text(div(), TextSize::Sm)
                 .pb_2()
                 .text_color(p.muted_foreground)
-                .child("Enter the repository's path on the host."),
+                .child("Pick the repository's folder on the host."),
             )
             .children(form.clone().map(|form| {
               onboarding_remote::render(&form, &self.inputs, &self.react, self.dark, &p, cx)

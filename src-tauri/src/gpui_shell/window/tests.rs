@@ -330,6 +330,23 @@ impl RemoteHost for FakeHost {
       TreqCommandRequest::InspectRepository { repo } => {
         Ok(serde_json::to_value(inspection(&repo)).unwrap())
       }
+      TreqCommandRequest::ListDirectories { path } => {
+        let path = if path == "~" {
+          "/home/me".to_string()
+        } else {
+          path
+        };
+        let parent = path
+          .rsplit_once('/')
+          .map(|(p, _)| if p.is_empty() { "/" } else { p });
+        Ok(serde_json::json!({
+          "path": path, "parent": parent, "is_repo": path == "/srv/app" && !self.no_repo,
+          "entries": [
+            {"name": ".cache", "path": format!("{path}/.cache"), "hidden": true, "is_repo": false},
+            {"name": "app", "path": format!("{path}/app"), "hidden": false, "is_repo": true},
+          ],
+        }))
+      }
       _ => Err("unexpected read".into()),
     }
   }
@@ -1010,7 +1027,7 @@ fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
       "auth_identity_reference": "/k",
     }),
   );
-  window.field(cx, "remoteRepo.path", "/srv/app".into());
+  window.field(cx, "remoteRepo.browse", "/srv/app".into());
   window.press(cx, "remoteRepo.open");
   window
 }
@@ -1039,12 +1056,16 @@ fn registers_an_endpoint_and_opens_a_repository_on_it(cx: &mut TestAppContext) {
   };
   let form = route.remote_repo.expect("no repository form");
   assert_eq!(form.saved.len(), 1, "the endpoint's saved repositories");
-  window.field(cx, "remoteRepo.path", "/srv/app".into());
+  assert_eq!(form.path, "/home/me", "browsing starts at the host's home");
+  assert!(!form.show_hidden);
+  assert_eq!(form.listing.map(|l| l.entries.len()), Some(2));
+  window.field(cx, "remoteRepo.browse", "/srv/app".into());
   window.press(cx, "remoteRepo.open");
   let calls = host.calls();
   for call in [
     "register devbox.example",
     "saved ep-1 0",
+    "read ListDirectories",
     "read ProbeRepo",
     "read InspectRepository",
     "save remote /srv/app",
@@ -1082,6 +1103,40 @@ fn a_path_without_a_repository_offers_clone_and_init(cx: &mut TestAppContext) {
   window.press(cx, "remoteRepo.init");
   assert!(host.calls().contains(&"change InitRepo".to_string()));
   assert!(window.screen_snapshot().repository.is_some());
+}
+
+#[gpui::test]
+fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    no_repo: true,
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  window.screen(cx, ScreenAction::OpenRemote);
+  window.field(
+    cx,
+    "remote.registerUserManaged",
+    serde_json::json!({
+      "display_name": "Dev box", "hostname": "devbox.example", "port": 22,
+      "username": "me", "host_key_fingerprint": "SHA256:x",
+      "auth_identity_reference": "/k",
+    }),
+  );
+  let form = |window: &Window| {
+    let View::Onboarding(route) = window.screen_snapshot().view else {
+      panic!("not onboarding");
+    };
+    route.remote_repo.unwrap()
+  };
+  window.press(cx, "remoteRepo.up");
+  assert_eq!(form(&window).path, "/home");
+  window.field(cx, "remoteRepo.showHidden", true.into());
+  assert!(form(&window).show_hidden);
+  window.press(cx, "remoteRepo.useFolder");
+  let probe = form(&window).probe.expect("clone and init offered");
+  assert!(!probe.is_repo && probe.needs_clone);
+  window.field(cx, "remoteRepo.browse", "/home/me".into());
+  assert!(form(&window).probe.is_none(), "a new folder starts over");
 }
 
 #[gpui::test]

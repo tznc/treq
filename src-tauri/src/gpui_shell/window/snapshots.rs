@@ -593,7 +593,7 @@ mod tests {
     };
     let form = route.remote_repo.unwrap();
     assert!(form.selector);
-    assert_eq!(form.path, remote::DEFAULT_PATH);
+    assert_eq!(form.path, remote::HOME);
     assert!(
       matches!(screen(&Model::new(None), &Data::default()).unwrap().view, View::Onboarding(r) if r.remote_repo.is_none())
     );
