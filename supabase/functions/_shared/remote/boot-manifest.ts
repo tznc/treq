@@ -15,13 +15,25 @@ export interface BootManifest {
   agents: BootManifestAgent[];
 }
 
-export const CURRENT_MANIFEST_VERSION = 1;
+export const CURRENT_MANIFEST_VERSION = 2;
 
 const MANIFESTS: Record<number, BootManifest> = {
   1: {
     manifest_version: 1,
     treq_version: "0.3.0",
     jj_version: "0.24.0",
+    git_version: "2.45",
+    agents: [
+      { name: "claude", version: "1.0.0" },
+      { name: "codex", version: "1.0.0" },
+    ],
+  },
+  // jj matches the jj-lib treq links (src-tauri/Cargo.toml): jj 0.24 cannot
+  // open repositories that treq has written.
+  2: {
+    manifest_version: 2,
+    treq_version: "0.3.0",
+    jj_version: "0.40.0",
     git_version: "2.45",
     agents: [
       { name: "claude", version: "1.0.0" },

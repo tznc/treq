@@ -1308,6 +1308,7 @@ impl AgentPromptView {
       .top(zpx(32.))
       .right_0()
       .min_w(zpx(128.))
+      .child(ui::MenuLabel::new("Agent", p))
       // Agents that aren't installed are left out, unless already chosen.
       .children(
         Agent::ALL

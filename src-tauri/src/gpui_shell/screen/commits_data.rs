@@ -2,7 +2,7 @@
 //! to the backend, and the rules it applies: which commits show, which can
 //! be resolved, diff line numbers and the comments sent to an agent.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 
@@ -483,34 +483,43 @@ pub fn first_file_diff(
   Err(error.unwrap_or_else(|| "Failed to load commit file diff".into()))
 }
 
+static HUNK_HEADER: LazyLock<Regex> = LazyLock::new(|| {
+  Regex::new(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk header regex")
+});
+
 /// `parseHunkHeader`: `(old_start, new_start)`.
 pub fn hunk_starts(header: &str) -> (u32, u32) {
-  let re = Regex::new(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk header regex");
-  re.captures(header)
+  HUNK_HEADER
+    .captures(header)
     .map(|c| (c[1].parse().unwrap_or(1), c[2].parse().unwrap_or(1)))
     .unwrap_or((1, 1))
 }
 
 /// `computeHunkLineNumbers`: each line's `(old, new)` number.
 pub fn line_numbers(hunk: &JjDiffHunk) -> Vec<(Option<u32>, Option<u32>)> {
+  numbered(hunk).collect()
+}
+
+/// Line `l`'s `(old, new)` number, counting only the lines before it.
+pub fn line_number(hunk: &JjDiffHunk, l: usize) -> (Option<u32>, Option<u32>) {
+  numbered(hunk).nth(l).unwrap_or((None, None))
+}
+
+fn numbered(hunk: &JjDiffHunk) -> impl Iterator<Item = (Option<u32>, Option<u32>)> + '_ {
   let (mut old, mut new) = hunk_starts(&hunk.header);
-  hunk
-    .lines
-    .iter()
-    .map(|line| {
-      if line.starts_with('+') {
-        new += 1;
-        (None, Some(new - 1))
-      } else if line.starts_with('-') {
-        old += 1;
-        (Some(old - 1), None)
-      } else {
-        old += 1;
-        new += 1;
-        (Some(old - 1), Some(new - 1))
-      }
-    })
-    .collect()
+  hunk.lines.iter().map(move |line| {
+    if line.starts_with('+') {
+      new += 1;
+      (None, Some(new - 1))
+    } else if line.starts_with('-') {
+      old += 1;
+      (Some(old - 1), None)
+    } else {
+      old += 1;
+      new += 1;
+      (Some(old - 1), Some(new - 1))
+    }
+  })
 }
 
 /// A diff line's kind, from its prefix.
