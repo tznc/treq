@@ -3,6 +3,7 @@
 // queries Linear for the workspace name, stores the token, and consumes the intent.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
+import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,7 +31,7 @@ async function sha256Hex(input: string): Promise<string> {
 async function getWorkspaceInfo(
   accessToken: string,
 ): Promise<{ name: string; id: string }> {
-  const response = await fetch("https://api.linear.app/graphql", {
+  const response = await fetchWithTimeout("https://api.linear.app/graphql", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -128,7 +129,7 @@ Deno.serve(async (req) => {
   const redirectUri = `${Deno.env.get("WEB_URL") ?? "https://treq.dev"}/integrations/linear/callback`;
   let tokenResponse;
   try {
-    const tokenRes = await fetch("https://api.linear.app/oauth/token", {
+    const tokenRes = await fetchWithTimeout("https://api.linear.app/oauth/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({

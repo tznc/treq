@@ -10,6 +10,7 @@
 // All queue orchestration happens in the merge-queue-worker function.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
+import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import { publishMergeQueueCommand } from "../_shared/merge-queue/commands-queue.ts";
 import { applyInstallationFacts, commandsForEvent } from "./webhook-handlers.ts";
 
@@ -65,7 +66,7 @@ function invokeWorkerSoon(): void {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !key) return;
-  const invoke = fetch(`${url}/functions/v1/merge-queue-worker`, {
+  const invoke = fetchWithTimeout(`${url}/functions/v1/merge-queue-worker`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,

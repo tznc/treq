@@ -12,6 +12,8 @@
 // One PostgREST call as the service role, so this uses fetch rather than
 // supabase-js.
 
+import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function json(body: unknown, status = 200): Response {
@@ -62,7 +64,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   try {
-    const res = await fetch(`${supabaseUrl}/rest/v1/rpc/gtm_metrics`, {
+    const res = await fetchWithTimeout(`${supabaseUrl}/rest/v1/rpc/gtm_metrics`, {
       method: "POST",
       headers: {
         apikey: serviceKey,

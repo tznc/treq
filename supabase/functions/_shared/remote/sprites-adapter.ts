@@ -4,6 +4,7 @@
 // state normalization, same idempotency-header convention. Vendor status
 // strings and vendor SDK types must never leave this module.
 
+import { fetchWithTimeout } from "../http/fetch-with-timeout.ts";
 import type { RegionCode, SizePreset } from "./catalog.ts";
 
 export type ManagedInstanceState =
@@ -65,6 +66,28 @@ export interface MachineExecResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+/**
+ * Message safe to return to a client. Provider messages can carry upstream
+ * response bodies or transport details, so only the fixed messages for
+ * well-known kinds pass through; callers log `err.message` instead.
+ */
+export function providerClientMessage(err: ProviderError): string {
+  switch (err.kind) {
+    case "not_found":
+    case "already_exists":
+    case "quota_exceeded":
+      return err.message;
+    case "invalid_request":
+      return "provider rejected the request";
+    case "timeout":
+      return "provider request timed out";
+    case "unavailable":
+      return "provider unavailable";
+    default:
+      return "provider request failed";
+  }
 }
 
 export interface ManagedComputeProvider {
@@ -194,11 +217,11 @@ export class SpritesProvider implements ManagedComputeProvider {
     url.searchParams.set("path", command[0]);
 
     try {
-      const response = await fetch(url, {
+      // The caller-chosen exec timeout replaces the 15s default.
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers: this.headers(),
-        signal: AbortSignal.timeout(timeoutSeconds * 1_000),
-      });
+      }, timeoutSeconds * 1_000);
       if (!response.ok) throw await this.mapErrorResponse(response);
       return { exitCode: 0, stdout: await response.text(), stderr: "" };
     } catch (err) {
@@ -219,21 +242,19 @@ export class SpritesProvider implements ManagedComputeProvider {
   ): Promise<void> {
     const serviceUrl = `${this.spriteUrl(providerId)}/services/${encodeURIComponent(name)}`;
     try {
-      const put = await fetch(serviceUrl, {
+      const put = await fetchWithTimeout(serviceUrl, {
         method: "PUT",
         headers: this.headers(),
         body: JSON.stringify({ cmd: spec.cmd, args: spec.args }),
-        signal: AbortSignal.timeout(30_000),
-      });
+      }, 30_000);
       if (!put.ok) throw await this.mapErrorResponse(put);
       await put.body?.cancel();
       // `restart` rather than `start` so a repaired definition or rotated CA
       // file is picked up by an already-running sshd.
-      const restart = await fetch(`${serviceUrl}/restart`, {
+      const restart = await fetchWithTimeout(`${serviceUrl}/restart`, {
         method: "POST",
         headers: this.headers(),
-        signal: AbortSignal.timeout(60_000),
-      });
+      }, 60_000);
       if (!restart.ok) throw await this.mapErrorResponse(restart);
       // The response streams NDJSON progress; drain it so the service has
       // finished starting before the caller reads host keys.
@@ -287,11 +308,11 @@ export class SpritesProvider implements ManagedComputeProvider {
 
     let response: Response;
     try {
-      response = await fetch(this.spritesUrl(), {
+      response = await fetchWithTimeout(this.spritesUrl(), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify(body),
-      });
+      }, 30_000); // Creating a Sprite is slower than a metadata call.
     } catch (err) {
       throw new ProviderError(
         "unavailable",
@@ -312,7 +333,7 @@ export class SpritesProvider implements ManagedComputeProvider {
   async getInstance(providerId: string): Promise<ProviderInstance> {
     let response: Response;
     try {
-      response = await fetch(this.spriteUrl(providerId), {
+      response = await fetchWithTimeout(this.spriteUrl(providerId), {
         headers: this.headers(),
       });
     } catch (err) {
@@ -359,7 +380,7 @@ export class SpritesProvider implements ManagedComputeProvider {
   async deleteInstance(providerId: string): Promise<void> {
     let response: Response;
     try {
-      response = await fetch(this.spriteUrl(providerId), {
+      response = await fetchWithTimeout(this.spriteUrl(providerId), {
         method: "DELETE",
         headers: this.headers(),
       });

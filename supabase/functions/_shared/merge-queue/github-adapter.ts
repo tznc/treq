@@ -6,6 +6,8 @@
 //   GITHUB_APP_ID                 - numeric App ID
 //   GITHUB_APP_PRIVATE_KEY_BASE64 - base64-encoded PEM private key
 
+import { fetchWithTimeout } from "../http/fetch-with-timeout.ts";
+
 function base64url(data: ArrayBuffer | string): string {
   const bytes =
     typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data);
@@ -62,7 +64,7 @@ export async function getInstallationToken(installationId: number): Promise<stri
   const { appId, privateKey } = appCredentials();
   const jwt = await createAppJWT(appId, privateKey);
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
       method: "POST",
@@ -94,7 +96,7 @@ export async function getInstallation(installationId: number): Promise<{
   const { appId, privateKey } = appCredentials();
   const jwt = await createAppJWT(appId, privateKey);
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.github.com/app/installations/${installationId}`,
     {
       headers: {
@@ -179,7 +181,7 @@ export class GitHubRestAdapter implements GitHubAdapter {
     body?: unknown,
   ): Promise<{ status: number; data: T | null }> {
     const url = `https://api.github.com/repos/${this.owner}/${this.repo}${path}`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method,
       headers: {
         Authorization: `Bearer ${this.token}`,
