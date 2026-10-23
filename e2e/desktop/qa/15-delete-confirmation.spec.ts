@@ -37,7 +37,7 @@ async function askDelete(page: Page, context: BrowserContext): Promise<void> {
 test("delete-confirmation: one in-app question; Escape cancels", async ({ page, context }) => {
   await home(page);
   await askDelete(page, context);
-  const question = page.getByText(`Delete ${BRANCH}?`, { exact: true });
+  const question = page.getByRole("dialog", { name: `Delete ${BRANCH}?`, exact: true });
   await expect(question).toBeVisible();
   await expect(question).toHaveCount(1);
   await expect(page.getByTestId("confirm-cancel")).toHaveAccessibleName("Cancel");

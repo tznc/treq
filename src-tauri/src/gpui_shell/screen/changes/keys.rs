@@ -64,7 +64,10 @@ impl ChangesView {
   }
 
   fn lines_of(&self, path: &str) -> Vec<JjDiffHunk> {
-    self.file_hunks(path).map(|d| d.hunks).unwrap_or_default()
+    self
+      .file_hunks(path)
+      .map(|d| d.hunks.to_vec())
+      .unwrap_or_default()
   }
 
   /// Up or Down: the cursor moves a line, into the next file at a file's

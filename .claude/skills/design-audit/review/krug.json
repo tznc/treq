@@ -72,7 +72,8 @@
     {
       "name": "SplitButton",
       "examples": [
-        "split-button/playground"
+        "split-button/playground",
+        "split-button/pill"
       ],
       "compound": "A Button and an IconButton fused into one silhouette.",
       "notes": [
@@ -87,6 +88,10 @@
         {
           "principle": "HI",
           "how": "It takes the filled or outline style as a single unit, so it never adds a second primary to a region."
+        },
+        {
+          "principle": "CV",
+          "how": "The pill variant is a state that is also a button (a PR's Open): fully rounded, tinted in the state's tone exactly like a Badge, so it reads as the same status label everywhere. Its second half is one related command (open on the web) with its own name."
         }
       ],
       "gap": null
@@ -164,7 +169,8 @@
     {
       "name": "Checkbox",
       "examples": [
-        "checkbox/states"
+        "checkbox/states",
+        "checkbox/labels"
       ],
       "compound": null,
       "notes": [
@@ -179,6 +185,10 @@
         {
           "principle": "NO",
           "how": "This one component replaces the three hand-drawn checkboxes the review found."
+        },
+        {
+          "principle": "CL",
+          "how": "The label sits right of the box in the row that takes the click, so the whole label toggles it; a hint goes under in muted text. A partly checked parent shows a dash and its children are indented under it."
         }
       ],
       "gap": null
@@ -201,6 +211,10 @@
         {
           "principle": "HI",
           "how": "An alert has at most one action, at the trailing edge where the eye lands after the message."
+        },
+        {
+          "principle": "HI",
+          "how": "Actions sit bottom right under the text, so the eye reads the fact, then what to do, then lands on the verb. With two, the dismissive ghost comes first and the resolving outline sits in the corner."
         }
       ],
       "gap": null
@@ -302,6 +316,10 @@
         {
           "principle": "SE",
           "how": "A description line explains a choice in place (\"Plan the change first, without editing files\"), so nobody has to try it to learn what it does."
+        },
+        {
+          "principle": "SE",
+          "how": "A group of values gets a MenuLabel that names the value (\"Target branch\", \"Agent\"), so the check column under it is explained before it appears instead of reading as a sudden indent."
         }
       ],
       "gap": null

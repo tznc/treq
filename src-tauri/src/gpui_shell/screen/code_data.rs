@@ -3,9 +3,12 @@
 //! the task input's agent, branch names and mentions, the stack, and the
 //! commit history column.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::LazyLock,
+};
 
-use regex::Regex;
+use regex::{Regex, RegexSet};
 
 use super::{settings_data::SettingsHost, workspace_data::WorkspaceHost};
 use crate::{
@@ -538,26 +541,28 @@ pub fn insert_at(text: &str, cursor: usize, insertion: &str) -> (String, usize) 
 /// `looksLikeMarkdown`: block syntax at a line start, or inline emphasis,
 /// code or a link.
 pub fn looks_like_markdown(text: &str) -> bool {
-  const PATTERNS: [&str; 9] = [
-    r"(?m)^#{1,6}\s",
-    r"(?m)^\s*[-*+]\s",
-    r"(?m)^\s*\d+\.\s",
-    r"(?m)^>\s",
-    r"(?m)^```",
-    r"(?m)^\|.*\|\s*$",
-    r"\*\*[^*\n]+\*\*",
-    r"`[^`\n]+`",
-    r"\[[^\]\n]+\]\([^)\s]+\)",
-  ];
-  PATTERNS
-    .iter()
-    .any(|p| Regex::new(p).expect("regex").is_match(text))
+  static PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
+    RegexSet::new([
+      r"(?m)^#{1,6}\s",
+      r"(?m)^\s*[-*+]\s",
+      r"(?m)^\s*\d+\.\s",
+      r"(?m)^>\s",
+      r"(?m)^```",
+      r"(?m)^\|.*\|\s*$",
+      r"\*\*[^*\n]+\*\*",
+      r"`[^`\n]+`",
+      r"\[[^\]\n]+\]\([^)\s]+\)",
+    ])
+    .expect("markdown regexes")
+  });
+  PATTERNS.is_match(text)
 }
 
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
 /// shortcodes stay as typed.
 pub fn emojify(text: &str) -> String {
-  let shortcode = Regex::new(r":([a-z0-9_+-]+):").expect("regex");
+  static SHORTCODE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r":([a-z0-9_+-]+):").expect("regex"));
   let mut fenced = false;
   text
     .split_inclusive('\n')
@@ -578,7 +583,7 @@ pub fn emojify(text: &str) -> String {
           if i % 2 == 1 {
             return piece.to_string();
           }
-          shortcode
+          SHORTCODE
             .replace_all(piece, |c: &regex::Captures| {
               emojis::get_by_shortcode(&c[1])
                 .map_or_else(|| c[0].to_string(), |e| e.as_str().to_string())

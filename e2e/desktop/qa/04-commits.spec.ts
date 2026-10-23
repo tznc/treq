@@ -52,7 +52,11 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
   // Unfold the conflicted commit: its chevron, left of the first title. A
   // commit's fold state outlives the tab; "Edit description" shows unfolded.
   const editDescription = page.getByRole("button", { name: "Edit description" });
-  if ((await editDescription.count()) === 0) await page.mouse.click(329, 279);
+  // The first row sits a fixed distance under the banner's Resolve button.
+  const resolve = await page.getByRole("button", { name: "Resolve conflicts…" }).boundingBox();
+  if (!resolve) throw new Error("no Resolve conflicts… button");
+  const firstRow = resolve.y + resolve.height + 73;
+  if ((await editDescription.count()) === 0) await page.mouse.click(329, firstRow);
   await expect(editDescription).toBeVisible();
   await settle(page, 2000);
   await capture(page, {
@@ -83,11 +87,11 @@ test("commits: conflicted stack, resolve dialog, unfolded diff", async ({ page }
     expectations: ["Hovering the pencil beside the timestamp shows an 'Edit timestamp' tooltip"],
   });
   await page.mouse.move(700, 700);
-  await page.mouse.click(329, 279);
+  await page.mouse.click(329, firstRow);
   await expect(editDescription).toHaveCount(0);
   await settle(page, 800);
 
-  await page.mouse.click(600, 279, { button: "right" });
+  await page.mouse.click(600, firstRow, { button: "right" });
   await settle(page, 1000);
   await capture(page, {
     name: "04-commits-context-menu",

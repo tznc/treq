@@ -1226,13 +1226,21 @@ impl Sidebar {
       .when(repo_active, |this| {
         this.group_hover(group.clone(), |style| style.invisible())
       })
-      .when(row.conflicted, |this| {
-        this.child(
-          div()
-            .debug_selector(move || format!("conflict-{id}"))
-            .child(ui::Dot::new(Tone::Danger, palette)),
-        )
-      })
+      // A conflict is one danger dot: the red status dot already says it.
+      .when(
+        row.conflicted
+          && !row
+            .status
+            .as_ref()
+            .is_some_and(|s| s.color == StatusColor::Red),
+        |this| {
+          this.child(
+            div()
+              .debug_selector(move || format!("conflict-{id}"))
+              .child(ui::Dot::new(Tone::Danger, palette)),
+          )
+        },
+      )
       .when_some(row.queue.as_deref(), |this, status| {
         let (color, pulse, _) = queue_dot(status, palette);
         let dot = div()
