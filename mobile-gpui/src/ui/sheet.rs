@@ -2,7 +2,7 @@
 //! closes it. Menus (a list of actions) and confirmations are sheets; so is
 //! any view a screen opens with [`open`].
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -66,13 +66,37 @@ pub fn close(cx: &mut App) {
     return;
   };
   cx.defer(move |cx| {
+    root.update(cx, dismiss).ok();
+  });
+}
+
+/// How long taps are ignored after a sheet closes. A double tap on a sheet's
+/// button would otherwise land its second tap on the page below (a row, or
+/// the page's own button in the same spot).
+const TAP_GUARD: Duration = Duration::from_millis(350);
+
+/// Closes the open sheet, if any, and ignores taps for [`TAP_GUARD`].
+pub(super) fn dismiss(root: &mut super::Root, cx: &mut Context<super::Root>) {
+  if root.sheet.take().is_none() {
+    return;
+  }
+  root.tap_guard = true;
+  cx.spawn(async move |root, cx| {
+    cx.background_executor().timer(TAP_GUARD).await;
     root
       .update(cx, |root, cx| {
-        root.sheet = None;
+        root.tap_guard = false;
         cx.notify();
       })
       .ok();
-  });
+  })
+  .detach();
+  cx.notify();
+}
+
+/// Swallows taps while [`TAP_GUARD`] runs.
+pub(super) fn tap_guard() -> impl IntoElement {
+  div().id("sheet-tap-guard").absolute().inset_0().occlude()
 }
 
 /// The sheet over `content`: a scrim that closes it and a panel along the
@@ -91,6 +115,8 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
         .id("sheet-scrim")
         .absolute()
         .inset_0()
+        // The tap that closes the sheet must not reach the page below.
+        .occlude()
         .bg(palette.scrim())
         .on_click(|_, _, cx| close(cx)),
     )
@@ -106,6 +132,7 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
         .child(
           div()
             .flex()
+            .flex_none()
             .justify_center()
             .pt_2()
             .child(div().w(px(36.)).h(px(4.)).rounded_full().bg(theme.border)),
@@ -113,6 +140,7 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
         .when_some(sheet.title.clone(), |panel, title| {
           panel.child(
             div()
+              .flex_none()
               .px_4()
               .pt_2()
               .pb_1()
@@ -122,7 +150,8 @@ pub(super) fn render(sheet: &Sheet, bottom_inset: Pixels, cx: &App) -> impl Into
               .child(title),
           )
         })
-        .child(sheet.view.clone()),
+        // A tall sheet scrolls; its parts keep their height.
+        .child(div().flex_none().child(sheet.view.clone())),
     )
 }
 
