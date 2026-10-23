@@ -364,7 +364,8 @@ pub struct TerminalView {
   /// Whether the last frame had focus. Only a focused cursor blinks, so an
   /// unfocused terminal skips the blink's redraw.
   focused: bool,
-  idle: u64,
+  /// Fires `Idle` once the process stops writing; each burst replaces it.
+  idle: Option<Task<()>>,
   chat_due: bool,
   search: Search,
   tooltips: Tooltips,
@@ -415,7 +416,7 @@ impl TerminalView {
       reported: None,
       cursor_on: true,
       focused: false,
-      idle: 0,
+      idle: None,
       chat_due: false,
       search: Search::default(),
       tooltips: Tooltips::new(popups, dark),
@@ -646,19 +647,14 @@ impl TerminalView {
     if from_process {
       // The channel works again, so its next drop gets its own attempt.
       self.remote.auto_spent = false;
-      self.idle += 1;
-      let idle = self.idle;
-      cx.spawn(async move |this, cx| {
+      self.idle = Some(cx.spawn(async move |this, cx| {
         cx.background_executor().timer(IDLE_AFTER).await;
         let _ = this.update(cx, |view, cx| {
-          if view.idle == idle {
-            view.chat_due = false;
-            view.record_chat();
-            (view.on_event)(TermEvent::Idle, cx);
-          }
+          view.chat_due = false;
+          view.record_chat();
+          (view.on_event)(TermEvent::Idle, cx);
         });
-      })
-      .detach();
+      }));
       if !self.chat_due && self.is_agent() {
         self.chat_due = true;
         cx.spawn(async move |this, cx| {

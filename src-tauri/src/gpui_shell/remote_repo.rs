@@ -12,6 +12,7 @@
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},
+  time::{Duration, Instant},
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,6 +23,7 @@ use crate::{
     remote::{FileRevision, TreqCommandRequest},
     remote_control_plane::SshEndpoint,
     remote_idempotency::{self, Outcome},
+    workspaces::WorkspaceSummary,
     PullWorkspaceResult, WorkspaceFileHunksBatch, WorkspaceFileHunksBatchFile, WorkspaceStatus,
   },
   github::GitRemoteInfo,
@@ -408,6 +410,39 @@ impl Remote {
     self.read(TreqCommandRequest::ListWorkspaces {
       repo: self.repo_arg(),
     })
+  }
+
+  /// `WorkspaceSummaries`: every workspace with its sidebar status and
+  /// uncommitted changes, in one round trip.
+  pub fn workspace_summaries(&self) -> Result<Vec<WorkspaceSummary>, String> {
+    self.read(TreqCommandRequest::WorkspaceSummaries {
+      repo: self.repo_arg(),
+    })
+  }
+
+  /// [`Self::workspace_summaries`], or `None` when the host does not answer
+  /// it (an older `treq`), so the caller reads workspace by workspace. A
+  /// failure is remembered for a while rather than retried on every poll.
+  pub fn workspace_summaries_if_supported(&self) -> Option<Vec<WorkspaceSummary>> {
+    static FAILED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+    const RETRY_AFTER: Duration = Duration::from_secs(300);
+    let key = self.repo_arg();
+    let recently_failed = FAILED
+      .lock_or_recover()
+      .get_or_insert_with(HashMap::new)
+      .get(&key)
+      .is_some_and(|at| at.elapsed() < RETRY_AFTER);
+    if recently_failed {
+      return None;
+    }
+    let summaries = self.workspace_summaries().ok();
+    if summaries.is_none() {
+      FAILED
+        .lock_or_recover()
+        .get_or_insert_with(HashMap::new)
+        .insert(key, Instant::now());
+    }
+    summaries
   }
 
   // -- Workspace lifecycle (`useWorkspaceDeletion`) ----------------------------

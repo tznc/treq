@@ -45,6 +45,7 @@ pub(crate) mod open_new_window;
 #[cfg(feature = "gui")]
 pub mod pr_status;
 pub mod pty;
+pub mod pty_stream;
 pub mod repo_config;
 pub mod review_aggregate;
 pub mod send_dispatch;
@@ -586,16 +587,19 @@ pub fn run() {
       #[cfg(feature = "e2e")]
       let saved_repo_path = gpui_shell::e2e::repo().or(saved_repo_path);
 
-      // Load cached binary paths and initialize in-memory cache
-      let binary_paths = commands::load_cached_binary_paths(&db);
-      binary_paths::init_binary_paths_cache(binary_paths);
-      // Resolve the login-shell PATH off the main thread so the first terminal
-      // doesn't wait on shell startup.
+      // Resolve the login-shell PATH off the main thread, before anything
+      // else can wait on it, so the first terminal doesn't wait on shell
+      // startup.
       std::thread::spawn(binary_paths::get_extended_path);
 
-      // Load cached editor apps and initialize in-memory cache
-      let editor_apps = commands::load_cached_editor_apps(&db);
-      binary_paths::init_editor_apps_cache(editor_apps);
+      // Cached paths and editors are read from the database here; what was
+      // never looked for is detected in the background once the state is
+      // managed (`detect_binaries`, and the window's `detect_editors`).
+      let (binary_paths, undetected_binaries) = commands::load_cached_binary_paths(&db);
+      binary_paths::init_binary_paths_cache(binary_paths);
+      if let Some(editor_apps) = commands::load_cached_editor_apps(&db) {
+        binary_paths::init_editor_apps_cache(editor_apps);
+      }
 
       let pty_manager = PtyManager::new();
 
@@ -626,6 +630,12 @@ pub fn run() {
       );
 
       app.manage(app_state);
+      if !undetected_binaries.is_empty() {
+        let handle = app.handle().clone();
+        std::thread::spawn(move || {
+          commands::binary::detect_binaries(&handle.state::<AppState>().db, &undetected_binaries);
+        });
+      }
       #[cfg(not(mobile))]
       let remote_exec_state = commands::remote_control::RemoteExecState::default();
       // Mobile authenticates with the device key held in the OS
@@ -663,9 +673,16 @@ pub fn run() {
         use tauri_plugin_deep_link::DeepLinkExt;
         // Installers register `treq://` with the OS. An AppImage or a dev
         // build is not installed, so it registers itself at startup.
+        // It rewrites a launcher entry and runs `xdg-mime`, so it stays off
+        // the startup path.
         #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
-        if let Err(err) = app.deep_link().register_all() {
-          log::warn!("failed to register deep link schemes: {err}");
+        {
+          let handle = app.handle().clone();
+          std::thread::spawn(move || {
+            if let Err(err) = handle.deep_link().register_all() {
+              log::warn!("failed to register deep link schemes: {err}");
+            }
+          });
         }
         let handle = app.handle().clone();
         app.deep_link().on_open_url(move |event| {

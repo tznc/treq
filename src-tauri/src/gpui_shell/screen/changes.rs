@@ -915,34 +915,36 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .collect();
     let split = !staged.is_empty();
-    self.run(
-      move |host, parent| {
-        let result = if split {
-          host.split(&parent.working_directory(), &message, staged)
-        } else {
-          host.commit(&parent.repo_path, parent.workspace_id(), &message)
-        };
-        let result = result.map_err(|e| ("Commit failed", e))?;
-        if action == CommitAction::Push {
-          host
-            .push_remote(&parent.repo_path, parent.workspace_id())
-            .map_err(|e| ("Failed to push", e))?;
+    let (host, parent) = (self.host.clone(), self.parent.clone());
+    let key = parent.key();
+    // The commit is reported as soon as it lands; the push is a second stage
+    // with its own feedback, and runs even if the tab moved on meanwhile.
+    cx.spawn(async move |this, cx| {
+      let (work_host, work_parent) = (host.clone(), parent.clone());
+      let committed = cx
+        .background_spawn(async move {
+          if split {
+            work_host.split(&work_parent.working_directory(), &message, staged)
+          } else {
+            work_host.commit(&work_parent.repo_path, work_parent.workspace_id(), &message)
+          }
+        })
+        .await;
+      let pushing = committed.is_ok() && action == CommitAction::Push;
+      let _ = this.update(cx, |view, cx| {
+        if view.parent.key() != key {
+          return;
         }
-        Ok::<_, (&str, String)>(result)
-      },
-      move |view, result, cx| {
-        view.pending = None;
+        if !pushing {
+          view.pending = None;
+        }
         if split {
           view.staging.staged.clear();
         }
-        match result {
+        match committed {
           Ok(result) => {
-            let text = result.trim();
-            view.toast(ToastTone::Success, "Commit created", text);
+            view.toast(ToastTone::Success, "Commit created", result.trim());
             view.committed_collapsed = true;
-            if action == CommitAction::Push {
-              view.toast(ToastTone::Success, "Pushed to remote", "");
-            }
             if action == CommitAction::Pr {
               view.send_react(
                 ScreenAction::Press {
@@ -952,13 +954,33 @@ impl ChangesView {
               );
             }
           }
-          Err((title, err)) => view.toast(ToastTone::Error, title, err),
+          Err(err) => view.toast(ToastTone::Error, "Commit failed", err),
         }
         Self::changed(view.host.as_ref(), &view.parent);
         view.load(cx);
-      },
-      cx,
-    );
+        cx.notify();
+      });
+      if !pushing {
+        return;
+      }
+      let pushed = cx
+        .background_spawn(async move { host.push_remote(&parent.repo_path, parent.workspace_id()) })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        if view.parent.key() != key {
+          return;
+        }
+        view.pending = None;
+        match pushed {
+          Ok(_) => view.toast(ToastTone::Success, "Pushed to remote", ""),
+          Err(err) => view.toast(ToastTone::Error, "Failed to push", err),
+        }
+        Self::changed(view.host.as_ref(), &view.parent);
+        view.load(cx);
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   fn ensure_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {

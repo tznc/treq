@@ -990,26 +990,66 @@ impl CommitsView {
     if *saving || Some(&*text) == loaded.as_ref().ok() {
       return;
     }
-    *saving = true;
-    cx.notify();
     let (change, description) = (commit.change_id.clone(), text.clone());
+    // The row shows the new description at once; a failure puts the old one
+    // back.
+    let before = self.set_description(&change, &description);
+    self.dialog = None;
+    self.layout_gen += 1;
+    cx.notify();
     self.run(
       move |host, parent| host.describe(&parent.repo_path, ws, &change, &description),
       move |view, result, _| match result {
         Ok(()) => {
-          view.dialog = None;
           view.toast(ToastTone::Success, "Description updated", "");
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
-          if let Some(Dialog::Describe { saving, .. }) = &mut view.dialog {
-            *saving = false;
+          for (commit_id, description) in before {
+            view.restore_description(&commit_id, description);
           }
+          view.layout_gen += 1;
           view.toast(ToastTone::Error, "Failed to update description", err);
         }
       },
       cx,
     );
+  }
+
+  /// Sets the description of every loaded commit of change `change_id`;
+  /// returns what each had.
+  fn set_description(&mut self, change_id: &str, description: &str) -> Vec<(String, String)> {
+    let Some(history) = &mut self.history else {
+      return Vec::new();
+    };
+    history
+      .tentative
+      .iter_mut()
+      .map(|(c, _)| c)
+      .chain(history.own.iter_mut())
+      .chain(history.target.iter_mut())
+      .filter(|c| c.change_id == change_id)
+      .map(|c| {
+        let before = std::mem::replace(&mut c.description, description.to_string());
+        (c.commit_id.clone(), before)
+      })
+      .collect()
+  }
+
+  fn restore_description(&mut self, commit_id: &str, description: String) {
+    let Some(history) = &mut self.history else {
+      return;
+    };
+    if let Some(commit) = history
+      .tentative
+      .iter_mut()
+      .map(|(c, _)| c)
+      .chain(history.own.iter_mut())
+      .chain(history.target.iter_mut())
+      .find(|c| c.commit_id == commit_id)
+    {
+      commit.description = description;
+    }
   }
 
   pub(super) fn edit_timestamp(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {

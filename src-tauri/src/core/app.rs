@@ -190,6 +190,30 @@ pub fn init_git_repository(path: &str) -> Result<(), String> {
 /// Fails with [`InitError::NotGitRepository`], before writing anything, when the
 /// folder is not a Git (or jj) repository.
 pub fn init(repo_path: &str) -> Result<bool, InitError> {
+  match init_repo_state(repo_path)? {
+    Some(conflict_style) => {
+      rebase_workspaces(repo_path, &conflict_style);
+      Ok(true)
+    }
+    None => Ok(false),
+  }
+}
+
+/// [`init`], with the rebase of every workspace left to a background thread:
+/// the caller gets the repository as soon as it is usable, and a workspace
+/// that is behind its target is rebased while the window already draws it.
+pub fn init_deferring_rebase(repo_path: &str) -> Result<bool, InitError> {
+  let Some(conflict_style) = init_repo_state(repo_path)? else {
+    return Ok(false);
+  };
+  let repo_path = repo_path.to_string();
+  std::thread::spawn(move || rebase_workspaces(&repo_path, &conflict_style));
+  Ok(true)
+}
+
+/// Everything [`init`] does but the rebase pass. The conflict marker style
+/// the pass needs, or `None` when jj could not be initialized.
+fn init_repo_state(repo_path: &str) -> Result<Option<String>, InitError> {
   if !is_repository(repo_path) {
     return Err(InitError::NotGitRepository(repo_path.to_string()));
   }
@@ -206,21 +230,24 @@ pub fn init(repo_path: &str) -> Result<bool, InitError> {
   match jj::ensure_jj_initialized(&db, repo_path) {
     Ok(_already_initialized) => {
       let _ = workspaces::sync_workspaces(repo_path);
-      let conflict_style = super::resolve_conflict_marker_style_from_db(&db);
-      if let Ok(all_workspaces) = local_db::get_workspaces(repo_path) {
-        for workspace in all_workspaces {
-          if let Err(err) = ensure_workspace_rebased(repo_path, workspace.id, &conflict_style) {
-            tracing::warn!(
-              "Init rebase warning: workspace '{}' ({}) failed: {}",
-              workspace.workspace_name,
-              workspace.id,
-              err
-            );
-          }
-        }
-      }
-      Ok(true)
+      Ok(Some(super::resolve_conflict_marker_style_from_db(&db)))
     }
-    Err(_) => Ok(false),
+    Err(_) => Ok(None),
+  }
+}
+
+/// Rebases each workspace that is behind its target branch.
+fn rebase_workspaces(repo_path: &str, conflict_style: &str) {
+  if let Ok(all_workspaces) = local_db::get_workspaces(repo_path) {
+    for workspace in all_workspaces {
+      if let Err(err) = ensure_workspace_rebased(repo_path, workspace.id, conflict_style) {
+        tracing::warn!(
+          "Init rebase warning: workspace '{}' ({}) failed: {}",
+          workspace.workspace_name,
+          workspace.id,
+          err
+        );
+      }
+    }
   }
 }

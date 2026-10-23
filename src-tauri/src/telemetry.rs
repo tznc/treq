@@ -46,7 +46,9 @@ pub fn install_panic_hook() {
 
 pub fn init(log_dir: &Path) -> Result<TelemetryGuards, Box<dyn std::error::Error>> {
   std::fs::create_dir_all(log_dir)?;
-  cleanup_old_logs(log_dir, MAX_AGE);
+  // Walks the whole log directory; nothing waits on it.
+  let log_dir_owned = log_dir.to_path_buf();
+  std::thread::spawn(move || cleanup_old_logs(&log_dir_owned, MAX_AGE));
 
   let appender = rolling::daily(log_dir, crate::core::system_logs::LOG_FILE_PREFIX);
   let (writer, file_guard) = tracing_appender::non_blocking(appender);

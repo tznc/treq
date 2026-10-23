@@ -17,7 +17,7 @@ struct Harness {
   popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
 }
 
-type Sink = Arc<dyn Fn(String) + Send + Sync>;
+type Sink = Arc<dyn Fn(&[u8]) + Send + Sync>;
 type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 
 /// The backend, as the screens see it, recording what they asked of it.
@@ -927,7 +927,7 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(())
   }
 
-  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> terminal_data::Listening {
+  fn listen(&self, id: &str, sink: terminal_data::OutputSink) -> terminal_data::Listening {
     self
       .sinks
       .lock()
@@ -1080,7 +1080,7 @@ impl FakeHost {
       .map(|(_, sink)| sink.clone())
       .collect();
     for sink in sinks {
-      sink(data.to_string());
+      sink(data.as_bytes());
     }
   }
 }
