@@ -837,6 +837,7 @@ pub fn total_lines<'a>(files: impl Iterator<Item = &'a FileHunks>) -> usize {
     .sum()
 }
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static NEW_RANGE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@").expect("hunk header regex")
 });

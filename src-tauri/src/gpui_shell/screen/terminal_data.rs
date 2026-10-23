@@ -551,6 +551,10 @@ pub fn shell_pty_id(dir: &str, millis: u128) -> String {
 /// `consumePtyEcho`: drops the echo of what the user typed from an output
 /// chunk, so local echo isn't taken for the process working. Returns the
 /// echo still pending and the output the process wrote.
+#[allow(
+  clippy::string_slice,
+  reason = "offsets are char_indices() positions plus char lengths"
+)]
 pub fn consume_echo<'a>(pending: &str, chunk: &'a str) -> (String, &'a str) {
   let echo: Vec<char> = pending.chars().collect();
   let bytes = chunk.as_bytes();

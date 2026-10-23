@@ -18,6 +18,7 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
 /// `sanitizeForBranchName`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn sanitize_for_branch_name(text: &str) -> String {
   let lower: String = text
     .to_lowercase()
@@ -40,6 +41,7 @@ fn sanitize_for_branch_name(text: &str) -> String {
 }
 
 /// `cleanBranchNameTrailing`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn clean_branch_name_trailing(name: &str) -> String {
   let single = Regex::new(r"[/.\-][a-z]$").expect("regex");
   let separators = Regex::new(r"[/.\-]+$").expect("regex");

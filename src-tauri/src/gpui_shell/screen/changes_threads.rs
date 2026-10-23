@@ -198,6 +198,7 @@ fn diff_tokens<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(ChangeTag, &'a str)
 }
 
 /// Runs of whitespace and of everything else, as `diffWords` splits them.
+#[allow(clippy::string_slice, reason = "offsets come from char_indices()")]
 fn words(text: &str) -> Vec<&str> {
   let mut out = Vec::new();
   let mut start = 0;

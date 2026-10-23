@@ -502,6 +502,10 @@ pub struct Suggestion {
 }
 
 /// The first ```` ```suggestion ```` block of `text`, as GitHub reads it.
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from finding ASCII fence markers and newlines"
+)]
 pub fn parse_suggestion(text: &str) -> Option<Suggestion> {
   const OPEN: &str = "```suggestion";
   let start = text.find(OPEN)?;

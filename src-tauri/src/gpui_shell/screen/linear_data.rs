@@ -521,6 +521,10 @@ pub struct Anchor<'a> {
 
 /// `highlightQuotedText`: wraps each anchor's first match in a `<mark>`,
 /// so the passage lines up with its card in the comments column.
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from find() of the quote and its own length"
+)]
 pub fn highlight_quoted(content: &str, anchors: &[Anchor]) -> String {
   let mut result = content.to_string();
   for anchor in anchors {

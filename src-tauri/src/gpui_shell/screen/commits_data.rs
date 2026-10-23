@@ -483,6 +483,7 @@ pub fn first_file_diff(
   Err(error.unwrap_or_else(|| "Failed to load commit file diff".into()))
 }
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static HUNK_HEADER: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk header regex")
 });
@@ -658,6 +659,7 @@ impl Default for ShiftForm {
 
 impl ShiftForm {
   /// The shift to apply, or `None` while the form can't be submitted.
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   pub fn shift(&self) -> Option<TimeShift> {
     if self.to_day {
       let re = Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex");

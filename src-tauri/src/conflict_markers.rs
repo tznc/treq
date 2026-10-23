@@ -63,6 +63,10 @@ pub struct ConflictRegionView {
 
 pub type ConflictRegion = ConflictRegionView;
 
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from ASCII find() and is_ascii_digit() scans of a marker line"
+)]
 fn extract_conflict_info(line: &str) -> Option<(usize, usize)> {
   let conflict_pos = line.find("Conflict ")?;
   let rest = &line[conflict_pos + 9..];
