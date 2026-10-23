@@ -533,6 +533,9 @@ pub fn run() {
         gpui_shell::forget_window(&label);
         let app_handle = window.app_handle().clone();
         if is_last_repo_window(&label, repo_windows(&app_handle).keys()) {
+          #[cfg(feature = "gpui-shell")]
+          #[cfg(desktop)]
+          gpui_shell::forget_terminals();
           if let Some(state) = app_handle.try_state::<AppState>() {
             state.pty_manager.close_all();
           }
