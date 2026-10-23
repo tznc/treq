@@ -12,7 +12,7 @@ gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default
 # Bootstrap 5's components on gpui-kit's unstyled controls, re-themed with
 # treq's tokens (`theme::bootstrap`). The branch adds custom button colors
 # and interactive handlers (not on main yet).
-gpui-bootstrap = { git = "https://github.com/Ziinc/gpui-bootstrap", branch = "claude/button-variant-colors" }
+gpui-bootstrap = { git = "https://github.com/Ziinc/gpui-bootstrap", branch = "main" }
 log = "0.4"
 serde_json = "1"
 
