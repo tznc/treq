@@ -1658,12 +1658,15 @@ impl SettingsView {
     });
 
     let body: AnyElement = if repo.loading {
-      div()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("Loading settings...")
-        .into_any_element()
+      ui::delayed(
+        "settings-loading",
+        div()
+          .py_8()
+          .text_center()
+          .text_color(p.muted_foreground)
+          .child("Loading settings..."),
+      )
+      .into_any_element()
     } else {
       let pattern = self.controls.input(
         "repo.branchNamePattern",
@@ -1961,7 +1964,8 @@ impl SettingsView {
           ),
       )
       .when(tab.loading, |this| {
-        this.child(
+        this.child(ui::delayed(
+          "skills-loading",
           ui::text(div(), TextSize::Sm)
             .flex()
             .items_center()
@@ -1969,7 +1973,7 @@ impl SettingsView {
             .text_color(p.muted_foreground)
             .child(ui::spinner("skills-loading", 16., p.muted_foreground))
             .child("Loading skill registry…"),
-        )
+        ))
       })
       .when_some(tab.error.clone(), |this, err| {
         this.child(

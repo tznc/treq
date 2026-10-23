@@ -9,14 +9,14 @@ use super::*;
 
 /// Draws one frame without running any task, as the first frame after a
 /// click is drawn before any read lands.
-fn first_frame(h: &mut Harness) {
+pub(super) fn first_frame(h: &mut Harness) {
   h.cx.update(|window, cx| {
     window.refresh();
     window.draw(cx).clear(cx);
   });
 }
 
-fn drawn_now(h: &mut Harness, selector: &'static str) -> bool {
+pub(super) fn drawn_now(h: &mut Harness, selector: &'static str) -> bool {
   h.cx.debug_bounds(selector).is_some()
 }
 
@@ -29,7 +29,7 @@ fn set_tab(h: &mut Harness, tab: &str) {
 }
 
 /// Shows workspace `id` of the window's list, as the window model routes it.
-fn set_workspace(h: &mut Harness, id: i64) {
+pub(super) fn set_workspace(h: &mut Harness, id: i64) {
   h.update(|s| {
     if let View::Workspace(route) = &mut s.view {
       route.workspace_id = Some(id);
@@ -38,13 +38,13 @@ fn set_workspace(h: &mut Harness, id: i64) {
   });
 }
 
-fn workspace(id: i64) -> crate::local_db::Workspace {
+pub(super) fn workspace(id: i64) -> crate::local_db::Workspace {
   let mut row = workspace_row(&format!("feature/{id}"));
   row["id"] = id.into();
   serde_json::from_value(row).expect("workspace")
 }
 
-fn reads(host: &FakeHost, prefix: &str) -> usize {
+pub(super) fn reads(host: &FakeHost, prefix: &str) -> usize {
   host
     .calls()
     .iter()

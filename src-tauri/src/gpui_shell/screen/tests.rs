@@ -604,6 +604,10 @@ impl code_data::CodeHost for FakeHost {
     Ok(())
   }
 
+  fn warm_file_index(&self, _: &str, workspace_id: Option<i64>, _: &str) {
+    self.record(format!("read file index {workspace_id:?}"));
+  }
+
   fn search_files(
     &self,
     _: &str,
@@ -7788,6 +7792,7 @@ mod logs_explorer;
 mod merge_queue;
 mod open_workspaces;
 mod pr_review;
+mod prefetch;
 mod review_comments;
 mod stack_panel;
 mod tab_badges;

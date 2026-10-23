@@ -784,6 +784,30 @@ fn selects_a_workspace_from_the_sidebar(cx: &mut TestAppContext) {
   assert!(sidebar.repos[0].workspaces[1].selected);
 }
 
+/// What a click on a workspace row would show, for reading it ahead, is
+/// the route the click then presents; the model itself does not move.
+#[gpui::test]
+fn reads_ahead_the_route_a_workspace_click_shows(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let ahead = window
+    .controller
+    .read_with(cx, |c, _| c.workspace_route(2))
+    .expect("route");
+  assert_eq!(window.route_workspace(), None);
+  assert!(window.sidebar(
+    cx,
+    SidebarAction::SelectWorkspace {
+      id: 2,
+      shift: false,
+      toggle: false
+    }
+  ));
+  match window.screen_snapshot().view {
+    View::Workspace(route) => assert_eq!(*route, ahead),
+    _ => panic!("not the workspace view"),
+  }
+}
+
 #[gpui::test]
 fn selects_a_created_workspace_once_it_is_listed(cx: &mut TestAppContext) {
   let host = repo_host();

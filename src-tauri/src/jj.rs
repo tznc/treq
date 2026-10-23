@@ -1098,7 +1098,7 @@ pub struct DiscoveredWorkspace {
 }
 
 /// A diff hunk from jj diff output
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JjDiffHunk {
   pub id: String,
   pub header: String,
@@ -1136,7 +1136,7 @@ pub struct JjRebaseResult {
 }
 
 /// A single commit in the log
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JjLogCommit {
   pub commit_id: String,
   pub short_id: String,
@@ -1162,7 +1162,7 @@ pub struct JjLogCommit {
 }
 
 /// The full log response including metadata
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JjLogResult {
   /// Commit history: workspace/current-branch commits first, then target-only commits (`on_target_only = true`) when target-branch history is included.
   pub commits: Vec<JjLogCommit>,
@@ -1179,7 +1179,7 @@ pub struct JjLogResult {
 }
 
 /// A tentative working-copy entry shown above the normal commit history when dirty.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JjTentativeWorkingCopy {
   pub workspace_label: String,
   pub commit: JjLogCommit,

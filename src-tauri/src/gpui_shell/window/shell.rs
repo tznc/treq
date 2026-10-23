@@ -152,6 +152,16 @@ pub(in crate::gpui_shell) fn workspace(
   controller(label, cx)?.read(cx).workspace(repo, id).cloned()
 }
 
+/// The workspace view's route were window `label` to select workspace `id`
+/// of its repository.
+pub(in crate::gpui_shell) fn workspace_route(
+  label: &str,
+  id: i64,
+  cx: &App,
+) -> Option<screen::workspace_data::Route> {
+  controller(label, cx)?.read(cx).workspace_route(id)
+}
+
 /// A keyboard shortcut pressed in window `label`.
 /// Window `label`'s confirmation answered: `yes` for its verb.
 pub(in crate::gpui_shell) fn answer(label: &str, yes: bool, cx: &mut App) {

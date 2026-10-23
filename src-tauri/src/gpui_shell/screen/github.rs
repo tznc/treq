@@ -516,11 +516,13 @@ impl GithubView {
         .background_spawn(async move { host.pr_checks(&key.repo, key.number) })
         .await;
       let _ = this.update(cx, |view, cx| {
-        if view.detail.generation == generation {
-          if let Ok(checks) = checks {
+        // Most polls find the checks as they were: nothing to redraw.
+        match checks {
+          Ok(checks) if view.detail.generation == generation && view.detail.checks != checks => {
             view.detail.checks = checks;
+            cx.notify();
           }
-          cx.notify();
+          _ => {}
         }
       });
     })

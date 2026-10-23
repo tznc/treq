@@ -351,6 +351,23 @@ impl ChangesView {
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
+    self.run_changed(
+      work,
+      |view, value, cx| {
+        apply(view, value, cx);
+        true
+      },
+      cx,
+    );
+  }
+
+  /// [`Self::run`], redrawing only when `apply` says what shows changed.
+  fn run_changed<T: Send + 'static>(
+    &self,
+    work: impl FnOnce(&dyn ChangesHost, &Parent) -> T + Send + 'static,
+    apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> bool + 'static,
+    cx: &mut Context<Self>,
+  ) {
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
     cx.spawn(async move |this, cx| {
@@ -358,8 +375,7 @@ impl ChangesView {
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
       let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
+        if view.parent.key() == key && apply(view, value, cx) {
           cx.notify();
         }
       });
@@ -613,30 +629,40 @@ impl ChangesView {
       return;
     }
     let batch = batches.remove(0);
-    self.run(
+    self.run_changed(
       move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), batch),
       move |view, result, cx| {
         if view.generation != generation {
-          return;
+          return false;
         }
+        // A file read again unchanged (a refresh) draws nothing new.
+        let mut changed = false;
         match result {
           Ok(batch) => {
             for file in batch.files {
-              let data = FileHunks {
-                hunks: file.hunks.into(),
-                loading: false,
-                error: file.error,
-              };
-              view.hunks.insert(file.path, data);
+              let same = view.hunks.get(&file.path).is_some_and(|old| {
+                !old.loading && old.error == file.error && *old.hunks == file.hunks
+              });
+              if !same {
+                let data = FileHunks {
+                  hunks: file.hunks.into(),
+                  loading: false,
+                  error: file.error,
+                };
+                view.hunks.insert(file.path, data);
+                changed = true;
+              }
             }
           }
           Err(err) => log::warn!("Failed to load file hunks: {err}"),
         }
+        let marks = (view.viewed.len(), view.review.comments.len());
         view.unmark_stale(cx);
         if batches.is_empty() {
           view.prune_comments(cx);
         }
         view.load_batches(generation, batches, cx);
+        changed || marks != (view.viewed.len(), view.review.comments.len())
       },
       cx,
     );
@@ -648,7 +674,7 @@ impl ChangesView {
       .workspace
       .as_ref()
       .map(|w| w.branch_name.clone());
-    self.run(
+    self.run_changed(
       move |host, parent| {
         let github = host.github_remote(&parent.repo_path);
         let pr = branch
@@ -657,8 +683,10 @@ impl ChangesView {
         (github, pr)
       },
       |view, (github, pr), _| {
+        let changed = view.github != github || view.pr_state != pr;
         view.github = github;
         view.pr_state = pr;
+        changed
       },
       cx,
     );
