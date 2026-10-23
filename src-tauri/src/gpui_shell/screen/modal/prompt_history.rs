@@ -132,7 +132,7 @@ impl PromptHistoryView {
   /// `handleCopy`.
   fn copy(&self, text: String, description: &str, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.env.toast(ToastTone::Success, "Copied", description);
+    self.env.toast(ToastTone::Success, description, "");
   }
 
   fn close(&self, cx: &mut Context<Self>) {
@@ -169,7 +169,7 @@ impl PromptHistoryView {
 
   fn rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let p = theme::palette(self.dark);
-    let (accent, muted) = (p.menu_accent, p.muted_foreground);
+    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
     let Some(entries) = self.entries.clone() else {
       return Vec::new();
     };
@@ -191,10 +191,8 @@ impl PromptHistoryView {
               .py_2()
               .rounded(radius::MD)
               .cursor_pointer()
-              .when(selected, |this| this.bg(accent))
-              .when(!selected, |this| {
-                this.hover(move |s| s.bg(accent.opacity(0.5)))
-              })
+              .when(selected, |this| this.bg(selected_bg))
+              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
               .child(
                 div()
                   .font_family(theme::MONO_FONT)
@@ -283,9 +281,9 @@ impl PromptHistoryView {
           .px_2()
           .child(ui::icon(theme::ICON_COPY, 12., p.foreground).mr_1())
           .child(ui::text(div(), TextSize::Xs).child("Copy"))
-          .on_click(cx.listener(move |view, _, _, cx| {
-            view.copy(text.clone(), "Prompt copied to clipboard", cx)
-          })),
+          .on_click(
+            cx.listener(move |view, _, _, cx| view.copy(text.clone(), "Prompt copied", cx)),
+          ),
       );
     let entry = entry.clone();
     pane.child(
@@ -339,7 +337,7 @@ impl Render for PromptHistoryView {
         .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr_1p5())
         .label("Copy all")
         .on_click(cx.listener(move |view, _, _, cx| {
-          view.copy(format_for_copy(&all), "All prompts copied to clipboard", cx)
+          view.copy(format_for_copy(&all), "All prompts copied", cx)
         }))
     });
     let header = div()

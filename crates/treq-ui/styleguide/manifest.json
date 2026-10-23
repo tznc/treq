@@ -405,7 +405,7 @@
           }
         },
         {
-          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )"
+          "text": ";\ndiv()\n  .flex()\n  .items_center()\n  .gap_2()\n  .child(IconButton::new(\"ghost\", theme::ICON_X, \"Close\", &p).size(size))\n  .child(\n    IconButton::new(\"outline\", theme::ICON_CHEVRON_DOWN, \"More\", &p)\n      .outline()\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"selected\", theme::ICON_INFO, \"Details\", &p)\n      .selected(true)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"danger\", theme::ICON_X, \"Remove\", &p)\n      .tone(Tone::Danger)\n      .size(size),\n  )\n  .child(\n    IconButton::new(\"disabled\", theme::ICON_X, \"Close\", &p)\n      .disabled(true)\n      .size(size),\n  )"
         }
       ],
       "knobs": [
@@ -432,10 +432,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/light/default.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "2608e5be3e59ecf8"
+          "hash": "c01cecbe2d6b1d98"
         },
         {
           "theme": "light",
@@ -444,10 +444,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/light/size=small.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "86eba6428d81defb"
+          "hash": "4d4852d13d612951"
         },
         {
           "theme": "dark",
@@ -457,10 +457,10 @@
           },
           "is_default": true,
           "file": "snapshots/icon-button/states/dark/default.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "883e762a4641411d"
+          "hash": "6946fe572ea6b105"
         },
         {
           "theme": "dark",
@@ -469,10 +469,10 @@
             "size": "small"
           },
           "file": "snapshots/icon-button/states/dark/size=small.png",
-          "width": 232,
+          "width": 264,
           "height": 88,
           "scale": 2.0,
-          "hash": "ed40a8c74cdde475"
+          "hash": "41070760b15aaf70"
         }
       ]
     },
@@ -549,10 +549,10 @@
             "outline": true
           },
           "file": "snapshots/split-button/playground/light/outline=true.png",
-          "width": 119,
+          "width": 118,
           "height": 55,
           "scale": 2.0,
-          "hash": "c80cdae7766b5ca2"
+          "hash": "cddb8b6af9c91eea"
         },
         {
           "theme": "light",
@@ -606,10 +606,10 @@
             "outline": true
           },
           "file": "snapshots/split-button/playground/dark/outline=true.png",
-          "width": 119,
+          "width": 118,
           "height": 55,
           "scale": 2.0,
-          "hash": "912d5fee7f408bea"
+          "hash": "caf4be0682bdf21a"
         },
         {
           "theme": "dark",
@@ -638,6 +638,145 @@
           "height": 55,
           "scale": 2.0,
           "hash": "3cb9e176690a3713"
+        }
+      ]
+    },
+    {
+      "id": "split-button/pill",
+      "title": "Status pill",
+      "component": "SplitButton",
+      "code": [
+        {
+          "text": "let p = p(cx);\nlet (label, icon, tone) = "
+        },
+        {
+          "knob": "state",
+          "code": {
+            "closed": "(\"Closed\", theme::ICON_PR_CLOSED, Tone::GitClosed)",
+            "draft": "(\"Draft\", theme::ICON_PR_DRAFT, Tone::Neutral)",
+            "merged": "(\"Merged\", theme::ICON_MERGE, Tone::GitMerged)",
+            "open": "(\"Open\", theme::ICON_PR, Tone::GitOpen)"
+          }
+        },
+        {
+          "text": ";\nSplitButton::new(\"pr\", label, &p)\n  .pill(tone)\n  .icon(icon)\n  .aria_label(format!(\"View PR (#42, {})\", label.to_lowercase()))\n  .menu_label(\"Open PR on web\")\n  .menu_icon(theme::ICON_EXTERNAL_LINK)"
+        }
+      ],
+      "knobs": [
+        {
+          "name": "state",
+          "type": "select",
+          "options": [
+            "open",
+            "draft",
+            "merged",
+            "closed"
+          ],
+          "default": "open"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "state=open",
+          "values": {
+            "state": "open"
+          },
+          "is_default": true,
+          "file": "snapshots/split-button/pill/light/default.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "1c6cd2a5773ef80a"
+        },
+        {
+          "theme": "light",
+          "key": "state=draft",
+          "values": {
+            "state": "draft"
+          },
+          "file": "snapshots/split-button/pill/light/state=draft.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "192ee82ad677c88e"
+        },
+        {
+          "theme": "light",
+          "key": "state=merged",
+          "values": {
+            "state": "merged"
+          },
+          "file": "snapshots/split-button/pill/light/state=merged.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "9a997ab281adaf33"
+        },
+        {
+          "theme": "light",
+          "key": "state=closed",
+          "values": {
+            "state": "closed"
+          },
+          "file": "snapshots/split-button/pill/light/state=closed.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "a02671b884b79e35"
+        },
+        {
+          "theme": "dark",
+          "key": "state=open",
+          "values": {
+            "state": "open"
+          },
+          "is_default": true,
+          "file": "snapshots/split-button/pill/dark/default.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "fe967b551749833c"
+        },
+        {
+          "theme": "dark",
+          "key": "state=draft",
+          "values": {
+            "state": "draft"
+          },
+          "file": "snapshots/split-button/pill/dark/state=draft.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "92e26ef0a9d7d0fe"
+        },
+        {
+          "theme": "dark",
+          "key": "state=merged",
+          "values": {
+            "state": "merged"
+          },
+          "file": "snapshots/split-button/pill/dark/state=merged.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "9150212873a7d70a"
+        },
+        {
+          "theme": "dark",
+          "key": "state=closed",
+          "values": {
+            "state": "closed"
+          },
+          "file": "snapshots/split-button/pill/dark/state=closed.png",
+          "width": 192,
+          "height": 88,
+          "scale": 2.0,
+          "hash": "e047e30c96a892d9"
         }
       ]
     },
@@ -775,20 +914,20 @@
           "key": "",
           "is_default": true,
           "file": "snapshots/kbd/basic/light/default.png",
-          "width": 185,
+          "width": 211,
           "height": 48,
           "scale": 2.0,
-          "hash": "844888469421bd53"
+          "hash": "d4649228309d5a33"
         },
         {
           "theme": "dark",
           "key": "",
           "is_default": true,
           "file": "snapshots/kbd/basic/dark/default.png",
-          "width": 185,
+          "width": 211,
           "height": 48,
           "scale": 2.0,
-          "hash": "1fec4e0c5fd53481"
+          "hash": "3e6009c1bddd7037"
         }
       ]
     },
@@ -829,6 +968,42 @@
       ]
     },
     {
+      "id": "checkbox/labels",
+      "title": "With labels",
+      "component": "Checkbox",
+      "code": [
+        {
+          "text": "let p = p(cx);\n// The label sits in the row that takes the click, so it toggles too.\nlet row = |id: &'static str, state: CheckState, label: &'static str, disabled: bool| {\n  div()\n    .id(id)\n    .flex()\n    .items_center()\n    .gap_2()\n    .h(px(28.))\n    .child(\n      Checkbox::new(format!(\"{id}-box\"), &p)\n        .checked(state)\n        .disabled(disabled),\n    )\n    .child(\n      treq_ui::text(div(), treq_ui::TextSize::Sm)\n        .text_color(if disabled {\n          p.muted_foreground\n        } else {\n          p.foreground\n        })\n        .child(label),\n    )\n};\ndiv()\n  .w(px(300.))\n  .flex()\n  .flex_col()\n  .child(row(\"all\", CheckState::Mixed, \"All files\", false))\n  .child(\n    div()\n      .pl_5()\n      .child(row(\"src\", CheckState::On, \"src/main.rs\", false))\n      .child(row(\"lock\", CheckState::Off, \"Cargo.lock\", false)),\n  )\n  .child(row(\"viewed\", CheckState::On, \"Viewed\", false))\n  .child(row(\n    \"locked\",\n    CheckState::On,\n    \"Pushed commits (locked)\",\n    true,\n  ))\n  .child(\n    div()\n      .id(\"notify\")\n      .flex()\n      .items_start()\n      .gap_2()\n      .py_1()\n      .child(\n        div()\n          .pt(px(3.))\n          .child(Checkbox::new(\"notify-box\", &p).checked(true)),\n      )\n      .child(\n        div()\n          .flex()\n          .flex_col()\n          .child(\n            treq_ui::text(div(), treq_ui::TextSize::Sm)\n              .text_color(p.foreground)\n              .child(\"Notify when the agent finishes\"),\n          )\n          .child(\n            treq_ui::text(div(), treq_ui::TextSize::Xs)\n              .text_color(p.muted_foreground)\n              .child(\"A desktop notification, only while Treq is in the background.\"),\n          ),\n      ),\n  )"
+        }
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "variants": [
+        {
+          "theme": "light",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/labels/light/default.png",
+          "width": 372,
+          "height": 262,
+          "scale": 2.0,
+          "hash": "e0f5d5518540fef9"
+        },
+        {
+          "theme": "dark",
+          "key": "",
+          "is_default": true,
+          "file": "snapshots/checkbox/labels/dark/default.png",
+          "width": 372,
+          "height": 262,
+          "scale": 2.0,
+          "hash": "3d3f137e84984049"
+        }
+      ]
+    },
+    {
       "id": "alert/playground",
       "title": "Playground",
       "component": "Alert",
@@ -852,6 +1027,12 @@
         },
         {
           "text": ")\n    .when("
+        },
+        {
+          "knob": "dismiss"
+        },
+        {
+          "text": ", |a| {\n      a.action(\n        Button::new(\"dismiss\", &p)\n          .variant(Variant::Ghost)\n          .size(treq_ui::Size::Xs)\n          .label(\"Not now\"),\n      )\n    })\n    .when("
         },
         {
           "knob": "action"
@@ -880,6 +1061,11 @@
           "default": "danger"
         },
         {
+          "name": "dismiss",
+          "type": "bool",
+          "default": false
+        },
+        {
           "name": "action",
           "type": "bool",
           "default": true
@@ -892,24 +1078,71 @@
       "variants": [
         {
           "theme": "light",
-          "key": "title=1 file has conflicts,severity=danger,action=true",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=true",
           "values": {
             "action": true,
+            "dismiss": false,
             "severity": "danger",
             "title": "1 file has conflicts"
           },
           "is_default": true,
           "file": "snapshots/alert/playground/light/default.png",
           "width": 472,
-          "height": 79,
+          "height": 105,
           "scale": 2.0,
-          "hash": "0e350a9634a6f18a"
+          "hash": "e9b50d995d3cac4e"
         },
         {
           "theme": "light",
-          "key": "title=1 file has conflicts,severity=danger,action=false",
+          "key": "title=1 file has conflicts,severity=info,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "info",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/severity=info.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "889060d28f988a73"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=warning,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "warning",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/severity=warning.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "3825d2ac286af317"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=true,action=true",
+          "values": {
+            "action": true,
+            "dismiss": true,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/light/dismiss=true.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "5d1fdd6787535996"
+        },
+        {
+          "theme": "light",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=false",
           "values": {
             "action": false,
+            "dismiss": false,
             "severity": "danger",
             "title": "1 file has conflicts"
           },
@@ -920,81 +1153,72 @@
           "hash": "7b86a5b3a335ddfd"
         },
         {
-          "theme": "light",
-          "key": "title=1 file has conflicts,severity=info,action=true",
-          "values": {
-            "action": true,
-            "severity": "info",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/light/severity=info.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "3292e2d6c4fc81ff"
-        },
-        {
-          "theme": "light",
-          "key": "title=1 file has conflicts,severity=info,action=false",
-          "values": {
-            "action": false,
-            "severity": "info",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/light/severity=info,action=false.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "bc23e9159286bf00"
-        },
-        {
-          "theme": "light",
-          "key": "title=1 file has conflicts,severity=warning,action=true",
-          "values": {
-            "action": true,
-            "severity": "warning",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/light/severity=warning.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "e10c570274cd0257"
-        },
-        {
-          "theme": "light",
-          "key": "title=1 file has conflicts,severity=warning,action=false",
-          "values": {
-            "action": false,
-            "severity": "warning",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/light/severity=warning,action=false.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "181f8dca37eab988"
-        },
-        {
           "theme": "dark",
-          "key": "title=1 file has conflicts,severity=danger,action=true",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=true",
           "values": {
             "action": true,
+            "dismiss": false,
             "severity": "danger",
             "title": "1 file has conflicts"
           },
           "is_default": true,
           "file": "snapshots/alert/playground/dark/default.png",
           "width": 472,
-          "height": 79,
+          "height": 105,
           "scale": 2.0,
-          "hash": "045c7dac7c88e36d"
+          "hash": "872fcc5ba14ccf99"
         },
         {
           "theme": "dark",
-          "key": "title=1 file has conflicts,severity=danger,action=false",
+          "key": "title=1 file has conflicts,severity=info,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "info",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/severity=info.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "18535d75655baaf7"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=warning,dismiss=false,action=true",
+          "values": {
+            "action": true,
+            "dismiss": false,
+            "severity": "warning",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/severity=warning.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "1661c6ac3d057718"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=true,action=true",
+          "values": {
+            "action": true,
+            "dismiss": true,
+            "severity": "danger",
+            "title": "1 file has conflicts"
+          },
+          "file": "snapshots/alert/playground/dark/dismiss=true.png",
+          "width": 472,
+          "height": 105,
+          "scale": 2.0,
+          "hash": "11d8b331fbbbc9a8"
+        },
+        {
+          "theme": "dark",
+          "key": "title=1 file has conflicts,severity=danger,dismiss=false,action=false",
           "values": {
             "action": false,
+            "dismiss": false,
             "severity": "danger",
             "title": "1 file has conflicts"
           },
@@ -1003,62 +1227,6 @@
           "height": 79,
           "scale": 2.0,
           "hash": "1156db93eca336e2"
-        },
-        {
-          "theme": "dark",
-          "key": "title=1 file has conflicts,severity=info,action=true",
-          "values": {
-            "action": true,
-            "severity": "info",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/dark/severity=info.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "3d25560e84f18b23"
-        },
-        {
-          "theme": "dark",
-          "key": "title=1 file has conflicts,severity=info,action=false",
-          "values": {
-            "action": false,
-            "severity": "info",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/dark/severity=info,action=false.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "b683a15de351a654"
-        },
-        {
-          "theme": "dark",
-          "key": "title=1 file has conflicts,severity=warning,action=true",
-          "values": {
-            "action": true,
-            "severity": "warning",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/dark/severity=warning.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "b7fc1e0734a24394"
-        },
-        {
-          "theme": "dark",
-          "key": "title=1 file has conflicts,severity=warning,action=false",
-          "values": {
-            "action": false,
-            "severity": "warning",
-            "title": "1 file has conflicts"
-          },
-          "file": "snapshots/alert/playground/dark/severity=warning,action=false.png",
-          "width": 472,
-          "height": 79,
-          "scale": 2.0,
-          "hash": "bab20712357e3d83"
         }
       ]
     },
@@ -1163,7 +1331,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "de8244dccd857c30"
+          "hash": "3a33ee02e9a21626"
         },
         {
           "theme": "dark",
@@ -1173,7 +1341,7 @@
           "width": 352,
           "height": 192,
           "scale": 2.0,
-          "hash": "18ea8f030c1e3346"
+          "hash": "41c07d4b0a122fcf"
         }
       ]
     },
@@ -1199,7 +1367,13 @@
           "knob": "conflict"
         },
         {
-          "text": " {\n        changes.dot(Tone::Danger)\n      } else {\n        changes\n      }\n    },\n    Tab::new(\"logs\", \"Logs\"),\n  ])\n  .selected(1)"
+          "text": " {\n        changes.dot(Tone::Danger)\n      } else {\n        changes\n      }\n    },\n    {\n      let logs = Tab::new(\"logs\", \"Logs\");\n      if "
+        },
+        {
+          "knob": "badge"
+        },
+        {
+          "text": " {\n        logs.badge(\"PRO\", Tone::Neutral)\n      } else {\n        logs\n      }\n    },\n  ])\n  .selected(1)"
         }
       ],
       "knobs": [
@@ -1216,6 +1390,11 @@
           "name": "conflict",
           "type": "bool",
           "default": false
+        },
+        {
+          "name": "badge",
+          "type": "bool",
+          "default": false
         }
       ],
       "themes": [
@@ -1225,8 +1404,9 @@
       "variants": [
         {
           "theme": "light",
-          "key": "style=segmented,conflict=false",
+          "key": "style=segmented,conflict=false,badge=false",
           "values": {
+            "badge": false,
             "conflict": false,
             "style": "segmented"
           },
@@ -1239,21 +1419,9 @@
         },
         {
           "theme": "light",
-          "key": "style=segmented,conflict=true",
+          "key": "style=underline,conflict=false,badge=false",
           "values": {
-            "conflict": true,
-            "style": "segmented"
-          },
-          "file": "snapshots/tabs/playground/light/conflict=true.png",
-          "width": 286,
-          "height": 58,
-          "scale": 2.0,
-          "hash": "422eaead5c367a76"
-        },
-        {
-          "theme": "light",
-          "key": "style=underline,conflict=false",
-          "values": {
+            "badge": false,
             "conflict": false,
             "style": "underline"
           },
@@ -1265,21 +1433,37 @@
         },
         {
           "theme": "light",
-          "key": "style=underline,conflict=true",
+          "key": "style=segmented,conflict=true,badge=false",
           "values": {
+            "badge": false,
             "conflict": true,
-            "style": "underline"
+            "style": "segmented"
           },
-          "file": "snapshots/tabs/playground/light/style=underline,conflict=true.png",
-          "width": 265,
-          "height": 54,
+          "file": "snapshots/tabs/playground/light/conflict=true.png",
+          "width": 286,
+          "height": 58,
           "scale": 2.0,
-          "hash": "e33aa558a7aaf52d"
+          "hash": "422eaead5c367a76"
+        },
+        {
+          "theme": "light",
+          "key": "style=segmented,conflict=false,badge=true",
+          "values": {
+            "badge": true,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/light/badge=true.png",
+          "width": 310,
+          "height": 58,
+          "scale": 2.0,
+          "hash": "3bb232b17f215a1d"
         },
         {
           "theme": "dark",
-          "key": "style=segmented,conflict=false",
+          "key": "style=segmented,conflict=false,badge=false",
           "values": {
+            "badge": false,
             "conflict": false,
             "style": "segmented"
           },
@@ -1292,21 +1476,9 @@
         },
         {
           "theme": "dark",
-          "key": "style=segmented,conflict=true",
+          "key": "style=underline,conflict=false,badge=false",
           "values": {
-            "conflict": true,
-            "style": "segmented"
-          },
-          "file": "snapshots/tabs/playground/dark/conflict=true.png",
-          "width": 286,
-          "height": 55,
-          "scale": 2.0,
-          "hash": "c1061020c3abc287"
-        },
-        {
-          "theme": "dark",
-          "key": "style=underline,conflict=false",
-          "values": {
+            "badge": false,
             "conflict": false,
             "style": "underline"
           },
@@ -1318,16 +1490,31 @@
         },
         {
           "theme": "dark",
-          "key": "style=underline,conflict=true",
+          "key": "style=segmented,conflict=true,badge=false",
           "values": {
+            "badge": false,
             "conflict": true,
-            "style": "underline"
+            "style": "segmented"
           },
-          "file": "snapshots/tabs/playground/dark/style=underline,conflict=true.png",
-          "width": 265,
-          "height": 54,
+          "file": "snapshots/tabs/playground/dark/conflict=true.png",
+          "width": 286,
+          "height": 55,
           "scale": 2.0,
-          "hash": "1ed6f2cbc447da38"
+          "hash": "c1061020c3abc287"
+        },
+        {
+          "theme": "dark",
+          "key": "style=segmented,conflict=false,badge=true",
+          "values": {
+            "badge": true,
+            "conflict": false,
+            "style": "segmented"
+          },
+          "file": "snapshots/tabs/playground/dark/badge=true.png",
+          "width": 310,
+          "height": 55,
+          "scale": 2.0,
+          "hash": "12ed505c34f35022"
         }
       ]
     },
@@ -1373,7 +1560,7 @@
       "component": "Menu",
       "code": [
         {
-          "text": "let p = p(cx);\ndiv()\n  .w(px(240.))\n  .p_1()\n  .rounded(px(theme::RADIUS_MD))\n  .border_1()\n  .border_color(p.border)\n  .bg(p.popover)\n  .child(MenuItem::new(\"copy\", \"Copy branch name\", &p).shortcut(\"secondary-c\"))\n  .child(MenuItem::new(\"rename\", \"Rename…\", &p))\n  .child(MenuItem::new(\"open-pr\", \"Open pull request\", &p).disabled(true))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"main\", \"main\", &p).checked(true))\n  .child(MenuItem::new(\"develop\", \"develop\", &p).checked(false))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"delete\", \"Delete workspace…\", &p).danger())"
+          "text": "let p = p(cx);\ndiv()\n  .w(px(240.))\n  .p_1()\n  .rounded(px(theme::RADIUS_MD))\n  .border_1()\n  .border_color(p.border)\n  .bg(p.popover)\n  .child(MenuItem::new(\"copy\", \"Copy branch name\", &p).shortcut(\"secondary-c\"))\n  .child(MenuItem::new(\"rename\", \"Rename…\", &p))\n  .child(\n    MenuItem::new(\"plan\", \"Plan\", &p)\n      .description(\"Plan the change first, without editing files\"),\n  )\n  .child(MenuItem::new(\"open-pr\", \"Open pull request\", &p).disabled(true))\n  .child(MenuSeparator::new(&p))\n  .child(MenuLabel::new(\"Target branch\", &p))\n  .child(MenuItem::new(\"main\", \"main\", &p).checked(true))\n  .child(MenuItem::new(\"develop\", \"develop\", &p).checked(false))\n  .child(MenuSeparator::new(&p))\n  .child(MenuItem::new(\"delete\", \"Delete workspace…\", &p).danger())"
         }
       ],
       "themes": [
@@ -1387,9 +1574,9 @@
           "is_default": true,
           "file": "snapshots/menu/items/light/default.png",
           "width": 272,
-          "height": 189,
+          "height": 251,
           "scale": 2.0,
-          "hash": "613f0cd401781562"
+          "hash": "d5ebeb5f3761f3aa"
         },
         {
           "theme": "dark",
@@ -1397,9 +1584,9 @@
           "is_default": true,
           "file": "snapshots/menu/items/dark/default.png",
           "width": 272,
-          "height": 189,
+          "height": 251,
           "scale": 2.0,
-          "hash": "da875099bb685dfb"
+          "hash": "c67c5ebc663cd7b5"
         }
       ]
     },
@@ -1510,7 +1697,7 @@
           "width": 592,
           "height": 292,
           "scale": 2.0,
-          "hash": "22990fbd0d7abce2"
+          "hash": "e2fb52f576efb791"
         },
         {
           "theme": "dark",
@@ -1520,7 +1707,7 @@
           "width": 592,
           "height": 292,
           "scale": 2.0,
-          "hash": "dc8fa7b6d79f8333"
+          "hash": "ec8c55975685409d"
         }
       ]
     }

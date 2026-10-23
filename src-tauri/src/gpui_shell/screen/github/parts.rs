@@ -27,44 +27,18 @@ pub fn named(el: Div, id: impl Into<SharedString>) -> Stateful<Div> {
 }
 
 /// `StateChip`: Draft, Open, Merged or Closed.
-pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
+pub fn state_chip(state: &str, draft: bool, p: &Palette) -> impl IntoElement {
   let s = state.to_uppercase();
-  let (icon, label, bg, fg) = if draft && s == "OPEN" {
-    (theme::ICON_PR_DRAFT, "Draft", p.muted, p.muted_foreground)
+  let (label, tone) = if draft && s == "OPEN" {
+    ("Draft", Tone::Neutral)
   } else if s == "OPEN" {
-    (
-      theme::ICON_CIRCLE_DOT,
-      "Open",
-      Tone::GitOpen.tint(p),
-      p.pr_open,
-    )
+    ("Open", Tone::GitOpen)
   } else if s == "MERGED" {
-    (
-      theme::ICON_MERGE,
-      "Merged",
-      Tone::GitMerged.tint(p),
-      p.pr_merged,
-    )
+    ("Merged", Tone::GitMerged)
   } else {
-    (
-      theme::ICON_CIRCLE_ALERT,
-      "Closed",
-      Tone::GitClosed.tint(p),
-      p.pr_closed,
-    )
+    ("Closed", Tone::GitClosed)
   };
-  ui::text(div(), TextSize::Sm)
-    .flex()
-    .flex_none()
-    .items_center()
-    .gap_1()
-    .px_2()
-    .py_0p5()
-    .rounded_full()
-    .bg(bg)
-    .text_color(fg)
-    .child(ui::icon(icon, 12., fg))
-    .child(label)
+  ui::Badge::new(label, p).tone(tone)
 }
 
 /// A label's `#rrggbb` (or bare `rrggbb`) color.

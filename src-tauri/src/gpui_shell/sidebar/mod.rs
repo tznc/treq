@@ -625,14 +625,7 @@ impl Render for Sidebar {
               .truncate()
               .child(snapshot.repo_name.clone()),
           )
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .flex_none()
-              .px_1()
-              .rounded_sm()
-              .bg(palette.muted)
-              .child(crate::gpui_shell::keys::hint("⌘ + K")),
-          )
+          .child(ui::Kbd::new("secondary-k", &palette))
           .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
       )
       .child(self.header_button(
@@ -1053,9 +1046,7 @@ impl Sidebar {
       .px_2()
       .h(zpx(32.))
       .rounded_md()
-      .when(repo.home_selected, |this| {
-        this.bg(palette.primary.opacity(0.2))
-      })
+      .when(repo.home_selected, |this| this.bg(palette.selected()))
       .cursor_pointer()
       .when(!repo.home_selected, |this| {
         this.hover(|style| style.bg(palette.accent))
@@ -1120,7 +1111,7 @@ impl Sidebar {
       .h(zpx(32.))
       .rounded_md()
       .cursor_pointer()
-      .when(active, |this| this.bg(palette.primary.opacity(0.2)))
+      .when(active, |this| this.bg(palette.selected()))
       .when(!active, |this| this.hover(|style| style.bg(palette.accent)))
       .child(icon(icon_path, 16., palette.sidebar_foreground))
       .child(div().flex_1().min_w_0().truncate().child(text))
@@ -1205,9 +1196,7 @@ impl Sidebar {
       Some(pr) => pr_color(pr, palette),
       None => palette.muted_foreground,
     };
-    let title_color = if row.conflicted {
-      palette.destructive
-    } else if row.selected {
+    let title_color = if row.selected {
       palette.sidebar_foreground
     } else {
       palette.muted_foreground
@@ -1237,6 +1226,21 @@ impl Sidebar {
       .when(repo_active, |this| {
         this.group_hover(group.clone(), |style| style.invisible())
       })
+      // A conflict is one danger dot: the red status dot already says it.
+      .when(
+        row.conflicted
+          && !row
+            .status
+            .as_ref()
+            .is_some_and(|s| s.color == StatusColor::Red),
+        |this| {
+          this.child(
+            div()
+              .debug_selector(move || format!("conflict-{id}"))
+              .child(ui::Dot::new(Tone::Danger, palette)),
+          )
+        },
+      )
       .when_some(row.queue.as_deref(), |this, status| {
         let (color, pulse, _) = queue_dot(status, palette);
         let dot = div()
@@ -1290,20 +1294,24 @@ impl Sidebar {
       .pr_2()
       .rounded_md()
       .when(!row.archiving, |this| this.cursor_pointer())
-      .when(row.selected, |this| this.bg(palette.primary.opacity(0.2)))
+      .when(row.selected, |this| this.bg(palette.selected()))
       .when(!row.selected && !row.archiving, |this| {
-        this.hover(|style| style.bg(palette.muted.opacity(0.5)))
+        this.hover(|style| style.bg(palette.hover()))
       })
       .when(row.archiving, |this| this.opacity(0.5))
       .when(row.depth > 0, |this| {
+        // An elbow into the row, not a bar that reads as a selection marker.
         this.child(
           div()
             .absolute()
             .top_0()
-            .bottom_0()
             .left(zpx(guide_left(row.depth)))
-            .w(zpx(2.))
-            .bg(palette.stack_guide),
+            .h(zpx(16.))
+            .w(zpx(6.))
+            .border_l_1()
+            .border_b_1()
+            .border_color(palette.border)
+            .rounded_bl(ui::radius::SM),
         )
       })
       .child(leading)

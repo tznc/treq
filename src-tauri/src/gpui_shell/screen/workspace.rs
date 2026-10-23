@@ -260,6 +260,8 @@ pub struct WorkspaceView {
   actions: Arc<dyn super::workspace_ops::WorkspaceActionsHost>,
   /// Those actions in flight.
   busy: actions::Busy,
+  /// The open confirmation (Delete workspace).
+  confirm: Option<crate::gpui_shell::confirm::Pending<Self>>,
   popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
   /// The header popover that shows in the modal window, if one does.
@@ -352,6 +354,7 @@ impl WorkspaceView {
       host: host.clone(),
       actions: host.clone(),
       busy: actions::Busy::default(),
+      confirm: None,
       popover_host: host.clone(),
       popover: None,
       window: None,
@@ -1119,61 +1122,38 @@ impl WorkspaceView {
       )
   }
 
-  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    // The button reads the PR's status, a pill filled as GitHub fills its state label.
+  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+    // The PR's state as GitHub labels it, as a pill that is also the button:
+    // the label opens the PR in Treq, the trailing half on GitHub.
     let draft = pr.draft && pr.state == PrState::Open;
-    let (label, icon, state) = match pr.state {
-      _ if draft => ("Draft", theme::ICON_PR_DRAFT, p.muted_foreground),
-      PrState::Open => ("Open", theme::ICON_PR, p.pr_open),
-      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, p.pr_closed),
-      PrState::Merged => ("Merged", theme::ICON_MERGE, p.pr_merged),
+    let (label, icon, tone) = match pr.state {
+      _ if draft => ("Draft", theme::ICON_PR_DRAFT, ui::Tone::Neutral),
+      PrState::Open => ("Open", theme::ICON_PR, ui::Tone::GitOpen),
+      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, ui::Tone::GitClosed),
+      PrState::Merged => ("Merged", theme::ICON_MERGE, ui::Tone::GitMerged),
     };
-    let (bg, hover) = (state, state.opacity(0.85));
-    let white = p.primary_foreground;
-    let styled = |b: Button| b.size(Size::Sm).bg(bg).text_color(white).hover_bg(hover);
-    let view = styled(Button::new("workspace-view-pr", p))
-      .gap_1()
-      .rounded_l_full()
-      .rounded_r_none()
-      .font_weight(gpui::FontWeight::BOLD)
-      .child(ui::icon(icon, 16., white))
-      .child(label)
+    let copy = self.copy_link(self.pr_url());
+    let pill = ui::SplitButton::new("workspace-view-pr", label, p)
+      .pill(tone)
+      .icon(icon)
       .aria_label(view_pr_name(pr))
+      .menu_label("Open PR on web")
+      .menu_icon(theme::ICON_EXTERNAL_LINK)
       .on_click(self.press("workspace.viewPr"))
-      .on_right_click(self.copy_link(self.pr_url()));
-    let web = styled(Button::new("workspace-view-pr-web", p))
-      .rounded_l_none()
-      .rounded_r_full()
-      .border_l_1()
-      .border_color(
-        p.primary_foreground
-          .opacity(if self.dark { 0.3 } else { 0.2 }),
-      )
-      .px_2()
-      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., white))
-      .aria_label("Open PR on web")
-      .on_click(self.press("workspace.viewPrWeb"))
-      .on_right_click(self.copy_link(self.pr_url()));
-    div()
-      .flex()
-      .flex_none()
-      .items_center()
-      .child(self.with_tooltip(
-        "workspace-view-pr",
-        Some(TooltipContent::Text(
-          format!("View pull request #{} in Treq", pr.number).into(),
-        )),
-        view,
-        cx,
-      ))
-      .child(self.with_tooltip(
-        "workspace-view-pr-web",
-        Some(TooltipContent::Text(
-          format!("Open pull request #{} on GitHub", pr.number).into(),
-        )),
-        web,
-        cx,
-      ))
+      .on_menu(self.press("workspace.viewPrWeb"))
+      .on_right_click(move |e, w, cx| copy(e, w, cx));
+    self.with_tooltip(
+      "workspace-view-pr",
+      Some(TooltipContent::Text(
+        format!(
+          "Pull request #{}: view in Treq, or open on GitHub",
+          pr.number
+        )
+        .into(),
+      )),
+      pill,
+      cx,
+    )
   }
 
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {
@@ -1315,21 +1295,17 @@ impl WorkspaceView {
   }
 
   fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+    // Counts are neutral; a conflict shows once, as a danger dot.
     let pill = |count: u32, tone: Tone, id: &'static str| {
-      let (bg, fg) = match tone {
-        Tone::Muted => (p.muted, p.muted_foreground),
-        Tone::Conflict => (p.destructive.opacity(0.2), p.destructive),
-        Tone::Uncommitted => (ui::Tone::Warning.tint(p), ui::Tone::Warning.text(p)),
-      };
-      ui::text(div(), TextSize::Xs)
+      div()
         .debug_selector(move || id.into())
-        .rounded_full()
-        .px_2()
-        .py_0p5()
-        .font_weight(FontWeight::MEDIUM)
-        .bg(bg)
-        .text_color(fg)
-        .child(count.to_string())
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .child(ui::Count::new(count as usize, p))
+        .when(tone == Tone::Conflict, |el| {
+          el.child(ui::Dot::new(ui::Tone::Danger, p))
+        })
     };
     let mut tabs: Vec<(Tab, &'static str, &'static str, Option<Div>)> = vec![
       (Tab::Overview, theme::ICON_CODE, "Code", None),
@@ -1341,7 +1317,7 @@ impl WorkspaceView {
           CommitsLabel::Count { count, tone } => pill(*count, *tone, "commits-tab-count"),
           CommitsLabel::HomeConflict => div()
             .debug_selector(|| "commits-tab-conflict-icon".into())
-            .child(ui::icon(theme::ICON_TRIANGLE_ALERT, 14., p.destructive)),
+            .child(ui::Dot::new(ui::Tone::Danger, p)),
         }),
       ),
       (
@@ -1557,13 +1533,7 @@ impl WorkspaceView {
         if value["useIdleAgent"].as_bool() == Some(true) {
           match self.send_to_idle(&markdown, cx) {
             None => return (self.react)(ScreenAction::Field { field, value }, cx),
-            Some(true) => {
-              return self.toast(
-                ToastTone::Success,
-                "Review sent to agent",
-                "Sent review to the idle agent",
-              )
-            }
+            Some(true) => return self.toast(ToastTone::Success, "Review sent to agent", ""),
             Some(false) => {}
           }
         }
@@ -1580,19 +1550,10 @@ impl WorkspaceView {
         let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
         match self.send_to_idle(&prompt, cx) {
           None => return (self.react)(ScreenAction::Field { field, value }, cx),
-          Some(true) => {
-            return self.toast(
-              ToastTone::Success,
-              "Comment sent to agent",
-              "Sent review comment to the idle agent",
-            )
-          }
+          Some(true) => return self.toast(ToastTone::Success, "Comment sent to agent", ""),
           Some(false) => {}
         }
-        let done = (
-          "Comment sent to agent",
-          "Created new agent session and sent review comment",
-        );
+        let done = ("Comment sent to agent", "");
         self.start(cx, Some(done), "Failed to create agent", move |_| {
           request("Review Comment", prompt, "acceptEdits", None)
         });
@@ -1902,6 +1863,7 @@ impl Render for WorkspaceView {
     self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
     let p = theme::palette(self.dark);
+    let confirm = crate::gpui_shell::confirm::render(Self::confirm_slot, self, window, &p, cx);
     let snapshot = self.snapshot.clone();
     let header = match &snapshot {
       Some(snapshot) => self.header(&snapshot.header, &p, cx),
@@ -1983,6 +1945,7 @@ impl Render for WorkspaceView {
           .text_color(p.foreground)
           .children(strip)
           .child(pane_area)
+          .children(confirm)
           .into_any_element();
       }
       // The tab alone, while no terminal pane shows.
@@ -2015,6 +1978,7 @@ impl Render for WorkspaceView {
             d.child(super::remote_chrome::cutoff_overlay(&p))
           }),
       )
+      .children(confirm)
       .into_any_element()
   }
 }

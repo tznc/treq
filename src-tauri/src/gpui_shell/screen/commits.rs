@@ -39,6 +39,7 @@ use super::{
 };
 use crate::{
   gpui_shell::{
+    confirm::{self, Question},
     native::{self, NativeEvent, ToastAction, ToastTone},
     popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
@@ -154,6 +155,8 @@ enum Kind {
 
 pub struct CommitsView {
   host: Host,
+  /// The open confirmation (delete, undo or revert a commit).
+  confirm: Option<confirm::Pending<Self>>,
   react: ActionSink,
   pub(super) parent: Parent,
   dark: bool,
@@ -220,6 +223,7 @@ impl CommitsView {
       selection: None,
       comment: None,
       dialog: None,
+      confirm: None,
       requested: scroll_to.clone(),
       scroll_to,
       feed: rows::Feed::default(),
@@ -511,20 +515,26 @@ impl CommitsView {
     .detach();
   }
 
-  /// `ask`, then `act` off the main thread.
+  fn confirm_slot(view: &mut Self) -> &mut Option<confirm::Pending<Self>> {
+    &mut view.confirm
+  }
+
+  /// Asks `question`; its verb runs `act` off the main thread, unless the
+  /// tab has moved to another workspace meanwhile.
   fn confirmed<T: Send + 'static>(
-    &self,
-    title: &'static str,
-    message: String,
+    &mut self,
+    question: Question,
     act: impl FnOnce(&dyn CommitsHost, &Parent) -> T + Send + 'static,
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
-    self.run(
-      move |host, parent| host.confirm(title, &message).then(|| act(host, parent)),
-      move |view, result, cx| {
-        if let Some(result) = result {
-          apply(view, result, cx);
+    let key = self.parent.key();
+    confirm::ask(
+      &mut self.confirm,
+      question,
+      move |view, cx| {
+        if view.parent.key() == key {
+          view.run(act, apply, cx);
         }
       },
       cx,
@@ -533,15 +543,18 @@ impl CommitsView {
 
   fn abandon(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
     let ws = self.parent.workspace_id();
-    let message = format!(
-      "Abandon commit {} — {}?",
-      commit.short_id,
-      first_line(&commit)
-    );
+    let question = Question::new(
+      format!("Delete commit {}?", commit.short_id),
+      format!(
+        "\u{201c}{}\u{201d} is abandoned. You can undo it from the toast that follows.",
+        first_line(&commit)
+      ),
+      "Delete commit",
+    )
+    .destructive();
     let change = commit.change_id.clone();
     self.confirmed(
-      "Delete Commit",
-      message,
+      question,
       move |host, parent| host.abandon(&parent.repo_path, ws, &change),
       move |view, result, cx| match result {
         Ok(operation) => {
@@ -553,11 +566,7 @@ impl CommitsView {
             let event = match host.undo_operation(&parent.repo_path, ws, &operation) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                toast_event(
-                  ToastTone::Success,
-                  "Restored",
-                  format!("Restored commit {short}"),
-                )
+                toast_event(ToastTone::Success, &format!("Restored commit {short}"), "")
               }
               Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
             };
@@ -587,15 +596,11 @@ impl CommitsView {
     self.run(
       move |host, parent| host.stash(&parent.repo_path, parent.workspace_id(), &change),
       move |view, result, cx| match result {
-        Ok(short) => {
+        Ok(_) => {
           view.remove_later(commit.commit_id.clone(), cx);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           Self::changed(view.host.as_ref(), &view.parent);
-          view.toast(
-            ToastTone::Success,
-            "Commit stashed",
-            format!("Parked {short} — apply it onto another workspace from Stashed Changes"),
-          );
+          view.toast(ToastTone::Success, "Commit stashed", "");
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to stash commit", err),
       },
@@ -607,15 +612,17 @@ impl CommitsView {
     let Some(ws) = self.parent.workspace_id() else {
       return;
     };
-    let message = format!(
-      "Undo commit {} — {}? Its changes will be returned to your working copy.",
-      commit.short_id,
-      first_line(&commit)
+    let question = Question::new(
+      format!("Undo commit {}?", commit.short_id),
+      format!(
+        "\u{201c}{}\u{201d} is undone and its changes return to your working copy.",
+        first_line(&commit)
+      ),
+      "Undo commit",
     );
     let change = commit.change_id.clone();
     self.confirmed(
-      "Undo Commit",
-      message,
+      question,
       move |host, parent| host.undo_commit(&parent.repo_path, ws, &change),
       move |view, result, cx| match result {
         Ok(()) => {
@@ -623,8 +630,8 @@ impl CommitsView {
           Self::changed(view.host.as_ref(), &view.parent);
           view.toast(
             ToastTone::Success,
-            "Commit undone",
-            format!("Undid commit {}", commit.short_id),
+            &format!("Undid commit {}", commit.short_id),
+            "",
           );
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to undo commit", err),
@@ -635,23 +642,25 @@ impl CommitsView {
 
   fn revert(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
     let ws = self.parent.workspace_id();
-    let message = format!(
-      "Revert commit {} — {}? This creates a new commit that reverses its changes.",
-      commit.short_id,
-      first_line(&commit)
+    let question = Question::new(
+      format!("Revert commit {}?", commit.short_id),
+      format!(
+        "A new commit reverses the changes of \u{201c}{}\u{201d}.",
+        first_line(&commit)
+      ),
+      "Revert commit",
     );
     let change = commit.change_id.clone();
     self.confirmed(
-      "Revert Commit",
-      message,
+      question,
       move |host, parent| host.revert(&parent.repo_path, ws, &change),
       move |view, result, _| match result {
         Ok(()) => {
           Self::changed(view.host.as_ref(), &view.parent);
           view.toast(
             ToastTone::Success,
-            "Commit reverted",
-            format!("Reverted commit {}", commit.short_id),
+            &format!("Reverted commit {}", commit.short_id),
+            "",
           );
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to revert commit", err),
@@ -685,11 +694,7 @@ impl CommitsView {
         view.shifting = false;
         match result {
           Ok(()) => {
-            view.toast(
-              ToastTone::Success,
-              "Timestamps updated",
-              "Mutable commits on this branch now end at the current time",
-            );
+            view.toast(ToastTone::Success, "Timestamps updated", "");
             Self::changed(view.host.as_ref(), &view.parent);
             if from_dialog {
               view.dialog = None;
@@ -729,11 +734,7 @@ impl CommitsView {
             let event = match host.restore_snapshot(&path, &snapshot) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                toast_event(
-                  ToastTone::Success,
-                  "Restored",
-                  "Working copy changes were restored",
-                )
+                toast_event(ToastTone::Success, "Changes restored", "")
               }
               Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
             };
@@ -930,11 +931,7 @@ impl CommitsView {
       },
       |view, result, _cx| match result {
         Ok(_) => {
-          view.toast(
-            ToastTone::Success,
-            "Comment sent to agent",
-            "Created new agent session and sent comment",
-          );
+          view.toast(ToastTone::Success, "Comment sent to agent", "");
         }
         Err(err) => view.toast(ToastTone::Error, "Failed to create agent", err),
       },
@@ -985,21 +982,13 @@ impl CommitsView {
     }
     *saving = true;
     cx.notify();
-    let (change, short, description) = (
-      commit.change_id.clone(),
-      commit.short_id.clone(),
-      text.clone(),
-    );
+    let (change, description) = (commit.change_id.clone(), text.clone());
     self.run(
       move |host, parent| host.describe(&parent.repo_path, ws, &change, &description),
       move |view, result, _| match result {
         Ok(()) => {
           view.dialog = None;
-          view.toast(
-            ToastTone::Success,
-            "Description updated",
-            format!("Updated commit {short}"),
-          );
+          view.toast(ToastTone::Success, "Description updated", "");
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1051,17 +1040,13 @@ impl CommitsView {
     *saving = true;
     *error = None;
     cx.notify();
-    let (change, short) = (commit.change_id.clone(), commit.short_id.clone());
+    let change = commit.change_id.clone();
     self.run(
       move |host, parent| host.shift_timestamp(&parent.repo_path, ws, &change, &shift),
       move |view, result, _| match result {
         Ok(()) => {
           view.dialog = None;
-          view.toast(
-            ToastTone::Success,
-            "Timestamp updated",
-            format!("Updated commit {short} and repaired later commits on this lineage"),
-          );
+          view.toast(ToastTone::Success, "Timestamp updated", "");
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1167,16 +1152,9 @@ impl CommitsView {
         ))
       },
       |view, result, _cx| match result {
-        Ok((_, count)) => {
+        Ok(_) => {
           view.dialog = None;
-          view.toast(
-            ToastTone::Success,
-            "Resolve session started",
-            format!(
-              "{count} resolve director{} ready for the agent",
-              if count == 1 { "y" } else { "ies" }
-            ),
-          );
+          view.toast(ToastTone::Success, "Resolve session started", "");
         }
         Err(err) => {
           if let Some(Dialog::Resolve { submitting, .. }) = &mut view.dialog {
@@ -1464,7 +1442,11 @@ impl Render for CommitsView {
       );
     }
     let dialog = self.dialog_view(window, &p, cx);
-    root.child(self.feed_list(cx)).children(dialog)
+    let confirm = confirm::render(Self::confirm_slot, self, window, &p, cx);
+    root
+      .child(self.feed_list(cx))
+      .children(dialog)
+      .children(confirm)
   }
 }
 
@@ -1498,47 +1480,26 @@ impl CommitsView {
       })
       .when(n > 0, |this| {
         this.child(
-          div()
-            .debug_selector(|| "resolve-conflicts-banner".into())
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(p.destructive.opacity(0.4))
-            .bg(p.destructive.opacity(0.05))
-            .px_3()
-            .py_2()
-            .child(
-              div()
-                .min_w_0()
-                .child(
-                  ui::text(div(), TextSize::Sm)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(p.destructive)
-                    .child(format!(
-                      "{n} conflicted commit{}",
-                      if n == 1 { "" } else { "s" }
-                    )),
-                )
-                .child(
-                  ui::text(div(), TextSize::Xs)
-                    .text_color(p.muted_foreground)
-                    .child(
-                      "Resolve in place via a short-lived resolve workspace — no extra commit.",
-                    ),
-                ),
-            )
-            .child(
-              Button::new("resolve-conflicts-button", p)
-                .variant(Variant::Destructive)
-                .size(Size::Sm)
-                .gap_1p5()
-                .icon(theme::ICON_MERGE, 16.)
-                .label("Resolve conflicts…")
-                .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
+          ui::Alert::new(
+            "resolve-conflicts-banner",
+            format!(
+              "{n} commit{} conflicts",
+              if n == 1 { " has" } else { "s have" }
             ),
+            p,
+          )
+          .severity(ui::Severity::Danger)
+          .message("Resolve them in place with a short-lived resolve workspace.")
+          .action(
+            Button::new("resolve-conflicts-button", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .gap_1p5()
+              .icon(theme::ICON_MERGE, 16.)
+              .label("Resolve…")
+              .aria_label("Resolve conflicts…")
+              .on_click(cx.listener(move |view, _, _, cx| view.open_resolve(ids.clone(), cx))),
+          ),
         )
       })
   }
@@ -1995,7 +1956,7 @@ impl CommitsView {
       NativeMenuItem::item(label, move |cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
         let _ = view.update(cx, |view, _| {
-          view.toast(ToastTone::Success, "Copied", format!("Copied {what}"))
+          view.toast(ToastTone::Success, &format!("{what} copied"), "")
         });
       })
       .icon(MenuIcon::Copy)
@@ -2010,8 +1971,8 @@ impl CommitsView {
     let workspace = self.parent.workspace.is_some();
     let removing = self.removing.contains(&commit.commit_id);
     let mut items = vec![
-      copy("Copy commit ID", commit.commit_id.clone(), "commit ID"),
-      copy("Copy change ID", commit.change_id.clone(), "change ID"),
+      copy("Copy commit ID", commit.commit_id.clone(), "Commit ID"),
+      copy("Copy change ID", commit.change_id.clone(), "Change ID"),
       copy(
         "Copy message",
         commit.description.trim().to_string(),

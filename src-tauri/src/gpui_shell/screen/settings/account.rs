@@ -1233,16 +1233,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           .flex()
           .items_center()
           .gap_2()
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .rounded(radius::SM)
-              .bg(Tone::Success.tint(p))
-              .px_1p5()
-              .py_0p5()
-              .font_weight(FontWeight::SEMIBOLD)
-              .text_color(Tone::Success.text(p))
-              .child("PRO"),
-          )
+          .child(ui::Badge::new("PRO", p))
           .child(
             div()
               .flex_1()

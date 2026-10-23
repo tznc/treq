@@ -111,8 +111,6 @@ pub trait CommitsHost: CodeHost {
   fn snapshot_working_copy(&self, workspace_path: &str) -> Result<String, String>;
   fn discard_all(&self, workspace_path: &str) -> Result<(), String>;
   fn restore_snapshot(&self, workspace_path: &str, snapshot_id: &str) -> Result<(), String>;
-  /// A native OK/Cancel warning (`ask`); true for OK.
-  fn confirm(&self, title: &str, message: &str) -> bool;
 }
 
 /// Remote hosts only run these against a workspace, not the home repository.
@@ -314,14 +312,6 @@ impl CommitsHost for Backend {
       Some(remote) => remote.restore_snapshot(workspace_path, snapshot_id),
       None => core::restore_working_copy_snapshot(workspace_path, snapshot_id).map(|_| ()),
     }
-  }
-
-  fn confirm(&self, title: &str, message: &str) -> bool {
-    self.ask_native(
-      title,
-      message,
-      crate::gpui_shell::question::Buttons::OkCancel,
-    )
   }
 }
 

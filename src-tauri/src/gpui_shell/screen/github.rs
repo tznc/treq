@@ -1076,28 +1076,25 @@ impl GithubView {
       ui::Tab::new("github-tab-prs", "Pull Requests"),
     ];
     if merge_queue.is_some() {
-      tabs.push(ui::Tab::new("github-tab-merge-queue", "Merge Queue"));
+      let mut tab = ui::Tab::new("github-tab-merge-queue", "Merge Queue");
+      if merge_queue.is_some_and(|mq| !mq.pro) {
+        tab = tab.badge("PRO", ui::Tone::Neutral);
+      }
+      tabs.push(tab);
     }
-    div()
-      .flex()
-      .items_center()
-      .gap_2()
-      .child(
-        ui::Tabs::new("github-tabs", p)
-          .tabs(tabs)
-          .selected(selected)
-          .on_select(move |ix, _, cx| {
-            let press = [
-              "github.tab:issues",
-              "github.tab:prs",
-              "github.tab:merge-queue",
-            ][ix];
-            view.update(cx, |view, cx| view.press(press, cx)).ok();
-          }),
-      )
-      .when(merge_queue.is_some_and(|mq| !mq.pro), |d| {
-        d.child(ui::Badge::new("PRO", p).tone(ui::Tone::Success))
-      })
+    div().flex().items_center().gap_2().child(
+      ui::Tabs::new("github-tabs", p)
+        .tabs(tabs)
+        .selected(selected)
+        .on_select(move |ix, _, cx| {
+          let press = [
+            "github.tab:issues",
+            "github.tab:prs",
+            "github.tab:merge-queue",
+          ][ix];
+          view.update(cx, |view, cx| view.press(press, cx)).ok();
+        }),
+    )
   }
 
   fn toolbar(
@@ -1212,22 +1209,9 @@ impl GithubView {
       .size(Size::Sm)
       .h(zpx(28.))
       .gap_1()
-      .when(count > 0, |b| {
-        b.border_color(p.primary.opacity(0.4))
-          .bg(p.primary.opacity(0.1))
-      })
       .icon(theme::ICON_LIST_FILTER, 14.)
       .label("Filters")
-      .when(count > 0, |b| {
-        b.child(
-          ui::text(div(), TextSize::Xs)
-            .rounded_full()
-            .bg(p.primary)
-            .px_1p5()
-            .text_color(p.primary_foreground)
-            .child(count.to_string()),
-        )
-      })
+      .when(count > 0, |b| b.child(ui::Count::new(count, p)))
       .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::Filters, cx)));
     let panel = (self.popover == Some(Popover::Filters)).then(|| self.filter_panel(p, window, cx));
     div().relative().child(button).children(panel)
@@ -1590,7 +1574,7 @@ impl GithubView {
       .items_start()
       .gap_2()
       .cursor_pointer()
-      .when(selected, |d| d.bg(p.primary.opacity(0.1)))
+      .when(selected, |d| d.bg(p.selected()))
       .when(!selected, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
       .on_click(cx.listener(move |view, _, _, cx| on_click(view, cx)))
   }

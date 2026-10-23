@@ -153,27 +153,26 @@ fn deletes_the_workspace_from_the_more_menu(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
   h.pick("Delete Workspace");
+  assert!(calls_starting(&host, &["delete workspace"]).is_empty());
+  h.answer("Delete workspace");
   assert_eq!(
-    calls_starting(&host, &["ask", "delete workspace", "notify"]),
+    calls_starting(&host, &["delete workspace", "notify"]),
     [
-      "ask Delete workspace feature/login?",
       "delete workspace 7",
       "notify workspaceChanged",
       "notify workspacesRemoved",
-      "notify toast Workspace Deleted",
+      "notify toast Workspace deleted",
     ]
   );
 }
 
 #[gpui::test]
 fn keeps_the_workspace_when_delete_is_declined(cx: &mut TestAppContext) {
-  let host = FakeHost {
-    decline: true,
-    ..feature_host()
-  };
-  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
   h.pick("Delete Workspace");
+  h.answer("Cancel");
+  assert!(!h.drawn("confirm"));
   assert!(!host
     .calls()
     .iter()
@@ -194,7 +193,10 @@ fn retargets_onto_another_branch(cx: &mut TestAppContext) {
   assert!(h.sent().is_empty());
   assert_eq!(
     calls_starting(&host, &["retarget", "notify toast"]),
-    ["retarget feature/login -> develop", "notify toast Rebased",]
+    [
+      "retarget feature/login -> develop",
+      "notify toast Rebased onto develop",
+    ]
   );
 }
 

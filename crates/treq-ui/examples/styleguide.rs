@@ -9,8 +9,9 @@ use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
   theme::{self, Palette},
   Alert, Badge, Button, CheckState, Checkbox, ConfirmDialog, Count, Dialog, Dot, EmptyState,
-  IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuSeparator, Picker, PickerPlacement, Row,
-  RowDensity, Severity, Skeleton, SplitButton, Tab, Tabs, TabsStyle, Tone, Variant,
+  IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel, MenuSeparator, Picker,
+  PickerPlacement, Row, RowDensity, Severity, Skeleton, SplitButton, Tab, Tabs, TabsStyle, Tone,
+  Variant,
 };
 
 fn main() {
@@ -41,12 +42,14 @@ fn styleguide() -> Styleguide {
     .describe(
       "IconButton",
       "An icon-only button, 24 in rows and 28 in toolbars. Its label is required: it is the \
-       accessible name and the tooltip.",
+       accessible name and the tooltip. A tone colours the icon for state, such as danger.",
     )
     .describe(
       "SplitButton",
       "A command with a menu of related commands. One silhouette; the menu half has its own \
-       accessible name.",
+       accessible name. The pill variant is a state that is also a button (a PR's Open): \
+       fully rounded, tinted in the state's tone like a Badge, its second half a related \
+       command such as open on the web.",
     )
     .describe(
       "Picker",
@@ -60,17 +63,23 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Kbd",
-      "Shortcuts in the platform's glyphs: ⌘K on macOS, Ctrl K elsewhere.",
+      "Shortcuts in the platform's names with \" + \" between keys: ⌘ + K on macOS, Ctrl + K elsewhere.",
     )
     .describe(
       "Alert",
       "The icon and tint carry the severity; the title states the fact, the message says \
-       what to do, and the one action is an outline button.",
+       what to do. Actions sit bottom right under the text: one outline verb, or a ghost \
+       dismiss before it when there are two.",
+    )
+    .describe(
+      "Checkbox",
+      "13px, primary when on, a dash for a partly checked parent. The label sits right of \
+       the box in the row that takes the click, in body text; a hint goes under it, muted.",
     )
     .describe(
       "Tabs",
-      "Segmented switches views of one thing; underline switches panels. Counts trail the \
-       label; a problem is a dot.",
+      "Segmented switches views of one thing; underline switches panels. A badge labels \
+       the tab (a plan chip), counts trail the label, and a problem is a dot.",
     )
     .describe(
       "Row",
@@ -79,7 +88,8 @@ fn styleguide() -> Styleguide {
     )
     .describe(
       "Menu",
-      "Rows 28 tall: icon, label, shortcut. Values get a check; destructive items go last.",
+      "Rows 28 tall: icon, label, shortcut; a description adds a muted second line. Values \
+       get a check under a group label that names the value; destructive items go last.",
     )
     .describe(
       "Dialog",
@@ -178,6 +188,11 @@ fn buttons() -> Vec<Example> {
             .size(size),
         )
         .child(
+          IconButton::new("danger", theme::ICON_X, "Remove", &p)
+            .tone(Tone::Danger)
+            .size(size),
+        )
+        .child(
           IconButton::new("disabled", theme::ICON_X, "Close", &p)
             .disabled(true)
             .size(size),
@@ -185,7 +200,7 @@ fn buttons() -> Vec<Example> {
     })
     .component("IconButton")
     .title("States")
-    .size(200., 56.),
+    .size(232., 56.),
     example!("split-button/playground", |knobs, _, cx| {
       let p = p(cx);
       SplitButton::new("push", "Push", &p)
@@ -196,6 +211,28 @@ fn buttons() -> Vec<Example> {
     })
     .component("SplitButton")
     .title("Playground"),
+    example!("split-button/pill", |knobs, _, cx| {
+      let p = p(cx);
+      let (label, icon, tone) = knobs.pick(
+        "state",
+        &[
+          ("open", ("Open", theme::ICON_PR, Tone::GitOpen)),
+          ("draft", ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral)),
+          ("merged", ("Merged", theme::ICON_MERGE, Tone::GitMerged)),
+          ("closed", ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed)),
+        ],
+        "open",
+      );
+      SplitButton::new("pr", label, &p)
+        .pill(tone)
+        .icon(icon)
+        .aria_label(format!("View PR (#42, {})", label.to_lowercase()))
+        .menu_label("Open PR on web")
+        .menu_icon(theme::ICON_EXTERNAL_LINK)
+    })
+    .component("SplitButton")
+    .title("Status pill")
+    .size(160., 56.),
     example!("picker/placements", |knobs, _, cx| {
       let p = p(cx);
       let open = knobs.bool("open", false);
@@ -291,6 +328,81 @@ fn indicators() -> Vec<Example> {
     .component("Checkbox")
     .title("Checkbox")
     .size(120., 32.),
+    example!("checkbox/labels", |_, _, cx| {
+      let p = p(cx);
+      // The label sits in the row that takes the click, so it toggles too.
+      let row = |id: &'static str, state: CheckState, label: &'static str, disabled: bool| {
+        div()
+          .id(id)
+          .flex()
+          .items_center()
+          .gap_2()
+          .h(px(28.))
+          .child(
+            Checkbox::new(format!("{id}-box"), &p)
+              .checked(state)
+              .disabled(disabled),
+          )
+          .child(
+            treq_ui::text(div(), treq_ui::TextSize::Sm)
+              .text_color(if disabled {
+                p.muted_foreground
+              } else {
+                p.foreground
+              })
+              .child(label),
+          )
+      };
+      div()
+        .w(px(300.))
+        .flex()
+        .flex_col()
+        .child(row("all", CheckState::Mixed, "All files", false))
+        .child(
+          div()
+            .pl_5()
+            .child(row("src", CheckState::On, "src/main.rs", false))
+            .child(row("lock", CheckState::Off, "Cargo.lock", false)),
+        )
+        .child(row("viewed", CheckState::On, "Viewed", false))
+        .child(row(
+          "locked",
+          CheckState::On,
+          "Pushed commits (locked)",
+          true,
+        ))
+        .child(
+          div()
+            .id("notify")
+            .flex()
+            .items_start()
+            .gap_2()
+            .py_1()
+            .child(
+              div()
+                .pt(px(3.))
+                .child(Checkbox::new("notify-box", &p).checked(true)),
+            )
+            .child(
+              div()
+                .flex()
+                .flex_col()
+                .child(
+                  treq_ui::text(div(), treq_ui::TextSize::Sm)
+                    .text_color(p.foreground)
+                    .child("Notify when the agent finishes"),
+                )
+                .child(
+                  treq_ui::text(div(), treq_ui::TextSize::Xs)
+                    .text_color(p.muted_foreground)
+                    .child("A desktop notification, only while Treq is in the background."),
+                ),
+            ),
+        )
+    })
+    .component("Checkbox")
+    .title("With labels")
+    .size(340., 230.),
     example!("alert/playground", |knobs, _, cx| {
       let p = p(cx);
       div().w(px(440.)).child(
@@ -305,6 +417,14 @@ fn indicators() -> Vec<Example> {
             ],
             "danger",
           ))
+          .when(knobs.bool("dismiss", false), |a| {
+            a.action(
+              Button::new("dismiss", &p)
+                .variant(Variant::Ghost)
+                .size(treq_ui::Size::Xs)
+                .label("Not now"),
+            )
+          })
           .when(knobs.bool("action", true), |a| {
             a.action(
               Button::new("resolve", &p)
@@ -392,7 +512,14 @@ fn navigation() -> Vec<Example> {
               changes
             }
           },
-          Tab::new("logs", "Logs"),
+          {
+            let logs = Tab::new("logs", "Logs");
+            if knobs.bool("badge", false) {
+              logs.badge("PRO", Tone::Neutral)
+            } else {
+              logs
+            }
+          },
         ])
         .selected(1)
     })
@@ -448,8 +575,13 @@ fn navigation() -> Vec<Example> {
         .bg(p.popover)
         .child(MenuItem::new("copy", "Copy branch name", &p).shortcut("secondary-c"))
         .child(MenuItem::new("rename", "Rename…", &p))
+        .child(
+          MenuItem::new("plan", "Plan", &p)
+            .description("Plan the change first, without editing files"),
+        )
         .child(MenuItem::new("open-pr", "Open pull request", &p).disabled(true))
         .child(MenuSeparator::new(&p))
+        .child(MenuLabel::new("Target branch", &p))
         .child(MenuItem::new("main", "main", &p).checked(true))
         .child(MenuItem::new("develop", "develop", &p).checked(false))
         .child(MenuSeparator::new(&p))

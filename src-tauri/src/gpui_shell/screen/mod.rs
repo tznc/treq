@@ -18,6 +18,7 @@ pub use terminal::TERMINAL_CONTEXT;
 pub(super) use workspace_data::WorkspaceHost;
 
 use super::{
+  confirm,
   popup::{PopupRequest, PopupSink},
   theme,
 };
@@ -219,6 +220,8 @@ pub struct Screen {
   /// Cmd+P's "Jump to File", while the window model keeps it open.
   file_picker: Option<(file_picker::Scope, Entity<file_picker::FilePicker>)>,
   _file_picker: Option<gpui::Subscription>,
+  /// The open confirmation (the palette's Delete Workspace).
+  confirm: Option<confirm::Pending<Self>>,
 }
 
 impl Screen {
@@ -269,6 +272,7 @@ impl Screen {
       workspace_modal: None,
       file_picker: None,
       _file_picker: None,
+      confirm: None,
     }
   }
 
@@ -351,22 +355,48 @@ impl Screen {
     }
   }
 
+  fn confirm_slot(screen: &mut Self) -> &mut Option<confirm::Pending<Self>> {
+    &mut screen.confirm
+  }
+
   /// `handleDelete`: asks, deletes and closes the workspace's terminals.
   fn delete_workspace(&mut self, repo_path: String, id: i64, cx: &mut Context<Self>) {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
-      let removed = cx
+      let found = cx
         .background_spawn(async move {
-          let workspace = code_data::CodeHost::workspaces(&*host, &repo_path)
+          code_data::CodeHost::workspaces(&*host, &repo_path)
             .ok()?
             .into_iter()
-            .find(|w| w.id == id)?;
-          let workspace = workspace_ops::Removed::of(&workspace);
-          workspace_ops::delete(&*host, &workspace).then_some(workspace)
+            .find(|w| w.id == id)
         })
         .await;
-      if let Some(workspace) = removed {
-        let _ = this.update(cx, |screen, cx| screen.close_terminals(workspace.path, cx));
+      let Some(workspace) = found else {
+        return;
+      };
+      let workspace = workspace_ops::Removed::of(&workspace);
+      let _ = this.update(cx, |screen, cx| {
+        let question = workspace_ops::delete_question(&workspace);
+        confirm::ask(
+          &mut screen.confirm,
+          question,
+          move |screen, cx| screen.delete_confirmed(workspace, cx),
+          cx,
+        );
+      });
+    })
+    .detach();
+  }
+
+  fn delete_confirmed(&mut self, workspace: workspace_ops::Removed, cx: &mut Context<Self>) {
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let path = workspace.path.clone();
+      let gone = cx
+        .background_spawn(async move { workspace_ops::delete(&*host, &workspace) })
+        .await;
+      if gone {
+        let _ = this.update(cx, |screen, cx| screen.close_terminals(path, cx));
       }
     })
     .detach();
@@ -430,8 +460,9 @@ impl Ctx<'_> {
 }
 
 impl Render for Screen {
-  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let dark = self.snapshot.dark;
+    let confirm = confirm::render(Self::confirm_slot, self, window, &theme::palette(dark), cx);
     if !matches!(self.snapshot.view, View::Onboarding(_)) {
       self.onboarding = None;
     }
@@ -659,6 +690,7 @@ impl Render for Screen {
       .children(workspace_modal)
       .children(modal)
       .children(self.file_picker.as_ref().map(|(_, picker)| picker.clone()))
+      .children(confirm)
   }
 }
 

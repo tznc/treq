@@ -1058,7 +1058,7 @@ impl WorkspaceDialog {
         .flex()
         .flex_col()
         .gap_1p5()
-        .child(label_xs("Stacking On"))
+        .child(label_xs("Stacking on"))
         .child(stacking_on),
     );
 
@@ -1076,7 +1076,7 @@ impl WorkspaceDialog {
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .when(active, |this| {
-            this.bg(p.background).text_color(p.foreground).shadow_sm()
+            this.bg(p.selected()).text_color(p.foreground)
           })
           .when(!active, |this| {
             this
@@ -1157,7 +1157,7 @@ impl WorkspaceDialog {
           .flex()
           .flex_col()
           .gap_1p5()
-          .child(label_xs("Target Workspace"))
+          .child(label_xs("Target workspace"))
           .child(match select {
             None => ui::text(div(), TextSize::Xs)
               .debug_selector(|| "no-other-workspaces".into())
@@ -1633,28 +1633,34 @@ impl WorkspaceDialog {
         .filter(|c| locked.as_ref().is_none_or(|s| s.hash != c.hash))
         .cloned(),
     );
-    let tab_trigger = |id: &'static str, label: String, active: bool, disabled: bool| {
-      let fg = p.foreground;
-      let bg = p.background.opacity(0.5);
-      ui::text(div(), TextSize::Xs)
-        .id(id)
-        .debug_selector(move || id.into())
-        .px_3()
-        .py_1()
-        .rounded(radius::MD)
-        .font_weight(FontWeight::MEDIUM)
-        .when(active, |this| {
-          this.bg(p.background).text_color(p.foreground).shadow_sm()
-        })
-        .when(!active, |this| this.text_color(p.muted_foreground))
-        .when(!active && !disabled, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.bg(bg).text_color(fg))
-        })
-        .when(disabled, |this| this.opacity(0.5))
-        .child(label)
-    };
+    let tab_trigger =
+      |id: &'static str, label: &'static str, count: usize, active: bool, disabled: bool| {
+        let fg = p.foreground;
+        let bg = p.background.opacity(0.5);
+        ui::text(div(), TextSize::Xs)
+          .id(id)
+          .debug_selector(move || id.into())
+          .flex()
+          .items_center()
+          .gap_1p5()
+          .px_3()
+          .py_1()
+          .rounded(radius::MD)
+          .font_weight(FontWeight::MEDIUM)
+          .when(active, |this| {
+            this.bg(p.selected()).text_color(p.foreground)
+          })
+          .when(!active, |this| this.text_color(p.muted_foreground))
+          .when(!active && !disabled, |this| {
+            this
+              .cursor_pointer()
+              .hover(move |s| s.bg(bg).text_color(fg))
+          })
+          .when(disabled, |this| this.opacity(0.5))
+          .aria_label(format!("{label} ({count})"))
+          .child(label)
+          .child(ui::Count::new(count, &p))
+      };
     let tabs = div()
       .flex()
       .gap_1()
@@ -1665,7 +1671,8 @@ impl WorkspaceDialog {
       .child(
         tab_trigger(
           "workspace-dialog-tab-commits",
-          format!("Commits ({})", commits.len()),
+          "Commits",
+          commits.len(),
           self.tab == Tab::Commits,
           false,
         )
@@ -1678,7 +1685,8 @@ impl WorkspaceDialog {
         let disabled = locked.is_some();
         tab_trigger(
           "workspace-dialog-tab-changes",
-          format!("Changes ({})", self.changed_files.len()),
+          "Changes",
+          self.changed_files.len(),
           self.tab == Tab::Changes,
           disabled,
         )

@@ -416,7 +416,7 @@ impl MergeQueueView {
         })
         .child(label)
     };
-    let pro = (!self.pro).then(|| ui::Badge::new("PRO", p).tone(Tone::Success));
+    let pro = (!self.pro).then(|| ui::Badge::new("PRO", p));
     let tabs = div().flex_none().px_4().pb_2().child(
       div()
         .flex()
@@ -461,23 +461,6 @@ impl MergeQueueView {
   fn toolbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let on = self.route.show_merged_history;
     let fg = p.foreground;
-    let check = div()
-      .size(zpx(14.))
-      .flex()
-      .items_center()
-      .justify_center()
-      .rounded(radius::SM)
-      .border_1()
-      .when(on, |this| {
-        this.border_color(p.primary).bg(p.primary).child(ui::icon(
-          theme::ICON_CHECK,
-          12.,
-          p.primary_foreground,
-        ))
-      })
-      .when(!on, |this| {
-        this.border_color(p.muted_foreground.opacity(0.4))
-      });
     let merged = ui::text(div(), TextSize::Sm)
       .id("merge-queue-merged")
       .debug_selector(|| "merge-queue-merged".into())
@@ -487,22 +470,10 @@ impl MergeQueueView {
       .h_7()
       .px_2()
       .rounded(radius::MD)
-      .border_1()
       .cursor_pointer()
-      .when(on, |this| {
-        this
-          .border_color(p.primary.opacity(0.4))
-          .bg(p.primary.opacity(0.1))
-          .text_color(p.foreground)
-      })
-      .when(!on, |this| {
-        this
-          .border_color(p.border)
-          .bg(p.background)
-          .text_color(p.muted_foreground)
-          .hover(move |s| s.text_color(fg))
-      })
-      .child(check)
+      .text_color(if on { p.foreground } else { p.muted_foreground })
+      .hover(move |s| s.text_color(fg))
+      .child(ui::Checkbox::new("merge-queue-merged-check", p).checked(on))
       .child("Merged")
       .on_click(cx.listener(move |view, _, _, cx| {
         view.field("mergeQueue.showMerged", json!(!on), cx);
@@ -602,7 +573,7 @@ impl MergeQueueView {
               .flex_col()
               .items_center()
               .gap_2()
-              .child(ui::Badge::new("PRO", p).tone(Tone::Success))
+              .child(ui::Badge::new("PRO", p))
               .child(
                 ui::text(div(), TextSize::Lg)
                   .font_weight(FontWeight::SEMIBOLD)

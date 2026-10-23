@@ -883,11 +883,7 @@ impl FileBrowserView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(
-      ToastTone::Success,
-      "Review canceled",
-      "All comments have been discarded",
-    );
+    self.toast(ToastTone::Success, "Review canceled", "");
   }
 
   fn input_for(
@@ -1106,9 +1102,9 @@ impl FileBrowserView {
 
   // Menus.
 
-  fn copy_toast(&self, text: String, description: String, cx: &mut App) {
+  fn copy_toast(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, "Copied", description);
+    self.toast(ToastTone::Success, &title, "");
   }
 
   /// `FileTreeContextMenu`.
@@ -1116,11 +1112,11 @@ impl FileBrowserView {
     let rel = self.rel(path);
     let full = path.to_string();
     let entity = cx.entity().downgrade();
-    let copy = |text: String, description: String| {
+    let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
         let _ = entity.update(cx, |view, cx| {
-          view.copy_toast(text.clone(), description.clone(), cx)
+          view.copy_toast(text.clone(), title.clone(), cx)
         });
       }
     };
@@ -1146,12 +1142,12 @@ impl FileBrowserView {
     let items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(rel.clone(), format!("Copied relative path: {rel}")),
+        copy(rel.clone(), "Relative path copied".to_string()),
       )
       .icon(MenuIcon::Copy),
       NativeMenuItem::item(
         "Copy full path",
-        copy(full.clone(), format!("Copied full path: {full}")),
+        copy(full.clone(), "Full path copied".to_string()),
       )
       .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
@@ -1546,7 +1542,6 @@ impl FileBrowserView {
           "file-markdown",
           &opened.content,
           14.,
-          20.,
           self.dark,
         ))
         .into_any_element()

@@ -22,7 +22,7 @@ use crate::{
     running_checks::{CheckRun, ChecksTarget},
   },
   gpui_shell::{
-    checks_run, menus,
+    checks_run, confirm, menus,
     native::{self, NativeEvent, OpenRequest, ToastAction, ToastTone},
     popup::PopupRequest,
   },
@@ -200,7 +200,23 @@ impl WorkspaceView {
     );
   }
 
+  /// The confirmation's slot.
+  pub(super) fn confirm_slot(view: &mut Self) -> &mut Option<confirm::Pending<Self>> {
+    &mut view.confirm
+  }
+
+  /// Asks, then deletes the workspace.
   fn delete_workspace(&mut self, workspace: Removed, cx: &mut Context<Self>) {
+    let question = workspace_ops::delete_question(&workspace);
+    confirm::ask(
+      &mut self.confirm,
+      question,
+      move |view, cx| view.delete_confirmed(workspace, cx),
+      cx,
+    );
+  }
+
+  fn delete_confirmed(&mut self, workspace: Removed, cx: &mut Context<Self>) {
     let host = self.actions.clone();
     cx.spawn(async move |this, cx| {
       let path = workspace.path.clone();
@@ -417,8 +433,8 @@ impl WorkspaceView {
           Ok(()) => workspace_ops::toast(
             &*view.host,
             ToastTone::Success,
-            "Rebased",
-            &format!("Workspace rebased onto {branch}"),
+            &format!("Rebased onto {branch}"),
+            "",
           ),
           Err(err) => workspace_ops::toast(&*view.host, ToastTone::Error, "Rebase failed", &err),
         }

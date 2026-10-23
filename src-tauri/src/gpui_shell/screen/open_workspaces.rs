@@ -594,7 +594,11 @@ impl OpenWorkspacesDialog {
     }
     let opened = summary(created, reused);
     if self.errors.is_empty() {
-      self.toast(ToastTone::Success, "Workspaces opened", opened);
+      self.toast(
+        ToastTone::Success,
+        opened.trim_end_matches('.'),
+        String::new(),
+      );
       if let Some((repo_path, id)) = first {
         (self.sink)(
           ScreenAction::Field {
@@ -1124,23 +1128,14 @@ impl OpenWorkspacesDialog {
           .text_color(color)
           .map(|this| {
             if active {
-              this.bg(p.background).shadow_sm()
+              this.bg(p.selected())
             } else {
               this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
             }
           })
           .child(ui::icon(icon, 14., color))
           .child(label)
-          .when(picked > 0, |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .rounded_full()
-                .bg(p.primary)
-                .px_1p5()
-                .text_color(p.primary_foreground)
-                .child(picked.to_string()),
-            )
-          })
+          .when(picked > 0, |this| this.child(ui::Count::new(picked, p)))
           .on_click(cx.listener(move |view, _, _, cx| {
             view.picked = Some(tab);
             cx.notify();
@@ -1379,7 +1374,7 @@ fn pick_row(
   item: Div,
   p: &Palette,
 ) -> gpui::Stateful<Div> {
-  let muted = p.muted;
+  let hover = p.hover();
   div()
     .id(SharedString::from(format!("{id}-row")))
     .role(gpui::Role::CheckBox)
@@ -1398,8 +1393,8 @@ fn pick_row(
     .items_start()
     .gap_2()
     .cursor_pointer()
-    .when(checked, |d| d.bg(p.primary.opacity(0.1)))
-    .when(!checked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
+    .when(checked, |d| d.bg(p.selected()))
+    .when(!checked, |d| d.hover(move |s| s.bg(hover)))
     .child(
       div().mt_1().child(
         ui::Checkbox::new(SharedString::from(format!("{id}-check")), p)
@@ -1607,15 +1602,7 @@ fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -
   );
   let detail = detail.join(" · ");
   row(id, format!("{}: {detail}", target.branch), p)
-    .child(ui::icon(
-      theme::ICON_CHECK,
-      14.,
-      if target.existing {
-        p.muted_foreground
-      } else {
-        p.success
-      },
-    ))
+    .child(ui::icon(theme::ICON_CHECK, 14., p.muted_foreground))
     .child(mono(&target.branch))
     .child(
       div()

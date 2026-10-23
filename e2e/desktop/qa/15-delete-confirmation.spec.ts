@@ -1,8 +1,6 @@
-// The delete-workspace confirmation belongs to the repo window: it is
-// transient for it, so the window manager (openbox here) keeps it above the
-// app, and asking to delete again while it is open doesn't stack a second
-// one. The question is answered No, so nothing is deleted.
-import { execFileSync, spawn } from "node:child_process";
+// The delete-workspace confirmation is drawn in the repo window itself, over
+// everything in it: the title asks the question, and the buttons are Cancel
+// and "Delete workspace". Escape cancels, so nothing is deleted.
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { home, mod, overlay, settle } from "./helpers.ts";
@@ -10,18 +8,6 @@ import { home, mod, overlay, settle } from "./helpers.ts";
 test.describe.configure({ mode: "serial" });
 
 const BRANCH = "feat/keyvalues-cache";
-
-function windows(name: string): string[] {
-  try {
-    return execFileSync("xdotool", ["search", "--onlyvisible", "--name", name])
-      .toString()
-      .trim()
-      .split("\n")
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 /** Picks Delete Workspace for `BRANCH` from the palette. */
 async function askDelete(page: Page, context: BrowserContext): Promise<void> {
@@ -46,62 +32,28 @@ async function askDelete(page: Page, context: BrowserContext): Promise<void> {
   await find(picker).fill(BRANCH);
   await settle(page, 600);
   await picker.keyboard.press("Enter").catch(() => {});
-  await page.waitForTimeout(2000);
 }
 
-test("delete-confirmation: one question, owned by the repo window", async ({ page, context }) => {
+test("delete-confirmation: one in-app question; Escape cancels", async ({ page, context }) => {
   await home(page);
-  // Stacking and placement are the window manager's job, and Xvfb has none.
-  const wm = spawn("openbox", [], { stdio: "ignore", detached: true });
-  await page.waitForTimeout(1500);
-  try {
-    await askDelete(page, context);
-    expect(windows("^Delete Workspace$")).toHaveLength(1);
-    await askDelete(page, context);
-    const questions = windows("^Delete Workspace$");
-    // Each question names its owner window; none means a stray dialog the
-    // window manager can bury under the app.
-    const owners = questions.map((id) =>
-      execFileSync("xprop", ["-id", id, "WM_TRANSIENT_FOR"]).toString().trim(),
-    );
-    console.log(`open delete questions: ${questions.length}\n${owners.join("\n")}`);
-    // Raise the repo window, as clicking back into the app does.
-    execFileSync("xdotool", ["windowraise", windows("^Treq")[0]]);
-    // The window manager centres every question on the same spot, so a
-    // second one would hide the first: fan them out.
-    questions.forEach((id, i) => {
-      const g = Object.fromEntries(
-        execFileSync("xdotool", ["getwindowgeometry", "--shell", id])
-          .toString()
-          .trim()
-          .split("\n")
-          .map((l) => l.split("=")),
-      );
-      execFileSync("xdotool", [
-        "windowmove",
-        id,
-        String(Number(g.X) - 500 + i * 1000),
-        String(Number(g.Y) - 200 + i * 400),
-      ]);
-    });
-    await page.waitForTimeout(800);
-    await capture(page, {
-      name: "15-delete-confirmation-asked-twice",
-      title: "Delete Workspace picked twice",
-      screen: true,
-      rest: false,
-      expectations: [
-        "A single Delete Workspace question, above the raised repo window",
-      ],
-    });
-    expect(questions).toHaveLength(1);
-    expect(owners[0]).toMatch(/window id # 0x/);
-  } finally {
-    for (const id of windows("^Delete Workspace$")) {
-      execFileSync("xdotool", ["key", "--window", id, "Escape"]);
-      await page.waitForTimeout(500);
-    }
-    if (wm.pid) process.kill(-wm.pid);
-  }
+  await askDelete(page, context);
+  const question = page.getByRole("dialog", { name: `Delete ${BRANCH}?`, exact: true });
+  await expect(question).toBeVisible();
+  await expect(question).toHaveCount(1);
+  await expect(page.getByTestId("confirm-cancel")).toHaveAccessibleName("Cancel");
+  await expect(page.getByTestId("confirm-confirm")).toHaveAccessibleName("Delete workspace");
+  await settle(page, 600);
+  await capture(page, {
+    name: "15-delete-confirmation-asked",
+    title: "Delete Workspace: the in-app question",
+    screen: true,
+    rest: false,
+    expectations: [
+      `The title asks 'Delete ${BRANCH}?' over a scrim that covers the whole window`,
+      "Cancel and a red 'Delete workspace' button; no Yes/No",
+    ],
+  });
+  await page.keyboard.press("Escape");
+  await expect(question).toHaveCount(0);
   await expect(page.getByRole("button", { name: new RegExp(BRANCH) }).first()).toBeVisible();
 });

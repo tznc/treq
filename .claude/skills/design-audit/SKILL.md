@@ -2,10 +2,11 @@
 name: design-audit
 description: >-
   Scan treq's desktop UI for drift from the design system (crates/treq-ui),
-  in code and in screenshots, and write a drift report. Use on /design-audit,
-  when asked whether the UI is consistent or follows the design system, and
-  before landing a change that adds or restyles UI in
-  src-tauri/src/gpui_shell/**.
+  in code and in screenshots, and write a drift report; or run a full design
+  review (Krug's Don't Make Me Think principles, per component and screen).
+  Use on /design-audit, when asked whether the UI is consistent, follows the
+  design system or is usable, for a design review, and before landing a
+  change that adds or restyles UI in src-tauri/src/gpui_shell/**.
 ---
 
 # Design audit
@@ -23,6 +24,11 @@ audit finds it two ways, then reports both:
 |---|---|---|
 | Code scan | raw colours, text sizes and spacing; hand-rolled controls; Escape handled outside the layer stack; Yes/No copy | `npm run design:audit` (the design lints with their "not migrated" lists set aside) |
 | Screenshot scan | what the code scan can't see: hierarchy, state colours, chevrons, selected styles, dialog footers, copy on screen | styleguide snapshots, /app-qa captures, judged with gpui-visual-test |
+
+An audit answers "does the UI follow the system?". A **design review**
+(section 4) answers "is the system itself right, and does the app use it?";
+run it when asked for a design review, a usability pass, or before changing
+the system's rules.
 
 Scope it to what was asked: a whole-app audit, one area ("audit the merge
 dialog"), or the diff of the current branch. For a branch, run both halves
@@ -131,14 +137,14 @@ names.
 - **Alerts**: the icon and tint carry the severity, the title is in body
   colour, and there is at most one outline action.
 - **Empty states** say why the area is empty and offer at most one action.
-- **Shortcuts** read `⌘K` on macOS and `Ctrl K` elsewhere, never with
-  " + ".
+- **Shortcuts** read `⌘ + K` on macOS and `Ctrl + K` elsewhere: the
+  platform's key names with " + " between keys, rendered by `ui::Kbd`.
 - **Type and spacing**: text comes in the four sizes (11, 13, 15, 20) and
   nothing is clipped or overlapping. Controls in a row share one height.
 - **Copy**: sentence case, except the sidebar's group labels. No "successfully" and no
   "Are you sure".
 
-## 3. Report
+## 3. Report (audit)
 
 Write `design-audit.md` into `QA_OUT` (or the scratchpad) with:
 
@@ -156,3 +162,82 @@ Write `design-audit.md` into `QA_OUT` (or the scratchpad) with:
 Publish the report with the failing captures as an Artifact (before/after
 pairs when auditing a branch) and give the user the link. Fixes go in their
 own change: an audit reports, it doesn't migrate.
+
+## 4. Design review
+
+A review judges the UI against Krug's test: can a first-time user tell,
+without thinking, what this is, what they can do here, and what just
+happened? Score it on six principles, and use these exact names and
+abbreviations, which `review/krug.json` and the walkthrough page use:
+
+| Key | Principle | Asks |
+|---|---|---|
+| SE | Self-evident | Is it obvious what this is and does? |
+| CV | Conventions | Does it work like macOS, Windows and GitHub taught? |
+| HI | Clear hierarchy | Is the most important thing the most prominent? |
+| CL | Obvious clickability | Does what's clickable look clickable, and only that? |
+| NO | Less noise | Does each signal mean one thing? |
+| WH | What just happened | Are waiting, emptiness and results explained? |
+
+Work through these steps in order. Each one can stop the review with a
+finding.
+
+1. **Inventory.** List the controls the screens draw, grouped by job
+   (buttons, value pickers, counts and status, tabs, rows, menus, dialogs,
+   alerts, empty and loading states, toasts, shortcuts). Use the code scan's
+   component adoption counts and grep for hand-drawn versions. Count the
+   variants of each job (for example, "three checkboxes, five kbd styles").
+   Every extra variant is a finding.
+2. **Screens, per principle.** Capture the app in both themes (/app-qa).
+   For each principle, write what holds up and what breaks, citing captures.
+   The output is a two-column "holds up / breaks" table per principle.
+3. **Before/after mocks.** For each finding worth fixing, show the real
+   capture beside the same UI redrawn under the proposed rule, and state the
+   rule in one or two sentences. Rules must be testable: they become
+   styleguide `.describe(..)` text, lint rules, and the "Rules to check on
+   every screen" list above.
+4. **Components, per principle.** For every `ui` component and every
+   compound example in the styleguide (an example built from several `ui`
+   parts, such as Alert with a Button or Row with Dot, Count and
+   IconButton), write how it satisfies each principle that applies. Put this
+   in `review/krug.json`: one entry per component, with its styleguide
+   example ids, a `compound` note, `notes` (principle key and how), and a
+   `gap` for anything a screen needs that the component can't express. Then
+   build the page:
+
+   ```sh
+   cargo run -p treq-ui --example styleguide -- render   # if components changed
+   python3 .claude/skills/design-audit/review/walkthrough.py "$OUT/walkthrough.html"
+   ```
+
+   A gap is a finding. Close it in `crates/treq-ui`, with a builder test and
+   a styleguide example, before migrating the screens that need it.
+5. **Adoption gate.** A rule only counts as applied when screens construct
+   the component that carries it. Re-run the adoption counts. Any component
+   at 0, or used by one screen when several draw that job, is a finding,
+   even if every lint passes. Tokens alone don't change what users see.
+   Moving screens onto tokens is lint debt, not a review fix.
+6. **Visible-change check.** After screens adopt the fixes, capture the same
+   QA specs on the base and on the branch. For every review item, put the
+   before and after captures side by side and look at them. If an item's
+   screen looks the same, the fix didn't reach it: go back to step 5. Don't
+   present the result as done.
+
+Deliver the review as an Artifact with these parts:
+
+1. The verdict.
+2. The per-principle table.
+3. The before/after mocks.
+4. The design language and tokens.
+5. Interaction rules.
+6. The walkthrough link.
+7. Decisions for the user, each with a recommended option.
+
+After approval, land it as a short stack:
+
+1. Rules and lints.
+2. Components and the styleguide.
+3. The audit.
+4. The screens adopting the components, one commit per review item.
+
+Re-run steps 5 and 6 on the screens PR before calling it done.

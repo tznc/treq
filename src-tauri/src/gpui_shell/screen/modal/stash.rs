@@ -324,11 +324,7 @@ impl StashView {
         match patch {
           Ok(patch) => {
             cx.write_to_clipboard(ClipboardItem::new_string(patch));
-            view.env.toast(
-              ToastTone::Success,
-              "Copied",
-              "Git patch copied to clipboard",
-            );
+            view.env.toast(ToastTone::Success, "Patch copied", "");
           }
           Err(err) => view
             .env
@@ -365,11 +361,7 @@ impl StashView {
             }
             view.env.workspace_changed(&repo);
             view.load(cx);
-            view.env.toast(
-              ToastTone::Success,
-              "Stash deleted",
-              format!("Removed stash {}", entry.short_commit_id),
-            );
+            view.env.toast(ToastTone::Success, "Stash deleted", "");
           }
           Err(err) => view
             .env
@@ -386,11 +378,6 @@ impl StashView {
     self.pending = Some(format!("apply-{}", entry.id));
     self.close_apply(cx);
     cx.notify();
-    let label = self
-      .targets()
-      .into_iter()
-      .find(|t| t.branch == target)
-      .map_or_else(|| target.clone(), |t| t.label);
     let (host, repo, id) = (
       self.env.host.clone(),
       self.route.repo_path.clone(),
@@ -408,11 +395,7 @@ impl StashView {
         match result {
           Ok(()) => {
             view.env.workspace_changed(&repo);
-            view.env.toast(
-              ToastTone::Success,
-              "Stash applied",
-              format!("Copied onto {label}"),
-            );
+            view.env.toast(ToastTone::Success, "Stash applied", "");
           }
           Err(err) => view
             .env
@@ -437,7 +420,7 @@ impl StashView {
 
 impl StashView {
   fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-    let (accent, muted) = (p.menu_accent, p.muted_foreground);
+    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
     div()
       .debug_selector(|| "stash-list".into())
       .w(zpx(288.))
@@ -467,10 +450,8 @@ impl StashView {
               .py_2()
               .rounded(radius::MD)
               .cursor_pointer()
-              .when(selected, |this| this.bg(accent))
-              .when(!selected, |this| {
-                this.hover(move |s| s.bg(accent.opacity(0.5)))
-              })
+              .when(selected, |this| this.bg(selected_bg))
+              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
               .child(
                 div()
                   .font_family(theme::MONO_FONT)

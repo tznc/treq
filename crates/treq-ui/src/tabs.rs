@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui::{div, prelude::*, App, FocusHandle, KeyDownEvent, SharedString, Window};
 
-use crate::{badge::Tone, text, theme, theme::Palette, zpx, Count, Dot, TextSize};
+use crate::{badge::Tone, text, theme, theme::Palette, zpx, Badge, Count, Dot, TextSize};
 
 /// How a [`Tabs`] strip looks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -18,10 +18,11 @@ pub enum TabsStyle {
   Underline,
 }
 
-/// One tab: a label, then an optional count and status dot.
+/// One tab: a label, then an optional badge, count and status dot.
 pub struct Tab {
   id: SharedString,
   label: SharedString,
+  badge: Option<(SharedString, Tone)>,
   count: Option<usize>,
   dot: Option<Tone>,
   disabled: bool,
@@ -32,10 +33,17 @@ impl Tab {
     Self {
       id: id.into(),
       label: label.into(),
+      badge: None,
       count: None,
       dot: None,
       disabled: false,
     }
+  }
+
+  /// A label for what the tab is, such as a `PRO` plan chip.
+  pub fn badge(mut self, label: impl Into<SharedString>, tone: Tone) -> Self {
+    self.badge = Some((label.into(), tone));
+    self
   }
 
   /// How many things the tab holds, as a neutral count.
@@ -213,6 +221,9 @@ impl RenderOnce for Tabs {
               .hover(move |s| s.text_color(p.foreground))
           })
           .child(tab.label)
+          .when_some(tab.badge, |el, (label, tone)| {
+            el.child(Badge::new(label, &p).tone(tone))
+          })
           .when_some(tab.count, |el, count| el.child(Count::new(count, &p)))
           .when_some(tab.dot, |el, tone| el.child(Dot::new(tone, &p)))
           .when_some(on_select, move |el, f| {
@@ -236,9 +247,11 @@ mod tests {
         Tab::new("commits", "Commits").count(2),
         Tab::new("changes", "Changes").count(3).dot(Tone::Danger),
         Tab::new("logs", "Logs").disabled(true),
+        Tab::new("team", "Team").badge("PRO", Tone::Neutral),
       ])
       .selected(1);
-    assert_eq!(tabs.tabs.len(), 4);
+    assert_eq!(tabs.tabs.len(), 5);
+    assert_eq!(tabs.tabs[4].badge, Some(("PRO".into(), Tone::Neutral)));
     assert_eq!(tabs.tabs[2].dot, Some(Tone::Danger));
     assert_eq!(tabs.selected, 1);
   }

@@ -142,6 +142,13 @@ pub(in crate::gpui_shell) fn sidebar_action(
 }
 
 /// A keyboard shortcut pressed in window `label`.
+/// Window `label`'s confirmation answered: `yes` for its verb.
+pub(in crate::gpui_shell) fn answer(label: &str, yes: bool, cx: &mut App) {
+  if let Some(controller) = controller(label, cx) {
+    controller.update(cx, |c, cx| c.answer(yes, cx));
+  }
+}
+
 pub(in crate::gpui_shell) fn shortcut(label: &str, shortcut: Shortcut, cx: &mut App) {
   if let Some(controller) = controller(label, cx) {
     controller.update(cx, |c, cx| c.shortcut(shortcut, cx));
