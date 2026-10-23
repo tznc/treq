@@ -1,6 +1,6 @@
 // Remote SSH against a real server: a second app with a fresh home whose
-// ~/.ssh holds the key the server trusts, driven through the Open a
-// Repository screen's machines, "Your own VM", the repository form, New
+// ~/.ssh holds the key the server trusts, driven through the Overview
+// screen's machines, the SSH Hosts +, the repository form, New
 // Workspaces, a remote shell, installing Claude Code with its official
 // installer and running it as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
 // QA_SSH_KEY (a private key with its `.pub` beside it) and QA_SSH_REPO (a
@@ -99,29 +99,22 @@ async function shot(name: string, title: string, expectations: string[]): Promis
 }
 
 test("ssh remote: connect and open a Git repository", async () => {
-  const open = page.getByRole("button", { name: "Open via SSH" });
+  const open = page.getByRole("button", { name: "Add SSH host" });
   await expect(open).toBeVisible({ timeout: 60_000 });
-  await shot("machines", "Open a Repository: machines and recent repositories", [
-    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER and 'Cloud workspace' under TREQ CLOUD ('Sign in to create one'), with 'Open via SSH' at the bottom",
-    "Right panel is headed 'Open a Repository' with the Open Repository button; no recents yet says where they appear",
+  await expect(page.getByRole("button", { name: "Sign in to Treq Cloud" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cloud workspace", exact: true })).toHaveCount(0);
+  await shot("machines", "Overview: machines and recent repositories", [
+    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, and SSH HOSTS and DEV CONTAINERS each with a + and an empty line",
+    "Signed out there is no TREQ CLOUD group; 'Sign in to Treq Cloud' sits at the bottom",
+    "Right panel is headed 'Overview' with the Open Repository button; no recents yet says where they appear",
   ]);
-  await page.getByRole("button", { name: "Cloud workspace", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign in with Browser" })).toBeVisible({ timeout: 30_000 });
-  await shot("cloud-sign-in", "The cloud row while signed out", [
-    "Setup opens on the Treq-managed cloud workspace, not the choice",
-    "It asks to sign in with the browser before creating the workspace",
-  ]);
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("button", { name: "Sign in with Browser" })).toHaveCount(0);
   await page.getByRole("button", { name: /on This computer$/ }).click();
   await shot("local-tools", "This computer's tools popover", [
     "A popover beside the row lists Required (Git), Agent CLI and Optional tools with Installed or Install",
   ]);
   await page.keyboard.press("Escape");
+  // The + next to SSH Hosts opens the own-VM form directly.
   await open.click();
-  await page.waitForTimeout(1000);
-  // The chooser's cards are not observable elements (see 01-onboarding).
-  await page.mouse.click(834, 478);
   await page.waitForTimeout(1500);
   // Display name, hostname, port, username: the form's text fields in order.
   const fields = page.getByRole("textbox");
