@@ -189,7 +189,10 @@ mod tests {
       .disabled(true);
     assert!(item.danger && item.disabled);
     assert_eq!(item.checked, Some(false));
-    assert_eq!(item.description.as_deref(), Some("Removes its worktree too"));
+    assert_eq!(
+      item.description.as_deref(),
+      Some("Removes its worktree too")
+    );
     assert_eq!(item.shortcut.as_deref(), Some("secondary-backspace"));
   }
 }

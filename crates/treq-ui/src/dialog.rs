@@ -7,6 +7,8 @@ use gpui::{
   Pixels, SharedString, Size, Window,
 };
 
+use gpui_kit::base::TestSupportExt as _;
+
 use crate::{text, theme, theme::Palette, zpx, Button, IconButton, TextSize, Variant};
 
 type Handler = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -123,6 +125,7 @@ impl RenderOnce for Dialog {
       .debug_selector(move || selector)
       .role(gpui::Role::Dialog)
       .when_some(self.title.clone(), |el, title| el.aria_label(title))
+      .test_support()
       .relative()
       .w(zpx(self.width))
       .max_w_full()
