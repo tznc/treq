@@ -521,13 +521,13 @@ impl CommitsView {
   /// A row under a file's row: a hunk's header, a line, the comment box,
   /// "Load diff" or "No diff content available."
   fn body_row(&mut self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-    let (e, f) = match row {
-      Row::HunkHeader(e, f, _)
-      | Row::Line(e, f, ..)
-      | Row::CommentBox(e, f)
-      | Row::Deferred(e, f)
-      | Row::Missing(e, f) => (e, f),
-      _ => return div().into_any_element(),
+    let (Row::HunkHeader(e, f, _)
+    | Row::Line(e, f, ..)
+    | Row::CommentBox(e, f)
+    | Row::Deferred(e, f)
+    | Row::Missing(e, f)) = row
+    else {
+      return div().into_any_element();
     };
     let commit = self.feed.entries[e].commit.clone();
     let Some(state) = self.diffs.get(&commit.commit_id) else {
@@ -589,7 +589,10 @@ impl CommitsView {
 
   /// `HunkView`'s line: its numbers, the comment button, the sign and the
   /// highlighted text.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "the row needs its commit, file, hunk and position"
+  )]
   fn line(
     &self,
     commit: &JjLogCommit,
