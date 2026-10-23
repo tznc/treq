@@ -1,8 +1,8 @@
-id: max-2000-non-comment-lines-tauri
+id: max-500-non-comment-lines-tauri
 language: rust
 severity: warning
 message: >
-  Keep Rust files in src-tauri/src/ at 2000 non-comment lines or fewer. Split large
+  Keep Rust files in src-tauri/src/ at 500 non-comment lines or fewer. Split large
   files into smaller modules.
 files:
   - "src-tauri/src/**/*.rs"

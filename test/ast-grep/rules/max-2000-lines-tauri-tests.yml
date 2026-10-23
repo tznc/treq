@@ -10,5 +10,5 @@ ignores:
   - "src-tauri/tests/it/core_workspaces_test.rs"
 rule:
   kind: source_file
-  # Triggers when a file has 1001+ lines.
+  # Triggers when a file has 2001+ lines.
   regex: (?m)(?:^[^\n]*\n){2001,}
