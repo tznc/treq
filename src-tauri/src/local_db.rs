@@ -2762,6 +2762,7 @@ mod tests {
       branch_name: "fix/example".to_string(),
       has_conflicts: false,
       last_activity_at: None,
+      bookmark_conflicted: false,
     }];
     let workspaces = sync_discovered_workspaces(repo_path, &discovered, "2026-08-08T00:00:00Z")
       .expect("sync discovery");
@@ -2793,6 +2794,7 @@ mod tests {
       branch_name: "feat-alpha".to_string(),
       has_conflicts: false,
       last_activity_at: None,
+      bookmark_conflicted: false,
     }];
     let workspaces = sync_discovered_workspaces(repo_path, &discovered, "2026-08-08T00:00:00Z")
       .expect("sync discovery");
@@ -2822,6 +2824,7 @@ mod tests {
       branch_name: "fix-example".to_string(),
       has_conflicts: true,
       last_activity_at: None,
+      bookmark_conflicted: false,
     }];
     let workspaces = sync_discovered_workspaces(repo_path, &discovered, "2026-08-08T00:00:00Z")
       .expect("sync discovery");
@@ -2851,6 +2854,7 @@ mod tests {
       branch_name: "fix/example".to_string(),
       has_conflicts: true,
       last_activity_at: None,
+      bookmark_conflicted: false,
     }];
     let workspaces = sync_discovered_workspaces(repo_path, &discovered, "2026-08-08T00:00:00Z")
       .expect("sync discovery");
