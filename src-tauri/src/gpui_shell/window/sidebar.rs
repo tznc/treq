@@ -212,7 +212,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     })
     .collect();
   let main = if model.main_repo.is_empty() {
-    on_screen.clone()
+    on_screen
   } else {
     model.main_repo.clone()
   };

@@ -1193,14 +1193,11 @@ impl ChangesView {
     let mut items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(relative.clone(), "Relative path copied".into()),
+        copy(relative, "Relative path copied".into()),
       )
       .icon(MenuIcon::Copy),
-      NativeMenuItem::item(
-        "Copy full path",
-        copy(full.clone(), "Full path copied".into()),
-      )
-      .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy full path", copy(full, "Full path copied".into()))
+        .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
         text: "Open in...".into(),
@@ -1716,7 +1713,10 @@ impl ChangesView {
       .child(div().flex().w_full().child(main).child(menu))
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn section_header(
     &mut self,
     id: &'static str,
@@ -1997,7 +1997,7 @@ impl ChangesView {
         .staging
         .anchor
         .and_then(|i| self.listed().get(i).cloned())
-        .map(|f| f.path.clone())
+        .map(|f| f.path)
     };
     let mut rows = div().mt_2().overflow_hidden();
     if !collapsed {
@@ -2052,7 +2052,10 @@ impl ChangesView {
     )
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn file_row(
     &mut self,
     list: List,
@@ -2140,7 +2143,7 @@ impl ChangesView {
       }));
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
-    let (click, menu) = (path.clone(), path.clone());
+    let (click, menu) = (path.clone(), path);
     div()
       .id(SharedString::from(format!(
         "{}-row-{}",
@@ -2539,7 +2542,7 @@ impl ChangesView {
           }),
       ),
       Body::Generated => {
-        let file = path.to_string();
+        let file = path.clone();
         card.child(
           div()
             .debug_selector(|| "generated-file-placeholder".into())
@@ -2589,7 +2592,10 @@ impl ChangesView {
     .into_any_element()
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn file_header(
     &mut self,
     path: &str,

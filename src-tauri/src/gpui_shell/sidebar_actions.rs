@@ -11,7 +11,7 @@ use tauri_plugin_gpui::gpui::App;
 
 use super::{
   menus,
-  native::{Backend, NativeEvent, OpenRequest},
+  native::{Backend, NativeEvent, OpenRequest, ToastTone},
   screen::{
     workspace_ops::{self, Removed},
     ChangesHost, WorkspaceHost,
@@ -85,7 +85,9 @@ pub fn handle(
       }
       let (app, repo_path) = (app.clone(), active.path.clone());
       std::thread::spawn(move || {
-        let Ok(workspaces) = workspaces(&backend, &repo_path) else {
+        let Some(workspaces) =
+          workspaces_or_toast(&backend, &repo_path, "Failed to archive workspaces")
+        else {
           return;
         };
         let selected: Vec<Removed> = workspaces
@@ -109,17 +111,26 @@ pub fn handle(
         .unwrap_or_else(|| "main".into());
       let repo_path = active.path.clone();
       std::thread::spawn(move || {
-        let Ok(workspaces) = workspaces(&backend, &repo_path) else {
+        const FAILED: &str = "Failed to move workspace";
+        let Some(workspaces) = workspaces_or_toast(&backend, &repo_path, FAILED) else {
           return;
         };
         let find = |id: i64| workspaces.iter().find(|w| w.id == id).cloned();
         let Some(workspace) = find(id) else {
+          backend.toast(ToastTone::Error, FAILED, "The workspace no longer exists.");
           return;
         };
         let target = match onto {
           Some(onto) => match find(onto) {
             Some(onto) => onto.branch_name,
-            None => return,
+            None => {
+              backend.toast(
+                ToastTone::Error,
+                FAILED,
+                "The target workspace no longer exists.",
+              );
+              return;
+            }
           },
           None => home,
         };
@@ -138,6 +149,31 @@ fn workspaces(backend: &Backend, repo_path: &str) -> Result<Vec<Workspace>, Stri
     Some(remote) => remote.workspaces(),
     None => core::list_workspaces(repo_path),
   }
+}
+
+/// `workspaces`, or `None` after telling the user why the list could not be
+/// read. For actions that already left the menu, so a failure has no other
+/// place to show.
+fn workspaces_or_toast(backend: &Backend, repo_path: &str, title: &str) -> Option<Vec<Workspace>> {
+  workspaces(backend, repo_path)
+    .map_err(|err| backend.toast(ToastTone::Error, title, err))
+    .ok()
+}
+
+/// Workspace `id` of `repo_path`, or `None` after a toast titled `title`.
+fn workspace_or_toast(
+  backend: &Backend,
+  repo_path: &str,
+  id: i64,
+  title: &str,
+) -> Option<Workspace> {
+  let found = workspaces_or_toast(backend, repo_path, title)?
+    .into_iter()
+    .find(|w| w.id == id);
+  if found.is_none() {
+    backend.toast(ToastTone::Error, title, "The workspace no longer exists.");
+  }
+  found
 }
 
 fn editors(host: &dyn ChangesHost) -> EditorApps {
@@ -164,10 +200,12 @@ fn workspace_menu(
   if backend.remote(repo_path).is_some() {
     let (app, label, repo_path) = (app.clone(), label.to_string(), repo_path.to_string());
     std::thread::spawn(move || {
-      let Some(workspace) = workspaces(&backend, &repo_path)
-        .ok()
-        .and_then(|list| list.into_iter().find(|w| w.id == id))
-      else {
+      let Some(workspace) = workspace_or_toast(
+        &backend,
+        &repo_path,
+        id,
+        "Failed to load the workspace menu",
+      ) else {
         return;
       };
       super::defer_main(&app.clone(), move |app| {
@@ -239,10 +277,12 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     } => {
       let app = app.clone();
       std::thread::spawn(move || {
-        let Some(workspace) = workspaces(&backend, &repo_path)
-          .ok()
-          .and_then(|list| list.into_iter().find(|w| w.id == workspace_id))
-        else {
+        let Some(workspace) = workspace_or_toast(
+          &backend,
+          &repo_path,
+          workspace_id,
+          "Failed to archive workspace",
+        ) else {
           return;
         };
         let workspace = Removed::of(&workspace);

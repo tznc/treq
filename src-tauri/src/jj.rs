@@ -418,12 +418,8 @@ fn reconcile_colocated_home_repo(repo_path: &str) -> Result<(), JjError> {
         .store()
         .get_commit(head_id)
         .map_err(|e| JjError::GitWorkspaceError(format!("Failed to load Git HEAD: {e}")))?;
-      let wc_commit = block_on(
-        head_tx
-          .repo_mut()
-          .check_out(workspace_name.clone(), &head_commit),
-      )
-      .map_err(|e| JjError::GitWorkspaceError(format!("Failed to check out Git HEAD: {e}")))?;
+      let wc_commit = block_on(head_tx.repo_mut().check_out(workspace_name, &head_commit))
+        .map_err(|e| JjError::GitWorkspaceError(format!("Failed to check out Git HEAD: {e}")))?;
       let mut working_copy = loaded
         .workspace
         .start_working_copy_mutation()
@@ -721,10 +717,7 @@ fn compute_commit_stats(
     let mut deletions = 0;
     futures::pin_mut!(diff_stream);
     while let Some(entry) = diff_stream.next().await {
-      let values = match entry.values {
-        Ok(values) => values,
-        Err(_) => continue,
-      };
+      let Ok(values) = entry.values else { continue };
       let before = materialized_value_to_bytes(
         entry.path.source(),
         values.before,
@@ -748,13 +741,11 @@ fn compute_commit_stats(
           deletions += count_lines(&before);
         }
         (Some(before), Some(after)) => {
-          let before = match String::from_utf8(before) {
-            Ok(content) => content,
-            Err(_) => continue,
+          let Ok(before) = String::from_utf8(before) else {
+            continue;
           };
-          let after = match String::from_utf8(after) {
-            Ok(content) => content,
-            Err(_) => continue,
+          let Ok(after) = String::from_utf8(after) else {
+            continue;
           };
           let (added, removed) = diff_line_counts(&before, &after);
           insertions += added;
@@ -1900,7 +1891,7 @@ pub fn create_workspace(
   // Create new wc commit on top of source_commit (empty, inherits source tree)
   let new_wc = block_on(
     tx.repo_mut()
-      .new_commit(vec![source_commit_id.clone()], parent_tree)
+      .new_commit(vec![source_commit_id], parent_tree)
       .write(),
   )
   .map_err(|e| JjError::GitWorkspaceError(format!("Failed to create wc commit: {}", e)))?;
@@ -2066,7 +2057,7 @@ pub fn create_resolve_workspace(
 
   let mut tx = new_repo.start_transaction();
   // Edit the conflicted commit directly — no child WC commit, no bookmark.
-  block_on(tx.repo_mut().edit(new_ws_name.clone(), &target_commit)).map_err(|e| {
+  block_on(tx.repo_mut().edit(new_ws_name, &target_commit)).map_err(|e| {
     JjError::GitWorkspaceError(format!(
       "Failed to edit conflicted commit in resolve WC: {}",
       e
@@ -2167,9 +2158,8 @@ pub fn jj_detach_resolve_workspace_wc(workspace_path: &str) -> Result<(), JjErro
   let mut loaded = load_workspace_repo_for_history_edit(workspace_path)?;
   snapshot_loaded_working_copy(&mut loaded, workspace_path)?;
   let ws_name = loaded.workspace.workspace_name().to_owned();
-  let wc_commit = match get_workspace_wc_commit(&loaded)? {
-    Some(commit) => commit,
-    None => return Ok(()),
+  let Some(wc_commit) = get_workspace_wc_commit(&loaded)? else {
+    return Ok(());
   };
   let tree = wc_commit.tree();
   let mut tx = loaded.repo.start_transaction();
@@ -2964,16 +2954,13 @@ pub fn move_hunks_between_workspaces(
     let source_file = Path::new(source_workspace_path).join(&hunk.file_path);
     let destination_file = Path::new(destination_workspace_path).join(&hunk.file_path);
 
-    let source_content = match fs::read_to_string(&source_file) {
-      Ok(content) => content,
-      Err(_) => {
-        outcome.skipped += 1;
-        outcome.warnings.push(format!(
-          "Skipped {}:{}-{}: source file not found",
-          hunk.file_path, hunk.start_line, hunk.end_line
-        ));
-        continue;
-      }
+    let Ok(source_content) = fs::read_to_string(&source_file) else {
+      outcome.skipped += 1;
+      outcome.warnings.push(format!(
+        "Skipped {}:{}-{}: source file not found",
+        hunk.file_path, hunk.start_line, hunk.end_line
+      ));
+      continue;
     };
     let mut source_lines: Vec<String> = source_content
       .lines()
@@ -3189,12 +3176,11 @@ pub fn jj_undo_operation(workspace_path: &str, operation_id: &str) -> Result<Str
   let operation = undo_target_operation(&loaded.repo, &requested)?;
   let parents = block_on(operation.parents())
     .map_err(|e| JjError::IoError(format!("Failed to load operation parents: {}", e)))?;
-  if parents.len() != 1 {
+  let Ok([parent]) = <[_; 1]>::try_from(parents) else {
     return Err(JjError::IoError(
       "Cannot undo a merge operation".to_string(),
     ));
-  }
-  let parent = parents.into_iter().next().unwrap();
+  };
   let parent_repo = block_on(loaded.repo.loader().load_at(&parent))
     .map_err(|e| JjError::IoError(format!("Failed to load parent operation: {}", e)))?;
   let restored_view = parent_repo.view().store_view().clone();
@@ -3879,9 +3865,8 @@ pub fn reconcile_all_workspaces_after_rewrite(
   skip_workspace_name: Option<&str>,
 ) -> Result<(), JjError> {
   // Load the home workspace to enumerate all registered workspaces and their paths.
-  let (home_workspace, repo, workspace_store) = match load_home_repo(repo_path) {
-    Ok(r) => r,
-    Err(_) => return Ok(()), // best-effort; don't abort the calling operation
+  let Ok((home_workspace, repo, workspace_store)) = load_home_repo(repo_path) else {
+    return Ok(());
   };
 
   let home_ws_name = home_workspace.workspace_name().as_str().to_string();
@@ -4038,23 +4023,20 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
     reconcile_colocated_home_repo(workspace_path)?;
   }
   let settings_path = repo_path_opt.as_deref().unwrap_or(workspace_path);
-  let settings = match create_user_settings(settings_path) {
-    Ok(s) => s,
-    Err(_) => return Ok(Vec::new()),
+  let Ok(settings) = create_user_settings(settings_path) else {
+    return Ok(Vec::new());
   };
   with_working_copy_lock(workspace_path, || {
-    let mut workspace = match Workspace::load(
+    let Ok(mut workspace) = Workspace::load(
       &settings,
       path,
       &StoreFactories::default(),
       &default_working_copy_factories(),
-    ) {
-      Ok(ws) => ws,
-      Err(_) => return Ok(Vec::new()),
+    ) else {
+      return Ok(Vec::new());
     };
-    let repo = match block_on(workspace.repo_loader().load_at_head()) {
-      Ok(r) => r,
-      Err(_) => return Ok(Vec::new()),
+    let Ok(repo) = block_on(workspace.repo_loader().load_at_head()) else {
+      return Ok(Vec::new());
     };
     let ignore_root = repo_path_opt.as_deref().unwrap_or(workspace_path);
     let matcher = repo_root_matcher();
@@ -4067,18 +4049,15 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
       Some(id) => id.clone(),
       None => return Ok(Vec::new()),
     };
-    let wc_commit = match repo.store().get_commit(&wc_commit_id) {
-      Ok(c) => c,
-      Err(_) => return Ok(Vec::new()),
+    let Ok(wc_commit) = repo.store().get_commit(&wc_commit_id) else {
+      return Ok(Vec::new());
     };
 
-    let mut locked_ws = match workspace.start_working_copy_mutation() {
-      Ok(lws) => lws,
-      Err(_) => return Ok(Vec::new()),
+    let Ok(mut locked_ws) = workspace.start_working_copy_mutation() else {
+      return Ok(Vec::new());
     };
-    let new_tree = match block_on(locked_ws.locked_wc().snapshot(&opts)) {
-      Ok((tree, _)) => tree,
-      Err(_) => return Ok(Vec::new()), // locked_ws dropped here, lock released
+    let Ok((new_tree, _)) = block_on(locked_ws.locked_wc().snapshot(&opts)) else {
+      return Ok(Vec::new());
     };
 
     // If tree changed, create a new WC commit and update op-store to expose the snapshotted state.
@@ -4088,7 +4067,7 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
       builder.set_tree(new_tree.clone());
       match block_on(builder.write(tx.repo_mut())) {
         Ok(rewritten_wc) => {
-          let _ = block_on(tx.repo_mut().edit(workspace_name.clone(), &rewritten_wc));
+          let _ = block_on(tx.repo_mut().edit(workspace_name, &rewritten_wc));
           let _ = block_on(tx.repo_mut().rebase_descendants());
           match block_on(tx.commit("snapshot working copy")) {
             Ok(final_repo) => {
@@ -4127,10 +4106,7 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
     let mut changes = Vec::new();
     for entry in diff_entries {
       let file_path = entry.path.as_internal_file_string().to_string();
-      let values = match entry.values {
-        Ok(v) => v,
-        Err(_) => continue,
-      };
+      let Ok(values) = entry.values else { continue };
       let status = if !values.before.is_resolved() || !values.after.is_resolved() {
         "C"
       } else if values.before.is_absent() {
@@ -5052,10 +5028,7 @@ pub fn jj_export_commit_git_patch(
   block_on(async {
     futures::pin_mut!(diff_stream);
     while let Some(entry) = diff_stream.next().await {
-      let values = match entry.values {
-        Ok(values) => values,
-        Err(_) => continue,
-      };
+      let Ok(values) = entry.values else { continue };
       let path = entry.path.target().as_internal_file_string().to_string();
       let before_absent = matches!(&values.before, MaterializedTreeValue::Absent);
       let after_absent = matches!(&values.after, MaterializedTreeValue::Absent);
@@ -7542,7 +7515,7 @@ fn resolve_local_target_branch_revision(
     .cloned()
     .collect();
   if preferred_ids.is_empty() {
-    preferred_ids = ids.clone();
+    preferred_ids = ids;
   }
 
   // Newest author timestamp, then commit id as tie-breaker.
@@ -7685,10 +7658,10 @@ pub fn jj_get_log(
     if !remote_ref.target.is_absent() {
       format!("{}@origin", target_branch)
     } else {
-      selected_target_ref.clone()
+      selected_target_ref
     }
   } else {
-    selected_target_ref.clone()
+    selected_target_ref
   };
   let immutable_revset = evaluate_revset(
     &loaded,
@@ -8865,16 +8838,12 @@ fn merge_diff_between_revisions_in(
   block_on(async {
     futures::pin_mut!(diff_stream);
     while let Some(entry) = diff_stream.next().await {
-      let values = match entry.values {
-        Ok(values) => values,
-        Err(_) => continue,
-      };
+      let Ok(values) = entry.values else { continue };
       let before_absent = matches!(&values.before, MaterializedTreeValue::Absent);
       let after_absent = matches!(&values.after, MaterializedTreeValue::Absent);
       let style = parse_conflict_marker_style(_conflict_marker_style);
-      let merge_options = match MergeOptions::from_settings(&loaded.settings) {
-        Ok(options) => options,
-        Err(_) => continue,
+      let Ok(merge_options) = MergeOptions::from_settings(&loaded.settings) else {
+        continue;
       };
       let before_bytes = materialized_value_to_bytes(
         entry.path.source(),
@@ -8953,16 +8922,12 @@ pub fn jj_get_commit_diff(
     let mut total_changed_lines = 0usize;
 
     while let Some(entry) = diff_stream.next().await {
-      let values = match entry.values {
-        Ok(values) => values,
-        Err(_) => continue,
-      };
+      let Ok(values) = entry.values else { continue };
       let before_absent = matches!(&values.before, MaterializedTreeValue::Absent);
       let after_absent = matches!(&values.after, MaterializedTreeValue::Absent);
       let style = parse_conflict_marker_style(_conflict_marker_style);
-      let merge_options = match MergeOptions::from_settings(&loaded.settings) {
-        Ok(options) => options,
-        Err(_) => continue,
+      let Ok(merge_options) = MergeOptions::from_settings(&loaded.settings) else {
+        continue;
       };
       let before_bytes = materialized_value_to_bytes(
         entry.path.source(),
@@ -9060,14 +9025,10 @@ pub fn jj_get_commit_file_diff(
       if target_path != file_path {
         continue;
       }
-      let values = match entry.values {
-        Ok(values) => values,
-        Err(_) => continue,
-      };
+      let Ok(values) = entry.values else { continue };
       let style = parse_conflict_marker_style(_conflict_marker_style);
-      let merge_options = match MergeOptions::from_settings(&loaded.settings) {
-        Ok(options) => options,
-        Err(_) => continue,
+      let Ok(merge_options) = MergeOptions::from_settings(&loaded.settings) else {
+        continue;
       };
       let before_bytes = materialized_value_to_bytes(
         entry.path.source(),
@@ -10459,7 +10420,7 @@ mod tests {
     let local_id = "unsquashed".to_string();
     let remote_id = "squashed".to_string();
     let candidates = vec![
-      (local_id.clone(), "same-tree".to_string()),
+      (local_id, "same-tree".to_string()),
       (remote_id.clone(), "same-tree".to_string()),
     ];
 

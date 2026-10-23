@@ -48,6 +48,7 @@ pub mod repo;
 pub mod resolve;
 pub mod review_drafts;
 pub mod running_checks;
+pub mod session_secrets;
 pub mod sessions;
 pub mod shell_step;
 pub mod skills;

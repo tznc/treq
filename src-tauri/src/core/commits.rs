@@ -490,8 +490,7 @@ pub fn shift_commit_timestamp(
       if days != 0 || hours != 0 || minutes != 0 {
         return Err("Provide either a day or a duration offset, not both".to_string());
       }
-      let (year, month, day) =
-        crate::commit_timestamps::parse_day(day).map_err(|e| e.to_string())?;
+      let (year, month, day) = crate::commit_timestamps::parse_day(day)?;
       crate::commit_timestamps::TimestampShift::ToDay { year, month, day }
     }
     None => {

@@ -197,7 +197,10 @@ mod tests {
     let server = tokio::spawn(async move {
       let (tcp, _) = listener.accept().await.unwrap();
       let mut auth_tx = Some(auth_tx);
-      #[allow(clippy::result_large_err)]
+      #[allow(
+        clippy::result_large_err,
+        reason = "the callback signature is fixed by tungstenite's handshake callback"
+      )]
       let callback = |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                       response| {
         let auth = request
@@ -282,9 +285,8 @@ mod tests {
         .write_all(b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\n\r\n")
         .await;
     });
-    let error = match connect_relay(&format!("ws://{addr}/relay"), "secret-jwt").await {
-      Ok(_) => panic!("expected a refusal"),
-      Err(error) => error,
+    let Err(error) = connect_relay(&format!("ws://{addr}/relay"), "secret-jwt").await else {
+      panic!("expected a refusal")
     };
     assert!(error.contains("401"), "{error}");
     assert!(!error.contains("secret-jwt"), "{error}");

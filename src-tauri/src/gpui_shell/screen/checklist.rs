@@ -132,7 +132,7 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
     Some(false) => {
       let id = SharedString::from(format!("install-{}", tool.binary));
       ui::text(
-        Button::new(id.clone(), &p)
+        Button::new(id, &p)
           .variant(Variant::Link)
           .size(Size::Sm)
           .h_auto()
@@ -181,6 +181,9 @@ enum Kind {
 /// A tool the checklist reports on (`PREREQUISITE_TOOLS` in React).
 struct Known {
   binary: &'static str,
+  /// Only a machine Treq reaches over SSH or in a container needs it: the
+  /// app runs jj and its terminals itself.
+  host_only: bool,
   label: &'static str,
   kind: Kind,
   install_url: &'static str,
@@ -188,17 +191,35 @@ struct Known {
 }
 
 /// The tools, in display order. Their binaries are
-/// `core::PREREQUISITE_BINARIES`.
-const TOOLS: [Known; 6] = [
+/// `core::PREREQUISITE_BINARIES`, and `core::HOST_BINARIES` on a host.
+const TOOLS: [Known; 8] = [
   Known {
     binary: "git",
+    host_only: false,
     label: "Git",
     kind: Kind::Required,
     install_url: "https://git-scm.com/downloads",
     note: None,
   },
   Known {
+    binary: "jj",
+    host_only: true,
+    label: "Jujutsu",
+    kind: Kind::Required,
+    install_url: "https://jj-vcs.github.io/jj/latest/install-and-setup/",
+    note: None,
+  },
+  Known {
+    binary: "tmux",
+    host_only: true,
+    label: "tmux",
+    kind: Kind::Required,
+    install_url: "https://github.com/tmux/tmux/wiki/Installing",
+    note: Some("Keeps terminals and agents running between connections"),
+  },
+  Known {
     binary: "claude",
+    host_only: false,
     label: "Claude Code",
     kind: Kind::Agent,
     install_url: "https://code.claude.com/docs/en/setup",
@@ -206,6 +227,7 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "codex",
+    host_only: false,
     label: "Codex",
     kind: Kind::Agent,
     install_url: "https://developers.openai.com/codex/cli",
@@ -213,6 +235,7 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "cursor-agent",
+    host_only: false,
     label: "Cursor Agent",
     kind: Kind::Agent,
     install_url: "https://cursor.com/docs/cli/installation",
@@ -220,6 +243,7 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "copilot",
+    host_only: false,
     label: "GitHub Copilot CLI",
     kind: Kind::Agent,
     install_url: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
@@ -227,6 +251,7 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "gh",
+    host_only: false,
     label: "GitHub CLI",
     kind: Kind::Optional,
     install_url: "https://cli.github.com/",
@@ -246,6 +271,40 @@ pub fn from_statuses(
   title: &str,
   statuses: Option<&[PrerequisiteStatus]>,
   validating: bool,
+) -> Checklist {
+  checklist(title, statuses, validating, false)
+}
+
+/// The checklist of a machine Treq reaches over SSH or in a container:
+/// jj and tmux are required there too.
+pub fn from_host_statuses(
+  title: &str,
+  statuses: Option<&[PrerequisiteStatus]>,
+  validating: bool,
+) -> Checklist {
+  checklist(title, statuses, validating, true)
+}
+
+/// Whether every required tool is installed, or `None` before a check.
+pub fn ready(list: &Checklist) -> Option<bool> {
+  let required = || {
+    list
+      .groups
+      .iter()
+      .flat_map(|g| &g.tools)
+      .filter(|t| t.required)
+  };
+  if required().any(|t| t.installed.is_none()) {
+    return None;
+  }
+  Some(required().all(|t| t.installed == Some(true)) && !list.groups.iter().any(|g| g.error))
+}
+
+fn checklist(
+  title: &str,
+  statuses: Option<&[PrerequisiteStatus]>,
+  validating: bool,
+  host: bool,
 ) -> Checklist {
   let installed = |binary: &str| {
     statuses.map(|statuses| {
@@ -268,7 +327,7 @@ pub fn from_statuses(
         error: *kind == Kind::Agent && no_agent,
         tools: TOOLS
           .iter()
-          .filter(|tool| tool.kind == *kind)
+          .filter(|tool| tool.kind == *kind && (host || !tool.host_only))
           .map(|tool| Tool {
             binary: tool.binary.to_string(),
             label: tool.label.to_string(),

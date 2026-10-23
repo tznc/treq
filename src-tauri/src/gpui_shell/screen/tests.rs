@@ -23,7 +23,13 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
-  remote_ssh: bool,
+  /// What the folder picker returns, and why starting a dev container fails.
+  picked: Option<String>,
+  container_error: Option<String>,
+  /// The Overview screen's machines and recent repositories.
+  listing: machines::Listing,
+  /// What a host machine says is installed on it.
+  host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
   /// What `check_prerequisites` reports.
   installed: Vec<(&'static str, bool)>,
   /// App and repository settings, by key.
@@ -86,6 +92,8 @@ struct FakeHost {
   exits: Mutex<Vec<(String, ExitSink)>>,
   /// What `PtyList` says of a remote session (`None`: the host is down).
   remote_running: Mutex<Option<bool>>,
+  /// The SSH host refuses attaches from now on.
+  attach_down: Mutex<bool>,
   /// What the dialogs read: the prompt history, and the stashes and their diff.
   prompts: Vec<crate::local_db::PromptHistoryEntry>,
   stash_list: Mutex<Vec<crate::local_db::StashEntry>>,
@@ -246,11 +254,45 @@ impl FakeHost {
   }
 }
 
-impl onboarding::OnboardingHost for FakeHost {
-  fn remote_ssh_enabled(&self) -> bool {
-    self.remote_ssh
+impl machines::MachinesHost for FakeHost {
+  fn listing(&self) -> machines::Listing {
+    self.listing.clone()
+  }
+
+  fn machine_tools(
+    &self,
+    place: &machines::Place,
+  ) -> Result<Vec<crate::core::PrerequisiteStatus>, String> {
+    if *place == machines::Place::Local {
+      return Ok(checklist::ToolsHost::check_prerequisites(self));
+    }
+    self.record(format!("tools {place:?}"));
+    self
+      .host_tools
+      .clone()
+      .unwrap_or_else(|| Err("ssh: connection refused".into()))
+  }
+
+  fn open_local(&self, path: &str) {
+    self.record(format!("open_local {path}"));
+  }
+
+  fn remove_machine(&self, place: &machines::Place) -> bool {
+    self.record(format!("remove {place:?}"));
+    true
+  }
+
+  fn pick_folder(&self) -> Option<String> {
+    self.picked.clone()
+  }
+
+  fn start_dev_container(&self, repo_path: &str) -> Result<(), String> {
+    self.record(format!("container up {repo_path}"));
+    self.container_error.clone().map_or(Ok(()), Err)
   }
 }
+
+impl onboarding::OnboardingHost for FakeHost {}
 
 impl settings_data::SettingsHost for FakeHost {
   fn settings(&self, keys: &[String]) -> Result<settings_data::Values, String> {
@@ -624,7 +666,7 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<Vec<crate::jj::JjFileChange>, String> {
     self.record(format!("read changed files {workspace_id:?}"));
     let working = self.working().ok_or("no changes")?;
-    Ok(working.uncommitted_files.clone())
+    Ok(working.uncommitted_files)
   }
 
   fn workspace_diff(
@@ -915,7 +957,7 @@ impl terminal_data::TerminalHost for FakeHost {
     _: u16,
   ) -> Result<(), String> {
     self.record(format!("attach {id} to {}", target.label));
-    if self.failing.contains(&"remote_attach") {
+    if self.failing.contains(&"remote_attach") || *self.attach_down.lock().unwrap() {
       return Err("ssh: connection refused".into());
     }
     self.ptys.lock().unwrap().push(id.to_string());
@@ -1663,30 +1705,219 @@ fn the_ui_zoom_scales_pixel_lengths_as_css_zoom_does(cx: &mut TestAppContext) {
   );
 }
 
+/// This computer with `/home/me/app`, an SSH host with `/srv/app` saved
+/// on it, and a stopped dev container.
+fn listing() -> machines::Listing {
+  use machines::{Machine, Place, Recent};
+  machines::Listing {
+    machines: vec![
+      Machine {
+        id: "local".into(),
+        place: Place::Local,
+        name: "This computer".into(),
+        detail: "laptop".into(),
+      },
+      Machine {
+        id: "ssh:ep-1".into(),
+        place: Place::Ssh {
+          endpoint_id: "ep-1".into(),
+        },
+        name: "Dev box".into(),
+        detail: "me@devbox".into(),
+      },
+      Machine {
+        id: "cloud".into(),
+        place: Place::Cloud {
+          endpoint_id: None,
+          status: machines::CLOUD_NOT_CREATED.into(),
+        },
+        name: "Cloud workspace".into(),
+        detail: "Not created yet".into(),
+      },
+      Machine {
+        id: "devcontainer:c1".into(),
+        place: Place::DevContainer {
+          container_id: "c1".into(),
+          repo_path: "/home/me/web".into(),
+          running: false,
+        },
+        name: "web".into(),
+        detail: "Stopped".into(),
+      },
+    ],
+    recents: vec![
+      Recent {
+        machine_id: "local".into(),
+        name: "app".into(),
+        path: "/home/me/app".into(),
+        saved_id: None,
+      },
+      Recent {
+        machine_id: "ssh:ep-1".into(),
+        name: "app".into(),
+        path: "/srv/app".into(),
+        saved_id: Some("r1".into()),
+      },
+    ],
+    signed_out: false,
+    ssh: false,
+    containers: false,
+  }
+}
+
 #[gpui::test]
 fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     installed: vec![("git", false), ("gh", true)],
+    listing: listing(),
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host.clone());
-  // The check ran as the screen opened.
+  // This computer's tools are checked as the screen opens, shown in its
+  // popover.
+  assert!(!h.drawn("install-git"));
+  h.click("machine-tools-local");
   assert!(h.drawn("install-git"));
   assert!(!h.drawn("install-gh"));
-  h.click("onboarding-open-repo");
   h.click("prerequisites-recheck");
   h.click("install-git");
-  // Only the remote dialog is still React's.
-  h.click("onboarding-open-remote");
+  h.click("onboarding-open-repo");
+  h.click("recent-local-0");
   assert_eq!(
     host.calls(),
-    ["check", "check", "open https://git-scm.com/downloads"]
+    [
+      "check",
+      "check",
+      "open https://git-scm.com/downloads",
+      "open_local /home/me/app",
+    ]
   );
-  // The window model asks for the folder; the remote dialog is React's.
+  // The window model asks for the folder.
+  assert_eq!(h.sent(), vec![ScreenAction::OpenRepo]);
+}
+
+#[gpui::test]
+fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  for selector in [
+    "onboarding-machines",
+    "machine-local",
+    "machine-ssh:ep-1",
+    "machine-cloud",
+    "machine-devcontainer:c1",
+    "recent-local-0",
+    "recent-ssh:ep-1-0",
+  ] {
+    assert!(h.drawn(selector), "{selector}");
+  }
+  assert!(!h.drawn("onboarding-no-recents"));
+  // A remote repository opens through the window, by its saved record; a
+  // machine's row connects to it.
+  h.click("recent-ssh:ep-1-0");
+  h.click("machine-ssh:ep-1");
+  // A dev container opens its repository here.
+  h.click("machine-devcontainer:c1");
+  h.click("machine-local");
+  // Before its workspace runs, the cloud row sets it up.
+  h.click("machine-cloud");
   assert_eq!(
     h.sent(),
-    vec![ScreenAction::OpenRepo, ScreenAction::OpenRemote]
+    vec![
+      press("machines.openSaved:r1"),
+      press("machines.connect:ep-1"),
+      ScreenAction::OpenRepo,
+      press("machines.cloud"),
+    ]
   );
+  assert_eq!(host.calls(), ["check", "open_local /home/me/web"]);
+}
+
+#[gpui::test]
+fn onboarding_offers_sign_in_instead_of_a_cloud_row_when_signed_out(cx: &mut TestAppContext) {
+  let mut signed_out = listing();
+  signed_out.machines.retain(|m| m.id != "cloud");
+  signed_out.signed_out = true;
+  let host = Arc::new(FakeHost {
+    listing: signed_out,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(!h.drawn("machine-cloud"));
+  h.click("onboarding-sign-in");
+  assert!(host
+    .calls()
+    .contains(&"open http://localhost:3001/sign-in?source=desktop".to_string()));
+  let mut h = Harness::with_host(
+    cx,
+    onboarding(),
+    Arc::new(FakeHost {
+      listing: listing(),
+      ..FakeHost::default()
+    }),
+  );
+  assert!(
+    !h.drawn("onboarding-sign-in"),
+    "signed in: the cloud row instead"
+  );
+  assert!(h.drawn("machine-cloud"));
+}
+
+#[gpui::test]
+fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![
+      crate::core::PrerequisiteStatus {
+        binary: "git".into(),
+        installed: true,
+      },
+      crate::core::PrerequisiteStatus {
+        binary: "tmux".into(),
+        installed: false,
+      },
+    ])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert_eq!(host.calls(), ["check"]);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-tools-popover"));
+  // jj and tmux are required on a host; Git is there.
+  assert!(h.drawn("install-tmux"));
+  assert!(h.drawn("install-jj"));
+  assert!(!h.drawn("install-git"));
+  assert!(host.calls().iter().any(|c| c.starts_with("tools Ssh")));
+  // Removing the host closes the popover and lists the machines again.
+  h.click("machine-remove");
+  assert!(!h.drawn("machine-tools-popover"));
+  // In-app confirmation first: Cancel keeps the host.
+  h.answer("Cancel");
+  assert!(!host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-remove");
+  h.answer("Remove host");
+  assert!(host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_says_why_a_host_could_not_be_checked(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-tools-error"));
+}
+
+#[gpui::test]
+fn onboarding_without_recents_says_where_they_appear(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, onboarding(), Arc::new(FakeHost::default()));
+  assert!(h.drawn("onboarding-no-recents"));
 }
 
 fn onboarding_with_form(form: serde_json::Value) -> ScreenSnapshot {
@@ -1698,29 +1929,16 @@ fn onboarding_with_form(form: serde_json::Value) -> ScreenSnapshot {
   .expect("onboarding")
 }
 
-/// Scrolls the onboarding screen down to the form under the card.
-fn scroll_to_form(h: &mut Harness) {
-  h.cx.run_until_parked();
-  let at = h
-    .cx
-    .debug_bounds("onboarding-open-repo")
-    .expect("card")
-    .center();
-  h.cx.simulate_event(gpui::ScrollWheelEvent {
-    position: at,
-    delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-5000.))),
-    modifiers: Modifiers::none(),
-    touch_phase: gpui::TouchPhase::Moved,
-  });
-  h.cx.run_until_parked();
-}
-
 #[gpui::test]
 fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
-  let host = Arc::new(FakeHost::default());
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
   let mut h = Harness::with_host(
     cx,
     onboarding_with_form(serde_json::json!({
+      "endpointId": "ep-1",
       "selector": true,
       "saved": [{ "id": "r1", "display_name": "app", "canonical_remote_path": "/srv/app" }],
       "path": "/srv/new",
@@ -1732,11 +1950,9 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
     host,
   );
   for selector in [
-    "onboarding-open-repo",
+    "onboarding-remote-form",
     "remote-repository-selector",
-    "remote-saved-repo",
-    "remote-repo-path",
-    "remote-repo-probe",
+    "remote-browser",
     "remote-repo-not-a-repo",
     "remote-repo-clone-url",
     "remote-repo-init",
@@ -1744,37 +1960,105 @@ fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
   ] {
     assert!(h.drawn(selector), "{selector}");
   }
+  // The group lists the saved repositories; the form only opens new ones.
+  assert!(!h.drawn("remote-saved-repo"));
   assert!(!h.drawn("remote-repo-open"));
   assert!(!h.drawn("remote-repo-cutoff"));
-  scroll_to_form(&mut h);
-  h.click("remote-repo-probe");
-  h.click("remote-saved-repo");
+  // Clone and init already show for the folder.
+  assert!(!h.drawn("remote-repo-use-folder"));
   h.click("remote-repo-confirm-init");
   // Initialize waits for the confirmation; Clone for a URL.
   h.click("remote-repo-init");
   h.click("remote-repo-clone");
   assert_eq!(
     h.sent(),
+    vec![ScreenAction::Field {
+      field: "remoteRepo.confirmInit".into(),
+      value: true.into()
+    }]
+  );
+}
+
+fn browsed_form(path: &str, is_repo: bool, show_hidden: bool) -> serde_json::Value {
+  serde_json::json!({
+    "endpointId": "ep-1",
+    "selector": true,
+    "path": path,
+    "showHidden": show_hidden,
+    "listing": {
+      "path": path,
+      "parent": "/home",
+      "is_repo": is_repo,
+      "entries": [
+        { "name": ".config", "path": format!("{path}/.config"), "hidden": true, "is_repo": false },
+        { "name": "app", "path": format!("{path}/app"), "hidden": false, "is_repo": true },
+      ],
+    },
+  })
+}
+
+#[gpui::test]
+fn the_remote_browser_lists_folders_and_hides_dot_folders(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(browsed_form("/home/dev", false, false)),
+    host,
+  );
+  assert!(h.drawn("remote-browse-folder-app"));
+  assert!(
+    !h.drawn("remote-browse-folder-.config"),
+    "hidden by default"
+  );
+  assert!(h.drawn("remote-repo-use-folder"));
+  assert!(!h.drawn("remote-repo-open"));
+  h.click("remote-browse-folder-app");
+  h.click("remote-browse-crumb-1");
+  h.click("remote-browse-home");
+  h.click("remote-browse-hidden");
+  h.click("remote-repo-use-folder");
+  assert_eq!(
+    h.sent(),
     vec![
-      press("remoteRepo.probe"),
-      ScreenAction::Field {
-        field: "remoteRepo.select".into(),
-        value: "r1".into()
-      },
-      ScreenAction::Field {
-        field: "remoteRepo.confirmInit".into(),
-        value: true.into()
-      },
+      field("remoteRepo.browse", "/home/dev/app".into()),
+      field("remoteRepo.browse", "/home".into()),
+      field("remoteRepo.browse", "~".into()),
+      field("remoteRepo.showHidden", true.into()),
+      press("remoteRepo.useFolder"),
     ]
   );
 }
 
 #[gpui::test]
+fn the_remote_browser_shows_hidden_folders_and_opens_a_repository(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(browsed_form("/home/dev/app", true, true)),
+    host,
+  );
+  assert!(h.drawn("remote-browse-folder-.config"));
+  assert!(!h.drawn("remote-repo-use-folder"));
+  h.click("remote-repo-open");
+  assert_eq!(h.sent(), vec![press("remoteRepo.open")]);
+}
+
+#[gpui::test]
 fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
-  let host = Arc::new(FakeHost::default());
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
   let mut h = Harness::with_host(
     cx,
     onboarding_with_form(serde_json::json!({
+      "endpointId": "ep-1",
       "cutoff": "session_ended",
       "selector": true,
     })),
@@ -1782,26 +2066,48 @@ fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
   );
   assert!(h.drawn("remote-repo-cutoff"));
   assert!(!h.drawn("remote-repository-selector"));
-  scroll_to_form(&mut h);
   h.click("remote-repo-reauthenticate");
   assert_eq!(h.sent(), vec![press("remoteRepo.reauthenticate")]);
 }
 
 #[gpui::test]
-fn onboarding_labels_the_remote_button_by_preview(cx: &mut TestAppContext) {
+fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  empty.ssh = true;
+  empty.containers = true;
   let host = Arc::new(FakeHost {
-    remote_ssh: true,
+    listing: empty,
+    picked: Some("/home/me/web".into()),
+    container_error: Some("The Dev Containers CLI is not installed.".into()),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  // Both sections show while empty, each with its +.
+  assert!(h.drawn("machines-add-ssh"));
+  assert!(h.drawn("machines-add-container"));
+  h.click("machines-add-ssh");
+  assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+  h.click("machines-add-container");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"container up /home/me/web".to_string()));
+  assert!(h.drawn("machines-container-status"), "why it did not start");
+
+  let mut off = listing();
+  off
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  let host = Arc::new(FakeHost {
+    listing: off,
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  assert!(h.drawn("onboarding-open-remote"));
-  let label = h.screen.read_with(&h.cx, |screen, cx| {
-    screen
-      .onboarding
-      .as_ref()
-      .map(|view| view.read(cx).remote_label.clone())
-  });
-  assert_eq!(label.as_deref(), Some("Open via SSH"));
+  assert!(!h.drawn("machines-add-ssh"), "the previews are off");
+  assert!(!h.drawn("machines-add-container"));
 }
 
 fn settings_route(tab: &str) -> ScreenSnapshot {
@@ -5545,7 +5851,7 @@ fn terminal_pane_attaches_a_remote_session(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_dropped_remote_session_reattaches_once_then_waits(cx: &mut TestAppContext) {
+fn a_dropped_remote_session_reattaches_on_every_drop(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
   *host.remote_running.lock().unwrap() = Some(true);
@@ -5555,11 +5861,27 @@ fn a_dropped_remote_session_reattaches_once_then_waits(cx: &mut TestAppContext) 
   assert_eq!(attached.len(), 2, "reattached on its own");
   assert_ne!(attached[0], attached[1], "with a fresh local id");
   assert!(host.calls().contains(&format!("close {}", attached[0])));
-  // Dropping again within the cooldown waits for the user.
+  // Once the session talks again, a later drop gets its own attempt.
+  host.output(&attached[1], "$ ");
+  h.cx.run_until_parked();
   host.exit(&attached[1], None);
   h.cx.run_until_parked();
-  assert_eq!(host.attached().len(), 2);
+  assert_eq!(host.attached().len(), 3);
+  assert!(!h.drawn("remote-terminal-lost"));
+}
+
+#[gpui::test]
+fn a_lost_host_is_retried_once_before_offering_reattach(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  // The host is unreachable: `PtyList` fails and so does the attach.
+  *host.remote_running.lock().unwrap() = None;
+  *host.attach_down.lock().unwrap() = true;
+  host.exit(&host.attached()[0], None);
+  h.cx.run_until_parked();
+  assert_eq!(host.attached().len(), 2, "tried once on its own");
   assert!(h.drawn("remote-terminal-lost"));
+  *host.attach_down.lock().unwrap() = false;
   h.click("remote-terminal-reattach");
   h.cx.run_until_parked();
   assert_eq!(host.attached().len(), 3);
@@ -5575,6 +5897,7 @@ fn an_unreachable_remote_session_offers_reattach_and_close(cx: &mut TestAppConte
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
   assert!(h.drawn("remote-terminal-lost"));
+  assert_eq!(host.attached().len(), 2, "retried once first");
   h.click("remote-terminal-close");
   h.cx.run_until_parked();
   assert!(!h.drawn("terminal-column-shell"));
@@ -5619,12 +5942,17 @@ fn a_failed_remote_write_shows_the_error_with_reattach(cx: &mut TestAppContext) 
   assert!(!h.drawn("remote-terminal-lost"));
   h.cx.simulate_input("ls");
   h.cx.run_until_parked();
+  // The first failure reattaches on its own.
+  assert_eq!(host.attached().len(), 2, "{:?}", host.calls());
+  assert!(!h.drawn("remote-terminal-lost"));
+  // Failing again before the session says anything shows the error.
+  h.cx.simulate_input("ls");
+  h.cx.run_until_parked();
   assert!(h.drawn("remote-terminal-lost"), "{:?}", host.calls());
   assert!(h.drawn("remote-terminal-reattach"));
-  // The session is replaced by a fresh attach.
   h.click("remote-terminal-reattach");
   h.cx.run_until_parked();
-  assert_eq!(host.attached().len(), 2);
+  assert_eq!(host.attached().len(), 3);
   assert!(!h.drawn("remote-terminal-lost"));
 }
 
@@ -6684,12 +7012,54 @@ fn setup_route(allow_user_managed: bool, cloud: serde_json::Value) -> serde_json
   })
 }
 
+/// The remote dialogs, signed in as Ada.
 fn remote_harness(
   cx: &mut TestAppContext,
   host: FakeHost,
   remote: serde_json::Value,
 ) -> (Harness, Arc<FakeHost>) {
-  workspace_harness(cx, host, remote_snapshot(remote))
+  let (mut h, host) = workspace_harness(cx, host, remote_snapshot(remote));
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  (h, host)
+}
+
+#[gpui::test]
+fn setup_dialog_opens_on_your_own_vm_from_the_ssh_hosts_plus(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({ "setup": { "allowUserManaged": true, "screen": "ownVm" } }),
+  );
+  assert!(h.drawn("remote-username"));
+  assert!(!h.drawn("remote-setup-own-vm"));
+  // An action pair and no X; Cancel closes, as there is no choice to go
+  // back to.
+  assert!(!h.drawn("remote-setup-close"));
+  assert!(!h.drawn("remote-setup-back"));
+  h.click("remote-setup-cancel");
+  assert_eq!(h.sent(), vec![press("remote.setup.close")]);
+}
+
+#[gpui::test]
+fn setup_dialog_asks_to_sign_in_before_the_cloud_workspace(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({ "setup": { "allowUserManaged": true, "screen": "managed" } }),
+  );
+  // The machines page's cloud row opens straight on the cloud workspace.
+  assert!(h.drawn("cloud-create"));
+  assert!(!h.drawn("remote-setup-own-vm"));
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(h.drawn("remote-setup-signed-out"));
+  assert!(!h.drawn("cloud-create"));
+  h.click("remote-setup-sign-in");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"open http://localhost:3001/sign-in?source=desktop".to_string()));
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  assert!(h.drawn("cloud-create"));
 }
 
 fn ssh_key(label: &str) -> crate::core::remote_local_keys::LocalSshIdentity {

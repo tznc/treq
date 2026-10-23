@@ -597,7 +597,7 @@ impl CommitsView {
       move |host, parent| host.stash(&parent.repo_path, parent.workspace_id(), &change),
       move |view, result, cx| match result {
         Ok(_) => {
-          view.remove_later(commit.commit_id.clone(), cx);
+          view.remove_later(commit.commit_id, cx);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           Self::changed(view.host.as_ref(), &view.parent);
           view.toast(ToastTone::Success, "Commit stashed", "");
@@ -1542,7 +1542,10 @@ impl CommitsView {
 }
 
 impl CommitsView {
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn commit(
     &mut self,
     commit: &JjLogCommit,

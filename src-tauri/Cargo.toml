@@ -27,6 +27,7 @@ gui = [
   "dep:tauri-plugin-deep-link",
   "dep:tauri-plugin-notification",
   "dep:tauri-plugin-keystore",
+  "dep:keyring",
   "dep:tauri-plugin-biometric",
   "dep:tauri-plugin-cli",
   "dep:tauri-plugin-single-instance",
@@ -40,6 +41,25 @@ embed = []
 # e2e/desktop suite can drive it. It only listens when `GPUI_PLAYWRIGHT` is
 # set, and release builds leave the feature out.
 e2e = ["gpui-shell", "dep:gpui-playwright"]
+
+# Clippy's default set runs in CI with -D warnings; these add checks it
+# leaves out. clippy.toml lets tests unwrap.
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"
+# Output goes through tracing; only the CLI prints (allowed in cli/).
+print_stdout = "warn"
+print_stderr = "warn"
+mem_forget = "warn"
+exit = "warn"
+undocumented_unsafe_blocks = "warn"
+allow_attributes_without_reason = "warn"
+redundant_clone = "warn"
+manual_let_else = "warn"
+needless_collect = "warn"
+implicit_clone = "warn"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -79,6 +99,8 @@ two-face = { version = "0.4.5", default-features = false, features = ["syntect-f
 alacritty_terminal = { version = "0.26", default-features = false, optional = true }
 # Draws review highlights onto `treq send` images (gpui_shell terminal pane).
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# The Supabase session lives in the OS keychain (core::session_secrets).
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
 
 [dependencies]
 tauri = { version = "2.12", features = ["unstable"], optional = true }

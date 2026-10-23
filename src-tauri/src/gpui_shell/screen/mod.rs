@@ -49,6 +49,7 @@ mod linear;
 mod linear_data;
 mod logs;
 mod logs_data;
+mod machines;
 mod merge;
 mod merge_queue;
 mod merge_queue_data;
@@ -130,7 +131,6 @@ pub enum View {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScreenAction {
   OpenRepo,
-  OpenRemote,
   RecheckPrerequisites,
   OpenUrl {
     url: String,

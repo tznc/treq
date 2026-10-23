@@ -7,7 +7,20 @@ use serde::Serialize;
 pub const PREREQUISITE_BINARIES: [&str; 6] =
   ["git", "claude", "codex", "cursor-agent", "copilot", "gh"];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// What a machine Treq works on over SSH (or in a container) needs: the
+/// local list plus jj and tmux, which the host runs itself.
+pub const HOST_BINARIES: [&str; 8] = [
+  "git",
+  "jj",
+  "tmux",
+  "claude",
+  "codex",
+  "cursor-agent",
+  "copilot",
+  "gh",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct PrerequisiteStatus {
   pub binary: String,
   pub installed: bool,
@@ -21,7 +34,17 @@ pub fn check_prerequisites() -> Vec<PrerequisiteStatus> {
 
 /// Looks up every prerequisite with `find`, which returns a tool's path.
 pub fn check_prerequisites_with(find: impl Fn(&str) -> Option<String>) -> Vec<PrerequisiteStatus> {
-  PREREQUISITE_BINARIES
+  check_with(&PREREQUISITE_BINARIES, find)
+}
+
+/// [`HOST_BINARIES`] on this machine: what `treq repo tools` reports to a
+/// desktop app connected over SSH.
+pub fn check_host_tools() -> Vec<PrerequisiteStatus> {
+  check_with(&HOST_BINARIES, crate::binary_paths::detect_binary)
+}
+
+fn check_with(binaries: &[&str], find: impl Fn(&str) -> Option<String>) -> Vec<PrerequisiteStatus> {
+  binaries
     .iter()
     .map(|binary| PrerequisiteStatus {
       binary: binary.to_string(),

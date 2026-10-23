@@ -346,7 +346,7 @@ impl TerminalHost for Backend {
       .state::<crate::commands::remote_pty_commands::RemotePtyState>()
       .0
       .clone();
-    tauri::async_runtime::block_on(crate::commands::remote_pty_commands::reattach(
+    crate::gpui_shell::block_on(crate::commands::remote_pty_commands::reattach(
       self.app().clone(),
       &manager,
       &self.exec_pool(),
@@ -512,7 +512,7 @@ fn remote_channel(backend: &Backend, id: &str, op: RemoteOp) {
     std::thread::spawn(move || {
       while let Ok(op) = rx.recv() {
         let done = matches!(op, RemoteOp::Close);
-        let result = tauri::async_runtime::block_on(async {
+        let result = crate::gpui_shell::block_on(async {
           match op {
             RemoteOp::Write(data) => manager.write(&id, data.as_bytes()).await,
             RemoteOp::Resize { cols, rows } => manager.resize(&id, cols, rows).await,

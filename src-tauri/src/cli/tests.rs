@@ -260,9 +260,8 @@ fn positional_cli_args_take_values_in_tauri_config() {
     .expect("plugins.cli.subcommands must be an object");
 
   for (subcommand_name, subcommand) in subcommands {
-    let args = match subcommand.get("args").and_then(Value::as_array) {
-      Some(args) => args,
-      None => continue,
+    let Some(args) = subcommand.get("args").and_then(Value::as_array) else {
+      continue;
     };
 
     for arg in args {
@@ -743,6 +742,19 @@ fn parses_repo_usage_into_machine_usage_request() {
 }
 
 #[test]
+fn keeps_the_home_shorthand_for_repo_dirs() {
+  let request = parse_remote_command_request(
+    "repo",
+    &remote_matches(&[("action", "dirs"), ("repo", "~")]),
+  )
+  .unwrap();
+  assert_eq!(
+    request,
+    crate::core::remote::TreqCommandRequest::ListDirectories { path: "~".into() }
+  );
+}
+
+#[test]
 fn rejects_unknown_remote_action_and_arbitrary_command_kinds() {
   let error = parse_remote_command_request(
     "repo",
@@ -897,6 +909,8 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       idempotency_key: key(),
     },
     R::MachineUsage { root: repo() },
+    R::MachineTools { root: repo() },
+    R::ListDirectories { path: repo() },
     R::HostCheck { root: repo() },
     R::ProbeRepo { repo: repo() },
     R::CloneRepo {
@@ -1338,6 +1352,7 @@ mod implicit_stdin {
 
   fn pipe() -> (i32, i32) {
     let mut fds = [0; 2];
+    // SAFETY: `fds` is a two-element array, as `pipe(2)` requires.
     assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
     (fds[0], fds[1])
   }
@@ -1348,6 +1363,7 @@ mod implicit_stdin {
     let started = Instant::now();
     assert!(!fd_has_input(read, Duration::from_millis(50)));
     assert!(started.elapsed() < Duration::from_secs(5));
+    // SAFETY: both fds came from `pipe()` above and are closed exactly once.
     unsafe {
       libc::close(read);
       libc::close(write);
@@ -1357,13 +1373,17 @@ mod implicit_stdin {
   #[test]
   fn a_pipe_with_data_or_eof_is_input() {
     let (read, write) = pipe();
+    // SAFETY: the buffer is two readable bytes and `write` is an open pipe fd.
     assert_eq!(unsafe { libc::write(write, b"{}".as_ptr().cast(), 2) }, 2);
     assert!(fd_has_input(read, Duration::from_millis(50)));
+    // SAFETY: `read` came from `pipe()` and is closed exactly once.
     unsafe { libc::close(read) };
 
     let (read, write) = pipe();
+    // SAFETY: `write` came from `pipe()` and is closed exactly once.
     unsafe { libc::close(write) };
     assert!(fd_has_input(read, Duration::from_millis(50)));
+    // SAFETY: `read` came from this `pipe()` and is closed exactly once.
     unsafe { libc::close(read) };
   }
 }

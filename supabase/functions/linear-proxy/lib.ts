@@ -18,7 +18,7 @@ export type StoredToken = {
 
 export type TokenUpdate = Omit<StoredToken, "updated_at">;
 
-/** The signed-in user's row in linear_oauth_tokens. */
+/** The signed-in user's Linear tokens, kept in Vault (linear_tokens_*). */
 export interface TokenStore {
   load(): Promise<StoredToken | null>;
   save(update: TokenUpdate): Promise<void>;
@@ -31,19 +31,20 @@ export function linearTokenStore(
 ): TokenStore {
   return {
     load: async () => {
-      const { data, error } = await client
-        .from("linear_oauth_tokens")
-        .select("access_token, refresh_token, expires_at, updated_at")
-        .eq("user_id", userId)
-        .maybeSingle();
+      const { data, error } = await client.rpc("linear_tokens_load", {
+        p_user_id: userId,
+      });
       if (error) throw new Error(error.message);
-      return (data as StoredToken | null) ?? null;
+      const rows = (data as StoredToken[] | null) ?? [];
+      return rows[0] ?? null;
     },
     save: async (update) => {
-      const { error } = await client
-        .from("linear_oauth_tokens")
-        .update({ ...update, updated_at: new Date().toISOString() })
-        .eq("user_id", userId);
+      const { error } = await client.rpc("linear_tokens_save", {
+        p_user_id: userId,
+        p_access_token: update.access_token,
+        p_refresh_token: update.refresh_token,
+        p_expires_at: update.expires_at,
+      });
       if (error) throw new Error(error.message);
     },
   };

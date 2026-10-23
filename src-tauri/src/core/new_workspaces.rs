@@ -367,7 +367,6 @@ pub fn run(
     }
     let outcome = match step {
       NewWorkspaceStep::AlreadyOpen => local_db::get_workspace_by_branch(repo_path, &branch)
-        .map_err(|e| e.to_string())
         .and_then(|w| w.ok_or_else(|| format!("No workspace for {branch}")))
         .map(|w| w.id),
       NewWorkspaceStep::Open => workspaces::open_or_create_synced(

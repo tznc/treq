@@ -331,6 +331,23 @@ impl RemoteHost for FakeHost {
       TreqCommandRequest::InspectRepository { repo } => {
         Ok(serde_json::to_value(inspection(&repo)).unwrap())
       }
+      TreqCommandRequest::ListDirectories { path } => {
+        let path = if path == "~" {
+          "/home/me".to_string()
+        } else {
+          path
+        };
+        let parent = path
+          .rsplit_once('/')
+          .map(|(p, _)| if p.is_empty() { "/" } else { p });
+        Ok(serde_json::json!({
+          "path": path, "parent": parent, "is_repo": path == "/srv/app" && !self.no_repo,
+          "entries": [
+            {"name": ".cache", "path": format!("{path}/.cache"), "hidden": true, "is_repo": false},
+            {"name": "app", "path": format!("{path}/app"), "hidden": false, "is_repo": true},
+          ],
+        }))
+      }
       _ => Err("unexpected read".into()),
     }
   }
@@ -375,6 +392,16 @@ impl RemoteHost for FakeHost {
     let descriptor = self.last_remote.clone()?;
     let generation = descriptor.endpoint_generation;
     Some((descriptor, endpoint(), generation))
+  }
+
+  fn saved_remote(&self, id: &str) -> Option<(SavedRepository, SshEndpoint, u64)> {
+    self
+      .last_remote()
+      .filter(|(descriptor, ..)| descriptor.id == id)
+  }
+
+  fn machine_endpoint(&self, id: &str) -> Option<(SshEndpoint, u64)> {
+    Some((endpoint(), 0)).filter(|(e, _)| e.id == id)
   }
 
   fn cloud_action(&self, action: CloudAction) {
@@ -672,7 +699,7 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
   host
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let window = Window::open(cx, host, Some("/repo"));
   assert!(window.sidebar_ids().is_empty(), "the first read failed");
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
@@ -685,7 +712,7 @@ fn reads_the_branch_again_when_the_first_read_raced_the_repo_init(cx: &mut TestA
   host
     .no_branch_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let window = Window::open(cx, host, Some("/repo"));
   let repos = window.last().sidebar.unwrap().repos;
   assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
 }
@@ -1099,7 +1126,7 @@ fn opens_a_picked_folder_in_this_window(cx: &mut TestAppContext) {
 #[gpui::test]
 fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  assert!(window.press(cx, "machines.addSsh"));
   assert!(window.screen_snapshot().remote.setup.is_some());
   assert!(window.press(cx, "remote.setup.close"));
   assert!(window.screen_snapshot().remote.setup.is_none());
@@ -1113,7 +1140,7 @@ fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
 #[gpui::test]
 fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  assert!(window.press(cx, "machines.addSsh"));
   window
     .controller
     .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
@@ -1124,7 +1151,7 @@ fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
 /// A window that registered `endpoint()` and opened `/srv/app` on it.
 fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
   let window = Window::open(cx, host, None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
@@ -1134,7 +1161,7 @@ fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
       "auth_identity_reference": "/k",
     }),
   );
-  window.field(cx, "remoteRepo.path", "/srv/app".into());
+  window.field(cx, "remoteRepo.browse", "/srv/app".into());
   window.press(cx, "remoteRepo.open");
   window
 }
@@ -1146,7 +1173,7 @@ fn registers_an_endpoint_and_opens_a_repository_on_it(cx: &mut TestAppContext) {
     vec![workspace(1, "a", Some("main"))],
   ));
   let window = Window::open(cx, host.clone(), None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
@@ -1163,12 +1190,16 @@ fn registers_an_endpoint_and_opens_a_repository_on_it(cx: &mut TestAppContext) {
   };
   let form = route.remote_repo.expect("no repository form");
   assert_eq!(form.saved.len(), 1, "the endpoint's saved repositories");
-  window.field(cx, "remoteRepo.path", "/srv/app".into());
+  assert_eq!(form.path, "/home/me", "browsing starts at the host's home");
+  assert!(!form.show_hidden);
+  assert_eq!(form.listing.map(|l| l.entries.len()), Some(2));
+  window.field(cx, "remoteRepo.browse", "/srv/app".into());
   window.press(cx, "remoteRepo.open");
   let calls = host.calls();
   for call in [
     "register devbox.example",
     "saved ep-1 0",
+    "read ListDirectories",
     "read ProbeRepo",
     "read InspectRepository",
     "save remote /srv/app",
@@ -1209,12 +1240,97 @@ fn a_path_without_a_repository_offers_clone_and_init(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    no_repo: true,
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  window.press(cx, "machines.addSsh");
+  window.field(
+    cx,
+    "remote.registerUserManaged",
+    serde_json::json!({
+      "display_name": "Dev box", "hostname": "devbox.example", "port": 22,
+      "username": "me", "host_key_fingerprint": "SHA256:x",
+      "auth_identity_reference": "/k",
+    }),
+  );
+  let form = |window: &Window| {
+    let View::Onboarding(route) = window.screen_snapshot().view else {
+      panic!("not onboarding");
+    };
+    route.remote_repo.unwrap()
+  };
+  window.press(cx, "remoteRepo.up");
+  assert_eq!(form(&window).path, "/home");
+  window.field(cx, "remoteRepo.showHidden", true.into());
+  assert!(form(&window).show_hidden);
+  window.press(cx, "remoteRepo.useFolder");
+  let probe = form(&window).probe.expect("clone and init offered");
+  assert!(!probe.is_repo && probe.needs_clone);
+  window.field(cx, "remoteRepo.browse", "/home/me".into());
+  assert!(form(&window).probe.is_none(), "a new folder starts over");
+}
+
+#[gpui::test]
+fn the_cloud_row_opens_setup_on_the_cloud_workspace(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  let screen = |window: &Window| {
+    let setup = window.screen_snapshot().remote.setup.expect("setup open");
+    setup.screen
+  };
+  assert!(window.press(cx, "machines.cloud"));
+  assert_eq!(screen(&window).as_deref(), Some("managed"));
+  window.press(cx, "remote.setup.close");
+  assert!(window.press(cx, "machines.addSsh"));
+  assert_eq!(screen(&window).as_deref(), Some("ownVm"));
+  window.press(cx, "remote.setup.close");
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::OpenSsh, cx));
+  cx.run_until_parked();
+  assert_eq!(screen(&window), None, "Open via SSH starts at the choice");
+}
+
+#[gpui::test]
 fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     last_remote: Some(saved("ep-1", 0, "/srv/app")),
     ..FakeHost::default()
   });
   let window = Window::open(cx, host.clone(), None);
+  assert!(host.calls().contains(&"restore /srv/app".to_string()));
+  assert!(window.screen_snapshot().repository.is_some());
+}
+
+#[gpui::test]
+fn a_machine_shows_its_repository_form_or_the_setup(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let window = Window::open(cx, host.clone(), None);
+  assert!(window.press(cx, &format!("machines.connect:{}", endpoint().id)));
+  let View::Onboarding(route) = window.screen_snapshot().view else {
+    panic!("not onboarding");
+  };
+  let form = route.remote_repo.expect("no repository form");
+  assert_eq!(form.endpoint_id, endpoint().id);
+  assert!(window.screen_snapshot().remote.setup.is_none());
+  // A machine that cannot be reached opens the setup dialog instead.
+  assert!(window.press(cx, "machines.connect:gone"));
+  assert!(window.screen_snapshot().remote.setup.is_some());
+}
+
+#[gpui::test]
+fn opens_a_recent_remote_repository_by_its_saved_id(cx: &mut TestAppContext) {
+  let descriptor = saved(&endpoint().id, 0, "/srv/app");
+  let host = Arc::new(FakeHost {
+    last_remote: Some(descriptor.clone()),
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  // Launch restored it; leave it to open it again from the list.
+  host.calls.lock().unwrap().clear();
+  assert!(window.press(cx, &format!("machines.openSaved:{}", descriptor.id)));
   assert!(host.calls().contains(&"restore /srv/app".to_string()));
   assert!(window.screen_snapshot().repository.is_some());
 }

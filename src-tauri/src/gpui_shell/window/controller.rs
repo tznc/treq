@@ -556,14 +556,17 @@ impl WindowController {
         },
         cx,
       ),
-      RemoteEffect::Probe { endpoint, path } => self.background(
-        move |host| remote::probe(host, &endpoint, &path),
-        |this, result, cx| {
-          this.model.remote.probed(result);
-          this.present(cx);
-        },
-        cx,
-      ),
+      RemoteEffect::Browse { endpoint, path } => {
+        let endpoint_id = endpoint.id.clone();
+        self.background(
+          move |host| remote::list_directories(host, &endpoint, &path),
+          move |this, result, cx| {
+            this.model.remote.browsed(&endpoint_id, result);
+            this.present(cx);
+          },
+          cx,
+        )
+      }
       RemoteEffect::Open {
         endpoint,
         generation,
@@ -610,6 +613,36 @@ impl WindowController {
           // A repository opened meanwhile keeps the window.
           if let Some(opened) = opened.filter(|_| !this.model.has_repo()) {
             this.remote_opened(&opened, cx);
+          }
+        },
+        cx,
+      ),
+      RemoteEffect::Connect { endpoint_id } => self.background(
+        move |host| host.machine_endpoint(&endpoint_id),
+        |this, endpoint, cx| {
+          let effects = match endpoint {
+            Some((endpoint, generation)) => this.model.remote.connect(endpoint, generation),
+            None => {
+              this.model.open_remote_setup();
+              Vec::new()
+            }
+          };
+          this.run(effects.into_iter().map(Effect::from).collect(), cx);
+          this.present(cx);
+        },
+        cx,
+      ),
+      RemoteEffect::OpenSaved { id } => self.background(
+        move |host| remote::open_saved(host, &id),
+        |this, result, cx| match result {
+          Ok(opened) => this.remote_opened(&opened, cx),
+          Err(Some(failure)) => {
+            this.model.remote.restore_failed(failure);
+            this.present(cx);
+          }
+          Err(None) => {
+            this.model.open_remote_setup();
+            this.present(cx);
           }
         },
         cx,

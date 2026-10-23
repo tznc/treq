@@ -224,7 +224,10 @@ impl Controls {
   }
 
   /// `ui/slider.tsx`. Each move is a `Field`; the release is a `Commit`.
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub fn slider<V: 'static>(
     &mut self,
     field: &str,

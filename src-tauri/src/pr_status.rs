@@ -255,8 +255,7 @@ impl PrStatusManager {
     self
       .inner
       .cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)
       .cloned()
       .unwrap_or_default()
@@ -267,8 +266,7 @@ impl PrStatusManager {
     self
       .inner
       .ci_cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)
       .cloned()
       .unwrap_or_default()
@@ -280,8 +278,7 @@ impl PrStatusManager {
     self
       .inner
       .cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)?
       .get(branch_name)
       .cloned()
@@ -293,8 +290,7 @@ impl PrStatusManager {
     self
       .inner
       .ci_cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)?
       .get(branch_name)
       .cloned()
@@ -383,7 +379,7 @@ fn background_loop(inner: Arc<Inner>) {
       .wait_timeout_while(guard, wait, |_| {
         !inner.pending_wake.load(Ordering::SeqCst) && !inner.shutdown.load(Ordering::SeqCst)
       })
-      .unwrap();
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
   }
 }
 
@@ -410,8 +406,7 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
         log::warn!("pr-status: fetch failed for {repo_path}#{branch}: {e}");
         if let Some(prev) = inner
           .cache
-          .lock()
-          .unwrap()
+          .lock_or_recover()
           .get(repo_path)
           .and_then(|m| m.get(&branch).cloned())
         {
@@ -445,8 +440,7 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
 fn poll_ci_only(inner: &Inner, repo_path: &str) {
   let pr_cache = inner
     .cache
-    .lock()
-    .unwrap()
+    .lock_or_recover()
     .get(repo_path)
     .cloned()
     .unwrap_or_default();
@@ -482,8 +476,7 @@ fn poll_one_branch(inner: &Inner, repo_path: &str, branch_name: &str) {
       // Keep prior entry on transient failure.
       if let Some(prev) = inner
         .cache
-        .lock()
-        .unwrap()
+        .lock_or_recover()
         .get(repo_path)
         .and_then(|m| m.get(branch_name).cloned())
       {
@@ -530,15 +523,13 @@ fn poll_one_branch(inner: &Inner, repo_path: &str, branch_name: &str) {
 
   let statuses = inner
     .cache
-    .lock()
-    .unwrap()
+    .lock_or_recover()
     .get(repo_path)
     .cloned()
     .unwrap_or_default();
   let ci_statuses = inner
     .ci_cache
-    .lock()
-    .unwrap()
+    .lock_or_recover()
     .get(repo_path)
     .cloned()
     .unwrap_or_default();
@@ -569,8 +560,7 @@ fn fetch_ci_for_branch(
       log::warn!("pr-status: CI fetch failed for {repo_path}#{branch}: {e}");
       if let Some(prev) = inner
         .ci_cache
-        .lock()
-        .unwrap()
+        .lock_or_recover()
         .get(repo_path)
         .and_then(|m| m.get(branch).cloned())
       {

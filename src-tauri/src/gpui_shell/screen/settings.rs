@@ -18,7 +18,10 @@ use tauri_plugin_gpui::gpui::{
 pub(super) mod account;
 
 // The tests read what the tabs draw by these names.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+  not(test),
+  allow(unused_imports, reason = "re-exported for the tests only")
+)]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
   GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport, User,
@@ -763,9 +766,7 @@ impl SettingsView {
           let result = host.set_repo_settings(&path, &values);
           match &result {
             Ok(()) => {
-              host.notify(NativeEvent::RepoSettingsChanged {
-                repo_path: path.clone(),
-              });
+              host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
               host.notify(toast(ToastTone::Success, "Settings saved", ""));
             }
             Err(err) => host.notify(toast(

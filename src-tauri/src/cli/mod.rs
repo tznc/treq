@@ -1,3 +1,9 @@
+#![allow(
+  clippy::print_stdout,
+  clippy::print_stderr,
+  reason = "the CLI writes to the terminal"
+)]
+
 use args::{Matches, SubcommandMatches};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -258,8 +264,8 @@ fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), St
         }
       }
     }
-    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "host-check"
-    | "switch-branch" => handle_remote_review_command("repo", matches, format),
+    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "tools" | "dirs"
+    | "host-check" | "switch-branch" => handle_remote_review_command("repo", matches, format),
     other => Err(format!("unknown repo action '{other}'")),
   }
 }
@@ -336,9 +342,9 @@ fn create_workspace_metadata(
   let Some(raw) = metadata.as_deref() else {
     return Ok(title.map(|title| serde_json::json!({ "title": title }).to_string()));
   };
-  let mut object = match serde_json::from_str::<serde_json::Value>(raw) {
-    Ok(serde_json::Value::Object(object)) => object,
-    _ => return Err("invalid_arguments: --metadata must be a JSON object".to_string()),
+  let Ok(serde_json::Value::Object(mut object)) = serde_json::from_str::<serde_json::Value>(raw)
+  else {
+    return Err("invalid_arguments: --metadata must be a JSON object".to_string());
   };
   let Some(title) = title else {
     return Ok(metadata);
@@ -354,12 +360,13 @@ pub(crate) fn parse_remote_command_request(
   use crate::core::remote::{FileRevision, TreqCommandRequest};
   let action =
     get_arg_value(matches, "action").ok_or_else(|| format!("{command} action is required"))?;
-  let repo = absolute_repo_arg(
-    &get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?,
-  );
+  let raw_repo = get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?;
+  let repo = absolute_repo_arg(&raw_repo);
   // A workspace path means its home repo (no stray local.db in the workspace).
   let repo = match (command, action.as_str()) {
-    ("repo", "init" | "clone" | "usage") => repo,
+    // `~` is the host's home, which only the listing resolves.
+    ("repo", "dirs") => raw_repo,
+    ("repo", "init" | "clone" | "usage" | "tools") => repo,
     _ => crate::jj::derive_repo_path_from_workspace(&repo).unwrap_or(repo),
   };
   let workspace = get_arg_value(matches, "workspace");
@@ -400,6 +407,8 @@ pub(crate) fn parse_remote_command_request(
     ("repo", "branches") => Ok(TreqCommandRequest::ListBranches { repo }),
     ("repo", "probe") => Ok(TreqCommandRequest::ProbeRepo { repo }),
     ("repo", "usage") => Ok(TreqCommandRequest::MachineUsage { root: repo }),
+    ("repo", "tools") => Ok(TreqCommandRequest::MachineTools { root: repo }),
+    ("repo", "dirs") => Ok(TreqCommandRequest::ListDirectories { path: repo }),
     ("repo", "host-check") => Ok(TreqCommandRequest::HostCheck { root: repo }),
     ("repo", "switch-branch") => Ok(TreqCommandRequest::SwitchRepoBranch {
       repo,
@@ -735,6 +744,8 @@ pub(super) fn fd_has_input(fd: std::os::unix::io::RawFd, timeout: Duration) -> b
     revents: 0,
   };
   let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+  // SAFETY: `poll_fd` is a live, initialised `pollfd` and the count is 1, so
+  // `poll` reads and writes only that one struct.
   let ready = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
   ready > 0 && poll_fd.revents & (libc::POLLIN | libc::POLLHUP) != 0
 }

@@ -804,9 +804,8 @@ fn change_move() -> ScreenSnapshot {
 
 #[test]
 fn the_move_confirmation_counts_the_files() {
-  let route = match change_move().modal {
-    Some(workspace_modal::ModalRoute::ConfirmChangeMove(route)) => route,
-    _ => unreachable!(),
+  let Some(workspace_modal::ModalRoute::ConfirmChangeMove(route)) = change_move().modal else {
+    unreachable!()
   };
   assert_eq!(route.title(), "Move 2 files to signup?");
   assert_eq!(

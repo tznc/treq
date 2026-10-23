@@ -397,10 +397,7 @@ mod tests {
     // Stands in for another Treq process that is mid-run on the same DB.
     let claim = FileLock::lock(claim_path(&db)).unwrap();
 
-    let waiting = std::thread::spawn({
-      let db = db.clone();
-      move || run_if_needed(&db, Trigger::Manual)
-    });
+    let waiting = std::thread::spawn(move || run_if_needed(&db, Trigger::Manual));
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(run_count(&dir), 0);
 

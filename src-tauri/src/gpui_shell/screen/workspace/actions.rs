@@ -502,7 +502,7 @@ impl WorkspaceView {
           }
           Err(err) => (
             "Queue error".to_string(),
-            err.message.clone(),
+            err.message,
             ToastTone::Error,
             None,
           ),

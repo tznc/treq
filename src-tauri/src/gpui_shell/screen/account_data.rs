@@ -120,18 +120,18 @@ impl AccountHost for Backend {
 
   fn exchange_token(&self, token: &str) -> Result<(), String> {
     let cloud = self.cloud()?;
-    tauri::async_runtime::block_on(cloud.exchange_token(token))
+    crate::gpui_shell::block_on(cloud.exchange_token(token))
   }
 
   fn github_repositories(&self) -> Result<Vec<GithubRepository>, String> {
     let cloud = self.cloud()?;
-    tauri::async_runtime::block_on(account::github_repositories(&cloud.supabase))
+    crate::gpui_shell::block_on(account::github_repositories(&cloud.supabase))
       .map_err(|e| e.to_string())
   }
 
   fn linear_oauth_url(&self) -> Result<String, ApiError> {
     let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
-    tauri::async_runtime::block_on(account::linear_oauth_url(&cloud.supabase))
+    crate::gpui_shell::block_on(account::linear_oauth_url(&cloud.supabase))
   }
 
   fn cloud_action(&self, action: CloudAction) {

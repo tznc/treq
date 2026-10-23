@@ -492,7 +492,7 @@ mod tests {
   ) -> core::WorkspaceStatus {
     core::WorkspaceStatus {
       partial: core::WorkspacePartialStatus {
-        current: current.clone(),
+        current,
         has_conflicts,
         has_changes: false,
         commits_ahead: commit_count,
@@ -532,7 +532,7 @@ mod tests {
   #[test]
   fn focused_status_omits_diff_hint_when_clean() {
     let current = workspace(1, "feat/api", "API", None, Some("feat/core"));
-    let status = focused_status(current.clone(), false, vec![], 1);
+    let status = focused_status(current, false, vec![], 1);
     let lines = format_focused_workspace_status(&status, &[], 0, "main", None);
     assert!(lines.contains(&"  Conflicts: none".to_string()));
     assert!(!lines.iter().any(|line| line.contains("treq diff")));

@@ -105,22 +105,22 @@ impl Backend {
 impl LinearHost for Backend {
   fn linear_teams(&self, repo_path: &str) -> Result<Vec<LinearTeam>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_teams_impl(&client))
+    crate::gpui_shell::block_on(crate::linear::linear_list_teams_impl(&client))
   }
 
   fn linear_issues(&self, repo_path: &str, team: Option<&str>) -> Result<Vec<LinearIssue>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_issues_impl(&client, team))
+    crate::gpui_shell::block_on(crate::linear::linear_list_issues_impl(&client, team))
   }
 
   fn linear_viewer(&self, repo_path: &str) -> Result<LinearUser, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_get_viewer_impl(&client))
+    crate::gpui_shell::block_on(crate::linear::linear_get_viewer_impl(&client))
   }
 
   fn linear_projects(&self, repo_path: &str) -> Result<Vec<LinearProject>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_projects_impl(&client))
+    crate::gpui_shell::block_on(crate::linear::linear_list_projects_impl(&client))
   }
 
   fn linear_documents(
@@ -129,14 +129,14 @@ impl LinearHost for Backend {
     project_id: &str,
   ) -> Result<Vec<LinearDocument>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_project_documents_impl(
+    crate::gpui_shell::block_on(crate::linear::linear_list_project_documents_impl(
       &client, project_id,
     ))
   }
 
   fn linear_comments(&self, repo_path: &str, of: &Commented) -> Result<Vec<LinearComment>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(async {
+    crate::gpui_shell::block_on(async {
       match of {
         Commented::Issue(id) => crate::linear::linear_list_issue_comments_impl(&client, id).await,
         Commented::Project(id) => {
@@ -169,7 +169,7 @@ impl LinearHost for Backend {
 
   fn linear_apply_suggestion(&self, repo_path: &str, comment_id: &str) -> Result<(), String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_apply_review_suggestion_impl(
+    crate::gpui_shell::block_on(crate::linear::linear_apply_review_suggestion_impl(
       &client, repo_path, comment_id,
     ))
   }

@@ -554,7 +554,10 @@ pub fn open_or_create_workspace_from_pr(
   }
 
   // Ensure remote bookmarks (including the PR head) are imported before create.
-  let _ = jj::jj_git_fetch(repo_path);
+  // Best effort: offline, the workspace still opens on the local bookmarks.
+  if let Err(error) = jj::jj_git_fetch(repo_path) {
+    tracing::warn!(%error, repo_path, "fetch before opening a workspace failed; using local bookmarks");
+  }
   open_or_create_synced(repo_path, &request)
 }
 
@@ -590,7 +593,9 @@ pub fn open_or_create_workspaces(
   if let Err(err) = sync_workspaces(repo_path) {
     return requests.iter().map(|_| Err(err.clone())).collect();
   }
-  let _ = jj::jj_git_fetch(repo_path);
+  if let Err(error) = jj::jj_git_fetch(repo_path) {
+    tracing::warn!(%error, repo_path, "fetch before opening workspaces failed; using local bookmarks");
+  }
   requests
     .iter()
     .map(|request| {
@@ -747,7 +752,10 @@ pub fn validate_branch_name(name: &str) -> Result<(), String> {
 /// `symlinked_dirs` are paths relative to the repo root (e.g. `node_modules`). Each
 /// existing path is linked into the new workspace instead of being copied, so large
 /// dependency trees are shared with the home working copy.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn create_workspace_with_symlinked_dirs(
   repo_path: &str,
   branch_name: &str,
@@ -914,7 +922,7 @@ pub fn create_workspace_with_symlinked_dirs(
     let workspace_id = local_db::add_workspace(
       repo_path,
       workspace_path.clone(),
-      workspace_path.clone(),
+      workspace_path,
       branch_name.to_string(),
       description,
       moved_files.clone(),
@@ -933,14 +941,11 @@ pub fn create_workspace_with_symlinked_dirs(
 
     let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
       .map_err(|e| format!("Failed to get workspace from db: {}", e))?;
-    let workspace = match workspace {
-      Some(workspace) => workspace,
-      _ => {
-        return Err(format!(
-          "Workspace not found in database after creation: {}",
-          workspace_id
-        ))
-      }
+    let Some(workspace) = workspace else {
+      return Err(format!(
+        "Workspace not found in database after creation: {}",
+        workspace_id
+      ));
     };
 
     // If moved_files are specified, perform the squash operation
@@ -990,12 +995,19 @@ pub fn create_workspace_with_symlinked_dirs(
           .join(&workspace.workspace_path)
           .to_string_lossy()
           .to_string();
-        let _ = jj::update_stale_workspace(&new_workspace_path);
-        let _ = jj::update_stale_workspace(&source_workspace_path);
+        for path in [&new_workspace_path, &source_workspace_path] {
+          if let Err(error) = jj::update_stale_workspace(path) {
+            tracing::warn!(%error, workspace_path = %path, "could not update a stale working copy");
+          }
+        }
       }
     }
 
-    let _ = crate::core::submodules::populate_synced_submodules(repo_path, Some(workspace.id));
+    if let Err(error) =
+      crate::core::submodules::populate_synced_submodules(repo_path, Some(workspace.id))
+    {
+      tracing::warn!(%error, repo_path, workspace_id = workspace.id, "could not populate synced submodules");
+    }
 
     Ok(workspace)
   })();
@@ -1143,7 +1155,10 @@ fn forget_workspace_record(
         .join(".treq")
         .join("workspaces")
         .join(&workspace.workspace_path);
-      let workspace_path_str = workspace_path.to_str().unwrap().to_string();
+      let workspace_path_str = workspace_path
+        .to_str()
+        .ok_or_else(|| "Workspace path is not valid UTF-8".to_string())?
+        .to_string();
 
       // Splice direct children onto this workspace's own target so a stack
       // stays connected when a middle workspace goes away. Children keep
@@ -1560,57 +1575,54 @@ pub fn workspace_status(
   };
 
   // Home repo case: no workspace, build a minimal status
-  let workspace_id = match workspace_id {
-    Some(id) => id,
-    None => {
-      let rs = repo_status(repo_path)?;
-      if let Some(err) = &rs.fetch_error {
-        log::warn!("Home repo fetch: {}", err);
-      }
-      let default_branch = resolve_status_default_branch();
-      let home_branch = jj::resolve_home_repo_branch(repo_path)
-        .ok()
-        .filter(|branch| !branch.is_empty() && branch != "HEAD")
-        .unwrap_or_else(|| default_branch.clone());
-
-      // Synthesize a Workspace-like entry for the home repo
-      let home_workspace = local_db::Workspace {
-        id: 0,
-        repo_path: repo_path.to_string(),
-        workspace_name: "home".to_string(),
-        workspace_path: repo_path.to_string(),
-        branch_name: home_branch.clone(),
-        created_at: String::new(),
-        refreshed_at: None,
-        metadata: None,
-        target_branch: None,
-        title: home_branch.clone(),
-        description: None,
-        moved_files: None,
-        not_on_remote: matches!(rs.remote_sync, RemoteSyncStatus::NotOnRemote),
-        sparse_patterns: None,
-        archived: false,
-      };
-
-      let conflicted_files =
-        jj::get_conflicted_files(repo_path, Some(&home_branch)).unwrap_or_default();
-
-      return Ok(WorkspaceStatus {
-        partial: WorkspacePartialStatus {
-          current: home_workspace,
-          has_conflicts: rs.has_conflicts || !conflicted_files.is_empty(),
-          has_changes: rs.has_changes,
-          commits_ahead: 0,
-        },
-        conflicted_files,
-        remote_sync: rs.remote_sync,
-        target: None,
-        children: Vec::new(),
-        dag_nodes: Vec::new(),
-        conflicted_workspace_ids: Vec::new(),
-        commits_ahead_of_target: Vec::new(),
-      });
+  let Some(workspace_id) = workspace_id else {
+    let rs = repo_status(repo_path)?;
+    if let Some(err) = &rs.fetch_error {
+      log::warn!("Home repo fetch: {}", err);
     }
+    let default_branch = resolve_status_default_branch();
+    let home_branch = jj::resolve_home_repo_branch(repo_path)
+      .ok()
+      .filter(|branch| !branch.is_empty() && branch != "HEAD")
+      .unwrap_or_else(|| default_branch.clone());
+
+    // Synthesize a Workspace-like entry for the home repo
+    let home_workspace = local_db::Workspace {
+      id: 0,
+      repo_path: repo_path.to_string(),
+      workspace_name: "home".to_string(),
+      workspace_path: repo_path.to_string(),
+      branch_name: home_branch.clone(),
+      created_at: String::new(),
+      refreshed_at: None,
+      metadata: None,
+      target_branch: None,
+      title: home_branch.clone(),
+      description: None,
+      moved_files: None,
+      not_on_remote: matches!(rs.remote_sync, RemoteSyncStatus::NotOnRemote),
+      sparse_patterns: None,
+      archived: false,
+    };
+
+    let conflicted_files =
+      jj::get_conflicted_files(repo_path, Some(&home_branch)).unwrap_or_default();
+
+    return Ok(WorkspaceStatus {
+      partial: WorkspacePartialStatus {
+        current: home_workspace,
+        has_conflicts: rs.has_conflicts || !conflicted_files.is_empty(),
+        has_changes: rs.has_changes,
+        commits_ahead: 0,
+      },
+      conflicted_files,
+      remote_sync: rs.remote_sync,
+      target: None,
+      children: Vec::new(),
+      dag_nodes: Vec::new(),
+      conflicted_workspace_ids: Vec::new(),
+      commits_ahead_of_target: Vec::new(),
+    });
   };
 
   // Workspace case: look up from DB
@@ -2533,7 +2545,7 @@ mod tests {
     let child = test_workspace(3, "feat/child", Some("feat/parent"));
 
     let steps = plan_workspace_target_move(
-      &[parent.clone(), other, child.clone()],
+      &[parent, other, child.clone()],
       "feat/child",
       "feat/other",
       "main",
@@ -3031,11 +3043,10 @@ fn sync_home_and_workspace_for_branch(
     return Ok(());
   }
 
-  let workspace = match local_db::get_workspace_by_branch(repo_path, branch)
+  let Some(workspace) = local_db::get_workspace_by_branch(repo_path, branch)
     .map_err(|e| format!("Failed to get workspace by branch: {}", e))?
-  {
-    Some(workspace) => workspace,
-    None => return Ok(()),
+  else {
+    return Ok(());
   };
   let workspace_path = Path::new(repo_path)
     .join(".treq")
@@ -3760,22 +3771,19 @@ pub fn pull_workspace_from_remote(
   conflict_marker_style: &str,
 ) -> Result<PullWorkspaceResult, String> {
   // When workspace_id is None, do a simple pull for the home repo
-  let workspace_id = match workspace_id {
-    Some(id) => id,
-    None => {
-      // For home repo, just fetch — do not rebase, which would detach HEAD
-      jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
-      let home_branch = jj::resolve_home_repo_branch(repo_path)
-        .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-      sync_home_and_workspace_for_branch(repo_path, &home_branch, SyncSource::HomeToWorkspace)?;
-      return Ok(PullWorkspaceResult {
-        success: true,
-        message: "Fetched home repo".to_string(),
-        was_diverged: false,
-        commits_rebased: 0,
-        has_conflicts: false,
-      });
-    }
+  let Some(workspace_id) = workspace_id else {
+    // For home repo, just fetch — do not rebase, which would detach HEAD
+    jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
+    let home_branch = jj::resolve_home_repo_branch(repo_path)
+      .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
+    sync_home_and_workspace_for_branch(repo_path, &home_branch, SyncSource::HomeToWorkspace)?;
+    return Ok(PullWorkspaceResult {
+      success: true,
+      message: "Fetched home repo".to_string(),
+      was_diverged: false,
+      commits_rebased: 0,
+      has_conflicts: false,
+    });
   };
 
   // Look up workspace from DB

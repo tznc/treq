@@ -735,7 +735,7 @@ mod tests {
     let catalog = SkillCatalog {
       generated_at: None,
       sources: vec![],
-      skills: vec![entry.clone()],
+      skills: vec![entry],
     };
     let view = merge_catalog_with_installed(catalog, None).unwrap();
     assert_eq!(view.skills[0].installed.as_ref().unwrap().id, "test/demo");

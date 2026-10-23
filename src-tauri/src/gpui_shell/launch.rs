@@ -110,7 +110,7 @@ impl LaunchStore for Store<'_> {
           )?;
           crate::linear::resolve_linear_client(repo, db)
         })?;
-        let result = tauri::async_runtime::block_on(async {
+        let result = crate::gpui_shell::block_on(async {
           let issue = crate::linear::linear_get_issue_impl(&client, id).await?;
           crate::commands::linear::open_or_create_workspace_from_linear_issue(repo, &issue).await
         })?;

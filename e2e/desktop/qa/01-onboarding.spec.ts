@@ -69,15 +69,15 @@ test.afterAll(async () => {
 });
 
 test("onboarding: first run and open repository", async () => {
-  const open = page.getByRole("button", { name: "Open Repository" });
+  const open = page.getByRole("button", { name: "Open repository…" });
   await expect(open).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(1500);
   await capture(page, {
     name: "01-onboarding-first-run",
     title: "Onboarding: first run, no repository",
     expectations: [
-      "'Open a Repository' heading and helper text are centred and unclipped",
-      "Open Repository button is the primary action, aligned with the text",
+      "'Overview' heading and helper text are centred and unclipped",
+      "Open repository… is the primary action, aligned with the text",
       "Background and text colours match the theme",
     ],
   });
@@ -111,45 +111,23 @@ test("onboarding: first run and open repository", async () => {
     ],
   });
 
-  await page.getByRole("button", { name: "Open via SSH" }).click();
+  // Signed out, Treq Cloud is a sign-in button, not a machine group.
+  await expect(page.getByRole("button", { name: "Sign in to Treq Cloud" })).toBeVisible();
+  // The + next to SSH Hosts opens the own-VM form directly.
+  await page.getByRole("button", { name: "Add SSH host" }).click();
   await page.waitForTimeout(1500);
   await capture(page, {
-    name: "01-onboarding-open-via-ssh",
-    title: "Onboarding: Open via SSH (remote repository) dialog",
+    name: "01-onboarding-ssh-own-vm",
+    title: "Overview: Add SSH host (your own VM) form",
     screen: true,
     expectations: [
-      "Connect-a-remote-repository chooser: two choice cards, and an X close button at the top right",
+      "The own-VM form opens directly; Cancel and Continue at the bottom and no X, as it has an action pair",
       "Field labels and placeholders readable in this theme",
       "No network is needed to show the form; no stuck spinner",
     ],
   });
-  // The dialog's two choice cards are not observable elements, so they are
-  // clicked at their place in the 1400x900 window (centred dialog).
-  for (const [x, name, title] of [
-    [834, "01-onboarding-ssh-own-vm", "Remote: your own VM (SSH) form"],
-    [565, "01-onboarding-ssh-managed", "Remote: Treq-managed cloud workspace"],
-  ] as const) {
-    await page.mouse.click(x, 478);
-    await page.waitForTimeout(2000);
-    await capture(page, {
-      name,
-      title,
-      screen: true,
-      rest: false,
-      expectations: [
-        "Form fields, labels and buttons are aligned and unclipped",
-        "Without a network or sign-in it shows a clear state, not a spinner",
-        "A Back/Cancel affordance is visible",
-      ],
-    });
-    if (process.env.QA_DEBUG) console.log(await page.ariaSnapshot());
-    const back = page.getByRole("button", { name: "Back" });
-    if ((await back.count()) > 0) await back.click();
-    await page.waitForTimeout(1000);
-  }
-  // The chooser closes with its X button or Escape, as every other
-  // dialog does.
-  const close = page.getByRole("button", { name: "Close" });
+  // The dialog closes with Cancel or Escape, as every other dialog does.
+  const close = page.getByRole("button", { name: "Cancel" });
   await expect(close).toBeVisible();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(1000);
@@ -160,12 +138,12 @@ test("onboarding: first run and open repository", async () => {
     screen: true,
     expectations: ["The remote dialog is closed and the onboarding card shows"],
   });
-  await page.getByRole("button", { name: "Open via SSH" }).click();
+  await page.getByRole("button", { name: "Add SSH host" }).click();
   await page.waitForTimeout(1000);
   await close.click();
   await page.waitForTimeout(1000);
   await expect(close).toHaveCount(0);
-  await page.getByRole("button", { name: "Open via SSH" }).click();
+  await page.getByRole("button", { name: "Add SSH host" }).click();
   await page.waitForTimeout(1000);
   await page.mouse.click(80, 80);
   await page.waitForTimeout(1000);

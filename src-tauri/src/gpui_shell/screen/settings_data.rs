@@ -108,8 +108,7 @@ impl SettingsHost for Backend {
   }
 
   fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String> {
-    let view =
-      tauri::async_runtime::block_on(crate::commands::skills::catalog_view(repo_path, None))?;
+    let view = crate::gpui_shell::block_on(crate::commands::skills::catalog_view(repo_path, None))?;
     Ok(view.skills)
   }
 
@@ -123,7 +122,7 @@ impl SettingsHost for Backend {
     scope: SkillInstallScope,
     repo_path: Option<&str>,
   ) -> Result<(), String> {
-    tauri::async_runtime::block_on(crate::commands::skills::download_and_install(
+    crate::gpui_shell::block_on(crate::commands::skills::download_and_install(
       skill_id, scope, repo_path, None,
     ))?;
     self.with_db(skills::persist_app_index_setting)
@@ -145,7 +144,7 @@ impl SettingsHost for Backend {
   }
 
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
-    tauri::async_runtime::block_on(async {
+    crate::gpui_shell::block_on(async {
       let response = reqwest::get(url)
         .await
         .and_then(reqwest::Response::error_for_status)

@@ -100,6 +100,13 @@ only recorded in test builds.
    that is already running, `TREQ_E2E_BIN` picks
    another binary and `TREQ_E2E_PORT` another server port, so two runs can
    share a machine on different displays and ports.
+   - Remote SSH (`qa/18-ssh-remote.spec.ts`) needs a real host and is
+     skipped without one: build the headless CLI
+     (`cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --bin treq --target-dir target/cli`),
+     run `e2e/desktop/qa/ssh-server/up.sh` (Docker sshd with treq, jj, git,
+     tmux and a fake `claude`), export what it prints and run
+     `npm run qa -- --grep ssh`. Rebuild the CLI and rerun `up.sh` after a
+     change to `core/remote*.rs`: the host side runs that binary.
 5. **Verify every capture against its expectations.** Read each
    `<name>.json`, then open `<name>.png` with the Read tool and confirm or
    refute each claim. A spec whose assertions passed can still render a broken

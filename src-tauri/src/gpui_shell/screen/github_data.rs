@@ -163,7 +163,10 @@ pub trait GithubHost: WorkspaceHost {
   /// Adds (`on`) or removes the user's `content` reaction on a comment.
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String>;
-  #[allow(clippy::too_many_arguments)]
+  #[allow(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn create_pr(
     &self,
     repo: &str,

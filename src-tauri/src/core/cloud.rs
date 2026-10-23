@@ -1125,14 +1125,13 @@ mod tests {
     .await;
     trust_mocks(&server, None).await;
     cloud.provision().await;
-    let stages: Vec<_> = fake
+    assert!(fake
       .snapshots
       .lock()
       .unwrap()
       .iter()
       .filter_map(|s| s.cloud.provisioning_stage.clone())
-      .collect();
-    assert!(stages.contains(&"Waiting for the cloud workspace (provisioning)...".to_string()));
+      .any(|x| x == "Waiting for the cloud workspace (provisioning)..."));
     assert_eq!(connected(&fake), [(4, true)]);
     let ensured = bodies(&server, "ensure").await;
     assert!(ensured[0]["idempotency_key"]

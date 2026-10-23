@@ -45,9 +45,8 @@ pub fn list_submodules(
   if !gitmodules.is_file() {
     return Ok(Vec::new());
   }
-  let contents = match fs::read_to_string(&gitmodules) {
-    Ok(text) => text,
-    Err(_) => return Ok(Vec::new()),
+  let Ok(contents) = fs::read_to_string(&gitmodules) else {
+    return Ok(Vec::new());
   };
   let declared = parse_gitmodules(&contents);
   if declared.is_empty() {

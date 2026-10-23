@@ -60,21 +60,18 @@ fn get_arg_values(matches: &Matches, name: &str) -> Vec<String> {
       .map(|value| value.to_string())
       .filter(|value| !value.is_empty())
       .collect(),
-    serde_json::Value::String(value) if !value.is_empty() => vec![value.to_string()],
+    serde_json::Value::String(value) if !value.is_empty() => vec![value.clone()],
     _ => Vec::new(),
   }
 }
 
 pub(super) fn handle_workspace_add(matches: &Matches) -> bool {
-  let branch_name = match get_arg_value(matches, "branch_name") {
-    Some(name) => name,
-    None => {
-      super::log_cli_error("Error: branch name is required");
-      eprintln!(
+  let Some(branch_name) = get_arg_value(matches, "branch_name") else {
+    super::log_cli_error("Error: branch name is required");
+    eprintln!(
                 "Usage: treq add <branch_name> [-d description] [-l title] [-s source_branch] [-p sparse_path]... [-k symlink_path]..."
             );
-      return false;
-    }
+    return false;
   };
 
   let description = get_arg_value(matches, "description");
@@ -433,25 +430,19 @@ pub(super) fn handle_workspace_diff(matches: &Matches) -> bool {
 }
 
 pub(super) fn handle_workspace_move(matches: &Matches) -> bool {
-  let source = match get_arg_value(matches, "source") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: source workspace is required");
-      eprintln!(
+  let Some(source) = get_arg_value(matches, "source") else {
+    super::log_cli_error("Error: source workspace is required");
+    eprintln!(
                 "Usage: treq mv <source> <destination> -f [FILES...] -r [RANGES...] -c [COMMITS...]  (use '.' for the home repo)"
             );
-      return false;
-    }
+    return false;
   };
-  let destination = match get_arg_value(matches, "destination") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: destination workspace is required");
-      eprintln!(
+  let Some(destination) = get_arg_value(matches, "destination") else {
+    super::log_cli_error("Error: destination workspace is required");
+    eprintln!(
                 "Usage: treq mv <source> <destination> -f [FILES...] -r [RANGES...] -c [COMMITS...]  (use '.' for the home repo)"
             );
-      return false;
-    }
+    return false;
   };
 
   let files = get_arg_values(matches, "files");
@@ -511,22 +502,16 @@ pub(super) fn handle_workspace_move(matches: &Matches) -> bool {
 }
 
 pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
-  let branch = match get_arg_value(matches, "branch") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: branch is required");
-      eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
-      return false;
-    }
+  let Some(branch) = get_arg_value(matches, "branch") else {
+    super::log_cli_error("Error: branch is required");
+    eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
+    return false;
   };
 
-  let prompt = match get_arg_value(matches, "prompt") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: prompt is required");
-      eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
-      return false;
-    }
+  let Some(prompt) = get_arg_value(matches, "prompt") else {
+    super::log_cli_error("Error: prompt is required");
+    eprintln!("Usage: treq agent <branch> <prompt> [-m <edit|plan>]");
+    return false;
   };
 
   if branch == "." {
@@ -593,22 +578,16 @@ pub(super) fn handle_workspace_agent(matches: &Matches) -> bool {
 }
 
 pub(super) fn handle_workspace_commit(matches: &Matches) -> bool {
-  let workspace_name = match get_arg_value(matches, "workspace_name") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: workspace name is required");
-      eprintln!("Usage: treq commit <workspace_name> -m <message> [--push]");
-      return false;
-    }
+  let Some(workspace_name) = get_arg_value(matches, "workspace_name") else {
+    super::log_cli_error("Error: workspace name is required");
+    eprintln!("Usage: treq commit <workspace_name> -m <message> [--push]");
+    return false;
   };
 
-  let message = match get_arg_value(matches, "message") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: commit message is required (-m)");
-      eprintln!("Usage: treq commit <workspace_name> -m <message> [--push]");
-      return false;
-    }
+  let Some(message) = get_arg_value(matches, "message") else {
+    super::log_cli_error("Error: commit message is required (-m)");
+    eprintln!("Usage: treq commit <workspace_name> -m <message> [--push]");
+    return false;
   };
 
   let push = get_arg_flag(matches, "push");
@@ -684,13 +663,10 @@ pub(super) fn handle_resolve(matches: &Matches) -> bool {
   use std::collections::HashMap;
   use std::io::Read;
 
-  let commit_id = match get_arg_value(matches, "commit_id") {
-    Some(value) => value,
-    None => {
-      super::log_cli_error("Error: commit id is required");
-      eprintln!("Usage: treq resolve <commit_id> [sides...]");
-      return false;
-    }
+  let Some(commit_id) = get_arg_value(matches, "commit_id") else {
+    super::log_cli_error("Error: commit id is required");
+    eprintln!("Usage: treq resolve <commit_id> [sides...]");
+    return false;
   };
 
   let side_tokens = get_arg_values(matches, "sides");

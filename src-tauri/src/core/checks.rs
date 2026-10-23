@@ -133,17 +133,15 @@ pub fn list_workflows_sync(repo_path: &str) -> Result<Vec<WorkflowInfo>, String>
     let filename = entry.file_name().to_string_lossy().to_string();
 
     // Verify each file stays within the workflows directory.
-    let canonical_file = match entry.path().canonicalize() {
-      Ok(p) => p,
-      Err(_) => continue,
+    let Ok(canonical_file) = entry.path().canonicalize() else {
+      continue;
     };
     if !canonical_file.starts_with(&canonical_dir) {
       continue;
     }
 
-    let content = match std::fs::read_to_string(entry.path()) {
-      Ok(c) => c,
-      Err(_) => continue,
+    let Ok(content) = std::fs::read_to_string(entry.path()) else {
+      continue;
     };
 
     let wf: WorkflowFile = match serde_yaml::from_str(&content) {

@@ -39,6 +39,7 @@ impl Model {
   /// opens.
   pub fn open_remote_setup(&mut self) {
     self.remote.setup = true;
+    self.remote.setup_screen = None;
   }
 
   /// `invalidateRemoteRepositoryData` and `refreshRemoteRepository`.
@@ -93,6 +94,28 @@ impl Model {
       "remote.cloud.delete" => cloud(CloudAction::Delete),
       "remote.cloud.openRepositories" => cloud(CloudAction::OpenRepositories),
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
+      // The Overview screen's machines and recent repositories.
+      // The cloud row before its workspace runs: the setup dialog, on the
+      // cloud workspace's screen.
+      "machines.cloud" => {
+        self.remote.setup = true;
+        self.remote.setup_screen = Some("managed");
+        Vec::new()
+      }
+      // The SSH Hosts section's +: the "Your own VM" form.
+      "machines.addSsh" => {
+        self.remote.setup = true;
+        self.remote.setup_screen = Some("ownVm");
+        Vec::new()
+      }
+      id if id.starts_with("machines.connect:") => {
+        let endpoint_id = id["machines.connect:".len()..].to_string();
+        vec![Effect::from(RemoteEffect::Connect { endpoint_id })]
+      }
+      id if id.starts_with("machines.openSaved:") => {
+        let id = id["machines.openSaved:".len()..].to_string();
+        vec![Effect::from(RemoteEffect::OpenSaved { id })]
+      }
       _ => return None,
     };
     Some(effects)

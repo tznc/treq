@@ -559,6 +559,19 @@ fn popup_sink(app: AppHandle, label: String) -> popup::PopupSink {
 
 type Deferred = Box<dyn FnOnce(&AppHandle) + Send>;
 
+/// Runs `future` to completion on the calling thread, for host methods
+/// that call async backend code. Hosts run on GPUI's background executor;
+/// on the main thread this would freeze the window until the future (often a
+/// network call) finished, so debug builds refuse it. Use this, not
+/// `tauri::async_runtime::block_on`, in `gpui_shell`.
+pub(crate) fn block_on<F: std::future::Future>(future: F) -> F::Output {
+  debug_assert!(
+    std::thread::current().name() != Some("main"),
+    "gpui_shell::block_on called on the main thread; call the host from a background task"
+  );
+  tauri::async_runtime::block_on(future)
+}
+
 /// Calls waiting for the main thread, in the order they were deferred.
 static DEFERRED: Mutex<VecDeque<Deferred>> = Mutex::new(VecDeque::new());
 
@@ -728,4 +741,23 @@ pub fn forget_window(label: &str) {
       }
     }
   });
+}
+
+#[cfg(test)]
+mod block_on_tests {
+  #[test]
+  fn block_on_runs_off_the_main_thread() {
+    assert_eq!(super::block_on(async { 7 }), 7);
+  }
+
+  #[cfg(debug_assertions)]
+  #[test]
+  fn block_on_refuses_the_main_thread() {
+    let on_main = std::thread::Builder::new()
+      .name("main".into())
+      .spawn(|| super::block_on(async { 7 }))
+      .expect("spawn")
+      .join();
+    assert!(on_main.is_err());
+  }
 }

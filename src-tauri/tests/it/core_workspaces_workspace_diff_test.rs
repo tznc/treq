@@ -270,12 +270,11 @@ fn test_workspace_diff_includes_uncommitted_changes_and_conflicts() {
   assert!(committed_paths.contains(&"committed.txt"));
   assert!(!committed_paths.contains(&"uncommitted.txt"));
 
-  let uncommitted_paths: Vec<_> = diff
+  assert!(diff
     .uncommitted_files
     .iter()
     .map(|f| f.path.as_str())
-    .collect();
-  assert!(uncommitted_paths.contains(&"uncommitted.txt"));
+    .any(|x| x == "uncommitted.txt"));
   assert!(diff.conflicted_files.is_empty());
 }
 
