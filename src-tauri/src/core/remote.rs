@@ -3046,12 +3046,24 @@ fn init_repo_path(repo_path: &str) -> Result<RepositoryInspection, String> {
     return Err("Remote path is required".to_string());
   }
   let path = Path::new(trimmed);
-  enforce_disk_quota(path)?;
-  fs::create_dir_all(path)
-    .map_err(|e| format!("filesystem_error: Failed to create {trimmed}: {e}"))?;
   if !path.join(".jj").is_dir() && !path.join(".git").exists() {
+    enforce_disk_quota(path)?;
+    fs::create_dir_all(path)
+      .map_err(|e| format!("filesystem_error: Failed to create {trimmed}: {e}"))?;
     jj::jj_git_init_colocated(trimmed)
       .map_err(|e| format!("jj_command_failed: Failed to initialize repository: {e}"))?;
+  }
+  if !path.join(".jj").is_dir() {
+    // A plain Git repository: colocate jj with it, as opening one locally does.
+    match crate::core::init(trimmed) {
+      Ok(true) => {}
+      Ok(false) => {
+        return Err(format!(
+          "jj_command_failed: Failed to initialize jj in {trimmed}"
+        ))
+      }
+      Err(e) => return Err(format!("jj_command_failed: {e}")),
+    }
   }
   inspect_repository_path(trimmed)
 }
@@ -4009,6 +4021,35 @@ mod tests {
       inspection["repository_type"], "jj_colocated",
       "{inspection}"
     );
+  }
+
+  #[test]
+  fn init_repo_colocates_jj_with_a_plain_git_repository() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_path = repo_dir.path().to_str().unwrap().to_string();
+    let git = |args: &[&str]| {
+      let status = std::process::Command::new("git")
+        .args(["-c", "user.name=T", "-c", "user.email=t@example.com"])
+        .args(args)
+        .current_dir(&repo_path)
+        .status()
+        .unwrap();
+      assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.path().join("README.md"), "# r\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "Initial commit"]);
+    let inspection = execute_local_request(TreqCommandRequest::InitRepo {
+      repo: repo_path.clone(),
+      idempotency_key: "init-git".into(),
+    })
+    .unwrap();
+    assert_eq!(
+      inspection["repository_type"], "jj_colocated",
+      "{inspection}"
+    );
+    assert_eq!(inspection["default_branch"], "main", "{inspection}");
   }
 
   #[test]
