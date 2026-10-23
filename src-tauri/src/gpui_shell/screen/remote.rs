@@ -76,6 +76,8 @@ impl Route {
 pub struct SetupRoute {
   /// Whether the "Your own VM" path is offered (the `remoteSsh` preview).
   pub allow_user_managed: bool,
+  /// Open on the cloud workspace's screen (the machines page's cloud row).
+  pub managed: bool,
   /// The window is registering the endpoint the form confirmed.
   pub registering: bool,
 }
@@ -377,7 +379,7 @@ impl RemoteView {
   }
 
   fn first_mode(setup: &SetupRoute) -> Mode {
-    if setup.allow_user_managed {
+    if setup.allow_user_managed && !setup.managed {
       Mode::Choice
     } else {
       Mode::Managed
@@ -670,6 +672,9 @@ impl RemoteView {
       "cloud.upgrade" => self
         .host
         .open_url(&format!("{}/dashboard", native::web_url())),
+      "account.signIn" => self
+        .host
+        .open_url(&format!("{}/sign-in?source=desktop", native::web_url())),
       "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
@@ -842,10 +847,15 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let confirming = self.setup.as_ref().is_some_and(|s| s.confirming_delete);
-    let cloud = account_data::account(cx).cloud.unwrap_or_default();
-    let card = cloud_card(&cloud, confirming);
+    let account = account_data::account(cx);
     let press = Self::cloud_press(cx);
-    let card = cloud_card_element(&card, p, &self.tips, &press, cx);
+    let card = if account.user.is_some() {
+      let cloud = account.cloud.clone().unwrap_or_default();
+      let card = cloud_card(&cloud, confirming);
+      cloud_card_element(&card, p, &self.tips, &press, cx).into_any_element()
+    } else {
+      Self::sign_in(&account, &press, p).into_any_element()
+    };
     div()
       .child(header(
         "Treq-managed cloud workspace",
@@ -863,6 +873,42 @@ impl RemoteView {
           ),
         )
       })
+  }
+
+  /// Before the account is signed in: the cloud workspace belongs to an
+  /// account, so sign in first.
+  fn sign_in(
+    account: &super::settings::AccountRoute,
+    press: &impl Fn(&str) -> ClickFn,
+    p: &Palette,
+  ) -> Div {
+    let busy = account.loading || account.signing_in;
+    div()
+      .debug_selector(|| "remote-setup-signed-out".into())
+      .flex()
+      .flex_col()
+      .items_start()
+      .gap_3()
+      .child(hint(
+        "Sign in to Treq to create your cloud workspace. The browser opens the sign-in page and brings you back here.",
+        p,
+      ))
+      .child(
+        Button::new("remote-setup-sign-in", p)
+          .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., p.primary_foreground))
+          .label(if account.signing_in {
+            "Signing in..."
+          } else {
+            "Sign in with Browser"
+          })
+          .disabled(busy)
+          .on_click(press("account.signIn")),
+      )
+      .children(account.sign_in_error.clone().map(|error| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .child(format!("Sign-in failed: {error}"))
+      }))
   }
 
   /// A text field whose `<datalist>` suggests the `~/.ssh/config` aliases

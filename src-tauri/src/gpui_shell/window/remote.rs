@@ -84,6 +84,8 @@ impl Default for RepoForm {
 pub struct Remote {
   /// `RemoteSetupDialog` is open.
   pub setup: bool,
+  /// It opened on the cloud workspace's screen rather than the choice.
+  pub setup_managed: bool,
   /// The "Your own VM" endpoint the form confirmed is being registered.
   pub registering: bool,
   /// `RemoteTerminalDialog` is open.

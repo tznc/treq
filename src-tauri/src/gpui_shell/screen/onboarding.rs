@@ -99,6 +99,16 @@ pub struct OnboardingView {
   dark: bool,
   route: Route,
   inputs: onboarding_remote::Inputs,
+  /// Signed in, and the cloud workspace's status, as the cloud row last
+  /// showed them.
+  cloud_seen: (bool, Option<String>),
+}
+
+/// What of the account the cloud row shows.
+fn cloud_seen(cx: &gpui::App) -> (bool, Option<String>) {
+  let account = super::account_data::account(cx);
+  let status = account.cloud.and_then(|c| c.instance).map(|i| i.status);
+  (account.user.is_some(), status)
 }
 
 impl OnboardingView {
@@ -129,7 +139,17 @@ impl OnboardingView {
       host,
       route: Route::default(),
       inputs: onboarding_remote::Inputs::default(),
+      cloud_seen: cloud_seen(cx),
     };
+    // Signing in, or the cloud workspace changing state, changes its row.
+    cx.observe_global::<super::account_data::Account>(|view, cx| {
+      let seen = cloud_seen(cx);
+      if seen != view.cloud_seen {
+        view.cloud_seen = seen;
+        view.load(cx);
+      }
+    })
+    .detach();
     this.load(cx);
     this.check("local", Place::Local, cx);
     this
@@ -248,8 +268,9 @@ impl OnboardingView {
         endpoint_id: Some(endpoint_id),
         status,
       } if status == "ready" => (self.react)(press(format!("machines.connect:{endpoint_id}")), cx),
-      // The setup dialog wakes or repairs the cloud workspace.
-      Place::Cloud { .. } => (self.react)(ScreenAction::OpenRemote, cx),
+      // The setup dialog signs in, creates, wakes or repairs the cloud
+      // workspace.
+      Place::Cloud { .. } => (self.react)(press("machines.cloud".into()), cx),
       Place::DevContainer { repo_path, .. } => self.host.open_local(repo_path),
     }
   }

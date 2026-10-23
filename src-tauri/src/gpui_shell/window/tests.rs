@@ -1085,6 +1085,18 @@ fn a_path_without_a_repository_offers_clone_and_init(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_cloud_row_opens_setup_on_the_cloud_workspace(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  assert!(window.press(cx, "machines.cloud"));
+  let setup = window.screen_snapshot().remote.setup.expect("setup open");
+  assert!(setup.managed);
+  window.press(cx, "remote.setup.close");
+  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  let setup = window.screen_snapshot().remote.setup.expect("setup open");
+  assert!(!setup.managed, "Open via SSH starts at the choice");
+}
+
+#[gpui::test]
 fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     last_remote: Some(saved("ep-1", 0, "/srv/app")),
