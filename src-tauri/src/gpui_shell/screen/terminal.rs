@@ -361,6 +361,9 @@ pub struct TerminalView {
   /// The cell of the last mouse report, so a move within it sends none.
   reported: Option<(usize, usize)>,
   cursor_on: bool,
+  /// Whether the last frame had focus. Only a focused cursor blinks, so an
+  /// unfocused terminal skips the blink's redraw.
+  focused: bool,
   idle: u64,
   chat_due: bool,
   search: Search,
@@ -411,6 +414,7 @@ impl TerminalView {
       selecting: false,
       reported: None,
       cursor_on: true,
+      focused: false,
       idle: 0,
       chat_due: false,
       search: Search::default(),
@@ -622,8 +626,12 @@ impl TerminalView {
         cx.background_executor().timer(BLINK).await;
         if this
           .update(cx, |view, cx| {
-            view.cursor_on = !view.cursor_on;
-            cx.notify();
+            if view.focused {
+              view.cursor_on = !view.cursor_on;
+              cx.notify();
+            } else {
+              view.cursor_on = true;
+            }
           })
           .is_err()
         {
@@ -1486,6 +1494,7 @@ impl Render for TerminalView {
     self.tooltips.sync(cx);
     let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
+    self.focused = focused;
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
