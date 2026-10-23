@@ -23,7 +23,9 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
-  remote_ssh: bool,
+  /// What the folder picker returns, and why starting a dev container fails.
+  picked: Option<String>,
+  container_error: Option<String>,
   /// The Open a Repository screen's machines and recent repositories.
   listing: machines::Listing,
   /// What a host machine says is installed on it.
@@ -279,13 +281,18 @@ impl machines::MachinesHost for FakeHost {
     self.record(format!("remove {place:?}"));
     !self.decline
   }
+
+  fn pick_folder(&self) -> Option<String> {
+    self.picked.clone()
+  }
+
+  fn start_dev_container(&self, repo_path: &str) -> Result<(), String> {
+    self.record(format!("container up {repo_path}"));
+    self.container_error.clone().map_or(Ok(()), Err)
+  }
 }
 
 impl onboarding::OnboardingHost for FakeHost {
-  fn remote_ssh_enabled(&self) -> bool {
-    self.remote_ssh
-  }
-
   fn pick_repo(&self) {
     self.record("pick_repo".into());
   }
@@ -1709,10 +1716,10 @@ fn listing() -> machines::Listing {
         id: "cloud".into(),
         place: Place::Cloud {
           endpoint_id: None,
-          status: machines::CLOUD_SIGNED_OUT.into(),
+          status: machines::CLOUD_NOT_CREATED.into(),
         },
         name: "Cloud workspace".into(),
-        detail: "Sign in to create one".into(),
+        detail: "Not created yet".into(),
       },
       Machine {
         id: "devcontainer:c1".into(),
@@ -1739,6 +1746,9 @@ fn listing() -> machines::Listing {
         saved_id: Some("r1".into()),
       },
     ],
+    signed_out: false,
+    ssh: false,
+    containers: false,
   }
 }
 
@@ -1760,8 +1770,6 @@ fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
   h.click("install-git");
   h.click("onboarding-open-repo");
   h.click("recent-local-0");
-  // Only the remote dialog is the window's.
-  h.click("onboarding-open-remote");
   assert_eq!(
     host.calls(),
     [
@@ -1772,7 +1780,7 @@ fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
       "open_local /home/me/app",
     ]
   );
-  assert_eq!(h.sent(), vec![ScreenAction::OpenRemote]);
+  assert!(h.sent().is_empty());
 }
 
 #[gpui::test]
@@ -1801,7 +1809,7 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
   // A dev container opens its repository here.
   h.click("machine-devcontainer:c1");
   h.click("machine-local");
-  // Before its workspace runs, the cloud row signs in or sets it up.
+  // Before its workspace runs, the cloud row sets it up.
   h.click("machine-cloud");
   assert_eq!(
     h.sent(),
@@ -1815,6 +1823,36 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
     host.calls(),
     ["check", "open_local /home/me/web", "pick_repo"]
   );
+}
+
+#[gpui::test]
+fn onboarding_offers_sign_in_instead_of_a_cloud_row_when_signed_out(cx: &mut TestAppContext) {
+  let mut signed_out = listing();
+  signed_out.machines.retain(|m| m.id != "cloud");
+  signed_out.signed_out = true;
+  let host = Arc::new(FakeHost {
+    listing: signed_out,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(!h.drawn("machine-cloud"));
+  h.click("onboarding-sign-in");
+  assert!(host
+    .calls()
+    .contains(&"open http://localhost:3001/sign-in?source=desktop".to_string()));
+  let mut h = Harness::with_host(
+    cx,
+    onboarding(),
+    Arc::new(FakeHost {
+      listing: listing(),
+      ..FakeHost::default()
+    }),
+  );
+  assert!(
+    !h.drawn("onboarding-sign-in"),
+    "signed in: the cloud row instead"
+  );
+  assert!(h.drawn("machine-cloud"));
 }
 
 #[gpui::test]
@@ -1949,20 +1987,43 @@ fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn onboarding_labels_the_remote_button_by_preview(cx: &mut TestAppContext) {
+fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  empty.ssh = true;
+  empty.containers = true;
   let host = Arc::new(FakeHost {
-    remote_ssh: true,
+    listing: empty,
+    picked: Some("/home/me/web".into()),
+    container_error: Some("The Dev Containers CLI is not installed.".into()),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  // Both sections show while empty, each with its +.
+  assert!(h.drawn("machines-add-ssh"));
+  assert!(h.drawn("machines-add-container"));
+  h.click("machines-add-ssh");
+  assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+  h.click("machines-add-container");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"container up /home/me/web".to_string()));
+  assert!(h.drawn("machines-container-status"), "why it did not start");
+
+  let mut off = listing();
+  off
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  let host = Arc::new(FakeHost {
+    listing: off,
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  assert!(h.drawn("onboarding-open-remote"));
-  let label = h.screen.read_with(&h.cx, |screen, cx| {
-    screen
-      .onboarding
-      .as_ref()
-      .map(|view| view.read(cx).remote_label.clone())
-  });
-  assert_eq!(label.as_deref(), Some("Open via SSH"));
+  assert!(!h.drawn("machines-add-ssh"), "the previews are off");
+  assert!(!h.drawn("machines-add-container"));
 }
 
 fn settings_route(tab: &str) -> ScreenSnapshot {
@@ -6855,11 +6916,22 @@ fn remote_harness(
 }
 
 #[gpui::test]
+fn setup_dialog_opens_on_your_own_vm_from_the_ssh_hosts_plus(cx: &mut TestAppContext) {
+  let (mut h, _) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({ "setup": { "allowUserManaged": true, "screen": "ownVm" } }),
+  );
+  assert!(h.drawn("remote-username"));
+  assert!(!h.drawn("remote-setup-own-vm"));
+}
+
+#[gpui::test]
 fn setup_dialog_asks_to_sign_in_before_the_cloud_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = remote_harness(
     cx,
     FakeHost::default(),
-    serde_json::json!({ "setup": { "allowUserManaged": true, "managed": true } }),
+    serde_json::json!({ "setup": { "allowUserManaged": true, "screen": "managed" } }),
   );
   // The machines page's cloud row opens straight on the cloud workspace.
   assert!(h.drawn("cloud-create"));

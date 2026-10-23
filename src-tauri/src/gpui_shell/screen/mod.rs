@@ -128,7 +128,6 @@ pub enum View {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScreenAction {
   OpenRepo,
-  OpenRemote,
   RecheckPrerequisites,
   OpenUrl {
     url: String,

@@ -243,10 +243,6 @@ impl Model {
       // The onboarding screen opens a local repository itself.
       ScreenAction::OpenRepo => with(Effect::PickFolder(FolderPurpose::OpenRepo)),
       ScreenAction::RecheckPrerequisites => done(),
-      ScreenAction::OpenRemote => {
-        self.open_remote_setup();
-        done()
-      }
       // A slider let go: the screens that have one save it themselves.
       ScreenAction::Commit { .. } => done(),
     }
