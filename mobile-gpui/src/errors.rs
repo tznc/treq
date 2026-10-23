@@ -40,6 +40,7 @@ const CODES: &[&str] = &[
   "filesystem_error",
   "jj_error",
   "git_error",
+  "git_command_failed",
 ];
 
 /// The sentence and action for a raw error string.
@@ -80,6 +81,12 @@ pub fn describe(raw: &str) -> Problem {
   if has("treq: command not found") || has("treq: not found") || (has("exit=some(127)")) {
     return Problem::new(
       "treq isn't installed on this host, or isn't on the PATH for SSH sessions.",
+      None,
+    );
+  }
+  if has("no git remote named") {
+    return Problem::new(
+      "This repository has no Git remote to push to. Add one on the host (git remote add origin …), then push again.",
       None,
     );
   }
@@ -190,6 +197,16 @@ mod tests {
       describe("invalid_arguments: Unknown agent 'claude'").message,
       "Claude Code isn't installed on this host."
     );
+  }
+
+  #[test]
+  fn a_push_without_a_remote_says_to_add_one() {
+    let problem = describe(
+      "git_command_failed: Push failed: IO error: Failed to push bookmark: No git remote named 'origin'",
+    );
+    assert!(problem
+      .message
+      .starts_with("This repository has no Git remote"));
   }
 
   #[test]

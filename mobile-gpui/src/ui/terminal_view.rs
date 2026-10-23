@@ -91,6 +91,12 @@ impl TerminalView {
     }
   }
 
+  /// Whether the program asked for application cursor keys (DECCKM),
+  /// which changes what the arrow keys send.
+  pub fn application_cursor(&self) -> bool {
+    self.parser.screen().application_cursor()
+  }
+
   pub fn focus(&self, window: &mut Window, cx: &mut App) {
     window.focus(&self.focus, cx);
   }

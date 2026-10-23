@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{h_flex, v_flex, ActiveTheme, IconName},
   *,
@@ -87,6 +88,40 @@ pub fn row_full(
   trailing: Option<AnyElement>,
   cx: &App,
 ) -> Stateful<Div> {
+  let chevron = div()
+    .text_color(cx.theme().muted_foreground)
+    .child(IconName::ChevronRight)
+    .into_any_element();
+  row_base(id, leading, title, detail, trailing, Some(chevron), cx)
+}
+
+/// One option of a single choice: no chevron (it goes nowhere), a check
+/// and the selected background on the chosen one.
+pub fn choice(
+  id: impl Into<ElementId>,
+  title: impl Into<SharedString>,
+  detail: Option<SharedString>,
+  selected: bool,
+  cx: &App,
+) -> Stateful<Div> {
+  let check = div()
+    .w(px(16.))
+    .when(selected, |c| c.child(IconName::Check))
+    .into_any_element();
+  row_base(id, None, title, detail, None, Some(check), cx).when(selected, |row| {
+    row.bg(treq_ui::theme::current(cx).selected())
+  })
+}
+
+fn row_base(
+  id: impl Into<ElementId>,
+  leading: Option<AnyElement>,
+  title: impl Into<SharedString>,
+  detail: Option<SharedString>,
+  trailing: Option<AnyElement>,
+  end: Option<AnyElement>,
+  cx: &App,
+) -> Stateful<Div> {
   let theme = cx.theme();
   h_flex()
     .id(id)
@@ -113,11 +148,7 @@ pub fn row_full(
         })),
     )
     .children(trailing)
-    .child(
-      div()
-        .text_color(theme.muted_foreground)
-        .child(IconName::ChevronRight),
-    )
+    .children(end)
 }
 
 pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -149,5 +180,5 @@ pub fn page() -> Div {
 }
 
 pub fn centered_message(text: impl Into<SharedString>, cx: &App) -> Div {
-  div().py_6().flex().justify_center().child(muted(text, cx))
+  div().py_6().px_4().text_center().child(muted(text, cx))
 }

@@ -1,7 +1,6 @@
 //! Pages below home: hosts, repositories, workspaces and their views.
 
 pub mod add_host;
-pub mod agent;
 pub mod commits;
 pub mod conflicts;
 pub mod diff;

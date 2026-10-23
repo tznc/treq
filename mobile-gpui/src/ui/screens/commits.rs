@@ -1,4 +1,4 @@
-//! The workspace's commits.
+//! The workspace's commits, for its Commits tab.
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -10,21 +10,8 @@ use treq_lib::{core::remote::TreqCommandRequest, jj::JjLogResult};
 use super::{on_epoch, workspace::Target};
 use crate::{
   remote,
-  ui::{load, nav, widgets, Load, Location},
+  ui::{load, widgets, Load},
 };
-
-pub fn open(target: Target, cx: &mut App) {
-  let location = Location {
-    repo: Some(target.repo.clone()),
-    workspace: Some(crate::store::SnapshotWorkspace {
-      id: target.id.clone(),
-      name: target.name.clone(),
-    }),
-  };
-  nav::push("Commits", location, cx, move |_, cx| {
-    cx.new(|cx| CommitsScreen::new(target, cx))
-  });
-}
 
 pub struct CommitsScreen {
   target: Target,
@@ -33,7 +20,7 @@ pub struct CommitsScreen {
 }
 
 impl CommitsScreen {
-  fn new(target: Target, cx: &mut Context<Self>) -> Self {
+  pub fn new(target: Target, cx: &mut Context<Self>) -> Self {
     on_epoch(cx, |this, cx| this.reload(cx));
     let mut this = Self {
       target,
@@ -44,7 +31,7 @@ impl CommitsScreen {
     this
   }
 
-  fn reload(&mut self, cx: &mut Context<Self>) {
+  pub fn reload(&mut self, cx: &mut Context<Self>) {
     self.log = Load::Loading;
     let request = TreqCommandRequest::ListCommits {
       repo: self.target.repo.clone(),
@@ -109,17 +96,11 @@ impl Render for CommitsScreen {
           ))
       })),
     };
-    let header = self.log.ready().map(|log| {
-      widgets::muted(
-        format!("{} → {}", log.workspace_branch, log.target_branch),
-        cx,
-      )
-    });
     div()
       .id("commits")
       .size_full()
       .overflow_y_scroll()
       .track_scroll(&self.scroll)
-      .child(widgets::page().children(header).child(body))
+      .child(widgets::page().child(body))
   }
 }
