@@ -2061,16 +2061,7 @@ pub fn jj_apply_file_patch(
   patch: &str,
 ) -> Result<(), JjError> {
   let invalid = |message: String| JjError::IoError(format!("Invalid patch: {message}"));
-  let repo_path = RepoPathBuf::from_relative_path(file_path)
-    .map_err(|e| invalid(format!("path '{file_path}': {e}")))?;
-  if repo_path.is_root()
-    || matches!(
-      repo_path.components().next().map(|c| c.as_internal_str()),
-      Some(".jj" | ".git")
-    )
-  {
-    return Err(invalid(format!("'{file_path}' is not a workspace file")));
-  }
+  let repo_path = workspace_file_path(file_path).map_err(invalid)?;
   let patches = crate::unified_patch::parse(patch).map_err(invalid)?;
   let [file_patch] = patches.as_slice() else {
     return Err(invalid(format!(
@@ -3042,14 +3033,45 @@ fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), JjError>
   Ok(())
 }
 
+/// Parses a path inside a workspace, refusing the root, anything that leaves the
+/// workspace (absolute paths, `..`) and jj/git metadata.
+fn workspace_file_path(path: &str) -> Result<RepoPathBuf, String> {
+  let repo_path =
+    RepoPathBuf::from_relative_path(path).map_err(|e| format!("path '{path}': {e}"))?;
+  if repo_path.is_root()
+    || matches!(
+      repo_path.components().next().map(|c| c.as_internal_str()),
+      Some(".jj" | ".git")
+    )
+  {
+    return Err(format!("'{path}' is not a workspace file"));
+  }
+  Ok(repo_path)
+}
+
 fn move_paths_between_workspaces(
   source_workspace_path: &Path,
   target_workspace_path: &Path,
   paths: &[String],
 ) -> Result<(), JjError> {
-  for relative in paths {
-    let source = source_workspace_path.join(relative);
-    let target = target_workspace_path.join(relative);
+  // Validate every path before touching the disk so a bad entry moves nothing.
+  let repo_paths = paths
+    .iter()
+    .map(|path| workspace_file_path(path).map_err(|e| JjError::IoError(format!("Cannot move {e}"))))
+    .collect::<Result<Vec<_>, _>>()?;
+  for repo_path in repo_paths {
+    let source = repo_path.to_fs_path(source_workspace_path).map_err(|e| {
+      JjError::IoError(format!(
+        "Cannot move {}: {e}",
+        repo_path.as_internal_file_string()
+      ))
+    })?;
+    let target = repo_path.to_fs_path(target_workspace_path).map_err(|e| {
+      JjError::IoError(format!(
+        "Cannot move {}: {e}",
+        repo_path.as_internal_file_string()
+      ))
+    })?;
     if source.exists() {
       copy_path_recursive(&source, &target)?;
       if source.is_dir() {
@@ -10707,5 +10729,79 @@ mod tests {
       imported,
       jj_get_commit_id(repo_path, "master").expect("master id")
     );
+  }
+
+  #[test]
+  fn move_paths_rejects_paths_outside_the_workspace() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    let outside = TempDir::new().expect("outside");
+    fs::write(outside.path().join("keep.txt"), "keep").expect("write");
+    fs::create_dir(source.path().join(".jj")).expect("mkdir .jj");
+    fs::create_dir(target.path().join(".git")).expect("mkdir .git");
+    let escape = format!(
+      "../{}",
+      outside.path().file_name().expect("name").to_string_lossy()
+    );
+    let absolute = outside.path().to_string_lossy().into_owned();
+
+    for bad in [escape.as_str(), absolute.as_str(), ".jj", ".git", "", "."] {
+      let result = move_paths_between_workspaces(source.path(), target.path(), &[bad.to_string()]);
+      assert!(result.is_err(), "'{bad}' should be rejected");
+    }
+    assert!(outside.path().join("keep.txt").exists());
+    assert!(source.path().join(".jj").is_dir());
+    assert!(target.path().join(".git").is_dir());
+  }
+
+  #[test]
+  fn move_paths_validates_every_path_before_touching_files() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    fs::write(source.path().join("a.txt"), "a").expect("write");
+
+    let result = move_paths_between_workspaces(
+      source.path(),
+      target.path(),
+      &["a.txt".to_string(), "../escape".to_string()],
+    );
+
+    assert!(result.is_err());
+    assert!(source.path().join("a.txt").exists());
+    assert!(!target.path().join("a.txt").exists());
+  }
+
+  #[test]
+  fn move_paths_moves_files_and_directories() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    fs::create_dir_all(source.path().join("dir/nested")).expect("mkdir");
+    fs::write(source.path().join("dir/nested/b.txt"), "b").expect("write");
+    fs::write(source.path().join("a.txt"), "a").expect("write");
+    fs::write(target.path().join("gone.txt"), "x").expect("write");
+
+    move_paths_between_workspaces(
+      source.path(),
+      target.path(),
+      &[
+        "a.txt".to_string(),
+        "dir".to_string(),
+        "gone.txt".to_string(),
+      ],
+    )
+    .expect("move");
+
+    assert!(!source.path().join("a.txt").exists());
+    assert!(!source.path().join("dir").exists());
+    assert_eq!(
+      fs::read_to_string(target.path().join("a.txt")).expect("a"),
+      "a"
+    );
+    assert_eq!(
+      fs::read_to_string(target.path().join("dir/nested/b.txt")).expect("b"),
+      "b"
+    );
+    // Deleted in the source, so the move deletes it in the target too.
+    assert!(!target.path().join("gone.txt").exists());
   }
 }
