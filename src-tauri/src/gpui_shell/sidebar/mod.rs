@@ -3,7 +3,7 @@
 //! The window model builds its [`SidebarSnapshot`] and carries out every
 //! click the sidebar sends back as a [`SidebarAction`].
 
-use crate::gpui_shell::ui::{zpx, A11yDisabledExt as _};
+use crate::gpui_shell::ui::{self, zpx, A11yDisabledExt as _, TextSize, Tone};
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
@@ -13,7 +13,7 @@ use std::{
 use gpui_kit::base::TestSupportExt as _;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, rgb, svg, Animation, AnimationExt as _, App, ClickEvent, Context, Hsla,
+  self, div, prelude::*, svg, Animation, AnimationExt as _, App, ClickEvent, Context, Hsla,
   MouseButton, MouseDownEvent, Pixels, Point, Role, SharedString, Transformation, Window,
 };
 
@@ -244,14 +244,13 @@ struct DraggedWorkspace {
 
 impl Render for DraggedWorkspace {
   fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-    div()
+    ui::text(div(), TextSize::Sm)
       .px_2()
       .py_1()
       .rounded_md()
       .border_1()
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
-      .text_size(zpx(13.))
       .text_color(self.palette.sidebar_foreground)
       .font_family(theme::MONO_FONT)
       .shadow_md()
@@ -549,15 +548,27 @@ pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
 /// the React sidebar.
 fn queue_dot(status: &str, palette: &Palette) -> (Hsla, bool, String) {
   match status {
-    "queued" => (rgb(0xfacc15).into(), false, "In merge queue".into()),
+    "queued" => (Tone::Warning.color(palette), false, "In merge queue".into()),
     "testing" => (
-      rgb(0x60a5fa).into(),
+      Tone::Primary.color(palette),
       true,
       "CI running in merge queue".into(),
     ),
-    "merging" => (rgb(0x4ade80).into(), true, "Passed CI, merging now".into()),
-    "merged" => (rgb(0x16a34a).into(), false, "Merged via queue".into()),
-    "failed" => (rgb(0xef4444).into(), false, "Failed in merge queue".into()),
+    "merging" => (
+      Tone::Success.color(palette),
+      true,
+      "Passed CI, merging now".into(),
+    ),
+    "merged" => (
+      Tone::GitMerged.color(palette),
+      false,
+      "Merged via queue".into(),
+    ),
+    "failed" => (
+      Tone::Danger.color(palette),
+      false,
+      "Failed in merge queue".into(),
+    ),
     other => (palette.muted_foreground, false, other.into()),
   }
 }
@@ -571,14 +582,6 @@ fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
     .size(zpx(size))
     .flex_none()
     .text_color(color)
-}
-
-fn spinner(id: impl Into<gpui::ElementId>, size: f32, color: Hsla) -> impl IntoElement {
-  icon(theme::ICON_SPINNER, size, color).with_animation(
-    id,
-    Animation::new(Duration::from_secs(1)).repeat(),
-    |svg, delta| svg.with_transformation(Transformation::rotate(gpui::percentage(delta))),
-  )
 }
 
 impl Render for Sidebar {
@@ -623,17 +626,16 @@ impl Render for Sidebar {
               .child(snapshot.repo_name.clone()),
           )
           .child(
-            div()
+            ui::text(div(), TextSize::Xs)
               .flex_none()
               .px_1()
               .rounded_sm()
-              .text_size(zpx(11.))
               .bg(palette.muted)
               .child(crate::gpui_shell::keys::hint("⌘ + K")),
           )
           .on_click(self.on_action(SidebarAction::OpenCommandPalette)),
       )
-      .child(self.icon_button(
+      .child(self.header_button(
         "settings",
         theme::ICON_SETTINGS,
         "Settings",
@@ -644,7 +646,7 @@ impl Render for Sidebar {
         cx,
       ));
 
-    let mut sidebar = div()
+    let mut sidebar = ui::text(div(), TextSize::Sm)
       .id("sidebar")
       .debug_selector(|| "sidebar".into())
       .relative()
@@ -655,10 +657,9 @@ impl Render for Sidebar {
       .h_full()
       .bg(palette.sidebar)
       .text_color(palette.sidebar_foreground)
-      .text_size(zpx(13.))
       // Room for the right edge line, drawn as a child below so the modal
       // backdrop covers it (GPUI paints a border above the children).
-      .pr(zpx(1.))
+      .pr_px()
       // The traffic lights sit here; the edge line runs past them to the
       // window's top edge.
       .when(title_bar::SHOWN, |this| {
@@ -699,7 +700,7 @@ impl Render for Sidebar {
       .overflow_y_scroll()
       .px_2()
       .pb_2()
-      .gap(zpx(2.))
+      .gap_0p5()
       // A click on the empty list clears the selection; it is not a control.
       .cursor_default()
       .on_click(self.on_action(SidebarAction::ClearSelection))
@@ -709,11 +710,7 @@ impl Render for Sidebar {
     for (index, repo) in snapshot.repos.iter().enumerate() {
       // Each repository's rows sit in their own element, so workspace ids,
       // which are per repository, do not collide.
-      let mut section = div()
-        .id(("repo-section", index))
-        .flex()
-        .flex_col()
-        .gap(zpx(4.));
+      let mut section = div().id(("repo-section", index)).flex().flex_col().gap_1();
       if let Some(name) = &repo.label {
         section = section.child(self.group_label(repo, name, &palette));
       }
@@ -753,8 +750,7 @@ impl Render for Sidebar {
           .pt_3()
           .pb_1()
           .child(
-            div()
-              .text_size(zpx(12.))
+            ui::text(div(), TextSize::Xs)
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(palette.sidebar_foreground.opacity(0.7))
               .child("WORKSPACES"),
@@ -794,27 +790,29 @@ impl Render for Sidebar {
         cx.listener(|this, _, _, cx| this.finish_resize(cx)),
       )
       .when_some(snapshot.modal, |this, opacity| {
-        this.child(modal_backdrop(opacity).on_click(self.on_action(SidebarAction::DismissModal)))
+        this.child(
+          modal_backdrop(&palette, opacity).on_click(self.on_action(SidebarAction::DismissModal)),
+        )
       })
   }
 }
 
 /// The webview modal's backdrop, continued over the sidebar in the same
 /// translucent black. It takes every click and hover.
-fn modal_backdrop(opacity: f32) -> gpui::Stateful<gpui::Div> {
+fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> {
   div()
     .id("modal-backdrop")
     .debug_selector(|| "modal-backdrop".into())
     .absolute()
     .inset_0()
-    .bg(gpui::black().opacity(opacity.clamp(0., 1.)))
+    .bg(palette.scrim().alpha(opacity.clamp(0., 1.)))
     .occlude()
 }
 
 impl Sidebar {
   /// The WORKSPACES heading's Open button.
   fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
-    div()
+    ui::text(div(), TextSize::Xs)
       .id("open-workspaces")
       .debug_selector(|| "open-workspaces".into())
       .role(Role::Button)
@@ -824,10 +822,9 @@ impl Sidebar {
       .flex_none()
       .items_center()
       .gap_1()
-      .px(zpx(6.))
+      .px_1p5()
       .h(zpx(22.))
       .rounded_md()
-      .text_size(zpx(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .cursor_pointer()
       .hover(|style| style.bg(palette.accent))
@@ -842,7 +839,7 @@ impl Sidebar {
 
   /// A square header button with a tooltip below it.
   #[allow(clippy::too_many_arguments)]
-  fn icon_button(
+  fn header_button(
     &self,
     id: &'static str,
     icon_path: &'static str,
@@ -857,51 +854,26 @@ impl Sidebar {
     let disabled = disabled_reason.is_some();
     let tip = disabled_reason.unwrap_or(tooltip).to_string();
     div()
-      .id(id)
-      .debug_selector(move || id.into())
-      .role(Role::Button)
-      .aria_label(tooltip)
-      .a11y_disabled(disabled)
-      .test_support()
       .relative()
-      .flex()
       .flex_none()
-      .items_center()
-      .justify_center()
-      .size(zpx(32.))
-      .rounded_lg()
-      .border_1()
-      .border_color(palette.border)
-      .when(active, |this| this.bg(palette.primary.opacity(0.2)))
-      .when(!disabled, |this| {
-        this
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.accent))
-      })
-      .when(disabled, |this| this.opacity(0.5))
-      .child(icon(
-        icon_path,
-        16.,
-        if active {
-          palette.primary
-        } else {
-          palette.foreground
-        },
-      ))
-      .on_hover(
-        cx.listener(move |this, hovered: &bool, _, cx| {
-          this.hover_tooltip(key.clone(), *hovered, cx)
-        }),
+      .child(
+        ui::IconButton::new(id, icon_path, tooltip, palette)
+          .outline()
+          .selected(active)
+          .disabled(disabled)
+          .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+            this.hover_tooltip(key.clone(), *hovered, cx)
+          }))
+          .when(!disabled, |this| this.on_click(self.on_action(action))),
       )
       .when(self.tooltip_shown(id), |this| {
         this.child(self.tooltip_anchor(
           id.into(),
           Side::Bottom,
           TooltipContent::Text(tip.into()),
-          1.,
+          0.,
         ))
       })
-      .when(!disabled, |this| this.on_click(self.on_action(action)))
   }
 
   /// A small action button inside a row, with a tooltip.
@@ -977,7 +949,7 @@ impl Sidebar {
       .flex()
       .flex_none()
       .items_center()
-      .gap(zpx(2.))
+      .gap_0p5()
       .child(self.row_button(
         format!("{prefix}-start-agent").into(),
         theme::ICON_BOT,
@@ -1024,7 +996,7 @@ impl Sidebar {
         .flex_1()
         .min_w_0()
         .items_baseline()
-        .gap(zpx(6.))
+        .gap_1p5()
         .child(
           div()
             .flex_none()
@@ -1076,7 +1048,7 @@ impl Sidebar {
       .relative()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .mx_2()
       .px_2()
       .h(zpx(32.))
@@ -1093,9 +1065,8 @@ impl Sidebar {
       .child(title)
       .when(repo.missing, |this| {
         this.child(
-          div()
+          ui::text(div(), TextSize::Xs)
             .flex_none()
-            .text_size(zpx(12.))
             .text_color(palette.muted_foreground)
             .child("missing"),
         )
@@ -1143,7 +1114,7 @@ impl Sidebar {
       .test_support()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .mx_2()
       .px_2()
       .h(zpx(32.))
@@ -1192,7 +1163,7 @@ impl Sidebar {
       theme::ICON_CHEVRON_DOWN
     };
     let selector = format!("group-{name}");
-    div()
+    ui::text(div(), TextSize::Xs)
       .id("group-label")
       .debug_selector(move || selector.clone())
       .flex()
@@ -1201,7 +1172,6 @@ impl Sidebar {
       .px_2()
       .h(zpx(32.))
       .rounded_md()
-      .text_size(zpx(12.))
       .text_color(palette.sidebar_foreground.opacity(0.7))
       .cursor_pointer()
       .hover(|style| style.bg(palette.accent))
@@ -1250,7 +1220,7 @@ impl Sidebar {
     };
 
     let leading: gpui::AnyElement = if row.archiving {
-      spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
+      ui::spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
     } else {
       // The React sidebar flips the branch icon vertically.
       icon(theme::ICON_BRANCH, 12., branch_color)
@@ -1289,7 +1259,7 @@ impl Sidebar {
       .when_some(row.status.as_ref(), |this, status| {
         let color = status_color(status.color, palette);
         if status.spin {
-          this.child(spinner(("spin", id as u64), 14., color))
+          this.child(ui::spinner(("spin", id as u64), 14., color))
         } else {
           this.child(
             div()
@@ -1314,7 +1284,7 @@ impl Sidebar {
       .relative()
       .flex()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .h(zpx(32.))
       .pl(zpx(row_indent(row.depth)))
       .pr_2()
@@ -1488,9 +1458,13 @@ fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Di
     .h(zpx(32.))
     .rounded_md()
     .bg(palette.destructive)
-    .text_color(gpui::white())
+    .text_color(palette.destructive_foreground)
     .cursor_pointer()
     .hover(|style| style.opacity(0.9))
-    .child(icon(theme::ICON_ARCHIVE, 14., gpui::white()))
+    .child(icon(
+      theme::ICON_ARCHIVE,
+      14.,
+      palette.destructive_foreground,
+    ))
     .child(label)
 }

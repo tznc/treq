@@ -8,6 +8,7 @@
 //! comes back as the next [`Route`]. The Merge Queue tab and the PR review
 //! page are still React's: GPUI hands their routes back and React draws them.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::{HashMap, HashSet},
@@ -38,7 +39,7 @@ use crate::{
     form::{self, Controls, SelectOption},
     native::{register_toast_action, NativeEvent, ToastAction, ToastTone},
     popup::{self, PopupSink},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
@@ -946,42 +947,6 @@ fn finish_load<T>(pages: &mut Pages<T>, result: Result<Vec<GhListPage<T>>, Strin
   }
 }
 
-/// `TabsList`: `flex gap-1 bg-muted p-1 rounded-md w-fit`.
-pub(super) fn tabs_list(p: &Palette) -> Div {
-  ui::text(div(), TextSize::Sm)
-    .flex()
-    .gap_1()
-    .p_1()
-    .rounded(zpx(6.))
-    .bg(p.muted)
-}
-
-/// `TabsTrigger`: `px-3 py-1 font-medium rounded-md`.
-pub(super) fn tab_trigger(
-  id: impl Into<SharedString>,
-  active: bool,
-  p: &Palette,
-) -> gpui::Stateful<Div> {
-  let background = p.background;
-  named(div(), id)
-    .flex()
-    .items_center()
-    .gap(zpx(6.))
-    .px_3()
-    .py_1()
-    .rounded(zpx(6.))
-    .font_weight(FontWeight::MEDIUM)
-    .cursor_pointer()
-    .when(active, |t| {
-      t.bg(p.background).text_color(p.foreground).shadow_sm()
-    })
-    .when(!active, |t| {
-      let fg = p.foreground;
-      t.text_color(p.muted_foreground)
-        .hover(move |s| s.bg(background.opacity(0.5)).text_color(fg))
-    })
-}
-
 impl Render for GithubView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
@@ -1082,7 +1047,7 @@ impl GithubView {
           .flex_none()
           .px_4()
           .pb_2()
-          .child(self.tabs(p, cx)),
+          .child(self.view_tabs(p, cx)),
       )
       .child(self.toolbar(has_remote, p, window, cx))
       .when(
@@ -1099,47 +1064,40 @@ impl GithubView {
       )
   }
 
-  fn tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let tab = |id: &'static str, label: &'static str, active: bool, press: &'static str| {
-      tab_trigger(id, active, p)
-        .on_click(cx.listener(move |view, _, _, cx| view.press(press, cx)))
-        .child(label)
+  fn view_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let view = cx.weak_entity();
+    let merge_queue = self.route.merge_queue.as_ref();
+    let selected = match self.route.tab {
+      Tab::Issues => 0,
+      Tab::Prs => 1,
     };
-    named(tabs_list(p), "github-tabs")
-      .child(tab(
-        "github-tab-issues",
-        "Issues",
-        self.route.tab == Tab::Issues,
-        "github.tab:issues",
-      ))
-      .child(tab(
-        "github-tab-prs",
-        "Pull Requests",
-        self.route.tab == Tab::Prs,
-        "github.tab:prs",
-      ))
-      .children(self.route.merge_queue.as_ref().map(|mq| {
-        let green = tw::color(if p.dark { tw::GREEN_400 } else { tw::GREEN_700 });
-        tab(
-          "github-tab-merge-queue",
-          "Merge Queue",
-          false,
-          "github.tab:merge-queue",
-        )
-        .when(!mq.pro, |t| {
-          t.child(
-            ui::text(div(), TextSize::Sm)
-              .line_height(zpx(13.))
-              .font_weight(FontWeight::SEMIBOLD)
-              .px_1()
-              .py(zpx(1.))
-              .rounded(zpx(4.))
-              .bg(tw::color(tw::GREEN_500).opacity(0.2))
-              .text_color(green)
-              .child("PRO"),
-          )
-        })
-      }))
+    let mut tabs = vec![
+      ui::Tab::new("github-tab-issues", "Issues"),
+      ui::Tab::new("github-tab-prs", "Pull Requests"),
+    ];
+    if merge_queue.is_some() {
+      tabs.push(ui::Tab::new("github-tab-merge-queue", "Merge Queue"));
+    }
+    div()
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(
+        ui::Tabs::new("github-tabs", p)
+          .tabs(tabs)
+          .selected(selected)
+          .on_select(move |ix, _, cx| {
+            let press = [
+              "github.tab:issues",
+              "github.tab:prs",
+              "github.tab:merge-queue",
+            ][ix];
+            view.update(cx, |view, cx| view.press(press, cx)).ok();
+          }),
+      )
+      .when(merge_queue.is_some_and(|mq| !mq.pro), |d| {
+        d.child(ui::Badge::new("PRO", p).tone(ui::Tone::Success))
+      })
   }
 
   fn toolbar(
@@ -1157,8 +1115,8 @@ impl GithubView {
       .gap_1()
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(6.))
-      .p(zpx(2.))
+      .rounded(radius::MD)
+      .p_0p5()
       .bg(p.muted.opacity(0.3))
       .children(StateFilter::options(self.route.tab).iter().map(|&filter| {
         let active = filter == current;
@@ -1167,8 +1125,8 @@ impl GithubView {
           TextSize::Sm,
         )
         .px_2()
-        .py(zpx(2.))
-        .rounded(zpx(4.))
+        .py_0p5()
+        .rounded(radius::SM)
         .cursor_pointer()
         .when(active, |b| {
           b.bg(p.background).text_color(p.foreground).shadow_sm()
@@ -1265,7 +1223,7 @@ impl GithubView {
           ui::text(div(), TextSize::Xs)
             .rounded_full()
             .bg(p.primary)
-            .px(zpx(6.))
+            .px_1p5()
             .text_color(p.primary_foreground)
             .child(count.to_string()),
         )
@@ -1438,7 +1396,7 @@ impl GithubView {
         .flex()
         .flex_col()
         .gap_2()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border)
         .bg(p.popover)
@@ -1487,7 +1445,10 @@ impl GithubView {
       Tab::Issues => {
         let pages = &self.issues;
         if pages.loading {
-          return parts::loading("github-list-loading", p).into_any_element();
+          return div()
+            .py_12()
+            .child(ui::Loading::new("github-list-loading", p))
+            .into_any_element();
         }
         let issues = self.issue_items();
         if let (Some(err), true) = (&pages.error, issues.is_empty()) {
@@ -1501,7 +1462,8 @@ impl GithubView {
           .into_any_element();
         }
         if issues.is_empty() {
-          return parts::empty_state(theme::ICON_CIRCLE_DOT, "No issues found.", p)
+          return ui::EmptyState::new("github-no-issues", "No issues found.", p)
+            .icon(theme::ICON_CIRCLE_DOT)
             .into_any_element();
         }
         let (has_next, next) = (pages.has_next(), pages.fetching_next);
@@ -1547,7 +1509,10 @@ impl GithubView {
       Tab::Prs => {
         let pages = &self.prs;
         if pages.loading {
-          return parts::loading("github-list-loading", p).into_any_element();
+          return div()
+            .py_12()
+            .child(ui::Loading::new("github-list-loading", p))
+            .into_any_element();
         }
         let prs = self.pr_items();
         if let (Some(err), true) = (&pages.error, prs.is_empty()) {
@@ -1561,7 +1526,8 @@ impl GithubView {
           .into_any_element();
         }
         if prs.is_empty() {
-          return parts::empty_state(theme::ICON_PR, "No pull requests found.", p)
+          return ui::EmptyState::new("github-no-prs", "No pull requests found.", p)
+            .icon(theme::ICON_PR)
             .into_any_element();
         }
         let (has_next, next) = (pages.has_next(), pages.fetching_next);
@@ -1569,11 +1535,14 @@ impl GithubView {
         let selected = self.route.selected;
         div()
           .when(visible.is_empty(), |d| {
-            d.child(parts::empty_state(
-              theme::ICON_PR,
-              "No loaded pull requests match the filters.",
-              p,
-            ))
+            d.child(
+              ui::EmptyState::new(
+                "github-no-matching-prs",
+                "No loaded pull requests match the filters.",
+                p,
+              )
+              .icon(theme::ICON_PR),
+            )
           })
           .children(visible.iter().map(|pr| {
             let n = pr.number;
@@ -1614,7 +1583,7 @@ impl GithubView {
     named(div(), id)
       .w_full()
       .px_3()
-      .py(zpx(10.))
+      .py_2p5()
       .border_b_1()
       .border_color(p.border)
       .flex()

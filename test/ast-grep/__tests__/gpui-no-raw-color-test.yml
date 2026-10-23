@@ -42,3 +42,11 @@ invalid:
     fn glow() -> Div {
       div().bg(white().opacity(0.1))
     }
+  - |
+    fn theme_tailwind() -> Div {
+      div().bg(theme::tw::RED_500)
+    }
+  - |
+    fn scoped_white() -> Div {
+      div().text_color(gpui::white()).bg(gpui::black().opacity(0.4))
+    }

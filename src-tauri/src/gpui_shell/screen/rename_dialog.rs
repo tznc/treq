@@ -281,7 +281,7 @@ impl Render for RenameDialog {
       dialog_panel("rename-workspace-dialog", 500., window.viewport_size(), &p);
     let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
       let k = &e.keystroke;
-      if k.key == "escape" {
+      if ui::is_escape(k) {
         cx.stop_propagation();
         view.close(cx);
       } else if k.key == "enter"
@@ -310,7 +310,6 @@ impl Render for RenameDialog {
               .gap_2()
               .child(
                 ui::text(div(), TextSize::Sm)
-                  .line_height(zpx(13.))
                   .font_weight(FontWeight::MEDIUM)
                   .child("Branch Name"),
               )
@@ -321,9 +320,7 @@ impl Render for RenameDialog {
                   .w_full()
                   .child(
                     Styled::h(ui::input(&input).disabled(pending), zpx(40.))
-                      .when_some(status, |this, icon| {
-                        this.suffix(div().pr(zpx(4.)).child(icon))
-                      }),
+                      .when_some(status, |this, icon| this.suffix(div().pr_1().child(icon))),
                   ),
               )
               .when_some(invalid, |this, v| {

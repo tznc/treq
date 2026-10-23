@@ -5,10 +5,14 @@ snapshots:
       div().bg(white().opacity(0.1))
     }
   : labels:
-    - source: white().opacity(0.1)
+    - source: white()
       style: primary
       start: 30
-      end: 50
+      end: 37
+    - source: white
+      style: secondary
+      start: 30
+      end: 35
   ? |
     fn raw_hsla() -> Div {
       div().bg(hsla(0.5, 0.5, 0.5, 1.0))
@@ -49,14 +53,31 @@ snapshots:
       start: 34
       end: 38
   ? |
+    fn scoped_white() -> Div {
+      div().text_color(gpui::white()).bg(gpui::black().opacity(0.4))
+    }
+  : labels:
+    - source: gpui::white()
+      style: primary
+      start: 46
+      end: 59
+    - source: gpui::white
+      style: secondary
+      start: 46
+      end: 57
+  ? |
     fn scrim() -> Div {
       div().bg(black().opacity(0.4))
     }
   : labels:
-    - source: black().opacity(0.4)
+    - source: black()
       style: primary
       start: 31
-      end: 51
+      end: 38
+    - source: black
+      style: secondary
+      start: 31
+      end: 36
   ? |
     fn tailwind() -> Div {
       div().bg(tw::RED_500)
@@ -75,3 +96,12 @@ snapshots:
       style: primary
       start: 37
       end: 46
+  ? |
+    fn theme_tailwind() -> Div {
+      div().bg(theme::tw::RED_500)
+    }
+  : labels:
+    - source: theme::tw::RED_500
+      style: primary
+      start: 40
+      end: 58

@@ -295,7 +295,7 @@ pub fn render(screen: &Onboarding, ctx: &Ctx) -> impl IntoElement {
     .flex()
     .flex_col()
     .items_center()
-    .gap(zpx(6.))
+    .gap_1p5()
     .p_6()
     .child(
       div()

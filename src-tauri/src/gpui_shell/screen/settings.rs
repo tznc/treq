@@ -5,6 +5,7 @@
 //! React still owns which tab shows, closing the page, and the Supabase
 //! session the Account and Integrations tabs show (see `account`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{rc::Rc, sync::Arc, time::Duration};
 
@@ -741,7 +742,7 @@ impl SettingsView {
             host.notify(toast(
               ToastTone::Success,
               "Settings Saved",
-              "Application settings updated successfully",
+              "Application settings updated",
             ));
           }
           Err(err) => host.notify(toast(ToastTone::Error, "Error", err)),
@@ -772,7 +773,7 @@ impl SettingsView {
               host.notify(toast(
                 ToastTone::Success,
                 "Settings saved",
-                "Repository settings have been updated successfully.",
+                "Repository settings updated.",
               ));
             }
             Err(err) => host.notify(toast(
@@ -1142,9 +1143,8 @@ fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEven
 
 /// `<Label>`: 13px medium, `leading-none`.
 fn label(text: impl Into<SharedString>) -> gpui::Div {
-  div()
-    .text_size(zpx(13.))
-    .line_height(zpx(13.))
+  ui::text(div(), TextSize::Sm)
+    .h(zpx(13.))
     .font_weight(FontWeight::MEDIUM)
     .child(text.into())
 }
@@ -1264,7 +1264,7 @@ impl Render for SettingsView {
           .gap_2()
           .px_4()
           .py_2()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
           .cursor_pointer()
           .map(|this| {
@@ -1831,9 +1831,7 @@ impl SettingsView {
       .child(
         div()
           .child(
-            div()
-              .text_size(zpx(13.))
-              .line_height(zpx(20.))
+            ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::SEMIBOLD)
               .child("Feature Preview"),
           )
@@ -1854,7 +1852,7 @@ impl SettingsView {
               .items_center()
               .justify_between()
               .gap_4()
-              .rounded(zpx(8.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(p.border)
               .p_4()
@@ -2013,9 +2011,9 @@ impl SettingsView {
       .gap_2()
       .border_1()
       .border_color(p.border)
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .p_3()
-      .pr(zpx(48.))
+      .pr_12()
       .debug_selector(move || selector)
       .when(row.installed.is_some(), |this| {
         this.child(
@@ -2145,7 +2143,7 @@ impl SettingsView {
       .flex()
       .items_center()
       .justify_center()
-      .bg(gpui::black().opacity(0.5))
+      .bg(p.scrim())
       .occlude()
       .child(
         div()
@@ -2158,7 +2156,7 @@ impl SettingsView {
           .flex_col()
           .gap_4()
           .p_6()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
           .border_color(p.border)
           .bg(p.background)

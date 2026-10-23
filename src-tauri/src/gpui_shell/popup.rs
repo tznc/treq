@@ -8,6 +8,7 @@
 //! then moved and resized.
 
 use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::{self, radius, TextSize};
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -41,8 +42,8 @@ const TOOLTIP_OFFSET: f32 = 6.;
 /// How close a tooltip may come to the window's edge, as base-ui's
 /// collision padding.
 const EDGE_PADDING: f32 = 5.;
-/// `text-sm`: 14px on a 20px line.
-const TEXT_SIZE: f32 = 14.;
+/// `TextSize::Sm`: 13px on a 20px line.
+const TEXT_SIZE: f32 = 13.;
 const LINE_HEIGHT: f32 = 20.;
 /// A text tooltip's widest box: `max-w-xs`. Longer text wraps.
 const TOOLTIP_MAX_WIDTH: f32 = 320.;
@@ -838,7 +839,7 @@ impl PopupView {
         .gap(zpx(KBD_GAP))
         .child(text.clone())
         .child(
-          div()
+          ui::text(div(), TextSize::Xs)
             .debug_selector(|| "tooltip-kbd".into())
             .h(zpx(KBD_HEIGHT))
             .min_w(zpx(KBD_HEIGHT))
@@ -846,11 +847,9 @@ impl PopupView {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .bg(palette.muted)
             .text_color(palette.muted_foreground)
-            .text_size(zpx(LIST_ITEM_SIZE))
-            .line_height(zpx(LIST_ITEM_LINE))
             .font_weight(gpui::FontWeight::MEDIUM)
             .child(keys.clone()),
         )
@@ -867,7 +866,7 @@ impl PopupView {
           div()
             .flex()
             .items_center()
-            .gap(zpx(6.))
+            .gap_1p5()
             .font_family(theme::MONO_FONT)
             .child(
               svg()
@@ -903,13 +902,11 @@ impl PopupView {
             .child(title.clone()),
         )
         .child(
-          div()
+          ui::text(div(), TextSize::Xs)
             .flex()
             .flex_col()
-            .gap(zpx(2.))
+            .gap_0p5()
             .font_family(theme::MONO_FONT)
-            .text_size(zpx(LIST_ITEM_SIZE))
-            .line_height(zpx(LIST_ITEM_LINE))
             .children(items.iter().cloned()),
         )
         .into_any_element(),
@@ -1035,9 +1032,8 @@ impl PopupView {
           .debug_selector(move || format!("menu-submenu-{index}"))
           .when_some(detail.clone(), |row, detail| {
             row.child(
-              div()
+              ui::text(div(), TextSize::Xs)
                 .ml(zpx(DETAIL_GAP))
-                .text_size(zpx(LIST_ITEM_SIZE))
                 .text_color(palette.muted_foreground)
                 .whitespace_nowrap()
                 .child(detail),
@@ -1143,7 +1139,7 @@ impl PopupView {
           svg()
             .path(icon)
             .size(zpx(16.))
-            .mt(zpx(2.))
+            .mt_0p5()
             .flex_none()
             .text_color(icon_color),
         )
@@ -1155,9 +1151,8 @@ impl PopupView {
             .flex_col()
             .gap_1()
             .child(
-              div()
+              ui::text(div(), TextSize::Sm)
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .line_height(zpx(TEXT_SIZE))
                 .child(SharedString::from(toast.title.clone())),
             )
             .when_some(toast.description.clone(), |this, description| {
@@ -1265,19 +1260,17 @@ impl Render for PopupView {
     let body = match self.content.clone() {
       Content::Empty => None,
       Content::Toasts(toasts) => {
-        return div()
+        return ui::text(div(), TextSize::Sm)
           .size_full()
           .p(zpx(shadow_margin()))
           .font_family(theme::SANS_FONT)
-          .text_size(zpx(TEXT_SIZE))
-          .line_height(zpx(LINE_HEIGHT))
           .child(self.render_toasts(&toasts, cx));
       }
       // `px-3 py-1.5 shadow-md`
       Content::Tooltip(content) => Some(
         div()
           .px_3()
-          .py(zpx(6.))
+          .py_1p5()
           .shadow_md()
           .child(self.render_tooltip(&content, cx)),
       ),
@@ -1295,12 +1288,10 @@ impl Render for PopupView {
     };
     let composited = composited();
     let body = body.map(|body| if composited { body } else { body.shadow_none() });
-    div()
+    ui::text(div(), TextSize::Sm)
       .size_full()
       .p(zpx(shadow_margin()))
       .font_family(theme::SANS_FONT)
-      .text_size(zpx(TEXT_SIZE))
-      .line_height(zpx(LINE_HEIGHT))
       .when_some(body, |this, body| {
         // `rounded-md border bg-popover text-popover-foreground`
         this.child(

@@ -1,7 +1,7 @@
 //! The Changes tab's find bar (`useDiffSearch`, `SearchOverlay`): Cmd+F
 //! opens it, matches are marked in the diff and Enter steps through them.
 
-use crate::gpui_shell::ui::zpx;
+use crate::gpui_shell::ui::radius;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -460,26 +460,6 @@ impl ChangesView {
       0
     };
     let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let accent = p.accent;
-    let icon_button = |id: &'static str, icon: &'static str, disabled: bool| {
-      div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .size_5()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(zpx(2.))
-        .text_color(muted)
-        .when(disabled, |this| this.opacity(0.5))
-        .when(!disabled, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.bg(accent).text_color(fg))
-        })
-        .child(ui::icon(icon, 16., muted))
-    };
     Some(
       div()
         .id("diff-search")
@@ -490,12 +470,12 @@ impl ChangesView {
         .bg(p.background)
         .border_1()
         .border_color(p.border)
-        .rounded(zpx(6.))
+        .rounded(radius::MD)
         .shadow_lg()
-        .p(zpx(2.))
+        .p_0p5()
         .flex()
         .items_center()
-        .gap(zpx(2.))
+        .gap_0p5()
         .capture_action(cx.listener(|view, _: &Escape, _, cx| {
           view.close_search(cx);
           cx.stop_propagation();
@@ -508,7 +488,7 @@ impl ChangesView {
             .px_2()
             .flex()
             .items_center()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.input)
             .child(ui::input(&input).appearance(false).bordered(false)),
@@ -521,27 +501,48 @@ impl ChangesView {
             .text_color(muted)
             .child(format!("{shown} of {}", self.search.total)),
         )
-        .child(self.tip(
-          "diff-search-prev-tip".into(),
-          "Previous (Shift+Enter)",
-          icon_button("diff-search-prev", theme::ICON_CHEVRON_UP, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
-          }),
-          cx,
-        ))
-        .child(self.tip(
-          "diff-search-next-tip".into(),
-          "Next (Enter)",
-          icon_button("diff-search-next", theme::ICON_CHEVRON_DOWN, empty).when(!empty, |this| {
-            this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
-          }),
-          cx,
-        ))
+        .child(
+          self.tip(
+            "diff-search-prev-tip".into(),
+            "Previous (Shift+Enter)",
+            ui::IconButton::new(
+              "diff-search-prev",
+              theme::ICON_CHEVRON_UP,
+              "Previous match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .when(!empty, |this| {
+              this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
+            }),
+            cx,
+          ),
+        )
+        .child(
+          self.tip(
+            "diff-search-next-tip".into(),
+            "Next (Enter)",
+            ui::IconButton::new(
+              "diff-search-next",
+              theme::ICON_CHEVRON_DOWN,
+              "Next match",
+              p,
+            )
+            .size(ui::IconButtonSize::Small)
+            .disabled(empty)
+            .when(!empty, |this| {
+              this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
+            }),
+            cx,
+          ),
+        )
         .child(
           self.tip(
             "diff-search-close-tip".into(),
             "Close (Esc)",
-            icon_button("diff-search-close", theme::ICON_X, false)
+            ui::IconButton::new("diff-search-close", theme::ICON_X, "Close search", p)
+              .size(ui::IconButtonSize::Small)
               .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
             cx,
           ),

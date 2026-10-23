@@ -7,35 +7,6 @@ message: >
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
 ignores:
-  # Not migrated yet: remove a file once it passes.
-  - "src-tauri/src/gpui_shell/overlay/mod.rs"
-  - "src-tauri/src/gpui_shell/popover/checks.rs"
-  - "src-tauri/src/gpui_shell/screen/changes.rs"
-  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
-  - "src-tauri/src/gpui_shell/screen/changes/threads.rs"
-  - "src-tauri/src/gpui_shell/screen/code.rs"
-  - "src-tauri/src/gpui_shell/screen/commits.rs"
-  - "src-tauri/src/gpui_shell/screen/commits/rows.rs"
-  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
-  - "src-tauri/src/gpui_shell/screen/file_picker.rs"
-  - "src-tauri/src/gpui_shell/screen/github.rs"
-  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
-  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
-  - "src-tauri/src/gpui_shell/screen/linear.rs"
-  - "src-tauri/src/gpui_shell/screen/logs.rs"
-  - "src-tauri/src/gpui_shell/screen/merge.rs"
-  - "src-tauri/src/gpui_shell/screen/merge_queue.rs"
-  - "src-tauri/src/gpui_shell/screen/onboarding_remote.rs"
-  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
-  - "src-tauri/src/gpui_shell/screen/reactions.rs"
-  - "src-tauri/src/gpui_shell/screen/remote.rs"
-  - "src-tauri/src/gpui_shell/screen/remote_chrome.rs"
-  - "src-tauri/src/gpui_shell/screen/settings/account.rs"
-  - "src-tauri/src/gpui_shell/screen/terminal.rs"
-  - "src-tauri/src/gpui_shell/screen/terminal_lightbox.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
-  - "src-tauri/src/gpui_shell/sidebar/mod.rs"
   # Syntax and ANSI palettes are content colors, not UI tokens.
   - "src-tauri/src/gpui_shell/screen/highlight.rs"
   - "src-tauri/src/gpui_shell/screen/terminal_emu.rs"
@@ -46,15 +17,12 @@ rule:
     - kind: call_expression
       has:
         field: function
-        kind: identifier
-        regex: ^(rgb|rgba|hsla)$
+        regex: "^(gpui(_kit)?::)?(rgb|rgba|hsla|black|white)$"
     - kind: scoped_identifier
-      regex: "^tw::"
+      regex: "(^|::)tw::"
       not:
         inside:
           kind: scoped_identifier
-    - pattern: "black().opacity($$$)"
-    - pattern: "white().opacity($$$)"
   not:
     inside:
       kind: mod_item

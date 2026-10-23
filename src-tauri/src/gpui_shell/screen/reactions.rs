@@ -1,15 +1,16 @@
 //! Reactions on GitHub comments: the counts under a comment, and the
 //! picker of GitHub's eight reactions that adds or removes the user's own.
 
+use crate::gpui_shell::ui::radius;
 use tauri_plugin_gpui::gpui::{deferred, div, prelude::*, Context, Div, SharedString};
 
 use crate::{
   github::GhReactionGroup,
   gpui_shell::{
     popup::{Side, TooltipContent},
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
-    ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Variant},
+    ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Tone, Variant},
   },
 };
 
@@ -133,7 +134,7 @@ fn chip<V: Reacts>(
   p: &Palette,
   cx: &mut Context<V>,
 ) -> Button {
-  let sky = tw::color(tw::SKY_500);
+  let sky = Tone::Primary.color(p);
   let mine = group.viewer_has_reacted;
   let (comment, content) = (id.to_string(), static_content(&group.content));
   Button::new(
@@ -172,7 +173,7 @@ fn picker<V: Reacts>(
   p: &Palette,
   cx: &mut Context<V>,
 ) -> impl IntoElement {
-  let sky = tw::color(tw::SKY_500);
+  let sky = Tone::Primary.color(p);
   deferred(
     div()
       .id(SharedString::from(format!("reaction-picker-{id}")))
@@ -183,7 +184,7 @@ fn picker<V: Reacts>(
       .p_1()
       .flex()
       .gap_1()
-      .rounded(zpx(8.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)

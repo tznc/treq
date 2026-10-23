@@ -6,7 +6,7 @@ use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, FontWeight, Stateful};
 
 use super::{
-  code::{menu_item, menu_panel, tw, GREEN_500},
+  code::{menu_panel, menu_row},
   code_data::Environment,
 };
 use crate::gpui_shell::{
@@ -57,7 +57,7 @@ pub(crate) fn trigger(
     .size(Size::Sm)
     .h(zpx(size.height))
     .px(zpx(size.padding))
-    .gap(zpx(6.))
+    .gap_1p5()
     .child(ui::icon(icon, size.icon, p.foreground))
     .child(ui::text(div(), TextSize::Xs).child(label))
     .when(devcontainer, |b| {
@@ -69,7 +69,7 @@ pub(crate) fn trigger(
         ))
       } else {
         b.child(div().size(zpx(6.)).rounded_full().bg(if running {
-          tw(GREEN_500)
+          crate::gpui_shell::ui::Tone::Success.color(p)
         } else {
           p.muted_foreground.opacity(0.5)
         }))
@@ -105,11 +105,11 @@ pub(crate) fn menu<V: 'static>(
               detail: &str,
               selected: bool,
               disabled: bool| {
-    menu_item(id, p, disabled)
+    menu_row(id, p, disabled)
       .items_start()
       .child(
         div()
-          .mt(zpx(2.))
+          .mt_0p5()
           .child(ui::icon(icon, 14., p.popover_foreground)),
       )
       .child(
@@ -118,7 +118,7 @@ pub(crate) fn menu<V: 'static>(
           .min_w_0()
           .flex()
           .flex_col()
-          .gap(zpx(2.))
+          .gap_0p5()
           .child(div().font_weight(FontWeight::MEDIUM).child(title))
           .child(
             ui::text(div(), TextSize::Xs)
@@ -129,7 +129,7 @@ pub(crate) fn menu<V: 'static>(
       .when(selected, |this| {
         this.child(
           div()
-            .mt(zpx(2.))
+            .mt_0p5()
             .child(ui::icon(theme::ICON_CHECK, 14., p.popover_foreground)),
         )
       })
@@ -140,7 +140,7 @@ pub(crate) fn menu<V: 'static>(
     .child(
       ui::text(div(), TextSize::Xs)
         .px_2()
-        .py(zpx(6.))
+        .py_1p5()
         .text_color(p.muted_foreground)
         .child("New terminals and agents run in"),
     )
@@ -172,9 +172,9 @@ pub(crate) fn menu<V: 'static>(
     panel = panel
       .child(div().h_px().my_1().mx_neg_1().bg(p.border))
       .child(
-        menu_item("environment-start", p, starting)
-          .child(ui::icon(theme::ICON_PLAY, 14., p.popover_foreground))
-          .child("Start devcontainer")
+        ui::MenuItem::new("environment-start", "Start devcontainer", p)
+          .icon(theme::ICON_PLAY)
+          .disabled(starting)
           .when(!starting, |this| {
             this.on_click(cx.listener(move |view, _, _, cx| start(view, cx)))
           }),

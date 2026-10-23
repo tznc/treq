@@ -12,6 +12,7 @@
 //! popover's own button, which only closes it. What only React can do (retargeting the workspace,
 //! running workflows, the prompt history dialog) goes back as screen actions.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
@@ -210,8 +211,7 @@ impl Popover {
   }
 
   fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-    let key = event.keystroke.key.as_str();
-    if key == "escape" {
+    if crate::gpui_shell::ui::is_escape(&event.keystroke) {
       self.close(cx);
       cx.stop_propagation();
       return;
@@ -235,7 +235,7 @@ impl Popover {
       .debug_selector(move || id.into())
       .w(zpx(width))
       .p(zpx(padding))
-      .rounded(zpx(6.))
+      .rounded(radius::MD)
       .border_1()
       .border_color(p.border)
       .bg(p.popover)

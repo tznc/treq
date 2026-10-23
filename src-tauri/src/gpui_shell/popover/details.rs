@@ -178,11 +178,7 @@ impl Popover {
             .debug_selector(|| "details-view-full".into())
             .mt_1()
             .cursor_pointer()
-            .text_color(gpui::Hsla::from(gpui::rgb(if self.dark {
-              theme::tw::BLUE_400
-            } else {
-              theme::tw::BLUE_600
-            })))
+            .text_color(theme::palette(self.dark).primary)
             .hover(|s| s.underline())
             .child("View full prompt")
             .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx))),
@@ -215,7 +211,7 @@ impl Popover {
       .panel("workspace-details-popover", WIDTH, 16., &p)
       .flex()
       .flex_col()
-      .gap(zpx(12.))
+      .gap_3()
       .child(details)
       .child(starting)
   }

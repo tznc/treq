@@ -8,6 +8,7 @@
 //! what the nested layout's collapsing margins made it, and each row in the
 //! timeline draws its own stretch of the rule.
 
+use crate::gpui_shell::ui::radius;
 use std::rc::Rc;
 
 use tauri_plugin_gpui::gpui::{
@@ -23,7 +24,7 @@ use crate::{
       commits_data::{line_kind, line_numbers, History, LineKind},
       highlight,
     },
-    theme::{self, tw, Palette},
+    theme::{self, Palette},
     ui::{self, zpx},
   },
   jj::{JjDiffHunk, JjLogCommit},
@@ -490,8 +491,8 @@ impl CommitsView {
       .ml_7()
       .border_x_1()
       .border_color(p.border)
-      .when(top, |this| this.border_t_1().rounded_t(zpx(8.)))
-      .when(bottom, |this| this.border_b_1().rounded_b(zpx(8.)))
+      .when(top, |this| this.border_t_1().rounded_t(radius::MD))
+      .when(bottom, |this| this.border_b_1().rounded_b(radius::MD))
       .overflow_hidden()
       .child(content)
       .into_any_element()
@@ -551,7 +552,7 @@ impl CommitsView {
         .child(
           div()
             .px_3()
-            .py(zpx(2.))
+            .py_0p5()
             .bg(p.muted.opacity(0.6))
             .text_color(p.muted_foreground)
             .border_t_1()
@@ -609,11 +610,11 @@ impl CommitsView {
     let gutter_hover = p.muted.opacity(0.5);
     let kind = line_kind(line);
     let bg = if selected {
-      Some(tw::color(tw::BLUE_500).opacity(0.1))
+      Some(ui::Tone::Primary.tint(p))
     } else {
       match kind {
-        LineKind::Added => Some(tw::color(tw::EMERALD_500).opacity(0.2)),
-        LineKind::Removed => Some(tw::color(tw::RED_500).opacity(0.2)),
+        LineKind::Added => Some(ui::Tone::GitOpen.tint(p)),
+        LineKind::Removed => Some(ui::Tone::GitClosed.tint(p)),
         LineKind::Context => None,
       }
     };
@@ -654,8 +655,8 @@ impl CommitsView {
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
             .debug_selector(move || format!("add-comment-{h}-{l}"))
-            .p(zpx(1.))
-            .rounded(zpx(4.))
+            .p_px()
+            .rounded(radius::SM)
             .bg(p.primary)
             .opacity(0.)
             .group_hover("diff-line", |s| s.opacity(1.))

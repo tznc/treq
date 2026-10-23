@@ -78,7 +78,7 @@ pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiErro
         theme::init(cx);
         // Escape in a shell window closes an open menu, as in a native one.
         cx.observe_keystrokes(move |event, _, _| {
-          if event.keystroke.key == "escape" {
+          if ui::is_escape(&event.keystroke) {
             defer_main(&handle, |_| popup::hide_menus());
           }
         })

@@ -152,7 +152,7 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
       host,
       ToastTone::Success,
       &format!("{n} Workspace{s} Archived"),
-      &format!("Successfully archived {n} workspace{s}"),
+      &format!("Archived {n} workspace{s}"),
     );
     removed(
       host,

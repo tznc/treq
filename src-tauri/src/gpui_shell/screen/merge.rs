@@ -5,6 +5,7 @@
 //! ahead and its diff, and merges it. React still owns leaving the page,
 //! which a merge does too (its caches refresh then).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
   collections::HashSet,
@@ -15,8 +16,7 @@ use std::{
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, deferred, div, hsla, prelude::*, relative, rgb, App, Context, FontWeight, Hsla,
-  SharedString, Window,
+  self, deferred, div, prelude::*, relative, App, Context, FontWeight, SharedString, Window,
 };
 
 use super::{rows::Rows, workspace_data::WorkspaceHost, ActionSink, ScreenAction};
@@ -26,7 +26,7 @@ use crate::{
     form::{self, Controls},
     native::{Backend, NativeEvent, ToastTone},
     theme::{self, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
   jj::{JjCommitsAhead, JjRevisionDiff},
   local_db::Workspace,
@@ -399,11 +399,7 @@ impl MergeView {
             view.toast(
               ToastTone::Success,
               title,
-              format!(
-                "Successfully {done} {} into {}",
-                ws.branch_name,
-                target_branch(&ws)
-              ),
+              format!("{} {done} into {}", ws.branch_name, target_branch(&ws)),
             );
           }
           Err(err) => view.toast(ToastTone::Error, "Merge failed", err),
@@ -420,11 +416,6 @@ impl MergeView {
   }
 }
 
-/// `hsl(142, 76%, 36%)`, the merge button's inline color.
-fn merge_green() -> Hsla {
-  hsla(142. / 360., 0.76, 0.36, 1.)
-}
-
 fn heading(label: impl Into<SharedString>) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
     .font_weight(FontWeight::SEMIBOLD)
@@ -437,7 +428,7 @@ fn empty(p: &Palette, label: String) -> gpui::Div {
   ui::text(div(), TextSize::Sm)
     .border_1()
     .border_color(p.border)
-    .rounded(zpx(12.))
+    .rounded(radius::LG)
     .p_6()
     .text_center()
     .text_color(p.muted_foreground)
@@ -449,7 +440,7 @@ fn list(p: &Palette) -> gpui::Div {
   div()
     .border_1()
     .border_color(p.border)
-    .rounded(zpx(12.))
+    .rounded(radius::LG)
     .flex()
     .flex_col()
 }
@@ -562,7 +553,7 @@ impl MergeView {
         Strategy::Merge => "Confirm merge",
       }
     };
-    let green = merge_green();
+    let green = Tone::Success.color(p);
     let confirm = Button::new("merge-confirm", p)
       .disabled(disabled)
       .bg(green)
@@ -677,7 +668,7 @@ impl MergeView {
         .right_0()
         .w(zpx(256.))
         .p_1()
-        .rounded(zpx(8.))
+        .rounded(radius::MD)
         .border_1()
         .border_color(p.border)
         .bg(p.popover)
@@ -708,7 +699,7 @@ impl MergeView {
             .py_3()
             .pl_8()
             .pr_2()
-            .rounded(zpx(6.))
+            .rounded(radius::MD)
             .cursor_pointer()
             .hover(move |s| s.bg(p.menu_accent))
             .child(
@@ -846,7 +837,7 @@ impl MergeView {
         div()
           .bg(p.muted.opacity(0.3))
           .px_2()
-          .child(hunk_line(line))
+          .child(hunk_line(line, &p))
           .into_any_element()
       }
       Row::HunkEnd(..) => div().bg(p.muted.opacity(0.3)).h_2().into_any_element(),
@@ -860,8 +851,8 @@ impl MergeView {
         div()
           .border_x_1()
           .border_color(p.border)
-          .when(top, |this| this.border_t_1().rounded_t(zpx(12.)))
-          .when(bottom, |this| this.border_b_1().rounded_b(zpx(12.)))
+          .when(top, |this| this.border_t_1().rounded_t(radius::LG))
+          .when(bottom, |this| this.border_b_1().rounded_b(radius::LG))
           .overflow_hidden()
           .child(content),
       )
@@ -910,13 +901,11 @@ impl MergeView {
 
 /// A line of a hunk's `<pre className="p-2 text-xs font-mono">`, clipped
 /// at the card's edge like the other diffs.
-fn hunk_line(line: &str) -> impl IntoElement {
-  let added: Hsla = rgb(0x10b981).into();
-  let removed: Hsla = rgb(0xef4444).into();
+fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
   let bg = if line.starts_with('+') && !line.starts_with("+++") {
-    Some(added.opacity(0.2))
+    Some(Tone::GitOpen.tint(p))
   } else if line.starts_with('-') && !line.starts_with("---") {
-    Some(removed.opacity(0.2))
+    Some(Tone::GitClosed.tint(p))
   } else {
     None
   };
@@ -950,9 +939,9 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
             ui::text(div(), TextSize::Xs)
               .flex_none()
               .bg(p.muted)
-              .px(zpx(6.))
-              .py(zpx(2.))
-              .rounded(zpx(4.))
+              .px_1p5()
+              .py_0p5()
+              .rounded(radius::SM)
               .font_family(theme::MONO_FONT)
               .child(commit.short_id.clone()),
           )
@@ -972,7 +961,7 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                   .flex_wrap()
                   .items_center()
                   .gap_2()
-                  .mt(zpx(2.))
+                  .mt_0p5()
                   .text_color(p.muted_foreground)
                   .child(commit.author_name.clone())
                   .when(commit.insertions > 0 || commit.deletions > 0, |this| {
@@ -981,13 +970,13 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                         .flex()
                         .child(
                           div()
-                            .text_color(rgb(0x16a34a))
+                            .text_color(Tone::GitOpen.color(p))
                             .child(format!("+{}", commit.insertions)),
                         )
                         .child("\u{a0}")
                         .child(
                           div()
-                            .text_color(rgb(0xdc2626))
+                            .text_color(Tone::GitClosed.color(p))
                             .child(format!("-{}", commit.deletions)),
                         ),
                     )

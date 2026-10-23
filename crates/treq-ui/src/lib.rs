@@ -6,6 +6,7 @@
 
 pub mod alert;
 pub mod badge;
+pub mod checkbox;
 pub mod dialog;
 pub mod empty_state;
 pub mod icon_button;
@@ -20,6 +21,7 @@ pub mod theme;
 
 pub use alert::{Alert, Severity};
 pub use badge::{Badge, Count, Dot, Tone};
+pub use checkbox::{CheckState, Checkbox};
 pub use dialog::{ConfirmDialog, Dialog};
 pub use empty_state::{EmptyState, Loading, Skeleton};
 pub use icon_button::{IconButton, IconButtonSize};
@@ -46,6 +48,21 @@ use theme::Palette;
 
 /// The rem size at 100% `ui_zoom`, as the webview's root font size.
 pub const BASE_REM: f32 = 16.;
+
+/// The corner radii, as rems so they follow UI zoom:
+/// `.rounded(radius::MD)`.
+pub mod radius {
+  use gpui::Rems;
+
+  use crate::{theme, BASE_REM};
+
+  /// Kbd, checkboxes, menu and list rows.
+  pub const SM: Rems = Rems(theme::RADIUS_SM / BASE_REM);
+  /// Buttons, inputs, menus, popovers and tooltips.
+  pub const MD: Rems = Rems(theme::RADIUS_MD / BASE_REM);
+  /// Cards, toasts and dialogs.
+  pub const LG: Rems = Rems(theme::RADIUS_LG / BASE_REM);
+}
 
 /// `v` CSS pixels as rems, so the length follows the window's rem size,
 /// which `ui_zoom` scales the way React's CSS `zoom` scaled every length.
@@ -90,9 +107,16 @@ pub type OnHover = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 /// size and line height in pixels.
 #[derive(Clone, Copy)]
 pub enum TextSize {
+  /// Captions, badges and kbd.
   Xs,
+  /// Body text and controls.
   Sm,
+  /// Titles.
   Lg,
+  /// Headings.
+  Xl,
+  /// Code, paths and aligned digits, in the mono font.
+  Code,
 }
 
 impl TextSize {
@@ -101,6 +125,8 @@ impl TextSize {
       TextSize::Xs => (11., 16.),
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
+      TextSize::Xl => (20., 28.),
+      TextSize::Code => (12., 20.),
     }
   }
 }
@@ -522,6 +548,29 @@ pub trait DismissExt: InteractiveElement + Sized {
 
 impl<E: InteractiveElement> DismissExt for E {}
 
+/// Whether `keystroke` is a plain Escape, the key that closes the topmost
+/// layer. For a dispatcher that routes every key; a dialog or panel uses
+/// [`EscapeExt::on_escape`].
+pub fn is_escape(keystroke: &gpui::Keystroke) -> bool {
+  let m = keystroke.modifiers;
+  keystroke.key == "escape" && !(m.control || m.alt || m.shift || m.platform || m.function)
+}
+
+/// Escape for the focused dialog, sheet or panel: `f` runs on a plain
+/// Escape, which stops there, so only the topmost layer closes.
+pub trait EscapeExt: InteractiveElement + Sized {
+  fn on_escape(self, f: impl Fn(&gpui::KeyDownEvent, &mut Window, &mut App) + 'static) -> Self {
+    self.on_key_down(move |e: &gpui::KeyDownEvent, window, cx| {
+      if is_escape(&e.keystroke) {
+        cx.stop_propagation();
+        f(e, window, cx);
+      }
+    })
+  }
+}
+
+impl<E: InteractiveElement> EscapeExt for E {}
+
 /// Marks an element's accessibility node disabled, as `aria-disabled` did:
 /// GPUI has no setter for it, so a disabled button reached screen readers,
 /// and the e2e suite's `toBeDisabled`, as enabled. Call it before
@@ -658,6 +707,14 @@ pub fn card(p: &Palette) -> Div {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn escape_is_plain_escape_only() {
+    let key = |s| gpui::Keystroke::parse(s).unwrap();
+    assert!(is_escape(&key("escape")));
+    assert!(!is_escape(&key("shift-escape")));
+    assert!(!is_escape(&key("enter")));
+  }
 
   #[test]
   fn disabled_button_mutes_its_label_and_icons() {

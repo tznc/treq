@@ -3,6 +3,7 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::{
   cell::Cell,
@@ -13,7 +14,7 @@ use std::{
 
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
-  self, div, img, prelude::*, rgb, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
+  self, div, img, prelude::*, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
   FocusHandle, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels,
   SharedString, Stateful, Subscription, Window,
 };
@@ -35,15 +36,6 @@ use crate::gpui_shell::{
 /// `IMAGE_ZOOM_MIN`, `IMAGE_ZOOM_MAX`: one step, from 100% to 200%.
 const ZOOM_MIN: f32 = 1.;
 const ZOOM_MAX: f32 = 2.;
-const RED: u32 = 0xef4444;
-const ZINC_100: u32 = 0xf4f4f5;
-const ZINC_300: u32 = 0xd4d4d8;
-const ZINC_500: u32 = 0x71717a;
-const ZINC_900: u32 = 0x18181b;
-const ZINC_950: u32 = 0x09090b;
-const AMBER_500: u32 = 0xf59e0b;
-/// `text-sm leading-relaxed`.
-const TEXT_LINE: f32 = 13. * 1.625;
 
 /// What the lightbox asks of its pane.
 #[derive(Debug, Clone, PartialEq)]
@@ -65,8 +57,18 @@ struct Pending {
   end: usize,
 }
 
-fn white(alpha: f32) -> Hsla {
-  gpui::white().opacity(alpha)
+/// A text line's vertical padding: 23px rows, which the virtual list's
+/// scroll math is tuned to.
+const LINE_PADDING_Y: f32 = 1.5;
+
+/// The lightbox is dark in both themes: its text and lines at `alpha`.
+fn chrome(alpha: f32) -> Hsla {
+  theme::palette(true).foreground.opacity(alpha)
+}
+
+/// Behind the lightbox's controls, which sit over the media.
+fn scrim(alpha: f32) -> Hsla {
+  theme::palette(true).scrim().alpha(alpha)
 }
 
 pub struct Lightbox {
@@ -625,7 +627,7 @@ impl Lightbox {
 
   fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
     match event.keystroke.key.as_str() {
-      "escape" => {
+      _ if ui::is_escape(&event.keystroke) => {
         cx.stop_propagation();
         if self.discard {
           self.discard = false;
@@ -661,12 +663,12 @@ fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
     .flex()
     .items_center()
     .justify_center()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .when(disabled, |d| d.opacity(0.4))
     .when(!disabled, |d| {
-      d.cursor_pointer().hover(|s| s.bg(white(0.15)))
+      d.cursor_pointer().hover(|s| s.bg(chrome(0.15)))
     })
-    .child(ui::icon(icon, 16., gpui::white()))
+    .child(ui::icon(icon, 16., chrome(1.)))
 }
 
 impl Lightbox {
@@ -679,8 +681,8 @@ impl Lightbox {
       .gap_1()
       .rounded_full()
       .border_1()
-      .border_color(white(0.15))
-      .bg(gpui::black().opacity(0.4))
+      .border_color(chrome(0.15))
+      .bg(scrim(0.4))
       .p_1()
       .shadow_lg();
     if image {
@@ -699,7 +701,7 @@ impl Lightbox {
             .px_1()
             .flex()
             .justify_center()
-            .text_color(white(0.8))
+            .text_color(chrome(0.8))
             .child(format!("{}%", (self.zoom * 100.).round())),
         )
         .child(
@@ -707,7 +709,7 @@ impl Lightbox {
             b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom + 1., cx)))
           }),
         )
-        .child(div().mx(zpx(2.)).h_4().w_px().bg(white(0.2)));
+        .child(div().mx_0p5().h_4().w_px().bg(chrome(0.2)));
     }
     let pill = content(
       pill
@@ -737,11 +739,11 @@ impl Lightbox {
           .px_3()
           .flex()
           .items_center()
-          .rounded(zpx(6.))
+          .rounded(radius::MD)
           .border_1()
-          .border_color(white(0.15))
-          .bg(gpui::black().opacity(0.4))
-          .text_color(gpui::white())
+          .border_color(chrome(0.15))
+          .bg(scrim(0.4))
+          .text_color(chrome(1.))
           .when(disabled, |d| d.opacity(0.4))
           .child(Input::new(&general).appearance(false).bordered(false)),
       )
@@ -771,6 +773,7 @@ impl Lightbox {
       None => (vh * 0.8 * self.zoom, vh * 0.8 * self.zoom),
     };
     let zoomed = self.zoom > ZOOM_MIN;
+    let d = theme::palette(true);
     let surface = self.surface.clone();
     let active = self.active_highlight;
     let box_at = move |rect: Rect| {
@@ -814,7 +817,7 @@ impl Lightbox {
       .children(
         self
           .draft
-          .map(|rect| box_at(rect).border_color(rgb(RED).opacity(0.7))),
+          .map(|rect| box_at(rect).border_color(ui::Tone::Danger.color(&d).opacity(0.7))),
       );
     for highlight in self.current_highlights() {
       let id = highlight.id;
@@ -830,10 +833,10 @@ impl Lightbox {
           .top_0()
           .ml_2()
           .w_56()
-          .rounded(zpx(8.))
+          .rounded(radius::MD)
           .border_1()
-          .border_color(white(0.2))
-          .bg(rgb(ZINC_950))
+          .border_color(chrome(0.2))
+          .bg(d.popover)
           .p_2()
           .shadow_xl()
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -842,10 +845,10 @@ impl Lightbox {
               .min_h(zpx(72.))
               .px_3()
               .py_2()
-              .rounded(zpx(6.))
+              .rounded(radius::MD)
               .border_1()
-              .border_color(white(0.15))
-              .text_color(rgb(ZINC_100))
+              .border_color(chrome(0.15))
+              .text_color(d.foreground)
               .children(input.map(|i| Textarea::new(&i).appearance(false).bordered(false))),
           )
           .child(
@@ -859,11 +862,11 @@ impl Lightbox {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(zpx(8.))
+                .rounded(radius::MD)
                 .cursor_pointer()
-                .hover(|s| s.bg(white(0.1)))
+                .hover(|s| s.bg(chrome(0.1)))
                 .on_click(cx.listener(move |view, _, _, cx| view.remove_highlight(id, cx)))
-                .child(ui::icon(theme::ICON_X, 14., rgb(ZINC_300).into())),
+                .child(ui::icon(theme::ICON_X, 14., d.foreground)),
             ),
           )
       });
@@ -871,7 +874,7 @@ impl Lightbox {
         box_at(highlight.rect)
           .id(SharedString::from(format!("treq-send-highlight-{id}")))
           .debug_selector(move || format!("treq-send-highlight-{id}"))
-          .border_color(rgb(RED))
+          .border_color(ui::Tone::Danger.color(&d))
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _, _, cx| {
@@ -950,10 +953,10 @@ impl Lightbox {
           .items_start()
           .gap_3()
           .px_4()
-          .py(zpx(2.))
-          .hover(|s| s.bg(white(0.05)))
-          .when(pending, |d| d.bg(rgb(RED).opacity(0.15)))
-          .when(commented, |d| d.bg(rgb(AMBER_500).opacity(0.1)))
+          .py(zpx(LINE_PADDING_Y))
+          .hover(|s| s.bg(chrome(0.05)))
+          .when(pending, |d| d.bg(ui::Tone::Danger.tint(&palette)))
+          .when(commented, |d| d.bg(ui::Tone::Warning.tint(&palette)))
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, e: &MouseDownEvent, _, cx| view.line_down(n, e, cx)),
@@ -962,13 +965,12 @@ impl Lightbox {
             cx.listener(move |view, e: &MouseMoveEvent, _, cx| view.line_over(n, e, cx)),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Code)
               .w_8()
               .flex_none()
               .flex()
               .justify_end()
-              .line_height(zpx(TEXT_LINE))
-              .text_color(rgb(ZINC_500))
+              .text_color(palette.muted_foreground)
               .child(n.to_string()),
           )
           .child(
@@ -992,8 +994,8 @@ impl Lightbox {
         div()
           .debug_selector(|| "treq-send-line-comment-composer".into())
           .border_t_1()
-          .border_color(white(0.1))
-          .bg(rgb(ZINC_900))
+          .border_color(chrome(0.1))
+          .bg(palette.background)
           .px_4()
           .py_3()
           .font_family(theme::SANS_FONT)
@@ -1002,7 +1004,7 @@ impl Lightbox {
               .min_h(zpx(72.))
               .px_3()
               .py_2()
-              .rounded(zpx(6.))
+              .rounded(radius::MD)
               .border_1()
               .border_color(palette.input)
               .bg(palette.background)
@@ -1047,15 +1049,15 @@ impl Lightbox {
         ui::text(div(), TextSize::Sm)
           .debug_selector(move || format!("treq-send-line-comment-{id}"))
           .border_t_1()
-          .border_color(white(0.1))
-          .bg(rgb(ZINC_900).opacity(0.8))
+          .border_color(chrome(0.1))
+          .bg(palette.background.opacity(0.8))
           .px_4()
           .py_2()
           .font_family(theme::SANS_FONT)
-          .text_color(rgb(ZINC_100))
+          .text_color(palette.foreground)
           .child(
             ui::text(div(), TextSize::Xs)
-              .text_color(rgb(ZINC_500))
+              .text_color(palette.muted_foreground)
               .child(range),
           )
           .child(div().whitespace_normal().child(comment.text.clone()))
@@ -1065,6 +1067,7 @@ impl Lightbox {
   }
 
   fn text_slide(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    let d = theme::palette(true);
     let count = self.text_rows.len();
     let long = count > LONG_TEXT;
     let max_h = f32::from(window.viewport_size().height) * 0.8;
@@ -1078,28 +1081,26 @@ impl Lightbox {
       .flex()
       .flex_col()
       .overflow_hidden()
-      .rounded(zpx(12.))
-      .bg(rgb(ZINC_900))
+      .rounded(radius::LG)
+      .bg(d.background)
       .shadow_2xl()
       .child(
         ui::text(div(), TextSize::Xs)
           .flex_none()
           .border_b_1()
-          .border_color(white(0.1))
+          .border_color(chrome(0.1))
           .px_4()
-          .py(zpx(6.))
-          .text_color(rgb(ZINC_500))
+          .py_1p5()
+          .text_color(d.muted_foreground)
           .child("Click a line to comment. Drag or Shift+click to select multiple lines."),
       )
       .child(
-        div()
+        ui::text(div(), TextSize::Code)
           .id("treq-send-text-scroll")
           .min_h_0()
           .flex_shrink(1.)
           .font_family(theme::MONO_FONT)
-          .text_size(zpx(13.))
-          .line_height(zpx(TEXT_LINE))
-          .text_color(rgb(ZINC_100))
+          .text_color(d.foreground)
           .map(|this| {
             if long {
               this.flex_1().child(
@@ -1141,7 +1142,7 @@ impl Lightbox {
         .debug_selector(move || id.into())
         .absolute()
         .top(gpui::relative(0.5))
-        .mt(zpx(-32.))
+        .mt_neg_8()
         .when(next, |d| d.right_3())
         .when(!next, |d| d.left_3())
         .size_16()
@@ -1150,19 +1151,15 @@ impl Lightbox {
         .justify_center()
         .rounded_full()
         .border_1()
-        .border_color(white(0.2))
-        .bg(gpui::black().opacity(0.4))
+        .border_color(chrome(0.2))
+        .bg(scrim(0.4))
         .when(disabled, |d| d.opacity(0.5))
         .when(!disabled, |d| {
-          d.cursor_pointer()
-            .hover(|s| s.bg(gpui::black().opacity(0.6)))
-            .on_click(
-              cx.listener(move |view, _, window, cx| {
-                view.go(if next { 1 } else { -1 }, window, cx)
-              }),
-            )
+          d.cursor_pointer().hover(|s| s.bg(scrim(0.6))).on_click(
+            cx.listener(move |view, _, window, cx| view.go(if next { 1 } else { -1 }, window, cx)),
+          )
         })
-        .child(ui::icon(icon, 32., gpui::white())),
+        .child(ui::icon(icon, 32., chrome(1.))),
     )
   }
 
@@ -1176,7 +1173,7 @@ impl Lightbox {
       .w_full()
       .max_w(zpx(512.))
       .p_6()
-      .rounded(zpx(16.))
+      .rounded(radius::LG)
       .border_1()
       .border_color(p.border.opacity(0.5))
       .bg(p.popover)
@@ -1187,10 +1184,9 @@ impl Lightbox {
         div()
           .flex()
           .flex_col()
-          .gap(zpx(6.))
+          .gap_1p5()
           .child(
             ui::text(div(), TextSize::Lg)
-              .line_height(zpx(15.))
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .child("Discard unsent comments?"),
           )
@@ -1233,7 +1229,7 @@ impl Lightbox {
         .flex()
         .items_center()
         .justify_center()
-        .bg(gpui::black().opacity(0.4))
+        .bg(scrim(0.4))
         .on_mouse_down(
           MouseButton::Left,
           cx.listener(|view, _, _, cx| {
@@ -1269,14 +1265,14 @@ impl Render for Lightbox {
       .flex()
       .flex_col()
       .items_center()
-      .gap(zpx(6.))
+      .gap_1p5()
       .children(current.as_ref().map(|asset| {
         ui::text(div(), TextSize::Sm)
           .id("treq-send-preview-title")
           .debug_selector(|| "treq-send-preview-title".into())
           .max_w_full()
           .truncate()
-          .text_color(white(0.8))
+          .text_color(chrome(0.8))
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .child(asset.title.clone())
       }))
@@ -1300,7 +1296,7 @@ impl Render for Lightbox {
       .items_center()
       .justify_center()
       .font_family(theme::SANS_FONT)
-      .text_color(gpui::white())
+      .text_color(chrome(1.))
       .occlude()
       .capture_key_down(cx.listener(Self::on_key))
       .on_mouse_move(cx.listener(Self::on_mouse_move))
@@ -1313,7 +1309,7 @@ impl Render for Lightbox {
           .id("treq-send-preview-backdrop")
           .absolute()
           .inset_0()
-          .bg(gpui::black().opacity(0.55))
+          .bg(scrim(0.55))
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(|view, _, _, cx| view.request_close(cx)),

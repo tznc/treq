@@ -34,6 +34,31 @@ impl Tone {
       Tone::GitClosed => p.pr_closed,
     }
   }
+
+  /// The tone as text on the window background: the 400 shade in dark
+  /// mode and the 700 shade in light, where the solid color is too faint.
+  pub fn text(self, p: &Palette) -> Hsla {
+    use crate::theme::tw;
+    let (dark, light) = match self {
+      Tone::Neutral => return p.muted_foreground,
+      Tone::Primary => return p.primary,
+      Tone::GitOpen | Tone::GitMerged | Tone::GitClosed => return self.color(p),
+      Tone::Success => (tw::GREEN_400, tw::GREEN_700),
+      Tone::Warning => (tw::YELLOW_400, tw::YELLOW_700),
+      Tone::Danger => (tw::RED_400, tw::RED_700),
+    };
+    tw::color(if p.dark { dark } else { light })
+  }
+
+  /// The fill behind a badge, an alert or a highlighted line.
+  pub fn tint(self, p: &Palette) -> Hsla {
+    self.color(p).opacity(if p.dark { 0.15 } else { 0.1 })
+  }
+
+  /// The border around a tinted area.
+  pub fn border(self, p: &Palette) -> Hsla {
+    self.color(p).opacity(0.4)
+  }
 }
 
 /// A short label in a pill, such as `Draft` or `PRO`: 20 tall, caption
@@ -164,6 +189,11 @@ mod tests {
     assert_eq!(badge.tone, Tone::GitMerged);
     assert_eq!(Tone::GitMerged.color(&p), p.pr_merged);
     assert_eq!(Tone::default().color(&p), p.muted_foreground);
+    assert_eq!(Tone::Danger.text(&p), theme::tw::color(theme::tw::RED_400));
+    assert_eq!(
+      Tone::Danger.text(&theme::palette(false)),
+      theme::tw::color(theme::tw::RED_700)
+    );
   }
 
   #[test]

@@ -1,24 +1,20 @@
 //! `github-panel/shared.tsx`: the chips, rows and states the GitHub view's
 //! lists and details share.
 
+use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, rgb, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
+  self, div, prelude::*, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
 };
 
 use super::super::github_data::{self as data, CiState};
 use crate::{
   github::{GhLabel, GhPullRequest, PrCheckEntry},
   gpui_shell::{
-    theme::{self, tw, Palette},
-    ui::{self, Button, Size, TextSize, Variant},
+    theme::{self, Palette},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
 };
-
-/// Tailwind purple-500, behind the Merged chip.
-const PURPLE_500: u32 = 0xa855f7;
-/// Tailwind yellow-700, a running check.
-const YELLOW_700: u32 = 0xa16207;
 
 /// A click handler for a part.
 pub type OnClick = Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>;
@@ -39,21 +35,21 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
     (
       theme::ICON_CIRCLE_DOT,
       "Open",
-      tw::color(tw::GREEN_500).opacity(0.2),
+      Tone::GitOpen.tint(p),
       p.pr_open,
     )
   } else if s == "MERGED" {
     (
       theme::ICON_MERGE,
       "Merged",
-      tw::color(PURPLE_500).opacity(0.2),
+      Tone::GitMerged.tint(p),
       p.pr_merged,
     )
   } else {
     (
       theme::ICON_CIRCLE_ALERT,
       "Closed",
-      tw::color(tw::RED_500).opacity(0.2),
+      Tone::GitClosed.tint(p),
       p.pr_closed,
     )
   };
@@ -63,7 +59,7 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
     .items_center()
     .gap_1()
     .px_2()
-    .py(zpx(2.))
+    .py_0p5()
     .rounded_full()
     .bg(bg)
     .text_color(fg)
@@ -74,8 +70,8 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> Div {
 /// A label's `#rrggbb` (or bare `rrggbb`) color.
 fn hex(color: &str) -> Hsla {
   u32::from_str_radix(color.trim_start_matches('#'), 16)
-    .map(|v| rgb(v).into())
-    .unwrap_or_else(|_| gpui::black())
+    .map(theme::data_color)
+    .unwrap_or_else(|_| theme::data_color(0))
 }
 
 /// `LabelChip`: the label's color at 20% behind, 40% around.
@@ -83,9 +79,9 @@ pub fn label_chip(label: &GhLabel) -> Div {
   let color = hex(&label.color);
   ui::text(div(), TextSize::Sm)
     .flex_none()
-    .px(zpx(6.))
-    .py(zpx(2.))
-    .rounded(zpx(4.))
+    .px_1p5()
+    .py_0p5()
+    .rounded(radius::SM)
     .font_weight(FontWeight::MEDIUM)
     .bg(color.opacity(0.2))
     .text_color(color)
@@ -109,18 +105,9 @@ pub fn labels(labels: &[GhLabel]) -> Option<Div> {
 /// `ciStatusStyle(state).textClassName`, and its icon.
 pub fn ci_style(state: CiState, p: &Palette) -> (&'static str, Hsla) {
   match state {
-    CiState::Success => (
-      theme::ICON_CIRCLE_CHECK,
-      tw::color(if p.dark { tw::GREEN_400 } else { tw::GREEN_700 }),
-    ),
-    CiState::Failure => (
-      theme::ICON_CIRCLE_X,
-      tw::color(if p.dark { tw::RED_400 } else { tw::RED_700 }),
-    ),
-    CiState::Pending => (
-      theme::ICON_SPINNER,
-      tw::color(if p.dark { tw::YELLOW_400 } else { YELLOW_700 }),
-    ),
+    CiState::Success => (theme::ICON_CIRCLE_CHECK, Tone::Success.text(p)),
+    CiState::Failure => (theme::ICON_CIRCLE_X, Tone::Danger.text(p)),
+    CiState::Pending => (theme::ICON_SPINNER, Tone::Warning.text(p)),
   }
 }
 
@@ -153,7 +140,7 @@ pub fn check_row(
     .flex()
     .items_center()
     .gap_2()
-    .py(zpx(6.))
+    .py_1p5()
     .px_2()
     .child(ci_icon(format!("{id}-spin"), state, 16., p))
     .child(
@@ -173,7 +160,7 @@ pub fn check_row(
   match on_open.filter(|_| !check.link.is_empty()) {
     Some(open) => named(div(), id)
       .w_full()
-      .rounded(zpx(4.))
+      .rounded(radius::SM)
       .cursor_pointer()
       .hover(move |s| s.bg(muted.opacity(0.5)))
       .on_click(open)
@@ -199,25 +186,6 @@ pub fn section_heading(
     // `tracking-widest` is 0.1em: GPUI has no letter spacing, so the
     // capitals stand in.
     .child(label.to_uppercase())
-}
-
-/// `EmptyState`.
-pub fn empty_state(icon: &'static str, message: &str, p: &Palette) -> Div {
-  div()
-    .flex()
-    .flex_col()
-    .items_center()
-    .justify_center()
-    .py_12()
-    .px_6()
-    .gap_2()
-    .text_center()
-    .child(ui::icon(icon, 24., p.muted_foreground))
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .text_color(p.muted_foreground)
-        .child(message.to_string()),
-    )
 }
 
 /// `ErrorState`: the gh message, so auth or network trouble shows.
@@ -259,16 +227,6 @@ pub fn error_state(
     }))
 }
 
-/// A centered `Loader2` (`w-5 h-5`).
-pub fn loading(id: &'static str, p: &Palette) -> Div {
-  div()
-    .flex()
-    .items_center()
-    .justify_center()
-    .py_12()
-    .child(ui::spinner(id, 20., p.muted_foreground))
-}
-
 /// `LoadMoreButton`.
 pub fn load_more(id: &'static str, loading: bool, p: &Palette, on_click: OnClick) -> Div {
   div().p_3().child(
@@ -293,7 +251,7 @@ pub fn open_in_web(id: &'static str, p: &Palette, on_click: OnClick) -> Button {
   Button::new(id, p)
     .variant(Variant::Outline)
     .size(Size::Sm)
-    .gap(zpx(6.))
+    .gap_1p5()
     .icon(theme::ICON_EXTERNAL_LINK, 16.)
     .label("Open in Web")
     .on_click(on_click)
@@ -315,7 +273,7 @@ pub fn busy_spinner(button: Button, id: &str, busy: bool, color: Hsla) -> Button
 pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) -> Div {
   ui::text(div(), TextSize::Sm)
     .bg(p.muted.opacity(0.3))
-    .rounded(zpx(6.))
+    .rounded(radius::MD)
     .p_3()
     .child(
       div()
@@ -339,31 +297,13 @@ pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) ->
 pub fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
   named(div(), id)
     .p_1()
-    .rounded(zpx(8.))
+    .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
     .bg(p.popover)
     .text_color(p.popover_foreground)
     .shadow_md()
     .occlude()
-}
-
-/// A plain `DropdownMenuItem`.
-pub fn menu_item(
-  id: impl Into<SharedString>,
-  label: &str,
-  p: &Palette,
-  on_click: OnClick,
-) -> Stateful<Div> {
-  let accent = p.menu_accent;
-  ui::text(named(div(), id), TextSize::Sm)
-    .px_2()
-    .py(zpx(6.))
-    .rounded(zpx(4.))
-    .cursor_pointer()
-    .hover(move |s| s.bg(accent))
-    .on_click(on_click)
-    .child(label.to_string())
 }
 
 /// A list row's title and number.

@@ -397,7 +397,7 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn push(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
     self.record(format!("push {workspace_id:?}"));
-    workspace_data::Outcome::ok("Pushed to remote", "Changes pushed successfully".into())
+    workspace_data::Outcome::ok("Pushed to remote", "Changes pushed".into())
   }
 
   fn sync(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {

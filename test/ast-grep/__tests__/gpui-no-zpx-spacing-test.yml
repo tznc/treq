@@ -9,6 +9,10 @@ valid:
       div().w(zpx(width)).h(zpx(24.)).text_size(zpx(13.))
     }
   - |
+    fn computed() -> Div {
+      div().pl(zpx(depth as f32 * 16.)).p(zpx(MENU_PADDING))
+    }
+  - |
     fn plain_value() -> Div {
       div().gap(px(4.))
     }
@@ -28,6 +32,10 @@ invalid:
   - |
     fn margin() -> Div {
       div().mt(zpx(4.))
+    }
+  - |
+    fn negative_margin() -> Div {
+      div().mx(zpx(-8.))
     }
   - |
     fn radius() -> Div {
