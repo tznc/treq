@@ -301,7 +301,7 @@ impl Transport for Backend {
   ) -> Result<serde_json::Value, String> {
     self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
     let pool = self.exec_pool();
-    tauri::async_runtime::block_on(remote_command::execute_remote_command::<serde_json::Value>(
+    crate::gpui_shell::block_on(remote_command::execute_remote_command::<serde_json::Value>(
       &pool,
       endpoint,
       request,
@@ -319,7 +319,7 @@ impl Transport for Backend {
     self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
     let pool = self.exec_pool();
     let metrics = pool.metrics.clone();
-    let outcome = tauri::async_runtime::block_on(remote_command::retry_after_reconnect::<
+    let outcome = crate::gpui_shell::block_on(remote_command::retry_after_reconnect::<
       serde_json::Value,
       _,
     >(

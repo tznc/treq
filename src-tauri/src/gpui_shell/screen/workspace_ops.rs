@@ -32,7 +32,7 @@ impl WorkspaceActionsHost for Backend {
   fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError> {
     let cloud = crate::commands::cloud::owned_cloud(self.app())
       .ok_or_else(|| ApiError::new("no_account", "The account is not available in this window."))?;
-    tauri::async_runtime::block_on(account::enqueue(&cloud.supabase, full_name, branch, action))
+    crate::gpui_shell::block_on(account::enqueue(&cloud.supabase, full_name, branch, action))
   }
 
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {

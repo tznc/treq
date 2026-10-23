@@ -554,7 +554,10 @@ pub fn open_or_create_workspace_from_pr(
   }
 
   // Ensure remote bookmarks (including the PR head) are imported before create.
-  let _ = jj::jj_git_fetch(repo_path);
+  // Best effort: offline, the workspace still opens on the local bookmarks.
+  if let Err(error) = jj::jj_git_fetch(repo_path) {
+    tracing::warn!(%error, repo_path, "fetch before opening a workspace failed; using local bookmarks");
+  }
   open_or_create_synced(repo_path, &request)
 }
 
@@ -590,7 +593,9 @@ pub fn open_or_create_workspaces(
   if let Err(err) = sync_workspaces(repo_path) {
     return requests.iter().map(|_| Err(err.clone())).collect();
   }
-  let _ = jj::jj_git_fetch(repo_path);
+  if let Err(error) = jj::jj_git_fetch(repo_path) {
+    tracing::warn!(%error, repo_path, "fetch before opening workspaces failed; using local bookmarks");
+  }
   requests
     .iter()
     .map(|request| {
@@ -990,12 +995,19 @@ pub fn create_workspace_with_symlinked_dirs(
           .join(&workspace.workspace_path)
           .to_string_lossy()
           .to_string();
-        let _ = jj::update_stale_workspace(&new_workspace_path);
-        let _ = jj::update_stale_workspace(&source_workspace_path);
+        for path in [&new_workspace_path, &source_workspace_path] {
+          if let Err(error) = jj::update_stale_workspace(path) {
+            tracing::warn!(%error, workspace_path = %path, "could not update a stale working copy");
+          }
+        }
       }
     }
 
-    let _ = crate::core::submodules::populate_synced_submodules(repo_path, Some(workspace.id));
+    if let Err(error) =
+      crate::core::submodules::populate_synced_submodules(repo_path, Some(workspace.id))
+    {
+      tracing::warn!(%error, repo_path, workspace_id = workspace.id, "could not populate synced submodules");
+    }
 
     Ok(workspace)
   })();
