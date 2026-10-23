@@ -766,9 +766,7 @@ impl SettingsView {
           let result = host.set_repo_settings(&path, &values);
           match &result {
             Ok(()) => {
-              host.notify(NativeEvent::RepoSettingsChanged {
-                repo_path: path.clone(),
-              });
+              host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
               host.notify(toast(ToastTone::Success, "Settings saved", ""));
             }
             Err(err) => host.notify(toast(

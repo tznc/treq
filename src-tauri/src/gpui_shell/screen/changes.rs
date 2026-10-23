@@ -1193,14 +1193,11 @@ impl ChangesView {
     let mut items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(relative.clone(), "Relative path copied".into()),
+        copy(relative, "Relative path copied".into()),
       )
       .icon(MenuIcon::Copy),
-      NativeMenuItem::item(
-        "Copy full path",
-        copy(full.clone(), "Full path copied".into()),
-      )
-      .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy full path", copy(full, "Full path copied".into()))
+        .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
         text: "Open in...".into(),
