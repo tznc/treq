@@ -26,7 +26,7 @@ pub use dialog::{ConfirmDialog, Dialog};
 pub use empty_state::{EmptyState, Loading, Skeleton};
 pub use icon_button::{IconButton, IconButtonSize};
 pub use kbd::Kbd;
-pub use menu::{MenuItem, MenuSeparator};
+pub use menu::{MenuItem, MenuLabel, MenuSeparator};
 pub use picker::{Picker, PickerPlacement};
 pub use popover::Popover;
 pub use row::{Row, RowDensity};

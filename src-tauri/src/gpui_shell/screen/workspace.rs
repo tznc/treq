@@ -1122,8 +1122,9 @@ impl WorkspaceView {
       )
   }
 
-  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    // The button reads the PR's status in a badge toned as GitHub tones its state label.
+  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+    // The PR's state as GitHub labels it, as a pill that is also the button:
+    // the label opens the PR in Treq, the trailing half on GitHub.
     let draft = pr.draft && pr.state == PrState::Open;
     let (label, icon, tone) = match pr.state {
       _ if draft => ("Draft", theme::ICON_PR_DRAFT, ui::Tone::Neutral),
@@ -1131,41 +1132,28 @@ impl WorkspaceView {
       PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, ui::Tone::GitClosed),
       PrState::Merged => ("Merged", theme::ICON_MERGE, ui::Tone::GitMerged),
     };
-    let color = tone.color(p);
-    let styled = |b: Button| b.variant(ui::Variant::Ghost).size(Size::Sm);
-    let view = styled(Button::new("workspace-view-pr", p))
-      .gap_1()
-      .child(ui::icon(icon, 16., color))
-      .child(ui::Badge::new(label, p).tone(tone))
+    let copy = self.copy_link(self.pr_url());
+    let pill = ui::SplitButton::new("workspace-view-pr", label, p)
+      .pill(tone)
+      .icon(icon)
       .aria_label(view_pr_name(pr))
+      .menu_label("Open PR on web")
+      .menu_icon(theme::ICON_EXTERNAL_LINK)
       .on_click(self.press("workspace.viewPr"))
-      .on_right_click(self.copy_link(self.pr_url()));
-    let web = styled(Button::new("workspace-view-pr-web", p))
-      .px_2()
-      .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., p.muted_foreground))
-      .aria_label("Open PR on web")
-      .on_click(self.press("workspace.viewPrWeb"))
-      .on_right_click(self.copy_link(self.pr_url()));
-    div()
-      .flex()
-      .flex_none()
-      .items_center()
-      .child(self.with_tooltip(
-        "workspace-view-pr",
-        Some(TooltipContent::Text(
-          format!("View pull request #{} in Treq", pr.number).into(),
-        )),
-        view,
-        cx,
-      ))
-      .child(self.with_tooltip(
-        "workspace-view-pr-web",
-        Some(TooltipContent::Text(
-          format!("Open pull request #{} on GitHub", pr.number).into(),
-        )),
-        web,
-        cx,
-      ))
+      .on_menu(self.press("workspace.viewPrWeb"))
+      .on_right_click(move |e, w, cx| copy(e, w, cx));
+    self.with_tooltip(
+      "workspace-view-pr",
+      Some(TooltipContent::Text(
+        format!(
+          "Pull request #{}: view in Treq, or open on GitHub",
+          pr.number
+        )
+        .into(),
+      )),
+      pill,
+      cx,
+    )
   }
 
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {

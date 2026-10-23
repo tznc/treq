@@ -252,7 +252,7 @@ pub struct BootManifest {
 }
 
 impl BootManifest {
-  pub const CURRENT_VERSION: u32 = 1;
+  pub const CURRENT_VERSION: u32 = 2;
 }
 
 /// Provider-independent record of a managed instance, matching the "Suggested
@@ -419,7 +419,7 @@ mod tests {
     let manifest = BootManifest {
       manifest_version: BootManifest::CURRENT_VERSION,
       treq_version: "0.2.0".to_string(),
-      jj_version: "0.24.0".to_string(),
+      jj_version: "0.40.0".to_string(),
       git_version: "2.45".to_string(),
       agents: vec![BootManifestAgent {
         name: "claude".to_string(),

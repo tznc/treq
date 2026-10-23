@@ -80,7 +80,7 @@ async function question(page: Page): Promise<{ cancel: Locator; initialize: Loca
   const cancel = page.getByTestId("confirm-cancel");
   const initialize = page.getByRole("button", { name: "Initialize", exact: true });
   await expect(initialize).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("Initialize a Git repository here?")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Initialize a Git repository here?" })).toBeVisible();
   return { cancel, initialize };
 }
 

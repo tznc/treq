@@ -73,3 +73,5 @@ scripts/screenshot/.generated/
 .claude/worktrees/
 
 *.pem
+# Coverage reports (scripts/coverage.sh)
+/coverage
