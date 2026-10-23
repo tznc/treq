@@ -8,7 +8,7 @@
 use std::{
   cell::RefCell,
   collections::HashMap,
-  hash::{BuildHasher, RandomState},
+  hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState},
   ops::Range,
   rc::Rc,
   sync::LazyLock,
@@ -60,36 +60,72 @@ pub(super) type Spans = Rc<Vec<(Range<usize>, Token)>>;
 /// it again, and its spans.
 #[derive(Clone)]
 struct Line {
+  language: &'static str,
   text: SharedString,
   spans: Spans,
 }
 
-/// Lines by language and a hash of their text, so a hit allocates nothing.
+impl Line {
+  fn is(&self, language: &str, text: &str) -> bool {
+    self.language == language && self.text.as_ref() == text
+  }
+}
+
+/// The map's keys are already hashes, and are used as they are.
+#[derive(Default)]
+struct Prehashed(u64);
+
+impl Hasher for Prehashed {
+  fn finish(&self) -> u64 {
+    self.0
+  }
+
+  fn write(&mut self, bytes: &[u8]) {
+    for b in bytes {
+      self.0 = self.0.rotate_left(8) ^ u64::from(*b);
+    }
+  }
+
+  fn write_u64(&mut self, n: u64) {
+    self.0 = n;
+  }
+}
+
+type Lines = HashMap<u64, Line, BuildHasherDefault<Prehashed>>;
+
+/// Lines by a hash of their language and text, so a hit allocates nothing.
 /// Lines go into `current`; once it holds half of [`CACHE_MAX`] it becomes
 /// `previous`, and a line found there moves back. A full cache so drops
 /// only lines not drawn for a while, never the ones on screen.
 #[derive(Default)]
 struct Cache {
-  current: HashMap<(&'static str, u64), Line>,
-  previous: HashMap<(&'static str, u64), Line>,
+  current: Lines,
+  previous: Lines,
   hasher: RandomState,
 }
 
 impl Cache {
-  fn get(&mut self, key: (&'static str, u64), text: &str) -> Option<Line> {
+  fn get<R>(
+    &mut self,
+    key: u64,
+    language: &str,
+    text: &str,
+    read: impl FnOnce(&Line) -> R,
+  ) -> Option<R> {
     if let Some(line) = self.current.get(&key) {
       // Another line with the same hash is a miss, and is replaced.
-      return (line.text.as_ref() == text).then(|| line.clone());
+      return line.is(language, text).then(|| read(line));
     }
     let line = self.previous.remove(&key)?;
-    if line.text.as_ref() != text {
+    if !line.is(language, text) {
       return None;
     }
-    self.insert(key, line.clone());
-    Some(line)
+    let out = read(&line);
+    self.insert(key, line);
+    Some(out)
   }
 
-  fn insert(&mut self, key: (&'static str, u64), line: Line) {
+  fn insert(&mut self, key: u64, line: Line) {
     if self.current.len() >= CACHE_MAX / 2 {
       self.previous = std::mem::take(&mut self.current);
     }
@@ -143,20 +179,22 @@ fn syntax(language: &str) -> Option<&'static SyntaxReference> {
 
 /// Token spans of one line, byte ranges into `line`.
 pub(super) fn spans(language: &'static str, line: &str) -> Spans {
-  highlighted(language, line).spans
+  highlighted(language, line, |l| l.spans.clone())
 }
 
-fn highlighted(language: &'static str, line: &str) -> Line {
+/// `read` of `line`'s cache entry, highlighting it first on a miss.
+fn highlighted<R>(language: &'static str, line: &str, read: impl Fn(&Line) -> R) -> R {
   let key = CACHE.with(|c| {
     let mut c = c.borrow_mut();
-    let key = (language, c.hasher.hash_one(line));
-    c.get(key, line).ok_or(key)
+    let key = c.hasher.hash_one((language, line));
+    c.get(key, language, line, &read).ok_or(key)
   });
   let key = match key {
     Ok(hit) => return hit,
     Err(key) => key,
   };
-  let hit = Line {
+  let entry = Line {
+    language,
     text: SharedString::from(line.to_string()),
     spans: Rc::new(
       syntax(language)
@@ -164,8 +202,9 @@ fn highlighted(language: &'static str, line: &str) -> Line {
         .unwrap_or_default(),
     ),
   };
-  CACHE.with(|c| c.borrow_mut().insert(key, hit.clone()));
-  hit
+  let out = read(&entry);
+  CACHE.with(|c| c.borrow_mut().insert(key, entry));
+  out
 }
 
 fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usize>, Token)> {
@@ -336,7 +375,7 @@ fn text_and_styles(
   let Some(language) = language else {
     return (SharedString::from(line.to_string()), Vec::new());
   };
-  let Line { text, spans } = highlighted(language, line);
+  let (text, spans) = highlighted(language, line, |l| (l.text.clone(), l.spans.clone()));
   let styles = spans
     .iter()
     .filter_map(|(range, token)| {
@@ -428,22 +467,24 @@ mod tests {
   fn a_full_cache_keeps_the_lines_read_since() {
     let mut cache = Cache::default();
     let line = |text: &str| Line {
+      language: "rs",
       text: text.to_string().into(),
       spans: Rc::default(),
     };
-    cache.insert(("rs", 0), line("kept"));
-    cache.insert(("rs", 1), line("dropped"));
+    cache.insert(0, line("kept"));
+    cache.insert(1, line("dropped"));
     for i in 2..2 * CACHE_MAX as u64 {
-      cache.insert(("rs", i), line("other"));
+      cache.insert(i, line("other"));
       if i % 1000 == 0 {
-        assert!(cache.get(("rs", 0), "kept").is_some());
+        assert!(cache.get(0, "rs", "kept", |_| ()).is_some());
       }
     }
-    assert!(cache.get(("rs", 0), "kept").is_some());
-    assert!(cache.get(("rs", 1), "dropped").is_none());
+    assert!(cache.get(0, "rs", "kept", |_| ()).is_some());
+    assert!(cache.get(1, "rs", "dropped", |_| ()).is_none());
+    // Another text or language with the same hash is not taken for the line.
+    assert!(cache.get(0, "rs", "collides", |_| ()).is_none());
+    assert!(cache.get(0, "ts", "kept", |_| ()).is_none());
     assert!(cache.current.len() + cache.previous.len() <= CACHE_MAX);
-    // Another text with the same hash is not taken for the line.
-    assert!(cache.get(("rs", 0), "collides").is_none());
   }
 
   #[test]
