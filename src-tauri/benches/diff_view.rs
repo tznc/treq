@@ -125,6 +125,24 @@ fn bench_intraline(c: &mut Criterion) {
   c.bench_function("diff_view/intraline_250_pairs", |b| {
     b.iter(|| diff::changed_ranges(black_box(&hunk.lines)))
   });
+  // Long lines with edits spread along them: the diffed middle is nearly
+  // the whole 400 characters, the table's worst case.
+  let long: Vec<String> = (0..PAIRS)
+    .map(|i| format!("-{}", long_line(i, false)))
+    .chain((0..PAIRS).map(|i| format!("+{}", long_line(i, true))))
+    .collect();
+  c.bench_function("diff_view/intraline_250_long_pairs", |b| {
+    b.iter(|| diff::changed_ranges(black_box(&long)))
+  });
+}
+
+/// A 400-character line; the new side changes one character in each
+/// 40-character word.
+fn long_line(i: usize, new: bool) -> String {
+  let mark = if new { 'y' } else { 'x' };
+  (0..10)
+    .map(|w| format!("w{w}_{i:04}_{mark}_abcdefghijklmnopqrstuvwxyz0123"))
+    .collect()
 }
 
 fn bench_highlight(c: &mut Criterion) {
