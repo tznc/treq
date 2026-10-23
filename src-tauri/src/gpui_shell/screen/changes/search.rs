@@ -170,6 +170,12 @@ impl ChangesView {
     }));
   }
 
+  /// Cmd+F is the shown view's: a hidden one stops listening, and listens
+  /// again once drawn.
+  pub(super) fn unwatch_find_key(&mut self) {
+    self.search._find_key = None;
+  }
+
   /// Cmd+F: opens the bar, or selects its text again.
   pub(super) fn open_search(&mut self, cx: &mut Context<Self>) {
     self.search.open = true;

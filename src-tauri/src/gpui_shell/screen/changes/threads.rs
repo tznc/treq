@@ -48,6 +48,12 @@ impl ChangesView {
   /// Reads the threads and agent comments now and on a timer.
   pub(super) fn watch_threads(&mut self, cx: &mut Context<Self>) {
     self.threads = Threads::default();
+    self.poll_threads(cx);
+  }
+
+  /// Reads the threads and agent comments now and on a timer, keeping
+  /// what was read.
+  pub(super) fn poll_threads(&mut self, cx: &mut Context<Self>) {
     if self.parent.workspace.is_none() {
       return;
     }
@@ -65,6 +71,10 @@ impl ChangesView {
         tick = tick.wrapping_add(1);
       }
     }));
+  }
+
+  pub(super) fn stop_threads(&mut self) {
+    self.threads.poll = None;
   }
 
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {

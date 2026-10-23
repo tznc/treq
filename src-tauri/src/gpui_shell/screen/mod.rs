@@ -755,3 +755,10 @@ impl Screen {
     }
   }
 }
+
+/// A scoped thread's result, its panic carried on to the caller.
+pub(super) fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+  handle
+    .join()
+    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}

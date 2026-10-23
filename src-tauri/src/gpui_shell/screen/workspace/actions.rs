@@ -96,11 +96,10 @@ impl WorkspaceView {
       run,
       move |target, run| host.run_checks(target, run),
       move |_, cx| {
-        let _ = view.update(cx, |view, cx| {
+        let _ = view.update(cx, |view, _| {
           view
             .host
             .notify(NativeEvent::WorkspaceChanged { repo_path });
-          view.load(cx);
         });
       },
     );
@@ -347,7 +346,6 @@ impl WorkspaceView {
         view.host.notify(NativeEvent::WorkspaceChanged {
           repo_path: request.repo_path.clone(),
         });
-        view.load(cx);
         view.rebuild(cx);
       });
     })
@@ -392,7 +390,6 @@ impl WorkspaceView {
               view.host.notify(NativeEvent::WorkspaceChanged {
                 repo_path: request.repo_path.clone(),
               });
-              view.load(cx);
             }
             view.host.open_url(&url);
           }
@@ -441,7 +438,6 @@ impl WorkspaceView {
         view
           .host
           .notify(NativeEvent::WorkspaceChanged { repo_path });
-        view.load(cx);
         view.rebuild(cx);
       });
     })

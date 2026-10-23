@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 use crate::agent_dispatch::{InstanceWindowSnapshot, RegisteredInstance};
 use crate::jj::DiscoveredWorkspace;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Workspace {
   pub id: i64,
   pub repo_path: String,

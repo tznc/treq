@@ -148,22 +148,34 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
   let current = parent.workspace.as_ref()?;
   let workspaces = host.workspaces(&parent.repo_path).ok()?;
   let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
-  Some(
-    stack
+  // Each row's commits are an independent read: read them all at once.
+  Some(std::thread::scope(|scope| {
+    #[allow(
+      clippy::needless_collect,
+      reason = "every read starts before the first is joined"
+    )]
+    let reads: Vec<_> = stack
       .into_iter()
       .map(|(workspace, current)| {
-        let stats = host
-          .commits(&parent.repo_path, Some(workspace.id), false, None)
-          .map(|log| diff_stats(&log.commits))
-          .unwrap_or_default();
-        StackRow {
-          workspace,
-          current,
-          stats,
-        }
+        let id = workspace.id;
+        let stats = scope.spawn(move || {
+          host
+            .commits(&parent.repo_path, Some(id), false, None)
+            .map(|log| diff_stats(&log.commits))
+            .unwrap_or_default()
+        });
+        (workspace, current, stats)
       })
-      .collect(),
-  )
+      .collect();
+    reads
+      .into_iter()
+      .map(|(workspace, current, stats)| StackRow {
+        workspace,
+        current,
+        stats: super::joined(stats),
+      })
+      .collect()
+  }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,9 +300,15 @@ impl CodeView {
       self.tips.dark = dark;
       cx.notify();
     }
-    if self.next.as_ref().unwrap_or(&self.parent) == &parent {
+    let current = self.next.as_ref().unwrap_or(&self.parent);
+    if current == &parent {
       return;
     }
+    // The conflicted files or the workspace's record changing alone (the
+    // header's read landing after the window's listing) don't read again.
+    let reread = current.key() != parent.key()
+      || current.revision != parent.revision
+      || current.default_branch != parent.default_branch;
     if parent.key() != self.parent.key() {
       // Another workspace: keep drawing this one until the new one is read,
       // then swap them in one frame (`apply`), so the tab never draws empty.
@@ -300,7 +318,9 @@ impl CodeView {
       self.parent = parent;
       cx.notify();
     }
-    self.load(cx);
+    if reread {
+      self.load(cx);
+    }
   }
 
   /// Reads everything the tab shows off the main thread and applies it in
@@ -318,14 +338,19 @@ impl CodeView {
       let read = cx
         .background_spawn(async move {
           let host = host.as_ref();
-          let read = Read {
-            overview: Overview::or_unavailable(
-              host.overview(&parent.repo_path, parent.workspace_id()),
-            ),
-            history: read_history(host, &parent, limit),
-            stack: read_stack(host, &parent),
-            settings: task_settings(host, &parent.repo_path),
-          };
+          // Independent reads: run them side by side.
+          let read = std::thread::scope(|scope| {
+            let overview = scope.spawn(|| host.overview(&parent.repo_path, parent.workspace_id()));
+            let history = scope.spawn(|| read_history(host, &parent, limit));
+            let stack = scope.spawn(|| read_stack(host, &parent));
+            let settings = task_settings(host, &parent.repo_path);
+            Read {
+              overview: Overview::or_unavailable(super::joined(overview)),
+              history: super::joined(history),
+              stack: super::joined(stack),
+              settings,
+            }
+          });
           (parent, read)
         })
         .await;
