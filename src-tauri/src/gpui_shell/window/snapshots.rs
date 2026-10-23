@@ -51,6 +51,7 @@ fn remote_dialogs(model: &Model, data: &Data) -> Value {
   let setup = remote.setup.then(|| {
     json!({
       "allowUserManaged": data.flags.remote_ssh,
+      "managed": remote.setup_managed,
       "registering": remote.registering,
     })
   });

@@ -39,6 +39,7 @@ impl Model {
   /// opens.
   pub fn open_remote_setup(&mut self) {
     self.remote.setup = true;
+    self.remote.setup_managed = false;
   }
 
   /// `invalidateRemoteRepositoryData` and `refreshRemoteRepository`.
@@ -94,6 +95,13 @@ impl Model {
       "remote.cloud.openRepositories" => cloud(CloudAction::OpenRepositories),
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
       // The Open a Repository screen's machines and recent repositories.
+      // The cloud row before its workspace runs: the setup dialog, on the
+      // cloud workspace's screen.
+      "machines.cloud" => {
+        self.remote.setup = true;
+        self.remote.setup_managed = true;
+        Vec::new()
+      }
       id if id.starts_with("machines.connect:") => {
         let endpoint_id = id["machines.connect:".len()..].to_string();
         vec![Effect::from(RemoteEffect::Connect { endpoint_id })]

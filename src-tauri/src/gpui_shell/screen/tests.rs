@@ -1706,6 +1706,15 @@ fn listing() -> machines::Listing {
         detail: "me@devbox".into(),
       },
       Machine {
+        id: "cloud".into(),
+        place: Place::Cloud {
+          endpoint_id: None,
+          status: machines::CLOUD_SIGNED_OUT.into(),
+        },
+        name: "Cloud workspace".into(),
+        detail: "Sign in to create one".into(),
+      },
+      Machine {
         id: "devcontainer:c1".into(),
         place: Place::DevContainer {
           container_id: "c1".into(),
@@ -1777,6 +1786,7 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
     "onboarding-machines",
     "machine-local",
     "machine-ssh:ep-1",
+    "machine-cloud",
     "machine-devcontainer:c1",
     "recent-local-0",
     "recent-ssh:ep-1-0",
@@ -1791,11 +1801,14 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
   // A dev container opens its repository here.
   h.click("machine-devcontainer:c1");
   h.click("machine-local");
+  // Before its workspace runs, the cloud row signs in or sets it up.
+  h.click("machine-cloud");
   assert_eq!(
     h.sent(),
     vec![
       press("machines.openSaved:r1"),
-      press("machines.connect:ep-1")
+      press("machines.connect:ep-1"),
+      press("machines.cloud"),
     ]
   );
   assert_eq!(
@@ -6897,12 +6910,37 @@ fn setup_route(allow_user_managed: bool, cloud: serde_json::Value) -> serde_json
   })
 }
 
+/// The remote dialogs, signed in as Ada.
 fn remote_harness(
   cx: &mut TestAppContext,
   host: FakeHost,
   remote: serde_json::Value,
 ) -> (Harness, Arc<FakeHost>) {
-  workspace_harness(cx, host, remote_snapshot(remote))
+  let (mut h, host) = workspace_harness(cx, host, remote_snapshot(remote));
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  (h, host)
+}
+
+#[gpui::test]
+fn setup_dialog_asks_to_sign_in_before_the_cloud_workspace(cx: &mut TestAppContext) {
+  let (mut h, host) = remote_harness(
+    cx,
+    FakeHost::default(),
+    serde_json::json!({ "setup": { "allowUserManaged": true, "managed": true } }),
+  );
+  // The machines page's cloud row opens straight on the cloud workspace.
+  assert!(h.drawn("cloud-create"));
+  assert!(!h.drawn("remote-setup-own-vm"));
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(h.drawn("remote-setup-signed-out"));
+  assert!(!h.drawn("cloud-create"));
+  h.click("remote-setup-sign-in");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"open http://localhost:3001/sign-in?source=desktop".to_string()));
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  assert!(h.drawn("cloud-create"));
 }
 
 fn ssh_key(label: &str) -> crate::core::remote_local_keys::LocalSshIdentity {

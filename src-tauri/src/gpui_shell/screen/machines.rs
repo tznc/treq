@@ -27,7 +27,8 @@ pub enum Place {
     endpoint_id: String,
   },
   /// The account's Treq Cloud workspace (a managed Sprite); its endpoint
-  /// is known while it runs.
+  /// is known while it runs. `status` is the instance's, or
+  /// [`CLOUD_SIGNED_OUT`] / [`CLOUD_NOT_CREATED`] before there is one.
   Cloud {
     endpoint_id: Option<String>,
     status: String,
@@ -106,11 +107,34 @@ fn last_segment(path: &str) -> &str {
     .unwrap_or(path)
 }
 
-/// The cloud workspace while signed in with one: its endpoint and status.
+/// The cloud row's status before signing in.
+pub const CLOUD_SIGNED_OUT: &str = "signed_out";
+/// The cloud row's status while signed in with no workspace yet.
+pub const CLOUD_NOT_CREATED: &str = "not_created";
+
+/// The Treq Cloud row: always there, so signing in and creating the
+/// workspace start from it. Its endpoint is known while the workspace runs.
 fn cloud_machine(backend: &Backend) -> Option<Machine> {
   let cloud = crate::commands::cloud::owned_cloud(backend.app())?;
-  let status = cloud.snapshot().cloud.instance_status?;
-  let instance = status.instance.as_ref()?;
+  let snapshot = cloud.snapshot();
+  let before = |status: &str, detail: &str| Machine {
+    id: "cloud".into(),
+    place: Place::Cloud {
+      endpoint_id: None,
+      status: status.into(),
+    },
+    name: "Cloud workspace".into(),
+    detail: detail.into(),
+  };
+  if snapshot.auth.session.is_none() {
+    return Some(before(CLOUD_SIGNED_OUT, "Sign in to create one"));
+  }
+  let Some(status) = snapshot.cloud.instance_status else {
+    return Some(before(CLOUD_NOT_CREATED, "Not created yet"));
+  };
+  let Some(instance) = status.instance.as_ref().filter(|i| i.status != "deleted") else {
+    return Some(before(CLOUD_NOT_CREATED, "Not created yet"));
+  };
   let endpoint = status.endpoint_summary();
   Some(Machine {
     id: "cloud".into(),
@@ -247,6 +271,12 @@ impl MachinesHost for Backend {
         endpoint_id: Some(endpoint_id),
         status,
       } if status == "ready" => endpoint_id,
+      Place::Cloud { status, .. } if status == CLOUD_SIGNED_OUT => {
+        return Err("Sign in to Treq to use a cloud workspace.".into())
+      }
+      Place::Cloud { status, .. } if status == CLOUD_NOT_CREATED => {
+        return Err("Create the cloud workspace to check what is installed on it.".into())
+      }
       Place::Cloud { .. } => {
         return Err("Wake the cloud workspace to check what is installed on it.".into())
       }
