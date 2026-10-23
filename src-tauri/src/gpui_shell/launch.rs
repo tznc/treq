@@ -7,6 +7,7 @@
 //! ([`NativeEvent::AgentSessionStarted`]), since React still routes the
 //! selection.
 
+use crate::result_ext::ResultExt;
 use tauri::{AppHandle, Manager};
 
 use super::native::{Backend, NativeEvent, ToastTone};
@@ -320,11 +321,13 @@ fn open_window_for(app: &AppHandle, repo: &str) {
   let label = crate::open_new_window::new_repo_window_label();
   let title = crate::open_new_window::new_repo_window_title(repo);
   let (app_for_window, repo) = (app.clone(), repo.to_string());
-  let _ = app.run_on_main_thread(move || {
-    if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
-      log::error!("failed to open a window for an agent deep link: {err}");
-    }
-  });
+  app
+    .run_on_main_thread(move || {
+      if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
+        log::error!("failed to open a window for an agent deep link: {err}");
+      }
+    })
+    .ignore_closed();
 }
 
 /// Starts the deep links queued for `repo` once window `label` shows it.
@@ -356,7 +359,7 @@ pub fn treq_send(app: &AppHandle, request: &crate::send_dispatch::SendDispatchRe
   };
   if launch::add_send_asset(asset) {
     super::defer_main(app, |_| {
-      let _ = tauri_plugin_gpui::with_app(|cx| cx.refresh_windows());
+      tauri_plugin_gpui::with_app(|cx| cx.refresh_windows()).ignore_closed();
     });
   }
 }

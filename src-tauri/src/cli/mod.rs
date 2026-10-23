@@ -4,6 +4,7 @@
   reason = "the CLI writes to the terminal"
 )]
 
+use crate::result_ext::ResultExt;
 use args::{Matches, SubcommandMatches};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -148,7 +149,7 @@ fn write_json_error(out: &mut dyn std::io::Write, code: &str, message: &str) {
     },
   };
   if let Ok(json) = serde_json::to_string(&body) {
-    let _ = writeln!(out, "{json}");
+    writeln!(out, "{json}").best_effort();
   }
 }
 
@@ -165,7 +166,7 @@ pub(super) fn run_structured_command(
   let format = match OutputFormat::parse(get_arg_value(matches, "format").as_deref()) {
     Ok(format) => format,
     Err(error) => {
-      let _ = writeln!(err, "Error: {error}");
+      writeln!(err, "Error: {error}").best_effort();
       return false;
     }
   };
@@ -175,7 +176,7 @@ pub(super) fn run_structured_command(
       match format {
         OutputFormat::Json => write_json_error(out, classify_cli_error(&error), &error),
         OutputFormat::Human => {
-          let _ = writeln!(err, "Error: {error}");
+          writeln!(err, "Error: {error}").best_effort();
         }
       }
       false

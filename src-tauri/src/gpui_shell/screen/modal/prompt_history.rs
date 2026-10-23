@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use serde::Deserialize;
 use serde_json::json;
 use std::{ops::Range, rc::Rc};
@@ -114,17 +115,19 @@ impl PromptHistoryView {
           log::warn!("Failed to load prompt history: {err}");
           Vec::new()
         });
-      let _ = this.update(cx, |view, cx| {
-        if view.route.repo_path != key {
-          return;
-        }
-        // The most recent entry, unless one was already asked for or picked.
-        if view.selected.is_none() {
-          view.selected = entries.first().map(|e| e.id);
-        }
-        view.entries = Some(Rc::new(entries));
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.repo_path != key {
+            return;
+          }
+          // The most recent entry, unless one was already asked for or picked.
+          if view.selected.is_none() {
+            view.selected = entries.first().map(|e| e.id);
+          }
+          view.entries = Some(Rc::new(entries));
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

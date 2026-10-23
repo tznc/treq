@@ -12,6 +12,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   ops::Range,
@@ -160,12 +161,14 @@ impl PrReviewView {
       let value = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route == route {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route == route {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }

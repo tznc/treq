@@ -10,6 +10,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -332,12 +333,14 @@ impl LinearView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &repo) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route.repo_path == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.repo_path == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -879,13 +882,15 @@ impl LinearView {
       let view = view.clone();
       move |cx: &mut App| {
         let value = value.clone();
-        let _ = view.update(cx, |view, cx| {
-          if projects {
-            view.set_project_filter(key, value, cx)
-          } else {
-            view.set_issue_filter(key, value, cx)
-          }
-        });
+        view
+          .update(cx, |view, cx| {
+            if projects {
+              view.set_project_filter(key, value, cx)
+            } else {
+              view.set_issue_filter(key, value, cx)
+            }
+          })
+          .ignore_closed();
       }
     };
     let mut items = vec![
@@ -1000,7 +1005,9 @@ impl LinearView {
       let view = view.clone();
       move |cx: &mut App| {
         let team = team.clone();
-        let _ = view.update(cx, |view, cx| view.set_team(team, cx));
+        view
+          .update(cx, |view, cx| view.set_team(team, cx))
+          .ignore_closed();
       }
     };
     div()

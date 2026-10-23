@@ -2,6 +2,7 @@
 //! callback. Shared by workflow check steps, the workspace setup script and
 //! the application setup script.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -90,7 +91,7 @@ fn wait(child: &mut Child, timeout: Duration) -> Result<StepOutcome, String> {
     }
     if Instant::now() >= deadline {
       kill_process_group(child);
-      let _ = child.wait();
+      child.wait().best_effort();
       return Ok(StepOutcome::TimedOut);
     }
     std::thread::sleep(Duration::from_millis(100));
@@ -113,7 +114,7 @@ fn forward_lines(
       sink(stream, &strip_ansi(line.trim_end_matches(['\n', '\r'])));
       buf.clear();
     }
-    let _ = done.send(());
+    done.send(()).ignore_closed();
   });
 }
 

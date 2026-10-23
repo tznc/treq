@@ -1,4 +1,5 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -272,24 +273,42 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     )
     .map_err(|e| format!("Failed to create workspaces branch index: {}", e))?;
 
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN target_branch TEXT", []);
-  let _ = conn.execute(
-    "ALTER TABLE workspaces ADD COLUMN has_conflicts BOOLEAN DEFAULT 0",
-    [],
-  );
-  let _ = conn.execute(
-    "ALTER TABLE workspaces ADD COLUMN archived BOOLEAN DEFAULT 0",
-    [],
-  );
-  let _ = conn.execute(
-    "ALTER TABLE workspaces ADD COLUMN not_on_remote BOOLEAN DEFAULT 0",
-    [],
-  );
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN title TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN description TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN moved_files TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN refreshed_at TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN sparse_patterns TEXT", []);
+  conn
+    .execute("ALTER TABLE workspaces ADD COLUMN target_branch TEXT", [])
+    .best_effort();
+  conn
+    .execute(
+      "ALTER TABLE workspaces ADD COLUMN has_conflicts BOOLEAN DEFAULT 0",
+      [],
+    )
+    .best_effort();
+  conn
+    .execute(
+      "ALTER TABLE workspaces ADD COLUMN archived BOOLEAN DEFAULT 0",
+      [],
+    )
+    .best_effort();
+  conn
+    .execute(
+      "ALTER TABLE workspaces ADD COLUMN not_on_remote BOOLEAN DEFAULT 0",
+      [],
+    )
+    .best_effort();
+  conn
+    .execute("ALTER TABLE workspaces ADD COLUMN title TEXT", [])
+    .best_effort();
+  conn
+    .execute("ALTER TABLE workspaces ADD COLUMN description TEXT", [])
+    .best_effort();
+  conn
+    .execute("ALTER TABLE workspaces ADD COLUMN moved_files TEXT", [])
+    .best_effort();
+  conn
+    .execute("ALTER TABLE workspaces ADD COLUMN refreshed_at TEXT", [])
+    .best_effort();
+  conn
+    .execute("ALTER TABLE workspaces ADD COLUMN sparse_patterns TEXT", [])
+    .best_effort();
 
   conn
     .execute(
@@ -348,7 +367,9 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     }
   }
 
-  let _ = conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT", []);
+  conn
+    .execute("ALTER TABLE sessions ADD COLUMN model TEXT", [])
+    .best_effort();
 
   conn
     .execute(
@@ -357,10 +378,18 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     )
     .map_err(|e| format!("Failed to create sessions workspace index: {}", e))?;
 
-  let _ = conn.execute("DROP TABLE IF EXISTS git_file_hunks", []);
-  let _ = conn.execute("DROP TABLE IF EXISTS git_changed_files", []);
-  let _ = conn.execute("DROP INDEX IF EXISTS idx_git_file_hunks_workspace", []);
-  let _ = conn.execute("DROP INDEX IF EXISTS idx_git_changed_files_workspace", []);
+  conn
+    .execute("DROP TABLE IF EXISTS git_file_hunks", [])
+    .best_effort();
+  conn
+    .execute("DROP TABLE IF EXISTS git_changed_files", [])
+    .best_effort();
+  conn
+    .execute("DROP INDEX IF EXISTS idx_git_file_hunks_workspace", [])
+    .best_effort();
+  conn
+    .execute("DROP INDEX IF EXISTS idx_git_changed_files_workspace", [])
+    .best_effort();
 
   conn
     .execute(
@@ -404,7 +433,9 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
     )
     .map_err(|e| format!("Failed to create workspace_files table: {}", e))?;
 
-  let _ = conn.execute("ALTER TABLE workspace_files ADD COLUMN mtime INTEGER", []);
+  conn
+    .execute("ALTER TABLE workspace_files ADD COLUMN mtime INTEGER", [])
+    .best_effort();
 
   conn
     .execute(
@@ -462,7 +493,9 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
         .map(|n| n > 0)
         .unwrap_or(false);
   if needs_rebuild {
-    let _ = conn.execute("DROP TABLE IF EXISTS commit_diff_stats", []);
+    conn
+      .execute("DROP TABLE IF EXISTS commit_diff_stats", [])
+      .best_effort();
   }
 
   conn
@@ -666,7 +699,7 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
           COMMIT;",
       )
       .map_err(|e| {
-        let _ = conn.execute_batch("ROLLBACK");
+        conn.execute_batch("ROLLBACK").best_effort();
         format!("Failed to migrate prompt_history cascade deletes: {}", e)
       })?;
   }
@@ -742,7 +775,7 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
          COMMIT;",
       )
       .map_err(|e| {
-        let _ = conn.execute_batch("ROLLBACK");
+        conn.execute_batch("ROLLBACK").best_effort();
         format!("Failed to migrate stashes delete behavior: {}", e)
       })?;
   }

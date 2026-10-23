@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -413,12 +414,13 @@ fn cleanup_resolve_workspace(
   // forgetting the resolve workspace. Otherwise `remove_wc_commit` can hide the
   // rewritten change when it was the resolve WC tip.
   if full_path.exists() {
-    let _ = jj::jj_detach_resolve_workspace_wc(&full_path_str);
+    jj::jj_detach_resolve_workspace_wc(&full_path_str)
+      .warn_on_err("jj detach resolve workspace wc");
   }
 
-  let _ = jj::remove_workspace(repo_path, &full_path_str);
+  jj::remove_workspace(repo_path, &full_path_str).warn_on_err("remove workspace");
   if workspace.id >= 0 {
-    let _ = local_db::delete_workspace(repo_path, workspace.id);
+    local_db::delete_workspace(repo_path, workspace.id).warn_on_err("delete workspace");
   }
 
   // Prefer slug from metadata; fall back to parent of the change-id dir.
@@ -437,7 +439,7 @@ fn cleanup_resolve_workspace(
     });
   let agent_cwd = resolve_root_path(repo_path, &slug);
   if remaining_change_dirs(&agent_cwd).is_empty() {
-    let _ = fs::remove_dir_all(&agent_cwd);
+    fs::remove_dir_all(&agent_cwd).best_effort();
   }
 
   Ok(())
@@ -481,7 +483,8 @@ pub fn resolve_commit(
 
   jj::jj_snapshot_resolve_workspace(&resolve_path).map_err(|e| e.to_string())?;
   cleanup_resolve_workspace(repo_path, &workspace)?;
-  let _ = jj::reconcile_all_workspaces_after_rewrite(repo_path, None);
+  jj::reconcile_all_workspaces_after_rewrite(repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(ResolveCommitResult {
     success: true,

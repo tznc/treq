@@ -14,6 +14,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
 use gpui_kit::component::input::{
@@ -194,10 +195,12 @@ impl Popover {
       click_count: event.click_count,
     };
     cx.defer(move |cx| {
-      let _ = shell.update(cx, |_, window, cx| {
-        window.dispatch_event(PlatformInput::MouseDown(down), cx);
-        window.dispatch_event(PlatformInput::MouseUp(up), cx);
-      });
+      shell
+        .update(cx, |_, window, cx| {
+          window.dispatch_event(PlatformInput::MouseDown(down), cx);
+          window.dispatch_event(PlatformInput::MouseUp(up), cx);
+        })
+        .ignore_closed();
     });
   }
 

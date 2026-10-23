@@ -5,6 +5,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
 use gpui::{AnyElement, Task};
@@ -142,12 +143,14 @@ impl ChangesView {
           async move { work(host.as_ref(), &target) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.pr.as_ref().is_some_and(|p| p.target == target) {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.pr.as_ref().is_some_and(|p| p.target == target) {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }

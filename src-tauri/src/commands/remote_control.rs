@@ -16,6 +16,7 @@
 //! job — but both are real, callable, and tested.
 
 use crate::core::remote_ssh_transport::{CutoffReason, SshConnectionPool};
+use crate::result_ext::ResultExt;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::Emitter;
@@ -96,13 +97,15 @@ pub async fn force_cutoff(app: &tauri::AppHandle, endpoint_id: &str, reason: Cut
     .0
     .close_all_for_endpoint(endpoint_id)
     .await;
-  let _ = app.emit(
-    REMOTE_CUTOFF_EVENT,
-    RemoteCutoffEvent {
-      endpoint_id: endpoint_id.to_string(),
-      reason: reason.into(),
-    },
-  );
+  app
+    .emit(
+      REMOTE_CUTOFF_EVENT,
+      RemoteCutoffEvent {
+        endpoint_id: endpoint_id.to_string(),
+        reason: reason.into(),
+      },
+    )
+    .ignore_closed();
 }
 
 /// [`remote_cut_off_managed`], for Rust callers (signing out).
@@ -117,13 +120,15 @@ pub async fn cut_off_managed(app: &tauri::AppHandle) {
   let ptys = app.state::<crate::commands::remote_pty_commands::RemotePtyState>();
   for endpoint_id in ended {
     ptys.0.close_all_for_endpoint(&endpoint_id).await;
-    let _ = app.emit(
-      REMOTE_CUTOFF_EVENT,
-      RemoteCutoffEvent {
-        endpoint_id,
-        reason,
-      },
-    );
+    app
+      .emit(
+        REMOTE_CUTOFF_EVENT,
+        RemoteCutoffEvent {
+          endpoint_id,
+          reason,
+        },
+      )
+      .ignore_closed();
   }
 }
 

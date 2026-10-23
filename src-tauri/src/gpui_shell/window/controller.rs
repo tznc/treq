@@ -3,6 +3,7 @@
 //! every invalidation, runs the [`Effect`]s the model asks for, and hands
 //! the shell what to draw ([`Presentation`]) whenever that changes.
 
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use futures::StreamExt;
@@ -346,7 +347,9 @@ impl WindowController {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let value = cx.background_spawn(async move { f(&*host) }).await;
-      let _ = this.update(cx, |this, cx| then(this, value, cx));
+      this
+        .update(cx, |this, cx| then(this, value, cx))
+        .ignore_closed();
     })
     .detach();
   }

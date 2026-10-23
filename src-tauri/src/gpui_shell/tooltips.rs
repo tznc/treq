@@ -5,6 +5,7 @@
 //! [`Tooltips::sync`] at the start of its render closes the popup once no
 //! tooltip shows.
 
+use crate::result_ext::ResultExt;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, Context, Div, SharedString, Stateful};
@@ -58,14 +59,16 @@ impl Tooltips {
     tips.current = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        if let Some((k, shown)) = view.tooltips().current.as_mut() {
-          if *k == key && !*shown {
-            *shown = true;
-            cx.notify();
+      this
+        .update(cx, |view, cx| {
+          if let Some((k, shown)) = view.tooltips().current.as_mut() {
+            if *k == key && !*shown {
+              *shown = true;
+              cx.notify();
+            }
           }
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }

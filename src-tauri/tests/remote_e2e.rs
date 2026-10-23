@@ -31,6 +31,7 @@
 
 #![allow(
   clippy::unwrap_used,
+  clippy::let_underscore_must_use,
   clippy::print_stderr,
   reason = "test code reports progress on stderr"
 )]

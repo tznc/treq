@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  reason = "test code"
+)]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::path::PathBuf;
 use std::process::Command;

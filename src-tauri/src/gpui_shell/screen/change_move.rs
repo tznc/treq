@@ -1,6 +1,7 @@
 //! Dashboard's `AlertDialog` that confirms moving files dropped on another
 //! workspace, and the move itself.
 
+use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -147,14 +148,16 @@ impl ChangeMoveDialog {
           action: None,
         },
       );
-      let _ = this.update(cx, |view, cx| {
-        view.pending = false;
-        if moved.is_ok() {
-          view.dismissed = true;
-          press(&view.sink, "changeMove.done", cx);
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.pending = false;
+          if moved.is_ok() {
+            view.dismissed = true;
+            press(&view.sink, "changeMove.done", cx);
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

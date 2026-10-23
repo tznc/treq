@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -308,7 +309,7 @@ pub fn install_skill_files(
     SkillInstallScope::Repository => app_skills_root().ok(),
   };
   if let Some(other) = other_root {
-    let _ = uninstall_from_root(&other, &entry.id);
+    uninstall_from_root(&other, &entry.id).warn_on_err("uninstall from root");
   }
 
   Ok(record)

@@ -12,6 +12,7 @@
 //! close) so a caller who already knows the local PTY API is not learning a
 //! second vocabulary.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -364,7 +365,7 @@ impl RemotePtyManager {
     };
     if let Some(session) = removed {
       session.closed.store(true, Ordering::SeqCst);
-      let _ = session.channel.close().await;
+      session.channel.close().await.best_effort();
     }
     Ok(())
   }
@@ -391,7 +392,7 @@ impl RemotePtyManager {
     };
     for (id, channel, closed) in to_close {
       closed.store(true, Ordering::SeqCst);
-      let _ = channel.close().await;
+      channel.close().await.best_effort();
       self
         .sessions
         .lock()
@@ -414,7 +415,7 @@ impl RemotePtyManager {
     };
     for (id, channel, closed) in to_close {
       closed.store(true, Ordering::SeqCst);
-      let _ = channel.close().await;
+      channel.close().await.best_effort();
       self
         .sessions
         .lock()
@@ -437,7 +438,7 @@ impl RemotePtyManager {
     };
     for (id, channel, closed) in to_close {
       closed.store(true, Ordering::SeqCst);
-      let _ = channel.close().await;
+      channel.close().await.best_effort();
       self
         .sessions
         .lock()

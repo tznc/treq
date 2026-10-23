@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs;
@@ -100,9 +101,9 @@ pub fn cleanup_agent_cli_files(paths: &[String]) -> Result<(), String> {
       ));
     }
     if canonical.is_dir() {
-      let _ = fs::remove_dir_all(&canonical);
+      fs::remove_dir_all(&canonical).best_effort();
     } else {
-      let _ = fs::remove_file(&canonical);
+      fs::remove_file(&canonical).best_effort();
     }
   }
   Ok(())

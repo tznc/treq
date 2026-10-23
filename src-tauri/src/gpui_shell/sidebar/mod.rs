@@ -4,6 +4,7 @@
 //! click the sidebar sends back as a [`SidebarAction`].
 
 use crate::gpui_shell::ui::{self, zpx, A11yDisabledExt as _, TextSize, Tone};
+use crate::result_ext::ResultExt;
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
@@ -407,11 +408,13 @@ impl Sidebar {
     move |event, _, cx| {
       cx.stop_propagation();
       anchor.set(event.position);
-      let _ = sidebar.update(cx, |this, cx| {
-        if this.tooltip.take().is_some() {
-          cx.notify();
-        }
-      });
+      sidebar
+        .update(cx, |this, cx| {
+          if this.tooltip.take().is_some() {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
       sink(action.clone(), cx);
     }
   }
@@ -453,14 +456,16 @@ impl Sidebar {
     self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
-      let _ = this.update(cx, |this, cx| {
-        if let Some((k, shown)) = this.tooltip.as_mut() {
-          if *k == key && !*shown {
-            *shown = true;
-            cx.notify();
+      this
+        .update(cx, |this, cx| {
+          if let Some((k, shown)) = this.tooltip.as_mut() {
+            if *k == key && !*shown {
+              *shown = true;
+              cx.notify();
+            }
           }
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }

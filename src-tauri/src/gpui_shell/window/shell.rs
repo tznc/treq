@@ -2,6 +2,7 @@
 //! made with the window, draws through the `Shell`, and receives what the
 //! window's views, the backend, the menu bar and app-wide events report.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -58,7 +59,9 @@ pub(in crate::gpui_shell) fn start(
       let weak = weak.clone();
       // The model can present from inside the shell's own update.
       cx.defer(move |cx| {
-        let _ = weak.update(cx, |shell, cx| shell.present(presentation, cx));
+        weak
+          .update(cx, |shell, cx| shell.present(presentation, cx))
+          .ignore_closed();
       });
     });
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
@@ -93,11 +96,12 @@ fn with_controller(
 ) {
   let label = label.to_string();
   defer_main(app, move |_| {
-    let _ = tauri_plugin_gpui::with_app(move |cx| {
+    tauri_plugin_gpui::with_app(move |cx| {
       if let Some(controller) = controller(&label, cx) {
         controller.update(cx, f);
       }
-    });
+    })
+    .ignore_closed();
   });
 }
 

@@ -19,6 +19,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use serde::Deserialize;
@@ -268,12 +269,14 @@ impl MergeQueueView {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.read_for.as_ref() == Some(&key) {
-          view.local = local;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.read_for.as_ref() == Some(&key) {
+            view.local = local;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -311,14 +314,16 @@ impl MergeQueueView {
       let result = cx
         .background_spawn(async move { host.dequeue(&full_name, &branches) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.queue.dequeuing = false;
-        if let Err(error) = result {
-          log::warn!("removing from the merge queue failed: {error}");
-        }
-        view.read_queue(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.queue.dequeuing = false;
+          if let Err(error) = result {
+            log::warn!("removing from the merge queue failed: {error}");
+          }
+          view.read_queue(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -335,10 +340,12 @@ impl MergeQueueView {
       cx.background_executor()
         .timer(Duration::from_millis(1500))
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.copied = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.copied = false;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }

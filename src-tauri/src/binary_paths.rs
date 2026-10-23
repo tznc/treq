@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
@@ -137,7 +138,7 @@ fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) 
       .take(1024 * 1024)
       .read_to_end(&mut bytes)
       .map(|_| bytes);
-    let _ = sender.send(result);
+    sender.send(result).ignore_closed();
   });
   let start = Instant::now();
   loop {
@@ -150,8 +151,8 @@ fn shell_path_from_command(command: &mut Command, timeout: std::time::Duration) 
       }
       Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
       _ => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return None;
       }
     }
@@ -207,7 +208,7 @@ fn first_output_line(command: &mut Command) -> Option<String> {
 
 /// Initialize binary paths cache with detected paths
 pub fn init_binary_paths_cache(paths: HashMap<String, String>) {
-  let _ = BINARY_PATHS_CACHE.set(paths);
+  BINARY_PATHS_CACHE.set(paths).best_effort();
 }
 
 /// Get cached binary path for a given binary name
@@ -236,7 +237,7 @@ static EDITOR_APPS_CACHE: OnceLock<HashMap<String, bool>> = OnceLock::new();
 
 /// Initialize editor apps cache
 pub fn init_editor_apps_cache(apps: HashMap<String, bool>) {
-  let _ = EDITOR_APPS_CACHE.set(apps);
+  EDITOR_APPS_CACHE.set(apps).best_effort();
 }
 
 /// Get a cached editor-apps snapshot if initialized.

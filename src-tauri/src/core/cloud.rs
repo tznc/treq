@@ -8,6 +8,7 @@
 //! the webview's endpoint) goes through [`CloudEffects`], so the flows run
 //! against a fake in tests.
 
+use crate::result_ext::ResultExt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -224,7 +225,7 @@ impl Cloud {
   /// Restores the stored session and reads its subscription. Call once at
   /// launch, then [`Cloud::keep_fresh`].
   pub async fn start(&self) {
-    let _ = self.supabase.auth.restore().await;
+    self.supabase.auth.restore().await.warn_on_err("restore");
     self.after_sign_in().await;
   }
 

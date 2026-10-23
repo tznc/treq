@@ -11,6 +11,7 @@
 //! remote repository and the remote setup dialog go to the window.
 
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
 
 use serde::Deserialize;
@@ -109,7 +110,9 @@ impl OnboardingView {
   ) -> Self {
     let view = cx.weak_entity();
     let sink: ActionSink = Rc::new(move |action, cx| {
-      let _ = view.update(cx, |view, cx| view.handle(action, cx));
+      view
+        .update(cx, |view, cx| view.handle(action, cx))
+        .ignore_closed();
     });
     let mut this = Self {
       react,
@@ -165,10 +168,12 @@ impl OnboardingView {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let listing = cx.background_spawn(async move { host.listing() }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.listing = listing;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.listing = listing;
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -182,16 +187,18 @@ impl OnboardingView {
       let result = cx
         .background_spawn(async move { host.machine_tools(&place) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.tools.insert(
-          id,
-          Tools {
-            result: Some(result),
-            checking: false,
-          },
-        );
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.tools.insert(
+            id,
+            Tools {
+              result: Some(result),
+              checking: false,
+            },
+          );
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -272,18 +279,22 @@ impl OnboardingView {
       else {
         return;
       };
-      let _ = this.update(cx, |view, cx| {
-        view.container = Some(Ok(path.clone()));
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.container = Some(Ok(path.clone()));
+          cx.notify();
+        })
+        .ignore_closed();
       let result = cx
         .background_spawn(async move { host.start_dev_container(&path) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.container = result.err().map(Err);
-        view.load(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.container = result.err().map(Err);
+          view.load(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

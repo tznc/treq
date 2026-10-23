@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  reason = "test code"
+)]
 mod common;
 
 use common::{JjVerifier, TestRepo};

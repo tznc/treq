@@ -7,6 +7,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
@@ -414,7 +415,9 @@ impl SettingsView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -481,10 +484,12 @@ impl SettingsView {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let result = cx.background_spawn(async move { work(&*host) }).await;
-      let _ = this.update(cx, |view, cx| {
-        done(view, result, cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          done(view, result, cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }

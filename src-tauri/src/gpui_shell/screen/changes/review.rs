@@ -5,6 +5,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{ops::Range, time::Duration};
 
 use super::*;
@@ -180,26 +181,28 @@ impl ChangesView {
     }
     self.review.save = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SAVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        let (comments, summary, notes) = stored.to_save();
-        view.run(
-          move |host, parent| {
-            host.save_review(
-              &parent.repo_path,
-              id,
-              &comments,
-              summary.as_deref(),
-              notes.as_deref(),
-            )
-          },
-          |_, result, _| {
-            if let Err(err) = result {
-              log::warn!("Failed to save pending review: {err}");
-            }
-          },
-          cx,
-        );
-      });
+      this
+        .update(cx, |view, cx| {
+          let (comments, summary, notes) = stored.to_save();
+          view.run(
+            move |host, parent| {
+              host.save_review(
+                &parent.repo_path,
+                id,
+                &comments,
+                summary.as_deref(),
+                notes.as_deref(),
+              )
+            },
+            |_, result, _| {
+              if let Err(err) = result {
+                log::warn!("Failed to save pending review: {err}");
+              }
+            },
+            cx,
+          );
+        })
+        .ignore_closed();
     }));
   }
 
@@ -537,10 +540,12 @@ impl ChangesView {
     self.review.copied = true;
     self.review.copied_reset = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(COPIED_FOR).await;
-      let _ = this.update(cx, |view, cx| {
-        view.review.copied = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.review.copied = false;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
     cx.notify();
   }
@@ -734,7 +739,9 @@ impl ChangesView {
     let add = {
       let (entity, target) = (entity.clone(), target.clone());
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| view.open_draft(target.clone(), cx));
+        entity
+          .update(cx, |view, cx| view.open_draft(target.clone(), cx))
+          .ignore_closed();
       }
     };
     let location = line_location(&target);
@@ -742,9 +749,11 @@ impl ChangesView {
     let copy = |text: String, description: &'static str| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          view.copy(text.clone(), description.into(), cx)
-        });
+        entity
+          .update(cx, |view, cx| {
+            view.copy(text.clone(), description.into(), cx)
+          })
+          .ignore_closed();
       }
     };
     let items = vec![

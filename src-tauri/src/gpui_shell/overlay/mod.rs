@@ -10,6 +10,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::sync::Arc;
 
 use gpui_kit::base::TestSupportExt as _;
@@ -215,17 +216,19 @@ impl Overlay {
               )
             })
             .await;
-          let _ = this.update(cx, |this, cx| {
-            if let Body::Palette {
-              checks: c, pr: p, ..
-            } = &mut this.body
-            {
-              *c = Some(checks);
-              *p = pr;
-            }
-            this.rebuild_commands();
-            cx.notify();
-          });
+          this
+            .update(cx, |this, cx| {
+              if let Body::Palette {
+                checks: c, pr: p, ..
+              } = &mut this.body
+              {
+                *c = Some(checks);
+                *p = pr;
+              }
+              this.rebuild_commands();
+              cx.notify();
+            })
+            .ignore_closed();
         }));
       }
       OverlayView::WorkspacePicker { repo_path } => {
@@ -237,11 +240,13 @@ impl Overlay {
               log::warn!("workspace picker: {err}");
               Vec::new()
             });
-          let _ = this.update(cx, |this, cx| {
-            this.body = Body::Workspaces(Some(rows));
-            this.select_first();
-            cx.notify();
-          });
+          this
+            .update(cx, |this, cx| {
+              this.body = Body::Workspaces(Some(rows));
+              this.select_first();
+              cx.notify();
+            })
+            .ignore_closed();
         }));
       }
       OverlayView::BranchSwitcher { repo_path } => {
@@ -254,22 +259,24 @@ impl Overlay {
           let read = cx
             .background_spawn(async move { host.branches(&repo_path) })
             .await;
-          let _ = this.update(cx, |this, cx| {
-            this.body = match read {
-              Ok(list) => Body::Branches {
-                branches: Some(group_branches(list)),
-                error: None,
-                switching: false,
-              },
-              Err(err) => Body::Branches {
-                branches: None,
-                error: Some(err),
-                switching: false,
-              },
-            };
-            this.select_first();
-            cx.notify();
-          });
+          this
+            .update(cx, |this, cx| {
+              this.body = match read {
+                Ok(list) => Body::Branches {
+                  branches: Some(group_branches(list)),
+                  error: None,
+                  switching: false,
+                },
+                Err(err) => Body::Branches {
+                  branches: None,
+                  error: Some(err),
+                  switching: false,
+                },
+              };
+              this.select_first();
+              cx.notify();
+            })
+            .ignore_closed();
         }));
       }
     }
@@ -446,19 +453,21 @@ impl Overlay {
         cx.background_spawn(async move { host.switch_branch(&repo_path, &name) })
           .await
       };
-      let _ = this.update(cx, |this, cx| match switched {
-        Ok(()) => {
-          this.set_switching(false, None, cx);
-          this.send(
-            ScreenAction::Field {
-              field: "branchSwitcher.changed".into(),
-              value: name.into(),
-            },
-            cx,
-          );
-        }
-        Err(err) => this.set_switching(false, Some(err), cx),
-      });
+      this
+        .update(cx, |this, cx| match switched {
+          Ok(()) => {
+            this.set_switching(false, None, cx);
+            this.send(
+              ScreenAction::Field {
+                field: "branchSwitcher.changed".into(),
+                value: name.into(),
+              },
+              cx,
+            );
+          }
+          Err(err) => this.set_switching(false, Some(err), cx),
+        })
+        .ignore_closed();
     }));
   }
 

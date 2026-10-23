@@ -4,6 +4,7 @@
 //! new branch may take, the stack a new workspace joins, and the steps
 //! `useWorkspaceDialogSubmit` takes to create or move.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashSet;
 
 use serde::Deserialize;
@@ -105,7 +106,7 @@ impl WorkspaceDialogHost for Backend {
     }
     let repo_path = repo_path.to_string();
     std::thread::spawn(move || {
-      let _ = crate::core::repo::fetch_repo(&repo_path);
+      crate::core::repo::fetch_repo(&repo_path).warn_on_err("fetch repo");
     });
   }
 

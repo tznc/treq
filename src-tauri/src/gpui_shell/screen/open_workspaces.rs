@@ -6,6 +6,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   sync::Arc,
@@ -248,32 +249,36 @@ impl OpenWorkspacesDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let (pattern, default, branches) = settings;
-        if let Some(pattern) = pattern {
-          view.pattern = pattern;
-        }
-        view.default_branch = default;
-        view.branches = branches;
-        view.github = remotes
-          .iter()
-          .find(|(path, _)| *path == view.route.repo_path)
-          .map(|(_, name)| name.clone());
-        view.remotes = Some(remotes);
-        view.open_branches = open;
-        view.load_prs(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let (pattern, default, branches) = settings;
+          if let Some(pattern) = pattern {
+            view.pattern = pattern;
+          }
+          view.default_branch = default;
+          view.branches = branches;
+          view.github = remotes
+            .iter()
+            .find(|(path, _)| *path == view.route.repo_path)
+            .map(|(_, name)| name.clone());
+          view.remotes = Some(remotes);
+          view.open_branches = open;
+          view.load_prs(cx);
+          cx.notify();
+        })
+        .ignore_closed();
       cx.background_spawn(async move {
         for repo in &route.repos {
           host.fetch(repo);
         }
       })
       .await;
-      let _ = this.update(cx, |view, cx| {
-        view.fetched = true;
-        view.check_lines(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.fetched = true;
+          view.check_lines(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -301,20 +306,22 @@ impl OpenWorkspacesDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.prs.generation != generation {
-          return;
-        }
-        view.prs.loading = false;
-        match result {
-          Ok((items, mine)) => {
-            view.prs.items = items;
-            view.prs.mine = mine;
+      this
+        .update(cx, |view, cx| {
+          if view.prs.generation != generation {
+            return;
           }
-          Err(err) => view.prs.error = Some(err),
-        }
-        cx.notify();
-      });
+          view.prs.loading = false;
+          match result {
+            Ok((items, mine)) => {
+              view.prs.items = items;
+              view.prs.mine = mine;
+            }
+            Err(err) => view.prs.error = Some(err),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -336,17 +343,19 @@ impl OpenWorkspacesDialog {
           Ok::<_, String>((issues, viewer))
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.issues.loading = false;
-        match result {
-          Ok((items, viewer)) => {
-            view.issues.items = items;
-            view.issues.viewer = viewer;
+      this
+        .update(cx, |view, cx| {
+          view.issues.loading = false;
+          match result {
+            Ok((items, viewer)) => {
+              view.issues.items = items;
+              view.issues.viewer = viewer;
+            }
+            Err(err) => view.issues.error = Some(err),
           }
-          Err(err) => view.issues.error = Some(err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -379,7 +388,9 @@ impl OpenWorkspacesDialog {
     self.query = query;
     self._search = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.load_prs(cx));
+      this
+        .update(cx, |view, cx| view.load_prs(cx))
+        .ignore_closed();
     }));
   }
 
@@ -389,7 +400,9 @@ impl OpenWorkspacesDialog {
     cx.notify();
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.check_lines(cx));
+      this
+        .update(cx, |view, cx| view.check_lines(cx))
+        .ignore_closed();
     }));
   }
 
@@ -424,13 +437,15 @@ impl OpenWorkspacesDialog {
             .collect::<Vec<_>>()
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.checks.extend(checked);
-        view.checking = false;
-        // Lines typed while checking.
-        view.check_lines(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checks.extend(checked);
+          view.checking = false;
+          // Lines typed while checking.
+          view.check_lines(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -564,7 +579,9 @@ impl OpenWorkspacesDialog {
       let results = cx
         .background_spawn(async move { plan.run(&*host, targets) })
         .await;
-      let _ = this.update(cx, |view, cx| view.opened(results, cx));
+      this
+        .update(cx, |view, cx| view.opened(results, cx))
+        .ignore_closed();
     })
     .detach();
   }

@@ -7,6 +7,7 @@
 //! navigating) goes back as [`ScreenAction`]s; what it changed itself goes
 //! as native events (`native::NativeEvent`), so the model's data follows.
 
+use crate::result_ext::ResultExt;
 use std::{rc::Rc, sync::Arc};
 
 use serde::{Deserialize, Serialize};
@@ -375,15 +376,17 @@ impl Screen {
         return;
       };
       let workspace = workspace_ops::Removed::of(&workspace);
-      let _ = this.update(cx, |screen, cx| {
-        let question = workspace_ops::delete_question(&workspace);
-        confirm::ask(
-          &mut screen.confirm,
-          question,
-          move |screen, cx| screen.delete_confirmed(workspace, cx),
-          cx,
-        );
-      });
+      this
+        .update(cx, |screen, cx| {
+          let question = workspace_ops::delete_question(&workspace);
+          confirm::ask(
+            &mut screen.confirm,
+            question,
+            move |screen, cx| screen.delete_confirmed(workspace, cx),
+            cx,
+          );
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -396,7 +399,9 @@ impl Screen {
         .background_spawn(async move { workspace_ops::delete(&*host, &workspace) })
         .await;
       if gone {
-        let _ = this.update(cx, |screen, cx| screen.close_terminals(path, cx));
+        this
+          .update(cx, |screen, cx| screen.close_terminals(path, cx))
+          .ignore_closed();
       }
     })
     .detach();

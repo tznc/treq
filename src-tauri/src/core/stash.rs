@@ -1,5 +1,6 @@
 use crate::jj::{self, JjRevisionDiff};
 use crate::local_db::{self, StashEntry};
+use crate::result_ext::ResultExt;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -108,10 +109,12 @@ pub fn delete_stash(repo_path: &str, stash_id: i64) -> Result<(), String> {
     .ok_or_else(|| format!("Stash not found: {}", stash_id))?;
 
   // Prefer deleting via the home/repo path; bookmark lives in the shared store.
-  let _ = jj::jj_delete_stash_bookmark(repo_path, &entry.bookmark_name);
+  jj::jj_delete_stash_bookmark(repo_path, &entry.bookmark_name)
+    .warn_on_err("jj delete stash bookmark");
   if let Some(workspace_id) = entry.workspace_id {
     if let Ok(ws_path) = resolve_workspace_root(repo_path, Some(workspace_id)) {
-      let _ = jj::jj_delete_stash_bookmark(&ws_path, &entry.bookmark_name);
+      jj::jj_delete_stash_bookmark(&ws_path, &entry.bookmark_name)
+        .warn_on_err("jj delete stash bookmark");
     }
   }
 
