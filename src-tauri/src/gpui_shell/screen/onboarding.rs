@@ -1,4 +1,4 @@
-//! `Onboarding`: the window with no repository open, "Open a Repository".
+//! `Onboarding`: the window with no repository open, "Overview".
 //!
 //! Two panels: the machines Treq opens repositories on (this computer,
 //! saved SSH hosts, the Treq Cloud workspace and dev containers), each with
@@ -816,7 +816,7 @@ impl OnboardingView {
               .child(
                 ui::text(div(), TextSize::Lg)
                   .font_weight(FontWeight::SEMIBOLD)
-                  .child("Open a Repository"),
+                  .child("Overview"),
               )
               .child(
                 ui::text(div(), TextSize::Sm)

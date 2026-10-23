@@ -142,7 +142,7 @@ pub enum RemoteEffect {
   },
   /// The last-opened remote repository, at launch with no local one.
   RestoreLast,
-  /// The Open a Repository screen's machine: connect to it and show its
+  /// The Overview screen's machine: connect to it and show its
   /// repository form, or the setup dialog if it cannot be reached.
   Connect { endpoint_id: String },
   /// A recent repository on a machine, by its saved id.
@@ -291,7 +291,7 @@ impl Remote {
     self.load_saved().into_iter().collect()
   }
 
-  /// A machine the Open a Repository screen picked is connected: the
+  /// A machine the Overview screen picked is connected: the
   /// form shows for it.
   pub fn connect(&mut self, endpoint: SshEndpoint, generation: u64) -> Vec<RemoteEffect> {
     self.form = RepoForm::default();

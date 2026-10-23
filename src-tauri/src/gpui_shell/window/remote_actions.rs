@@ -94,7 +94,7 @@ impl Model {
       "remote.cloud.delete" => cloud(CloudAction::Delete),
       "remote.cloud.openRepositories" => cloud(CloudAction::OpenRepositories),
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
-      // The Open a Repository screen's machines and recent repositories.
+      // The Overview screen's machines and recent repositories.
       // The cloud row before its workspace runs: the setup dialog, on the
       // cloud workspace's screen.
       "machines.cloud" => {

@@ -1,4 +1,4 @@
-//! What the Open a Repository screen lists: the machines Treq opens
+//! What the Overview screen lists: the machines Treq opens
 //! repositories on (this computer, saved SSH hosts, the Treq Cloud
 //! workspace and dev containers), the tools installed on each, and the
 //! repositories opened recently on each.

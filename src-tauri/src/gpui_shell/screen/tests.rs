@@ -26,7 +26,7 @@ struct FakeHost {
   /// What the folder picker returns, and why starting a dev container fails.
   picked: Option<String>,
   container_error: Option<String>,
-  /// The Open a Repository screen's machines and recent repositories.
+  /// The Overview screen's machines and recent repositories.
   listing: machines::Listing,
   /// What a host machine says is installed on it.
   host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
