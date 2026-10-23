@@ -199,6 +199,7 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     },
     "fileBrowser": file_browser,
     "remoteChrome": remote_chrome(model),
+    "workspace": workspace,
   })
 }
 

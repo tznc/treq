@@ -185,6 +185,9 @@ pub struct CommitsView {
   feed: rows::Feed,
   /// Bumped when the history or any diff changes, which the rows lay out.
   layout_gen: u64,
+  /// The revision the tab was hidden at, while another tab or workspace
+  /// shows.
+  hidden_at: Option<u64>,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -230,6 +233,7 @@ impl CommitsView {
       scroll_to,
       feed: rows::Feed::default(),
       layout_gen: 0,
+      hidden_at: None,
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -260,6 +264,11 @@ impl CommitsView {
       return;
     }
     let moved = self.parent.key() != parent.key();
+    // The log depends on nothing else: the conflicted files or the
+    // workspace's record changing alone don't read it again.
+    let reread = moved
+      || self.parent.revision != parent.revision
+      || self.parent.default_branch != parent.default_branch;
     self.parent = parent;
     if moved {
       self.history = None;
@@ -275,8 +284,30 @@ impl CommitsView {
       self.dialog = None;
       self.move_menu = None;
     }
-    self.load(cx);
+    if reread {
+      self.load(cx);
+    }
     cx.notify();
+  }
+
+  /// Its first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.history.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows; shown again, it reads
+  /// again behind what it draws, unless a newer revision already did.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    match (shown, self.hidden_at) {
+      (false, None) => self.hidden_at = Some(self.parent.revision),
+      (true, Some(at)) => {
+        self.hidden_at = None;
+        if at == self.parent.revision {
+          self.load(cx);
+        }
+      }
+      _ => {}
+    }
   }
 
   fn home(&self) -> bool {

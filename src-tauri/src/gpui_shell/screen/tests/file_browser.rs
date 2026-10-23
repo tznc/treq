@@ -75,7 +75,7 @@ fn browser(h: &mut Harness) -> Entity<FileBrowserView> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    workspace.file_browser.clone().expect("file browser")
+    workspace.file_browser().cloned().expect("file browser")
   })
 }
 

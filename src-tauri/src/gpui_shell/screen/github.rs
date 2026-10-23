@@ -467,10 +467,12 @@ impl GithubView {
       cx,
       move |host| match k.tab {
         Tab::Issues => (host.issue(&k.repo, k.number).map(Ok), None),
-        Tab::Prs => (
-          host.pr(&k.repo, k.number).map(Err),
-          Some(host.pr_checks(&k.repo, k.number)),
-        ),
+        // Two independent `gh` calls: run them side by side.
+        Tab::Prs => std::thread::scope(|scope| {
+          let checks = scope.spawn(|| host.pr_checks(&k.repo, k.number));
+          let pr = host.pr(&k.repo, k.number).map(Err);
+          (pr, Some(super::joined(checks)))
+        }),
       },
       move |view, (read, checks), cx| {
         if view.detail.generation != generation {

@@ -169,6 +169,8 @@ pub struct ChangesView {
   pub(super) pr: Option<pr::PrMode>,
   /// Held by the diff, so it takes the arrow keys.
   focus: FocusHandle,
+  /// Hidden while another tab or workspace shows.
+  hidden: bool,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -251,6 +253,7 @@ impl ChangesView {
       threads: threads::Threads::default(),
       pr: None,
       focus: cx.focus_handle(),
+      hidden: false,
       _subscriptions: Vec::new(),
     }
   }
@@ -308,6 +311,31 @@ impl ChangesView {
       self.load(cx);
     }
     cx.notify();
+  }
+
+  /// Its first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.snapshot.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows, it stops polling its
+  /// threads and hearing Cmd+F; shown again, it reads the diff, the threads and the pull
+  /// request again behind what it draws.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    if self.hidden != shown {
+      return;
+    }
+    self.hidden = !shown;
+    if !shown {
+      self.stop_threads();
+      self.unwatch_find_key();
+      return;
+    }
+    self.poll_threads(cx);
+    self.load_pr(cx);
+    if !self.loading {
+      self.load(cx);
+    }
   }
 
   pub(super) fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
@@ -470,16 +498,21 @@ impl ChangesView {
     let show = self.show_committed();
     self.run(
       move |host, parent| {
-        let snapshot = match parent.workspace_id() {
-          Some(id) => host
-            .workspace_diff(&parent.repo_path, id)
-            .map(|diff| Snapshot::from_workspace_diff(diff, show)),
-          None => host
-            .changed_files(&parent.repo_path, None)
-            .map(|files| Snapshot::from_home(&files)),
-        };
-        let rules = host.generated_files(&parent.repo_path, parent.workspace_id());
-        snapshot.map(|s| s.with_generated(&rules))
+        // The generated-file rules don't depend on the diff: read both at once.
+        std::thread::scope(|scope| {
+          let rules =
+            scope.spawn(|| host.generated_files(&parent.repo_path, parent.workspace_id()));
+          let snapshot = match parent.workspace_id() {
+            Some(id) => host
+              .workspace_diff(&parent.repo_path, id)
+              .map(|diff| Snapshot::from_workspace_diff(diff, show)),
+            None => host
+              .changed_files(&parent.repo_path, None)
+              .map(|files| Snapshot::from_home(&files)),
+          };
+          let rules = super::joined(rules);
+          snapshot.map(|s| s.with_generated(&rules))
+        })
       },
       |view, result, cx| {
         view.loading = false;

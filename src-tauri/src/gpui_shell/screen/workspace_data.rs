@@ -87,6 +87,10 @@ pub struct Route {
   /// absent for a local one. (`remote` is the snapshot's remote dialogs.)
   #[serde(default)]
   pub remote_chrome: Option<super::remote_chrome::RemoteChrome>,
+  /// The workspace as the window last listed it, so the tabs start on it
+  /// before the header's own read lands.
+  #[serde(default)]
+  pub workspace: Option<local_db::Workspace>,
 }
 
 impl Route {
@@ -161,6 +165,58 @@ fn unique_paths<'a>(paths: impl Iterator<Item = &'a str>) -> usize {
   paths.collect::<HashSet<_>>().len()
 }
 
+/// The Changes pill's counts: unique paths changed (committed too, off
+/// the home branch) and those uncommitted.
+fn changed_counts(
+  repo: &str,
+  route: &Route,
+  workspace: Option<&local_db::Workspace>,
+) -> (usize, usize) {
+  let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
+  let include_committed = workspace.is_some_and(|w| w.branch_name != route.default_target());
+  match route.workspace_id {
+    Some(id) if include_committed => core::workspace_diff(repo, id)
+      .map(|diff| {
+        let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
+        (
+          unique_paths(all.map(|f| f.path.as_str())),
+          diff.uncommitted_files.len(),
+        )
+      })
+      .unwrap_or_else(|e| {
+        warn("diff", e);
+        (0, 0)
+      }),
+    id => core::list_changed_files(repo, id)
+      .map(|files| {
+        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
+        (count, count)
+      })
+      .unwrap_or_else(|e| {
+        warn("changed files", e);
+        (0, 0)
+      }),
+  }
+}
+
+/// The home branch's commits behind its target, and the dry-run rebase
+/// onto it, on a home feature branch.
+fn home_rebase(repo: &str, route: &Route) -> (usize, Option<HomeRebaseDryRunResult>) {
+  let home_branch = route.home_branch.as_str();
+  let on_home_feature = route.workspace_id.is_none() && home_branch != DEFAULT_BRANCH;
+  let home_ahead = if on_home_feature {
+    core::list_commits(repo, None, true, None, Some(14))
+      .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
+      .unwrap_or(0)
+  } else {
+    0
+  };
+  let home_dry_run = (on_home_feature && home_ahead > 0 && !home_branch.is_empty())
+    .then(|| core::repo::dry_run_home_rebase(repo, home_branch, DEFAULT_BRANCH))
+    .flatten();
+  (home_ahead, home_dry_run)
+}
+
 impl WorkspaceHost for Backend {
   fn load(&self, route: &Route) -> Loaded {
     if let Some(remote) = self.remote(&route.repo_path) {
@@ -168,83 +224,59 @@ impl WorkspaceHost for Backend {
     }
     let repo = route.repo_path.as_str();
     let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
-    let workspace = route.workspace_id.and_then(|id| {
-      core::list_workspaces(repo)
-        .map_err(|e| warn("workspaces", e))
-        .ok()?
-        .into_iter()
-        .find(|w| w.id == id)
-    });
-    let status = core::workspace_status(repo, route.workspace_id)
-      .map_err(|e| warn("status", e))
-      .ok();
-    let remote = crate::core::github_cli::remote(repo)
-      .map_err(|e| warn("remote", e))
-      .ok()
-      .flatten();
-    let commits = route.workspace_id.and_then(|id| {
-      core::list_commits(repo, Some(id), false, None, None)
-        .map_err(|e| warn("commits", e))
-        .ok()
-    });
-    let include_committed = workspace
-      .as_ref()
-      .is_some_and(|w| w.branch_name != route.default_target());
-    let (review_count, uncommitted_count) = match route.workspace_id {
-      Some(id) if include_committed => core::workspace_diff(repo, id)
-        .map(|diff| {
-          let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
-          (
-            unique_paths(all.map(|f| f.path.as_str())),
-            diff.uncommitted_files.len(),
-          )
+    // The reads are independent but for the counts, which need the
+    // workspace: run them side by side, so the header waits for the
+    // slowest rather than for all of them in turn.
+    std::thread::scope(|scope| {
+      let status = scope.spawn(|| {
+        core::workspace_status(repo, route.workspace_id)
+          .map_err(|e| warn("status", e))
+          .ok()
+      });
+      let remote = scope.spawn(|| {
+        crate::core::github_cli::remote(repo)
+          .map_err(|e| warn("remote", e))
+          .ok()
+          .flatten()
+      });
+      let commits = scope.spawn(|| {
+        route.workspace_id.and_then(|id| {
+          core::list_commits(repo, Some(id), false, None, None)
+            .map_err(|e| warn("commits", e))
+            .ok()
         })
-        .unwrap_or_else(|e| {
-          warn("diff", e);
-          (0, 0)
-        }),
-      id => core::list_changed_files(repo, id)
-        .map(|files| {
-          let count = unique_paths(files.iter().map(|f| f.path.as_str()));
-          (count, count)
-        })
-        .unwrap_or_else(|e| {
-          warn("changed files", e);
-          (0, 0)
-        }),
-    };
-    let home_branch = route.home_branch.as_str();
-    let on_home_feature = route.workspace_id.is_none() && home_branch != DEFAULT_BRANCH;
-    let home_ahead = if on_home_feature {
-      core::list_commits(repo, None, true, None, Some(14))
-        .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
-        .unwrap_or(0)
-    } else {
-      0
-    };
-    let home_dry_run = (on_home_feature && home_ahead > 0 && !home_branch.is_empty())
-      .then(|| core::repo::dry_run_home_rebase(repo, home_branch, DEFAULT_BRANCH))
-      .flatten();
-    let checks = route.workspace_id.map(|id| read_checks(repo, id));
-    let (linear_enabled, logs_enabled) = self.with_db(|db| {
-      (
-        feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-        feature_preview::is_enabled(db, PreviewFeature::Logs),
-      )
-    });
-    Loaded {
-      workspace,
-      status,
-      remote,
-      commits,
-      review_count,
-      uncommitted_count,
-      home_ahead,
-      home_dry_run,
-      checks,
-      linear_enabled,
-      logs_enabled,
-    }
+      });
+      let home = scope.spawn(|| home_rebase(repo, route));
+      let checks = scope.spawn(|| route.workspace_id.map(|id| read_checks(repo, id)));
+      let workspace = route.workspace_id.and_then(|id| {
+        core::list_workspaces(repo)
+          .map_err(|e| warn("workspaces", e))
+          .ok()?
+          .into_iter()
+          .find(|w| w.id == id)
+      });
+      let (review_count, uncommitted_count) = changed_counts(repo, route, workspace.as_ref());
+      let (linear_enabled, logs_enabled) = self.with_db(|db| {
+        (
+          feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
+          feature_preview::is_enabled(db, PreviewFeature::Logs),
+        )
+      });
+      let (home_ahead, home_dry_run) = super::joined(home);
+      Loaded {
+        workspace,
+        status: super::joined(status),
+        remote: super::joined(remote),
+        commits: super::joined(commits),
+        review_count,
+        uncommitted_count,
+        home_ahead,
+        home_dry_run,
+        checks: super::joined(checks),
+        linear_enabled,
+        logs_enabled,
+      }
+    })
   }
 
   fn pr_cache(&self, repo_path: &str, branch: &str) -> PrCache {
