@@ -18,12 +18,17 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 /// A title's branch until the repository sets its own pattern.
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static DASH_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_DASH_LETTER: LazyLock<Regex> =
   LazyLock::new(|| Regex::new("-[a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_SEPARATOR_LETTER: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-][a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static TRAILING_SEPARATORS: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
 
