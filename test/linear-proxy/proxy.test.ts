@@ -205,7 +205,9 @@ describe("linearTokenStore", () => {
   it("loads the user's tokens from Vault through linear_tokens_load", async () => {
     const c = client([token()]);
     await expect(linearTokenStore(c, "u1").load()).resolves.toEqual(token());
-    expect(c.rpc).toHaveBeenCalledWith("linear_tokens_load", { p_user_id: "u1" });
+    expect(c.rpc).toHaveBeenCalledWith("linear_tokens_load", {
+      p_user_id: "u1",
+    });
     expect(c.from).not.toHaveBeenCalled();
   });
 
