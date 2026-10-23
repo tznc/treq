@@ -1,0 +1,337 @@
+{
+  "principles": {
+    "SE": "Self-evident",
+    "CV": "Conventions",
+    "HI": "Clear hierarchy",
+    "CL": "Obvious clickability",
+    "NO": "Less noise",
+    "WH": "What just happened"
+  },
+  "components": [
+    {
+      "name": "Button",
+      "examples": [
+        "button/playground",
+        "button/variants"
+      ],
+      "compound": null,
+      "notes": [
+        {
+          "principle": "HI",
+          "how": "Exactly one filled (default) button per region, and Enter is bound to it, so the next step is the loudest thing on screen. Everything else drops to outline, ghost or link."
+        },
+        {
+          "principle": "SE",
+          "how": "Labels are verbs that name the outcome (\"Merge\", \"Delete\"). An ellipsis (\"Rename…\") means more UI follows, so nobody has to guess whether a click acts immediately."
+        },
+        {
+          "principle": "CV",
+          "how": "Destructive actions are red. Disabled is always 50% opacity, and that fade is used for nothing else, so a disabled button can't be mistaken for a secondary one."
+        },
+        {
+          "principle": "CL",
+          "how": "Every variant has a hover fill, including ghost and link. The desktop default cursor is used, never the web hand, which matches native macOS and Windows apps."
+        },
+        {
+          "principle": "NO",
+          "how": "There are six variants and the lints block a seventh: ad-hoc `button` helpers fail `gpui-no-adhoc-controls`."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "IconButton",
+      "examples": [
+        "icon-button/states"
+      ],
+      "compound": null,
+      "notes": [
+        {
+          "principle": "SE",
+          "how": "The label is a required constructor argument. It becomes both the tooltip and the accessible name, so an unlabelled glyph can't be built."
+        },
+        {
+          "principle": "CV",
+          "how": "There are two sizes: 24 in rows and 28 in toolbars. All glyphs are Lucide icons, the same set the rest of the app uses."
+        },
+        {
+          "principle": "HI",
+          "how": "Icon buttons are ghost by default, so they rank below labelled buttons. Outline is reserved for the one icon command that needs weight."
+        },
+        {
+          "principle": "CL",
+          "how": "Selected is a primary tint, not a border, and reads as \"on\" like a native toggle. Hover is the shared `hover()` fill."
+        },
+        {
+          "principle": "NO",
+          "how": "A tone colours only the icon (danger for a destructive command), so state shows without a filled button."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "SplitButton",
+      "examples": [
+        "split-button/playground"
+      ],
+      "compound": "A Button and an IconButton fused into one silhouette.",
+      "notes": [
+        {
+          "principle": "CV",
+          "how": "Uses the native split-button shape: the main half acts, and the chevron half opens related commands."
+        },
+        {
+          "principle": "SE",
+          "how": "The two halves have separate accessible names (\"Push\" and \"More Push options\"), so it's clear which half does what."
+        },
+        {
+          "principle": "HI",
+          "how": "It takes the filled or outline style as a single unit, so it never adds a second primary to a region."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Picker",
+      "examples": [
+        "picker/placements"
+      ],
+      "compound": null,
+      "notes": [
+        {
+          "principle": "SE",
+          "how": "It answers \"what is this set to?\". The current value is shown with a trailing chevron. The design review found a value picker drawn as a plain label; this replaces it."
+        },
+        {
+          "principle": "CV",
+          "how": "The chevron means \"this changes a value\". A command that opens a menu is a Button with no chevron, so the two never share a look."
+        },
+        {
+          "principle": "HI",
+          "how": "The form placement keeps its label above the field. The toolbar placement drops to ghost so it doesn't compete with the composer's single primary button."
+        },
+        {
+          "principle": "WH",
+          "how": "An empty value shows a placeholder that says what to pick (\"Pick an agent\"), not a blank box."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Badge",
+      "examples": [
+        "badge/tones"
+      ],
+      "compound": "Badge, Count and Dot are three components with three distinct jobs.",
+      "notes": [
+        {
+          "principle": "NO",
+          "how": "Counts are always neutral; colour means state. The design review found red tab counts, red dots and a red banner on one screen. Now red appears only where something is wrong."
+        },
+        {
+          "principle": "CV",
+          "how": "PR states use GitHub's own colours (open, merged, closed), which users already know."
+        },
+        {
+          "principle": "SE",
+          "how": "Badge labels an object, Count says how many, and Dot gives one status. Each has one job, so the meaning is in the shape before the colour."
+        },
+        {
+          "principle": "HI",
+          "how": "Counts above 999 abbreviate to \"1.5k\", so a count never outweighs the label it sits beside."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Kbd",
+      "examples": [
+        "kbd/basic"
+      ],
+      "compound": null,
+      "notes": [
+        {
+          "principle": "CV",
+          "how": "Shortcuts render in each platform's key names with \" + \" between keys: ⌘ + K on macOS, Ctrl + K elsewhere. The review found five kbd styles; now there is one component, and Kbd::from_label converts old labels."
+        },
+        {
+          "principle": "NO",
+          "how": "Shortcuts are small and muted. They are a hint beside a command, not a call to action."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Checkbox",
+      "examples": [
+        "checkbox/states"
+      ],
+      "compound": null,
+      "notes": [
+        {
+          "principle": "CV",
+          "how": "A 13px native-sized box. On and Mixed use the primary fill, with a check and a dash respectively, matching the macOS tri-state convention for \"some children\"."
+        },
+        {
+          "principle": "CL",
+          "how": "Checkbox draws only the box. The row that handles the click holds the label, so clicking the label toggles it too, as in a native app."
+        },
+        {
+          "principle": "NO",
+          "how": "This one component replaces the three hand-drawn checkboxes the review found."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Alert",
+      "examples": [
+        "alert/playground"
+      ],
+      "compound": "An icon, a title, a message and an outline Button in one tinted surface.",
+      "notes": [
+        {
+          "principle": "SE",
+          "how": "The title states the fact (\"1 file has conflicts\"), and the message says what to do next. A user reads two lines and knows both."
+        },
+        {
+          "principle": "NO",
+          "how": "The severity is carried by one signal: the icon plus a tint. The action stays a neutral outline button, so the banner doesn't add a second red element."
+        },
+        {
+          "principle": "HI",
+          "how": "An alert has at most one action, at the trailing edge where the eye lands after the message."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "EmptyState",
+      "examples": [
+        "empty-state/playground",
+        "empty-state/loading"
+      ],
+      "compound": "EmptyState with an outline Retry Button; Loading paired with Skeleton.",
+      "notes": [
+        {
+          "principle": "SE",
+          "how": "It says why the area is empty and what to do: \"No pull requests. Push a branch to open one.\" An error names the cause and the fix (\"Run gh auth login\")."
+        },
+        {
+          "principle": "WH",
+          "how": "Loading draws a skeleton where the result will appear, so the layout doesn't jump. This replaces the 12px-to-32px spread of spinners."
+        },
+        {
+          "principle": "HI",
+          "how": "It has at most one action, and only when the user can actually fix something (Retry). A plain empty state has no button."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Tabs",
+      "examples": [
+        "tabs/playground"
+      ],
+      "compound": "Tabs carrying Count and Dot.",
+      "notes": [
+        {
+          "principle": "CV",
+          "how": "Segmented switches views of one thing; underline switches panels. Each style has one meaning, where the review found three segmented controls drawn three ways."
+        },
+        {
+          "principle": "NO",
+          "how": "A count trails the label in neutral. A problem is shown as a red dot, not a red number, so \"3 changes\" and \"a conflict\" look different."
+        },
+        {
+          "principle": "SE",
+          "how": "The selected tab is filled or underlined, never shown by colour alone, so it survives in both themes and for colour-blind users."
+        },
+        {
+          "principle": "SE",
+          "how": "A badge slot labels what the tab is (the PRO plan chip) inside the tab, so the label and its qualifier read as one thing."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Row",
+      "examples": [
+        "row/densities"
+      ],
+      "compound": "Row composed with Dot, Count and a small IconButton.",
+      "notes": [
+        {
+          "principle": "CV",
+          "how": "It has three densities: 28 in the sidebar and trees, 32 in dialogs, and two lines for commits and PRs. One row component covers every list in the app."
+        },
+        {
+          "principle": "HI",
+          "how": "There is one hover fill and one selected fill, the shared `hover()` and `selected()` tokens. The review found a solid-blue selection that read as a button. Here it is a tint."
+        },
+        {
+          "principle": "NO",
+          "how": "Status is a single trailing Dot or Count. Row actions appear in a fixed 32px trailing slot, so titles don't shift under the cursor."
+        },
+        {
+          "principle": "CL",
+          "how": "The whole row is the click target, and it exposes `aria_selected` so assistive tech and the e2e suite see the same state."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Menu",
+      "examples": [
+        "menu/items"
+      ],
+      "compound": "MenuItem, MenuSeparator and Kbd inside the popover surface.",
+      "notes": [
+        {
+          "principle": "CV",
+          "how": "Rows are 28 tall, laid out as icon, label, shortcut. This is the native menu anatomy, with shortcuts right-aligned in Kbd."
+        },
+        {
+          "principle": "SE",
+          "how": "A value gets a check mark, and an item that opens more UI ends in \"…\". Disabled items stay visible, so the user learns the command exists."
+        },
+        {
+          "principle": "HI",
+          "how": "Destructive items go last, in red, after a separator, so they are never the item under the cursor when a menu opens."
+        },
+        {
+          "principle": "SE",
+          "how": "A description line explains a choice in place (\"Plan the change first, without editing files\"), so nobody has to try it to learn what it does."
+        }
+      ],
+      "gap": null
+    },
+    {
+      "name": "Dialog",
+      "examples": [
+        "dialog/confirm",
+        "dialog/close"
+      ],
+      "compound": "Dialog with a Button pair (confirm) or with an X and Kbd content (information).",
+      "notes": [
+        {
+          "principle": "SE",
+          "how": "A confirmation's title is the question, and its buttons answer with verbs (\"Initialize\", \"Delete workspace\"), never Yes/No. `ui-copy-no-yes-no` enforces this."
+        },
+        {
+          "principle": "CV",
+          "how": "If there's an action pair, the footer holds it and there's no X. Otherwise an X closes the dialog. Esc always closes it (`EscapeExt::on_escape`). The review found close shown as an X in one dialog, Cancel in the next and Esc-only in a third."
+        },
+        {
+          "principle": "HI",
+          "how": "The confirm button is the one primary, or destructive for what can't be undone, and it is bound to Enter. Cancel is outline."
+        },
+        {
+          "principle": "WH",
+          "how": "The dialog is in-app on a scrim with radius 12, replacing the native Yes/No box, so the flow stays in Treq's own visual language."
+        }
+      ],
+      "gap": null
+    }
+  ]
+}
