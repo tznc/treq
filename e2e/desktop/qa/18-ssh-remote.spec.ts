@@ -1,11 +1,13 @@
 // Remote SSH against a real server: a second app with a fresh home whose
-// ~/.ssh holds the key the server trusts, driven through "Your own VM",
-// the repository form, New Workspaces, a remote shell and agent, and a
-// dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
+// ~/.ssh holds the key the server trusts, driven through the Open a
+// Repository screen's machines, "Your own VM", the repository form, New
+// Workspaces, a remote shell, installing Claude Code with its official
+// installer and running it as an agent, and a dropped connection. Opt-in: set QA_SSH_HOST, QA_SSH_PORT, QA_SSH_USER,
 // QA_SSH_KEY (a private key with its `.pub` beside it) and QA_SSH_REPO (a
 // path on the server the run replaces with a fresh Git repository). The
-// server needs `treq`, jj, git, tmux and a `claude` on the login PATH;
-// `ssh-server/up.sh` starts one in Docker and prints the variables.
+// server needs `treq`, jj, git, tmux and curl, and must reach
+// claude.ai; `ssh-server/up.sh` starts one in Docker and prints the
+// variables.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -99,6 +101,15 @@ async function shot(name: string, title: string, expectations: string[]): Promis
 test("ssh remote: connect and open a Git repository", async () => {
   const open = page.getByRole("button", { name: "Open via SSH" });
   await expect(open).toBeVisible({ timeout: 60_000 });
+  await shot("machines", "Open a Repository: machines and recent repositories", [
+    "Left panel 'Machines' lists 'This computer' under THIS COMPUTER, with 'Open via SSH' at the bottom",
+    "Right panel is headed 'Open a Repository' with the Open Repository button; no recents yet says where they appear",
+  ]);
+  await page.getByRole("button", { name: /on This computer$/ }).click();
+  await shot("local-tools", "This computer's tools popover", [
+    "A popover beside the row lists Required (Git), Agent CLI and Optional tools with Installed or Install",
+  ]);
+  await page.keyboard.press("Escape");
   await open.click();
   await page.waitForTimeout(1000);
   // The chooser's cards are not observable elements (see 01-onboarding).
@@ -122,10 +133,18 @@ test("ssh remote: connect and open a Git repository", async () => {
   await page.getByRole("button", { name: "Trust and connect" }).click();
   const path = page.getByRole("textbox").first();
   await expect(page.getByRole("button", { name: "Probe" })).toBeVisible({ timeout: 30_000 });
-  await shot("connected", "Connected: the remote repository form", [
-    "An 'Open a Remote Repository' card is centred where the window opens, above the local card",
-    "Its path field and Probe button are visible without scrolling",
+  await shot("connected", "Connected: the host's repository form", [
+    "'QA container' is listed under SSH HOSTS with user@host:port",
+    "Its group on the right holds the path field and Probe button",
   ]);
+  await page.getByRole("button", { name: /on QA container$/ }).click();
+  await expect(page.getByRole("button", { name: "Remove Host" })).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(3000);
+  await shot("host-tools", "The SSH host's tools popover", [
+    "Asked over SSH (`treq repo tools`): Git, Jujutsu and tmux are installed",
+    "Claude Code is not installed yet; Remove Host at the bottom",
+  ]);
+  await page.keyboard.press("Escape");
   await path.fill(env.repo);
   await page.getByRole("button", { name: "Probe" }).click();
   const openRemote = page.getByRole("button", { name: "Open", exact: true });
@@ -185,26 +204,43 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   await page.waitForTimeout(3000);
   expect(onServer(`cd '${env.repo}/.treq/workspaces/'*/ && jj log --no-graph -r @- -T description`)).toContain("Add sub");
   await shot("ws-commits", "Remote workspace: committed", ["'Add sub' is the workspace's commit"]);
+});
+
+test("ssh remote: install Claude Code and run it as an agent", async () => {
+  test.setTimeout(600_000);
+  const row = page.getByRole("button", { name: BRANCH, exact: true });
+  // The official installer, typed into the remote shell as a user would.
+  await page.mouse.click(700, 780);
+  await page.keyboard.type("clear; curl -fsSL https://claude.ai/install.sh | bash\n");
+  const deadline = Date.now() + 480_000;
+  while (!onServer("test -x ~/.local/bin/claude && echo yes || true").includes("yes")) {
+    if (Date.now() > deadline) throw new Error("Claude Code did not install");
+    await page.waitForTimeout(5000);
+  }
+  await page.waitForTimeout(5000);
+  await page.keyboard.type("~/.local/bin/claude --version\n");
+  await shot("claude-installed", "Claude Code installed on the server", [
+    "The installer's output ends with 'Installation complete!' in the remote shell",
+    "`claude --version` prints the installed version",
+  ]);
   await row.hover();
   await row.getByRole("button", { name: "Start agent" }).click();
-  await page.waitForTimeout(5000);
-  await shot("agent", "Remote agent", [
-    "The agent pane runs `claude` on the server in the workspace directory",
+  await page.waitForTimeout(10_000);
+  await shot("agent", "Claude Code running as a remote agent", [
+    "The agent pane runs the real Claude Code TUI on the server, in the workspace directory",
+    "Without credentials it stops at its first-run sign-in screen",
   ]);
 });
 
-test("ssh remote: dropped connection and reattach", async () => {
+test("ssh remote: dropped connection reattaches on its own", async () => {
   // Detached, so killing this command's own connection does not stop it
   // half way through.
   onServer(`setsid sh -c "sleep 1; pkill -f 'sshd: .*@'" </dev/null >/dev/null 2>&1 &`);
-  await page.waitForTimeout(8000);
-  await shot("dropped", "After the server drops every SSH connection", [
-    "A remote terminal whose connection dropped says so and offers Reattach and Close",
-  ]);
-  await page.getByRole("button", { name: "Reattach" }).first().click();
-  await page.waitForTimeout(5000);
-  await shot("reattached", "Reattached remote session", [
-    "The shell is back with its earlier output: the tmux session survived on the server",
+  await page.waitForTimeout(10_000);
+  await expect(page.getByRole("button", { name: "Reattach" })).toHaveCount(0);
+  await shot("reattached", "After the server drops every SSH connection", [
+    "Every remote terminal reattached on its own, with no Reattach/Close overlay",
+    "The shell and agent show their earlier output: the tmux sessions survived on the server",
   ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();
