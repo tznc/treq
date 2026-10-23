@@ -188,3 +188,7 @@ required-features = ["gpui-shell"]
 [[bench]]
 name = "window_poll"
 harness = false
+
+[[bench]]
+name = "file_search"
+harness = false
