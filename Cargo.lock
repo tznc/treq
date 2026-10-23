@@ -4568,6 +4568,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-bootstrap"
+version = "0.1.0"
+source = "git+https://github.com/Ziinc/gpui-bootstrap?branch=main#ffa67cfe69fd25d9cee5723d9cbef3af3be8f646"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "gpui-component"
 version = "0.7.3"
 source = "git+https://github.com/Ziinc/gpui-kit?branch=main#86526cb00b6490bffa5fc57e927533cbaa1a1578"
@@ -4947,6 +4955,7 @@ dependencies = [
  "gpui-component",
  "gpui-fast",
  "gpui-fast-platform",
+ "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-macros",
  "gpui-pre-platform",
@@ -12445,6 +12454,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "gix",
+ "gpui-bootstrap",
  "gpui-kit",
  "gpui-playwright",
  "gpui-pre",

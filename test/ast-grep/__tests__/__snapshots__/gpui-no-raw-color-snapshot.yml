@@ -1,0 +1,77 @@
+id: gpui-no-raw-color
+snapshots:
+  ? |
+    fn glow() -> Div {
+      div().bg(white().opacity(0.1))
+    }
+  : labels:
+    - source: white().opacity(0.1)
+      style: primary
+      start: 30
+      end: 50
+  ? |
+    fn raw_hsla() -> Div {
+      div().bg(hsla(0.5, 0.5, 0.5, 1.0))
+    }
+  : labels:
+    - source: hsla(0.5, 0.5, 0.5, 1.0)
+      style: primary
+      start: 34
+      end: 58
+    - source: hsla
+      style: secondary
+      start: 34
+      end: 38
+  ? |
+    fn raw_rgb() -> Div {
+      div().bg(rgb(0x112233))
+    }
+  : labels:
+    - source: rgb(0x112233)
+      style: primary
+      start: 33
+      end: 46
+    - source: rgb
+      style: secondary
+      start: 33
+      end: 36
+  ? |
+    fn raw_rgba() -> Div {
+      div().bg(rgba(0x11223380))
+    }
+  : labels:
+    - source: rgba(0x11223380)
+      style: primary
+      start: 34
+      end: 50
+    - source: rgba
+      style: secondary
+      start: 34
+      end: 38
+  ? |
+    fn scrim() -> Div {
+      div().bg(black().opacity(0.4))
+    }
+  : labels:
+    - source: black().opacity(0.4)
+      style: primary
+      start: 31
+      end: 51
+  ? |
+    fn tailwind() -> Div {
+      div().bg(tw::RED_500)
+    }
+  : labels:
+    - source: tw::RED_500
+      style: primary
+      start: 34
+      end: 45
+  ? |
+    fn tailwind_fn() -> Div {
+      div().bg(tw::color(tw::RED_500, 0.5))
+    }
+  : labels:
+    - source: tw::color
+      style: primary
+      start: 37
+      end: 46

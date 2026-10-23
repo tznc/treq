@@ -1,0 +1,83 @@
+id: gpui-no-adhoc-controls
+snapshots:
+  ? |
+    fn closure() {
+      let icon_button = |name: &str| div().child(name);
+    }
+  : labels:
+    - source: 'let icon_button = |name: &str| div().child(name);'
+      style: primary
+      start: 17
+      end: 66
+    - source: icon_button
+      style: secondary
+      start: 21
+      end: 32
+    - source: '|name: &str| div().child(name)'
+      style: secondary
+      start: 35
+      end: 65
+  ? |
+    fn menu_item(p: &Palette) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn menu_item(p: &Palette) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 44
+    - source: menu_item
+      style: secondary
+      start: 3
+      end: 12
+  ? |
+    fn spinner() -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn spinner() -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 31
+    - source: spinner
+      style: secondary
+      start: 3
+      end: 10
+  ? |
+    pub fn empty_state(title: &str) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        pub fn empty_state(title: &str) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 50
+    - source: empty_state
+      style: secondary
+      start: 7
+      end: 18
+  ? |
+    pub(crate) fn checkbox(checked: bool) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        pub(crate) fn checkbox(checked: bool) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 56
+    - source: checkbox
+      style: secondary
+      start: 14
+      end: 22

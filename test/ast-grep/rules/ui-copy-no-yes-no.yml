@@ -1,0 +1,44 @@
+id: ui-copy-no-yes-no
+language: rust
+severity: error
+message: >
+  Name the result on a button, not "Yes", "No" or "OK": use a verb label such
+  as "Delete branch". State a result plainly, without "Are you sure" or
+  "successfully".
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Not migrated yet: remove a file once it passes.
+  - "src-tauri/src/gpui_shell/screen/merge.rs"
+  - "src-tauri/src/gpui_shell/screen/settings.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace/actions.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_data.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_ops.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/gpui_shell/theme.rs"
+  - "src-tauri/src/gpui_shell/ui.rs"
+  - "src-tauri/src/gpui_shell/ui/**"
+rule:
+  any:
+    - kind: string_literal
+      regex: ^"(Yes|No|OK)"$
+      inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^label$
+    - kind: string_literal
+      regex: (?i)(are you sure|successfully)
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

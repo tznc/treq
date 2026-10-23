@@ -1,0 +1,36 @@
+id: gpui-no-raw-text-size
+snapshots:
+  ? |
+    fn raw_line_height() -> Div {
+      div().line_height(relative(1.4))
+    }
+  : labels:
+    - source: div().line_height(relative(1.4))
+      style: primary
+      start: 32
+      end: 64
+    - source: line_height
+      style: secondary
+      start: 38
+      end: 49
+    - source: div().line_height
+      style: secondary
+      start: 32
+      end: 49
+  ? |
+    fn raw_size() -> Div {
+      div().text_size(zpx(13.))
+    }
+  : labels:
+    - source: div().text_size(zpx(13.))
+      style: primary
+      start: 25
+      end: 50
+    - source: text_size
+      style: secondary
+      start: 31
+      end: 40
+    - source: div().text_size
+      style: secondary
+      start: 25
+      end: 40

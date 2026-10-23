@@ -1,0 +1,57 @@
+id: gpui-no-raw-text-size
+language: rust
+severity: error
+message: >
+  Do not set a text size or line height by hand. Use
+  `ui::text(el, TextSize::..)`, which sets both from the type scale.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Not migrated yet: remove a file once it passes.
+  - "src-tauri/src/gpui_shell/form.rs"
+  - "src-tauri/src/gpui_shell/overlay/mod.rs"
+  - "src-tauri/src/gpui_shell/overlay/shortcuts.rs"
+  - "src-tauri/src/gpui_shell/popup.rs"
+  - "src-tauri/src/gpui_shell/screen/changes.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/rows.rs"
+  - "src-tauri/src/gpui_shell/screen/code.rs"
+  - "src-tauri/src/gpui_shell/screen/commits.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
+  - "src-tauri/src/gpui_shell/screen/github.rs"
+  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
+  - "src-tauri/src/gpui_shell/screen/linear.rs"
+  - "src-tauri/src/gpui_shell/screen/logs.rs"
+  - "src-tauri/src/gpui_shell/screen/merge_queue.rs"
+  - "src-tauri/src/gpui_shell/screen/modal.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/agent_prompt.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
+  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/rename_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/settings.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal_lightbox.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_modal.rs"
+  - "src-tauri/src/gpui_shell/sidebar/mod.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/gpui_shell/theme.rs"
+  - "src-tauri/src/gpui_shell/ui.rs"
+  - "src-tauri/src/gpui_shell/ui/**"
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: field_expression
+    has:
+      field: field
+      regex: ^(text_size|line_height)$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

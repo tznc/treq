@@ -1,0 +1,90 @@
+id: gpui-no-zpx-spacing
+language: rust
+severity: error
+message: >
+  Do not pass `zpx(..)` to a gap, padding, margin or radius method. Use
+  GPUI's spacing helpers (`gap_1p5`, `px_3`, ..), which follow UI zoom, or
+  the theme radius tokens.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  # Not migrated yet: remove a file once it passes.
+  - "src-tauri/src/gpui_shell/form.rs"
+  - "src-tauri/src/gpui_shell/overlay/mod.rs"
+  - "src-tauri/src/gpui_shell/overlay/shortcuts.rs"
+  - "src-tauri/src/gpui_shell/popover/checks.rs"
+  - "src-tauri/src/gpui_shell/popover/details.rs"
+  - "src-tauri/src/gpui_shell/popover/mod.rs"
+  - "src-tauri/src/gpui_shell/popup.rs"
+  - "src-tauri/src/gpui_shell/screen/changes.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/pr.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/rows.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/search.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/threads.rs"
+  - "src-tauri/src/gpui_shell/screen/checklist.rs"
+  - "src-tauri/src/gpui_shell/screen/code.rs"
+  - "src-tauri/src/gpui_shell/screen/commits.rs"
+  - "src-tauri/src/gpui_shell/screen/commits/rows.rs"
+  - "src-tauri/src/gpui_shell/screen/environment.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
+  - "src-tauri/src/gpui_shell/screen/file_picker.rs"
+  - "src-tauri/src/gpui_shell/screen/github.rs"
+  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
+  - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
+  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
+  - "src-tauri/src/gpui_shell/screen/linear.rs"
+  - "src-tauri/src/gpui_shell/screen/logs.rs"
+  - "src-tauri/src/gpui_shell/screen/merge.rs"
+  - "src-tauri/src/gpui_shell/screen/merge_queue.rs"
+  - "src-tauri/src/gpui_shell/screen/modal.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/agent_prompt.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/stash.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding_remote.rs"
+  - "src-tauri/src/gpui_shell/screen/open_workspaces.rs"
+  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/reactions.rs"
+  - "src-tauri/src/gpui_shell/screen/remote.rs"
+  - "src-tauri/src/gpui_shell/screen/remote_chrome.rs"
+  - "src-tauri/src/gpui_shell/screen/rename_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/settings.rs"
+  - "src-tauri/src/gpui_shell/screen/settings/account.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal_lightbox.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_modal.rs"
+  - "src-tauri/src/gpui_shell/sidebar/mod.rs"
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/gpui_shell/theme.rs"
+  - "src-tauri/src/gpui_shell/ui.rs"
+  - "src-tauri/src/gpui_shell/ui/**"
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        kind: field_expression
+        has:
+          field: field
+          regex: ^(gap|gap_x|gap_y|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|rounded|rounded_(t|b|l|r|tl|tr|bl|br))$
+    - has:
+        field: arguments
+        has:
+          kind: call_expression
+          has:
+            field: function
+            kind: identifier
+            regex: ^zpx$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end
