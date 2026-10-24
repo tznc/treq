@@ -284,7 +284,7 @@ fn run(window: &Window, host: &FakeHost, op: &Op, decline: bool, cx: &mut TestAp
     Op::FailNextRead => host.panic_once.store(true, Ordering::SeqCst),
     Op::Focused => controller.update(cx, |c, cx| c.focused(cx)),
     Op::FilesChanged => controller.update(cx, |c, cx| c.files_changed(cx)),
-    Op::PrsChanged => controller.update(cx, |c, cx| c.prs_changed("/repo", cx)),
+    Op::PrsChanged => controller.update(cx, |c, cx| c.prs_changed("/repo", false, cx)),
     Op::Advance(ms) => {
       cx.executor()
         .advance_clock(std::time::Duration::from_millis(*ms));

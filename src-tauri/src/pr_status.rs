@@ -695,6 +695,8 @@ pub fn set_app_handle(app: tauri::AppHandle) {
   // and only when what the poll found differs from the last event.
   let last_emitted: Mutex<HashMap<String, u64>> = Mutex::new(HashMap::new());
   global().set_on_update(Arc::new(move |repo_path, statuses, ci_statuses| {
+    // Follow GitHub retargets and merged bases before the UI rereads stacks.
+    let stacks_moved = crate::core::pr_stacks::sync_pr_bases(repo_path, statuses);
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     serde_json::to_string(&(statuses_sorted(statuses), statuses_sorted(ci_statuses)))
@@ -705,12 +707,13 @@ pub fn set_app_handle(app: tauri::AppHandle) {
       .lock_or_recover()
       .insert(repo_path.to_string(), digest)
       == Some(digest)
+      && !stacks_moved
     {
       return;
     }
     let _ = app.emit(
       "pr-statuses-updated",
-      serde_json::json!({ "repo_path": repo_path }),
+      serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved }),
     );
   }));
   global().ensure_started();

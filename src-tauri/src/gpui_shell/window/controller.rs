@@ -290,13 +290,21 @@ impl WindowController {
     });
   }
 
-  /// `pr-statuses-updated`: the PR poller's cache for `repo_path` changed.
+  /// `pr-statuses-updated`: the PR poller's cache for `repo_path` changed,
+  /// and with `stacks_moved` it retargeted workspaces to follow GitHub.
   /// Windows that show other repositories have nothing to refresh.
-  pub fn prs_changed(&mut self, repo_path: &str, cx: &mut Context<Self>) {
+  pub fn prs_changed(&mut self, repo_path: &str, stacks_moved: bool, cx: &mut Context<Self>) {
     let shown = self.model.main_repo == repo_path
       || self.data.supporting().iter().any(|r| r.path == repo_path);
     if shown {
-      self.read(Read::default(), cx);
+      self.read(
+        if stacks_moved {
+          Read::POLL
+        } else {
+          Read::default()
+        },
+        cx,
+      );
     }
   }
 

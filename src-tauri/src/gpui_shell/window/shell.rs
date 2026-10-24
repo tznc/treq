@@ -253,9 +253,12 @@ pub fn listen(app: &AppHandle) {
     let Some(repo_path) = payload["repo_path"].as_str() else {
       return;
     };
+    let stacks_moved = payload["stacks_moved"].as_bool().unwrap_or(false);
     for label in labels() {
       let repo_path = repo_path.to_string();
-      with_controller(&handle, &label, move |c, cx| c.prs_changed(&repo_path, cx));
+      with_controller(&handle, &label, move |c, cx| {
+        c.prs_changed(&repo_path, stacks_moved, cx)
+      });
     }
   });
   // `remoteCutoffStore`: the transport tore an endpoint's connections down.

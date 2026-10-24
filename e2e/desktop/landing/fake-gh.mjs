@@ -79,6 +79,14 @@ const prs = [
   ...pr,
 }));
 
+// QA specs change a PR on "GitHub" by writing `$HOME/fake-gh-prs.json`:
+// fields to merge over a fixture PR, by head branch.
+const overrides = join(process.env.HOME ?? "", "fake-gh-prs.json");
+if (existsSync(overrides)) {
+  const changes = JSON.parse(readFileSync(overrides, "utf8"));
+  for (const pr of prs) Object.assign(pr, changes[pr.headRefName]);
+}
+
 const issues = [
   {
     number: 77,
