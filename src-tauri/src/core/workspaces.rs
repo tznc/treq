@@ -1268,7 +1268,7 @@ pub fn push_workspace_to_remote(
   workspace_id: Option<i64>,
 ) -> Result<String, String> {
   // Determine the push path and target branch based on workspace_id
-  let (push_path, branch_name, target_branch) = if let Some(id) = workspace_id {
+  let (push_path, branch_name, target_branch, not_on_remote) = if let Some(id) = workspace_id {
     // For workspace, look up the path from database
     let workspace = local_db::get_workspace_by_id(repo_path, id)
       .map_err(|e| format!("Failed to get workspace: {}", e))?
@@ -1285,13 +1285,18 @@ pub fn push_workspace_to_remote(
       .target_branch
       .clone()
       .unwrap_or_else(|| "main".to_string());
-    (push_path, workspace.branch_name, target_branch)
+    (
+      push_path,
+      workspace.branch_name,
+      target_branch,
+      workspace.not_on_remote,
+    )
   } else {
     // For home repo, use repo_path directly
     let branch_name = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
     let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
-    (repo_path.to_string(), branch_name, target_branch)
+    (repo_path.to_string(), branch_name, target_branch, false)
   };
 
   // An ancestry-only merge cannot be abandoned cleanly while its bookmark still
@@ -1303,8 +1308,9 @@ pub fn push_workspace_to_remote(
   // Perform the push
   let result = jj::jj_push(&push_path).map_err(|e| format!("Push failed: {}", e))?;
 
-  // Clear the not_on_remote flag after successful push (only for workspaces)
-  if let Some(id) = workspace_id {
+  // Clear the not_on_remote flag after successful push (only for workspaces).
+  // A write is a commit with fsyncs, so skip it when the flag is clear.
+  if let (Some(id), true) = (workspace_id, not_on_remote) {
     local_db::update_workspace_not_on_remote(repo_path, id, false)?;
   }
 
