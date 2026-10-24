@@ -219,3 +219,7 @@ harness = false
 [[bench]]
 name = "file_search"
 harness = false
+
+[[bench]]
+name = "stacked_workspaces"
+harness = false
