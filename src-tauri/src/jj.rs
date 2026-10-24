@@ -7937,8 +7937,9 @@ pub fn jj_get_log(
 
 /// Get the most recent commits on a target branch (for display below active workspace commits).
 ///
-/// Uses revset: `latest(::{target_branch}, {limit})` to get the N most recent commits
-/// on the target branch.
+/// Takes the first `limit` of `::{target_branch}` in topological order, as the
+/// home-repo log does: `latest(::{target_branch}, {limit})` read every commit in
+/// the branch's history for its timestamp.
 pub fn jj_get_target_branch_log(
   workspace_path: &str,
   target_branch: &str,
@@ -7955,7 +7956,7 @@ pub fn jj_get_target_branch_log(
   let loaded = load_workspace_repo(workspace_path)?;
   let selected_target_ref =
     resolve_local_target_branch_revision(&loaded, workspace_path, target_branch)?;
-  let revset_expr = build_target_branch_revset(&selected_target_ref, fetch_limit);
+  let revset_expr = build_target_branch_revset(&selected_target_ref);
   let revset = evaluate_revset(&loaded, &revset_expr).map_err(|e| {
     JjError::IoError(format!(
       "Failed to evaluate target branch revset '{}': {}",
@@ -7976,6 +7977,7 @@ pub fn jj_get_target_branch_log(
     .collect();
   let commits = revset
     .iter()
+    .take(fetch_limit)
     .commits(loaded.repo.store())
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| JjError::IoError(format!("Failed to iterate revset '{}': {}", revset_expr, e)))?;
@@ -8004,8 +8006,8 @@ pub fn jj_get_target_branch_log(
   ))
 }
 
-fn build_target_branch_revset(target_ref: &str, limit: usize) -> String {
-  format!("latest(::{}, {})", format_revset_symbol(target_ref), limit)
+fn build_target_branch_revset(target_ref: &str) -> String {
+  format!("::{}", format_revset_symbol(target_ref))
 }
 
 /// Get commits that are in workspace but not in target branch
