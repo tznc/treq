@@ -216,14 +216,14 @@ it("deletes only the caller and releases their billing, machines and integration
     expect(instanceError).toBeNull();
 
     const linearToken = `lin_oauth_sqa_${randomBytes(6).toString("hex")}`;
-    const { error: linearError } = await admin
-      .from("linear_oauth_tokens")
-      .insert({
-        user_id: owner.user.id,
-        access_token: linearToken,
-        linear_workspace_id: "ws_sqa",
-        linear_workspace_name: "Service QA",
-      });
+    const { error: linearError } = await admin.rpc("linear_tokens_save", {
+      p_user_id: owner.user.id,
+      p_access_token: linearToken,
+      p_refresh_token: null,
+      p_expires_at: null,
+      p_workspace_id: "ws_sqa",
+      p_workspace_name: "Service QA",
+    });
     expect(linearError).toBeNull();
 
     const personal = await linkGithubRepo(admin, owner.user.id);

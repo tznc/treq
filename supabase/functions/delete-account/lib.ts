@@ -34,6 +34,7 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../_shared/billing/stripe-api.ts";
+import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import type { ManagedComputeProvider } from "../_shared/remote/sprites-adapter.ts";
 
 export type LiveInstance = { id: string; provider_resource_id: string | null };
@@ -194,10 +195,12 @@ export async function revokeLinearToken(
   accessToken: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const response = await fetchImpl("https://api.linear.app/oauth/revoke", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const response = await fetchWithTimeout(
+    "https://api.linear.app/oauth/revoke",
+    { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
+    undefined,
+    fetchImpl,
+  );
   if (!response.ok && response.status !== 400 && response.status !== 401) {
     throw new Error(`Linear revoke returned HTTP ${response.status}`);
   }
@@ -208,7 +211,9 @@ type QueryResult = { data: unknown; error: { message: string } | null };
 // supabase-js builders are too deeply generic to match a structural type, so
 // `from` stays untyped, as in _shared/billing/store.ts.
 export interface DeleteAccountClient {
+  rpc(fn: string, args: Record<string, unknown>): PromiseLike<QueryResult>;
   // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: supabase-js query builders are too generic to type structurally
   from(table: string): any;
   auth: {
     admin: {
@@ -339,15 +344,12 @@ export function deleteAccountStoreFor(
     },
 
     async linearAccessToken() {
-      const row = check(
-        await client
-          .from("linear_oauth_tokens")
-          .select("access_token")
-          .eq("user_id", userId)
-          .maybeSingle(),
+      // Tokens live in Vault (032_linear_tokens_vault.sql).
+      const rows = check(
+        await client.rpc("linear_tokens_load", { p_user_id: userId }),
         "Linear token lookup",
-      ) as { access_token: string } | null;
-      return row?.access_token ?? null;
+      ) as { access_token: string | null }[] | null;
+      return rows?.[0]?.access_token ?? null;
     },
 
     async deletePersonalInstallations() {
