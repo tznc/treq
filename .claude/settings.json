@@ -1,4 +1,30 @@
 {
+  "model": "opus",
+  "effortLevel": "low",
+  "env": {
+    "BASH_MAX_OUTPUT_LENGTH": "20000",
+    "MAX_MCP_OUTPUT_TOKENS": "10000",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+  },
+  "permissions": {
+    "deny": [
+      "Read(./target/**)",
+      "Read(./src-tauri/target/**)",
+      "Read(./src-tauri/gen/**)",
+      "Read(./mobile-gpui/target/**)",
+      "Read(./mobile-gpui/dist/**)",
+      "Read(./**/node_modules/**)",
+      "Read(./web/build/**)",
+      "Read(./web/.docusaurus/**)",
+      "Read(./web/package-lock.json)",
+      "Read(./supabase/.temp/**)",
+      "Read(./supabase/.branches/**)",
+      "Read(./coverage/**)",
+      "Read(./scripts/*/.generated/**)",
+      "Read(./assets/screenshots/**)",
+      "Read(./web/static/img/landing/**)"
+    ]
+  },
   "attribution": {
     "commit": "",
     "pr": "",
