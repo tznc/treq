@@ -8,7 +8,10 @@
 //! `NativeEvent`s React's `invalidateQueries` ran for), which also bump
 //! [`Data::revision`], as `useCacheRevision` does.
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+  collections::{HashMap, HashSet},
+  time::Duration,
+};
 
 use crate::{
   core::{repo::RepoBranch, supporting_repos::SupportingRepo, WorkspaceSidebarStatus},
@@ -77,6 +80,9 @@ pub struct RepoData {
   /// Whether the remote was read yet (`useGitRemoteInfo`'s `isLoading`).
   pub remote_read: bool,
   pub prs: HashMap<String, Option<PrInfo>>,
+  /// Workspaces being removed: their rows are gone before the removal
+  /// finishes, and a read made meanwhile must not bring them back.
+  pub hidden: HashSet<i64>,
 }
 
 /// The preview features the window's views depend on.
@@ -183,7 +189,11 @@ impl Data {
   pub fn apply(&mut self, path: &str, read: RepoRead) -> Applied {
     let repo = self.repos.entry(path.to_string()).or_default();
     let mut applied = Applied::default();
-    if let Some(workspaces) = read.workspaces {
+    if let Some(mut workspaces) = read.workspaces {
+      let listed: HashSet<i64> = workspaces.iter().map(|w| w.id).collect();
+      workspaces.retain(|w| !repo.hidden.contains(&w.id));
+      // A read that no longer lists a removed workspace ends its hiding.
+      repo.hidden.retain(|id| listed.contains(id));
       let ids = |list: &[Workspace]| list.iter().map(|w| w.id).collect::<Vec<_>>();
       let before = repo.workspaces.as_deref().map(ids);
       if repo.workspaces.as_deref().map(json) != Some(json(&workspaces)) {
@@ -192,7 +202,8 @@ impl Data {
       applied.before = Some(before.unwrap_or_default());
       repo.workspaces = Some(workspaces);
     }
-    if let Some(statuses) = read.statuses {
+    if let Some(mut statuses) = read.statuses {
+      statuses.retain(|s| !repo.hidden.contains(&s.current.id));
       if json(&repo.statuses) != json(&statuses) {
         applied.changed = true;
       }
@@ -227,6 +238,28 @@ impl Data {
       repo.prs = read.prs;
     }
     applied
+  }
+
+  /// Takes workspaces `ids` of `path` off the lists at once, and out of every
+  /// read until one no longer lists them (a read made before the removal
+  /// finished still does) or [`Data::unhide`].
+  pub fn hide(&mut self, path: &str, ids: &[i64]) {
+    let repo = self.repos.entry(path.to_string()).or_default();
+    repo.hidden.extend(ids);
+    if let Some(workspaces) = &mut repo.workspaces {
+      workspaces.retain(|w| !ids.contains(&w.id));
+    }
+    repo.statuses.retain(|s| !ids.contains(&s.current.id));
+    repo.has_changes.retain(|id, _| !ids.contains(id));
+  }
+
+  /// Ends [`Data::hide`] for a removal that failed: reads list `ids` again.
+  pub fn unhide(&mut self, path: &str, ids: &[i64]) {
+    if let Some(repo) = self.repos.get_mut(path) {
+      for id in ids {
+        repo.hidden.remove(id);
+      }
+    }
   }
 
   /// Forgets what was read of repositories the window no longer shows.
@@ -280,6 +313,49 @@ mod tests {
       },
     );
     assert_eq!(data.sessions_revision, 0, "still no sessions");
+  }
+
+  #[test]
+  fn a_hidden_workspace_stays_off_reads_until_one_drops_it() {
+    let mut data = Data::default();
+    let listed = |ids: &[i64]| RepoRead {
+      workspaces: Some(
+        ids
+          .iter()
+          .map(|&i| workspace(i, &format!("b{i}"), None))
+          .collect(),
+      ),
+      ..RepoRead::default()
+    };
+    data.apply("/repo", listed(&[1, 2]));
+    data.hide("/repo", &[2]);
+    assert_eq!(data.workspaces("/repo").len(), 1, "gone at once");
+    // A read made before the removal finished still lists it.
+    let stale = data.apply("/repo", listed(&[1, 2]));
+    assert!(!stale.changed, "the hidden row is not a change");
+    assert_eq!(data.workspaces("/repo").len(), 1);
+    // The read after it does not, which ends the hiding.
+    data.apply("/repo", listed(&[1]));
+    data.apply("/repo", listed(&[1, 2]));
+    assert_eq!(
+      data.workspaces("/repo").len(),
+      2,
+      "a new row with that id is shown"
+    );
+  }
+
+  #[test]
+  fn unhiding_brings_a_failed_removal_back() {
+    let mut data = Data::default();
+    let listed = RepoRead {
+      workspaces: Some(vec![workspace(1, "a", None), workspace(2, "b", None)]),
+      ..RepoRead::default()
+    };
+    data.apply("/repo", listed.clone());
+    data.hide("/repo", &[2]);
+    data.unhide("/repo", &[2]);
+    data.apply("/repo", listed);
+    assert_eq!(data.workspaces("/repo").len(), 2);
   }
 
   #[test]

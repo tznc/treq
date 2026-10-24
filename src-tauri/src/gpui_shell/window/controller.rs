@@ -202,6 +202,13 @@ impl WindowController {
         .detach();
     }
     let effects = self.model.native_event(event, &self.data);
+    // After the model: leaving a removed workspace reads its stack parent
+    // from the list the rows are about to leave.
+    match event {
+      NativeEvent::WorkspacesRemoving { repo_path, ids } => self.data.hide(repo_path, ids),
+      NativeEvent::WorkspacesRestored { repo_path, ids } => self.data.unhide(repo_path, ids),
+      _ => {}
+    }
     self.run(effects, cx);
   }
 
