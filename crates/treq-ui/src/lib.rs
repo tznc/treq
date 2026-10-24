@@ -238,6 +238,8 @@ pub struct Button {
   on_right_click: Option<OnRightClick>,
   on_hover: Option<OnHover>,
   selected: bool,
+  /// On or off, for a toggle.
+  pressed: Option<bool>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
@@ -257,6 +259,7 @@ impl Button {
       on_right_click: None,
       on_hover: None,
       selected: false,
+      pressed: None,
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
@@ -288,6 +291,14 @@ impl Button {
   /// trigger of a menu that is open.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
+    self
+  }
+
+  /// A toggle, on or off: drawn in the selected style while on, and read
+  /// out as pressed or not.
+  pub fn pressed(mut self, on: bool) -> Self {
+    self.pressed = Some(on);
+    self.selected = on;
     self
   }
 
@@ -467,6 +478,13 @@ impl RenderOnce for Button {
         b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })
       .when_some(self.name, |b, name| b.accessibility_label(name))
+      .when_some(self.pressed, |b, on| {
+        b.aria_toggled(if on {
+          gpui::accesskit::Toggled::True
+        } else {
+          gpui::accesskit::Toggled::False
+        })
+      })
       .debug_selector(move || selector)
       .whitespace_nowrap()
       .font_weight(gpui::FontWeight::MEDIUM)
@@ -730,6 +748,21 @@ mod tests {
     assert!(is_escape(&key("escape")));
     assert!(!is_escape(&key("shift-escape")));
     assert!(!is_escape(&key("enter")));
+  }
+
+  #[test]
+  fn a_pressed_button_is_a_toggle_in_the_selected_style() {
+    let p = theme::palette(false);
+    let off = Button::new("off", &p).pressed(false);
+    assert_eq!(off.pressed, Some(false));
+    assert!(!off.selected);
+    let on = Button::new("on", &p)
+      .variant(Variant::Outline)
+      .pressed(true);
+    assert_eq!(on.pressed, Some(true));
+    assert_eq!(on.colors().bg, p.selected());
+    // A plain button is no toggle.
+    assert_eq!(Button::new("plain", &p).pressed, None);
   }
 
   #[test]
