@@ -84,7 +84,7 @@ const SHELL_KEYS: &[(&str, Key)] = &[
 /// Keys an agent's TUI asks for: interrupt, mode switch and menu movement.
 const AGENT_KEYS: &[(&str, Key)] = &[
   ("Esc", Key::Named("escape")),
-  ("⇤", Key::Bytes(b"\x1b[Z")),
+  ("⇧⇥", Key::Bytes(b"\x1b[Z")),
   ("↑", Key::Named("up")),
   ("↓", Key::Named("down")),
   ("⏎", Key::Named("enter")),
