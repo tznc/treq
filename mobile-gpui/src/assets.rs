@@ -7,7 +7,12 @@ use gpui_kit::{AssetSource, Result, SharedString};
 
 gpui_kit::assets::icon_assets!(
   ExtraIcons,
-  [CircleQuestionMark, ListIndentDecrease, ListIndentIncrease]
+  [
+    CircleQuestionMark,
+    CornerDownRight,
+    ListIndentDecrease,
+    ListIndentIncrease
+  ]
 );
 
 pub struct AppAssets;

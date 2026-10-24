@@ -15,7 +15,8 @@ use gpui_kit::{
     h_flex,
     input::{Indent, InputEvent, Outdent, Textarea, TextareaState},
     popover::Popover,
-    v_flex, ActiveTheme, IconName, Sizable,
+    tag::Tag,
+    v_flex, ActiveTheme, Icon, IconName, Sizable,
   },
   *,
 };
@@ -60,7 +61,9 @@ pub fn open(repo: String, stack_on: Option<String>, done: OnDone, cx: &mut App) 
     None => "New workspaces".into(),
   };
   let title = SharedString::from(title);
-  sheet::open(Some(title.clone()), cx, move |window, cx| {
+  // The sheet draws its own title row, which changes with the step and
+  // holds the help button.
+  sheet::open(None, cx, move |window, cx| {
     cx.new(|cx| NewWorkspacesSheet::new(repo, stack_on, title, done, window, cx))
   });
 }
@@ -97,20 +100,6 @@ fn preview_label(count: Option<usize>) -> String {
   match count {
     Some(n) if n > 0 => format!("{PREVIEW_TITLE} {}", workspaces(n)),
     _ => PREVIEW_TITLE.into(),
-  }
-}
-
-/// A row's plan in words.
-fn step_text(row: &NewWorkspaceRow) -> String {
-  match (row.step, &row.error) {
-    (_, Some(error)) => error.clone(),
-    (Some(NewWorkspaceStep::Create), _) => match &row.base {
-      Some(base) if row.depth > 0 => format!("New branch on {base}"),
-      _ => "New branch".into(),
-    },
-    (Some(NewWorkspaceStep::Open), _) => "Existing branch".into(),
-    (Some(NewWorkspaceStep::AlreadyOpen), _) => "Already open".into(),
-    (None, None) => String::new(),
   }
 }
 
@@ -219,7 +208,6 @@ impl NewWorkspacesSheet {
     self.previewing = true;
     self.results = None;
     self.error = None;
-    sheet::set_title(PREVIEW_TITLE, cx);
     if self.plan_current(cx) {
       self.shown_at = Some(Instant::now());
     } else {
@@ -239,7 +227,6 @@ impl NewWorkspacesSheet {
     self.previewing = false;
     self.shown_at = None;
     self.error = None;
-    sheet::set_title(self.title.clone(), cx);
     self.lines.update(cx, |state, cx| state.focus(window, cx));
     cx.notify();
   }
@@ -378,15 +365,28 @@ impl NewWorkspacesSheet {
     }
     v_flex()
       .children(to_make(rows).enumerate().map(|(i, row)| {
-        let failed = row.error.is_some();
-        let icon = if failed {
-          IconName::TriangleAlert
-        } else if ran {
-          IconName::Check
-        } else if row.step == Some(NewWorkspaceStep::Create) {
-          IconName::Plus
+        let error = row.error.clone().filter(|_| row.step.is_some() || !ran);
+        // A stacked row hangs off the row above; a top-level one needs no
+        // icon unless it failed.
+        let icon = if row.error.is_some() {
+          Some(IconName::TriangleAlert.into())
+        } else if row.depth > 0 {
+          Some(Icon::from(LucideIcon::CornerDownRight))
         } else {
-          IconName::FolderOpen
+          None
+        };
+        // "New" goes in front of the branch name, wherever the row shows it.
+        let new = row.step == Some(NewWorkspaceStep::Create) && row.error.is_none();
+        let branch_line = |text: String, mono: bool| {
+          h_flex()
+            .gap_1p5()
+            .min_w_0()
+            .when(new, |line| line.child(Tag::info().xsmall().child("New")))
+            .child(if mono {
+              widgets::mono(text, cx).text_xs().truncate()
+            } else {
+              div().truncate().child(text)
+            })
         };
         h_flex()
           .id(("plan", i))
@@ -394,43 +394,29 @@ impl NewWorkspacesSheet {
           .py_1p5()
           .gap_2()
           .items_start()
-          .pl(px(16. + INDENT * row.depth as f32))
-          .child(
+          .pl(px(16. + INDENT * row.depth.saturating_sub(1) as f32))
+          .children(icon.map(|icon| {
             div()
               .pt_0p5()
-              .text_color(if failed {
+              .text_color(if row.error.is_some() {
                 theme.danger
               } else {
                 theme.muted_foreground
               })
-              .child(icon),
-          )
+              .child(icon)
+          }))
           .child(
             v_flex()
               .flex_1()
               .min_w_0()
-              .child(
-                div()
-                  .truncate()
-                  .child(row.title.clone().unwrap_or_else(|| row.line.clone())),
-              )
-              .children(
-                row
-                  .branch
-                  .clone()
-                  .filter(|_| row.title.is_some())
-                  .map(|branch| widgets::mono(branch, cx).text_xs().truncate()),
-              )
-              .child(
-                div()
-                  .text_xs()
-                  .text_color(if failed {
-                    theme.danger
-                  } else {
-                    theme.muted_foreground
-                  })
-                  .child(step_text(row)),
-              ),
+              .gap_0p5()
+              .map(|rows| match (&row.title, &row.branch) {
+                (Some(title), Some(branch)) => rows
+                  .child(div().truncate().child(title.clone()))
+                  .child(branch_line(branch.clone(), true)),
+                _ => rows.child(branch_line(row.line.trim().to_string(), false)),
+              })
+              .children(error.map(|error| div().text_xs().text_color(theme.danger).child(error))),
           )
       }))
       .into_any_element()
@@ -464,19 +450,6 @@ impl NewWorkspacesSheet {
                   .icon(LucideIcon::ListIndentIncrease)
                   .tooltip("Indent")
                   .on_click(cx.listener(|this, _, window, cx| this.indent(false, window, cx))),
-              )
-              .child(div().flex_1())
-              .child(
-                Popover::new("lines-help")
-                  .anchor(Anchor::TopRight)
-                  .trigger(
-                    Button::new("lines-help-button")
-                      .ghost()
-                      .icon(LucideIcon::CircleQuestionMark),
-                  )
-                  .max_w(px(280.))
-                  .text_sm()
-                  .child(LINES_HELP),
               ),
           )
           .when(self.legacy, |lines| {
@@ -565,11 +538,49 @@ impl NewWorkspacesSheet {
 
 impl Render for NewWorkspacesSheet {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    if self.previewing {
-      self.render_preview(cx)
+    let title = if self.previewing {
+      SharedString::from(PREVIEW_TITLE)
     } else {
-      self.render_lines(cx)
-    }
+      self.title.clone()
+    };
+    v_flex()
+      .child(
+        // Matches the title row `sheet` draws for other sheets.
+        h_flex()
+          .h(px(36.))
+          .px_4()
+          .gap_2()
+          .items_center()
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .text_sm()
+              .text_color(cx.theme().muted_foreground)
+              .truncate()
+              .child(title),
+          )
+          .when(!self.previewing, |row| {
+            row.child(
+              Popover::new("lines-help")
+                .anchor(Anchor::BottomRight)
+                .trigger(
+                  Button::new("lines-help-button")
+                    .ghost()
+                    .small()
+                    .icon(LucideIcon::CircleQuestionMark),
+                )
+                .max_w(px(280.))
+                .text_sm()
+                .child(LINES_HELP),
+            )
+          }),
+      )
+      .child(if self.previewing {
+        self.render_preview(cx)
+      } else {
+        self.render_lines(cx)
+      })
   }
 }
 
