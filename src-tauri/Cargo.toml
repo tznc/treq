@@ -219,3 +219,7 @@ harness = false
 [[bench]]
 name = "file_search"
 harness = false
+
+[[bench]]
+name = "code_files"
+harness = false
