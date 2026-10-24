@@ -71,6 +71,11 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn sessions(&self, repo: &str) -> Vec<Session>;
   fn branch(&self, repo: &str) -> Option<RepoBranch>;
   fn default_branch(&self, repo: &str) -> Option<String>;
+  /// [`Self::branch`] and [`Self::default_branch`], for a repository where
+  /// one read answers both.
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    (self.branch(repo), self.default_branch(repo))
+  }
   fn remote(&self, repo: &str) -> Option<GitRemoteInfo>;
   /// The pull request poller's cache, by branch.
   fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>>;
@@ -190,9 +195,20 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
 
 /// The repository's branch, default branch and remote.
 pub fn read_detail(host: &dyn WindowHost, repo: &str, out: &mut RepoRead) {
-  out.branch = Some(host.branch(repo));
-  out.default_branch = Some(host.default_branch(repo));
-  out.remote = Some(host.remote(repo));
+  // Side by side: for a remote repository each is a round trip.
+  let ((branch, default_branch), remote) = std::thread::scope(|scope| {
+    let remote = scope.spawn(|| host.remote(repo));
+    let branches = host.branches(repo);
+    (
+      branches,
+      remote
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+    )
+  });
+  out.branch = Some(branch);
+  out.default_branch = Some(default_branch);
+  out.remote = Some(remote);
 }
 
 /// Repositories `open_in_new_window` initialized for the window it opens,
@@ -224,6 +240,18 @@ fn take_just_initialized(repo: &str) -> bool {
   }
 }
 
+/// The branch an `InspectRepository` answer shows.
+fn repo_branch(inspection: RepositoryInspection) -> RepoBranch {
+  RepoBranch {
+    display_ref: inspection
+      .current_branch
+      .clone()
+      .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
+    is_detached: inspection.current_branch.is_none(),
+    current_branch: inspection.current_branch,
+  }
+}
+
 impl Backend {
   /// `InspectRepository` of the window's remote repository `repo`.
   pub(crate) fn inspect_remote(&self, repo: &str) -> Option<RepositoryInspection> {
@@ -249,22 +277,19 @@ impl WindowHost for Backend {
       return core::list_workspace_statuses(repo);
     };
     // The host has no sidebar listing: each workspace's own inspection.
-    Ok(
-      remote
-        .workspaces()?
-        .into_iter()
-        .map(|workspace| {
-          let has_conflicts = remote
-            .status(Some(workspace.id))
-            .is_ok_and(|s| !s.conflicted_files.is_empty());
-          WorkspaceSidebarStatus {
-            current: workspace,
-            has_conflicts,
-            last_activity_at: None,
-          }
-        })
-        .collect(),
-    )
+    Ok(remote_repo::parallel_map(
+      remote.workspaces()?,
+      |workspace| {
+        let has_conflicts = remote
+          .status(Some(workspace.id))
+          .is_ok_and(|s| !s.conflicted_files.is_empty());
+        WorkspaceSidebarStatus {
+          current: workspace,
+          has_conflicts,
+          last_activity_at: None,
+        }
+      },
+    ))
   }
 
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool> {
@@ -295,17 +320,19 @@ impl WindowHost for Backend {
 
   fn branch(&self, repo: &str) -> Option<RepoBranch> {
     if self.remote(repo).is_some() {
-      let inspection = self.inspect_remote(repo)?;
-      return Some(RepoBranch {
-        display_ref: inspection
-          .current_branch
-          .clone()
-          .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
-        is_detached: inspection.current_branch.is_none(),
-        current_branch: inspection.current_branch,
-      });
+      return self.inspect_remote(repo).map(repo_branch);
     }
     core::repo::get_repo_current_branch(repo).ok()
+  }
+
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    if Backend::remote(self, repo).is_some() {
+      // One `InspectRepository` answers both.
+      let inspection = self.inspect_remote(repo);
+      let default_branch = inspection.as_ref().map(|i| i.default_branch.clone());
+      return (inspection.map(repo_branch), default_branch);
+    }
+    (self.branch(repo), self.default_branch(repo))
   }
 
   fn default_branch(&self, repo: &str) -> Option<String> {

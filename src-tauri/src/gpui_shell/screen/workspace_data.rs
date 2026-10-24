@@ -24,7 +24,7 @@ use crate::{
     popover::data::{read_checks, ChecksData},
     remote_repo::{unsupported, Remote},
   },
-  jj::{HomeRebaseDryRunResult, JjLogResult},
+  jj::{HomeRebaseDryRunResult, JjFileChange, JjLogResult},
   local_db,
 };
 
@@ -358,40 +358,101 @@ impl WorkspaceHost for Backend {
   }
 }
 
-/// `ShowWorkspace`'s reads for a remote repository, through its typed
-/// commands. The home branch's dry-run rebase and the workflow checks are
-/// local-only (`assertLocalOperation`), so they stay empty.
-fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
+/// What the header reads of a remote repository.
+struct RemoteHeader {
+  workspace: Option<local_db::Workspace>,
+  status: Option<WorkspaceStatus>,
+  origin: Option<GitRemoteInfo>,
+  commits: Option<JjLogResult>,
+  review_count: usize,
+  uncommitted_count: usize,
+  home_ahead: usize,
+}
+
+/// The header's reads, side by side: each is a round trip to the host, so
+/// the header waits for the slowest rather than for all of them in turn.
+/// The workspace's diff, which tells committed from uncommitted files, is
+/// started before its branch is known, as it is wanted for any workspace
+/// off the default branch.
+fn read_remote_header(remote: &Remote, route: &Route) -> RemoteHeader {
   let warn = |what: &str, err: String| log::warn!("remote workspace header: {what}: {err}");
-  let workspace = route.workspace_id.and_then(|id| {
-    remote
-      .workspaces()
-      .map_err(|e| warn("workspaces", e))
-      .ok()?
-      .into_iter()
-      .find(|w| w.id == id)
-  });
-  let status = remote
-    .status(route.workspace_id)
-    .map_err(|e| warn("status", e))
-    .ok();
-  let origin = remote
-    .git_remote()
-    .map_err(|e| warn("remote", e))
-    .ok()
-    .flatten();
-  let commits = route.workspace_id.and_then(|id| {
-    remote
-      .commits(Some(id))
-      .map_err(|e| warn("commits", e))
-      .ok()
-  });
+  let on_home_feature = route.workspace_id.is_none() && route.home_branch != DEFAULT_BRANCH;
+  let (workspace, status, origin, commits, diff, home_files, home_ahead) =
+    std::thread::scope(|scope| {
+      let workspace = scope.spawn(|| {
+        route.workspace_id.and_then(|id| {
+          remote
+            .workspaces()
+            .map_err(|e| warn("workspaces", e))
+            .ok()?
+            .into_iter()
+            .find(|w| w.id == id)
+        })
+      });
+      let status = scope.spawn(|| {
+        remote
+          .status(route.workspace_id)
+          .map_err(|e| warn("status", e))
+          .ok()
+      });
+      let origin = scope.spawn(|| {
+        remote
+          .git_remote()
+          .map_err(|e| warn("remote", e))
+          .ok()
+          .flatten()
+      });
+      let commits = scope.spawn(|| {
+        route.workspace_id.and_then(|id| {
+          remote
+            .commits(Some(id))
+            .map_err(|e| warn("commits", e))
+            .ok()
+        })
+      });
+      let diff = scope.spawn(|| route.workspace_id.map(|id| remote.workspace_diff(id)));
+      let home_files = scope.spawn(|| {
+        route
+          .workspace_id
+          .is_none()
+          .then(|| remote.changed_files(None))
+      });
+      let home_ahead = scope.spawn(|| {
+        if on_home_feature {
+          remote
+            .commits(None)
+            .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
+            .unwrap_or(0)
+        } else {
+          0
+        }
+      });
+      (
+        super::joined(workspace),
+        super::joined(status),
+        super::joined(origin),
+        super::joined(commits),
+        super::joined(diff),
+        super::joined(home_files),
+        super::joined(home_ahead),
+      )
+    });
   let include_committed = workspace
     .as_ref()
     .is_some_and(|w| w.branch_name != route.default_target());
-  let (review_count, uncommitted_count) = match route.workspace_id {
-    Some(id) if include_committed => remote
-      .workspace_diff(id)
+  let changed = |files: Result<Vec<JjFileChange>, String>| {
+    files
+      .map(|files| {
+        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
+        (count, count)
+      })
+      .unwrap_or_else(|e| {
+        warn("changed files", e);
+        (0, 0)
+      })
+  };
+  let (review_count, uncommitted_count) = match (route.workspace_id, diff) {
+    (Some(_), Some(diff)) if include_committed => diff
       .map(|diff| {
         let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
         (
@@ -403,26 +464,25 @@ fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
         warn("diff", e);
         (0, 0)
       }),
-    id => remote
-      .changed_files(id)
-      .map(|files| {
-        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
-        (count, count)
-      })
-      .unwrap_or_else(|e| {
-        warn("changed files", e);
-        (0, 0)
-      }),
+    (None, _) => changed(home_files.unwrap_or_else(|| remote.changed_files(None))),
+    (id, _) => changed(remote.changed_files(id)),
   };
-  let on_home_feature = route.workspace_id.is_none() && route.home_branch != DEFAULT_BRANCH;
-  let home_ahead = if on_home_feature {
-    remote
-      .commits(None)
-      .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
-      .unwrap_or(0)
-  } else {
-    0
-  };
+  RemoteHeader {
+    workspace,
+    status,
+    origin,
+    commits,
+    review_count,
+    uncommitted_count,
+    home_ahead,
+  }
+}
+
+/// `ShowWorkspace`'s reads for a remote repository, through its typed
+/// commands. The home branch's dry-run rebase and the workflow checks are
+/// local-only (`assertLocalOperation`), so they stay empty.
+fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
+  let header = read_remote_header(remote, route);
   let (linear_enabled, logs_enabled) = backend.with_db(|db| {
     (
       feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
@@ -430,13 +490,13 @@ fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
     )
   });
   Loaded {
-    workspace,
-    status,
-    remote: origin,
-    commits,
-    review_count,
-    uncommitted_count,
-    home_ahead,
+    workspace: header.workspace,
+    status: header.status,
+    remote: header.origin,
+    commits: header.commits,
+    review_count: header.review_count,
+    uncommitted_count: header.uncommitted_count,
+    home_ahead: header.home_ahead,
     home_dry_run: None,
     checks: None,
     linear_enabled,
@@ -780,4 +840,97 @@ pub fn workspace_view(
     }
   });
   (header, tab_row)
+}
+
+#[cfg(test)]
+mod remote_header_tests {
+  use std::{sync::Arc, time::Duration};
+
+  use super::*;
+  use crate::gpui_shell::remote_repo::tests::{repository, workspace_json, FakeTransport};
+
+  fn route(workspace_id: Option<i64>) -> Route {
+    serde_json::from_value(serde_json::json!({
+      "repoPath": "/srv/app",
+      "workspaceId": workspace_id,
+      "homeBranch": "main",
+      "tab": "changes",
+      "retargeting": false,
+      "creatingPr": false,
+      "runningChecks": [],
+      "mergeQueue": null,
+      "revision": 0,
+    }))
+    .unwrap()
+  }
+
+  fn answered(latency: Duration) -> (Remote, Arc<FakeTransport>) {
+    let transport = Arc::new(FakeTransport::default());
+    *transport.latency.lock().unwrap() = latency;
+    transport.answer(
+      "ListWorkspaces",
+      serde_json::json!([workspace_json(3, "feat", "feat/x")]),
+    );
+    transport.answer(
+      "WorkspaceDiff",
+      serde_json::json!({
+        "committed_files": [],
+        "hunks_by_file": [],
+        "uncommitted_files": [],
+        "conflicted_files": [],
+        "too_large_to_render": false,
+      }),
+    );
+    (Remote::new(repository(), transport.clone()), transport)
+  }
+
+  fn kinds(transport: &FakeTransport) -> Vec<&'static str> {
+    let mut kinds: Vec<_> = transport.sent().iter().map(|r| r.kind_name()).collect();
+    kinds.sort_unstable();
+    kinds
+  }
+
+  #[test]
+  fn a_workspace_header_reads_everything_side_by_side() {
+    let (remote, transport) = answered(Duration::from_millis(40));
+    let started = std::time::Instant::now();
+    let header = read_remote_header(&remote, &route(Some(3)));
+    let took = started.elapsed();
+    assert_eq!(header.workspace.map(|w| w.id), Some(3));
+    assert_eq!(
+      kinds(&transport),
+      [
+        "GitRemoteInfo",
+        "InspectWorkspace",
+        "ListCommits",
+        "ListWorkspaces",
+        "WorkspaceDiff"
+      ]
+    );
+    // Five serial reads would take 200 ms.
+    assert!(took < Duration::from_millis(120), "{took:?}");
+  }
+
+  #[test]
+  fn a_workspace_on_the_default_branch_counts_changed_files_instead() {
+    let (remote, transport) = answered(Duration::ZERO);
+    transport.answer(
+      "ListWorkspaces",
+      serde_json::json!([workspace_json(3, "main", "main")]),
+    );
+    transport.answer("ListChanges", serde_json::json!([]));
+    read_remote_header(&remote, &route(Some(3)));
+    assert!(kinds(&transport).contains(&"ListChanges"));
+  }
+
+  #[test]
+  fn the_home_header_reads_the_changed_files_with_the_rest() {
+    let (remote, transport) = answered(Duration::ZERO);
+    transport.answer("ListChanges", serde_json::json!([]));
+    read_remote_header(&remote, &route(None));
+    assert_eq!(
+      kinds(&transport),
+      ["GitRemoteInfo", "ListChanges", "RepositoryStatus"]
+    );
+  }
 }
