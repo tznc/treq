@@ -335,16 +335,21 @@ fn pick_folder_and_open_new_window(app: AppHandle) {
       let app_for_init = app;
       tauri::async_runtime::spawn(async move {
         let path_for_init = path.clone();
-        let init_ok = tauri::async_runtime::spawn_blocking(move || core::init(&path_for_init))
-          .await
-          .ok()
-          .and_then(Result::ok)
-          .unwrap_or(false);
+        // The rebase pass runs behind the window, which opens at once.
+        let init_ok =
+          tauri::async_runtime::spawn_blocking(move || core::init_deferring_rebase(&path_for_init))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(false);
         if !init_ok {
           menu_to_focused(&app_for_init, "menu-open-in-new-window-invalid");
           open_new_window::OPEN_NEW_WINDOW_GATE.end();
           return;
         }
+        // The window's `prepare_repo` must not set the repository up again.
+        #[cfg(feature = "gpui-shell")]
+        gpui_shell::note_just_initialized(&path);
         let label = open_new_window::new_repo_window_label();
         let title = open_new_window::new_repo_window_title(&path);
         let app_for_window = app_for_init.clone();

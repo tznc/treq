@@ -27,6 +27,7 @@ mod tree;
 
 pub(super) use actions::Shortcut;
 pub(super) use controller::{Presentation, WindowController};
+pub(crate) use host::note_just_initialized;
 pub(super) use host::WindowHost;
 pub(super) use keys::{from_app, window_shortcut};
 pub(super) use shell::{

@@ -861,7 +861,9 @@ where
     );
     return;
   }
-  if let Err(err) = core::init(path) {
+  // The rebase pass runs behind the window, which opens at once; its
+  // `prepare_repo` must not set the repository up a second time.
+  if let Err(err) = core::init_deferring_rebase(path) {
     toast(
       ToastTone::Error,
       "Failed to open repository",
@@ -869,6 +871,7 @@ where
     );
     return;
   }
+  crate::gpui_shell::note_just_initialized(path);
   let last = [("last_opened_repo_path".to_string(), path.to_string())];
   if let Err(err) = host.set_settings(&last) {
     log::warn!("failed to remember the last opened repository: {err}");
