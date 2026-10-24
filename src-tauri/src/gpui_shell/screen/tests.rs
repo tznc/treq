@@ -714,7 +714,6 @@ impl changes_data::ChangesHost for FakeHost {
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
           path: path.clone(),
-          content_hash: format!("h-{path}"),
           hunks: working
             .hunks_by_file
             .iter()

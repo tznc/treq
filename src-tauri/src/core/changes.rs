@@ -1,6 +1,5 @@
 use crate::{jj, local_db};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -56,18 +55,10 @@ pub(crate) fn deduplicate_file_paths(file_paths: Vec<String>) -> Vec<String> {
     .collect()
 }
 
-pub(crate) fn content_hash<T: Serialize>(value: &T) -> String {
-  Sha256::digest(serde_json::to_vec(value).unwrap_or_default())
-    .iter()
-    .map(|byte| format!("{byte:02x}"))
-    .collect()
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileHunksBatchFile {
   pub path: String,
-  pub content_hash: String,
   pub hunks: Vec<jj::JjDiffHunk>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<String>,
@@ -76,10 +67,13 @@ pub struct WorkspaceFileHunksBatchFile {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileHunksBatch {
+  /// Names the working-copy diff the files were read from, and the marker
+  /// style; empty when unknown. Equal tokens mean equal hunks.
   pub snapshot_token: String,
   pub files: Vec<WorkspaceFileHunksBatchFile>,
 }
 
+/// [`list_file_hunks`] for several files, read from one snapshot.
 pub fn list_file_hunks_batch(
   repo_path: &str,
   workspace_id: Option<i64>,
@@ -89,27 +83,39 @@ pub fn list_file_hunks_batch(
   if repo_path.trim().is_empty() {
     return Err("Repository path cannot be empty".to_string());
   }
-  resolve_workspace_dir(repo_path, workspace_id)?;
-  let files = deduplicate_file_paths(file_paths)
+  let path = resolve_workspace_dir(repo_path, workspace_id)?;
+  let paths = deduplicate_file_paths(file_paths);
+  let error = |e: jj::JjError| format!("Failed to get file hunks: {}", e);
+  let (snapshot_token, hunks): (String, Vec<Result<_, String>>) =
+    match jj::jj_get_file_hunks_batch(&path, &paths, conflict_marker_style) {
+      Ok((token, hunks)) => (
+        format!("{token}:{conflict_marker_style}"),
+        hunks.into_iter().map(|h| h.map_err(error)).collect(),
+      ),
+      Err(e) => {
+        let message = error(e);
+        (
+          String::new(),
+          paths.iter().map(|_| Err(message.clone())).collect(),
+        )
+      }
+    };
+  let files = paths
     .into_iter()
-    .map(
-      |path| match list_file_hunks(repo_path, workspace_id, &path, conflict_marker_style) {
-        Ok(hunks) => WorkspaceFileHunksBatchFile {
-          content_hash: content_hash(&hunks),
-          path,
-          hunks,
-          error: None,
-        },
-        Err(error) => WorkspaceFileHunksBatchFile {
-          content_hash: content_hash(&error),
-          path,
-          hunks: Vec::new(),
-          error: Some(error),
-        },
+    .zip(hunks)
+    .map(|(path, hunks)| match hunks {
+      Ok(hunks) => WorkspaceFileHunksBatchFile {
+        path,
+        hunks,
+        error: None,
       },
-    )
+      Err(error) => WorkspaceFileHunksBatchFile {
+        path,
+        hunks: Vec::new(),
+        error: Some(error),
+      },
+    })
     .collect();
-  let snapshot_token = content_hash(&list_changed_files(repo_path, workspace_id)?);
   Ok(WorkspaceFileHunksBatch {
     snapshot_token,
     files,
@@ -168,19 +174,5 @@ mod batch_tests {
       deduplicate_file_paths(vec!["b.rs".into(), "a.rs".into(), "b.rs".into()]),
       vec!["b.rs", "a.rs"]
     );
-  }
-
-  #[test]
-  fn content_hash_is_deterministic_and_changes_with_hunks() {
-    let empty: Vec<jj::JjDiffHunk> = Vec::new();
-    assert_eq!(content_hash(&empty), content_hash(&empty));
-    assert_ne!(content_hash(&empty), content_hash(&vec![test_hunk()]));
-  }
-
-  fn test_hunk() -> jj::JjDiffHunk {
-    serde_json::from_value(serde_json::json!({
-      "id": "h", "header": "@@", "lines": ["+x"], "patch": "+x"
-    }))
-    .unwrap()
   }
 }
