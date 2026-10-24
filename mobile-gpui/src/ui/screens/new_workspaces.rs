@@ -1,8 +1,6 @@
 //! New workspaces, several at once: one title or branch per line, an
-//! indented line stacked on the line above, and the host's plan for each
-//! line shown before anything is made.
-
-use std::time::Duration;
+//! indented line stacked on the line above. A Preview step shows the host's
+//! plan for each line, and nothing is made until it is confirmed there.
 
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -27,15 +25,14 @@ use crate::{
   ui::{load, sheet, widgets, Load},
 };
 
-/// How long typing pauses before the host is asked for a plan.
-const PLAN_DELAY: Duration = Duration::from_millis(400);
-
 /// Indent per stacking level in the plan.
 const INDENT: f32 = 16.;
 
-/// The plan's height before it scrolls, so a long plan leaves the button in
+/// The plan's height before it scrolls, so a long plan leaves the buttons in
 /// view.
-const PLAN_MAX_H: f32 = 240.;
+const PLAN_MAX_H: f32 = 440.;
+
+const PREVIEW_TITLE: &str = "Preview";
 
 /// Opens the sheet. New workspaces stack on `stack_on`, or the default
 /// branch; `done` runs once any were made.
@@ -44,8 +41,9 @@ pub fn open(repo: String, stack_on: Option<String>, done: OnDone, cx: &mut App) 
     Some(branch) => format!("New workspaces on {branch}"),
     None => "New workspaces".into(),
   };
-  sheet::open(Some(title.into()), cx, move |window, cx| {
-    cx.new(|cx| NewWorkspacesSheet::new(repo, stack_on, done, window, cx))
+  let title = SharedString::from(title);
+  sheet::open(Some(title.clone()), cx, move |window, cx| {
+    cx.new(|cx| NewWorkspacesSheet::new(repo, stack_on, title, done, window, cx))
   });
 }
 
@@ -88,7 +86,11 @@ fn step_text(row: &NewWorkspaceRow) -> String {
 struct NewWorkspacesSheet {
   repo: String,
   stack_on: Option<String>,
+  /// The sheet's title on the lines step.
+  title: SharedString,
   lines: Entity<TextareaState>,
+  /// On the Preview step: the plan is shown and the lines can't change.
+  previewing: bool,
   plan: Load<Vec<NewWorkspaceRow>>,
   /// The host's treq predates planning: lines are planned here and made
   /// one at a time.
@@ -99,13 +101,13 @@ struct NewWorkspacesSheet {
   error: Option<String>,
   keys: IdempotencyKeys,
   done: OnDone,
-  _plan: Task<()>,
 }
 
 impl NewWorkspacesSheet {
   fn new(
     repo: String,
     stack_on: Option<String>,
+    title: SharedString,
     done: OnDone,
     window: &mut Window,
     cx: &mut Context<Self>,
@@ -115,9 +117,10 @@ impl NewWorkspacesSheet {
         .rows(5)
         .placeholder("Fix login redirect\nfeat/billing-api\n  Billing page")
     });
-    cx.subscribe(&lines, |this, _, event: &InputEvent, cx| {
+    // Preview is enabled once there is a line.
+    cx.subscribe(&lines, |_, _, event: &InputEvent, cx| {
       if let InputEvent::Change = event {
-        this.text_changed(cx);
+        cx.notify();
       }
     })
     .detach();
@@ -125,7 +128,9 @@ impl NewWorkspacesSheet {
     Self {
       repo,
       stack_on,
+      title,
       lines,
+      previewing: false,
       plan: Load::Idle,
       legacy: false,
       results: None,
@@ -133,7 +138,6 @@ impl NewWorkspacesSheet {
       error: None,
       keys: IdempotencyKeys::default(),
       done,
-      _plan: Task::ready(()),
     }
   }
 
@@ -141,23 +145,35 @@ impl NewWorkspacesSheet {
     self.lines.read(cx).value().to_string()
   }
 
-  /// Replans once typing pauses.
-  fn text_changed(&mut self, cx: &mut Context<Self>) {
+  /// Moves to the Preview step and asks the host for the plan.
+  fn preview(&mut self, cx: &mut Context<Self>) {
+    if self.previewing || self.text(cx).trim().is_empty() {
+      return;
+    }
+    self.previewing = true;
     self.results = None;
     self.error = None;
-    if self.text(cx).trim().is_empty() {
-      self.plan = Load::Idle;
-      self._plan = Task::ready(());
-      return cx.notify();
-    }
+    sheet::set_title(PREVIEW_TITLE, cx);
     if self.legacy {
       self.plan = Load::Ready(self.unchecked(cx));
       return cx.notify();
     }
-    self._plan = cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(PLAN_DELAY).await;
-      this.update(cx, |this, cx| this.replan(cx)).ok();
-    });
+    self.plan = Load::Loading;
+    self.replan(cx);
+    cx.notify();
+  }
+
+  /// Back to the lines, as they were.
+  fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.running {
+      return;
+    }
+    self.previewing = false;
+    self.plan = Load::Idle;
+    self.error = None;
+    sheet::set_title(self.title.clone(), cx);
+    self.lines.update(cx, |state, cx| state.focus(window, cx));
+    cx.notify();
   }
 
   fn unchecked(&self, cx: &App) -> Vec<NewWorkspaceRow> {
@@ -166,9 +182,6 @@ impl NewWorkspacesSheet {
 
   fn replan(&mut self, cx: &mut Context<Self>) {
     let text = self.text(cx);
-    if self.plan.ready().is_none() {
-      self.plan = Load::Loading;
-    }
     let request = TreqCommandRequest::PlanNewWorkspaces {
       repo: self.repo.clone(),
       text: text.clone(),
@@ -178,8 +191,8 @@ impl NewWorkspacesSheet {
       cx,
       remote::read::<Vec<NewWorkspaceRow>>(request),
       move |this, result, cx| {
-        // A newer edit is on its way; its plan replaces this one.
-        if this.text(cx) != text {
+        // Back was pressed and the lines edited since.
+        if !this.previewing || this.text(cx) != text {
           return;
         }
         this.plan = match result {
@@ -207,7 +220,11 @@ impl NewWorkspacesSheet {
     let Some(plan) = self.plan.ready().cloned() else {
       return;
     };
-    if self.running || plan.iter().all(|r| r.step.is_none()) {
+    if !self.previewing
+      || self.running
+      || self.results.is_some()
+      || plan.iter().all(|r| r.step.is_none())
+    {
       return;
     }
     self.running = true;
@@ -275,14 +292,7 @@ impl NewWorkspacesSheet {
           .px_4()
           .into_any_element()
       }
-      (None, Load::Idle) => {
-        return widgets::muted(
-          "One per line: a title or a branch name. Indent a line to stack it on the line above.",
-          cx,
-        )
-        .px_4()
-        .into_any_element()
-      }
+      (None, Load::Idle) => return div().into_any_element(),
     };
     let ran = self.results.is_some();
     v_flex()
@@ -346,10 +356,10 @@ impl NewWorkspacesSheet {
   }
 }
 
-impl Render for NewWorkspacesSheet {
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let rows = self.plan.ready().cloned().unwrap_or_default();
-    let runnable = rows.iter().any(|r| r.step.is_some()) && self.results.is_none();
+impl NewWorkspacesSheet {
+  /// The lines step: what to make, before anything is checked.
+  fn render_lines(&self, cx: &mut Context<Self>) -> Div {
+    let empty = self.text(cx).trim().is_empty();
     v_flex()
       .gap_3()
       .child(
@@ -373,15 +383,40 @@ impl Render for NewWorkspacesSheet {
                   .small()
                   .label("Indent")
                   .on_click(cx.listener(|this, _, window, cx| this.indent(false, window, cx))),
-              )
-              .when(self.legacy, |bar| {
-                bar.child(widgets::muted(
-                  "This host's treq can't check lines first.",
-                  cx,
-                ))
-              }),
-          ),
+              ),
+          )
+          .child(widgets::muted(
+            "One per line: a title or a branch name. Indent a line to stack it on the line above.",
+            cx,
+          ))
+          .when(self.legacy, |lines| {
+            lines.child(widgets::muted(
+              "This host's treq can't check lines first.",
+              cx,
+            ))
+          }),
       )
+      .child(
+        div().px_4().child(
+          Button::new("preview-workspaces")
+            .primary()
+            .large()
+            .w_full()
+            .h(px(widgets::CTA_H - 8.))
+            .label(PREVIEW_TITLE)
+            .disabled(empty)
+            .on_click(cx.listener(|this, _, _, cx| this.preview(cx))),
+        ),
+      )
+  }
+
+  /// The Preview step: what each line will do, confirmed with the button.
+  fn render_preview(&self, cx: &mut Context<Self>) -> Div {
+    let rows = self.plan.ready().cloned().unwrap_or_default();
+    let ran = self.results.is_some();
+    let runnable = rows.iter().any(|r| r.step.is_some()) && !ran;
+    v_flex()
+      .gap_3()
       .child(
         div()
           .id("plan-rows")
@@ -396,28 +431,52 @@ impl Render for NewWorkspacesSheet {
           .map(|e| widgets::error_text(e, cx).px_4()),
       )
       .child(
-        div().px_4().child(
-          Button::new("create-workspaces")
-            .primary()
-            .large()
-            .w_full()
-            .h(px(widgets::CTA_H - 8.))
-            .label(if self.results.is_some() {
-              "Done".to_string()
-            } else {
-              action_label(&rows)
-            })
-            .loading(self.running)
-            .disabled(!(runnable || self.results.is_some()) || self.running)
-            .on_click(cx.listener(|this, _, _, cx| {
-              if this.results.is_some() {
-                sheet::close(cx);
+        h_flex()
+          .px_4()
+          .gap_2()
+          .when(!ran, |bar| {
+            bar.child(
+              Button::new("back-to-lines")
+                .outline()
+                .large()
+                .h(px(widgets::CTA_H - 8.))
+                .label("Back")
+                .disabled(self.running)
+                .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+            )
+          })
+          .child(
+            Button::new("create-workspaces")
+              .primary()
+              .large()
+              .flex_1()
+              .h(px(widgets::CTA_H - 8.))
+              .label(if ran {
+                "Done".to_string()
               } else {
-                this.run(cx);
-              }
-            })),
-        ),
+                action_label(&rows)
+              })
+              .loading(self.running)
+              .disabled(!(runnable || ran) || self.running)
+              .on_click(cx.listener(|this, _, _, cx| {
+                if this.results.is_some() {
+                  sheet::close(cx);
+                } else {
+                  this.run(cx);
+                }
+              })),
+          ),
       )
+  }
+}
+
+impl Render for NewWorkspacesSheet {
+  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    if self.previewing {
+      self.render_preview(cx)
+    } else {
+      self.render_lines(cx)
+    }
   }
 }
 
