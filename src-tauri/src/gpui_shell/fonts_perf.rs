@@ -48,6 +48,22 @@ fn fonts_perf() {
     ])
     .unwrap();
   mark("add_fonts", &mut t);
+  if std::env::var("PREWARM").is_ok() {
+    use gpui::{FontWeight, Font};
+    let ids: Vec<_> = [
+      font("Inter"),
+      Font { weight: FontWeight::MEDIUM, ..font("Inter") },
+      Font { weight: FontWeight::SEMIBOLD, ..font("Inter") },
+      font("JetBrains Mono"),
+      Font { weight: FontWeight::SEMIBOLD, ..font("JetBrains Mono") },
+    ]
+    .iter()
+    .map(|f| system.font_id(f).unwrap())
+    .collect();
+    mark("font_ids", &mut t);
+    system.prewarm_fonts(&ids);
+    mark("prewarm_fonts", &mut t);
+  }
   shape(&system, "Inter", "Settings Close Save changes");
   mark("inter_ascii_first", &mut t);
   shape(&system, "Inter", "Command palette — Go to Home › … · ↑↓ ↵");
