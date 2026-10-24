@@ -26,6 +26,8 @@ use super::{
   github_data::{
     self as data, GithubHost, LogLine, PrFilters, Route, StateFilter, Tab, TreqChecks,
   },
+  integrations_cache::cache,
+  prefetch::Intent,
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -140,6 +142,8 @@ pub(super) struct Detail {
   /// Runs whose job logs are open, and the logs read, by run and job.
   pub(super) runs_open: HashSet<i64>,
   pub(super) logs: HashMap<(i64, String), Result<Vec<LogLine>, String>>,
+  /// The PR's checks and workspace are being read on a timer.
+  polling: bool,
   generation: u64,
 }
 
@@ -199,6 +203,8 @@ pub struct GithubView {
   /// The dialog's focus, for Escape.
   dialog_focus: FocusHandle,
   dialog_focused: bool,
+  /// The row the pointer rests on, whose detail is read ahead.
+  hovered: Intent<(Tab, u64)>,
   /// Draws checks as running while one runs anywhere in the app.
   _running: gpui::Subscription,
 }
@@ -248,6 +254,7 @@ impl GithubView {
       popover_closed: None,
       workspaces: Vec::new(),
       logs_enabled: false,
+      hovered: Intent::default(),
       dialog_focus: cx.focus_handle(),
       dialog_focused: false,
       _running: cx.observe_global::<checks_run::Running>(|_, cx| cx.notify()),
@@ -368,10 +375,19 @@ impl GithubView {
       }
       self.popover = None;
       self.detail = Detail {
-        key: detail,
+        key: detail.clone(),
         generation: self.detail.generation + 1,
         ..Detail::default()
       };
+      // What was read last (or read ahead by the pointer) shows while the
+      // read below replaces it.
+      if let Some(key) = detail {
+        let at = (key.repo, key.number);
+        match key.tab {
+          Tab::Issues => self.detail.issue = cache(cx).issues.get(&at).cloned(),
+          Tab::Prs => self.detail.pr = cache(cx).prs.get(&at).cloned(),
+        }
+      }
       self.load_detail(cx);
     }
     let creating_pr = self.route.creating && self.route.tab == Tab::Prs;
@@ -399,6 +415,14 @@ impl GithubView {
     };
     let filter = self.route.filter;
     let plan = plan_load(&mut self.issues, (repo.clone(), filter), more);
+    let key = (repo.clone(), filter);
+    if self.issues.pages.is_empty() {
+      // The first page read last shows while the list is read again.
+      if let Some(page) = cache(cx).issue_pages.get(&key).cloned() {
+        self.issues.pages = vec![page];
+        self.issues.loading = false;
+      }
+    }
     let generation = self.issues.generation;
     self.run(
       cx,
@@ -407,7 +431,12 @@ impl GithubView {
           host.list_issues(&repo, filter.value(), after)
         })
       },
-      move |view, result, _| {
+      move |view, result, cx| {
+        if let Some(first) = result.as_ref().ok().and_then(|pages| pages.first()) {
+          cache(cx)
+            .issue_pages
+            .insert(key, Instant::now(), first.clone());
+        }
         if view.issues.generation == generation {
           finish_load(&mut view.issues, result);
         }
@@ -421,6 +450,13 @@ impl GithubView {
     };
     let filter = self.route.filter;
     let plan = plan_load(&mut self.prs, (repo.clone(), filter), more);
+    let key = (repo.clone(), filter);
+    if self.prs.pages.is_empty() {
+      if let Some(page) = cache(cx).pr_pages.get(&key).cloned() {
+        self.prs.pages = vec![page];
+        self.prs.loading = false;
+      }
+    }
     let generation = self.prs.generation;
     self.run(
       cx,
@@ -429,7 +465,12 @@ impl GithubView {
           host.list_prs(&repo, filter.value(), page)
         })
       },
-      move |view, result, _| {
+      move |view, result, cx| {
+        if let Some(first) = result.as_ref().ok().and_then(|pages| pages.first()) {
+          cache(cx)
+            .pr_pages
+            .insert(key, Instant::now(), first.clone());
+        }
         if view.prs.generation == generation {
           finish_load(&mut view.prs, result);
         }
@@ -475,10 +516,15 @@ impl GithubView {
         }),
       },
       move |view, (read, checks), cx| {
+        let at = (key.repo.clone(), key.number);
+        match &read {
+          Ok(Ok(issue)) => cache(cx).issues.insert(at, Instant::now(), issue.clone()),
+          Ok(Err(pr)) => cache(cx).prs.insert(at, Instant::now(), pr.clone()),
+          Err(_) => {}
+        }
         if view.detail.generation != generation {
           return;
         }
-        let first = view.detail.issue.is_none() && view.detail.pr.is_none();
         view.detail.loading = false;
         match read {
           Ok(Ok(issue)) => view.detail.issue = Some(issue),
@@ -491,12 +537,59 @@ impl GithubView {
             None
           });
         }
-        if first && key.tab == Tab::Prs {
+        if key.tab == Tab::Prs && !view.detail.polling {
+          view.detail.polling = true;
           view.load_treq(cx);
           view.poll_checks(generation, cx);
         }
       },
     );
+  }
+
+  /// The pointer entered or left a row: once it rests on one, its detail is
+  /// read into the cache the click's own read starts from.
+  fn hover_item(&mut self, number: u64, hovered: bool, cx: &mut Context<Self>) {
+    let tab = self.route.tab;
+    self
+      .hovered
+      .hover((tab, number), hovered, cx, move |view, cx| {
+        view.read_ahead(tab, number, cx)
+      });
+  }
+
+  fn read_ahead(&mut self, tab: Tab, number: u64, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo() else {
+      return;
+    };
+    if self.route.selected == Some(number) {
+      return;
+    }
+    let at = (repo.clone(), number);
+    let cached = match tab {
+      Tab::Issues => cache(cx).issues.has_fresh(&at, Instant::now()),
+      Tab::Prs => cache(cx).prs.has_fresh(&at, Instant::now()),
+    };
+    if cached {
+      return;
+    }
+    let host = self.host.clone();
+    cx.spawn(async move |_, cx| {
+      let read = cx
+        .background_spawn(async move {
+          match tab {
+            Tab::Issues => host.issue(&repo, number).map(Ok),
+            Tab::Prs => host.pr(&repo, number).map(Err),
+          }
+        })
+        .await;
+      if let Ok(read) = read {
+        cx.update(|cx| match read {
+          Ok(issue) => cache(cx).issues.insert(at, Instant::now(), issue),
+          Err(pr) => cache(cx).prs.insert(at, Instant::now(), pr),
+        });
+      }
+    })
+    .detach();
   }
 
   /// Reads the open PR's checks every [`CHECKS_POLL`] while it shows.
@@ -1433,10 +1526,13 @@ impl GithubView {
       Tab::Issues => {
         let pages = &self.issues;
         if pages.loading {
-          return div()
-            .py_12()
-            .child(ui::Loading::new("github-list-loading", p))
-            .into_any_element();
+          return ui::delayed(
+            "github-list-loading",
+            div()
+              .py_12()
+              .child(ui::Loading::new("github-list-loading-spinner", p)),
+          )
+          .into_any_element();
         }
         let issues = self.issue_items();
         if let (Some(err), true) = (&pages.error, issues.is_empty()) {
@@ -1466,6 +1562,9 @@ impl GithubView {
                 p,
                 cx,
                 move |view, cx| view.press(format!("github.select:{n}"), cx),
+              )
+              .on_hover(
+                cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
               )
               .child(
                 div()
@@ -1497,10 +1596,13 @@ impl GithubView {
       Tab::Prs => {
         let pages = &self.prs;
         if pages.loading {
-          return div()
-            .py_12()
-            .child(ui::Loading::new("github-list-loading", p))
-            .into_any_element();
+          return ui::delayed(
+            "github-list-loading",
+            div()
+              .py_12()
+              .child(ui::Loading::new("github-list-loading-spinner", p)),
+          )
+          .into_any_element();
         }
         let prs = self.pr_items();
         if let (Some(err), true) = (&pages.error, prs.is_empty()) {
@@ -1541,6 +1643,9 @@ impl GithubView {
                 p,
                 cx,
                 move |view, cx| view.press(format!("github.select:{n}"), cx),
+              )
+              .on_hover(
+                cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
               )
               .child(parts::pr_list_item(pr, !show_detail, p))
               .child(chevron(p))
