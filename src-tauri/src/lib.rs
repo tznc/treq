@@ -481,7 +481,9 @@ pub fn run() {
   // CLI invocations never start Tauri: see `cli::args` for why.
   #[cfg(desktop)]
   if is_cli_process(std::env::args_os()) {
-    std::process::exit(cli::args::run(std::env::args_os()));
+    let code = cli::args::run(std::env::args_os());
+    local_db::close_idle_connections();
+    std::process::exit(code);
   }
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
@@ -1027,6 +1029,7 @@ pub fn run() {
         if let Some(state) = app_handle.try_state::<AppState>() {
           state.pty_manager.close_all();
         }
+        local_db::close_idle_connections();
         if let Some(state) = app_handle.try_state::<commands::remote_pty_commands::RemotePtyState>()
         {
           tauri::async_runtime::block_on(state.0.close_all());
@@ -1040,7 +1043,9 @@ pub fn run() {
 #[allow(clippy::exit, reason = "the CLI hands its exit code to the shell")]
 pub fn run() {
   telemetry::install_panic_hook();
-  std::process::exit(cli::args::run(std::env::args_os()));
+  let code = cli::args::run(std::env::args_os());
+  local_db::close_idle_connections();
+  std::process::exit(code);
 }
 
 #[cfg(all(test, feature = "gui"))]

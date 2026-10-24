@@ -1276,6 +1276,7 @@ fn move_workspace_dir_to_trash(repo_path: &str, workspace_dir: &Path, workspace_
     .map(|d| d.as_nanos())
     .unwrap_or_default();
   let target = trash_dir.join(format!("{name}-{workspace_id}-{stamp}"));
+  crate::local_db::release_connections_under(workspace_dir);
   match std::fs::rename(workspace_dir, &target) {
     Ok(()) => target.to_string_lossy().to_string(),
     Err(e) => {
