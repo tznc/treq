@@ -12,6 +12,8 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
+  cell::RefCell,
+  collections::HashMap,
   sync::{Arc, LazyLock},
   time::Duration,
 };
@@ -1087,12 +1089,28 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
 
 /// `MarkdownContent`'s prose, at the type scale step nearest `size` (`Lg`
 /// for `prose`, `Sm` for `prose-sm`); the step sets the line height.
-pub(super) fn markdown(
+pub(super) fn markdown(id: impl Into<SharedString>, text: &str, size: f32, dark: bool) -> Div {
+  markdown_view(id, text, size, dark, false)
+}
+
+/// [`markdown`] that fills its parent and scrolls itself, drawing only the
+/// blocks on screen: for a whole document.
+pub(super) fn scrolling_markdown(
   id: impl Into<SharedString>,
   text: &str,
   size: f32,
   dark: bool,
-) -> impl IntoElement {
+) -> Div {
+  markdown_view(id, text, size, dark, true).size_full()
+}
+
+fn markdown_view(
+  id: impl Into<SharedString>,
+  text: &str,
+  size: f32,
+  dark: bool,
+  scrollable: bool,
+) -> Div {
   let id: SharedString = id.into();
   let text_size = match size {
     s if s <= 12. => TextSize::Xs,
@@ -1112,14 +1130,43 @@ pub(super) fn markdown(
     3 => px(17.),
     _ => base,
   });
-  // HTML comments never show, as in `MarkdownContent`; shortcodes show as
-  // emoji, as on GitHub.
+  ui::text(div(), text_size).child(
+    TextView::markdown(id, prepared_markdown(text))
+      .style(style)
+      .selectable(true)
+      .scrollable(scrollable),
+  )
+}
+
+/// The texts [`prepared_markdown`] keeps; a page shows only a few.
+const PREPARED_MAX: usize = 64;
+
+thread_local! {
+  /// Markdown texts as drawn, by their source.
+  static PREPARED: RefCell<HashMap<String, SharedString>> = RefCell::default();
+}
+
+/// `text` as `MarkdownContent` draws it: HTML comments never show, and
+/// shortcodes show as emoji, as on GitHub. Kept by source, since every frame
+/// draws it again: a long README cost a regex pass, `emojify` and a copy per
+/// frame, and the same string lets `TextView` skip comparing the text.
+fn prepared_markdown(text: &str) -> SharedString {
+  if let Some(hit) = PREPARED.with(|p| p.borrow().get(text).cloned()) {
+    return hit;
+  }
   #[allow(clippy::expect_used, reason = "constant pattern")]
   static HTML_COMMENT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
-  let text = HTML_COMMENT.replace_all(text, "");
-  let text = super::code_data::emojify(&text);
-  ui::text(div(), text_size).child(TextView::markdown(id, text).style(style).selectable(true))
+  let prepared: SharedString =
+    super::code_data::emojify(&HTML_COMMENT.replace_all(text, "")).into();
+  PREPARED.with(|p| {
+    let mut p = p.borrow_mut();
+    if p.len() >= PREPARED_MAX {
+      p.clear();
+    }
+    p.insert(text.to_string(), prepared.clone());
+  });
+  prepared
 }
 
 impl Render for CodeView {
