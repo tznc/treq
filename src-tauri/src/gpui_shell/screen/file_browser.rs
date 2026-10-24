@@ -1683,15 +1683,16 @@ impl FileBrowserView {
     let markdown = is_markdown(&path);
     let previewing = markdown && self.preview.as_deref() == Some(path.as_str());
     let body = if previewing {
+      // The preview scrolls itself, so a long README draws only the blocks
+      // on screen.
       div()
         .id("markdown-preview")
         .debug_selector(|| "file-markdown-preview".into())
         .size_full()
-        .overflow_y_scroll()
         .bg(p.background)
         .px_8()
         .py_6()
-        .child(super::code::markdown(
+        .child(super::code::scrolling_markdown(
           "file-markdown",
           &opened.content,
           14.,
