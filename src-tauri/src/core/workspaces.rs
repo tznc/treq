@@ -4113,7 +4113,6 @@ fn workspace_diff_with_conflict_style(
     .map_err(|e| format!("Failed to get workspace: {}", e))?
     .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
 
-  let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
   let workspace_dir = Path::new(repo_path)
     .join(".treq")
     .join("workspaces")
@@ -4124,7 +4123,9 @@ fn workspace_diff_with_conflict_style(
   if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
     return Ok(empty);
   }
-  let repo = jj::WorkspaceRepo::load(workspace_dir_str)
+  // One load, lock and snapshot for the whole reload; the revision queries
+  // below see the same snapshot as the uncommitted files.
+  let (repo, working_copy) = jj::WorkspaceRepo::load_working_copy(workspace_dir_str)
     .map_err(|e| format!("Failed to load workspace repo: {}", e))?;
   let base_revision = resolve_workspace_diff_base_revision(repo_path, &workspace, &repo)?;
   let tip_revision = resolve_workspace_diff_tip_revision(&workspace, &repo)?;
@@ -4141,15 +4142,14 @@ fn workspace_diff_with_conflict_style(
     .merge_diff_between_revisions(&base_revision, &tip_revision, conflict_marker_style)
     .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
 
-  let uncommitted_files = jj::jj_get_changed_files(workspace_dir_str)
-    .map_err(|e| format!("Failed to get uncommitted workspace changes: {}", e))?;
+  let jj::WorkingCopyChanges {
+    files: uncommitted_files,
+    conflicted: conflicted_files,
+  } = working_copy;
   let uncommitted_paths: std::collections::HashSet<String> = uncommitted_files
     .iter()
     .map(|file| file.path.clone())
     .collect();
-  let conflicted_files =
-    jj::get_conflicted_files_after_snapshot(workspace_dir_str, Some(target_branch))
-      .map_err(|e| format!("Failed to get conflicted workspace files: {}", e))?;
   let conflicted_paths: std::collections::HashSet<String> =
     conflicted_files.iter().cloned().collect();
   // Drop clean overlap with the working copy so WC-only edits (bookmark at @)
