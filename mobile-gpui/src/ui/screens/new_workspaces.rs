@@ -2,6 +2,8 @@
 //! indented line stacked on the line above. A Preview step shows the host's
 //! plan for each line, and nothing is made until it is confirmed there.
 
+use std::time::{Duration, Instant};
+
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -33,6 +35,11 @@ const INDENT: f32 = 16.;
 const PLAN_MAX_H: f32 = 440.;
 
 const PREVIEW_TITLE: &str = "Preview";
+
+/// How long the plan is on screen before Create takes a tap. Create sits
+/// where Preview was, so a double tap on Preview would otherwise skip the
+/// confirmation.
+const CONFIRM_GUARD: Duration = Duration::from_millis(350);
 
 /// Opens the sheet. New workspaces stack on `stack_on`, or the default
 /// branch; `done` runs once any were made.
@@ -92,6 +99,8 @@ struct NewWorkspacesSheet {
   /// On the Preview step: the plan is shown and the lines can't change.
   previewing: bool,
   plan: Load<Vec<NewWorkspaceRow>>,
+  /// When the plan was shown, for [`CONFIRM_GUARD`].
+  shown_at: Option<Instant>,
   /// The host's treq predates planning: lines are planned here and made
   /// one at a time.
   legacy: bool,
@@ -132,6 +141,7 @@ impl NewWorkspacesSheet {
       lines,
       previewing: false,
       plan: Load::Idle,
+      shown_at: None,
       legacy: false,
       results: None,
       running: false,
@@ -154,8 +164,10 @@ impl NewWorkspacesSheet {
     self.results = None;
     self.error = None;
     sheet::set_title(PREVIEW_TITLE, cx);
+    self.shown_at = None;
     if self.legacy {
       self.plan = Load::Ready(self.unchecked(cx));
+      self.shown_at = Some(Instant::now());
       return cx.notify();
     }
     self.plan = Load::Loading;
@@ -202,6 +214,7 @@ impl NewWorkspacesSheet {
           }
           other => Load::from_result(other.map_err(|e| errors::describe(&e).message)),
         };
+        this.shown_at = Some(Instant::now());
         cx.notify();
       },
     );
@@ -220,7 +233,11 @@ impl NewWorkspacesSheet {
     let Some(plan) = self.plan.ready().cloned() else {
       return;
     };
+    let settled = self
+      .shown_at
+      .is_some_and(|at| at.elapsed() >= CONFIRM_GUARD);
     if !self.previewing
+      || !settled
       || self.running
       || self.results.is_some()
       || plan.iter().all(|r| r.step.is_none())
