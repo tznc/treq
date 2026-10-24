@@ -6,6 +6,7 @@
 //! The workspace header's popovers (`popover`) open here too, over a
 //! transparent backdrop, so a click outside one closes it.
 
+use crate::result_ext::ResultExt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Wry};
@@ -84,7 +85,7 @@ fn modal_window(
     .build()
     .map_err(|err| log::warn!("failed to build the GPUI modal window: {err}"))
     .ok()?;
-  let _ = window.remove_menu();
+  window.remove_menu().ignore_closed();
   #[cfg(target_os = "linux")]
   if let Ok(gtk_window) = window.gtk_window() {
     use gtk::prelude::GtkWindowExt;
@@ -105,15 +106,15 @@ fn modal_window(
   );
   if let Err(err) = attached {
     log::warn!("failed to attach GPUI to the modal window: {err}");
-    let _ = window.destroy();
+    window.destroy().ignore_closed();
     return None;
   }
   let root = built.borrow_mut().take()?;
   // As for the popups: settle an X11 compositor's translucency while 1x1.
   #[cfg(target_os = "linux")]
   {
-    let _ = window.show();
-    let _ = window.hide();
+    window.show().ignore_closed();
+    window.hide().ignore_closed();
   }
   MODALS.with(|modals| {
     modals.borrow_mut().insert(
@@ -136,7 +137,7 @@ fn cover(app: &AppHandle, owner: &str, window: &tauri::Window<Wry>) {
     return;
   };
   let size = LogicalSize::new(f32::from(client.size.width), f32::from(client.size.height));
-  let _ = window.set_size(size);
+  window.set_size(size).ignore_closed();
   #[cfg(target_os = "linux")]
   if let Ok(gtk_window) = window.gtk_window() {
     use gtk::prelude::{GtkWindowExt, WidgetExt};
@@ -144,10 +145,12 @@ fn cover(app: &AppHandle, owner: &str, window: &tauri::Window<Wry>) {
     gtk_window.set_size_request(width, height);
     gtk_window.resize(width, height);
   }
-  let _ = window.set_position(LogicalPosition::new(
-    f32::from(client.origin.x),
-    f32::from(client.origin.y),
-  ));
+  window
+    .set_position(LogicalPosition::new(
+      f32::from(client.origin.x),
+      f32::from(client.origin.y),
+    ))
+    .ignore_closed();
 }
 
 /// Shows `snapshot` over window `owner`, or closes its dialog for `None`.
@@ -196,9 +199,9 @@ pub fn update(
   if opened.unwrap_or(false) || !window.is_visible().unwrap_or(false) {
     popup::hide_all();
     cover(app, owner, &window);
-    let _ = window.show();
+    window.show().ignore_closed();
     cover(app, owner, &window);
-    let _ = window.set_focus();
+    window.set_focus().ignore_closed();
   }
 }
 
@@ -208,20 +211,23 @@ pub fn show_popover(app: &AppHandle, owner: &str, popover: Entity<Popover>, dark
   let Some((window, root)) = modal_window(app, owner) else {
     return;
   };
-  let _ = tauri_plugin_gpui::with_app(move |cx| {
+  tauri_plugin_gpui::with_app(move |cx| {
     // The search field's colors.
     theme::set_dark(dark, cx);
-    let _ = root.update(cx, |root, cx| {
-      root.overlay = None;
-      root.popover = Some(popover);
-      cx.notify();
-    });
-  });
+    root
+      .update(cx, |root, cx| {
+        root.overlay = None;
+        root.popover = Some(popover);
+        cx.notify();
+      })
+      .ignore_closed();
+  })
+  .ignore_closed();
   popup::hide_all();
   cover(app, owner, &window);
-  let _ = window.show();
+  window.show().ignore_closed();
   cover(app, owner, &window);
-  let _ = window.set_focus();
+  window.set_focus().ignore_closed();
 }
 
 /// Closes window `owner`'s popover, if it shows one.
@@ -272,16 +278,19 @@ fn hide(app: &AppHandle, owner: &str) {
   if !window.is_visible().unwrap_or(false) {
     return;
   }
-  let _ = tauri_plugin_gpui::with_app(move |cx| {
-    let _ = root.update(cx, |root, cx| {
-      root.overlay = None;
-      root.popover = None;
-      cx.notify();
-    });
-  });
-  let _ = window.hide();
+  tauri_plugin_gpui::with_app(move |cx| {
+    root
+      .update(cx, |root, cx| {
+        root.overlay = None;
+        root.popover = None;
+        cx.notify();
+      })
+      .ignore_closed();
+  })
+  .ignore_closed();
+  window.hide().ignore_closed();
   if let Some(parent) = tauri::Manager::get_window(app, owner) {
-    let _ = parent.set_focus();
+    parent.set_focus().ignore_closed();
   }
 }
 
@@ -296,6 +305,6 @@ pub fn place(app: &AppHandle, owner: &str) {
 /// Destroys window `owner`'s modal window once the window is gone.
 pub fn forget(owner: &str) {
   if let Some(modal) = MODALS.with(|modals| modals.borrow_mut().remove(owner)) {
-    let _ = modal.window.destroy();
+    modal.window.destroy().ignore_closed();
   }
 }

@@ -62,6 +62,7 @@ redundant_clone = "warn"
 manual_let_else = "warn"
 needless_collect = "warn"
 implicit_clone = "warn"
+let_underscore_must_use = "warn"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }

@@ -12,6 +12,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -374,7 +375,9 @@ impl WorkspaceView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let children: ActionSink = {
@@ -385,7 +388,9 @@ impl WorkspaceView {
         }
         let view = view.clone();
         cx.defer(move |cx| {
-          let _ = view.update(cx, |view, cx| view.launch(action, cx));
+          view
+            .update(cx, |view, cx| view.launch(action, cx))
+            .ignore_closed();
         });
       })
     };
@@ -544,13 +549,15 @@ impl WorkspaceView {
     let revision = route.revision;
     cx.spawn(async move |this, cx| {
       let loaded = cx.background_spawn(async move { host.load(&route) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.prefetching.remove(&key);
-        if view.route.key() != key {
-          let now = cx.background_executor().now();
-          view.headers.insert(key, now, (revision, loaded));
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          view.prefetching.remove(&key);
+          if view.route.key() != key {
+            let now = cx.background_executor().now();
+            view.headers.insert(key, now, (revision, loaded));
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -721,10 +728,12 @@ impl WorkspaceView {
           return;
         };
         let names = branches.into_iter().map(|b| b.name).collect();
-        let _ = this.update(cx, |view, cx| {
-          let now = cx.background_executor().now();
-          view.branches.insert(repo, now, names);
-        });
+        this
+          .update(cx, |view, cx| {
+            let now = cx.background_executor().now();
+            view.branches.insert(repo, now, names);
+          })
+          .ignore_closed();
       })
       .detach();
     });
@@ -742,18 +751,20 @@ impl WorkspaceView {
     cx.spawn(async move |this, cx| {
       let key = route.key();
       let loaded = cx.background_spawn(async move { host.load(&route) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.loading = false;
-        if view.route.key() == key {
-          view.loaded = Some(loaded);
-          view.read_pr(cx);
-          view.warm_file_index(cx);
-          view.rebuild(cx);
-        }
-        if std::mem::take(&mut view.reload) {
-          view.load(cx);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          view.loading = false;
+          if view.route.key() == key {
+            view.loaded = Some(loaded);
+            view.read_pr(cx);
+            view.warm_file_index(cx);
+            view.rebuild(cx);
+          }
+          if std::mem::take(&mut view.reload) {
+            view.load(cx);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -776,12 +787,14 @@ impl WorkspaceView {
       let pr = cx
         .background_spawn(async move { host.pr_cache(&repo, &branch) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route.key() == key && view.pr != pr {
-          view.pr = pr;
-          view.rebuild(cx);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.key() == key && view.pr != pr {
+            view.pr = pr;
+            view.rebuild(cx);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -949,25 +962,27 @@ impl WorkspaceView {
     let repo_path = self.route.repo_path.clone();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = Pending::None;
-        view.host.notify(NativeEvent::Toast {
-          title: outcome.title,
-          description: outcome.description,
-          tone: match (outcome.ok, outcome.warning) {
-            (false, _) => ToastTone::Error,
-            (true, true) => ToastTone::Warning,
-            (true, false) => ToastTone::Success,
-          },
-          action: None,
-        });
-        // The window reads again on this and bumps the route's revision,
-        // which reloads the header (`set_route`).
-        view
-          .host
-          .notify(NativeEvent::WorkspaceChanged { repo_path });
-        view.rebuild(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.pending = Pending::None;
+          view.host.notify(NativeEvent::Toast {
+            title: outcome.title,
+            description: outcome.description,
+            tone: match (outcome.ok, outcome.warning) {
+              (false, _) => ToastTone::Error,
+              (true, true) => ToastTone::Warning,
+              (true, false) => ToastTone::Success,
+            },
+            action: None,
+          });
+          // The window reads again on this and bumps the route's revision,
+          // which reloads the header (`set_route`).
+          view
+            .host
+            .notify(NativeEvent::WorkspaceChanged { repo_path });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1028,14 +1043,16 @@ impl WorkspaceView {
     self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
-      let _ = this.update(cx, |this, cx| {
-        if let Some((k, shown)) = this.tooltip.as_mut() {
-          if *k == key && !*shown {
-            *shown = true;
-            cx.notify();
+      this
+        .update(cx, |this, cx| {
+          if let Some((k, shown)) = this.tooltip.as_mut() {
+            if *k == key && !*shown {
+              *shown = true;
+              cx.notify();
+            }
           }
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -1757,7 +1774,7 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
       cx.observe_window_activation(window, move |_, window, _| {
         if window.is_window_active() {
           if let Some(tx) = tx.take() {
-            let _ = tx.send(());
+            tx.send(()).ignore_closed();
           }
         }
       })
@@ -1766,7 +1783,7 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
     return;
   };
   if let Some(_watch) = watch {
-    let _ = rx.await;
+    rx.await.ignore_closed();
   }
 }
 
@@ -1959,11 +1976,13 @@ impl WorkspaceView {
           host.launch_session(&request, false)
         })
         .await;
-      let _ = this.update(cx, |view, _| match (result, done) {
-        (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
-        (Ok(_), None) => {}
-        (Err(err), _) => view.toast(ToastTone::Error, failed, err),
-      });
+      this
+        .update(cx, |view, _| match (result, done) {
+          (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
+          (Ok(_), None) => {}
+          (Err(err), _) => view.toast(ToastTone::Error, failed, err),
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -2051,7 +2070,9 @@ impl WorkspaceView {
       let place = cx
         .background_spawn(async move { terminal_place(&*host, repo, workspace_id, home) })
         .await;
-      let _ = pane.update(cx, |pane, cx| pane.set_place(place, cx));
+      pane
+        .update(cx, |pane, cx| pane.set_place(place, cx))
+        .ignore_closed();
     });
   }
 

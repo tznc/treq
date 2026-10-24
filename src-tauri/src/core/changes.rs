@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use crate::{jj, local_db};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -158,7 +159,8 @@ pub fn split_working_copy(
   if let Some(repo_path) = jj::derive_repo_path_from_workspace(workspace_path) {
     if let Ok(branch) = jj::get_workspace_branch(workspace_path) {
       log::debug!("jj_split auto_rebase: repo_path={repo_path}, branch={branch}");
-      let _ = crate::auto_rebase::rebase_after_commit(&repo_path, &branch);
+      crate::auto_rebase::rebase_after_commit(&repo_path, &branch)
+        .warn_on_err("rebase after commit");
     }
   }
   Ok(result)

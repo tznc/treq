@@ -5,6 +5,7 @@
 //! does too: a line is parsed from a fresh state, and its spans are cached
 //! by language and text because a diff redraws on every hover.
 
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -263,7 +264,7 @@ fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usi
   let mut cursor = 0;
   for (index, op) in ops {
     push(cursor..index, &scopes);
-    let _ = scopes.apply(&op);
+    scopes.apply(&op).best_effort();
     cursor = index;
   }
   push(cursor..text.len(), &scopes);

@@ -18,6 +18,7 @@
 // redacted before storage in case a result itself echoes sensitive input
 // (e.g. `AgentStart`'s result includes the prompt it was given).
 
+use crate::result_ext::ResultExt;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -248,7 +249,7 @@ impl IdempotencyStore {
           .execute_batch("COMMIT")
           .map_err(|e| format!("filesystem_error: {e}"))?,
         Err(_) => {
-          let _ = conn.execute_batch("ROLLBACK");
+          conn.execute_batch("ROLLBACK").best_effort();
         }
       }
       result

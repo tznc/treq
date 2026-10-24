@@ -10,6 +10,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
@@ -228,7 +229,9 @@ impl GithubView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -306,10 +309,12 @@ impl GithubView {
       let out = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        done(view, out, cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          done(view, out, cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -608,16 +613,18 @@ impl GithubView {
       let checks = cx
         .background_spawn(async move { host.pr_checks(&key.repo, key.number) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        // Most polls find the checks as they were: nothing to redraw.
-        match checks {
-          Ok(checks) if view.detail.generation == generation && view.detail.checks != checks => {
-            view.detail.checks = checks;
-            cx.notify();
+      this
+        .update(cx, |view, cx| {
+          // Most polls find the checks as they were: nothing to redraw.
+          match checks {
+            Ok(checks) if view.detail.generation == generation && view.detail.checks != checks => {
+              view.detail.checks = checks;
+              cx.notify();
+            }
+            _ => {}
           }
-          _ => {}
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -651,11 +658,13 @@ impl GithubView {
         if setting_up {
           cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SETUP_POLL).await;
-            let _ = this.update(cx, |view, cx| {
-              if view.detail.generation == generation {
-                view.load_treq(cx);
-              }
-            });
+            this
+              .update(cx, |view, cx| {
+                if view.detail.generation == generation {
+                  view.load_treq(cx);
+                }
+              })
+              .ignore_closed();
           })
           .detach();
         }
@@ -766,12 +775,14 @@ impl GithubView {
       run,
       move |target, run| host.run_checks(target, run),
       move |_, cx| {
-        let _ = view.update(cx, |view, cx| {
-          view
-            .host
-            .notify(NativeEvent::WorkspaceChanged { repo_path });
-          view.reload_checks(cx);
-        });
+        view
+          .update(cx, |view, cx| {
+            view
+              .host
+              .notify(NativeEvent::WorkspaceChanged { repo_path });
+            view.reload_checks(cx);
+          })
+          .ignore_closed();
       },
     );
   }

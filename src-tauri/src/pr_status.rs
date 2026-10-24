@@ -10,6 +10,7 @@
 
 use crate::github::{PrCiStatus, PrInfo};
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -754,10 +755,12 @@ pub fn set_app_handle(app: tauri::AppHandle) {
     {
       return;
     }
-    let _ = app.emit(
-      "pr-statuses-updated",
-      serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved }),
-    );
+    app
+      .emit(
+        "pr-statuses-updated",
+        serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved }),
+      )
+      .ignore_closed();
   }));
   global().ensure_started();
 }

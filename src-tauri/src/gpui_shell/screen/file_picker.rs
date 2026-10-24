@@ -4,6 +4,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::{
@@ -94,11 +95,13 @@ impl FilePicker {
         })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |picker, cx| {
-        picker.results = results;
-        picker.selected = 0;
-        cx.notify();
-      });
+      this
+        .update(cx, |picker, cx| {
+          picker.results = results;
+          picker.selected = 0;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 

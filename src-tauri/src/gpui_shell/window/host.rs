@@ -5,6 +5,7 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   path::{Path, PathBuf},
@@ -453,11 +454,14 @@ impl WindowHost for Backend {
     let label = crate::open_new_window::new_repo_window_label();
     let title = crate::open_new_window::new_repo_window_title(path);
     let (app, path) = (self.app().clone(), path.to_string());
-    let _ = self.app().run_on_main_thread(move || {
-      if let Err(err) = crate::gpui_shell::open_window(&app, &label, Some(path), &title) {
-        log::error!("failed to open repo window: {err}");
-      }
-    });
+    self
+      .app()
+      .run_on_main_thread(move || {
+        if let Err(err) = crate::gpui_shell::open_window(&app, &label, Some(path), &title) {
+          log::error!("failed to open repo window: {err}");
+        }
+      })
+      .ignore_closed();
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
@@ -498,7 +502,7 @@ impl WindowHost for Backend {
             .flat_map(|e| e.paths.iter())
             .any(|p| !is_ignored(p) && !gitignore.ignores(p))
           {
-            let _ = tx.unbounded_send(());
+            tx.unbounded_send(()).ignore_closed();
           }
         }
         Err(errors) => log::warn!("File watch errors: {errors:?}"),

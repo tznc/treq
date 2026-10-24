@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::expect_used,
+  clippy::let_underscore_must_use,
+  reason = "test code"
+)]
 //! What the Code tab reads from disk: a directory listing for the file
 //! browser's tree, and the overview (the root's entries with their jj
 //! status, and the README).
