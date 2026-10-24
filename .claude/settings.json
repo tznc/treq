@@ -68,5 +68,18 @@
   },
   "disableBundledSkills": true,
   "maxEffortLevel": "medium",
-  "precomputeCompactionEnabled": false
+  "precomputeCompactionEnabled": false,
+  "skillOverrides": {
+    "anthropic-skills:pptx": "off",
+    "anthropic-skills:xlsx": "off",
+    "anthropic-skills:docx": "off",
+    "anthropic-skills:pdf": "off",
+    "anthropic-skills:morning": "off",
+    "anthropic-skills:import-memory": "off",
+    "anthropic-skills:google-workspace": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:chrome-browser": "off",
+    "anthropic-skills:built-in-browser": "off",
+    "anthropic-skills:deep-research": "off"
+  }
 }
