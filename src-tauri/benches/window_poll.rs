@@ -82,6 +82,15 @@ fn bench_window_poll(c: &mut Criterion) {
         }
       })
     });
+    // As the window reads them: all at once.
+    group.bench_function(format!("{count}_workspaces_has_changes_together"), |b| {
+      b.iter(|| {
+        std::hint::black_box(treq_lib::core::workspaces_have_changes(
+          &repo.repo_path,
+          &workspaces,
+        ))
+      })
+    });
   }
   group.finish();
 }
