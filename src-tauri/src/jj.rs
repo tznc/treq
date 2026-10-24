@@ -5384,14 +5384,19 @@ pub fn is_bookmark_tracked(
   Ok(loaded.repo.view().get_remote_bookmark(symbol).is_tracked())
 }
 
-fn remote_bookmark_exists(workspace_path: &str, bookmark_name: &str, remote_name: &str) -> bool {
-  load_workspace_repo(workspace_path).is_ok_and(|loaded| {
-    let symbol = RemoteRefSymbol {
-      name: RefName::new(bookmark_name),
-      remote: RemoteName::new(remote_name),
-    };
-    loaded.repo.view().get_remote_bookmark(symbol).is_present()
-  })
+/// Whether origin's `bookmark_name` is tracked, and whether it is there at
+/// all, from one load.
+fn origin_bookmark_state(
+  workspace_path: &str,
+  bookmark_name: &str,
+) -> Result<(bool, bool), JjError> {
+  let loaded = load_workspace_repo(workspace_path)?;
+  let symbol = RemoteRefSymbol {
+    name: RefName::new(bookmark_name),
+    remote: RemoteName::new("origin"),
+  };
+  let remote_ref = loaded.repo.view().get_remote_bookmark(symbol);
+  Ok((remote_ref.is_tracked(), remote_ref.is_present()))
 }
 
 /// Edit/switch to a bookmark (similar to git checkout)
@@ -7119,13 +7124,13 @@ pub fn jj_push(workspace_path: &str) -> Result<String, JjError> {
   // Ensure bookmark is tracked before push to avoid non-tracking bookmark warnings.
   let mut tracking_message = String::new();
 
-  match is_bookmark_tracked(workspace_path, &branch_name, "origin") {
-    Ok(true) => {
+  match origin_bookmark_state(workspace_path, &branch_name) {
+    Ok((true, _)) => {
       // Already tracked, proceed normally
     }
     // A branch not yet on origin has nothing to track; the push creates it.
-    Ok(false) if !remote_bookmark_exists(workspace_path, &branch_name, "origin") => {}
-    Ok(false) => {
+    Ok((false, false)) => {}
+    Ok((false, true)) => {
       // Not tracked, attempt to set up tracking
       tracking_message.push_str(&format!(
         "Warning: Bookmark '{}' was not tracked. Attempting to set up tracking...\n",
@@ -8419,11 +8424,11 @@ pub fn jj_dry_run_home_repo_rebase(
 /// Abandon every commit matched by `revset_expr` (by change id) in `workspace_path`.
 /// Returns the list of abandoned change IDs.
 fn abandon_commits_matching_revset(
+  loaded: &LoadedWorkspaceRepo,
   workspace_path: &str,
   revset_expr: &str,
 ) -> Result<Vec<String>, JjError> {
-  let loaded = load_workspace_repo(workspace_path)?;
-  let revset = evaluate_revset(&loaded, revset_expr).map_err(|e| {
+  let revset = evaluate_revset(loaded, revset_expr).map_err(|e| {
     JjError::IoError(format!(
       "Failed to evaluate revset '{}': {}",
       revset_expr, e
@@ -8480,7 +8485,7 @@ pub fn jj_abandon_empty_commits(
     "({}..@-) & empty()",
     format_revset_symbol(&selected_target_ref)
   );
-  abandon_commits_matching_revset(workspace_path, &revset_expr)
+  abandon_commits_matching_revset(&loaded, workspace_path, &revset_expr)
 }
 
 /// Collapse an undescribed merge at the workspace bookmark when its tree is
