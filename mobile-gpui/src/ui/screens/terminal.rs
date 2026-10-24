@@ -71,7 +71,7 @@ impl Key {
 /// Shell keys a phone keyboard lacks.
 const SHELL_KEYS: &[(&str, Key)] = &[
   ("Esc", Key::Named("escape")),
-  ("Tab", Key::Named("tab")),
+  ("⇥", Key::Named("tab")),
   ("^C", Key::Ctrl("c")),
   ("^D", Key::Ctrl("d")),
   ("^Z", Key::Ctrl("z")),
@@ -81,19 +81,14 @@ const SHELL_KEYS: &[(&str, Key)] = &[
   ("→", Key::Named("right")),
 ];
 
-/// Keys an agent's TUI asks for: interrupt, mode switch, menu movement,
-/// and the numbered answers of its permission prompts.
+/// Keys an agent's TUI asks for: interrupt, mode switch and menu movement.
 const AGENT_KEYS: &[(&str, Key)] = &[
   ("Esc", Key::Named("escape")),
-  ("⇧Tab", Key::Bytes(b"\x1b[Z")),
+  ("⇧⇥", Key::Bytes(b"\x1b[Z")),
   ("↑", Key::Named("up")),
   ("↓", Key::Named("down")),
   ("⏎", Key::Named("enter")),
-  ("1", Key::Bytes(b"1")),
-  ("2", Key::Bytes(b"2")),
-  ("3", Key::Bytes(b"3")),
   ("^C", Key::Ctrl("c")),
-  ("Tab", Key::Named("tab")),
   ("/", Key::Bytes(b"/")),
 ];
 
@@ -918,6 +913,9 @@ impl Render for TerminalScreen {
             ),
         )
       })
+      .when(self.ended.is_none(), |screen| {
+        screen.child(self.key_row(&view, cx))
+      })
       .when(agent && self.ended.is_none(), |screen| {
         screen.child(
           h_flex()
@@ -933,10 +931,6 @@ impl Render for TerminalScreen {
                 .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
             ),
         )
-      })
-      // The keys go last, nearest the thumb.
-      .when(self.ended.is_none(), |screen| {
-        screen.child(self.key_row(&view, cx))
       })
       .into_any_element()
   }
