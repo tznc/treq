@@ -142,13 +142,16 @@ fn matches(summary: &WorkspaceSummary, query: &str) -> bool {
       .contains(&query)
 }
 
+pub fn summaries_request(repo: &str) -> TreqCommandRequest {
+  TreqCommandRequest::WorkspaceSummaries {
+    repo: repo.to_string(),
+  }
+}
+
 /// The summaries, or a plain list from a host whose treq predates them.
-pub async fn load_summaries(repo: String) -> Result<Vec<WorkspaceSummary>, String> {
-  match remote::read::<Vec<WorkspaceSummary>>(TreqCommandRequest::WorkspaceSummaries {
-    repo: repo.clone(),
-  })
-  .await
-  {
+/// `join` as in [`remote::read_cached`].
+pub async fn load_summaries(repo: String, join: bool) -> Result<Vec<WorkspaceSummary>, String> {
+  match remote::read_cached::<Vec<WorkspaceSummary>>(summaries_request(&repo), join).await {
     Err(error) if error.contains("unknown workspace action") => {
       let list =
         remote::read::<Vec<Workspace>>(TreqCommandRequest::ListWorkspaces { repo }).await?;
@@ -192,26 +195,34 @@ impl WorkspacesScreen {
       }
     })
     .detach();
+    // Shown at once when this list was read before; refetched either way.
+    let list = remote::last(&summaries_request(&repo)).map_or(Load::Idle, Load::Ready);
     let mut this = Self {
       repo,
-      list: Load::Idle,
+      list,
       query,
       selection: None,
       busy: false,
       message: None,
       scroll: ScrollHandle::new(),
     };
-    this.reload(cx);
+    this.fetch(true, cx);
     this
   }
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
+    self.fetch(false, cx);
+  }
+
+  fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
     if self.list.ready().is_none() {
       self.list = Load::Loading;
     }
-    load::run(cx, load_summaries(self.repo.clone()), |this, result, _| {
-      this.list = Load::from_result(result)
-    });
+    load::run(
+      cx,
+      load_summaries(self.repo.clone(), join),
+      |this, result, _| this.list = Load::from_result(result),
+    );
   }
 
   fn summary(&self, id: i64) -> Option<&WorkspaceSummary> {

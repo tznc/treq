@@ -559,6 +559,7 @@ pub fn sign_out(cx: &mut App) {
     }
     backend.pool.set_relay_access_token(None);
     backend.auth.sign_out().await;
+    remote::forget_reads();
   });
   cx.spawn(async move |cx| {
     let _ = done.await;
@@ -614,6 +615,10 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
     cx.notify();
   });
   let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<&'static str>();
+  // The pages a restore reopens; otherwise `open` shows the last repository.
+  let snapshot = (open && model.read(cx).restoring)
+    .then(store::session_snapshot)
+    .flatten();
   let result = backend::spawn(async move {
     let connection = match machine {
       Machine::Host(record) => {
@@ -634,6 +639,10 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
         .await?
       }
     };
+    if open {
+      // Read alongside the host check, so the pages open on content.
+      screens::prefetch_location(&connection.endpoint, snapshot.as_ref());
+    }
     let _ = progress_tx.unbounded_send("Checking the machine");
     let check = remote::host_check(&connection.endpoint).await?;
     Ok::<_, String>((connection, check))
@@ -753,6 +762,7 @@ pub fn show_machines(cx: &mut App) {
 /// Removes a saved SSH host and drops its connection and terminals.
 pub fn forget_host(id: &str, cx: &mut App) {
   store::remove_user_managed_endpoint(id);
+  remote::forget_reads();
   if let Some(connection) = backend::get().remove_connection(id) {
     backend::spawn_detached(async move {
       let backend = backend::get();

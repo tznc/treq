@@ -222,14 +222,28 @@ pub struct Sessions {
   notice: Option<String>,
 }
 
+fn list_request(repo: &str, workspace: &Workspace) -> TreqCommandRequest {
+  TreqCommandRequest::PtyList {
+    repo: repo.to_string(),
+    workspace: Some(workspace.workspace_name.clone()),
+  }
+}
+
 impl Sessions {
-  pub fn new(target: Target) -> Self {
-    Self {
+  /// Lists at once when `workspace`, the record, is already known.
+  pub fn new(target: Target, workspace: Option<Workspace>, cx: &mut Context<Self>) -> Self {
+    let sessions = workspace
+      .as_ref()
+      .and_then(|w| remote::last(&list_request(&target.repo, w)))
+      .map_or(Load::Idle, Load::Ready);
+    let mut this = Self {
       target,
-      workspace: None,
-      sessions: Load::Idle,
+      workspace,
+      sessions,
       notice: None,
-    }
+    };
+    this.fetch(true, cx);
+    this
   }
 
   /// The workspace record (from the workspace's status), which names its
@@ -238,7 +252,7 @@ impl Sessions {
     let first = self.workspace.is_none();
     self.workspace = Some(workspace);
     if first {
-      self.reload(cx);
+      self.fetch(true, cx);
     }
   }
 
@@ -250,19 +264,21 @@ impl Sessions {
   }
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
+    self.fetch(false, cx);
+  }
+
+  /// `join` as in [`remote::read_cached`].
+  fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
     let Some(workspace) = &self.workspace else {
       return;
     };
     if self.sessions.ready().is_none() {
       self.sessions = Load::Loading;
     }
-    let request = TreqCommandRequest::PtyList {
-      repo: self.target.repo.clone(),
-      workspace: Some(workspace.workspace_name.clone()),
-    };
+    let request = list_request(&self.target.repo, workspace);
     load::run(
       cx,
-      remote::read::<Vec<PtySessionInfo>>(request),
+      remote::read_cached::<Vec<PtySessionInfo>>(request, join),
       |this, result, cx| {
         this.sessions = Load::from_result(result);
         cx.notify();

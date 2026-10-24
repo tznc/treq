@@ -9,6 +9,7 @@ mod backend;
 mod config;
 mod errors;
 mod managed;
+mod reads;
 mod remote;
 mod store;
 mod terminal;

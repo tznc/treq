@@ -95,7 +95,10 @@ impl DiffScreen {
     if self.fixed {
       return;
     }
-    self.hunks = Load::Loading;
+    // Hunks on screen stay up while they're read again.
+    if self.hunks.ready().is_none() {
+      self.hunks = Load::Loading;
+    }
     let request = TreqCommandRequest::DiffFile {
       repo: self.target.repo.clone(),
       workspace: Some(self.target.id.clone()),
@@ -112,7 +115,9 @@ impl DiffScreen {
   }
 
   fn load_content(&mut self, cx: &mut Context<Self>) {
-    self.content = Load::Loading;
+    if self.content.ready().is_none() {
+      self.content = Load::Loading;
+    }
     let request = TreqCommandRequest::ReadFile {
       repo: self.target.repo.clone(),
       workspace: Some(self.target.id.clone()),
