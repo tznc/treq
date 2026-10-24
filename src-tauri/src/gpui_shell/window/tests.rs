@@ -2064,3 +2064,44 @@ fn window_model_perf(cx: &mut TestAppContext) {
     report(&format!("{count} workspaces: unchanged poll"), &mut poll);
   }
 }
+
+/// Round 6 measurement: what opening and closing the command palette costs
+/// the window model with many workspaces (the snapshot rebuild and compare
+/// in `present`): `cargo test --features gpui-shell --lib window_overlay_perf
+/// -- --ignored --nocapture --test-threads=1`.
+#[gpui::test]
+#[ignore = "perf report"]
+fn window_overlay_perf(cx: &mut TestAppContext) {
+  let count: i64 = std::env::var("N").ok().and_then(|n| n.parse().ok()).unwrap_or(200);
+  let workspaces: Vec<Workspace> = (1..=count)
+    .map(|i| {
+      let target = (i % 3 != 1).then(|| format!("feat/ws-{}", i - 1));
+      let mut w = workspace(i, &format!("feat/ws-{i}"), target.as_deref());
+      w.created_at = format!("2026-10-01T00:00:{:02}Z", i % 60);
+      w
+    })
+    .collect();
+  let host = Arc::new(FakeHost::on("/repo", workspaces));
+  let window = Window::open(cx, host, Some("/repo"));
+  let press = |id: &str| ScreenAction::Press { id: id.into() };
+  let mut open = Vec::new();
+  let mut close = Vec::new();
+  for _ in 0..20 {
+    let start = std::time::Instant::now();
+    window
+      .controller
+      .update(cx, |c, cx| c.overlay_action(&press("overlay.commandPalette"), cx));
+    open.push(start.elapsed());
+    let start = std::time::Instant::now();
+    window
+      .controller
+      .update(cx, |c, cx| c.overlay_action(&press("overlay.close"), cx));
+    close.push(start.elapsed());
+  }
+  open.sort();
+  close.sort();
+  println!(
+    "{count} workspaces: palette open p50={:?}  close p50={:?}",
+    open[10], close[10]
+  );
+}
