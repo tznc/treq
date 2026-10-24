@@ -93,6 +93,32 @@ pub fn delete_question(workspace: &Removed) -> Question {
   .destructive()
 }
 
+/// What Reset to remote asks first: what it discards for good.
+pub fn reset_question(branch: &str, ahead: usize, uncommitted: usize) -> Question {
+  let plural = |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+  let lost: Vec<String> = [
+    (ahead > 0).then(|| plural(ahead, "local commit")),
+    (uncommitted > 0).then(|| format!("uncommitted changes to {}", plural(uncommitted, "file"))),
+  ]
+  .into_iter()
+  .flatten()
+  .collect();
+  let message = if lost.is_empty() {
+    format!("Fetches and checks out origin/{branch}. Nothing local is lost.")
+  } else {
+    format!(
+      "Discards {}, then matches origin/{branch}.",
+      lost.join(" and ")
+    )
+  };
+  Question::new(
+    format!("Reset {branch} to origin?"),
+    message,
+    "Reset to remote",
+  )
+  .destructive()
+}
+
 /// `handleDelete`, once confirmed ([`delete_question`]): deletes, toasts
 /// and tells React. Returns whether the workspace went, so its terminals
 /// close.
@@ -195,5 +221,35 @@ pub fn move_workspace(
       },
     ),
     Err(err) => toast(host, ToastTone::Error, "Failed to move workspace", &err),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn reset_question_says_what_is_lost() {
+    let q = reset_question("feature/login", 4, 2);
+    assert_eq!(q.question, "Reset feature/login to origin?");
+    assert_eq!(
+      q.message,
+      "Discards 4 local commits and uncommitted changes to 2 files, then matches origin/feature/login."
+    );
+    assert_eq!(q.verb, "Reset to remote");
+    assert!(q.destructive);
+
+    assert_eq!(
+      reset_question("b", 1, 0).message,
+      "Discards 1 local commit, then matches origin/b."
+    );
+    assert_eq!(
+      reset_question("b", 0, 1).message,
+      "Discards uncommitted changes to 1 file, then matches origin/b."
+    );
+    assert_eq!(
+      reset_question("b", 0, 0).message,
+      "Fetches and checks out origin/b. Nothing local is lost."
+    );
   }
 }
