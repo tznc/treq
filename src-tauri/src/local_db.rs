@@ -1169,12 +1169,13 @@ pub fn get_workspace_by_branch(
 /// row off `workspace_path` so a new workspace can take the same slot without
 /// hitting the UNIQUE constraint.
 fn release_archived_workspace_path(conn: &Connection, workspace_path: &str) -> Result<(), String> {
+  // Cached: discovery runs this for every workspace on every poll.
   conn
-    .execute(
+    .prepare_cached(
       "UPDATE workspaces SET workspace_path = workspace_path || '#archived-' || id
        WHERE workspace_path = ?1 AND COALESCE(archived, 0) = 1",
-      [workspace_path],
     )
+    .and_then(|mut statement| statement.execute([workspace_path]))
     .map_err(|e| format!("Failed to release archived workspace path: {}", e))?;
   Ok(())
 }
@@ -1537,7 +1538,9 @@ pub fn sync_discovered_workspaces(
     let update_branch_name = discovered_has_canonical_bookmark;
     let update_workspace_name = !workspace.has_conflicts;
     release_archived_workspace_path(&tx, &workspace.workspace_path)?;
-    tx.execute(
+    // Prepared once per sync rather than once per workspace, which was
+    // half of a poll's cost.
+    tx.prepare_cached(
             "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(workspace_path) DO UPDATE SET
@@ -1547,7 +1550,9 @@ pub fn sync_discovered_workspaces(
              WHERE workspaces.refreshed_at IS NULL
                  OR (?6 AND workspaces.workspace_name IS NOT excluded.workspace_name)
                  OR (?7 AND workspaces.branch_name IS NOT excluded.branch_name)",
-            params![
+        )
+        .and_then(|mut statement| {
+            statement.execute(params![
                 workspace.workspace_name,
                 workspace.workspace_path,
                 workspace.branch_name,
@@ -1555,8 +1560,8 @@ pub fn sync_discovered_workspaces(
                 refreshed_at,
                 update_workspace_name,
                 update_branch_name,
-            ],
-        )
+            ])
+        })
         .map_err(|e| format!("Failed to upsert discovered workspace: {}", e))?;
   }
   tx.commit()
