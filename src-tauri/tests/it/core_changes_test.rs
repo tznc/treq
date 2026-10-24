@@ -812,3 +812,82 @@ fn get_file_lines_reads_conflicted_parent_with_markers() {
   assert!(parent.lines.contains(&"workspace side".to_string()));
   assert!(parent.lines.contains(&"main side".to_string()));
 }
+
+#[test]
+fn list_file_hunks_batch_matches_single_file_reads() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/hunk-batch",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\ntwo\n").unwrap();
+  TestRepo::write_workspace_file(&workspace_path, "nested/b.txt", "three\n").unwrap();
+  let paths: Vec<String> = ["a.txt", "nested/b.txt", "a.txt", ""]
+    .map(String::from)
+    .to_vec();
+
+  let batch =
+    treq_lib::core::list_file_hunks_batch(&repo.repo_path, Some(workspace.id), paths, "git")
+      .expect("batch read should succeed");
+
+  let read: Vec<&str> = batch.files.iter().map(|f| f.path.as_str()).collect();
+  assert_eq!(
+    read,
+    ["a.txt", "nested/b.txt", ""],
+    "deduplicated, in order"
+  );
+  for file in &batch.files[..2] {
+    let single =
+      treq_lib::core::list_file_hunks(&repo.repo_path, Some(workspace.id), &file.path, "git")
+        .expect("single read should succeed");
+    assert_eq!(
+      serde_json::to_value(&file.hunks).unwrap(),
+      serde_json::to_value(&single).unwrap()
+    );
+    assert!(!file.hunks.is_empty());
+  }
+  assert!(
+    batch.files[2].error.is_some(),
+    "an invalid path fails alone"
+  );
+}
+
+#[test]
+fn list_file_hunks_batch_token_follows_working_copy_edits() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/hunk-token",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\n").unwrap();
+  let token = || {
+    treq_lib::core::list_file_hunks_batch(
+      &repo.repo_path,
+      Some(workspace.id),
+      vec!["a.txt".into()],
+      "git",
+    )
+    .expect("batch read should succeed")
+    .snapshot_token
+  };
+
+  let first = token();
+  assert!(!first.is_empty());
+  assert_eq!(token(), first, "an unchanged working copy keeps its token");
+  TestRepo::write_workspace_file(&workspace_path, "a.txt", "one\ntwo\n").unwrap();
+  assert_ne!(token(), first, "an edit changes it");
+}
