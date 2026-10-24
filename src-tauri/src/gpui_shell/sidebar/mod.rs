@@ -19,6 +19,7 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   popup::{PopupRequest, PopupSink, Side, TooltipContent},
+  screen::prefetch,
   theme::{self, Palette},
   title_bar,
 };
@@ -232,6 +233,11 @@ pub enum SidebarAction {
   ToggleRepo {
     repo_path: String,
   },
+  /// The pointer rests on a workspace row of the active repository: read
+  /// ahead what selecting it would show.
+  PrefetchWorkspace {
+    id: i64,
+  },
 }
 
 /// A workspace row being dragged.
@@ -288,6 +294,8 @@ pub struct Sidebar {
   hovered_row: Option<SharedString>,
   /// The width while the resize handle is dragged, ahead of React.
   drag_width: Option<f32>,
+  /// The workspace row the pointer rests on, to read ahead.
+  prefetch: prefetch::Intent<i64>,
 }
 
 impl Sidebar {
@@ -301,6 +309,7 @@ impl Sidebar {
       tooltip: None,
       hovered_row: None,
       drag_width: None,
+      prefetch: prefetch::Intent::default(),
     }
   }
 
@@ -447,6 +456,14 @@ impl Sidebar {
       cx.notify();
     }
     self.hover_tooltip(key, hovered, cx);
+  }
+
+  /// The pointer entered or left workspace `id`'s row: once it rests there,
+  /// what selecting the row would show is read ahead.
+  fn hover_workspace(&mut self, id: i64, hovered: bool, cx: &mut Context<Self>) {
+    self.prefetch.hover(id, hovered, cx, move |this, cx| {
+      (this.sink)(SidebarAction::PrefetchWorkspace { id }, cx)
+    });
   }
 
   fn start_tooltip(&mut self, key: SharedString, cx: &mut Context<Self>) {
@@ -1362,7 +1379,13 @@ impl Sidebar {
       )
       .on_hover(cx.listener({
         let key = key.clone();
-        move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
+        let prefetch = !row.archiving && !row.selected && repo_active;
+        move |this, hovered: &bool, _, cx| {
+          this.hover_row_tooltip(key.clone(), *hovered, cx);
+          if prefetch {
+            this.hover_workspace(id, *hovered, cx);
+          }
+        }
       }))
       .when(self.tooltip_shown(&key), |this| {
         this.child(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))

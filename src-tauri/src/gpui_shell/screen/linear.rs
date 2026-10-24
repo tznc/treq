@@ -15,7 +15,7 @@ use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
   sync::Arc,
-  time::Duration,
+  time::{Duration, Instant},
 };
 
 use gpui_kit::base::TestSupportExt as _;
@@ -28,6 +28,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes::threads::suggestion_box,
   code::markdown,
+  integrations_cache::cache,
   linear_data::{
     self as data, agent_count_label, comment_file, Anchor, Commented, FilterOption, IssueFilters,
     IssueView, LinearHost, ProjectFilters, ProjectView, Route,
@@ -304,6 +305,14 @@ impl LinearView {
 
   /// What the panel reads when it opens.
   fn load_all(&mut self, cx: &mut Context<Self>) {
+    // What the last visit read shows in the first frame, under the reads.
+    let repo = self.route.repo_path.clone();
+    let cached = cache(cx);
+    let issues = cached.linear_issues.get(&(repo.clone(), None)).cloned();
+    self.viewer = cached.linear_viewer.get(&repo).cloned();
+    if let Some(issues) = issues {
+      self.issues.entry(None).or_default().data = Some(issues);
+    }
     self.run(
       |host, repo| host.linear_teams(repo),
       |view, result, _| view.teams.settle(result, "teams"),
@@ -312,7 +321,16 @@ impl LinearView {
     self.teams.fetching = true;
     self.run(
       |host, repo| host.linear_viewer(repo),
-      |view, result, _| view.viewer = result.ok(),
+      |view, result, cx| {
+        if let Ok(viewer) = &result {
+          cache(cx).linear_viewer.insert(
+            view.route.repo_path.clone(),
+            Instant::now(),
+            viewer.clone(),
+          );
+        }
+        view.viewer = result.ok();
+      },
       cx,
     );
     self.load_issues(cx);
@@ -344,11 +362,28 @@ impl LinearView {
 
   fn load_issues(&mut self, cx: &mut Context<Self>) {
     let team = self.team.clone();
-    self.issues.entry(team.clone()).or_default().fetching = true;
+    let seed = cache(cx)
+      .linear_issues
+      .get(&(self.route.repo_path.clone(), team.clone()))
+      .cloned();
+    let entry = self.issues.entry(team.clone()).or_default();
+    entry.fetching = true;
+    if let Some(issues) = seed.filter(|_| entry.data.is_none()) {
+      entry.data = Some(issues);
+    }
     let key = team.clone();
     self.run(
       move |host, repo| host.linear_issues(repo, team.as_deref()),
-      move |view, result, _| view.issues.entry(key).or_default().settle(result, "issues"),
+      move |view, result, cx| {
+        if let Ok(issues) = &result {
+          cache(cx).linear_issues.insert(
+            (view.route.repo_path.clone(), key.clone()),
+            Instant::now(),
+            issues.clone(),
+          );
+        }
+        view.issues.entry(key).or_default().settle(result, "issues")
+      },
       cx,
     );
   }

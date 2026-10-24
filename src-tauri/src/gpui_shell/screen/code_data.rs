@@ -85,7 +85,7 @@ pub const NEW_WORKSPACE_SETTING: &str = "home_task_new_workspace";
 pub const ENVIRONMENT_SETTING: &str = "environment";
 
 /// The files and README the Code tab lists.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Overview {
   pub entries: Vec<WorkspaceEntry>,
   pub readme: Option<String>,
@@ -163,6 +163,8 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// Builds the file index `search_files` reads, unless it is built.
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
   fn devcontainer_up(&self, repo_path: &str) -> Result<DevcontainerStatus, String>;
@@ -284,6 +286,19 @@ impl CodeHost for Backend {
     core::search_workspace_files(repo_path, workspace_id, query, limit)
   }
 
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str) {
+    if self.remote_containing(repo_path).is_some() {
+      return;
+    }
+    if let Err(err) = crate::commands::workspace::ensure_workspace_indexed(
+      repo_path.to_string(),
+      workspace_id,
+      workspace_path.to_string(),
+    ) {
+      log::warn!("file index: {err}");
+    }
+  }
+
   fn devcontainers_enabled(&self) -> bool {
     self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::Devcontainers))
   }
@@ -304,7 +319,13 @@ impl CodeHost for Backend {
 
   fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
     let (workspaces, branches) = match self.remote_containing(repo_path) {
-      Some(remote) => (remote.workspaces()?, remote.branches()?),
+      Some(remote) => {
+        let (workspaces, branches) = std::thread::scope(|scope| {
+          let branches = scope.spawn(|| remote.branches());
+          (remote.workspaces(), super::joined(branches))
+        });
+        (workspaces?, branches?)
+      }
       None => (
         core::list_workspaces(repo_path)?,
         core::list_repo_branches(repo_path)?,

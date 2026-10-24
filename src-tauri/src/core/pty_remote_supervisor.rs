@@ -67,6 +67,16 @@ pub enum PtyBackend {
 /// list/resize/kill by name); falls back to screen; `None` when neither is
 /// on `PATH`.
 pub fn detect_backend() -> Option<PtyBackend> {
+  // Every remote attach is a new process, and the login shell that
+  // `detect_binary` asks for the full PATH takes a shell start. tmux found
+  // on the PATH the process already has needs no other answer.
+  #[cfg(unix)]
+  if std::env::var_os("PATH")
+    .and_then(|path| crate::binary_paths::detect_binary_in("tmux", path))
+    .is_some()
+  {
+    return Some(PtyBackend::Tmux);
+  }
   if crate::binary_paths::detect_binary("tmux").is_some() {
     Some(PtyBackend::Tmux)
   } else if crate::binary_paths::detect_binary("screen").is_some() {

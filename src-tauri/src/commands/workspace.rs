@@ -1,10 +1,12 @@
 use crate::local_db::Workspace;
 use crate::lock_ext::LockExt;
-use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
-// Track which workspaces have been indexed this session
-static INDEXED_WORKSPACES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+// Track which workspaces have been indexed this session. Each workspace has its
+// own lock, held while it indexes, so a search waits for an index another
+// thread (the warm-up when a workspace shows) is still building.
+static INDEXED_WORKSPACES: OnceLock<Mutex<HashMap<String, Arc<Mutex<bool>>>>> = OnceLock::new();
 
 /// Fires the repo's `.treq/config.yaml` `setup_script` (if any) for a newly
 /// created workspace, in the background so workspace creation itself isn't
@@ -42,22 +44,18 @@ pub fn ensure_workspace_indexed(
   workspace_id: Option<i64>,
   workspace_path: String,
 ) -> Result<bool, String> {
-  let indexed = INDEXED_WORKSPACES.get_or_init(|| Mutex::new(HashSet::new()));
-  let mut guard = indexed.lock_or_recover();
-
-  // Use workspace_path as the key
-  if guard.contains(&workspace_path) {
-    // Already indexed this session
+  let slot = INDEXED_WORKSPACES
+    .get_or_init(|| Mutex::new(HashMap::new()))
+    .lock_or_recover()
+    .entry(workspace_path.clone())
+    .or_default()
+    .clone();
+  let mut indexed = slot.lock_or_recover();
+  if *indexed {
     return Ok(false);
   }
-
-  // Mark as indexed
-  guard.insert(workspace_path.clone());
-  drop(guard);
-
-  // Trigger indexing
   crate::file_indexer::index_workspace_files(&repo_path, workspace_id, &workspace_path)?;
-
+  *indexed = true;
   Ok(true)
 }
 

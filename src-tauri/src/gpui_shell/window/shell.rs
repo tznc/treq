@@ -62,10 +62,8 @@ pub(in crate::gpui_shell) fn start(
       });
     });
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
-    let controller = cx.new(|cx| WindowController::new(host, repo, present, cx));
-    if let Some(dark) = shell.os_dark {
-      controller.update(cx, |c, cx| c.set_system_dark(dark, cx));
-    }
+    let dark = shell.os_dark;
+    let controller = cx.new(|cx| WindowController::new(host, repo, present, dark, cx));
     shell.window = Some(controller);
   })
 }
@@ -150,6 +148,16 @@ pub(in crate::gpui_shell) fn workspace(
   cx: &App,
 ) -> Option<crate::local_db::Workspace> {
   controller(label, cx)?.read(cx).workspace(repo, id).cloned()
+}
+
+/// The workspace view's route were window `label` to select workspace `id`
+/// of its repository.
+pub(in crate::gpui_shell) fn workspace_route(
+  label: &str,
+  id: i64,
+  cx: &App,
+) -> Option<screen::workspace_data::Route> {
+  controller(label, cx)?.read(cx).workspace_route(id)
 }
 
 /// A keyboard shortcut pressed in window `label`.

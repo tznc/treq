@@ -62,9 +62,20 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn summaries(&self, _repo: &str) -> Option<Vec<WorkspaceSummary>> {
     None
   }
+  /// The workspaces the local database lists, with no jj or network read,
+  /// so a window draws its rows before `statuses` and `has_changes` finish.
+  /// `None` where there is no such read (a repository over SSH).
+  fn listed_workspaces(&self, _repo: &str) -> Option<Vec<Workspace>> {
+    None
+  }
   fn sessions(&self, repo: &str) -> Vec<Session>;
   fn branch(&self, repo: &str) -> Option<RepoBranch>;
   fn default_branch(&self, repo: &str) -> Option<String>;
+  /// [`Self::branch`] and [`Self::default_branch`], for a repository where
+  /// one read answers both.
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    (self.branch(repo), self.default_branch(repo))
+  }
   fn remote(&self, repo: &str) -> Option<GitRemoteInfo>;
   /// The pull request poller's cache, by branch.
   fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>>;
@@ -177,11 +188,27 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     out.sessions = Some(host.sessions(repo));
   }
   if read.detail {
-    out.branch = Some(host.branch(repo));
-    out.default_branch = Some(host.default_branch(repo));
-    out.remote = Some(host.remote(repo));
+    read_detail(host, repo, &mut out);
   }
   out
+}
+
+/// The repository's branch, default branch and remote.
+pub fn read_detail(host: &dyn WindowHost, repo: &str, out: &mut RepoRead) {
+  // Side by side: for a remote repository each is a round trip.
+  let ((branch, default_branch), remote) = std::thread::scope(|scope| {
+    let remote = scope.spawn(|| host.remote(repo));
+    let branches = host.branches(repo);
+    (
+      branches,
+      remote
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+    )
+  });
+  out.branch = Some(branch);
+  out.default_branch = Some(default_branch);
+  out.remote = Some(remote);
 }
 
 /// Repositories `open_in_new_window` initialized for the window it opens,
@@ -193,7 +220,7 @@ static JUST_INITIALIZED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
 /// for it.
 const JUST_INITIALIZED_FOR: Duration = Duration::from_secs(30);
 
-fn note_just_initialized(repo: &str) {
+pub(crate) fn note_just_initialized(repo: &str) {
   let mut noted = JUST_INITIALIZED.lock_or_recover();
   noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
   noted.push((repo.to_string(), std::time::Instant::now()));
@@ -210,6 +237,18 @@ fn take_just_initialized(repo: &str) -> bool {
       true
     }
     None => false,
+  }
+}
+
+/// The branch an `InspectRepository` answer shows.
+fn repo_branch(inspection: RepositoryInspection) -> RepoBranch {
+  RepoBranch {
+    display_ref: inspection
+      .current_branch
+      .clone()
+      .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
+    is_detached: inspection.current_branch.is_none(),
+    current_branch: inspection.current_branch,
   }
 }
 
@@ -238,22 +277,19 @@ impl WindowHost for Backend {
       return core::list_workspace_statuses(repo);
     };
     // The host has no sidebar listing: each workspace's own inspection.
-    Ok(
-      remote
-        .workspaces()?
-        .into_iter()
-        .map(|workspace| {
-          let has_conflicts = remote
-            .status(Some(workspace.id))
-            .is_ok_and(|s| !s.conflicted_files.is_empty());
-          WorkspaceSidebarStatus {
-            current: workspace,
-            has_conflicts,
-            last_activity_at: None,
-          }
-        })
-        .collect(),
-    )
+    Ok(remote_repo::parallel_map(
+      remote.workspaces()?,
+      |workspace| {
+        let has_conflicts = remote
+          .status(Some(workspace.id))
+          .is_ok_and(|s| !s.conflicted_files.is_empty());
+        WorkspaceSidebarStatus {
+          current: workspace,
+          has_conflicts,
+          last_activity_at: None,
+        }
+      },
+    ))
   }
 
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool> {
@@ -263,6 +299,13 @@ impl WindowHost for Backend {
         .ok()
         .map(|status| status.partial.has_changes),
       None => core::workspace_has_changes(repo, workspace_id).ok(),
+    }
+  }
+
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    match self.remote(repo) {
+      Some(_) => None,
+      None => core::list_workspaces(repo).ok(),
     }
   }
 
@@ -277,17 +320,19 @@ impl WindowHost for Backend {
 
   fn branch(&self, repo: &str) -> Option<RepoBranch> {
     if self.remote(repo).is_some() {
-      let inspection = self.inspect_remote(repo)?;
-      return Some(RepoBranch {
-        display_ref: inspection
-          .current_branch
-          .clone()
-          .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
-        is_detached: inspection.current_branch.is_none(),
-        current_branch: inspection.current_branch,
-      });
+      return self.inspect_remote(repo).map(repo_branch);
     }
     core::repo::get_repo_current_branch(repo).ok()
+  }
+
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    if Backend::remote(self, repo).is_some() {
+      // One `InspectRepository` answers both.
+      let inspection = self.inspect_remote(repo);
+      let default_branch = inspection.as_ref().map(|i| i.default_branch.clone());
+      return (inspection.map(repo_branch), default_branch);
+    }
+    (self.branch(repo), self.default_branch(repo))
   }
 
   fn default_branch(&self, repo: &str) -> Option<String> {

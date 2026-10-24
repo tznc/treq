@@ -253,6 +253,7 @@ fn target(branches: Vec<&'static str>) -> (Kind, FakeHost) {
     Kind::Target(TargetSpec {
       repo_path: "/repo".into(),
       current: Some("main".into()),
+      branches: None,
     }),
     FakeHost {
       branches,
@@ -469,6 +470,25 @@ fn target_lists_the_repository_branches(cx: &mut TestAppContext) {
   assert!(h.drawn("branch-option-0"));
   assert!(h.drawn("branch-option-2"));
   assert!(!h.drawn("branch-option-3"));
+  assert!(h.host.calls().contains(&"branches /repo".to_string()));
+}
+
+/// Branches read ahead while the pointer rested on the button list in the
+/// first frame, with nothing loading, and are read again behind.
+#[gpui::test]
+fn target_lists_branches_read_ahead_at_once(cx: &mut TestAppContext) {
+  let (mut kind, host) = target(vec!["main", "develop"]);
+  if let Kind::Target(spec) = &mut kind {
+    spec.branches = Some(vec!["main".into(), "develop".into()]);
+  }
+  let mut h = Harness::new(cx, kind, host);
+  h.cx.update(|window, cx| {
+    window.refresh();
+    window.draw(cx).clear(cx);
+  });
+  assert!(h.cx.debug_bounds("branch-option-1").is_some());
+  assert!(h.cx.debug_bounds("target-loading").is_none());
+  assert!(h.drawn("branch-option-1"));
   assert!(h.host.calls().contains(&"branches /repo".to_string()));
 }
 

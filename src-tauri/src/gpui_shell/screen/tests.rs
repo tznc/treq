@@ -28,6 +28,8 @@ struct FakeHost {
   container_error: Option<String>,
   /// The Overview screen's machines and recent repositories.
   listing: machines::Listing,
+  /// The dev containers Docker lists, which join the listing.
+  containers: (Vec<machines::Machine>, Vec<machines::Recent>),
   /// What a host machine says is installed on it.
   host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
   /// What `check_prerequisites` reports.
@@ -259,6 +261,10 @@ impl machines::MachinesHost for FakeHost {
     self.listing.clone()
   }
 
+  fn containers(&self) -> (Vec<machines::Machine>, Vec<machines::Recent>) {
+    self.containers.clone()
+  }
+
   fn machine_tools(
     &self,
     place: &machines::Place,
@@ -423,7 +429,14 @@ impl settings_data::SettingsHost for FakeHost {
 impl workspace_data::WorkspaceHost for FakeHost {
   fn load(&self, route: &workspace_data::Route) -> workspace_data::Loaded {
     self.record(format!("read workspace {}", route.revision));
-    self.loaded.clone()
+    let mut loaded = self.loaded.clone();
+    // Another workspace of the list than the one `loaded` is for.
+    let listed = |id| self.workspaces.iter().find(|w| w.id == id).cloned();
+    match (route.workspace_id, loaded.workspace.as_ref().map(|w| w.id)) {
+      (Some(id), Some(loaded_id)) if id != loaded_id => loaded.workspace = listed(id),
+      _ => {}
+    }
+    loaded
   }
 
   fn pr_cache(&self, _: &str, branch: &str) -> workspace_data::PrCache {
@@ -600,6 +613,10 @@ impl code_data::CodeHost for FakeHost {
   fn set_title(&self, _: &str, workspace_id: i64, title: &str) -> Result<(), String> {
     self.record(format!("set title {workspace_id} {title:?}"));
     Ok(())
+  }
+
+  fn warm_file_index(&self, _: &str, workspace_id: Option<i64>, _: &str) {
+    self.record(format!("read file index {workspace_id:?}"));
   }
 
   fn search_files(
@@ -1842,6 +1859,42 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn onboarding_adds_the_dev_containers_docker_lists_to_its_rows(cx: &mut TestAppContext) {
+  use machines::{Machine, Place, Recent};
+  let mut base = listing();
+  base
+    .machines
+    .retain(|m| !matches!(m.place, Place::DevContainer { .. }));
+  base.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: base,
+    containers: (
+      vec![Machine {
+        id: "devcontainer:c2".into(),
+        place: Place::DevContainer {
+          container_id: "c2".into(),
+          repo_path: "/home/me/api".into(),
+          running: true,
+        },
+        name: "api".into(),
+        detail: "Running".into(),
+      }],
+      vec![Recent {
+        machine_id: "devcontainer:c2".into(),
+        name: "api".into(),
+        path: "/home/me/api".into(),
+        saved_id: None,
+      }],
+    ),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.drawn("machine-local"));
+  assert!(h.drawn("machine-devcontainer:c2"));
+  assert!(!h.drawn("machine-devcontainer:c1"));
+}
+
+#[gpui::test]
 fn onboarding_offers_sign_in_instead_of_a_cloud_row_when_signed_out(cx: &mut TestAppContext) {
   let mut signed_out = listing();
   signed_out.machines.retain(|m| m.id != "cloud");
@@ -2641,12 +2694,16 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
       "notify workspaceChanged",
     ]
   );
+  // The window reads again on `workspaceChanged` and bumps the route's
+  // revision, which reads the header again
+  // (`workspace_header_reads_again_when_the_model_refreshes`): the header
+  // doesn't read it twice.
   let reads = host
     .calls()
     .iter()
     .filter(|c| c.starts_with("read workspace "))
     .count();
-  assert_eq!(reads, 2, "it reads the workspace again after syncing");
+  assert_eq!(reads, 1);
 }
 
 #[gpui::test]
@@ -4648,7 +4705,7 @@ fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) 
   edit_a_rs(&mut h, &host);
   let viewed = h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
     changes.viewed.contains_key("c.rs")
   });
   assert!(viewed, "{:?}", host.writes());
@@ -4735,7 +4792,7 @@ fn shown_lines(h: &mut Harness, path: &str) -> Vec<String> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
     changes.hunks[path]
       .hunks
       .iter()
@@ -4762,7 +4819,7 @@ fn a_refresh_that_reads_the_same_diff_keeps_its_rows(cx: &mut TestAppContext) {
     h.drawn("changes-diff-viewer");
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
       (
         Arc::as_ptr(&changes.hunks["a.rs"].hunks),
         changes.layout_revision(),
@@ -4804,7 +4861,7 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
     changes
       .review
       .selection
@@ -4872,7 +4929,7 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   assert_eq!(
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
       changes.review.draft_text.clone()
     }),
     "```suggestion\nb\nc\n```\n"
@@ -5084,7 +5141,7 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
     h.cx.run_until_parked();
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let search = &workspace.changes.as_ref().expect("changes").read(cx).search;
+      let search = &workspace.changes().expect("changes").read(cx).search;
       (search.current, search.total)
     })
   };
@@ -7806,11 +7863,13 @@ mod conflicts;
 mod file_browser;
 mod fuzz;
 mod github;
+mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
 mod merge_queue;
 mod open_workspaces;
 mod pr_review;
+mod prefetch;
 mod review_comments;
 mod stack_panel;
 mod tab_badges;

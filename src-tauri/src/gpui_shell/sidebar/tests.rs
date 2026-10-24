@@ -844,3 +844,29 @@ fn parses_repo_labels_with_defaults() {
   assert_eq!(repo.label.as_deref(), Some("lib"));
   assert!(repo.missing && !repo.collapsed);
 }
+
+/// Resting on another workspace's row asks for it to be read ahead;
+/// passing over it, or resting on the selected row, does not.
+#[gpui::test]
+fn resting_on_a_workspace_row_reads_it_ahead(cx: &mut TestAppContext) {
+  use crate::gpui_shell::screen::prefetch::HOVER_INTENT;
+  let mut selected = row(8, "feat-b", 0);
+  selected.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), selected]));
+  let prefetches = |h: &Harness| {
+    h.sent()
+      .into_iter()
+      .filter(|a| matches!(a, SidebarAction::PrefetchWorkspace { .. }))
+      .collect::<Vec<_>>()
+  };
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(HOVER_INTENT / 2);
+  h.hover("workspace-8");
+  h.cx.executor().advance_clock(HOVER_INTENT * 2);
+  h.cx.run_until_parked();
+  assert!(prefetches(&h).is_empty());
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(HOVER_INTENT);
+  h.cx.run_until_parked();
+  assert_eq!(prefetches(&h), [SidebarAction::PrefetchWorkspace { id: 7 }]);
+}

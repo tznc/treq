@@ -14,6 +14,9 @@ files:
 ignores:
   - "src-tauri/src/cli/**"
   - "src-tauri/src/lib.rs"
+  # Debug-only startup timeline, opt-in with TREQ_STARTUP_TRACE=1; its
+  # first marks come before tracing is set up.
+  - "src-tauri/src/startup.rs"
   # Opt-in live suites (real Sprites API, real sshd): they print skip
   # notices and resource ids for whoever runs them with --nocapture.
   - "src-tauri/tests/remote_e2e.rs"
