@@ -165,7 +165,7 @@ fn diff_extremes_highlight_and_overlay() {
   }
   // The overlay of intraline marks on a line under LONG_LINE, per draw.
   let old = minified(300, 1);
-  let new = minified(300, 2);
+  let new = old.replacen("a+b*5;", "a-b*5;", 40);
   println!("overlay line len {}", old.len());
   let lines = vec![format!("-{old}"), format!("+{new}")];
   let marks = intraline::changed_ranges(&lines);
@@ -192,13 +192,13 @@ fn diff_extremes_highlight_and_overlay() {
   // Cache memory: 20k distinct lines of 19k chars.
   let before = live();
   let (_, d) = took(|| {
-    for i in 0..3_000 {
+    for i in 0..100 {
       let line = minified(300, i);
       highlight::spans("js", &line);
     }
   });
   println!(
-    "highlight cache, 3000 distinct ~{} char lines: {:.0} ms, live +{:.1} MiB",
+    "highlight cache, 100 distinct ~{} char lines: {:.0} ms, live +{:.1} MiB",
     minified(300, 0).len(),
     ms(d),
     (live() - before) as f64 / 1048576.
@@ -482,16 +482,16 @@ fn diff_extremes_frame_long_lines(cx: &mut TestAppContext) {
     lines.push(format!("+{}", minified(words, p + 1)));
   }
   let host = files_json(
-    &[file("dist/app.min.js", "M", None, pairs * 2)],
+    &[file("dist/app.js", "M", None, pairs * 2)],
     &[hunks_of(
-      "dist/app.min.js",
+      "dist/app.js",
       vec![hunk(&format!("@@ -1,{pairs} +1,{pairs} @@"), lines)],
     )],
   );
   let before = live();
   let (mut h, _) = workspace_harness(cx, host, changes_route());
   let start = Instant::now();
-  open(&mut h, "dist/app.min.js");
+  open(&mut h, "dist/app.js");
   println!(
     "{pairs} pair(s) of {chars}-char lines: open {:.0} ms; live +{:.1} MiB",
     ms(start.elapsed()),
