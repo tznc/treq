@@ -22,6 +22,9 @@ pub struct Spec {
   pub repo_path: String,
   /// The workspace's target branch, which gets the check mark.
   pub current: Option<String>,
+  /// The branch names, read ahead while the pointer rested on the button:
+  /// listed at once, and read again behind.
+  pub branches: Option<Vec<String>>,
 }
 
 pub struct State {
@@ -39,15 +42,19 @@ pub struct State {
 
 impl State {
   pub fn new(spec: Spec) -> Self {
-    Self {
+    let mut this = Self {
+      branches: spec.branches.clone(),
       spec,
-      branches: None,
       search: String::new(),
       field: None,
       selected: None,
       scroll: gpui::ScrollHandle::new(),
       rows: Vec::new(),
+    };
+    if this.branches.is_some() {
+      this.select_first();
     }
+    this
   }
 
   fn entries(&self) -> Vec<cmdk::Entry> {
@@ -89,12 +96,18 @@ impl Popover {
       let _ = this.update(cx, |this, cx| {
         if let super::Content::Target(state) = &mut this.content {
           // A failed read lists nothing, as React's does.
-          let names = read
+          let names: Vec<String> = read
             .map_err(|err| log::warn!("target branches: {err}"))
-            .unwrap_or_default();
-          state.branches = Some(names.into_iter().map(|b| b.name).collect());
-          state.select_first();
-          cx.notify();
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+          // The list read ahead, read again: the selection stays put.
+          if state.branches.as_ref() != Some(&names) {
+            state.branches = Some(names);
+            state.select_first();
+            cx.notify();
+          }
         }
       });
     }));
@@ -203,19 +216,22 @@ impl Popover {
     };
     match &state.branches {
       None => children.push(
-        message("Loading branches...")
-          .id("target-loading")
-          .debug_selector(|| "target-loading".into())
-          .flex()
-          .flex_col()
-          .items_center()
-          .child(
-            div()
-              .mb_1()
-              .child(ui::spinner("target-spin", 16., p.muted_foreground)),
-          )
-          .child("Loading branches...")
-          .into_any_element(),
+        ui::delayed(
+          "target-loading",
+          message("Loading branches...")
+            .id("target-loading")
+            .debug_selector(|| "target-loading".into())
+            .flex()
+            .flex_col()
+            .items_center()
+            .child(
+              div()
+                .mb_1()
+                .child(ui::spinner("target-spin", 16., p.muted_foreground)),
+            )
+            .child("Loading branches..."),
+        )
+        .into_any_element(),
       ),
       Some(_) if order.is_empty() => children.push(
         message("No branches found")

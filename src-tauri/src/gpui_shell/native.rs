@@ -7,7 +7,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use super::remote_repo::{self, Cutoff, Mutation, Remote, Transport};
+use super::remote_repo::{self, Cutoff, Mutation, Reads, Remote, Transport};
 use crate::{
   core::{
     feature_preview,
@@ -354,5 +354,10 @@ impl Transport for Backend {
       endpoint_id: endpoint_id.to_string(),
       reason: cutoff.id().to_string(),
     });
+  }
+
+  fn reads(&self) -> &Reads {
+    static READS: std::sync::OnceLock<Reads> = std::sync::OnceLock::new();
+    READS.get_or_init(Reads::default)
   }
 }

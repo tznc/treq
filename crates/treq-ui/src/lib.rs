@@ -166,6 +166,34 @@ pub fn spin(id: impl Into<ElementId>, icon: gpui::Svg) -> impl IntoElement {
   )
 }
 
+/// How long a load runs before its spinner or skeleton shows: one that
+/// lands sooner draws nothing rather than flashing it.
+pub const SPINNER_DELAY: Duration = Duration::from_millis(150);
+
+/// `placeholder` (a spinner, skeleton or "Loading..." line), hidden for its
+/// first [`SPINNER_DELAY`], so a fast load flashes nothing. It takes its room
+/// from the start, so nothing moves when it shows. Once shown it also
+/// answers to the debug selector `{id}-shown`.
+pub fn delayed<E>(id: impl Into<SharedString>, placeholder: E) -> gpui::AnimationElement<E>
+where
+  E: Styled + InteractiveElement + IntoElement + 'static,
+{
+  let id: SharedString = id.into();
+  let shown = format!("{id}-shown");
+  placeholder.with_animation(
+    ElementId::Name(id),
+    Animation::new(SPINNER_DELAY),
+    move |el, delta| {
+      if delta < 1. {
+        el.opacity(0.)
+      } else {
+        let shown = shown.clone();
+        el.debug_selector(move || shown)
+      }
+    },
+  )
+}
+
 /// `ui/button.tsx` variants.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Variant {

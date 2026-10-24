@@ -169,6 +169,8 @@ pub struct ChangesView {
   pub(super) pr: Option<pr::PrMode>,
   /// Held by the diff, so it takes the arrow keys.
   focus: FocusHandle,
+  /// Hidden while another tab or workspace shows.
+  hidden: bool,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -251,6 +253,7 @@ impl ChangesView {
       threads: threads::Threads::default(),
       pr: None,
       focus: cx.focus_handle(),
+      hidden: false,
       _subscriptions: Vec::new(),
     }
   }
@@ -310,6 +313,31 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// Its first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.snapshot.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows, it stops polling its
+  /// threads and hearing Cmd+F; shown again, it reads the diff, the threads and the pull
+  /// request again behind what it draws.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    if self.hidden != shown {
+      return;
+    }
+    self.hidden = !shown;
+    if !shown {
+      self.stop_threads();
+      self.unwatch_find_key();
+      return;
+    }
+    self.poll_threads(cx);
+    self.load_pr(cx);
+    if !self.loading {
+      self.load(cx);
+    }
+  }
+
   pub(super) fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
     if self.dark != dark {
       self.dark = dark;
@@ -331,6 +359,23 @@ impl ChangesView {
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
+    self.run_changed(
+      work,
+      |view, value, cx| {
+        apply(view, value, cx);
+        true
+      },
+      cx,
+    );
+  }
+
+  /// [`Self::run`], redrawing only when `apply` says what shows changed.
+  fn run_changed<T: Send + 'static>(
+    &self,
+    work: impl FnOnce(&dyn ChangesHost, &Parent) -> T + Send + 'static,
+    apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> bool + 'static,
+    cx: &mut Context<Self>,
+  ) {
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
     cx.spawn(async move |this, cx| {
@@ -338,8 +383,7 @@ impl ChangesView {
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
       let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
+        if view.parent.key() == key && apply(view, value, cx) {
           cx.notify();
         }
       });
@@ -470,16 +514,21 @@ impl ChangesView {
     let show = self.show_committed();
     self.run(
       move |host, parent| {
-        let snapshot = match parent.workspace_id() {
-          Some(id) => host
-            .workspace_diff(&parent.repo_path, id)
-            .map(|diff| Snapshot::from_workspace_diff(diff, show)),
-          None => host
-            .changed_files(&parent.repo_path, None)
-            .map(|files| Snapshot::from_home(&files)),
-        };
-        let rules = host.generated_files(&parent.repo_path, parent.workspace_id());
-        snapshot.map(|s| s.with_generated(&rules))
+        // The generated-file rules don't depend on the diff: read both at once.
+        std::thread::scope(|scope| {
+          let rules =
+            scope.spawn(|| host.generated_files(&parent.repo_path, parent.workspace_id()));
+          let snapshot = match parent.workspace_id() {
+            Some(id) => host
+              .workspace_diff(&parent.repo_path, id)
+              .map(|diff| Snapshot::from_workspace_diff(diff, show)),
+            None => host
+              .changed_files(&parent.repo_path, None)
+              .map(|files| Snapshot::from_home(&files)),
+          };
+          let rules = super::joined(rules);
+          snapshot.map(|s| s.with_generated(&rules))
+        })
       },
       |view, result, cx| {
         view.loading = false;
@@ -600,12 +649,14 @@ impl ChangesView {
       return;
     }
     let batch = batches.remove(0);
-    self.run(
+    self.run_changed(
       move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), batch),
       move |view, result, cx| {
         if view.generation != generation {
-          return;
+          return false;
         }
+        // A file read again unchanged (a refresh) draws nothing new.
+        let mut changed = false;
         match result {
           Ok(batch) => {
             for file in batch.files {
@@ -625,15 +676,18 @@ impl ChangesView {
                 error: file.error,
               };
               view.hunks.insert(file.path, data);
+              changed = true;
             }
           }
           Err(err) => log::warn!("Failed to load file hunks: {err}"),
         }
+        let marks = (view.viewed.len(), view.review.comments.len());
         view.unmark_stale(cx);
         if batches.is_empty() {
           view.prune_comments(cx);
         }
         view.load_batches(generation, batches, cx);
+        changed || marks != (view.viewed.len(), view.review.comments.len())
       },
       cx,
     );
@@ -645,7 +699,7 @@ impl ChangesView {
       .workspace
       .as_ref()
       .map(|w| w.branch_name.clone());
-    self.run(
+    self.run_changed(
       move |host, parent| {
         let github = host.github_remote(&parent.repo_path);
         let pr = branch
@@ -654,8 +708,10 @@ impl ChangesView {
         (github, pr)
       },
       |view, (github, pr), _| {
+        let changed = view.github != github || view.pr_state != pr;
         view.github = github;
         view.pr_state = pr;
+        changed
       },
       cx,
     );

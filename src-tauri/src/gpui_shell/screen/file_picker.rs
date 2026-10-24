@@ -70,12 +70,16 @@ impl FilePicker {
     this
   }
 
-  /// Searches for `query` once typing pauses (an empty one lists nothing).
+  /// Searches for `query` once typing pauses (an empty one lists nothing,
+  /// at once: the picker opening, or the query cleared).
   pub(super) fn search(&mut self, query: String, cx: &mut Context<Self>) {
     self.query = query.clone();
     let (host, scope) = (self.host.clone(), self.scope.clone());
+    let debounce = !query.trim().is_empty();
     self._search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(DEBOUNCE).await;
+      if debounce {
+        cx.background_executor().timer(DEBOUNCE).await;
+      }
       let results = cx
         .background_spawn(async move {
           host.search_files(

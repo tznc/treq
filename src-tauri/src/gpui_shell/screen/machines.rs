@@ -95,8 +95,12 @@ pub struct Listing {
 /// What the screen asks of the backend; faked in tests. Blocking calls run
 /// off the main thread.
 pub trait MachinesHost: ToolsHost {
-  /// Blocks: lists the dev containers through Docker.
+  /// Blocks: lists the machines and recent repositories, without the dev
+  /// containers, which wait on Docker (see `containers`).
   fn listing(&self) -> Listing;
+  /// Blocks: asks Docker for the dev containers, as machines and the
+  /// repositories on them.
+  fn containers(&self) -> (Vec<Machine>, Vec<Recent>);
   /// Blocks: asks the machine over SSH or `docker exec`.
   fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String>;
   /// Opens the local repository at `path` in this window.
@@ -243,33 +247,36 @@ impl MachinesHost for Backend {
         saved_id: Some(repo.id),
       })
     }));
-    if containers {
-      for container in devcontainer::containers() {
-        let id = format!("devcontainer:{}", container.id);
-        let name = last_segment(&container.repo_path).to_string();
-        listing.recents.push(Recent {
-          machine_id: id.clone(),
-          name: name.clone(),
-          path: container.repo_path.clone(),
-          saved_id: None,
-        });
-        listing.machines.push(Machine {
-          id,
-          detail: if container.running {
-            "Running".into()
-          } else {
-            "Stopped".into()
-          },
-          place: Place::DevContainer {
-            container_id: container.id,
-            repo_path: container.repo_path,
-            running: container.running,
-          },
-          name,
-        });
-      }
-    }
     listing
+  }
+
+  fn containers(&self) -> (Vec<Machine>, Vec<Recent>) {
+    let (mut machines, mut recents) = (Vec::new(), Vec::new());
+    for container in devcontainer::containers() {
+      let id = format!("devcontainer:{}", container.id);
+      let name = last_segment(&container.repo_path).to_string();
+      recents.push(Recent {
+        machine_id: id.clone(),
+        name: name.clone(),
+        path: container.repo_path.clone(),
+        saved_id: None,
+      });
+      machines.push(Machine {
+        id,
+        detail: if container.running {
+          "Running".into()
+        } else {
+          "Stopped".into()
+        },
+        place: Place::DevContainer {
+          container_id: container.id,
+          repo_path: container.repo_path,
+          running: container.running,
+        },
+        name,
+      });
+    }
+    (machines, recents)
   }
 
   fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String> {
@@ -349,7 +356,28 @@ impl MachinesHost for Backend {
   }
 }
 
+/// This computer's name: asked once, as it does not change while Treq runs.
 fn hostname() -> String {
+  static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+  NAME.get_or_init(read_hostname).clone()
+}
+
+#[cfg(unix)]
+fn read_hostname() -> String {
+  let mut name = [0u8; 256];
+  // SAFETY: `name` is writable for the length given, and `gethostname`
+  // terminates what it writes unless the name is longer, which the last
+  // byte below covers.
+  let found = unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len() - 1) } == 0;
+  let end = name.iter().position(|b| *b == 0).unwrap_or(name.len() - 1);
+  match found {
+    true => String::from_utf8_lossy(&name[..end]).trim().to_string(),
+    false => String::new(),
+  }
+}
+
+#[cfg(not(unix))]
+fn read_hostname() -> String {
   std::process::Command::new("hostname")
     .output()
     .ok()

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
+use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -227,8 +228,34 @@ pub fn detect_binary(name: &str) -> Option<String> {
 /// Finds `name` on `search_path` (a PATH-style list) and nowhere else, with
 /// the same `which` (Unix) or `where` (Windows) lookup as [`detect_binary`].
 pub fn detect_binary_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<String> {
-  let finder = if cfg!(windows) { "where" } else { "which" };
-  first_output_line(Command::new(finder).arg(name).env("PATH", search_path))
+  // The lookup `which` does, without a process: the first-run checklist
+  // asks for six tools at once.
+  #[cfg(unix)]
+  return executable_in(name, search_path.as_ref());
+  #[cfg(not(unix))]
+  first_output_line(Command::new("where").arg(name).env("PATH", search_path))
+}
+
+/// The first executable file called `name` in a directory of `search_path`.
+#[cfg(unix)]
+fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
+  use std::os::unix::fs::PermissionsExt;
+  let is_executable = |path: &Path| {
+    path
+      .metadata()
+      .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+  };
+  if name.is_empty() {
+    return None;
+  }
+  if name.contains('/') {
+    return is_executable(Path::new(name)).then(|| name.to_string());
+  }
+  env::split_paths(search_path)
+    .filter(|dir| !dir.as_os_str().is_empty())
+    .map(|dir| dir.join(name))
+    .find(|candidate| is_executable(candidate))
+    .map(|path| path.to_string_lossy().into_owned())
 }
 
 /// The first line a successful lookup printed: the binary's path.
@@ -275,19 +302,27 @@ pub fn get_binary_path(name: &str) -> Option<String> {
 
 /// Detect installed editor applications using mdfind
 pub fn detect_editor_app(app_name: &str) -> bool {
-  let search_pattern = "kMDItemKind == 'Application'";
+  let app_file = format!("/{}.app", app_name);
+  installed_applications().is_some_and(|apps| apps.lines().any(|line| line.ends_with(&app_file)))
+}
 
-  let output = Command::new("mdfind").arg(search_pattern).output().ok();
-
-  if let Some(output) = output {
-    if output.status.success() {
-      let stdout = String::from_utf8_lossy(&output.stdout);
-      let app_file = format!("/{}.app", app_name);
-      return stdout.lines().any(|line| line.ends_with(&app_file));
-    }
-  }
-
-  false
+/// Every application Spotlight knows, asked once for all the editors. Only
+/// macOS has `mdfind`; elsewhere there is no one to ask.
+fn installed_applications() -> Option<&'static str> {
+  static APPLICATIONS: OnceLock<Option<String>> = OnceLock::new();
+  APPLICATIONS
+    .get_or_init(|| {
+      if !cfg!(target_os = "macos") {
+        return None;
+      }
+      let output = Command::new("mdfind")
+        .arg("kMDItemKind == 'Application'")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+      Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    })
+    .as_deref()
 }
 
 static EDITOR_APPS_CACHE: OnceLock<HashMap<String, bool>> = OnceLock::new();
@@ -305,6 +340,28 @@ pub fn get_editor_apps_cache() -> Option<HashMap<String, bool>> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[cfg(unix)]
+  #[test]
+  fn finds_the_first_executable_on_the_search_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let tool = |dir: &tempfile::TempDir, mode| {
+      let path = dir.path().join("tool");
+      std::fs::write(&path, "#!/bin/sh\n").unwrap();
+      std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+      path
+    };
+    tool(&first, 0o644);
+    let wanted = tool(&second, 0o755);
+    let search = env::join_paths([first.path(), second.path()]).unwrap();
+    assert_eq!(
+      detect_binary_in("tool", &search),
+      Some(wanted.to_string_lossy().into_owned()),
+      "a file that is not executable does not shadow the one behind it"
+    );
+    assert_eq!(detect_binary_in("missing", &search), None);
+  }
 
   #[cfg(target_os = "macos")]
   #[test]

@@ -65,6 +65,8 @@ struct FakeHost {
   /// The next branch read fails, as one before `prepare_repo`'s jj init
   /// does.
   no_branch_once: std::sync::atomic::AtomicBool,
+  /// The workspaces come from a database the window can list at once.
+  from_db: bool,
   /// What `summaries` answers, when the host reads in one round trip.
   summaries: Mutex<Option<Vec<WorkspaceSummary>>>,
   /// Every call, in order.
@@ -115,6 +117,14 @@ impl WindowHost for FakeHost {
         .cloned()
         .unwrap_or_default(),
     )
+  }
+
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    if !self.from_db {
+      return None;
+    }
+    self.record(format!("listed {repo}"));
+    self.workspaces.lock().unwrap().get(repo).cloned()
   }
 
   fn statuses(&self, _: &str) -> Result<Vec<WorkspaceSidebarStatus>, String> {
@@ -435,7 +445,13 @@ impl Window {
     let repo = repo.map(String::from);
     let controller = cx.update(|cx| {
       cx.new(|cx| {
-        WindowController::new(host, repo, Rc::new(move |p, _| s.borrow_mut().push(p)), cx)
+        WindowController::new(
+          host,
+          repo,
+          Rc::new(move |p, _| s.borrow_mut().push(p)),
+          None,
+          cx,
+        )
       })
     });
     cx.run_until_parked();
@@ -566,6 +582,50 @@ fn opens_on_its_repository_and_draws_it(cx: &mut TestAppContext) {
   assert_eq!(window.sidebar_ids(), [1, 2]);
   assert_eq!(window.route_workspace(), None, "the home view");
   assert!(window.last().modal.is_none());
+}
+
+#[gpui::test]
+fn draws_the_rows_before_the_branch_and_the_jj_reads(cx: &mut TestAppContext) {
+  let mut host = FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]);
+  host.from_db = true;
+  let host = Arc::new(host);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let first_rows = window
+    .shown
+    .borrow()
+    .iter()
+    .position(|p| {
+      p.sidebar
+        .as_ref()
+        .is_some_and(|s| !s.repos[0].workspaces.is_empty())
+    })
+    .expect("rows are drawn");
+  let rows_without_branch = window.shown.borrow()[first_rows]
+    .sidebar
+    .as_ref()
+    .is_some_and(|s| s.repos[0].home_ref.is_none());
+  assert!(rows_without_branch, "the rows come before the branch");
+  assert_eq!(window.sidebar_ids(), [1]);
+  assert_eq!(
+    window.last().sidebar.unwrap().repos[0].home_ref.as_deref(),
+    Some("main")
+  );
+  let calls = host.calls();
+  let at = |call: &str| calls.iter().position(|c| c == call).expect(call);
+  assert!(at("listed /repo") < at("detail 1"));
+  assert_eq!(host.count("workspaces /repo"), 1, "listed once more, whole");
+}
+
+#[gpui::test]
+fn draws_the_saved_theme_in_the_first_presentation(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("theme".into(), "dark".into());
+  let window = Window::open(cx, host, Some("/repo"));
+  assert!(window.shown.borrow().iter().all(|p| p.dark), "never light");
 }
 
 #[gpui::test]
@@ -707,11 +767,13 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
   host
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host, Some("/repo"));
-  assert!(window.sidebar_ids().is_empty(), "the first read failed");
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  // The first read failed; `prepare_repo` finishing after it reads again,
+  // and otherwise the poll does.
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);
+  assert!(!host.panic_once.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 #[gpui::test]
@@ -790,6 +852,30 @@ fn selects_a_workspace_from_the_sidebar(cx: &mut TestAppContext) {
   assert_eq!(window.route_workspace(), Some(2));
   let sidebar = window.last().sidebar.unwrap();
   assert!(sidebar.repos[0].workspaces[1].selected);
+}
+
+/// What a click on a workspace row would show, for reading it ahead, is
+/// the route the click then presents; the model itself does not move.
+#[gpui::test]
+fn reads_ahead_the_route_a_workspace_click_shows(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let ahead = window
+    .controller
+    .read_with(cx, |c, _| c.workspace_route(2))
+    .expect("route");
+  assert_eq!(window.route_workspace(), None);
+  assert!(window.sidebar(
+    cx,
+    SidebarAction::SelectWorkspace {
+      id: 2,
+      shift: false,
+      toggle: false
+    }
+  ));
+  match window.screen_snapshot().view {
+    View::Workspace(route) => assert_eq!(*route, ahead),
+    _ => panic!("not the workspace view"),
+  }
 }
 
 #[gpui::test]

@@ -359,7 +359,11 @@ impl Render for PromptHistoryView {
       )
       .children(copy_all);
     let body = match &entries {
-      None => message("prompt-history-loading", "Loading prompt history...", &p).into_any_element(),
+      None => ui::delayed(
+        "prompt-history-loading",
+        message("prompt-history-loading", "Loading prompt history...", &p),
+      )
+      .into_any_element(),
       Some(entries) if entries.is_empty() => {
         message("prompt-history-empty", "No prompts sent yet.", &p).into_any_element()
       }

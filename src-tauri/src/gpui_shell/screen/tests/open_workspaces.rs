@@ -490,3 +490,29 @@ fn tab_indents_the_selected_lines(cx: &mut TestAppContext) {
     Some("feat/a\nfeat/b\nfeat/x")
   );
 }
+
+#[gpui::test]
+fn reopening_the_dialog_draws_the_pull_requests_it_read_last(cx: &mut TestAppContext) {
+  use super::kept_tabs::{drawn_now, first_frame, reads};
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
+  let (mut h, host) = dialog(host, cx);
+  let _ = screen(&mut h);
+  assert_eq!(reads(&host, "read open prs"), 1);
+
+  let modal = h.screen.read_with(&h.cx, |s, _| s.snapshot().modal.clone());
+  h.update(|s| s.modal = None);
+  h.cx.run_until_parked();
+  h.update(|s| s.modal = modal);
+  // Before any read lands, the first frame has the rows.
+  first_frame(&mut h);
+  let window = h.cx.update(|window, _| window.window_handle());
+  let first = gpui_testing_library::Screen::new(&h.cx, window);
+  first.redraw();
+  expect(first.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
+  assert!(!drawn_now(&mut h, "open-workspaces-prs-loading-shown"));
+  // And the list is read again behind them.
+  let _ = screen(&mut h);
+  assert_eq!(reads(&host, "read open prs"), 2);
+}
