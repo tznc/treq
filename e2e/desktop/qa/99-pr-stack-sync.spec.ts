@@ -34,7 +34,7 @@ test("pr-stack-sync: a merged base PR unstacks its child", async ({ page }) => {
   await settle(page, 3000);
   expect(childTarget()).toBe(PARENT);
   await capture(page, {
-    name: "20-pr-stack-sync-before",
+    name: "99-pr-stack-sync-before",
     title: "Stacked workspace before its base PR merges",
     clip: { x: 0, y: 0, width: 300, height: 520 },
     expectations: [
@@ -49,7 +49,7 @@ test("pr-stack-sync: a merged base PR unstacks its child", async ({ page }) => {
     .toBe("main");
   await settle(page, 1500);
   await capture(page, {
-    name: "20-pr-stack-sync-after",
+    name: "99-pr-stack-sync-after",
     title: "The child moved off the merged base",
     clip: { x: 0, y: 0, width: 300, height: 520 },
     expectations: [
