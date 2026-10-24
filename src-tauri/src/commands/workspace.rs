@@ -1,12 +1,14 @@
+use crate::file_indexer::FileIndex;
 use crate::local_db::Workspace;
 use crate::lock_ext::LockExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-// Track which workspaces have been indexed this session. Each workspace has its
+// The file index of each workspace built this session. Each workspace has its
 // own lock, held while it indexes, so a search waits for an index another
 // thread (the warm-up when a workspace shows) is still building.
-static INDEXED_WORKSPACES: OnceLock<Mutex<HashMap<String, Arc<Mutex<bool>>>>> = OnceLock::new();
+type IndexSlot = Arc<Mutex<Option<Arc<FileIndex>>>>;
+static FILE_INDEXES: OnceLock<Mutex<HashMap<String, IndexSlot>>> = OnceLock::new();
 
 /// Fires the repo's `.treq/config.yaml` `setup_script` (if any) for a newly
 /// created workspace, in the background so workspace creation itself isn't
@@ -39,24 +41,21 @@ pub(crate) fn spawn_setup_script_if_configured(workspace: &Workspace) {
   });
 }
 
-pub fn ensure_workspace_indexed(
-  repo_path: String,
-  workspace_id: Option<i64>,
-  workspace_path: String,
-) -> Result<bool, String> {
-  let slot = INDEXED_WORKSPACES
+/// The workspace's file index, built on first use.
+pub fn workspace_file_index(workspace_path: &str) -> Result<Arc<FileIndex>, String> {
+  let slot = FILE_INDEXES
     .get_or_init(|| Mutex::new(HashMap::new()))
     .lock_or_recover()
-    .entry(workspace_path.clone())
+    .entry(workspace_path.to_string())
     .or_default()
     .clone();
-  let mut indexed = slot.lock_or_recover();
-  if *indexed {
-    return Ok(false);
+  let mut index = slot.lock_or_recover();
+  if let Some(index) = index.as_ref() {
+    return Ok(index.clone());
   }
-  crate::file_indexer::index_workspace_files(&repo_path, workspace_id, &workspace_path)?;
-  *indexed = true;
-  Ok(true)
+  let built = Arc::new(FileIndex::build(workspace_path)?);
+  *index = Some(built.clone());
+  Ok(built)
 }
 
 #[cfg(test)]

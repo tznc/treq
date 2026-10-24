@@ -9,15 +9,6 @@ pub fn get_jj_tracked_files(workspace_path: &str) -> Result<Vec<String>, String>
   jj::jj_get_tracked_files(workspace_path).map_err(|e| e.to_string())
 }
 
-/// Get file modification time as unix timestamp
-fn get_file_mtime(path: &Path) -> Option<i64> {
-  std::fs::metadata(path)
-    .ok()
-    .and_then(|metadata| metadata.modified().ok())
-    .and_then(|mtime| mtime.duration_since(std::time::UNIX_EPOCH).ok())
-    .map(|duration| duration.as_secs() as i64)
-}
-
 /// Build a hierarchical file tree from a flat list of file paths
 /// Creates directory entries with parent_path relationships for efficient querying
 fn build_file_tree(
@@ -57,7 +48,7 @@ fn build_file_tree(
       is_directory: false,
       parent_path,
       cached_at: cached_at.clone(),
-      mtime: get_file_mtime(&full_path),
+      mtime: None,
     });
 
     // Collect all directory components
@@ -100,7 +91,7 @@ fn build_file_tree(
       is_directory: true,
       parent_path,
       cached_at: cached_at.clone(),
-      mtime: get_file_mtime(&full_dir_path),
+      mtime: None,
     });
   }
 
@@ -129,4 +120,176 @@ pub fn index_workspace_files(
   local_db::sync_workspace_files(repo_path, workspace_id, cached_files)?;
 
   Ok(())
+}
+
+/// The tracked files of one checkout, searched in memory. A keystroke scans
+/// it in about a millisecond; the SQLite `LIKE` scan it replaces re-opened a
+/// connection and walked every row.
+pub struct FileIndex {
+  files: Vec<IndexedFile>,
+}
+
+struct IndexedFile {
+  path: String,
+  /// ASCII-lowercased `path`, as SQLite's `LIKE` and `LOWER` compare.
+  lower: String,
+  /// `path`'s length in characters, as SQLite's `LENGTH` counts.
+  chars: usize,
+}
+
+impl FileIndex {
+  pub fn new(paths: Vec<String>) -> Self {
+    Self {
+      files: paths
+        .into_iter()
+        .map(|path| IndexedFile {
+          lower: path.to_ascii_lowercase(),
+          chars: path.chars().count(),
+          path,
+        })
+        .collect(),
+    }
+  }
+
+  /// Tracked files of the checkout at `workspace_path`.
+  pub fn build(workspace_path: &str) -> Result<Self, String> {
+    get_jj_tracked_files(workspace_path).map(Self::new)
+  }
+
+  pub fn len(&self) -> usize {
+    self.files.len()
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.files.is_empty()
+  }
+
+  /// Up to `limit` paths whose characters contain `query`'s in order (case
+  /// and whitespace ignored). An empty query lists the shortest paths.
+  /// Otherwise exact paths and names starting with the query come first,
+  /// then paths containing it, each tier shortest first.
+  pub fn search(&self, query: &str, limit: usize) -> Vec<String> {
+    let needle: String = query
+      .chars()
+      .filter(|character| !character.is_whitespace())
+      .map(|character| character.to_ascii_lowercase())
+      .collect();
+    let mut ranked: Vec<(u8, usize, usize)> = if needle.is_empty() {
+      (0..self.files.len())
+        .map(|index| (0, self.files[index].chars, index))
+        .collect()
+    } else {
+      let unicode_lower: String = query
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect();
+      let component = format!("/{needle}");
+      let ascii = needle.is_ascii();
+      self
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| {
+          if ascii {
+            is_subsequence(needle.as_bytes(), file.lower.as_bytes())
+          } else {
+            is_char_subsequence(&needle, &file.lower)
+          }
+        })
+        .map(|(index, file)| {
+          let tier = if file.lower == unicode_lower || file.lower.contains(&component) {
+            0
+          } else if file.lower.contains(&needle) {
+            1
+          } else {
+            2
+          };
+          (tier, file.chars, index)
+        })
+        .collect()
+    };
+    // Ties keep index order, as the table's rowid order did.
+    if ranked.len() > limit {
+      ranked.select_nth_unstable(limit);
+      ranked.truncate(limit);
+    }
+    ranked.sort_unstable();
+    ranked
+      .into_iter()
+      .map(|(_, _, index)| self.files[index].path.clone())
+      .collect()
+  }
+}
+
+fn is_subsequence(needle: &[u8], haystack: &[u8]) -> bool {
+  let mut rest = haystack;
+  needle.iter().all(|byte| {
+    rest.iter().position(|b| b == byte).is_some_and(|at| {
+      rest = &rest[at + 1..];
+      true
+    })
+  })
+}
+
+fn is_char_subsequence(needle: &str, haystack: &str) -> bool {
+  let mut chars = haystack.chars();
+  needle
+    .chars()
+    .all(|wanted| chars.any(|character| character == wanted))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn index(paths: &[&str]) -> FileIndex {
+    FileIndex::new(paths.iter().map(|path| path.to_string()).collect())
+  }
+
+  #[test]
+  fn search_ranks_path_components_then_substrings_then_fuzzy_each_shortest_first() {
+    let index = index(&[
+      "src/long/directory/maintenance.rs",
+      "src/m_a_i_n.rs",
+      "main.rs",
+      "src/main.rs",
+      "src/domain/x.rs",
+    ]);
+    assert_eq!(
+      index.search("Main", 10),
+      [
+        "src/main.rs",
+        "src/long/directory/maintenance.rs",
+        "main.rs",
+        "src/domain/x.rs",
+        "src/m_a_i_n.rs",
+      ]
+    );
+  }
+
+  #[test]
+  fn search_ignores_whitespace_and_lists_the_shortest_when_empty() {
+    let index = index(&["a/b/c.rs", "Makefile", "x.rs"]);
+    assert_eq!(index.search("make file", 10), ["Makefile"]);
+    assert_eq!(index.search(" ", 2), ["x.rs", "a/b/c.rs"]);
+    assert!(index.search("zzz", 10).is_empty());
+  }
+
+  #[test]
+  fn search_limits_to_the_best_matches() {
+    let paths: Vec<String> = (0..200)
+      .map(|i| format!("d/{}f{i}", "x".repeat(i % 7)))
+      .collect();
+    let index = FileIndex::new(paths);
+    let found = index.search("f", 5);
+    assert_eq!(found.len(), 5);
+    assert!(found.iter().all(|path| path.starts_with("d/f")));
+  }
+
+  #[test]
+  fn search_matches_non_ascii_names() {
+    let index = index(&["docs/résumé.md", "docs/readme.md"]);
+    assert_eq!(index.search("résu", 10), ["docs/résumé.md"]);
+  }
 }
