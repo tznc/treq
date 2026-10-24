@@ -12573,6 +12573,7 @@ dependencies = [
  "gpui-kit",
  "gpui-playwright",
  "gpui-pre",
+ "gpui-pre-wgpu",
  "gpui-testing-library",
  "gtk",
  "ignore",

@@ -649,3 +649,30 @@ fn checks_follow_the_workspace_view(cx: &mut TestAppContext) {
     .update(&mut h.cx, |popover, cx| popover.set_checks(input, cx));
   assert!(h.drawn("checks-workflow-2"));
 }
+
+/// Round 6 measurement: the SQLite connections one open of the Checks
+/// popover costs for a repository with `WORKFLOWS` workflows. Run under
+/// `strace -f -e trace=openat,fdatasync,fsync` and count `local.db` opens.
+#[test]
+#[ignore = "measurement"]
+fn checks_popover_read_perf() {
+  let workflows: usize = std::env::var("WORKFLOWS").ok().and_then(|n| n.parse().ok()).unwrap_or(5);
+  let repo = tempfile::TempDir::new().unwrap();
+  let dir = repo.path().join(".treq/workflows");
+  std::fs::create_dir_all(&dir).unwrap();
+  for i in 0..workflows {
+    std::fs::write(
+      dir.join(format!("w{i}.yml")),
+      format!("name: W{i}\njobs:\n  a:\n    name: A\n    steps:\n      - name: s\n        run: echo hi\n"),
+    )
+    .unwrap();
+  }
+  let path = repo.path().to_str().unwrap();
+  // Warm: schema init and the first connection.
+  let _ = crate::gpui_shell::popover::data::read_checks(path, 1);
+  eprintln!("MARK read_checks begin");
+  let started = std::time::Instant::now();
+  let data = crate::gpui_shell::popover::data::read_checks(path, 1);
+  eprintln!("MARK read_checks end: {:?} workflows={}", started.elapsed(), data.workflows.len());
+  let _ = std::fs::metadata("/nonexistent/MARK_read_checks_end");
+}
