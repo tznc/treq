@@ -53,6 +53,7 @@ use screen::Screen;
 pub use screen::{Modal, ScreenSnapshot};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
+pub(crate) use window::note_just_initialized;
 
 /// Tooltips, menus, toasts and the modal window are windows of their own,
 /// placed at screen positions (`popup`, `modal`), which a Wayland client
@@ -69,10 +70,6 @@ pub fn force_x11_on_wayland() {
 
 /// Starts GPUI. Call once from `setup`, before the first shell window.
 pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiError> {
-  // The syntax set takes a while to load; load it before the first diff.
-  let _ = std::thread::Builder::new()
-    .name("warm-highlighting".into())
-    .spawn(screen::warm_highlighting);
   let handle = app.handle().clone();
   tauri_plugin_gpui::init_with(
     app,
@@ -175,6 +172,18 @@ impl Render for Shell {
       e2e::begin_frame(window);
       e2e::shell_window(window.window_handle());
     }
+    static FIRST: std::sync::Once = std::sync::Once::new();
+    FIRST.call_once(|| {
+      crate::startup::mark("first render");
+      // The syntax set takes a while to load; load it before the first
+      // diff, but after the first frame, which it would compete with for a
+      // core.
+      window.on_next_frame(|_, _| {
+        let _ = std::thread::Builder::new()
+          .name("warm-highlighting".into())
+          .spawn(screen::warm_highlighting);
+      });
+    });
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
@@ -308,11 +317,14 @@ pub fn open_window(
     .title_bar_style(tauri::TitleBarStyle::Overlay)
     .hidden_title(true);
   let window = window.build()?;
+  crate::startup::mark("window built");
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;
 
   let shell_label = label.to_string();
   let shell_app = app.clone();
+  // The first frame follows the OS appearance, before GPUI reports it.
+  let os_dark = window.theme().ok().map(|theme| theme == tauri::Theme::Dark);
   window.attach_gpui(move |cx| {
     let shell = cx.new(|_| Shell {
       app: shell_app,
@@ -322,7 +334,7 @@ pub fn open_window(
       modal: None,
       window: None,
       presented: None,
-      os_dark: None,
+      os_dark,
       shortcuts: None,
       confirm_focus: None,
     });
@@ -332,7 +344,9 @@ pub fn open_window(
     shell
   })?;
 
+  crate::startup::mark("gpui attached");
   window::start(app, label, repo)?;
+  crate::startup::mark("window model started");
   Ok(())
 }
 

@@ -319,7 +319,13 @@ impl CodeHost for Backend {
 
   fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
     let (workspaces, branches) = match self.remote_containing(repo_path) {
-      Some(remote) => (remote.workspaces()?, remote.branches()?),
+      Some(remote) => {
+        let (workspaces, branches) = std::thread::scope(|scope| {
+          let branches = scope.spawn(|| remote.branches());
+          (remote.workspaces(), super::joined(branches))
+        });
+        (workspaces?, branches?)
+      }
       None => (
         core::list_workspaces(repo_path)?,
         core::list_repo_branches(repo_path)?,
