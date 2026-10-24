@@ -8117,6 +8117,7 @@ mod changes_large;
 mod code_files_large;
 mod commit_diffs;
 mod commits_large;
+mod diff_extremes;
 mod conflicts;
 mod file_browser;
 mod fuzz;
