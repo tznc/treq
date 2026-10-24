@@ -152,6 +152,35 @@ fn a_large_root_and_file_draw_only_the_rows_on_screen(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_code_tab_draws_the_root_entries_near_the_viewport(cx: &mut TestAppContext) {
+  let mut host = large_host();
+  host.overview.readme = Some("# Short".into());
+  let (mut h, _) = workspace_harness(cx, host, route(false));
+  h.cx.run_until_parked();
+  assert!(h.drawn("code-entry-zz_00000.txt"));
+  assert!(!h.drawn("code-entry-zz_04999.txt"), "far below the window");
+  let first = h.cx.debug_bounds("code-entry-zz_00000.txt").expect("row");
+  let second = h.cx.debug_bounds("code-entry-zz_00001.txt").expect("row");
+  let third = h.cx.debug_bounds("code-entry-zz_00002.txt").expect("row");
+  let at = first.center();
+  // Scrolled to the bottom: the last rows and the README follow the rows
+  // not drawn, at the height they would take.
+  scroll_by(&mut h, at, 150, -2000.);
+  assert!(h.drawn("code-entry-zz_04999.txt"));
+  assert!(!h.drawn("code-entry-zz_00000.txt"));
+  assert!(h.drawn("code-readme"));
+  // Every row but the first has a top border.
+  let pitch = third.top() - second.top();
+  let last = h.cx.debug_bounds("code-entry-zz_04999.txt").expect("row");
+  let before = h.cx.debug_bounds("code-entry-zz_04998.txt").expect("row");
+  assert_eq!(last.top() - before.top(), pitch);
+  // Back at the top, the first rows are where they started.
+  scroll_by(&mut h, at, 150, 2000.);
+  assert!(h.drawn("code-entry-zz_00000.txt"));
+  assert_eq!(h.cx.debug_bounds("code-entry-zz_00000.txt"), Some(first));
+}
+
+#[gpui::test]
 fn a_long_line_is_drawn(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, large_host(), route(true));
   h.cx.run_until_parked();
