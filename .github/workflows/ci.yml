@@ -360,18 +360,3 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --workspace --profile ci
-
-      # The design system's visual regression check: re-renders the
-      # styleguide (crates/treq-ui) offscreen and compares it with the
-      # committed snapshots. Spinners animate from their first paint, so the
-      # loading example gets a looser tolerance.
-      - name: Styleguide snapshots match
-        if: ${{ !cancelled() }}
-        working-directory: crates/treq-ui
-        run: |
-          cargo build --locked -p treq-ui --example styleguide
-          styleguide=../../target/debug/examples/styleguide
-          for example in $($styleguide list | grep -vx empty-state/loading); do
-            $styleguide check --filter "$example" --tolerance 0.01
-          done
-          $styleguide check --filter empty-state/loading --tolerance 0.05

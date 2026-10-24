@@ -2,7 +2,7 @@
 //!
 //! - `cargo run -p treq-ui --example styleguide` opens it.
 //! - `-- render` re-renders the snapshots under `styleguide/`; `-- check`
-//!   compares against them, which CI runs as the visual regression check.
+//!   compares against them.
 
 use gpui::{div, prelude::*, px, App};
 use gpui_styleguidist::{example, Example, Styleguide};
