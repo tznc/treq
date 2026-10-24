@@ -6,7 +6,7 @@
 //! has (pull requests, supporting repositories).
 
 use std::{
-  collections::HashMap,
+  collections::{HashMap, HashSet},
   path::{Path, PathBuf},
   time::Duration,
 };
@@ -56,6 +56,13 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String>;
   /// `has_changes` of `useWorkspaceGitDetail`.
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool>;
+  /// `has_changes` of each of `workspaces`, read together.
+  fn has_changes_of(&self, repo: &str, workspaces: &[Workspace]) -> HashMap<i64, bool> {
+    workspaces
+      .iter()
+      .filter_map(|w| self.has_changes(repo, w.id).map(|c| (w.id, c)))
+      .collect()
+  }
   /// Every workspace's sidebar status and uncommitted changes in one read,
   /// for a repository where that is one round trip. `None` falls back to
   /// `workspaces`, `statuses` and `has_changes`.
@@ -136,39 +143,33 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
       ),
       None => (host.workspaces(repo).ok(), host.statuses(repo).ok()),
     };
-    let open: Vec<i64> = match (&workspaces, &statuses) {
-      (Some(workspaces), statuses) => workspaces
-        .iter()
-        .filter(|w| {
-          !statuses
-            .iter()
-            .flatten()
-            .any(|s| s.current.id == w.id && s.has_conflicts)
-        })
-        .map(|w| w.id)
-        .collect(),
-      _ => Vec::new(),
-    };
-    let mut sorted = open.clone();
+    let conflicted: HashSet<i64> = statuses
+      .iter()
+      .flatten()
+      .filter(|s| s.has_conflicts)
+      .map(|s| s.current.id)
+      .collect();
+    let open: Vec<&Workspace> = workspaces
+      .iter()
+      .flatten()
+      .filter(|w| !conflicted.contains(&w.id))
+      .collect();
+    let mut sorted: Vec<i64> = open.iter().map(|w| w.id).collect();
     sorted.sort_unstable();
     let mut was = known.to_vec();
     was.sort_unstable();
     if read.detail || sorted != was {
-      out.has_changes = Some(
-        open
+      out.has_changes = Some(match &summaries {
+        Some(summaries) => summaries
           .iter()
-          .filter_map(|id| {
-            match &summaries {
-              Some(summaries) => summaries
-                .iter()
-                .find(|s| s.workspace.id == *id)
-                .map(|s| s.has_changes),
-              None => host.has_changes(repo, *id),
-            }
-            .map(|c| (*id, c))
-          })
+          .filter(|s| sorted.binary_search(&s.workspace.id).is_ok())
+          .map(|s| (s.workspace.id, s.has_changes))
           .collect(),
-      );
+        None => {
+          let open: Vec<Workspace> = open.into_iter().cloned().collect();
+          host.has_changes_of(repo, &open)
+        }
+      });
     }
     out.workspaces = workspaces;
     out.statuses = statuses;
@@ -264,6 +265,16 @@ impl WindowHost for Backend {
         .map(|status| status.partial.has_changes),
       None => core::workspace_has_changes(repo, workspace_id).ok(),
     }
+  }
+
+  fn has_changes_of(&self, repo: &str, workspaces: &[Workspace]) -> HashMap<i64, bool> {
+    if self.remote(repo).is_some() {
+      return workspaces
+        .iter()
+        .filter_map(|w| self.has_changes(repo, w.id).map(|c| (w.id, c)))
+        .collect();
+    }
+    core::workspaces_have_changes(repo, workspaces)
   }
 
   fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {

@@ -1584,6 +1584,53 @@ pub fn workspace_has_changes(repo_path: &str, workspace_id: i64) -> Result<bool,
   )
 }
 
+/// [`workspace_has_changes`] of each of `workspaces`, which snapshot their
+/// working copies a few at a time instead of one after another: a window
+/// reads every workspace's on each invalidation.
+pub fn workspaces_have_changes(
+  repo_path: &str,
+  workspaces: &[local_db::Workspace],
+) -> HashMap<i64, bool> {
+  let has_changes = |workspace: &local_db::Workspace| {
+    let path = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&workspace.workspace_path);
+    let changed = path
+      .to_str()
+      .and_then(|path| jj::jj_get_changed_files(path).ok())
+      .is_some_and(|files| !files.is_empty());
+    (workspace.id, changed)
+  };
+  let threads = std::thread::available_parallelism()
+    .map_or(1, |n| n.get())
+    .clamp(1, 4);
+  if workspaces.len() < 2 || threads == 1 {
+    return workspaces.iter().map(has_changes).collect();
+  }
+  let next = std::sync::atomic::AtomicUsize::new(0);
+  std::thread::scope(|scope| {
+    let workers: Vec<_> = (0..threads.min(workspaces.len()))
+      .map(|_| {
+        scope.spawn(|| {
+          let mut found = Vec::new();
+          loop {
+            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(workspace) = workspaces.get(index) else {
+              break found;
+            };
+            found.push(has_changes(workspace));
+          }
+        })
+      })
+      .collect();
+    workers
+      .into_iter()
+      .flat_map(|worker| worker.join().unwrap_or_default())
+      .collect()
+  })
+}
+
 pub fn workspace_status(
   repo_path: &str,
   workspace_id: Option<i64>,
