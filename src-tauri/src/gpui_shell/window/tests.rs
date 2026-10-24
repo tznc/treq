@@ -30,6 +30,7 @@ use crate::{
     remote_records::{self, RestoreFailure, SavedRepository},
     repo::RepoBranch,
     supporting_repos::SupportingRepo,
+    workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
   github::{GitRemoteInfo, PrInfo},
@@ -64,6 +65,8 @@ struct FakeHost {
   /// The next branch read fails, as one before `prepare_repo`'s jj init
   /// does.
   no_branch_once: std::sync::atomic::AtomicBool,
+  /// What `summaries` answers, when the host reads in one round trip.
+  summaries: Mutex<Option<Vec<WorkspaceSummary>>>,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
   /// The watched checkouts, each with the sender that reports an edit.
@@ -121,6 +124,11 @@ impl WindowHost for FakeHost {
   fn has_changes(&self, _: &str, id: i64) -> Option<bool> {
     self.record(format!("detail {id}"));
     Some(false)
+  }
+
+  fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    self.record(format!("summaries {repo}"));
+    self.summaries.lock().unwrap().clone()
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -1495,6 +1503,38 @@ fn deep_links_start_on_their_branch_or_toast_that_it_is_missing() {
     .lock()
     .unwrap()
     .is_processed("window-test-found"));
+}
+
+/// A remote poll reads every workspace's status in one request, not one
+/// per workspace, and falls back to those reads when the host has none.
+#[test]
+fn a_summaries_read_replaces_the_per_workspace_reads() {
+  use super::{data::Read, host::read_repo};
+  let host = FakeHost::on(
+    "/repo",
+    vec![workspace(1, "a", None), workspace(2, "b", None)],
+  );
+  let summary = |id, has_conflicts, has_changes| WorkspaceSummary {
+    workspace: workspace(id, "w", None),
+    has_conflicts,
+    has_changes,
+    commits_ahead: 0,
+    terminals: 0,
+    last_activity_at: None,
+  };
+  *host.summaries.lock().unwrap() = Some(vec![summary(1, false, true), summary(2, true, true)]);
+
+  let out = read_repo(&host, "/repo", Read::ALL, &[]);
+  assert_eq!(host.calls(), ["summaries /repo", "sessions /repo"]);
+  assert_eq!(out.workspaces.unwrap().len(), 2);
+  assert_eq!(out.statuses.unwrap().len(), 2);
+  // The conflicted workspace is not "open".
+  assert_eq!(out.has_changes.unwrap(), HashMap::from([(1, true)]));
+
+  *host.summaries.lock().unwrap() = None;
+  read_repo(&host, "/repo", Read::ALL, &[]);
+  assert_eq!(host.count("workspaces /repo"), 1);
+  assert_eq!(host.count("detail 1"), 1);
 }
 
 fn session_started(workspace_id: Option<i64>, select: bool) -> NativeEvent {

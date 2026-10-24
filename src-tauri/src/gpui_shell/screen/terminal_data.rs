@@ -123,7 +123,7 @@ pub trait TerminalHost:
   fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String>;
   fn close_pty(&self, id: &str) -> Result<(), String>;
   /// Calls `sink` with each chunk of the PTY's output until dropped.
-  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening;
+  fn listen(&self, id: &str, sink: OutputSink) -> Listening;
   /// Calls `sink` with the exit status when a remote session's channel
   /// ends, until dropped.
   fn listen_exit(&self, id: &str, sink: Box<dyn Fn(Option<u32>) + Send + Sync>) -> Listening;
@@ -175,6 +175,9 @@ pub trait TerminalHost:
 
 pub type Host = Arc<dyn TerminalHost>;
 
+/// Receives a PTY's output, as the bytes read.
+pub type OutputSink = Box<dyn Fn(&[u8]) + Send + Sync>;
+
 /// Stops a [`TerminalHost::listen`] when dropped.
 pub struct Listening(Option<Box<dyn FnOnce() + Send + Sync>>);
 
@@ -194,7 +197,7 @@ impl Drop for Listening {
 
 impl TerminalHost for Backend {
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String> {
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     let state = self.app().state::<crate::AppState>();
     if state.pty_manager.session_exists(&spawn.id) {
       return Ok(());
@@ -209,13 +212,8 @@ impl TerminalHost for Backend {
       None,
       None,
     )?;
-    let app = self.app().clone();
-    let event = format!("pty-data-{}", spawn.id);
-    let emit = Box::new(move |data: String| {
-      if let Err(error) = app.emit(&event, data) {
-        log::warn!("pty emit failed: event={event}, error={error}");
-      }
-    });
+    let id = spawn.id.clone();
+    let emit = Box::new(move |data: &[u8]| crate::pty_stream::publish(&id, data));
     state.pty_manager.create_session(
       spawn.id.clone(),
       Some(self.label().to_string()),
@@ -299,20 +297,9 @@ impl TerminalHost for Backend {
     Ok(())
   }
 
-  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening {
-    use tauri::Listener;
-    let app = self.app().clone();
-    let event = if is_remote_pty(id) {
-      format!("remote-pty-data-{id}")
-    } else {
-      format!("pty-data-{id}")
-    };
-    let handler = app.listen(event, move |event| {
-      if let Ok(data) = serde_json::from_str::<String>(event.payload()) {
-        sink(data);
-      }
-    });
-    Listening::new(move || app.unlisten(handler))
+  fn listen(&self, id: &str, sink: OutputSink) -> Listening {
+    let subscription = crate::pty_stream::subscribe(id, sink.into());
+    Listening::new(move || drop(subscription))
   }
 
   fn listen_exit(&self, id: &str, sink: Box<dyn Fn(Option<u32>) + Send + Sync>) -> Listening {
@@ -606,16 +593,28 @@ impl Live {
   }
 
   /// Parses a chunk of output; returns what the terminal wants written back.
+  #[cfg(test)]
   pub fn push(&self, chunk: &str) -> Vec<String> {
+    self.push_bytes(chunk.as_bytes())
+  }
+
+  /// [`Self::push`] for the bytes a PTY read.
+  pub fn push_bytes(&self, chunk: &[u8]) -> Vec<String> {
     let from_process = {
       let mut pending = self.pending_echo.lock_or_recover();
-      let (left, process) = consume_echo(&pending, chunk);
-      *pending = left;
-      !process.is_empty()
+      if pending.is_empty() {
+        !chunk.is_empty()
+      } else {
+        let text = String::from_utf8_lossy(chunk);
+        let (left, process) = consume_echo(&pending, &text);
+        let from_process = !process.is_empty();
+        *pending = left;
+        from_process
+      }
     };
     let outputs = {
       let mut emulator = self.emulator.lock_or_recover();
-      emulator.feed(chunk.as_bytes());
+      emulator.feed(chunk);
       emulator.drain()
     };
     let mut replies = Vec::new();
@@ -683,7 +682,7 @@ pub fn attach(host: &Host, id: &str, cols: usize, rows: usize) -> (Arc<Live>, bo
     id,
     Box::new(move |chunk| {
       if let Some(terminal) = weak.upgrade() {
-        for reply in terminal.push(&chunk) {
+        for reply in terminal.push_bytes(chunk) {
           let _ = writer.write_pty(&pty, &reply);
         }
       }
@@ -762,5 +761,65 @@ mod tests {
     assert!(live.last_output.lock_or_recover().is_some());
     assert_eq!(live.screen_text(), "adone");
     assert_eq!(live.push("\x1b[6n"), vec!["\x1b[1;6R".to_string()]);
+  }
+
+  #[test]
+  fn live_terminals_take_a_character_split_across_chunks() {
+    let live = Live::new(20, 2);
+    let tick = "✓".as_bytes();
+    live.push_bytes(&tick[..1]);
+    live.push_bytes(&tick[1..]);
+    assert_eq!(live.screen_text(), "✓");
+  }
+
+  /// Feeding ~32 MB of colored output through the old path (decode to a
+  /// string, JSON-encode it as the event payload, parse that, feed) and the
+  /// new one (feed the bytes read). The old path leaves out the event bus
+  /// itself, so it is a lower bound.
+  /// `cargo test --features gpui-shell --lib pty_output_path -- --ignored --nocapture`
+  #[test]
+  #[ignore = "benchmark"]
+  fn pty_output_path_throughput() {
+    let line = "\x1b[38;5;196mERROR\x1b[0m \x1b[1;32m✓ passed\x1b[0m src/日本/main.rs:42:7 \x1b[4mwarning\x1b[24m\r\n";
+    let mut data = Vec::new();
+    while data.len() < 32 << 20 {
+      data.extend_from_slice(line.as_bytes());
+    }
+    let chunks: Vec<&[u8]> = data.chunks(8192).collect();
+
+    // What only the old path does: decode, encode as JSON, parse that.
+    let mut decoder = crate::pty::Utf8StreamDecoder::new();
+    let start = Instant::now();
+    let mut total = 0;
+    for chunk in &chunks {
+      let payload = serde_json::to_string(&decoder.push(chunk)).unwrap();
+      total += serde_json::from_str::<String>(&payload).unwrap().len();
+    }
+    let transport_time = start.elapsed();
+    assert_eq!(total, data.len());
+
+    let old = Live::new(120, 40);
+    let mut decoder = crate::pty::Utf8StreamDecoder::new();
+    let start = Instant::now();
+    for chunk in &chunks {
+      let text = decoder.push(chunk);
+      let payload = serde_json::to_string(&text).unwrap();
+      let text: String = serde_json::from_str(&payload).unwrap();
+      old.push(&text);
+    }
+    let old_time = start.elapsed();
+
+    let new = Live::new(120, 40);
+    let start = Instant::now();
+    for chunk in &chunks {
+      new.push_bytes(chunk);
+    }
+    let new_time = start.elapsed();
+    let mb = data.len() as f64 / (1 << 20) as f64;
+    println!(
+      "transport stages alone {transport_time:?}; old {old_time:?} ({:.0} MB/s), new {new_time:?} ({:.0} MB/s)",
+      mb / old_time.as_secs_f64(),
+      mb / new_time.as_secs_f64()
+    );
   }
 }

@@ -27,6 +27,7 @@ use crate::{
     remote_records::{self, RestoreFailure, RestoreSteps, SavedRepository, UserManagedEndpoint},
     repo::RepoBranch,
     supporting_repos::{self, SupportingRepo},
+    workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
   github::{GitRemoteInfo, PrInfo},
@@ -51,6 +52,12 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String>;
   /// `has_changes` of `useWorkspaceGitDetail`.
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool>;
+  /// Every workspace's sidebar status and uncommitted changes in one read,
+  /// for a repository where that is one round trip. `None` falls back to
+  /// `workspaces`, `statuses` and `has_changes`.
+  fn summaries(&self, _repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    None
+  }
   fn sessions(&self, repo: &str) -> Vec<Session>;
   fn branch(&self, repo: &str) -> Option<RepoBranch>;
   fn default_branch(&self, repo: &str) -> Option<String>;
@@ -108,8 +115,23 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     ..RepoRead::default()
   };
   if read.workspaces {
-    let workspaces = host.workspaces(repo).ok();
-    let statuses = host.statuses(repo).ok();
+    let summaries = host.summaries(repo);
+    let (workspaces, statuses) = match &summaries {
+      Some(summaries) => (
+        Some(summaries.iter().map(|s| s.workspace.clone()).collect()),
+        Some(
+          summaries
+            .iter()
+            .map(|s| WorkspaceSidebarStatus {
+              current: s.workspace.clone(),
+              has_conflicts: s.has_conflicts,
+              last_activity_at: s.last_activity_at.clone(),
+            })
+            .collect::<Vec<_>>(),
+        ),
+      ),
+      None => (host.workspaces(repo).ok(), host.statuses(repo).ok()),
+    };
     let open: Vec<i64> = match (&workspaces, &statuses) {
       (Some(workspaces), statuses) => workspaces
         .iter()
@@ -131,7 +153,16 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
       out.has_changes = Some(
         open
           .iter()
-          .filter_map(|id| host.has_changes(repo, *id).map(|c| (*id, c)))
+          .filter_map(|id| {
+            match &summaries {
+              Some(summaries) => summaries
+                .iter()
+                .find(|s| s.workspace.id == *id)
+                .map(|s| s.has_changes),
+              None => host.has_changes(repo, *id),
+            }
+            .map(|c| (*id, c))
+          })
           .collect(),
       );
     }
@@ -147,6 +178,35 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     out.remote = Some(host.remote(repo));
   }
   out
+}
+
+/// Repositories `open_in_new_window` initialized for the window it opens,
+/// so that window's `prepare_repo` doesn't initialize them again.
+static JUST_INITIALIZED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+  std::sync::Mutex::new(Vec::new());
+
+/// How long a window may take to open after its repository was initialized
+/// for it.
+const JUST_INITIALIZED_FOR: Duration = Duration::from_secs(30);
+
+fn note_just_initialized(repo: &str) {
+  let mut noted = JUST_INITIALIZED.lock_or_recover();
+  noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
+  noted.push((repo.to_string(), std::time::Instant::now()));
+}
+
+/// Whether `repo` was initialized for the window being prepared; a note
+/// serves one window.
+fn take_just_initialized(repo: &str) -> bool {
+  let mut noted = JUST_INITIALIZED.lock_or_recover();
+  noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
+  match noted.iter().position(|(noted, _)| noted == repo) {
+    Some(index) => {
+      noted.remove(index);
+      true
+    }
+    None => false,
+  }
 }
 
 impl Backend {
@@ -200,6 +260,11 @@ impl WindowHost for Backend {
         .map(|status| status.partial.has_changes),
       None => core::workspace_has_changes(repo, workspace_id).ok(),
     }
+  }
+
+  fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    let remote = self.remote(repo)?;
+    remote.workspace_summaries_if_supported()
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -277,8 +342,10 @@ impl WindowHost for Backend {
   }
 
   fn prepare_repo(&self, main_repo: &str) {
-    if let Err(err) = core::init(main_repo) {
-      log::error!("Failed to init repo: {err}");
+    if !take_just_initialized(main_repo) {
+      if let Err(err) = core::init_deferring_rebase(main_repo) {
+        log::error!("Failed to init repo: {err}");
+      }
     }
     self.set_window_repo_path(main_repo);
     crate::pr_status::global().watch_repo(main_repo);
@@ -314,7 +381,7 @@ impl WindowHost for Backend {
   }
 
   fn open_in_new_window(&self, path: &str) {
-    if !core::init(path).unwrap_or(false) {
+    if !core::init_deferring_rebase(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,
         "Not a Git Repository",
@@ -322,6 +389,7 @@ impl WindowHost for Backend {
       );
       return;
     }
+    note_just_initialized(path);
     let label = crate::open_new_window::new_repo_window_label();
     let title = crate::open_new_window::new_repo_window_title(path);
     let (app, path) = (self.app().clone(), path.to_string());
