@@ -435,6 +435,19 @@ impl WorkspaceRepo {
     commit_id_in(&self.loaded, &self.path, revision)
   }
 
+  /// Whether `name` is a listed local bookmark (`get_branches`), and
+  /// whether `remote` has it (`check_remote_branch_exists`).
+  pub fn bookmark_presence(&self, name: &str, remote: &str) -> (bool, bool) {
+    let view = self.loaded.repo.view();
+    let local = !name.starts_with(STASH_BOOKMARK_PREFIX)
+      && view.local_bookmarks().any(|(n, _)| n.as_str() == name);
+    let remote_ref = view.get_remote_bookmark(RemoteRefSymbol {
+      name: RefName::new(name),
+      remote: RemoteName::new(remote),
+    });
+    (local, !remote_ref.target.is_absent())
+  }
+
   /// `jj_get_commits_ahead`.
   pub fn commits_ahead(&self, target_branch: &str) -> Result<JjCommitsAhead, JjError> {
     commits_ahead_in(&self.loaded, &self.path, target_branch)
