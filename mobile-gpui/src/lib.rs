@@ -93,9 +93,23 @@ pub fn run() {
     })
     .build(tauri::generate_context!())
     .expect("error while building the Treq GPUI app");
-  app.run(|_, event| {
-    if let (tauri::RunEvent::Resumed, Some(backend)) = (event, backend::try_get()) {
-      backend.emit(backend::AppEvent::Resumed);
+  app.run(|_, event| match event {
+    tauri::RunEvent::Resumed => {
+      backend::set_foreground(true);
+      if let Some(backend) = backend::try_get() {
+        backend.emit(backend::AppEvent::Resumed);
+      }
     }
+    #[cfg(mobile)]
+    tauri::RunEvent::WindowEvent {
+      event: tauri::WindowEvent::Suspended,
+      ..
+    } => backend::set_foreground(false),
+    #[cfg(mobile)]
+    tauri::RunEvent::WindowEvent {
+      event: tauri::WindowEvent::Resumed,
+      ..
+    } => backend::set_foreground(true),
+    _ => {}
   });
 }
