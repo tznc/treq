@@ -235,6 +235,15 @@ pub mod nav {
     });
   }
 
+  /// Whether the page showing `view` is the one on screen.
+  pub fn is_top(view: EntityId, cx: &App) -> bool {
+    cx.global::<Nav>()
+      .root
+      .upgrade()
+      .and_then(|root| root.read(cx).stack.last().map(|p| p.view.entity_id()))
+      == Some(view)
+  }
+
   pub fn pop(cx: &mut App) {
     update(cx, |root, cx| {
       if root.stack.len() > 1 {
@@ -559,6 +568,7 @@ pub fn sign_out(cx: &mut App) {
     }
     backend.pool.set_relay_access_token(None);
     backend.auth.sign_out().await;
+    remote::forget_reads();
   });
   cx.spawn(async move |cx| {
     let _ = done.await;
@@ -614,6 +624,10 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
     cx.notify();
   });
   let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<&'static str>();
+  // The pages a restore reopens; otherwise `open` shows the last repository.
+  let snapshot = (open && model.read(cx).restoring)
+    .then(store::session_snapshot)
+    .flatten();
   let result = backend::spawn(async move {
     let connection = match machine {
       Machine::Host(record) => {
@@ -634,6 +648,10 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
         .await?
       }
     };
+    if open {
+      // Read alongside the host check, so the pages open on content.
+      screens::prefetch_location(&connection.endpoint, snapshot.as_ref());
+    }
     let _ = progress_tx.unbounded_send("Checking the machine");
     let check = remote::host_check(&connection.endpoint).await?;
     Ok::<_, String>((connection, check))
@@ -753,6 +771,7 @@ pub fn show_machines(cx: &mut App) {
 /// Removes a saved SSH host and drops its connection and terminals.
 pub fn forget_host(id: &str, cx: &mut App) {
   store::remove_user_managed_endpoint(id);
+  remote::forget_reads();
   if let Some(connection) = backend::get().remove_connection(id) {
     backend::spawn_detached(async move {
       let backend = backend::get();
@@ -841,8 +860,15 @@ fn restore(cx: &mut Context<Root>) {
   model.update(cx, |m, _| m.restoring = true);
   let restored = backend::spawn(async { backend::get().auth.restore().await });
   cx.spawn(async move |_, cx| {
-    let _ = restored.await;
     let snapshot = store::session_snapshot();
+    // Only Treq Cloud needs the session: an SSH host connects without
+    // waiting for its refresh, a network round trip.
+    if !matches!(
+      snapshot.as_ref().map(|s| &s.endpoint),
+      Some(store::SessionEndpoint::UserManaged { .. })
+    ) {
+      let _ = restored.await;
+    }
     let Some(snapshot) = snapshot else {
       model.update(cx, |m, _| m.restoring = false);
       return;
@@ -859,29 +885,22 @@ fn restore(cx: &mut Context<Root>) {
       return;
     };
     let id = machine.id().to_string();
-    cx.update(|cx| connect(machine, true, cx));
-    // Wait for the connect to finish.
-    loop {
-      let state = cx.update(|cx| {
-        let m = model.read(cx);
-        (
-          m.machine(&id).status.is_connecting(),
-          m.connection.is_some(),
-        )
-      });
-      match state {
-        (true, _) => {
-          cx.background_executor()
-            .timer(std::time::Duration::from_millis(200))
-            .await
-        }
-        (false, connected) => {
-          if connected {
-            cx.update(|cx| screens::restore_pages(&snapshot, cx));
+    // Woken when the connect finishes, rather than polling for it.
+    let (done_tx, done_rx) = futures::channel::oneshot::channel();
+    let mut done_tx = Some(done_tx);
+    let _finished = cx.update(|cx| {
+      connect(machine, true, cx);
+      cx.observe(&model, move |model, cx| {
+        if !model.read(cx).machine(&id).status.is_connecting() {
+          if let Some(done) = done_tx.take() {
+            let _ = done.send(());
           }
-          break;
         }
-      }
+      })
+    });
+    let _ = done_rx.await;
+    if cx.update(|cx| model.read(cx).connection.is_some()) {
+      cx.update(|cx| screens::restore_pages(&snapshot, cx));
     }
     model.update(cx, |m, _| m.restoring = false);
   })
