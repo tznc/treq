@@ -294,7 +294,9 @@ impl EntryRows {
       return 0..ENTRIES_ALL;
     };
     let pitch = f32::from(pitch).max(1.);
-    let from = f32::from(-scroll.offset().y - top);
+    // A scroll past the end draws where layout clamps it, not a frame later.
+    let offset = (-scroll.offset().y).min(scroll.max_offset().y);
+    let from = f32::from(offset - top);
     let to = from + f32::from(scroll.bounds().size.height);
     let first = ((from / pitch).floor().max(0.) as usize).saturating_sub(ENTRIES_OVERSCAN);
     let last = ((to / pitch).ceil().max(0.) as usize + ENTRIES_OVERSCAN).min(count);
@@ -2162,11 +2164,14 @@ impl CodeView {
   }
 
   /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),
-  /// where row 0 sits in the scrolled content.
-  fn measure_entry_row(&self, i: usize, first: usize) -> impl IntoElement {
+  /// where row 0 sits in the scrolled content. A new measure draws the view again, which
+  /// nothing else would while the screen is cached.
+  fn measure_entry_row(&self, i: usize, first: usize, cx: &Context<Self>) -> impl IntoElement {
     let (rows, scroll) = (self.entry_rows.clone(), self.scroll.clone());
+    let view = cx.weak_entity();
     gpui::canvas(
-      move |b, _, _| {
+      move |b, _, cx| {
+        let before = (rows.pitch.get(), rows.top.get());
         if i > 0 {
           rows.pitch.set(Some(b.size.height));
         }
@@ -2177,6 +2182,11 @@ impl CodeView {
           };
           let top = b.top() - above - scroll.bounds().top() - scroll.offset().y;
           rows.top.set(Some(top));
+        }
+        if (rows.pitch.get(), rows.top.get()) != before {
+          if let Some(view) = view.upgrade() {
+            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
+          }
         }
       },
       |_, _, _, _| {},
@@ -2246,7 +2256,7 @@ impl CodeView {
               |this| {
                 this
                   .relative()
-                  .child(self.measure_entry_row(i, shown.start))
+                  .child(self.measure_entry_row(i, shown.start, cx))
               },
             )
             .flex()

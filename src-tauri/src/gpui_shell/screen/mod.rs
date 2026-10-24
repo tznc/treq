@@ -226,7 +226,13 @@ pub struct Screen {
   _file_picker: Option<gpui::Subscription>,
   /// The open confirmation (the palette's Delete Workspace).
   confirm: Option<confirm::Pending<Self>>,
+  /// Draws the screen again each minute, for its relative times ("3
+  /// minutes ago", "Today"), which a cached screen would otherwise keep.
+  _clock: gpui::Task<()>,
 }
+
+/// How often the screen's relative times are drawn again.
+const CLOCK: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl Screen {
   pub fn new(
@@ -253,6 +259,12 @@ impl Screen {
         }
       });
     });
+    let clock = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(CLOCK).await;
+      if this.update(cx, |_, cx| cx.notify()).is_err() {
+        break;
+      }
+    });
     Self {
       snapshot,
       sink,
@@ -277,6 +289,7 @@ impl Screen {
       file_picker: None,
       _file_picker: None,
       confirm: None,
+      _clock: clock,
     }
   }
 
@@ -326,6 +339,16 @@ impl Screen {
 
   pub fn snapshot(&self) -> &ScreenSnapshot {
     &self.snapshot
+  }
+
+  /// The screen as the shell lays it out, cached: a frame another view
+  /// asks for (the sidebar's hover or spinning status dot) reuses the last
+  /// drawing instead of rendering the whole screen again. The screen and
+  /// the views inside it notify themselves for everything they draw.
+  pub fn element(this: &Entity<Self>) -> impl IntoElement {
+    this
+      .clone()
+      .cached(gpui::StyleRefinement::default().size_full())
   }
 
   /// Whether the screen may run `action` itself ([`Screen::run`]).

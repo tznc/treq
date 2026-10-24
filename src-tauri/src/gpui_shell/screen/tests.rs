@@ -1506,6 +1506,18 @@ impl remote_data::RemoteHost for FakeHost {
   }
 }
 
+/// The window's root over the screen, as the shell embeds it: cached, so a
+/// test sees what a frame the screen did not ask for would show.
+struct Framed {
+  screen: Entity<Screen>,
+}
+
+impl Render for Framed {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div().size_full().child(Screen::element(&self.screen))
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, snapshot: ScreenSnapshot) -> Self {
     Self::with_host(cx, snapshot, Arc::new(FakeHost::default()))
@@ -1523,7 +1535,10 @@ impl Harness {
       let shown = shown.clone();
       Rc::new(move |request, _| shown.borrow_mut().push(request))
     };
-    let (screen, cx) = cx.add_window_view(|_, cx| Screen::new(snapshot, sink, popups, host, cx));
+    let (root, cx) = cx.add_window_view(|_, cx| Framed {
+      screen: cx.new(|cx| Screen::new(snapshot, sink, popups, host, cx)),
+    });
+    let screen = root.read_with(cx, |root, _| root.screen.clone());
     let cx = cx.clone();
     Self {
       cx,

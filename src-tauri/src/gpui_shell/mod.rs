@@ -250,7 +250,12 @@ impl Render for Shell {
             this.child(title_bar::drag_area("screen-title-bar"))
           })
           .when_some(self.screen.clone(), |this, screen| {
-            this.child(gpui::div().flex_1().min_h_0().child(screen))
+            this.child(
+              gpui::div()
+                .flex_1()
+                .min_h_0()
+                .child(Screen::element(&screen)),
+            )
           }),
       )
       .children(confirm)
