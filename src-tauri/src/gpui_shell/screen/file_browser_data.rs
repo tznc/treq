@@ -100,12 +100,23 @@ pub fn filter_hidden(entries: Vec<WorkspaceEntry>) -> Vec<WorkspaceEntry> {
 /// Directories first, then by name as `localeCompare` orders them: case
 /// folded, lowercase first on a tie.
 pub fn compare_entries(a: &WorkspaceEntry, b: &WorkspaceEntry) -> Ordering {
+  // Folded char by char, not into new strings: a sort makes thousands of
+  // comparisons.
+  fn fold(s: &str) -> impl Iterator<Item = char> + '_ {
+    s.chars().flat_map(char::to_lowercase)
+  }
   b.is_directory.cmp(&a.is_directory).then_with(|| {
-    a.name
-      .to_lowercase()
-      .cmp(&b.name.to_lowercase())
+    fold(&a.name)
+      .cmp(fold(&b.name))
       .then_with(|| b.name.cmp(&a.name))
   })
+}
+
+/// A directory's entries as the tree lists them, sorted off the main
+/// thread once, so [`flatten`]'s sort finds each level in order.
+pub fn sorted(mut entries: Vec<WorkspaceEntry>) -> Vec<WorkspaceEntry> {
+  entries.sort_by(compare_entries);
+  entries
 }
 
 /// A row of the tree.
@@ -380,6 +391,25 @@ mod tests {
         ("A.md".into(), 0),
         ("b.txt".into(), 0)
       ]
+    );
+  }
+
+  #[test]
+  fn entries_sort_directories_first_then_case_folded() {
+    let names = |entries: Vec<WorkspaceEntry>| {
+      sorted(entries)
+        .into_iter()
+        .map(|e| e.name)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+      names(vec![
+        entry("B", false),
+        entry("a", false),
+        entry("b", false),
+        entry("Z", true),
+      ]),
+      ["Z", "a", "b", "B"]
     );
   }
 
