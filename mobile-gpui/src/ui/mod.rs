@@ -841,8 +841,15 @@ fn restore(cx: &mut Context<Root>) {
   model.update(cx, |m, _| m.restoring = true);
   let restored = backend::spawn(async { backend::get().auth.restore().await });
   cx.spawn(async move |_, cx| {
-    let _ = restored.await;
     let snapshot = store::session_snapshot();
+    // Only Treq Cloud needs the session: an SSH host connects without
+    // waiting for its refresh, a network round trip.
+    if !matches!(
+      snapshot.as_ref().map(|s| &s.endpoint),
+      Some(store::SessionEndpoint::UserManaged { .. })
+    ) {
+      let _ = restored.await;
+    }
     let Some(snapshot) = snapshot else {
       model.update(cx, |m, _| m.restoring = false);
       return;
@@ -859,29 +866,22 @@ fn restore(cx: &mut Context<Root>) {
       return;
     };
     let id = machine.id().to_string();
-    cx.update(|cx| connect(machine, true, cx));
-    // Wait for the connect to finish.
-    loop {
-      let state = cx.update(|cx| {
-        let m = model.read(cx);
-        (
-          m.machine(&id).status.is_connecting(),
-          m.connection.is_some(),
-        )
-      });
-      match state {
-        (true, _) => {
-          cx.background_executor()
-            .timer(std::time::Duration::from_millis(200))
-            .await
-        }
-        (false, connected) => {
-          if connected {
-            cx.update(|cx| screens::restore_pages(&snapshot, cx));
+    // Woken when the connect finishes, rather than polling for it.
+    let (done_tx, done_rx) = futures::channel::oneshot::channel();
+    let mut done_tx = Some(done_tx);
+    let _finished = cx.update(|cx| {
+      connect(machine, true, cx);
+      cx.observe(&model, move |model, cx| {
+        if !model.read(cx).machine(&id).status.is_connecting() {
+          if let Some(done) = done_tx.take() {
+            let _ = done.send(());
           }
-          break;
         }
-      }
+      })
+    });
+    let _ = done_rx.await;
+    if cx.update(|cx| model.read(cx).connection.is_some()) {
+      cx.update(|cx| screens::restore_pages(&snapshot, cx));
     }
     model.update(cx, |m, _| m.restoring = false);
   })
