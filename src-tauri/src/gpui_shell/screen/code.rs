@@ -12,8 +12,9 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
-  cell::RefCell,
+  cell::{Cell, RefCell},
   collections::HashMap,
+  ops::Range,
   rc::Rc,
   sync::{Arc, LazyLock},
   time::Duration,
@@ -28,7 +29,8 @@ use gpui_kit::component::{
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
+  Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle, SharedString, Stateful,
+  Subscription, Task, Window,
 };
 
 use super::{
@@ -63,6 +65,10 @@ const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 /// `LinearCommitHistory`'s page size.
 const HISTORY_PAGE: usize = 14;
 const STACK_DOCS_PATH: &str = "/docs/concepts/workspaces#stacks-and-rebasing";
+/// A root of at most this many entries draws every row.
+const ENTRIES_ALL: usize = 200;
+/// Rows drawn past each edge of the viewport.
+const ENTRIES_OVERSCAN: usize = 20;
 
 /// What the workspace header already read, which the tab draws from too.
 #[derive(Debug, Clone)]
@@ -258,10 +264,42 @@ pub struct CodeView {
   syncing_submodule: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
+  /// The tab's scroll, and where the root's entry rows sit in it.
+  scroll: ScrollHandle,
+  entry_rows: Rc<EntryRows>,
   /// Text to put in the task input at its cursor on the next render.
   insert: Option<String>,
   _mention_search: Option<Task<()>>,
   _subscriptions: Vec<Subscription>,
+}
+
+/// Where the root's entry rows sit, measured as they draw, so a root of
+/// thousands of entries draws only the rows near the viewport: drawing all
+/// of 5,000 took most of a second a frame (debug).
+#[derive(Default)]
+struct EntryRows {
+  /// A row's height with its top border (every row but the first).
+  pitch: Cell<Option<Pixels>>,
+  /// The first row's top in the scrolled content.
+  top: Cell<Option<Pixels>>,
+}
+
+impl EntryRows {
+  /// The rows of `count` to draw while `scroll` shows what it does.
+  fn shown(&self, count: usize, scroll: &ScrollHandle) -> Range<usize> {
+    if count <= ENTRIES_ALL {
+      return 0..count;
+    }
+    let (Some(pitch), Some(top)) = (self.pitch.get(), self.top.get()) else {
+      return 0..ENTRIES_ALL;
+    };
+    let pitch = f32::from(pitch).max(1.);
+    let from = f32::from(-scroll.offset().y - top);
+    let to = from + f32::from(scroll.bounds().size.height);
+    let first = ((from / pitch).floor().max(0.) as usize).saturating_sub(ENTRIES_OVERSCAN);
+    let last = ((to / pitch).ceil().max(0.) as usize + ENTRIES_OVERSCAN).min(count);
+    first.min(last)..last
+  }
 }
 
 impl HasTooltips for CodeView {
@@ -312,6 +350,8 @@ impl CodeView {
       syncing_submodule: false,
       starting_devcontainer: false,
       picker: None,
+      scroll: ScrollHandle::new(),
+      entry_rows: Rc::default(),
       insert: None,
       _mention_search: None,
       _subscriptions: Vec::new(),
@@ -1181,6 +1221,7 @@ impl Render for CodeView {
     }
     let left = div()
       .id("code-scroll")
+      .track_scroll(&self.scroll)
       .flex_1()
       .min_w_0()
       .h_full()
@@ -2120,12 +2161,37 @@ impl CodeView {
     )
   }
 
+  /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),
+  /// where row 0 sits in the scrolled content.
+  fn measure_entry_row(&self, i: usize, first: usize) -> impl IntoElement {
+    let (rows, scroll) = (self.entry_rows.clone(), self.scroll.clone());
+    gpui::canvas(
+      move |b, _, _| {
+        if i > 0 {
+          rows.pitch.set(Some(b.size.height));
+        }
+        if i == first {
+          let above = match (first, rows.pitch.get()) {
+            (0, _) | (_, None) => px(0.),
+            (n, Some(pitch)) => pitch * n as f32 - px(1.),
+          };
+          let top = b.top() - above - scroll.bounds().top() - scroll.offset().y;
+          rows.top.set(Some(top));
+        }
+      },
+      |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+  }
+
   fn files(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let entries = self
       .overview
       .as_ref()
-      .map(|o| o.entries.clone())
-      .unwrap_or_default();
+      .map_or(&[][..], |o| o.entries.as_slice());
     let font = self.settings.as_ref().map_or(14., |s| s.font_size);
     let home = self.parent.workspace.is_none();
     let hover = p.muted.opacity(0.6);
@@ -2134,7 +2200,14 @@ impl CodeView {
     let loaded = self.overview.is_some();
     let empty = entries.is_empty();
     let unavailable = self.overview.as_ref().is_some_and(|o| o.unavailable);
-    for (i, entry) in entries.into_iter().enumerate() {
+    let count = entries.len();
+    let shown = self.entry_rows.shown(count, &self.scroll);
+    let pitch = self.entry_rows.pitch.get().unwrap_or_default();
+    // Rows not drawn keep their room: the first is a border shorter.
+    if shown.start > 0 {
+      list = list.child(div().h(pitch * shown.start as f32 - px(1.)));
+    }
+    for (i, entry) in entries.iter().enumerate().take(shown.end).skip(shown.start) {
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
       let icon = match (&pin, entry.is_directory) {
@@ -2168,6 +2241,14 @@ impl CodeView {
           div()
             .debug_selector(move || selector)
             .when(i > 0, |this| this.border_t_1().border_color(p.border))
+            .when(
+              count > ENTRIES_ALL && (i == shown.start || i == 1),
+              |this| {
+                this
+                  .relative()
+                  .child(self.measure_entry_row(i, shown.start))
+              },
+            )
             .flex()
             .items_center()
             .hover(move |s| s.bg(hover))
@@ -2235,6 +2316,9 @@ impl CodeView {
               )
             }),
         );
+    }
+    if shown.end < count {
+      list = list.child(div().h(pitch * (count - shown.end) as f32));
     }
     if loaded && empty {
       list = list.child(
