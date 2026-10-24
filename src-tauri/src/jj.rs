@@ -2897,7 +2897,7 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
     if let Some(ws_name) = ws_name {
       block_on(tx.repo_mut().remove_wc_commit(&ws_name))
         .map_err(|e| JjError::IoError(format!("Failed to forget workspace: {}", e)))?;
-      block_on(tx.repo_mut().rebase_descendants()).map_err(|e| {
+      let rebased = block_on(tx.repo_mut().rebase_descendants()).map_err(|e| {
         JjError::IoError(format!(
           "Failed to rebase descendants while forgetting workspace: {}",
           e
@@ -2907,7 +2907,11 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
         .map_err(|e| JjError::IoError(format!("Failed to forget workspace: {}", e)))?;
 
       // Reconcile remaining workspaces — WC commits may have been rewritten by rebase_descendants; skip the workspace being removed.
-      let _ = reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name));
+      // With nothing rebased no WC commit moved, so every other working copy is current; reconciling
+      // would only load each workspace to find that out.
+      if rebased > 0 {
+        let _ = reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name));
+      }
     }
   }
 
