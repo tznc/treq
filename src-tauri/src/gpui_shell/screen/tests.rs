@@ -59,6 +59,8 @@ struct FakeHost {
   description: String,
   /// Which of the workspace's fields follow its PR.
   pr_sync: Option<crate::local_db::PrSyncRecord>,
+  /// The PR's title and body as GitHub has them.
+  pr_text: Option<(String, String)>,
   /// What the Changes tab reads, and the repository's `.gitattributes`.
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
@@ -634,6 +636,11 @@ impl code_data::CodeHost for FakeHost {
   fn resync_from_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {
     self.record(format!("resync from PR {workspace_id}"));
     Ok(())
+  }
+
+  fn pr_text(&self, _: &str, _: &crate::local_db::Workspace) -> Option<(String, String)> {
+    self.record("read pr text".into());
+    self.pr_text.clone()
   }
 
   fn push_to_pr(&self, _: &str, workspace_id: i64) -> Result<(), String> {
@@ -4204,6 +4211,42 @@ fn code_tab_rereads_pr_sync_when_the_description_changes(cx: &mut TestAppContext
   show_description(&mut h, "Copied from the PR");
   h.cx.run_until_parked();
   assert!(reads() > before, "{:?}", host.calls());
+}
+
+#[gpui::test]
+fn code_tab_shows_github_beside_a_local_draft(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(false),
+    pr_text: Some(("Login fix on GitHub".into(), "The PR body".into())),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  // The draft shows first, editable.
+  assert!(h.drawn("workspace-about-tab-draft") && h.drawn("workspace-about-tab-github"));
+  assert!(h.drawn("workspace-description-edit"));
+  assert!(!h.drawn("workspace-about-github"));
+  h.click("workspace-about-tab-github");
+  assert!(h.drawn("workspace-about-github"));
+  assert!(!h.drawn("workspace-description-edit") && !h.drawn("workspace-title-edit"));
+  assert!(host.calls().contains(&"read pr text".to_string()));
+  // Sync stays in the footer under either tab.
+  assert!(h.drawn("workspace-description-resync"));
+  h.click("workspace-about-tab-draft");
+  assert!(h.drawn("workspace-description-edit"));
+}
+
+#[gpui::test]
+fn code_tab_has_no_tabs_without_a_draft(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    pr_sync: synced(true),
+    pr_text: Some(("t".into(), "b".into())),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.cx.run_until_parked();
+  assert!(!h.drawn("workspace-about-tab-github"));
+  assert!(h.drawn("workspace-description-edit"));
 }
 
 #[gpui::test]

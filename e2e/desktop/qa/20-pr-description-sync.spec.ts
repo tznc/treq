@@ -85,9 +85,28 @@ test("pr-description-sync: synced, local draft, Sync, save to PR", async ({ page
     ],
   });
 
+  // The GitHub tab shows what the PR still says.
+  await expect(page.getByRole("tab", { name: "Local draft" })).toBeVisible();
+  await page.getByRole("tab", { name: "GitHub", exact: true }).click();
+  await expect(page.getByText("Local note.")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Edit description" })).toBeHidden();
+  await settle(page);
+  await capture(page, {
+    name: "20-pr-description-github-tab",
+    title: "A draft's GitHub tab shows the PR as it is",
+    expectations: [
+      "The card opens with 'Local draft' and 'GitHub' underline tabs; GitHub is selected",
+      "Under them, the PR's title and body as markdown with no 'Local note.' and no edit pencils",
+      "The footer still reads 'Local draft, sent to PR #415 on your next push' with the amber Sync",
+    ],
+  });
+  await page.getByRole("tab", { name: "Local draft" }).click();
+  await expect(page.getByText("Local note.")).toBeVisible();
+
   await sync.click();
   await expect(synced).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Local note.")).toBeHidden();
+  await expect(page.getByRole("tab", { name: "GitHub", exact: true })).toBeHidden();
 
   // Save goes to the PR, which keeps it.
   await page.getByRole("button", { name: "Edit description" }).click();

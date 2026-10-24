@@ -165,6 +165,8 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   /// Sends the workspace's local title and description edits to its pull
   /// request.
   fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// The pull request's title and body as GitHub has them.
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)>;
   /// Builds the file index the first time, then searches it.
   fn search_files(
     &self,
@@ -301,6 +303,13 @@ impl CodeHost for Backend {
       return Err(unsupported("Updating the pull request"));
     }
     core::pr_sync::push_edits_to_github(repo_path, workspace_id)
+  }
+
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::github_text(repo_path, workspace)
   }
 
   fn search_files(

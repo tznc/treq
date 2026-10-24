@@ -238,6 +238,14 @@ pub enum Menu {
   SaveDescription,
 }
 
+/// Which side of a local draft the title and description card shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AboutTab {
+  #[default]
+  Draft,
+  GitHub,
+}
+
 /// `mentionQuery` and its results.
 #[derive(Debug, Clone, Default)]
 pub struct Mention {
@@ -289,6 +297,10 @@ pub struct CodeView {
   /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
   pr_sync: PrSyncRead,
   resyncing: bool,
+  /// The card's tab while a local draft differs from the pull request, and
+  /// the PR's title and body as the GitHub tab last read them.
+  about_tab: AboutTab,
+  pr_text: Option<(String, String)>,
   syncing_submodule: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
@@ -379,6 +391,8 @@ impl CodeView {
       saving_description: false,
       pr_sync: (0, None),
       resyncing: false,
+      about_tab: AboutTab::Draft,
+      pr_text: None,
       syncing_submodule: false,
       starting_devcontainer: false,
       picker: None,
@@ -515,6 +529,8 @@ impl CodeView {
         self.show_save_default = false;
         self.title_draft = None;
         self.description_draft = None;
+        self.about_tab = AboutTab::Draft;
+        self.pr_text = None;
         self.menu = None;
         self.history = None;
         self.history_error = None;
@@ -2012,26 +2028,110 @@ impl CodeView {
   /// The workspace's full title, wrapped rather than truncated, with an
   /// inline editor behind its pencil.
   /// The workspace's title and description in one card, with the pull
-  /// request's sync state in its footer.
+  /// request's sync state in its footer. While a local draft differs from
+  /// the PR, tabs switch between the draft and what GitHub has.
   fn about(
     &mut self,
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
-    let title = self.title(p, cx)?;
-    Some(
-      section(p)
-        .debug_selector(|| "workspace-about".into())
-        .px_4()
-        .py_3()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .child(title)
+    let draft = self
+      .pr_sync()
+      .is_some_and(|sync| !(sync.title && sync.description));
+    if !draft {
+      // The next draft opens on itself.
+      self.about_tab = AboutTab::Draft;
+    }
+    let card = section(p)
+      .debug_selector(|| "workspace-about".into())
+      .px_4()
+      .py_3()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .when(draft, |card| card.child(self.about_tabs(p, cx)));
+    let card = if draft && self.about_tab == AboutTab::GitHub {
+      card.child(self.github_text(p))
+    } else {
+      card
+        .child(self.title(p, cx)?)
         .children(self.description(p, window, cx))
-        .children(self.pr_footer(p, cx)),
-    )
+    };
+    Some(card.children(self.pr_footer(p, cx)))
+  }
+
+  fn about_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let view = cx.weak_entity();
+    ui::Tabs::new("workspace-about-tabs", p)
+      .style(ui::TabsStyle::Underline)
+      .tab(ui::Tab::new("workspace-about-tab-draft", "Local draft"))
+      .tab(ui::Tab::new("workspace-about-tab-github", "GitHub"))
+      .selected(match self.about_tab {
+        AboutTab::Draft => 0,
+        AboutTab::GitHub => 1,
+      })
+      .on_select(move |ix, _, cx| {
+        let tab = [AboutTab::Draft, AboutTab::GitHub][ix];
+        view
+          .update(cx, |view, cx| view.select_about_tab(tab, cx))
+          .ignore_closed();
+      })
+  }
+
+  /// Shows `tab`; the GitHub tab reads the PR's text again on the way.
+  fn select_about_tab(&mut self, tab: AboutTab, cx: &mut Context<Self>) {
+    self.about_tab = tab;
+    cx.notify();
+    if tab == AboutTab::GitHub {
+      self.read(
+        |host, parent| {
+          parent
+            .workspace
+            .as_ref()
+            .and_then(|ws| host.pr_text(&parent.repo_path, ws))
+        },
+        |view, text, _| view.pr_text = text,
+        cx,
+      );
+    }
+  }
+
+  /// The pull request's title and body as GitHub has them, read-only.
+  fn github_text(&self, p: &Palette) -> impl IntoElement {
+    let panel = div()
+      .debug_selector(|| "workspace-about-github".into())
+      .flex()
+      .flex_col()
+      .gap_3();
+    let Some((title, body)) = self.pr_text.clone() else {
+      return panel.child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Reading the pull request…"),
+      );
+    };
+    panel
+      .child(
+        ui::text(div(), TextSize::Xl)
+          .font_weight(FontWeight::SEMIBOLD)
+          .text_color(p.foreground)
+          .whitespace_normal()
+          .child(title),
+      )
+      .child(if body.is_empty() {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("No description")
+          .into_any_element()
+      } else if looks_like_markdown(&body) {
+        markdown("workspace-about-github-md", &body, 14., self.dark).into_any_element()
+      } else {
+        ui::text(div(), TextSize::Sm)
+          .whitespace_normal()
+          .child(body)
+          .into_any_element()
+      })
   }
 
   fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {

@@ -183,6 +183,23 @@ pub fn resync(repo_path: &str, workspace_id: i64, pr: &PrInfo) -> Result<(), Str
   )
 }
 
+/// The PR's title and body as GitHub has them: what the poller last read,
+/// else what was last copied into the workspace.
+#[cfg(feature = "gui")]
+pub fn github_text(repo_path: &str, workspace: &Workspace) -> Option<(String, String)> {
+  if let Some(pr) = crate::pr_status::global()
+    .get_cached(repo_path, &workspace.branch_name)
+    .flatten()
+  {
+    return Some((pr.title.clone(), pr_description(&pr)));
+  }
+  let record = record(repo_path, workspace.id)?;
+  Some((
+    record.title.unwrap_or_else(|| workspace.title.clone()),
+    record.description.unwrap_or_default(),
+  ))
+}
+
 /// [`resync`] with the PR the poller last read for the workspace's branch.
 #[cfg(feature = "gui")]
 pub fn resync_workspace(repo_path: &str, workspace_id: i64) -> Result<(), String> {
