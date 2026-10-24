@@ -1,6 +1,7 @@
 use crate::lock_ext::LockExt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Duration;
 
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -557,6 +558,11 @@ pub fn open_or_create_workspace_from_pr(
   open_or_create_synced(repo_path, &request)
 }
 
+/// How recent a fetch must be for creating or retargeting a workspace to rely
+/// on it: the New Workspaces dialog fetches when it opens, and each workspace
+/// it makes would fetch again.
+pub(super) const RECENT_FETCH: Duration = Duration::from_secs(30);
+
 /// A branch to open a workspace for, as [`open_or_create_workspaces`] takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchWorkspaceRequest {
@@ -589,7 +595,7 @@ pub fn open_or_create_workspaces(
   if let Err(err) = sync_workspaces(repo_path) {
     return requests.iter().map(|_| Err(err.clone())).collect();
   }
-  if let Err(error) = jj::jj_git_fetch(repo_path) {
+  if let Err(error) = jj::jj_git_fetch_unless_recent(repo_path, RECENT_FETCH) {
     tracing::warn!(%error, repo_path, "fetch before opening workspaces failed; using local bookmarks");
   }
   requests
@@ -648,7 +654,7 @@ pub(crate) fn open_or_create_synced(
 
   // create_workspace may default the target to the repo default branch; retarget
   // onto the PR base so stacked rebases follow the PR's merge base.
-  apply_workspace_target_branch(repo_path, workspace.id, base_branch)?;
+  apply_workspace_target_branch_after(repo_path, workspace.id, base_branch, RECENT_FETCH)?;
 
   if let Some(title) = request
     .title
@@ -3276,6 +3282,17 @@ pub fn apply_workspace_target_branch(
   workspace_id: i64,
   target_branch: &str,
 ) -> Result<local_db::Workspace, String> {
+  apply_workspace_target_branch_after(repo_path, workspace_id, target_branch, Duration::ZERO)
+}
+
+/// [`apply_workspace_target_branch`] for a flow that fetched already: it
+/// fetches again only if the last fetch is older than `max_age`.
+pub(crate) fn apply_workspace_target_branch_after(
+  repo_path: &str,
+  workspace_id: i64,
+  target_branch: &str,
+  max_age: Duration,
+) -> Result<local_db::Workspace, String> {
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
@@ -3288,7 +3305,7 @@ pub fn apply_workspace_target_branch(
     .to_str()
     .ok_or("Failed to convert workspace path to string")?;
 
-  let _ = jj::jj_git_fetch(repo_path);
+  let _ = jj::jj_git_fetch_unless_recent(repo_path, max_age);
 
   // Lifting off a parent workspace must leave that parent's commits in place.
   let parent_workspace = workspace.target_branch.as_deref().filter(|parent| {
