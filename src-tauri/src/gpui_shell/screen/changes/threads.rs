@@ -38,7 +38,12 @@ pub(in crate::gpui_shell::screen) struct Threads {
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
-  agent_lines: HashMap<(String, u32, Side), Vec<AgentReviewComment>>,
+  /// Indices into `agent`.
+  agent_lines: HashMap<(String, u32, Side), Vec<usize>>,
+  /// Bumped when `github` or `agent` is read again.
+  revision: u64,
+  /// The rows' and the threads' revisions `placed` was derived from.
+  placed_for: Option<(u64, u64)>,
   poll: Option<Task<()>>,
   /// The review comment whose reaction picker is open.
   reaction_picker: Option<String>,
@@ -96,6 +101,7 @@ impl ChangesView {
       }
     }
     self.threads.github = threads;
+    self.threads.revision += 1;
   }
 
   fn read_agent(&mut self, cx: &mut Context<Self>) {
@@ -105,7 +111,10 @@ impl ChangesView {
     self.run(
       move |host, parent| host.agent_comments(&parent.repo_path, id),
       |view, result, _| match result {
-        Ok(comments) => view.threads.agent = comments,
+        Ok(comments) => {
+          view.threads.agent = comments;
+          view.threads.revision += 1;
+        }
         Err(err) => log::warn!("Failed to read agent review comments: {err}"),
       },
       cx,
@@ -114,7 +123,13 @@ impl ChangesView {
 
   /// Anchors the threads and comments on the diff as it is now.
   pub(super) fn place_threads(&mut self) {
-    // Runs every frame: only the files a thread is on are looked at.
+    // The rows' revision follows the hunks and the snapshot.
+    let key = (self.diff.revision, self.threads.revision);
+    if self.threads.placed_for == Some(key) {
+      return;
+    }
+    self.threads.placed_for = Some(key);
+    // Only the files a thread is on are looked at.
     let paths: HashSet<&str> = self
       .threads
       .github
@@ -269,7 +284,7 @@ impl ChangesView {
         .flex_col()
         .gap_2()
         .font_family(theme::SANS_FONT);
-      for c in comments {
+      for c in comments.iter().filter_map(|&i| self.threads.agent.get(i)) {
         list = list.child(self.agent_card(c, original_text(c, hunk), p, cx));
       }
       out.push(list.into_any_element());
@@ -284,7 +299,7 @@ impl ChangesView {
         .flex()
         .flex_col()
         .gap_2();
-      for t in threads {
+      for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
         let anchor = Some((hunk.id.clone(), (h, l)));
         list = list.child(self.thread_card(t, path, anchor, number, side, p, cx));
       }
@@ -311,7 +326,7 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for t in threads {
+    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
       let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
       section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
     }

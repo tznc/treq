@@ -186,7 +186,7 @@ impl ChangesView {
       |view, result, cx| match result {
         Ok(diff) => {
           let parsed = pr_review_data::parse_unified_diff(&diff);
-          view.hunks = parsed
+          let hunks: HashMap<String, FileHunks> = parsed
             .hunks
             .into_iter()
             .map(|(path, hunks)| {
@@ -201,13 +201,17 @@ impl ChangesView {
             .collect();
           let listed: HashSet<String> = parsed.files.iter().map(|f| f.path.clone()).collect();
           view.viewed.retain(|p, _| listed.contains(p));
-          view.snapshot = Some(
-            Snapshot {
-              files: parsed.files,
-              ..Snapshot::default()
-            }
-            .with_generated(&GeneratedFiles::default()),
-          );
+          let snapshot = Snapshot {
+            files: parsed.files,
+            ..Snapshot::default()
+          }
+          .with_generated(&GeneratedFiles::default());
+          // The poll reads the diff again; an unchanged one keeps its rows.
+          if view.hunks != hunks || view.snapshot.as_ref() != Some(&snapshot) {
+            view.hunks = hunks;
+            view.snapshot = Some(snapshot);
+            view.layout_gen += 1;
+          }
           if let Some(pr) = view.pr.as_mut() {
             pr.error = None;
             pr.read = true;

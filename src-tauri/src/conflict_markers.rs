@@ -31,7 +31,7 @@ pub enum ConflictLineRole {
   Unknown,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConflictLineView {
   pub raw: String,
   pub kind: ConflictLineKind,
@@ -39,14 +39,14 @@ pub struct ConflictLineView {
   pub file_line: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConflictComparisonView {
   pub left_line_indexes: Vec<usize>,
   pub base_line_indexes: Vec<usize>,
   pub right_line_indexes: Vec<usize>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ConflictRegionView {
   pub id: String,
   pub file_path: String,

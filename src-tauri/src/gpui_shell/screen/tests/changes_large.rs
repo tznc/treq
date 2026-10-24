@@ -319,4 +319,10 @@ fn measure(h: &mut Harness) {
     })
     .collect();
   report("scroll 200px", &mut scroll);
+
+  h.click("commit-message");
+  let mut typing: Vec<_> = (0..20)
+    .map(|_| timed(h, |h| h.cx.simulate_input("x")))
+    .collect();
+  report("type in the message", &mut typing);
 }
