@@ -235,6 +235,15 @@ pub mod nav {
     });
   }
 
+  /// Whether the page showing `view` is the one on screen.
+  pub fn is_top(view: EntityId, cx: &App) -> bool {
+    cx.global::<Nav>()
+      .root
+      .upgrade()
+      .and_then(|root| root.read(cx).stack.last().map(|p| p.view.entity_id()))
+      == Some(view)
+  }
+
   pub fn pop(cx: &mut App) {
     update(cx, |root, cx| {
       if root.stack.len() > 1 {
