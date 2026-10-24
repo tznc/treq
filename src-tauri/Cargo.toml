@@ -227,3 +227,7 @@ harness = false
 [[bench]]
 name = "stacked_workspaces"
 harness = false
+
+[[bench]]
+name = "workspace_ops"
+harness = false
