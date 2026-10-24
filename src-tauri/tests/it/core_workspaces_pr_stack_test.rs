@@ -18,6 +18,7 @@ fn pr(number: u64, head: &str, base: &str, state: &str) -> (String, Option<PrInf
       base_ref_name: base.into(),
       merge_state_status: None,
       is_draft: false,
+      body: String::new(),
     }),
   )
 }
@@ -44,6 +45,7 @@ fn pr_workspace_targets_a_base_that_is_only_on_the_remote() {
     &repo.repo_path,
     "feat/b",
     "feat/a",
+    None,
     None,
     None,
   )
@@ -77,6 +79,7 @@ fn workspace_status_counts_commits_against_a_target_with_no_workspace() {
     &repo.repo_path,
     "feat/b",
     "feat/a",
+    None,
     None,
     None,
   )

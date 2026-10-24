@@ -193,6 +193,7 @@ mod tests {
         base_ref_name: base.into(),
         merge_state_status: None,
         is_draft: false,
+        body: String::new(),
       }),
     )
   }
