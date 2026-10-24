@@ -61,6 +61,48 @@ fn setup_commits_log() -> (TestRepo, i64) {
   (repo, workspace.id)
 }
 
+/// `history` commits on the default branch, then a workspace of `own`
+/// commits on top: a long-lived repository, or a long-running branch.
+fn setup_large_log(history: usize, own: usize) -> (TestRepo, i64) {
+  let repo = TestRepo::new().expect("failed to init test repo");
+  for index in 0..history {
+    repo
+      .commit_file(
+        &format!("src/history_{}.rs", index % 50),
+        &format!("pub const VALUE: usize = {index};\n"),
+        &format!("History {index}"),
+      )
+      .expect("failed to commit history");
+  }
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat-bench-large-log",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("failed to create workspace");
+  let dir = repo.workspaces_dir().join(&workspace.workspace_path);
+  for index in 0..own {
+    fs::write(
+      dir.join(format!("src/own_{}.rs", index % 50)),
+      format!("pub const VALUE: usize = {index};\n"),
+    )
+    .expect("failed to edit workspace file");
+    treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, &format!("Own {index}"))
+      .expect("failed to commit workspace edit");
+  }
+  let app_dir: PathBuf = repo.temp_dir.path().join("app-data");
+  fs::create_dir_all(&app_dir).expect("failed to create benchmark app dir");
+  std::env::set_var("TREQ_APP_DATA_DIR", app_dir.to_string_lossy().to_string());
+  let db =
+    treq_lib::db::Database::new(app_dir.join("treq.db")).expect("failed to open benchmark app db");
+  db.init().expect("failed to initialize benchmark app db");
+  (repo, workspace.id)
+}
+
 fn list(repo: &TestRepo, workspace_id: i64) {
   treq_lib::core::list_commits(
     std::hint::black_box(&repo.repo_path),
@@ -89,6 +131,20 @@ fn bench_commits_log(c: &mut Criterion) {
   let (repo, workspace_id) = setup_commits_log();
   list(&repo, workspace_id);
   group.bench_function("30_commits_warm", |b| {
+    b.iter(|| list(&repo, workspace_id));
+  });
+
+  // A workspace of 10 commits over 2,000 on the default branch.
+  let (repo, workspace_id) = setup_large_log(2000, 10);
+  list(&repo, workspace_id);
+  group.bench_function("history_2000_warm", |b| {
+    b.iter(|| list(&repo, workspace_id));
+  });
+
+  // A branch of 300 commits.
+  let (repo, workspace_id) = setup_large_log(10, 300);
+  list(&repo, workspace_id);
+  group.bench_function("own_300_warm", |b| {
     b.iter(|| list(&repo, workspace_id));
   });
 
