@@ -855,6 +855,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       workspace: Some("1".into()),
       path: "a.rs".into(),
     },
+    R::DiffFiles {
+      repo: repo(),
+      workspace: Some("1".into()),
+      paths: vec!["a.rs".into(), "b,c.rs".into()],
+      token: Some("t..u:git".into()),
+    },
     R::ReadFile {
       repo: repo(),
       workspace: Some("1".into()),

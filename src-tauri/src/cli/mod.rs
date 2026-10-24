@@ -507,6 +507,15 @@ pub(crate) fn parse_remote_command_request(
       workspace,
       path: path.ok_or_else(|| "--path is required".to_string())?,
     }),
+    ("changes", "diff-files") => Ok(TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths: serde_json::from_str(
+        &get_arg_value(matches, "paths").ok_or_else(|| "--paths is required".to_string())?,
+      )
+      .map_err(|e| format!("invalid_arguments: --paths must be a JSON list of paths: {e}"))?,
+      token: get_arg_value(matches, "token"),
+    }),
     ("file", "read") => Ok(TreqCommandRequest::ReadFile {
       repo,
       workspace,

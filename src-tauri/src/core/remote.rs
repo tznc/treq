@@ -165,6 +165,17 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     path: String,
   },
+  /// `DiffFile` for several files at once, from the trees `token` (a
+  /// `working_copy_token` from `WorkspaceDiff`) names when given, else from
+  /// a snapshot. Answers a `WorkspaceFileHunksBatch`; a host older than it
+  /// fails, so callers fall back to `DiffFile`.
+  DiffFiles {
+    repo: String,
+    workspace: Option<String>,
+    paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+  },
   ReadFile {
     repo: String,
     workspace: Option<String>,
@@ -560,6 +571,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -651,6 +663,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -699,6 +712,7 @@ impl TreqCommandRequest {
       Self::InspectWorkspace { .. } => "InspectWorkspace",
       Self::ListChanges { .. } => "ListChanges",
       Self::DiffFile { .. } => "DiffFile",
+      Self::DiffFiles { .. } => "DiffFiles",
       Self::ReadFile { .. } => "ReadFile",
       Self::ListCommits { .. } => "ListCommits",
       Self::ListConflicts { .. } => "ListConflicts",
@@ -767,6 +781,7 @@ impl TreqCommandRequest {
     "InspectWorkspace",
     "ListChanges",
     "DiffFile",
+    "DiffFiles",
     "ReadFile",
     "ListCommits",
     "ListConflicts",
@@ -1648,6 +1663,21 @@ impl TreqCommandRequest {
         fields.path = Some(path);
         ("changes", "diff", repo)
       }
+      Self::DiffFiles {
+        repo,
+        workspace,
+        paths,
+        token,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // JSON, as paths may hold commas.
+        let paths = serde_json::to_string(paths).map_err(|e| e.to_string())?;
+        fields.extra.push(("paths", paths));
+        if let Some(token) = token {
+          fields.extra.push(("token", token.clone()));
+        }
+        ("changes", "diff-files", repo)
+      }
       Self::ReadFile {
         repo,
         workspace,
@@ -2235,6 +2265,19 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace_id(workspace.as_ref())?,
       &path,
       "git",
+    )),
+    // The marker style `WorkspaceDiff` names its token with on a host.
+    TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths,
+      token,
+    } => json(crate::core::changes::list_file_hunks_batch(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      paths,
+      crate::core::DEFAULT_CONFLICT_MARKER_STYLE,
+      token.as_deref(),
     )),
     TreqCommandRequest::ReadFile {
       repo,
@@ -5022,7 +5065,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 62);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 63);
   }
 
   #[test]

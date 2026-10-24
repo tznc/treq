@@ -175,7 +175,7 @@ impl ChangesHost for Backend {
     token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String> {
     if let Some(remote) = self.remote_containing(repo_path) {
-      return remote.file_hunks_batch(workspace_id, paths);
+      return remote.file_hunks_batch(workspace_id, paths, token);
     }
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     let style = core::resolve_conflict_marker_style(&state.db);
