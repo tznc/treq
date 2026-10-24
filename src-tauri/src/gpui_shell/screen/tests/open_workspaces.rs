@@ -615,6 +615,38 @@ fn tab_indents_the_selected_lines(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn reopening_the_dialog_does_not_draw_the_assigned_list_as_the_users_own(cx: &mut TestAppContext) {
+  use super::kept_tabs::first_frame;
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
+  host.open_workspaces.assigned = vec![pr(7, "feat/other", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Assigned to me")));
+  let _ = self::screen(&mut h);
+
+  let modal = h.screen.read_with(&h.cx, |s, _| s.snapshot().modal.clone());
+  h.update(|s| s.modal = None);
+  h.cx.run_until_parked();
+  h.update(|s| s.modal = modal);
+  // The toggle is off again, so the first frame is the user's own list.
+  first_frame(&mut h);
+  let window = h.cx.update(|window, _| window.window_handle());
+  let first = gpui_testing_library::Screen::new(&h.cx, window);
+  first.redraw();
+  expect(first.get_by_role(by::role(Role::Button).name("Assigned to me")))
+    .not()
+    .to_be_pressed();
+  expect(first.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
+  assert!(first
+    .query_by_role(by::role(Role::CheckBox).name("#7 Change 7"))
+    .is_none());
+}
+
+#[gpui::test]
 fn reopening_the_dialog_draws_the_pull_requests_it_read_last(cx: &mut TestAppContext) {
   use super::kept_tabs::{drawn_now, first_frame, reads};
   let mut host = FakeHost::default();
