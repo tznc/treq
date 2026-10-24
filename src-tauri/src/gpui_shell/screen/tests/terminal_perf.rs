@@ -22,12 +22,12 @@ fn line(i: usize) -> String {
   )
 }
 
-fn lines(from: usize, n: usize) -> String {
+pub(super) fn lines(from: usize, n: usize) -> String {
   (from..from + n).map(line).collect()
 }
 
 /// The agent's terminal plus `shells` shells, in a large window.
-fn pane(cx: &mut TestAppContext, shells: usize) -> (Harness, Arc<FakeHost>, Vec<String>) {
+pub(super) fn pane(cx: &mut TestAppContext, shells: usize) -> (Harness, Arc<FakeHost>, Vec<String>) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   h.cx
     .simulate_resize(gpui::size(gpui::px(2560.), gpui::px(1440.)));

@@ -108,6 +108,16 @@ fn live() -> isize {
   LIVE.load(Relaxed)
 }
 
+/// Heap bytes live now, for the memory benches in `memory.rs`.
+pub(super) fn heap() -> isize {
+  live()
+}
+
+/// Allocations and bytes allocated so far, for the memory benches.
+pub(super) fn totals() -> (usize, usize) {
+  (ALLOCS.load(Relaxed), BYTES.load(Relaxed))
+}
+
 /// Memory held after showing the large working copy in one workspace after
 /// another: the kept views bound it.
 #[gpui::test]

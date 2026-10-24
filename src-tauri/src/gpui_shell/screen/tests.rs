@@ -8123,6 +8123,7 @@ mod fuzz;
 mod github;
 mod idle;
 mod kept_tabs;
+mod memory;
 mod linear_view;
 mod logs_explorer;
 mod merge_queue;
