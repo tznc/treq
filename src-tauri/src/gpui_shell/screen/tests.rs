@@ -47,6 +47,8 @@ struct FakeHost {
   merge_error: Option<String>,
   /// What the Code tab reads.
   overview: code_data::Overview,
+  /// The workspace setup script's status the Code tab reads.
+  setup_status: Option<crate::core::SetupScriptStatus>,
   history: Option<crate::jj::JjLogResult>,
   workspaces: Vec<crate::local_db::Workspace>,
   files: Vec<String>,
@@ -655,6 +657,27 @@ impl code_data::CodeHost for FakeHost {
 
   fn pick_files(&self) -> Option<Vec<String>> {
     None
+  }
+
+  fn setup(&self, _: &str, workspace_id: i64) -> Option<crate::core::SetupScriptStatus> {
+    self.record(format!("read setup {workspace_id}"));
+    self.setup_status.clone()
+  }
+
+  fn setup_logs(&self, _: &str, run_id: i64) -> Result<Vec<super::github_data::LogLine>, String> {
+    self.record(format!("read setup logs {run_id}"));
+    Ok(vec![super::github_data::LogLine {
+      stream: "stderr".into(),
+      body: "lockfile out of date".into(),
+    }])
+  }
+
+  fn run_setup(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    self.record(format!("run setup {}", target.workspace_id));
+    Ok(vec![])
   }
 }
 

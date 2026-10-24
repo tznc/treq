@@ -1,19 +1,17 @@
 // TREQ-195 and TREQ-45: the Code tab's file list marks each top-level
-// file's status and folds untouched files behind a toggle; a PR's Treq
-// checks open the workspace setup script's commands and output.
+// file's status and folds untouched files behind a toggle; an alert on the
+// same tab shows the workspace setup script, its commands and its output.
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { appBinary } from "../env.ts";
 import { fixture } from "../fixture.ts";
 import { workspaceDir } from "../landing/seed.ts";
 import { capture } from "./capture.ts";
-import { mod, openTab, openWorkspace, overlay, ready, settle } from "./helpers.ts";
+import { mod, openTab, openWorkspace, overlay, settle } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
-const PRS_TAB = { x: 422, y: 62 };
-const FIRST_ROW = { x: 700, y: 147 };
 
 test.describe.configure({ mode: "serial" });
 
@@ -66,25 +64,7 @@ test("file-status: Code tab file list", async ({ page }) => {
   await page.getByRole("button", { name: "Hide unchanged files" }).click();
 });
 
-async function prDetail(page: Page): Promise<void> {
-  await ready(page);
-  await page.keyboard.press("Escape");
-  const github = page.getByRole("button", { name: "Github", exact: true });
-  await expect(async () => {
-    await github.click();
-    await expect(page.getByRole("button", { name: "Github", selected: true })).toBeVisible({
-      timeout: 2_000,
-    });
-  }).toPass({ timeout: 20_000 });
-  await settle(page, 2000);
-  await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
-  await settle(page, 1500);
-  await page.mouse.click(FIRST_ROW.x, FIRST_ROW.y);
-  await expect(page.getByRole("button", { name: "Review changes" })).toBeVisible();
-  await settle(page, 1500);
-}
-
-test("setup-output: PR detail Treq checks", async ({ page, context }) => {
+test("setup-output: Code tab setup alert", async ({ page, context }) => {
   const config = join(fixture().repo, ".treq", "config.yaml");
   writeFileSync(
     config,
@@ -94,38 +74,37 @@ test("setup-output: PR detail Treq checks", async ({ page, context }) => {
   );
   try {
     // The workspace predates the setup script, so it reads as pending (which
-    // disables the panel's re-run button); the palette runs it regardless.
+    // disables the alert's re-run button); the palette runs it regardless.
     await openWorkspace(page, BRANCH);
     await page.keyboard.press(`${mod}+k`);
     const palette = await overlay(page, context);
     await palette.getByRole("textbox", { name: "Type a command or search..." }).fill("setup");
     await palette.getByRole("option", { name: "Re-run setup script" }).click();
     await settle(page, 3000);
-    await prDetail(page);
-    const open = page.getByRole("button", { name: "Setup output", expanded: true });
-    await expect(open).toBeVisible({ timeout: 30_000 });
-    await settle(page, 1500);
+    await page.keyboard.press("Escape");
+    await openTab(page, "Code");
+    const show = page.getByRole("button", { name: "Show output" });
+    await expect(show).toBeVisible({ timeout: 30_000 });
+    await settle(page, 1000);
     await capture(page, {
-      name: "21-setup-output-01-failed",
-      title: "PR detail: failed setup script, output open",
+      name: "21-setup-output-01-alert",
+      title: "Code tab: failed setup script alert, output hidden",
       expectations: [
-        "The setup row reads 'Workspace setup script failed. Checks can still run.' with a red warning icon and a down chevron",
-        "A Commands block lists '$ echo installing deps', the stderr echo and '$ exit 1'",
-        "An Output block shows 'installing deps' and '[stderr] error: lockfile out of date'",
+        "A red alert near the top of the Code tab reads 'Workspace setup script failed' / 'Checks can still run.'",
+        "Its actions are 'Show output' and 'Re-run setup script'; no commands or output are shown yet",
       ],
     });
 
-    await open.click();
-    await expect(
-      page.getByRole("button", { name: "Setup output", expanded: false }),
-    ).toBeVisible();
-    await settle(page, 600);
+    await show.click();
+    await expect(page.getByRole("button", { name: "Hide output" })).toBeVisible();
+    await settle(page, 1000);
     await capture(page, {
-      name: "21-setup-output-02-collapsed",
-      title: "PR detail: setup output collapsed",
+      name: "21-setup-output-02-expanded",
+      title: "Code tab: setup alert with output shown",
       expectations: [
-        "The setup row is one line with a right chevron and the Re-run setup script button",
-        "The commands and output blocks are gone; the rest of the Treq checks section follows directly below",
+        "Inside the alert, a Commands block lists '$ echo installing deps', the stderr echo and '$ exit 1'",
+        "An Output block shows 'installing deps' and '[stderr] error: lockfile out of date'",
+        "The actions now read 'Hide output' and 'Re-run setup script'",
       ],
     });
   } finally {

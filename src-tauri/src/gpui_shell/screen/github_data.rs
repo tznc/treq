@@ -765,7 +765,7 @@ pub fn check_duration(secs: u64) -> String {
   }
 }
 
-pub use crate::core::running_checks::{run_key, SETUP_KEY};
+pub use crate::core::running_checks::run_key;
 
 #[cfg(test)]
 mod tests {

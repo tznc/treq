@@ -817,7 +817,6 @@ fn github_pr_detail_runs_its_workspace_checks(cx: &mut TestAppContext) {
   let before = reads(&host);
   h.click("github-run-0");
   h.click("github-run-0-0");
-  h.click("github-rerun-setup");
   h.cx.run_until_parked();
   let runs: Vec<String> = host
     .calls()
@@ -829,11 +828,10 @@ fn github_pr_detail_runs_its_workspace_checks(cx: &mut TestAppContext) {
     [
       "run 3:ci.yml in /repo/.treq/workspaces/feat/a",
       "run 3:ci.yml:test in /repo/.treq/workspaces/feat/a",
-      "run 3:<setup> in /repo/.treq/workspaces/feat/a",
     ]
   );
   assert!(h.sent().is_empty(), "React runs none of them");
-  assert_eq!(reads(&host), before + 3, "each end reads the checks again");
+  assert_eq!(reads(&host), before + 2, "each end reads the checks again");
   assert!(host
     .calls()
     .contains(&"notify workspaceChanged".to_string()));
@@ -884,10 +882,8 @@ fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
   };
   let (mut h, host) = harness_with(cx, host, route("prs", Some(1), false));
   assert!(h.drawn("github-treq-checks"));
-  assert!(h.drawn("setup-script-status"));
   h.click("github-run-0");
   h.click("github-run-0-0");
-  h.click("github-rerun-setup");
   h.click("github-open-logs");
   let target = serde_json::json!({
     "repoPath": "/repo",
@@ -905,15 +901,7 @@ fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
   };
   assert_eq!(
     h.sent(),
-    [
-      run(None),
-      run(Some("test")),
-      ScreenAction::Field {
-        field: "github.checks.setup".into(),
-        value: target,
-      },
-      press("github.openLogs:3"),
-    ]
+    [run(None), run(Some("test")), press("github.openLogs:3"),]
   );
 
   // A run React started shows as running, and its end reads the checks again.
@@ -1029,54 +1017,15 @@ fn github_new_pr_from_a_branch(cx: &mut TestAppContext) {
   assert_eq!(h.sent(), [press("github.close")]);
 }
 
-fn setup_checks(status: &str) -> TreqChecks {
-  TreqChecks {
-    setup: Some(SetupScriptStatus {
-      configured: true,
-      status: status.into(),
-      run_id: Some(4),
-      script: Some("npm ci\n\nnpm run build".into()),
-    }),
-    ..treq()
-  }
-}
-
 #[gpui::test]
-fn github_pr_detail_opens_the_setup_commands_and_output(cx: &mut TestAppContext) {
+fn github_pr_detail_leaves_the_setup_script_to_the_code_tab(cx: &mut TestAppContext) {
   let fake = Fake {
     workspaces: vec![workspace(3, "feat/a", Some("main"))],
-    treq: setup_checks("passed"),
+    treq: treq(),
     ..prs()
   };
-  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
-  assert!(h.drawn("setup-script-status"));
-  assert!(
-    !h.drawn("setup-script-output"),
-    "a passed setup starts closed"
-  );
-
-  h.click("github-setup-toggle");
-  h.cx.run_until_parked();
-  assert!(h.drawn("setup-script-output"));
-  assert!(h.drawn("setup-command-0"));
-  assert!(h.drawn("setup-command-1"));
-  assert!(!h.drawn("setup-command-2"), "blank lines are not commands");
-  assert!(h.drawn("setup-script-logs"));
-  assert!(host.calls().contains(&"read logs 4 setup".to_string()));
-
-  h.click("github-setup-toggle");
-  assert!(!h.drawn("setup-script-output"));
-}
-
-#[gpui::test]
-fn github_pr_detail_opens_a_failed_setup_on_its_own(cx: &mut TestAppContext) {
-  let fake = Fake {
-    workspaces: vec![workspace(3, "feat/a", Some("main"))],
-    treq: setup_checks("failed"),
-    ..prs()
-  };
-  let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
-  assert!(h.drawn("setup-script-output"));
-  assert!(h.drawn("setup-script-logs"));
-  assert!(host.calls().contains(&"read logs 4 setup".to_string()));
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(h.drawn("github-treq-checks"));
+  assert!(!h.drawn("setup-script-status"));
+  assert!(!h.drawn("github-rerun-setup"));
 }

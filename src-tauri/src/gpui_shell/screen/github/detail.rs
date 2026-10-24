@@ -3,7 +3,6 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
   MouseButton, SharedString, Window,
@@ -23,7 +22,7 @@ use crate::{
     popup::{Side, TooltipContent},
     screen::{
       code::markdown,
-      github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab, SETUP_KEY},
+      github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab},
       workspace_modal::{dialog_description, dialog_header, dialog_panel},
     },
     theme::{self, Palette},
@@ -1234,7 +1233,6 @@ impl GithubView {
       .as_ref()
       .is_some_and(|s| s.configured && (s.status == "pending" || s.status == "running"));
     let can_run = checks.trusted && !setup_running;
-    let rerunning_setup = is_running(SETUP_KEY, None);
     let mut panel = named(div(), "workspace-checks")
       .flex()
       .flex_col()
@@ -1284,81 +1282,6 @@ impl GithubView {
                 );
               })),
           ),
-      );
-    }
-    if let Some(setup) = checks.setup.as_ref().filter(|s| s.configured) {
-      let failed = setup.status == "failed";
-      let label = if setup_running {
-        "Running workspace setup script before checks can run…".to_string()
-      } else if failed {
-        "Workspace setup script failed. Checks can still run.".to_string()
-      } else {
-        format!("Setup script: {}", setup.status)
-      };
-      let setup_ws = ws.clone();
-      let open = self.detail.setup_open.unwrap_or(failed);
-      let run_id = setup.run_id;
-      let toggle = named(div(), "github-setup-toggle")
-        .role(gpui::Role::Button)
-        .aria_label("Setup output")
-        .aria_expanded(open)
-        .test_support()
-        .flex()
-        .items_center()
-        .gap_2()
-        .min_w_0()
-        .cursor_pointer()
-        .child(chevron(open, p))
-        .child(if failed {
-          ui::icon(theme::ICON_TRIANGLE_ALERT, 16., p.destructive).into_any_element()
-        } else {
-          status_icon("github-setup-status", Some(&setup.status), 16., p)
-        })
-        .child(label)
-        .on_click(cx.listener(move |view, _, _, cx| {
-          view.detail.setup_open = Some(!open);
-          if let Some(run_id) = run_id.filter(|_| !open) {
-            view.load_logs(run_id, crate::core::SETUP_SCRIPT_JOB_ID.into(), cx);
-          }
-          cx.notify();
-        }));
-      panel = panel.child(
-        ui::text(named(div(), "setup-script-status"), TextSize::Sm)
-          .flex()
-          .flex_col()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .justify_between()
-              .gap_2()
-              .px_4()
-              .py_2()
-              .child(toggle)
-              .child(
-                Button::new("github-rerun-setup", p)
-                  .aria_label("Re-run setup script")
-                  .variant(Variant::Ghost)
-                  .size(Size::Sm)
-                  .gap_0()
-                  .disabled(rerunning_setup || setup_running)
-                  .child(if rerunning_setup {
-                    ui::spinner("github-rerun-setup-spin", 12., p.foreground).into_any_element()
-                  } else {
-                    ui::icon(theme::ICON_ROTATE_CW, 12., p.foreground).into_any_element()
-                  })
-                  .child(div().ml_1().child("Re-run setup script"))
-                  .on_click(cx.listener(move |view, _, _, cx| {
-                    view.run_treq_check(&setup_ws, CheckRun::Setup, cx)
-                  })),
-              ),
-          )
-          .when(open, |this| {
-            this.child(self.setup_output(run_id, setup.script.as_deref(), p))
-          }),
       );
     }
     if checks.workflows.is_empty() {
@@ -1499,72 +1422,6 @@ impl GithubView {
       );
     }
     panel.into_any_element()
-  }
-
-  /// The setup script's commands and its latest run's output.
-  fn setup_output(
-    &self,
-    run_id: Option<i64>,
-    script: Option<&str>,
-    p: &Palette,
-  ) -> impl IntoElement {
-    let block = |el: gpui::Stateful<Div>| {
-      ui::text(el, TextSize::Xs)
-        .rounded(radius::SM)
-        .bg(p.muted)
-        .p_2()
-        .font_family(theme::MONO_FONT)
-    };
-    let heading = |text: &'static str| {
-      ui::text(div(), TextSize::Xs)
-        .mb_1()
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(p.muted_foreground)
-        .child(text)
-    };
-    let commands = setup_commands(script.unwrap_or_default());
-    let job = crate::core::SETUP_SCRIPT_JOB_ID.to_string();
-    let output = match run_id.map(|id| self.detail.logs.get(&(id, job.clone()))) {
-      None => ui::text(div(), TextSize::Xs)
-        .text_color(p.muted_foreground)
-        .child("The setup script has not run yet.")
-        .into_any_element(),
-      Some(None) => {
-        ui::spinner("github-setup-logs-spin", 12., p.muted_foreground).into_any_element()
-      }
-      Some(Some(Err(err))) => ui::text(div(), TextSize::Xs)
-        .text_color(p.destructive)
-        .child(err.clone())
-        .into_any_element(),
-      Some(Some(Ok(lines))) => block(named(div(), "setup-script-logs"))
-        .max_h(zpx(256.))
-        .overflow_y_scroll()
-        .child(if lines.is_empty() {
-          "(no output)".to_string()
-        } else {
-          log_text(lines)
-        })
-        .into_any_element(),
-    };
-    named(div(), "setup-script-output")
-      .flex()
-      .flex_col()
-      .gap_2()
-      .border_t_1()
-      .border_color(p.border)
-      .px_4()
-      .py_3()
-      .child(
-        div().child(heading("Commands")).child(
-          block(named(div(), "setup-commands")).children(
-            commands
-              .into_iter()
-              .enumerate()
-              .map(|(i, command)| named(div(), format!("setup-command-{i}")).child(command)),
-          ),
-        ),
-      )
-      .child(div().child(heading("Output")).child(output))
   }
 
   /// `RunHistory`: a workflow's past runs, each opening to its job logs.
@@ -1767,15 +1624,6 @@ fn log_text(lines: &[data::LogLine]) -> String {
     })
     .collect::<Vec<_>>()
     .join("\n")
-}
-
-/// The setup script's non-blank lines, each shown as a `$ ` command.
-fn setup_commands(script: &str) -> Vec<String> {
-  script
-    .lines()
-    .filter(|l| !l.trim().is_empty())
-    .map(|l| format!("$ {l}"))
-    .collect()
 }
 
 fn chevron(open: bool, p: &Palette) -> impl IntoElement {

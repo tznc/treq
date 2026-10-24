@@ -543,3 +543,90 @@ fn code_tab_lists_unchanged_files_below_their_toggle(cx: &mut TestAppContext) {
   assert!(changed < toggle, "changed files come first");
   assert!(toggle < unchanged, "unchanged files follow the toggle row");
 }
+
+#[gpui::test]
+fn code_tab_hides_unchanged_files_again_in_another_workspace(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.overview.entries = vec![
+    status_entry(".gitignore", "untouched"),
+    status_entry("dirty.txt", "workingCopy"),
+  ];
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-unchanged-toggle");
+  assert!(h.drawn("code-entry-.gitignore"));
+  // The workspace screen hands the tab another workspace.
+  h.screen.update(&mut h.cx, |s, cx| {
+    let code = s
+      .workspace
+      .as_ref()
+      .expect("workspace")
+      .read(cx)
+      .code
+      .clone();
+    code.expect("code tab").update(cx, |code, cx| {
+      let mut parent = code.parent.clone();
+      if let Some(workspace) = parent.workspace.as_mut() {
+        workspace.id = 8;
+      }
+      code.set_parent(parent, false, cx);
+    });
+  });
+  h.cx.run_until_parked();
+  assert!(h.drawn("code-unchanged-toggle"));
+  assert!(!h.drawn("code-entry-.gitignore"), "hidden again by default");
+}
+
+fn setup_status(status: &str) -> crate::core::SetupScriptStatus {
+  crate::core::SetupScriptStatus {
+    configured: true,
+    status: status.into(),
+    run_id: Some(4),
+    script: Some("npm ci\n\nnpm run build".into()),
+  }
+}
+
+#[gpui::test]
+fn code_tab_alerts_on_the_setup_script_with_its_output_hidden(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("failed")),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  assert!(
+    !h.drawn("code-setup-output"),
+    "output starts hidden, even after a failure"
+  );
+
+  h.click("code-setup-toggle");
+  assert!(h.drawn("code-setup-output"));
+  assert!(h.drawn("code-setup-command-0"));
+  assert!(h.drawn("code-setup-command-1"));
+  assert!(
+    !h.drawn("code-setup-command-2"),
+    "blank lines are not commands"
+  );
+  assert!(h.drawn("code-setup-logs"));
+  assert!(host.calls().contains(&"read setup logs 4".to_string()));
+
+  h.click("code-setup-toggle");
+  assert!(!h.drawn("code-setup-output"));
+}
+
+#[gpui::test]
+fn code_tab_reruns_the_setup_script(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("passed")),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("code-setup-rerun");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"run setup 7".to_string()));
+}
+
+#[gpui::test]
+fn code_tab_draws_no_setup_alert_without_a_setup_script(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  assert!(!h.drawn("code-setup"));
+}

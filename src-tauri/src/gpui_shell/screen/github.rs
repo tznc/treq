@@ -140,8 +140,6 @@ pub(super) struct Detail {
   /// Runs whose job logs are open, and the logs read, by run and job.
   pub(super) runs_open: HashSet<i64>,
   pub(super) logs: HashMap<(i64, String), Result<Vec<LogLine>, String>>,
-  /// The setup script's output is open; `None` opens it after a failure.
-  pub(super) setup_open: Option<bool>,
   generation: u64,
 }
 
@@ -552,18 +550,7 @@ impl GithubView {
           .setup
           .as_ref()
           .is_some_and(|s| s.configured && (s.status == "pending" || s.status == "running"));
-        let setup_logs = checks
-          .setup
-          .as_ref()
-          .filter(|s| s.configured)
-          .and_then(|s| {
-            s.run_id
-              .filter(|_| view.detail.setup_open.unwrap_or(s.status == "failed"))
-          });
         view.detail.treq = Some(checks);
-        if let Some(run_id) = setup_logs {
-          view.load_logs(run_id, crate::core::SETUP_SCRIPT_JOB_ID.into(), cx);
-        }
         if setting_up {
           cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SETUP_POLL).await;
