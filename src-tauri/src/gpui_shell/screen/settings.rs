@@ -171,8 +171,7 @@ pub const LABEL_CUSTOM_GLOBAL: &str = "Custom · Global";
 pub const LABEL_UNCATALOGUED: &str = "Not in registry";
 
 /// The filter chips, in order: id and label.
-const SKILL_FILTERS: [(&str, &str); 6] = [
-  ("all", "All"),
+const SKILL_FILTERS: [(&str, &str); 5] = [
   ("installed", "Installed"),
   ("app-wide", LABEL_APP_WIDE),
   ("repository", LABEL_REPOSITORY),
@@ -442,7 +441,7 @@ struct Skills {
   /// User-owned skills in the repository and the home folder.
   custom: Vec<CustomSkill>,
   query: String,
-  /// The status filter chip's id; empty is `all`.
+  /// The selected status filter chip's id; empty shows every skill.
   filter: String,
   /// The skill an action runs for.
   pending: Option<String>,
@@ -788,9 +787,14 @@ impl SettingsView {
         host.uninstall_skill(&id, repo)
       }),
       "skills.customize" => self.customize_skill(id, cx),
+      // Clicking the selected chip clears the filter.
       "skills.filter" => {
         if let Some(skills) = &mut self.skills {
-          skills.filter = id;
+          skills.filter = if skills.filter == id {
+            String::new()
+          } else {
+            id
+          };
         }
       }
       "skills.source" => {
@@ -1440,10 +1444,7 @@ impl SettingsView {
           });
         }
         labelled.extend(rest);
-        let filter = match skills.filter.as_str() {
-          "" => "all",
-          other => other,
-        };
+        let filter = skills.filter.as_str();
         let filters = SKILL_FILTERS
           .iter()
           .map(|&(id, label)| SkillFilter {
@@ -2509,21 +2510,14 @@ impl SettingsView {
               Button::new(format!("skill-customize-{id}"), p)
                 .variant(Variant::Outline)
                 .size(Size::Sm)
-                .aria_label(format!("Edit {} with an agent", row.name))
+                .aria_label(format!("Customise {}", row.name))
                 .icon(theme::ICON_PENCIL, 14.)
-                .label("Edit with agent")
+                .label("Customise")
                 .on_click(self.press(&format!("skills.customize:{id}"))),
             ),
           )
         } else if let Some(level) = level {
-          let (customize_label, customize_aria) = if row.customized {
-            (
-              "Edit with agent",
-              format!("Edit {} with an agent", row.name),
-            )
-          } else {
-            ("Customize", format!("Customize {}", row.name))
-          };
+          let customize_aria = format!("Customise {}", row.name);
           this.child(
             div()
               .w_full()
@@ -2540,7 +2534,7 @@ impl SettingsView {
                   .disabled(row.busy)
                   .aria_label(customize_aria)
                   .icon(theme::ICON_PENCIL, 14.)
-                  .label(customize_label)
+                  .label("Customise")
                   .on_click(self.press(&format!("skills.customize:{id}")))
                   .into_any_element()
               })

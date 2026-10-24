@@ -97,7 +97,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   mark("Install: the catalog copy downloads and is checked against the checksum");
   await page.getByRole("button", { name: "Install", exact: true }).click();
   await expect(registry).toHaveCount(0, { timeout: 60_000 });
-  const customize = page.getByRole("button", { name: `Customize ${SKILL}` });
+  const customize = page.getByRole("button", { name: `Customise ${SKILL}` });
   await expect(customize).toBeVisible({ timeout: 60_000 });
   await settle(page, 2000);
   mark("One list, labelled by status: installed, custom repo and custom global skills first");
@@ -106,8 +106,8 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
     name: "19-skill-link-installed",
     title: "Every skill in one list, labelled by install status",
     expectations: [
-      "Filter chips under the search, no counts: All, Installed, App-wide, Repository, Custom, Not installed; All is selected",
-      "First rows: frontend-design labelled App-wide (with Customize), release-notes labelled Custom · Repo, standup labelled Custom · Global",
+      "Filter chips under the search, no counts: Installed, App-wide, Repository, Custom, Not installed; none selected",
+      "First rows: frontend-design labelled App-wide (with Customise), release-notes labelled Custom · Repo, standup labelled Custom · Global",
       "Registry skills that are not installed follow with no label and an Install… button",
     ],
   });
@@ -122,7 +122,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
       "Only frontend-design, release-notes and standup are listed",
     ],
   });
-  await chip(page, "All").click();
+  await chip(page, "Installed").click(); // again: clears the filter
   await settle(page, 800);
 
   // The QA agent prints a fixed transcript; for this step it shows the
@@ -159,7 +159,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
 
   await skillsTab(page);
   await chip(page, "Custom").click();
-  await expect(page.getByRole("button", { name: `Edit ${SKILL} with an agent` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Customise ${SKILL}` })).toBeVisible();
   mark("Customized: frontend-design gains a Custom · Repo label; catalog updates never overwrite the copy");
   await settle(page, 2500);
   await capture(page, {
@@ -167,8 +167,8 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
     title: "The customized skill in the Skills tab",
     expectations: [
       "The Custom chip is selected; frontend-design, release-notes (Custom · Repo) and standup (Custom · Global) are listed",
-      "frontend-design shows App-wide and Custom · Repo labels and an Edit with agent button",
-      "release-notes (hand-written) has only Edit with agent: no install level or trash icon",
+      "frontend-design shows App-wide and Custom · Repo labels and a Customise button",
+      "release-notes (hand-written) has only Customise: no install level or trash icon",
     ],
   });
   const { repo } = fixture();

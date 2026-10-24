@@ -2849,7 +2849,6 @@ fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
   assert_eq!(
     chips,
     [
-      ("All", true),
       ("Installed", false),
       ("App-wide", false),
       ("Repository", false),
@@ -2861,7 +2860,10 @@ fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
     skills.rows[4].description.as_deref(),
     Some("deploy by hand")
   );
-  assert!(h.drawn("skill-filter-all"));
+  assert!(
+    !h.drawn("skill-filter-all"),
+    "no filter selected shows every skill"
+  );
 }
 
 #[gpui::test]
@@ -2891,6 +2893,16 @@ fn skill_filter_chips_narrow_the_list(cx: &mut TestAppContext) {
   assert_eq!(shown(&mut h), ["notes"], "the search narrows the filter");
   let chips = drawn_settings(&mut h).skills.expect("skills tab").filters;
   assert!(chips.iter().any(|f| f.id == "installed" && f.selected));
+
+  settings_act(&mut h, field("skills.query", "".into()));
+  h.click("skill-filter-installed");
+  assert_eq!(
+    shown(&mut h).len(),
+    7,
+    "clicking the selected chip clears the filter"
+  );
+  let chips = drawn_settings(&mut h).skills.expect("skills tab").filters;
+  assert!(chips.iter().all(|f| !f.selected));
 }
 
 #[gpui::test]
