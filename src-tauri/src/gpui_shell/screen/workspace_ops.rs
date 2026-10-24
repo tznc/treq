@@ -97,6 +97,7 @@ pub fn delete_question(workspace: &Removed) -> Question {
 /// and tells React. Returns whether the workspace went, so its terminals
 /// close.
 pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
+  removing(host, &workspace.repo_path, vec![workspace.id]);
   match host.delete_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
@@ -104,6 +105,7 @@ pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
       true
     }
     Err(err) => {
+      restored(host, &workspace.repo_path, vec![workspace.id]);
       toast(host, ToastTone::Error, "Delete Failed", &err);
       false
     }
@@ -112,6 +114,7 @@ pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
 
 /// `archiveWorkspaceMutation`: archives, toasts and tells React.
 pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
+  removing(host, &workspace.repo_path, vec![workspace.id]);
   match host.archive_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
@@ -119,6 +122,7 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
       true
     }
     Err(err) => {
+      restored(host, &workspace.repo_path, vec![workspace.id]);
       toast(host, ToastTone::Error, "Archive Failed", &err);
       false
     }
@@ -131,10 +135,21 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
 pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> Vec<Removed> {
   let mut archived = Vec::new();
   let mut failures = Vec::new();
+  let mut failed_ids = Vec::new();
+  if let Some(first) = workspaces.first() {
+    removing(
+      host,
+      &first.repo_path,
+      workspaces.iter().map(|w| w.id).collect(),
+    );
+  }
   for workspace in workspaces {
     match host.archive_workspace(&workspace.repo_path, workspace.id) {
       Ok(()) => archived.push(workspace.clone()),
-      Err(err) => failures.push(err),
+      Err(err) => {
+        failed_ids.push(workspace.id);
+        failures.push(err);
+      }
     }
   }
   if let Some(first) = archived.first() {
@@ -153,6 +168,9 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     );
   }
   if !failures.is_empty() {
+    if let Some(first) = workspaces.first() {
+      restored(host, &first.repo_path, failed_ids);
+    }
     toast(
       host,
       ToastTone::Error,
@@ -161,6 +179,29 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     );
   }
   archived
+}
+
+/// The workspaces are going: their rows leave at once, ahead of the
+/// removal.
+fn removing(host: &dyn WorkspaceActionsHost, repo_path: &str, ids: Vec<i64>) {
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::WorkspacesRemoving {
+      repo_path: repo_path.into(),
+      ids,
+    },
+  );
+}
+
+/// The removal failed: the rows come back.
+fn restored(host: &dyn WorkspaceActionsHost, repo_path: &str, ids: Vec<i64>) {
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::WorkspacesRestored {
+      repo_path: repo_path.into(),
+      ids,
+    },
+  );
 }
 
 /// The workspaces went: React refreshes and leaves them.

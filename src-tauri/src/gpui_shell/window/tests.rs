@@ -1701,6 +1701,52 @@ fn archiving_the_open_workspace_lands_on_its_stack_parent(cx: &mut TestAppContex
   assert_eq!(window.route_workspace(), None);
 }
 
+fn removal(window: &Window, cx: &mut TestAppContext, event: fn(String, Vec<i64>) -> NativeEvent) {
+  window.controller.update(cx, |c, cx| {
+    c.native_event(&event("/repo".into(), vec![3]), cx)
+  });
+  cx.run_until_parked();
+}
+
+/// The row goes and the view leaves it as the removal starts, while the
+/// workspace is still listed, and a read meanwhile does not bring it back.
+#[gpui::test]
+fn a_removal_hides_the_row_before_it_finishes(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 3, false);
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoving { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+  assert_eq!(window.route_workspace(), Some(1), "onto its stack parent");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert!(
+    !window.sidebar_ids().contains(&3),
+    "the host still lists it"
+  );
+  remove(&host, 3);
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoved { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+}
+
+#[gpui::test]
+fn a_failed_removal_brings_the_row_back(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host, Some("/repo"));
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoving { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRestored { repo_path, ids }
+  });
+  assert!(window.sidebar_ids().contains(&3));
+}
+
 /// The listed-ids effect: a poll that no longer lists the open workspace.
 #[gpui::test]
 fn a_workspace_removed_outside_the_app_leaves_the_view(cx: &mut TestAppContext) {

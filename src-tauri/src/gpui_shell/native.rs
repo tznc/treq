@@ -62,6 +62,16 @@ pub enum NativeEvent {
     pane_session_id: i64,
     select: bool,
   },
+  /// GPUI is removing (deleting or archiving) these workspaces of the
+  /// repository: the window hides their rows and leaves them at once, while
+  /// the removal runs. It ends in [`Self::WorkspacesRemoved`] or
+  /// [`Self::WorkspacesRestored`].
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRemoving { repo_path: String, ids: Vec<i64> },
+  /// The removal started by [`Self::WorkspacesRemoving`] failed: the rows
+  /// show again.
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRestored { repo_path: String, ids: Vec<i64> },
   /// GPUI removed (deleted or archived) these workspaces of the repository,
   /// so the window leaves them if they show.
   #[serde(rename_all = "camelCase")]
