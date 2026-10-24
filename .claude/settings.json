@@ -81,5 +81,7 @@
     "anthropic-skills:chrome-browser": "off",
     "anthropic-skills:built-in-browser": "off",
     "anthropic-skills:deep-research": "off"
-  }
+  },
+  "skillListingMaxDescChars": 400,
+  "bashOutputMaxChars": 20000
 }
