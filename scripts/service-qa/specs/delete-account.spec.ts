@@ -127,7 +127,10 @@ async function organizationWith(
     const token = new URLSearchParams(
       new URL(String(invited.body.accept_url)).hash.slice(1),
     ).get("invite");
-    const joined = await organizations(admin, member)({ action: "accept", token });
+    const joined = await organizations(
+      admin,
+      member,
+    )({ action: "accept", token });
     expect(joined.status).toBe(200);
   }
   return orgId;
@@ -200,23 +203,27 @@ it("deletes only the caller and releases their billing, machines and integration
     const sharedTeam = await grantTeam(admin, sharedOrg);
 
     const providerId = `dev-treq-sqa-${randomBytes(4).toString("hex")}`;
-    const { error: instanceError } = await admin.from("remote_instances").insert({
-      owner_user_id: owner.user.id,
-      provider_kind: "fly_sprites",
-      provider_resource_id: providerId,
-      region: "us_east",
-      size_preset: "small",
-      status: "ready",
-    });
+    const { error: instanceError } = await admin
+      .from("remote_instances")
+      .insert({
+        owner_user_id: owner.user.id,
+        provider_kind: "fly_sprites",
+        provider_resource_id: providerId,
+        region: "us_east",
+        size_preset: "small",
+        status: "ready",
+      });
     expect(instanceError).toBeNull();
 
     const linearToken = `lin_oauth_sqa_${randomBytes(6).toString("hex")}`;
-    const { error: linearError } = await admin.from("linear_oauth_tokens").insert({
-      user_id: owner.user.id,
-      access_token: linearToken,
-      linear_workspace_id: "ws_sqa",
-      linear_workspace_name: "Service QA",
-    });
+    const { error: linearError } = await admin
+      .from("linear_oauth_tokens")
+      .insert({
+        user_id: owner.user.id,
+        access_token: linearToken,
+        linear_workspace_id: "ws_sqa",
+        linear_workspace_name: "Service QA",
+      });
     expect(linearError).toBeNull();
 
     const personal = await linkGithubRepo(admin, owner.user.id);
@@ -236,7 +243,12 @@ it("deletes only the caller and releases their billing, machines and integration
     expect(await userExists(admin, bystander.user.id)).toBe(true);
     expect(await rowCount(admin, "profiles", "id", bystander.user.id)).toBe(1);
     expect(
-      await rowCount(admin, "github_app_installations", "id", bystanderRepo.installationId),
+      await rowCount(
+        admin,
+        "github_app_installations",
+        "id",
+        bystanderRepo.installationId,
+      ),
     ).toBe(1);
     expect(stubs.stripeCalls).not.toContain(
       `DELETE /v1/subscriptions/${bystanderPro.subscriptionId}`,
@@ -247,10 +259,16 @@ it("deletes only the caller and releases their billing, machines and integration
         "With a body naming another user, delete-account answers 200 and deletes the token's user only.",
         "The other user, their profile, their GitHub installation and their subscription are untouched.",
       ],
-      details: { result, ownerId: owner.user.id, bystanderId: bystander.user.id },
+      details: {
+        result,
+        ownerId: owner.user.id,
+        bystanderId: bystander.user.id,
+      },
     });
 
-    expect(stubs.stripeCalls.filter((c) => c.startsWith("DELETE")).sort()).toEqual(
+    expect(
+      stubs.stripeCalls.filter((c) => c.startsWith("DELETE")).sort(),
+    ).toEqual(
       [
         `DELETE /v1/subscriptions/${ownPro.subscriptionId}`,
         `DELETE /v1/subscriptions/${soloTeam.subscriptionId}`,
@@ -280,17 +298,31 @@ it("deletes only the caller and releases their billing, machines and integration
       expect(await rowCount(admin, table, column, owner.user.id)).toBe(0);
     }
     expect(
-      await rowCount(admin, "github_app_installations", "id", personal.installationId),
+      await rowCount(
+        admin,
+        "github_app_installations",
+        "id",
+        personal.installationId,
+      ),
     ).toBe(0);
-    expect(await rowCount(admin, "github_repositories", "id", personal.repoId)).toBe(0);
+    expect(
+      await rowCount(admin, "github_repositories", "id", personal.repoId),
+    ).toBe(0);
     expect(await rowCount(admin, "organizations", "id", soloOrg)).toBe(0);
     const { data: sharedMembers } = await admin
       .from("organization_members")
       .select("user_id, role")
       .eq("org_id", sharedOrg);
-    expect(sharedMembers).toEqual([{ user_id: teammate.user.id, role: "owner" }]);
+    expect(sharedMembers).toEqual([
+      { user_id: teammate.user.id, role: "owner" },
+    ]);
     expect(
-      await rowCount(admin, "billing_subscriptions", "stripe_subscription_id", ownPro.subscriptionId),
+      await rowCount(
+        admin,
+        "billing_subscriptions",
+        "stripe_subscription_id",
+        ownPro.subscriptionId,
+      ),
     ).toBe(1);
 
     await recordOutcome("delete-account-04-rows", {
@@ -345,17 +377,20 @@ it("keeps the account when Stripe fails and finishes on retry", async () => {
     const retry = newStubs();
     const done = await callDeleteAccount(admin, token, retry);
     expect(done.status).toBe(200);
-    expect(retry.stripeCalls).toContain(`DELETE /v1/subscriptions/${pro.subscriptionId}`);
+    expect(retry.stripeCalls).toContain(
+      `DELETE /v1/subscriptions/${pro.subscriptionId}`,
+    );
     expect(await userExists(admin, user.user.id)).toBe(false);
 
     // The deleted user's token no longer authenticates, so a repeat call
     // cannot act on anyone.
     const again = await callDeleteAccount(admin, token, newStubs());
     expect(again.status).toBe(401);
-    const { error: signInError } = await getAnonClient().auth.signInWithPassword({
-      email: user.email,
-      password: user.password,
-    });
+    const { error: signInError } =
+      await getAnonClient().auth.signInWithPassword({
+        email: user.email,
+        password: user.password,
+      });
     expect(signInError).not.toBeNull();
 
     await recordOutcome("delete-account-06-retry", {
