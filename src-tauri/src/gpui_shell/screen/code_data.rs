@@ -163,6 +163,11 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// How long typing pauses before `search_files` runs: nothing for a local
+  /// in-memory index, a debounce for a remote host's round trip.
+  fn file_search_delay(&self, _repo_path: &str) -> std::time::Duration {
+    std::time::Duration::from_millis(150)
+  }
   /// Builds the file index `search_files` reads, unless it is built.
   fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
@@ -187,9 +192,10 @@ impl CodeHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Err(unsupported("Browsing the file tree"));
     }
+    let (entries, readme) = core::workspace_overview(repo_path, workspace_id)?;
     Ok(Overview {
-      entries: core::ls_workspace_with_status(repo_path, workspace_id)?,
-      readme: core::get_workspace_readme(repo_path, workspace_id)?,
+      entries,
+      readme,
       unavailable: false,
     })
   }
@@ -276,23 +282,21 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.search_files(workspace_id, query, limit);
     }
-    crate::commands::workspace::ensure_workspace_indexed(
-      repo_path.to_string(),
-      workspace_id,
-      workspace_path.to_string(),
-    )?;
-    core::search_workspace_files(repo_path, workspace_id, query, limit)
+    Ok(crate::commands::workspace::workspace_file_index(workspace_path)?.search(query, limit))
   }
 
-  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str) {
+  fn file_search_delay(&self, repo_path: &str) -> std::time::Duration {
+    if self.remote_containing(repo_path).is_some() {
+      return std::time::Duration::from_millis(150);
+    }
+    std::time::Duration::ZERO
+  }
+
+  fn warm_file_index(&self, repo_path: &str, _workspace_id: Option<i64>, workspace_path: &str) {
     if self.remote_containing(repo_path).is_some() {
       return;
     }
-    if let Err(err) = crate::commands::workspace::ensure_workspace_indexed(
-      repo_path.to_string(),
-      workspace_id,
-      workspace_path.to_string(),
-    ) {
+    if let Err(err) = crate::commands::workspace::workspace_file_index(workspace_path) {
       log::warn!("file index: {err}");
     }
   }
@@ -689,8 +693,8 @@ pub fn diff_stats(commits: &[JjLogCommit]) -> (u32, u32) {
 /// `LinearCommitHistory`'s split of a log: the workspace's own commits
 /// (without the working copy, or the empty commit on top of it) and the
 /// target branch's.
-pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>) {
-  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().cloned().partition(|c| c.on_target_only);
+pub fn history_commits(log: &JjLogResult) -> (Vec<&JjLogCommit>, Vec<&JjLogCommit>) {
+  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().partition(|c| c.on_target_only);
   let own: Vec<_> = own.into_iter().filter(|c| !c.is_working_copy).collect();
   let own = match own.as_slice() {
     [first, second, ..]
@@ -707,17 +711,17 @@ pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>
 }
 
 /// `groupCommitsByDay`: runs of commits on the same local day, labelled.
-pub fn group_by_day(commits: &[JjLogCommit]) -> Vec<(String, Vec<JjLogCommit>)> {
-  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<JjLogCommit>)> = Vec::new();
+/// Takes the commits or references to them, and keeps what it is given.
+pub fn group_by_day<C: std::borrow::Borrow<JjLogCommit>>(
+  commits: impl IntoIterator<Item = C>,
+) -> Vec<(String, Vec<C>)> {
+  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<C>)> = Vec::new();
   for commit in commits {
-    let day = time::day(&commit.timestamp);
+    let timestamp = &commit.borrow().timestamp;
+    let day = time::day(timestamp);
     match groups.last_mut() {
-      Some((last, _, list)) if *last == day => list.push(commit.clone()),
-      _ => groups.push((
-        day,
-        time::day_label(&commit.timestamp),
-        vec![commit.clone()],
-      )),
+      Some((last, _, list)) if *last == day => list.push(commit),
+      _ => groups.push((day, time::day_label(timestamp), vec![commit])),
     }
   }
   groups

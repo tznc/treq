@@ -12,6 +12,10 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
+  cell::{Cell, RefCell},
+  collections::HashMap,
+  ops::Range,
+  rc::Rc,
   sync::{Arc, LazyLock},
   time::Duration,
 };
@@ -25,7 +29,8 @@ use gpui_kit::component::{
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
+  Context, Div, Entity, FontWeight, Hsla, Pixels, Role, ScrollHandle, SharedString, Stateful,
+  Subscription, Task, Window,
 };
 
 use super::{
@@ -60,6 +65,10 @@ const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 /// `LinearCommitHistory`'s page size.
 const HISTORY_PAGE: usize = 14;
 const STACK_DOCS_PATH: &str = "/docs/concepts/workspaces#stacks-and-rebasing";
+/// A root of at most this many entries draws every row.
+const ENTRIES_ALL: usize = 200;
+/// Rows drawn past each edge of the viewport.
+const ENTRIES_OVERSCAN: usize = 20;
 
 /// What the workspace header already read, which the tab draws from too.
 #[derive(Debug, Clone)]
@@ -79,13 +88,12 @@ pub struct Parent {
 
 impl PartialEq for Parent {
   fn eq(&self, other: &Self) -> bool {
-    let json = |w: &Option<Workspace>| serde_json::to_value(w).ok();
     self.repo_path == other.repo_path
       && self.remote == other.remote
       && self.conflicted_files == other.conflicted_files
       && self.default_branch == other.default_branch
       && self.revision == other.revision
-      && json(&self.workspace) == json(&other.workspace)
+      && self.workspace == other.workspace
   }
 }
 
@@ -226,7 +234,8 @@ pub struct CodeView {
   dark: bool,
   tips: Tooltips,
   pub(super) overview: Option<Overview>,
-  pub(super) history: Option<JjLogResult>,
+  /// Shared, so a frame takes it without copying every commit.
+  pub(super) history: Option<Rc<JjLogResult>>,
   pub(super) history_limit: usize,
   history_loading: bool,
   /// Why the last commit read failed, while there is no history to show.
@@ -255,10 +264,42 @@ pub struct CodeView {
   syncing_submodule: bool,
   starting_devcontainer: bool,
   pub(super) picker: Option<Entity<FilePicker>>,
+  /// The tab's scroll, and where the root's entry rows sit in it.
+  scroll: ScrollHandle,
+  entry_rows: Rc<EntryRows>,
   /// Text to put in the task input at its cursor on the next render.
   insert: Option<String>,
   _mention_search: Option<Task<()>>,
   _subscriptions: Vec<Subscription>,
+}
+
+/// Where the root's entry rows sit, measured as they draw, so a root of
+/// thousands of entries draws only the rows near the viewport: drawing all
+/// of 5,000 took most of a second a frame (debug).
+#[derive(Default)]
+struct EntryRows {
+  /// A row's height with its top border (every row but the first).
+  pitch: Cell<Option<Pixels>>,
+  /// The first row's top in the scrolled content.
+  top: Cell<Option<Pixels>>,
+}
+
+impl EntryRows {
+  /// The rows of `count` to draw while `scroll` shows what it does.
+  fn shown(&self, count: usize, scroll: &ScrollHandle) -> Range<usize> {
+    if count <= ENTRIES_ALL {
+      return 0..count;
+    }
+    let (Some(pitch), Some(top)) = (self.pitch.get(), self.top.get()) else {
+      return 0..ENTRIES_ALL;
+    };
+    let pitch = f32::from(pitch).max(1.);
+    let from = f32::from(-scroll.offset().y - top);
+    let to = from + f32::from(scroll.bounds().size.height);
+    let first = ((from / pitch).floor().max(0.) as usize).saturating_sub(ENTRIES_OVERSCAN);
+    let last = ((to / pitch).ceil().max(0.) as usize + ENTRIES_OVERSCAN).min(count);
+    first.min(last)..last
+  }
 }
 
 impl HasTooltips for CodeView {
@@ -309,6 +350,8 @@ impl CodeView {
       syncing_submodule: false,
       starting_devcontainer: false,
       picker: None,
+      scroll: ScrollHandle::new(),
+      entry_rows: Rc::default(),
       insert: None,
       _mention_search: None,
       _subscriptions: Vec::new(),
@@ -440,7 +483,7 @@ impl CodeView {
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
-      && self.history.as_ref() == read.history.as_ref().ok()
+      && self.history.as_deref() == read.history.as_ref().ok()
       && self.history_error.is_none()
       && self.stack == read.stack
       && self.settings.as_ref() == Some(&read.settings);
@@ -502,7 +545,7 @@ impl CodeView {
     self.history_loading = false;
     match history {
       Ok(history) => {
-        self.history = Some(history);
+        self.history = Some(Rc::new(history));
         self.history_error = None;
         self.history_error_open = false;
       }
@@ -1050,7 +1093,9 @@ impl CodeView {
 fn pulse(el: Div, id: &'static str) -> impl IntoElement {
   el.with_animation(
     id,
-    Animation::new(Duration::from_secs(2)).repeat(),
+    Animation::new(Duration::from_secs(2))
+      .repeat()
+      .with_max_fps(ui::PULSE_FPS),
     |el, delta| el.opacity(1. - 0.5 * (1. - (2. * delta - 1.).abs())),
   )
 }
@@ -1087,12 +1132,28 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
 
 /// `MarkdownContent`'s prose, at the type scale step nearest `size` (`Lg`
 /// for `prose`, `Sm` for `prose-sm`); the step sets the line height.
-pub(super) fn markdown(
+pub(super) fn markdown(id: impl Into<SharedString>, text: &str, size: f32, dark: bool) -> Div {
+  markdown_view(id, text, size, dark, false)
+}
+
+/// [`markdown`] that fills its parent and scrolls itself, drawing only the
+/// blocks on screen: for a whole document.
+pub(super) fn scrolling_markdown(
   id: impl Into<SharedString>,
   text: &str,
   size: f32,
   dark: bool,
-) -> impl IntoElement {
+) -> Div {
+  markdown_view(id, text, size, dark, true).size_full()
+}
+
+fn markdown_view(
+  id: impl Into<SharedString>,
+  text: &str,
+  size: f32,
+  dark: bool,
+  scrollable: bool,
+) -> Div {
   let id: SharedString = id.into();
   let text_size = match size {
     s if s <= 12. => TextSize::Xs,
@@ -1112,14 +1173,43 @@ pub(super) fn markdown(
     3 => px(17.),
     _ => base,
   });
-  // HTML comments never show, as in `MarkdownContent`; shortcodes show as
-  // emoji, as on GitHub.
+  ui::text(div(), text_size).child(
+    TextView::markdown(id, prepared_markdown(text))
+      .style(style)
+      .selectable(true)
+      .scrollable(scrollable),
+  )
+}
+
+/// The texts [`prepared_markdown`] keeps; a page shows only a few.
+const PREPARED_MAX: usize = 64;
+
+thread_local! {
+  /// Markdown texts as drawn, by their source.
+  static PREPARED: RefCell<HashMap<String, SharedString>> = RefCell::default();
+}
+
+/// `text` as `MarkdownContent` draws it: HTML comments never show, and
+/// shortcodes show as emoji, as on GitHub. Kept by source, since every frame
+/// draws it again: a long README cost a regex pass, `emojify` and a copy per
+/// frame, and the same string lets `TextView` skip comparing the text.
+fn prepared_markdown(text: &str) -> SharedString {
+  if let Some(hit) = PREPARED.with(|p| p.borrow().get(text).cloned()) {
+    return hit;
+  }
   #[allow(clippy::expect_used, reason = "constant pattern")]
   static HTML_COMMENT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
-  let text = HTML_COMMENT.replace_all(text, "");
-  let text = super::code_data::emojify(&text);
-  ui::text(div(), text_size).child(TextView::markdown(id, text).style(style).selectable(true))
+  let prepared: SharedString =
+    super::code_data::emojify(&HTML_COMMENT.replace_all(text, "")).into();
+  PREPARED.with(|p| {
+    let mut p = p.borrow_mut();
+    if p.len() >= PREPARED_MAX {
+      p.clear();
+    }
+    p.insert(text.to_string(), prepared.clone());
+  });
+  prepared
 }
 
 impl Render for CodeView {
@@ -1131,6 +1221,7 @@ impl Render for CodeView {
     }
     let left = div()
       .id("code-scroll")
+      .track_scroll(&self.scroll)
       .flex_1()
       .min_w_0()
       .h_full()
@@ -2070,12 +2161,37 @@ impl CodeView {
     )
   }
 
+  /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),
+  /// where row 0 sits in the scrolled content.
+  fn measure_entry_row(&self, i: usize, first: usize) -> impl IntoElement {
+    let (rows, scroll) = (self.entry_rows.clone(), self.scroll.clone());
+    gpui::canvas(
+      move |b, _, _| {
+        if i > 0 {
+          rows.pitch.set(Some(b.size.height));
+        }
+        if i == first {
+          let above = match (first, rows.pitch.get()) {
+            (0, _) | (_, None) => px(0.),
+            (n, Some(pitch)) => pitch * n as f32 - px(1.),
+          };
+          let top = b.top() - above - scroll.bounds().top() - scroll.offset().y;
+          rows.top.set(Some(top));
+        }
+      },
+      |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+  }
+
   fn files(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let entries = self
       .overview
       .as_ref()
-      .map(|o| o.entries.clone())
-      .unwrap_or_default();
+      .map_or(&[][..], |o| o.entries.as_slice());
     let font = self.settings.as_ref().map_or(14., |s| s.font_size);
     let home = self.parent.workspace.is_none();
     let hover = p.muted.opacity(0.6);
@@ -2084,7 +2200,14 @@ impl CodeView {
     let loaded = self.overview.is_some();
     let empty = entries.is_empty();
     let unavailable = self.overview.as_ref().is_some_and(|o| o.unavailable);
-    for (i, entry) in entries.into_iter().enumerate() {
+    let count = entries.len();
+    let shown = self.entry_rows.shown(count, &self.scroll);
+    let pitch = self.entry_rows.pitch.get().unwrap_or_default();
+    // Rows not drawn keep their room: the first is a border shorter.
+    if shown.start > 0 {
+      list = list.child(div().h(pitch * shown.start as f32 - px(1.)));
+    }
+    for (i, entry) in entries.iter().enumerate().take(shown.end).skip(shown.start) {
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
       let icon = match (&pin, entry.is_directory) {
@@ -2118,6 +2241,14 @@ impl CodeView {
           div()
             .debug_selector(move || selector)
             .when(i > 0, |this| this.border_t_1().border_color(p.border))
+            .when(
+              count > ENTRIES_ALL && (i == shown.start || i == 1),
+              |this| {
+                this
+                  .relative()
+                  .child(self.measure_entry_row(i, shown.start))
+              },
+            )
             .flex()
             .items_center()
             .hover(move |s| s.bg(hover))
@@ -2185,6 +2316,9 @@ impl CodeView {
               )
             }),
         );
+    }
+    if shown.end < count {
+      list = list.child(div().h(pitch * (count - shown.end) as f32));
     }
     if loaded && empty {
       list = list.child(
@@ -2416,7 +2550,7 @@ impl CodeView {
       )));
     }
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
+    for (label, commits) in group_by_day(own.iter().copied()) {
       // `first:mt-0` never applies (the track line is the first child);
       // block layout collapses the margin as Chromium does.
       let mut group = div().mt_5();
@@ -2475,7 +2609,7 @@ impl CodeView {
               .font_family(theme::MONO_FONT)
               .child(log.target_branch.clone()),
           )
-          .when_some(log.merge_base_id, |this, base| {
+          .when_some(log.merge_base_id.clone(), |this, base| {
             this.child(
               div()
                 .ml_1()
@@ -2488,7 +2622,7 @@ impl CodeView {
         div().child(format!("Recent on {}", log.target_branch))
       };
       track = track.child(separator(label, p));
-      for (label, commits) in group_by_day(&target) {
+      for (label, commits) in group_by_day(target.iter().copied()) {
         let mut group = div().mt_5().child(day_label(&label, p));
         for commit in &commits {
           group = group.child(self.commit_item(commit, Kind::Target, false, p, cx));

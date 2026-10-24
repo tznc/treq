@@ -13,8 +13,9 @@ use std::{
 use gpui_kit::base::TestSupportExt as _;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, svg, Animation, AnimationExt as _, App, ClickEvent, Context, Hsla,
-  MouseButton, MouseDownEvent, Pixels, Point, Role, SharedString, Transformation, Window,
+  self, div, prelude::*, px, svg, Animation, AnimationExt as _, AnyElement, App, ClickEvent,
+  Context, Entity, Hsla, ListAlignment, ListState, MouseButton, MouseDownEvent, Pixels, Point,
+  Role, SharedString, StyleRefinement, Transformation, Window,
 };
 
 use super::{
@@ -296,11 +297,64 @@ pub struct Sidebar {
   drag_width: Option<f32>,
   /// The workspace row the pointer rests on, to read ahead.
   prefetch: prefetch::Intent<i64>,
+  /// The workspace list's entries, and the virtual list that draws only
+  /// those on screen: a hover or a spinning status dot redraws a few rows,
+  /// not every workspace.
+  items: Vec<Item>,
+  list: ListState,
+}
+
+/// One entry of the workspace list, in display order, by repository index.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Item {
+  /// The repository's group label, in a window with several.
+  Label(usize),
+  /// A placeholder row while the repository's list loads.
+  Skeleton(usize, usize),
+  /// Workspace row `.1` of the repository.
+  Row(usize, usize),
+  /// "Archive N workspaces", under the active repository's rows.
+  BulkArchive(usize),
+}
+
+impl Item {
+  fn repo(self) -> usize {
+    match self {
+      Item::Label(repo)
+      | Item::Skeleton(repo, _)
+      | Item::Row(repo, _)
+      | Item::BulkArchive(repo) => repo,
+    }
+  }
+}
+
+/// What the workspace list shows of `snapshot`.
+fn items(snapshot: &SidebarSnapshot) -> Vec<Item> {
+  let mut items = Vec::new();
+  for (index, repo) in snapshot.repos.iter().enumerate() {
+    if repo.label.is_some() {
+      items.push(Item::Label(index));
+    }
+    if repo.collapsed {
+      continue;
+    }
+    if repo.loading && repo.workspaces.is_empty() {
+      items.extend((0..6).map(|i| Item::Skeleton(index, i)));
+    }
+    items.extend((0..repo.workspaces.len()).map(|row| Item::Row(index, row)));
+    if repo.active && snapshot.bulk_archive.is_some() {
+      items.push(Item::BulkArchive(index));
+    }
+  }
+  items
 }
 
 impl Sidebar {
   pub fn new(snapshot: SidebarSnapshot, sink: ActionSink, popups: PopupSink) -> Self {
+    let items = items(&snapshot);
     Self {
+      list: ListState::new(items.len(), ListAlignment::Top, px(200.)),
+      items,
       snapshot,
       sink,
       popups,
@@ -343,9 +397,31 @@ impl Sidebar {
       if snapshot.modal.is_some() {
         self.tooltip = None;
       }
+      let items = items(&snapshot);
+      if items != self.items {
+        // Rows are one height, so the same index keeps the scroll in place.
+        let top = self.list.logical_scroll_top();
+        self.list.splice(0..self.items.len(), items.len());
+        self.list.scroll_to(top);
+        self.items = items;
+      }
       self.snapshot = snapshot;
       cx.notify();
     }
+  }
+
+  /// The sidebar as the shell lays it out, cached: a frame another view
+  /// asks for (a terminal's output, a hover in the screen) reuses the last
+  /// drawing instead of building every row again. The sidebar notifies
+  /// itself for everything it draws.
+  pub fn element(this: &Entity<Self>, cx: &App) -> impl IntoElement {
+    let width = this.read(cx).width();
+    this.clone().cached(
+      StyleRefinement::default()
+        .flex_none()
+        .w(zpx(width))
+        .h_full(),
+    )
   }
 
   /// A click handler that sends `action` and stops the click there, so a
@@ -700,50 +776,24 @@ impl Render for Sidebar {
         )
       }));
 
-    let mut list = div()
+    let grouped = snapshot.repos.iter().any(|repo| repo.label.is_some());
+    let any_rows = self.items.iter().any(|item| matches!(item, Item::Row(..)));
+    let list = div()
       .id("workspaces")
       .debug_selector(|| "workspaces".into())
-      .flex()
-      .flex_col()
       .flex_1()
       .min_h_0()
-      .overflow_y_scroll()
-      .px_2()
-      .pb_2()
-      .gap_0p5()
       // A click on the empty list clears the selection; it is not a control.
       .cursor_default()
       .on_click(self.on_action(SidebarAction::ClearSelection))
-      .on_drop(self.on_workspace_drop(None));
-    let mut any_rows = false;
-    let grouped = snapshot.repos.iter().any(|repo| repo.label.is_some());
-    for (index, repo) in snapshot.repos.iter().enumerate() {
-      // Each repository's rows sit in their own element, so workspace ids,
-      // which are per repository, do not collide.
-      let mut section = div().id(("repo-section", index)).flex().flex_col().gap_1();
-      if let Some(name) = &repo.label {
-        section = section.child(self.group_label(repo, name, &palette));
-      }
-      if !repo.collapsed {
-        if repo.loading && repo.workspaces.is_empty() {
-          section = section.children((0..6).map(|i| skeleton_row(i, &palette)));
-        }
-        for row in &repo.workspaces {
-          any_rows = true;
-          section = section.child(self.workspace_row(row, repo, index, &palette, cx));
-        }
-        if repo.active {
-          if let Some(count) = snapshot.bulk_archive {
-            section = section.child(
-              bulk_archive_button(count, &palette)
-                .on_click(self.on_action(SidebarAction::BulkArchive))
-                .test_support(),
-            );
-          }
-        }
-      }
-      list = list.child(section);
-    }
+      .on_drop(self.on_workspace_drop(None))
+      .child(
+        gpui::list(
+          self.list.clone(),
+          cx.processor(|this, ix, _, cx| this.item(ix, cx)),
+        )
+        .size_full(),
+      );
 
     sidebar
       .when(
@@ -1168,6 +1218,53 @@ impl Sidebar {
       })
   }
 
+  /// Entry `ix` of the workspace list, spaced as the list and its
+  /// repository sections were as flex columns.
+  fn item(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    let Some(&item) = self.items.get(ix) else {
+      return div().into_any_element();
+    };
+    let index = item.repo();
+    let Some(repo) = self.snapshot.repos.get(index) else {
+      return div().into_any_element();
+    };
+    let palette = theme::palette(self.snapshot.dark);
+    let first_of_repo = ix == 0 || self.items[ix - 1].repo() != index;
+    let gap = match item {
+      _ if ix == 0 => 0.,
+      _ if first_of_repo => 2.,
+      _ => 4.,
+    };
+    let content = match item {
+      Item::Label(_) => {
+        let name = repo.label.as_deref().unwrap_or_default();
+        self.group_label(repo, name, &palette).into_any_element()
+      }
+      Item::Skeleton(_, i) => skeleton_row(i, &palette).into_any_element(),
+      Item::Row(_, row) => match repo.workspaces.get(row) {
+        Some(row) => self
+          .workspace_row(row, repo, index, &palette, cx)
+          .into_any_element(),
+        None => div().into_any_element(),
+      },
+      Item::BulkArchive(_) => {
+        bulk_archive_button(self.snapshot.bulk_archive.unwrap_or(0), &palette)
+          .on_click(self.on_action(SidebarAction::BulkArchive))
+          .test_support()
+          .into_any_element()
+      }
+    };
+    // Each repository's rows sit in their own element, so workspace ids,
+    // which are per repository, do not collide.
+    div()
+      .id(("repo-section", index))
+      .px_2()
+      .pt(zpx(gap))
+      .when(ix + 1 == self.items.len(), |this| this.pb_2())
+      .child(content)
+      .into_any_element()
+  }
+
   /// A repository's workspace group label in a window with several; a
   /// click folds the group.
   fn group_label(&self, repo: &RepoSection, name: &str, palette: &Palette) -> impl IntoElement {
@@ -1274,11 +1371,15 @@ impl Sidebar {
           .rounded_full()
           .bg(color);
         if pulse {
-          this.child(dot.with_animation(
-            ("queue-pulse", id as u64),
-            Animation::new(Duration::from_secs(2)).repeat(),
-            |dot, delta| dot.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
-          ))
+          this.child(
+            dot.with_animation(
+              ("queue-pulse", id as u64),
+              Animation::new(Duration::from_secs(2))
+                .repeat()
+                .with_max_fps(ui::PULSE_FPS),
+              |dot, delta| dot.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
+            ),
+          )
         } else {
           this.child(dot)
         }
