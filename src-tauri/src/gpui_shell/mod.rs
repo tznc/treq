@@ -213,6 +213,7 @@ impl Render for Shell {
       })
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
+        let sidebar = Sidebar::element(&sidebar, cx);
         // The cut-off overlay spans the sidebar too; the workspace view
         // dims its own part below the remote strip.
         let cut_off = self
