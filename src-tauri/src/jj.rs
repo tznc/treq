@@ -6164,14 +6164,16 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
 
   let mut loaded = load_workspace_repo_for_history_edit(workspace_path)?;
   let old_wc_commit = get_workspace_wc_commit(&loaded)?;
-  let workspace_revision = resolve_branch_revision_for_rebase(workspace_path, workspace_branch)?;
-  let target_revision = resolve_branch_revision_for_rebase(workspace_path, target_branch)?;
+  let workspace_revision =
+    resolve_local_target_branch_revision(&loaded, workspace_path, workspace_branch)?;
+  let target_revision =
+    resolve_local_target_branch_revision(&loaded, workspace_path, target_branch)?;
   let workspace_tip_commit = resolve_commit_by_revision(&loaded, &workspace_revision)?;
   let target_commit = resolve_commit_by_revision(&loaded, &target_revision)?;
   let mut lineage_base = target_commit.id().hex();
   if let Some(old_target) = old_target_branch.filter(|old| *old != target_branch) {
     // Without the old parent's tip the rebase would drag its commits along.
-    let old_revision = resolve_branch_revision_for_rebase(workspace_path, old_target)?;
+    let old_revision = resolve_local_target_branch_revision(&loaded, workspace_path, old_target)?;
     let old_commit = resolve_commit_by_revision(&loaded, &old_revision)?;
     lineage_base = format!("({lineage_base} | {})", old_commit.id().hex());
   }
@@ -6793,7 +6795,7 @@ pub fn jj_rebase_with_revset(
       message: "Nothing to rebase (empty revision set)".to_string(),
     });
   }
-  let target_revision = resolve_branch_revision_for_rebase(working_dir, target_branch)?;
+  let target_revision = resolve_local_target_branch_revision(&loaded, working_dir, target_branch)?;
   let target_commit = resolve_commit_by_revision(&loaded, &target_revision)?;
 
   let rebase_options = RebaseOptions {
