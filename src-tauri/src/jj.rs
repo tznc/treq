@@ -7912,9 +7912,10 @@ pub fn jj_get_log(
       None
     } else {
       get_workspace_wc_commit(&loaded).map(|wc_commit| {
-        wc_commit.map(|commit| {
-          let mut misses = Vec::new();
-          let commit = build_log_commit(
+        wc_commit.map(|commit| JjTentativeWorkingCopy {
+          workspace_label: workspace_branch.clone(),
+          commit: build_wc_log_commit(
+            &cache_repo_path,
             &loaded.repo,
             &commit,
             &wc_commit_ids,
@@ -7922,14 +7923,7 @@ pub fn jj_get_log(
               .as_ref()
               .map(|(commit_id, tree)| (commit_id, tree)),
             &is_immutable,
-            &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
-            &mut misses,
-          );
-          let _ = local_db::cache_commit_rows(&cache_repo_path, &misses);
-          JjTentativeWorkingCopy {
-            workspace_label: workspace_branch.clone(),
-            commit,
-          }
+          ),
         })
       })?
     };
@@ -8686,71 +8680,96 @@ fn get_workspace_wc_commit(loaded: &LoadedWorkspaceRepo) -> Result<Option<Commit
     .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))
 }
 
-fn build_tentative_working_copy(
+/// A log row for a working-copy commit. Its id changes whenever its tree
+/// does, so a cached diff stat for that id is current: reading it skips
+/// diffing the working copy, and the cache is written only on a miss.
+fn build_wc_log_commit(
   cache_repo_path: &str,
   repo: &Arc<ReadonlyRepo>,
   commit: &Commit,
-  workspace_label: &str,
   wc_commit_ids: &HashSet<jj_lib::backend::CommitId>,
   wc_tree_override: Option<(&jj_lib::backend::CommitId, &MergedTree)>,
   is_immutable: &impl Fn(
     &jj_lib::backend::CommitId,
   ) -> Result<bool, jj_lib::revset::RevsetEvaluationError>,
-) -> JjTentativeWorkingCopy {
-  JjTentativeWorkingCopy {
-    workspace_label: workspace_label.to_string(),
-    commit: {
-      let mut misses = Vec::new();
-      let mut commit = build_log_commit(
-        repo,
-        commit,
-        wc_commit_ids,
-        wc_tree_override,
-        is_immutable,
-        &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
-        &mut misses,
-      );
-      let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
-      commit.workspace_label = Some(workspace_label.to_string());
-      commit
-    },
-  }
+) -> JjLogCommit {
+  let cached = local_db::get_cached_commit_diff_stats_batch(cache_repo_path, &[commit.id().hex()])
+    .unwrap_or_default();
+  let mut misses = Vec::new();
+  let row = build_log_commit(
+    repo,
+    commit,
+    wc_commit_ids,
+    wc_tree_override,
+    is_immutable,
+    &cached,
+    &mut misses,
+  );
+  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  row
 }
 
+/// A stacked workspace's working-copy commit, for the Commits list of a
+/// workspace above it; `None` when the working copy has no changes.
+///
+/// One load and one snapshot serve both the emptiness check and the row,
+/// under the lock [`jj_get_changed_files`] takes. A working copy that cannot
+/// be read or snapshotted counts as empty, as it does there.
 pub fn jj_get_tentative_working_copy(
   workspace_path: &str,
   workspace_label: &str,
 ) -> Result<Option<JjTentativeWorkingCopy>, JjError> {
-  if jj_is_working_copy_empty(workspace_path)? {
+  if !Path::new(workspace_path).join(".jj").exists() {
     return Ok(None);
   }
-
-  let loaded = load_workspace_repo(workspace_path)?;
-  let immutable_revset = evaluate_revset(
-    &loaded,
-    &format!("::{}", format_revset_symbol(workspace_label)),
-  )?;
-  let is_immutable_val = immutable_revset.containing_fn();
-  let wc_commit_ids: HashSet<_> = loaded
-    .repo
-    .view()
-    .wc_commit_ids()
-    .values()
-    .cloned()
-    .collect();
-
-  get_workspace_wc_commit(&loaded).map(|maybe_commit| {
-    maybe_commit.map(|commit| {
-      build_tentative_working_copy(
-        workspace_path,
-        &loaded.repo,
-        &commit,
-        workspace_label,
-        &wc_commit_ids,
-        None,
-        &is_immutable_val,
-      )
-    })
+  let cache_repo_path = match derive_repo_path_from_workspace(workspace_path) {
+    Some(repo_path) => repo_path,
+    None => {
+      reconcile_colocated_home_repo(workspace_path)?;
+      workspace_path.to_string()
+    }
+  };
+  with_working_copy_lock(workspace_path, || {
+    let Ok(mut loaded) = load_workspace_repo(workspace_path) else {
+      return Ok(None);
+    };
+    let Ok(Some(snapshot)) = snapshot_working_copy_tree(&mut loaded, workspace_path) else {
+      return Ok(None);
+    };
+    if snapshot_is_empty(&loaded, workspace_path, Some(&snapshot))? {
+      return Ok(None);
+    }
+    let immutable_revset = evaluate_revset(
+      &loaded,
+      &format!("::{}", format_revset_symbol(workspace_label)),
+    )?;
+    let is_immutable = immutable_revset.containing_fn();
+    let wc_commit_ids: HashSet<_> = loaded
+      .repo
+      .view()
+      .wc_commit_ids()
+      .values()
+      .cloned()
+      .collect();
+    let (wc_commit_id, tree) = &snapshot;
+    let commit = loaded
+      .repo
+      .store()
+      .get_commit(wc_commit_id)
+      .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))?;
+    let mut row = build_wc_log_commit(
+      &cache_repo_path,
+      &loaded.repo,
+      &commit,
+      &wc_commit_ids,
+      Some((wc_commit_id, tree)),
+      &is_immutable,
+    );
+    row.workspace_label = Some(workspace_label.to_string());
+    Ok(Some(JjTentativeWorkingCopy {
+      workspace_label: workspace_label.to_string(),
+      commit: row,
+    }))
   })
 }
 
