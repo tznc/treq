@@ -2,7 +2,7 @@
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{button::Button, v_flex, ActiveTheme, Sizable},
+  component::{button::Button, h_flex, v_flex, ActiveTheme, Sizable},
   *,
 };
 use treq_lib::{
@@ -16,17 +16,24 @@ use crate::{
   ui::{load, nav, widgets, Load},
 };
 
-/// A working-copy file's diff, fetched from the host.
-pub fn open(target: Target, path: String, cx: &mut App) {
-  push(target, path, None, cx)
+/// A working-copy file's diff, fetched from the host. A deleted file has
+/// no working-copy content to show.
+pub fn open(target: Target, path: String, deleted: bool, cx: &mut App) {
+  push(target, path, None, !deleted, cx)
 }
 
 /// A file's diff on the workspace's branch, from hunks already fetched.
 pub fn open_hunks(target: Target, path: String, hunks: Vec<JjDiffHunk>, cx: &mut App) {
-  push(target, path, Some(hunks), cx)
+  push(target, path, Some(hunks), false, cx)
 }
 
-fn push(target: Target, path: String, hunks: Option<Vec<JjDiffHunk>>, cx: &mut App) {
+fn push(
+  target: Target,
+  path: String,
+  hunks: Option<Vec<JjDiffHunk>>,
+  has_content: bool,
+  cx: &mut App,
+) {
   let title = path.rsplit('/').next().unwrap_or(&path).to_string();
   let location = crate::ui::Location {
     repo: Some(target.repo.clone()),
@@ -36,7 +43,7 @@ fn push(target: Target, path: String, hunks: Option<Vec<JjDiffHunk>>, cx: &mut A
     }),
   };
   nav::push(title, location, cx, move |_, cx| {
-    cx.new(|cx| DiffScreen::new(target, path, hunks, cx))
+    cx.new(|cx| DiffScreen::new(target, path, hunks, has_content, cx))
   });
 }
 
@@ -66,6 +73,8 @@ pub struct DiffScreen {
   show_content: bool,
   /// Set when the hunks came with the page, which then never refetches.
   fixed: bool,
+  /// Whether the file has working-copy content to show.
+  has_content: bool,
   scroll: ScrollHandle,
 }
 
@@ -74,6 +83,7 @@ impl DiffScreen {
     target: Target,
     path: String,
     hunks: Option<Vec<JjDiffHunk>>,
+    has_content: bool,
     cx: &mut Context<Self>,
   ) -> Self {
     on_epoch(cx, |this, cx| this.reload(cx));
@@ -85,6 +95,7 @@ impl DiffScreen {
       content: Load::Idle,
       show_content: false,
       fixed,
+      has_content,
       scroll: ScrollHandle::new(),
     };
     this.reload(cx);
@@ -207,23 +218,25 @@ impl Render for DiffScreen {
         widgets::page()
           .child(widgets::muted(self.path.clone(), cx))
           .child(hunks)
-          .when(!self.fixed, |page| {
+          .when(self.has_content, |page| {
             page.child(
-              Button::new("toggle-content")
-                .outline()
-                .small()
-                .label(if self.show_content {
-                  "Hide working-copy content"
-                } else {
-                  "Show working-copy content"
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                  this.show_content = !this.show_content;
-                  if this.show_content && this.content.ready().is_none() {
-                    this.load_content(cx);
-                  }
-                  cx.notify();
-                })),
+              h_flex().child(
+                Button::new("toggle-content")
+                  .outline()
+                  .small()
+                  .label(if self.show_content {
+                    "Hide working-copy content"
+                  } else {
+                    "Show working-copy content"
+                  })
+                  .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_content = !this.show_content;
+                    if this.show_content && this.content.ready().is_none() {
+                      this.load_content(cx);
+                    }
+                    cx.notify();
+                  })),
+              ),
             )
           })
           .children(content),
