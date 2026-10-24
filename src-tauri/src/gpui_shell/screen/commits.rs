@@ -425,28 +425,22 @@ impl CommitsView {
     );
   }
 
-  /// The commits listed: the tentative working copy, then the branch's own.
-  fn listed(&self) -> Vec<JjLogCommit> {
-    let Some(history) = &self.history else {
-      return Vec::new();
-    };
+  /// A listed commit: the tentative working copy, or one of the branch's
+  /// own or the target's not removed.
+  fn find(&self, commit_id: &str) -> Option<&JjLogCommit> {
+    let history = self.history.as_ref()?;
     history
       .tentative
       .iter()
-      .map(|(c, _)| c.clone())
+      .map(|(c, _)| c)
       .chain(
         history
           .own
           .iter()
           .chain(&history.target)
-          .filter(|c| !self.removed.contains(&c.commit_id))
-          .cloned(),
+          .filter(|c| !self.removed.contains(&c.commit_id)),
       )
-      .collect()
-  }
-
-  fn find(&self, commit_id: &str) -> Option<JjLogCommit> {
-    self.listed().into_iter().find(|c| c.commit_id == commit_id)
+      .find(|c| c.commit_id == commit_id)
   }
 
   pub(super) fn toggle(&mut self, commit_id: &str, cx: &mut Context<Self>) {
@@ -482,7 +476,7 @@ impl CommitsView {
         ..DiffState::default()
       },
     );
-    let change = self.find(commit_id).map(|c| c.change_id);
+    let change = self.find(commit_id).map(|c| c.change_id.clone());
     let revs = revisions(commit_id, change.as_deref());
     let id = commit_id.to_string();
     self.run(
@@ -547,7 +541,7 @@ impl CommitsView {
     state.deferred_loading.insert(path.to_string());
     state.deferred_errors.remove(path);
     cx.notify();
-    let change = self.find(commit_id).map(|c| c.change_id);
+    let change = self.find(commit_id).map(|c| c.change_id.clone());
     let revs = revisions(commit_id, change.as_deref());
     let (id, file) = (commit_id.to_string(), path.to_string());
     self.run(
