@@ -69,10 +69,6 @@ pub fn force_x11_on_wayland() {
 
 /// Starts GPUI. Call once from `setup`, before the first shell window.
 pub fn init(app: &mut tauri::App<Wry>) -> Result<(), tauri_plugin_gpui::GpuiError> {
-  // The syntax set takes a while to load; load it before the first diff.
-  let _ = std::thread::Builder::new()
-    .name("warm-highlighting".into())
-    .spawn(screen::warm_highlighting);
   let handle = app.handle().clone();
   tauri_plugin_gpui::init_with(
     app,
@@ -176,7 +172,17 @@ impl Render for Shell {
       e2e::shell_window(window.window_handle());
     }
     static FIRST: std::sync::Once = std::sync::Once::new();
-    FIRST.call_once(|| crate::startup::mark("first render"));
+    FIRST.call_once(|| {
+      crate::startup::mark("first render");
+      // The syntax set takes a while to load; load it before the first
+      // diff, but after the first frame, which it would compete with for a
+      // core.
+      window.on_next_frame(|_, _| {
+        let _ = std::thread::Builder::new()
+          .name("warm-highlighting".into())
+          .spawn(screen::warm_highlighting);
+      });
+    });
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
