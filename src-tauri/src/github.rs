@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1387,6 +1388,169 @@ pub fn get_pr_info_via_gh_impl(
   }))
 }
 
+/// Newest PRs `gh pr list` returns in one call. A repo with more PRs than this
+/// may have a branch's PR beyond the page; see [`PrListing::truncated`].
+const PR_LIST_LIMIT: usize = 100;
+
+const PR_LIST_JSON_FIELDS: &str = "number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,isCrossRepository,statusCheckRollup";
+
+/// One `statusCheckRollup` entry: a check run or a commit status.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhRollupEntry {
+  #[serde(default)]
+  name: Option<String>,
+  #[serde(default)]
+  context: Option<String>,
+  #[serde(default)]
+  status: Option<String>,
+  #[serde(default)]
+  conclusion: Option<String>,
+  #[serde(default)]
+  state: Option<String>,
+  #[serde(default)]
+  details_url: Option<String>,
+  #[serde(default)]
+  target_url: Option<String>,
+  #[serde(default)]
+  started_at: Option<String>,
+  #[serde(default)]
+  completed_at: Option<String>,
+}
+
+impl GhRollupEntry {
+  /// The `bucket` `gh pr checks` reports for this entry.
+  fn bucket(&self) -> &'static str {
+    let state = match self.status.as_deref() {
+      // A check run reports its result in `conclusion` once completed.
+      Some("COMPLETED") => self.conclusion.as_deref(),
+      Some(status) if !status.is_empty() => Some(status),
+      // A commit status carries only `state`.
+      _ => self.state.as_deref(),
+    };
+    match state.unwrap_or_default() {
+      "SUCCESS" => "pass",
+      "SKIPPED" | "NEUTRAL" => "skipping",
+      "ERROR" | "FAILURE" | "STARTUP_FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => "fail",
+      "CANCELLED" => "cancel",
+      _ => "pending",
+    }
+  }
+
+  fn into_check(self) -> GhCheck {
+    let bucket = self.bucket().to_string();
+    GhCheck {
+      name: self.name.or(self.context).unwrap_or_default(),
+      bucket,
+      link: self.details_url.or(self.target_url).unwrap_or_default(),
+      started_at: self.started_at,
+      completed_at: self.completed_at,
+    }
+  }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhListedPr {
+  number: u64,
+  title: String,
+  state: String,
+  url: String,
+  head_ref_name: String,
+  base_ref_name: String,
+  merge_state_status: Option<String>,
+  #[serde(default)]
+  is_draft: bool,
+  #[serde(default)]
+  is_cross_repository: bool,
+  #[serde(default)]
+  status_check_rollup: Option<Vec<GhRollupEntry>>,
+}
+
+/// The PR and rolled-up CI status of each head branch in a `gh pr list` page.
+pub struct PrListing {
+  pub by_branch: HashMap<String, (PrInfo, Option<PrCiStatus>)>,
+  /// The page was full, so a branch missing from it may still have an older PR.
+  pub truncated: bool,
+}
+
+/// Parses `gh pr list --json` output into one PR per head branch, picking the
+/// PR `gh pr view <branch>` would: an open one, else the newest. Fork PRs are
+/// skipped because `gh pr view` only matches the repository's own branches.
+fn parse_pr_list(stdout: &[u8]) -> Result<PrListing, String> {
+  let raw: Vec<GhListedPr> =
+    serde_json::from_slice(stdout).map_err(|e| format!("Failed to parse gh output: {e}"))?;
+  let truncated = raw.len() >= PR_LIST_LIMIT;
+  let mut by_branch: HashMap<String, GhListedPr> = HashMap::new();
+  for pr in raw.into_iter().filter(|pr| !pr.is_cross_repository) {
+    let rank = |pr: &GhListedPr| (pr.state == "OPEN", pr.number);
+    match by_branch.get(&pr.head_ref_name) {
+      Some(current) if rank(current) >= rank(&pr) => {}
+      _ => {
+        by_branch.insert(pr.head_ref_name.clone(), pr);
+      }
+    }
+  }
+  let by_branch = by_branch
+    .into_iter()
+    .map(|(branch, pr)| {
+      let ci = rollup_pr_checks(
+        pr.status_check_rollup
+          .unwrap_or_default()
+          .into_iter()
+          .map(GhRollupEntry::into_check)
+          .collect(),
+      );
+      let info = PrInfo {
+        number: pr.number,
+        title: pr.title,
+        state: pr.state,
+        url: pr.url,
+        head_ref_name: pr.head_ref_name,
+        base_ref_name: pr.base_ref_name,
+        merge_state_status: pr.merge_state_status,
+        is_draft: pr.is_draft,
+      };
+      (branch, (info, ci))
+    })
+    .collect();
+  Ok(PrListing {
+    by_branch,
+    truncated,
+  })
+}
+
+/// Lists the repo's newest PRs with their CI rollups in one `gh pr list`,
+/// replacing a `gh pr view` + `gh pr checks` pair per branch.
+pub fn list_prs_with_checks_via_gh_impl(
+  gh_path: &str,
+  repo_path: &str,
+  extended_path: &str,
+) -> Result<PrListing, String> {
+  let mut cmd = std::process::Command::new(gh_path);
+  cmd
+    .args([
+      "pr",
+      "list",
+      "--state",
+      "all",
+      "--limit",
+      &PR_LIST_LIMIT.to_string(),
+      "--json",
+      PR_LIST_JSON_FIELDS,
+    ])
+    .current_dir(repo_path)
+    .env("PATH", extended_path);
+  let output = spawn_with_etxtbsy_retry(cmd)?;
+  if !output.status.success() {
+    return Err(format!(
+      "gh pr list failed: {}",
+      String::from_utf8_lossy(&output.stderr).trim()
+    ));
+  }
+  parse_pr_list(&output.stdout)
+}
+
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
 
 #[derive(serde::Serialize, Clone)]
@@ -1623,6 +1787,67 @@ pub fn gh_list_pr_review_threads_impl(
 
 #[cfg(test)]
 mod tests {
+  fn listed_pr(number: u64, branch: &str, state: &str, cross_repo: bool, rollup: &str) -> String {
+    format!(
+      r#"{{"number":{number},"title":"t{number}","state":"{state}","url":"u{number}","headRefName":"{branch}","baseRefName":"main","mergeStateStatus":"CLEAN","isDraft":false,"isCrossRepository":{cross_repo},"statusCheckRollup":{rollup}}}"#
+    )
+  }
+
+  #[test]
+  fn pr_list_prefers_open_then_newest_and_skips_forks() {
+    let json = format!(
+      "[{}]",
+      [
+        listed_pr(9, "feat/a", "MERGED", false, "[]"),
+        listed_pr(7, "feat/a", "OPEN", false, "[]"),
+        listed_pr(5, "feat/a", "OPEN", false, "[]"),
+        listed_pr(8, "feat/b", "CLOSED", false, "[]"),
+        listed_pr(6, "feat/b", "MERGED", false, "[]"),
+        listed_pr(10, "feat/c", "OPEN", true, "[]"),
+      ]
+      .join(",")
+    );
+    let listing = super::parse_pr_list(json.as_bytes()).unwrap();
+    assert!(!listing.truncated);
+    assert_eq!(listing.by_branch["feat/a"].0.number, 7);
+    assert_eq!(listing.by_branch["feat/b"].0.number, 8);
+    assert!(!listing.by_branch.contains_key("feat/c"));
+    assert_eq!(listing.by_branch["feat/a"].1, None);
+  }
+
+  #[test]
+  fn pr_list_rolls_up_check_runs_and_statuses_like_gh_pr_checks() {
+    let rollup = r#"[
+      {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://x/1","startedAt":"2026-01-01T00:00:00Z","completedAt":"2026-01-01T00:01:00Z"},
+      {"__typename":"CheckRun","name":"lint","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://x/2","startedAt":"2026-01-01T00:00:00Z","completedAt":"0001-01-01T00:00:00Z"},
+      {"__typename":"CheckRun","name":"docs","status":"COMPLETED","conclusion":"SKIPPED","detailsUrl":"https://x/3"},
+      {"__typename":"StatusContext","context":"ci/legacy","state":"FAILURE","targetUrl":"https://x/4"}
+    ]"#;
+    let json = format!("[{}]", listed_pr(1, "feat/a", "OPEN", false, rollup));
+    let listing = super::parse_pr_list(json.as_bytes()).unwrap();
+    let ci = listing.by_branch["feat/a"].1.clone().unwrap();
+    assert_eq!(ci.state, "failure");
+    assert_eq!((ci.total, ci.passed, ci.failed, ci.pending), (4, 2, 1, 1));
+    let buckets: Vec<_> = ci.checks.iter().map(|c| c.bucket.as_str()).collect();
+    assert_eq!(buckets, ["pass", "pending", "skipping", "fail"]);
+    assert_eq!(ci.checks[0].duration_secs, Some(60));
+    assert_eq!(ci.checks[1].duration_secs, None);
+    assert_eq!(ci.checks[3].name, "ci/legacy");
+    assert_eq!(ci.checks[3].link, "https://x/4");
+  }
+
+  #[test]
+  fn pr_list_marks_a_full_page_as_truncated() {
+    let json = format!(
+      "[{}]",
+      (0..super::PR_LIST_LIMIT as u64)
+        .map(|n| listed_pr(n, &format!("b{n}"), "OPEN", false, "null"))
+        .collect::<Vec<_>>()
+        .join(",")
+    );
+    assert!(super::parse_pr_list(json.as_bytes()).unwrap().truncated);
+  }
+
   #[cfg(unix)]
   #[test]
   fn gh_that_hangs_is_killed_at_the_deadline() {

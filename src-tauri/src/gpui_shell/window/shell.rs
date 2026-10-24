@@ -229,9 +229,14 @@ pub fn window_focused(app: &AppHandle, label: &str) {
 /// Follows the app-wide events the window's data depends on. Once.
 pub fn listen(app: &AppHandle) {
   let handle = app.clone();
-  app.listen_any("pr-statuses-updated", move |_| {
+  app.listen_any("pr-statuses-updated", move |event| {
+    let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap_or_default();
+    let Some(repo_path) = payload["repo_path"].as_str() else {
+      return;
+    };
     for label in labels() {
-      with_controller(&handle, &label, |c, cx| c.prs_changed(cx));
+      let repo_path = repo_path.to_string();
+      with_controller(&handle, &label, move |c, cx| c.prs_changed(&repo_path, cx));
     }
   });
   // `remoteCutoffStore`: the transport tore an endpoint's connections down.

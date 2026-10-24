@@ -28,6 +28,8 @@ impl Database {
     // busy_timeout retries a write conflict instead of failing at once with
     // "database is locked".
     conn.pragma_update(None, "journal_mode", "WAL")?;
+    // Crash-safe under WAL; avoids an fsync per commit.
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(Database { conn })
   }

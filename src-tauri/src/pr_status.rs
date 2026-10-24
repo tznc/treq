@@ -31,6 +31,15 @@ pub type PrFetchFn = Arc<dyn Fn(&str, &str) -> Result<Option<PrInfo>, String> + 
 /// Only invoked when the PR fetch returned `Some(_)`.
 pub type CiFetchFn = Arc<dyn Fn(&str, &str) -> Result<Option<PrCiStatus>, String> + Send + Sync>;
 
+/// PR info and CI rollup for each requested branch of a repo, fetched in one
+/// call. Every requested branch is a key; `None` means it has no PR.
+pub type BulkFetchResult = HashMap<String, (Option<PrInfo>, Option<PrCiStatus>)>;
+
+/// Fetch PR info and CI for all of a repo's `branches` at once. An `Err`
+/// makes the poller fall back to per-branch fetches.
+pub type BulkFetchFn =
+  Arc<dyn Fn(&str, &[String]) -> Result<BulkFetchResult, String> + Send + Sync>;
+
 /// List workspace branch names that should be polled for a repo.
 pub type BranchListFn = Arc<dyn Fn(&str) -> Result<Vec<String>, String> + Send + Sync>;
 
@@ -53,6 +62,7 @@ struct Inner {
   watched: Mutex<HashSet<String>>,
   fetch: PrFetchFn,
   ci_fetch: CiFetchFn,
+  bulk_fetch: Option<BulkFetchFn>,
   list_branches: BranchListFn,
   on_update: Mutex<Option<OnUpdateFn>>,
   poll_interval: Duration,
@@ -110,6 +120,7 @@ impl PrStatusManager {
         watched: Mutex::new(HashSet::new()),
         fetch,
         ci_fetch,
+        bulk_fetch: None,
         list_branches,
         on_update: Mutex::new(None),
         poll_interval,
@@ -134,17 +145,32 @@ impl PrStatusManager {
     let ci_fetch = Arc::clone(&self.inner.ci_fetch);
     let list_branches = Arc::clone(&self.inner.list_branches);
     let on_update = self.inner.on_update.lock_or_recover().clone();
-    let mgr = Self::new_with_intervals(
+    let mut mgr = Self::new_with_intervals(
       fetch,
       ci_fetch,
       list_branches,
       poll_interval,
       ci_poll_interval,
     );
+    if let Some(bulk_fetch) = self.inner.bulk_fetch.clone() {
+      mgr = mgr.with_bulk_fetch(bulk_fetch);
+    }
     if let Some(cb) = on_update {
       mgr.set_on_update(cb);
     }
     mgr
+  }
+
+  /// Fetch each repo's PRs and CI in one call per poll instead of one per
+  /// branch. Call before the poller starts; per-branch fetches remain the
+  /// fallback when the bulk call fails.
+  pub fn with_bulk_fetch(mut self, bulk_fetch: BulkFetchFn) -> Self {
+    if let Some(inner) = Arc::get_mut(&mut self.inner) {
+      inner.bulk_fetch = Some(bulk_fetch);
+    } else {
+      log::warn!("pr-status: bulk fetch set after the manager was shared; ignored");
+    }
+    self
   }
 
   pub fn set_on_update(&self, cb: OnUpdateFn) {
@@ -396,7 +422,17 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
 
   let mut next: RepoPrCache = HashMap::new();
   let mut next_ci: RepoCiCache = HashMap::new();
+  let bulk = inner.bulk_fetch.as_ref().and_then(|bulk_fetch| {
+    bulk_fetch(repo_path, &branches)
+      .inspect_err(|e| log::warn!("pr-status: bulk fetch failed for {repo_path}: {e}"))
+      .ok()
+  });
   for branch in branches {
+    if let Some((pr_info, ci)) = bulk.as_ref().and_then(|bulk| bulk.get(&branch)) {
+      next.insert(branch.clone(), pr_info.clone());
+      next_ci.insert(branch, ci.clone());
+      continue;
+    }
     let pr_info = match (inner.fetch)(repo_path, &branch) {
       Ok(info) => {
         next.insert(branch.clone(), info.clone());
@@ -447,7 +483,9 @@ fn poll_ci_only(inner: &Inner, repo_path: &str) {
     .cloned()
     .unwrap_or_default();
 
-  if pr_cache.is_empty() {
+  // With the bulk call a full refresh costs one `gh` spawn, no more than the
+  // CI rollups alone would.
+  if pr_cache.is_empty() || inner.bulk_fetch.is_some() {
     poll_one_repo(inner, repo_path);
     return;
   }
@@ -579,7 +617,7 @@ static GLOBAL: std::sync::OnceLock<PrStatusManager> = std::sync::OnceLock::new()
 fn production_fetch() -> PrFetchFn {
   Arc::new(|repo_path: &str, branch_name: &str| {
     let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
+      .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
       .ok_or_else(|| "gh CLI not found".to_string())?;
     let path = crate::binary_paths::get_extended_path();
     crate::github::get_pr_info_via_gh_impl(&gh, repo_path, branch_name, &path)
@@ -589,10 +627,40 @@ fn production_fetch() -> PrFetchFn {
 fn production_ci_fetch() -> CiFetchFn {
   Arc::new(|repo_path: &str, branch_name: &str| {
     let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
+      .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
       .ok_or_else(|| "gh CLI not found".to_string())?;
     let path = crate::binary_paths::get_extended_path();
     crate::github::get_pr_checks_via_gh_impl(&gh, repo_path, branch_name, &path)
+  })
+}
+
+/// One `gh pr list` per repo. Branches missing from a full page fall back to
+/// `gh pr view`/`checks`, since their PR may predate the page.
+fn production_bulk_fetch() -> BulkFetchFn {
+  Arc::new(|repo_path: &str, branches: &[String]| {
+    let gh = crate::binary_paths::get_binary_path("gh")
+      .or_else(|| crate::binary_paths::detect_binary_cached("gh"))
+      .ok_or_else(|| "gh CLI not found".to_string())?;
+    let path = crate::binary_paths::get_extended_path();
+    let mut listing = crate::github::list_prs_with_checks_via_gh_impl(&gh, repo_path, &path)?;
+    let mut result = BulkFetchResult::new();
+    for branch in branches {
+      let entry = match listing.by_branch.remove(branch) {
+        Some((pr, ci)) => (Some(pr), ci),
+        None if listing.truncated => {
+          let pr = crate::github::get_pr_info_via_gh_impl(&gh, repo_path, branch, &path)?;
+          let ci = if pr.is_some() {
+            crate::github::get_pr_checks_via_gh_impl(&gh, repo_path, branch, &path)?
+          } else {
+            None
+          };
+          (pr, ci)
+        }
+        None => (None, None),
+      };
+      result.insert(branch.clone(), entry);
+    }
+    Ok(result)
   })
 }
 
@@ -611,19 +679,39 @@ pub fn global() -> &'static PrStatusManager {
       production_ci_fetch(),
       production_list_branches(),
     )
+    .with_bulk_fetch(production_bulk_fetch())
   })
+}
+
+/// The map's entries in key order, so equal caches serialize identically.
+fn statuses_sorted<V>(map: &HashMap<String, V>) -> std::collections::BTreeMap<&String, &V> {
+  map.iter().collect()
 }
 
 /// Attach a Tauri event emitter so cache refreshes notify the frontend.
 pub fn set_app_handle(app: tauri::AppHandle) {
   use tauri::Emitter;
+  // Listeners re-read the cache, so the event carries only which repo changed,
+  // and only when what the poll found differs from the last event.
+  let last_emitted: Mutex<HashMap<String, u64>> = Mutex::new(HashMap::new());
   global().set_on_update(Arc::new(move |repo_path, statuses, ci_statuses| {
-    let payload = serde_json::json!({
-        "repo_path": repo_path,
-        "statuses": statuses,
-        "ci_statuses": ci_statuses,
-    });
-    let _ = app.emit("pr-statuses-updated", payload);
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(&(statuses_sorted(statuses), statuses_sorted(ci_statuses)))
+      .unwrap_or_default()
+      .hash(&mut hasher);
+    let digest = hasher.finish();
+    if last_emitted
+      .lock_or_recover()
+      .insert(repo_path.to_string(), digest)
+      == Some(digest)
+    {
+      return;
+    }
+    let _ = app.emit(
+      "pr-statuses-updated",
+      serde_json::json!({ "repo_path": repo_path }),
+    );
   }));
   global().ensure_started();
 }
@@ -1167,5 +1255,72 @@ mod tests {
       42
     );
     mgr.shutdown();
+  }
+
+  #[test]
+  fn bulk_fetch_replaces_per_branch_fetches() {
+    let fetch: PrFetchFn = Arc::new(|_, _| panic!("per-branch fetch must not run"));
+    let ci_fetch: CiFetchFn = Arc::new(|_, _| panic!("per-branch CI fetch must not run"));
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat/open".into(), "feat/none".into()]));
+    let bulk: BulkFetchFn = Arc::new(|_, branches| {
+      Ok(
+        branches
+          .iter()
+          .map(|b| {
+            let entry = if b == "feat/open" {
+              (Some(sample_pr(5, b)), Some(sample_ci("success")))
+            } else {
+              (None, None)
+            };
+            (b.clone(), entry)
+          })
+          .collect(),
+      )
+    });
+    let mgr = PrStatusManager::new_with_ci(fetch, ci_fetch, list).with_bulk_fetch(bulk);
+
+    poll_one_repo(&mgr.inner, "/tmp/repo");
+
+    assert_eq!(
+      mgr
+        .get_cached("/tmp/repo", "feat/open")
+        .unwrap()
+        .unwrap()
+        .number,
+      5
+    );
+    assert_eq!(mgr.get_cached("/tmp/repo", "feat/none"), Some(None));
+    assert_eq!(
+      mgr
+        .get_cached_ci("/tmp/repo", "feat/open")
+        .unwrap()
+        .unwrap()
+        .state,
+      "success"
+    );
+  }
+
+  #[test]
+  fn failed_bulk_fetch_falls_back_to_per_branch_fetches() {
+    let fetch: PrFetchFn = Arc::new(|_, b| Ok(Some(sample_pr(8, b))));
+    let ci_fetch: CiFetchFn = Arc::new(|_, _| Ok(Some(sample_ci("pending"))));
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat".into()]));
+    let bulk: BulkFetchFn = Arc::new(|_, _| Err("gh pr list failed".into()));
+    let mgr = PrStatusManager::new_with_ci(fetch, ci_fetch, list).with_bulk_fetch(bulk);
+
+    poll_one_repo(&mgr.inner, "/tmp/repo");
+
+    assert_eq!(
+      mgr.get_cached("/tmp/repo", "feat").unwrap().unwrap().number,
+      8
+    );
+    assert_eq!(
+      mgr
+        .get_cached_ci("/tmp/repo", "feat")
+        .unwrap()
+        .unwrap()
+        .state,
+      "pending"
+    );
   }
 }

@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 static BINARY_PATHS_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
 
@@ -30,6 +31,18 @@ fn select_supported_git(
 /// jj-lib fetch needs Git >= 2.41. GUI launches may find Apple's older Git
 /// before Homebrew, and the persisted binary cache may also point at that Git.
 pub fn resolve_remote_git() -> Result<String, String> {
+  // The lookup spawns `which -a git` plus `git --version` per candidate, and
+  // every fetch and push asks. A failure is not cached so installing Git
+  // takes effect without a restart.
+  static RESOLVED: OnceLock<String> = OnceLock::new();
+  if let Some(path) = RESOLVED.get() {
+    return Ok(path.clone());
+  }
+  let path = find_remote_git()?;
+  Ok(RESOLVED.get_or_init(|| path).clone())
+}
+
+fn find_remote_git() -> Result<String, String> {
   let mut paths = get_binary_path("git").into_iter().collect::<Vec<_>>();
   let finder = if cfg!(windows) { "where" } else { "which" };
   let mut command = Command::new(finder);
@@ -54,6 +67,27 @@ pub fn resolve_remote_git() -> Result<String, String> {
 
 /// Use the configured shell's PATH on Unix, plus the running executable directory.
 pub fn get_extended_path() -> String {
+  // Once the login shell's PATH is known the result no longer depends on the
+  // environment, so build it once.
+  #[cfg(unix)]
+  {
+    static EXTENDED: OnceLock<String> = OnceLock::new();
+    if let Some(path) = EXTENDED.get() {
+      return path.clone();
+    }
+    let (path, from_shell) = build_extended_path();
+    if from_shell {
+      return EXTENDED.get_or_init(|| path).clone();
+    }
+    path
+  }
+  #[cfg(not(unix))]
+  build_extended_path().0
+}
+
+/// The extended PATH, and whether it came from the login shell (stable) or
+/// fell back to the inherited environment.
+fn build_extended_path() -> (String, bool) {
   let current_path = env::var("PATH").unwrap_or_default();
 
   if cfg!(windows) {
@@ -71,21 +105,24 @@ pub fn get_extended_path() -> String {
         }
       }
     }
-    return all_paths.join(";");
+    return (all_paths.join(";"), false);
   }
 
   #[cfg(unix)]
-  let current_path = {
+  let (current_path, from_shell) = {
     static SHELL_PATH: OnceLock<Option<String>> = OnceLock::new();
-    SHELL_PATH
+    let shell_path = SHELL_PATH
       .get_or_init(|| {
         let shell = env::var_os("SHELL").filter(|shell| !shell.is_empty())?;
         let mut command = login_shell_command(&shell);
         shell_path_from_command(&mut command, std::time::Duration::from_secs(5))
       })
-      .clone()
-      .unwrap_or(current_path)
+      .clone();
+    let from_shell = shell_path.is_some();
+    (shell_path.unwrap_or(current_path), from_shell)
   };
+  #[cfg(not(unix))]
+  let from_shell = false;
 
   let mut all_paths: Vec<String> = current_path
     .split(':')
@@ -103,7 +140,7 @@ pub fn get_extended_path() -> String {
     }
   }
 
-  all_paths.join(":")
+  (all_paths.join(":"), from_shell)
 }
 
 #[cfg(unix)]
@@ -203,6 +240,27 @@ fn first_output_line(command: &mut Command) -> Option<String> {
   let stdout = String::from_utf8(output.stdout).ok()?;
   let path = stdout.lines().next()?.trim();
   (!path.is_empty()).then(|| path.to_string())
+}
+
+/// [`detect_binary`] for binaries that are not in the startup cache, such as
+/// `gh`. A hit is kept for the process; a miss for a minute, so installing the
+/// tool takes effect soon without a `which` spawn on every poll.
+pub fn detect_binary_cached(name: &str) -> Option<String> {
+  const MISS_TTL: Duration = Duration::from_secs(60);
+  type Lookups = HashMap<String, (Option<String>, Instant)>;
+  static CACHE: OnceLock<Mutex<Lookups>> = OnceLock::new();
+  let cache = CACHE.get_or_init(Mutex::default);
+  if let Some((found, at)) = cache.lock().ok()?.get(name) {
+    if found.is_some() || at.elapsed() < MISS_TTL {
+      return found.clone();
+    }
+  }
+  let found = detect_binary(name);
+  cache
+    .lock()
+    .ok()?
+    .insert(name.to_string(), (found.clone(), Instant::now()));
+  found
 }
 
 /// Initialize binary paths cache with detected paths
