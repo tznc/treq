@@ -53,6 +53,42 @@ fn test_can_delete_workspace() {
 }
 
 #[test]
+fn delete_removing_directory_later_frees_the_slot_at_once() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let sibling = repo
+    .create_workspace_simple("feat/sibling")
+    .expect("Failed to create sibling");
+  let workspace = repo
+    .create_workspace_simple("feat/delete-later")
+    .expect("Failed to create workspace");
+  let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
+  std::fs::write(workspace_path.join("big.txt"), "x").expect("write file");
+
+  treq_lib::core::delete_workspace_removing_directory_later(&repo.repo_path, workspace.id)
+    .expect("Failed to delete workspace");
+
+  assert!(
+    !workspace_path.exists(),
+    "the slot is free before the directory is gone"
+  );
+  assert!(
+    JjVerifier::list_workspaces(&repo.repo_path)
+      .expect("Failed to list jj workspaces")
+      .contains(&sibling.workspace_name),
+    "the sibling stays registered"
+  );
+  assert!(
+    treq_lib::local_db::get_workspace_by_id(&repo.repo_path, workspace.id)
+      .expect("Failed to read workspace")
+      .is_none()
+  );
+  // The slot can be taken again straight away.
+  repo
+    .create_workspace_simple("feat/delete-later")
+    .expect("Failed to recreate workspace");
+}
+
+#[test]
 fn deletes_workspace_with_stash_and_preserves_applicable_stash() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let workspace = treq_lib::core::create_workspace(
