@@ -33,6 +33,10 @@ const PLAN_DELAY: Duration = Duration::from_millis(400);
 /// Indent per stacking level in the plan.
 const INDENT: f32 = 16.;
 
+/// The plan's height before it scrolls, so a long plan leaves the button in
+/// view.
+const PLAN_MAX_H: f32 = 240.;
+
 /// Opens the sheet. New workspaces stack on `stack_on`, or the default
 /// branch; `done` runs once any were made.
 pub fn open(repo: String, stack_on: Option<String>, done: OnDone, cx: &mut App) {
@@ -378,7 +382,13 @@ impl Render for NewWorkspacesSheet {
               }),
           ),
       )
-      .child(self.plan_rows(cx))
+      .child(
+        div()
+          .id("plan-rows")
+          .max_h(px(PLAN_MAX_H))
+          .overflow_y_scroll()
+          .child(self.plan_rows(cx)),
+      )
       .children(
         self
           .error
