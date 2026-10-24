@@ -142,6 +142,8 @@ pub struct Root {
   model: Entity<AppModel>,
   stack: Vec<Page>,
   sheet: Option<sheet::Sheet>,
+  /// Set briefly after a sheet closes; see [`sheet::dismiss`].
+  tap_guard: bool,
 }
 
 pub(crate) struct Nav {
@@ -294,8 +296,8 @@ impl Root {
     tauri_plugin_gpui::on_back(move |cx| {
       weak
         .update(cx, |root, cx| {
-          if root.sheet.take().is_some() {
-            cx.notify();
+          if root.sheet.is_some() {
+            sheet::dismiss(root, cx);
           } else if root.stack.len() > 1 {
             root.stack.pop();
             root.stack_changed(cx);
@@ -326,6 +328,7 @@ impl Root {
         location: Location::default(),
       }],
       sheet: None,
+      tap_guard: false,
     };
     restore(cx);
     root
@@ -481,6 +484,7 @@ impl Render for Root {
       .when_some(self.sheet.as_ref(), |root, sheet| {
         root.child(sheet::render(sheet, viewport.height - visible.bottom(), cx))
       })
+      .when(self.tap_guard, |root| root.child(sheet::tap_guard()))
   }
 }
 
