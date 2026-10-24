@@ -349,7 +349,28 @@ impl MachinesHost for Backend {
   }
 }
 
+/// This computer's name: asked once, as it does not change while Treq runs.
 fn hostname() -> String {
+  static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+  NAME.get_or_init(read_hostname).clone()
+}
+
+#[cfg(unix)]
+fn read_hostname() -> String {
+  let mut name = [0u8; 256];
+  // SAFETY: `name` is writable for the length given, and `gethostname`
+  // terminates what it writes unless the name is longer, which the last
+  // byte below covers.
+  let found = unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len() - 1) } == 0;
+  let end = name.iter().position(|b| *b == 0).unwrap_or(name.len() - 1);
+  match found {
+    true => String::from_utf8_lossy(&name[..end]).trim().to_string(),
+    false => String::new(),
+  }
+}
+
+#[cfg(not(unix))]
+fn read_hostname() -> String {
   std::process::Command::new("hostname")
     .output()
     .ok()
