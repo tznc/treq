@@ -509,16 +509,12 @@ pub fn create_new_workspace(
     metadata.sparse_patterns,
     metadata.symlinked_dirs,
   )?;
-  if let Some(title) = metadata
+  let title = metadata
     .title
     .as_deref()
     .map(str::trim)
-    .filter(|t| !t.is_empty())
-  {
-    local_db::update_workspace_title(repo_path, workspace.id, title)?;
-  }
-  local_db::update_workspace_last_rebased_commit(repo_path, workspace.id, "")?;
-  local_db::get_workspace_by_id(repo_path, workspace.id)?
+    .filter(|t| !t.is_empty());
+  local_db::init_new_workspace_state(repo_path, workspace.id, title)?
     .ok_or_else(|| format!("Workspace not found after creation: {}", workspace.id))
 }
 
@@ -821,15 +817,12 @@ pub fn create_workspace_with_symlinked_dirs(
     let _ = jj::jj_get_changed_files(&source_workspace_path.to_string_lossy());
   }
 
-  let branches =
-    jj::get_branches(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
-
-  let branch_exists: bool = branches.iter().any(|b| b.name == branch_name);
-
-  // Always check if branch exists on remote
+  // One load answers the local and remote questions and reads the bookmark's
+  // commit for the rollback below.
   let remote_ref = format!("{}@origin", branch_name);
-  let branch_exists_on_remote = jj::check_remote_branch_exists(repo_path, &remote_ref)
-    .map_err(|e| format!("Failed to check remote branch: {}", e))?;
+  let existing =
+    jj::WorkspaceRepo::load(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
+  let (branch_exists, branch_exists_on_remote) = existing.bookmark_presence(branch_name, "origin");
 
   let resolved_source_branch = if source_branch.is_none() {
     // A local tracking branch can lag its remote after fetching. In that case,
@@ -854,7 +847,8 @@ pub fn create_workspace_with_symlinked_dirs(
   };
 
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
-  let prior_bookmark = branch_exists.then(|| jj::jj_get_commit_id(repo_path, branch_name));
+  let prior_bookmark = branch_exists.then(|| existing.commit_id(branch_name));
+  drop(existing);
   let workspace_name = jj::create_workspace(
     repo_path,
     branch_name,
@@ -919,7 +913,9 @@ pub fn create_workspace_with_symlinked_dirs(
       .map_err(|e| format!("Failed to install library skills into workspace: {e}"))?;
     }
 
-    let workspace_id = local_db::add_workspace(
+    // One transaction: the row, the not_on_remote flag (set when the branch
+    // isn't on the remote) and the target branch.
+    let workspace = local_db::add_workspace_targeting(
       repo_path,
       workspace_path.clone(),
       workspace_path,
@@ -927,26 +923,11 @@ pub fn create_workspace_with_symlinked_dirs(
       description,
       moved_files.clone(),
       sparse_patterns.clone(),
+      !branch_exists_on_remote,
+      &effective_target_branch,
     )
     .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
-    registered_id = Some(workspace_id);
-
-    // Set not_on_remote flag if branch doesn't exist on remote
-    if !branch_exists_on_remote {
-      local_db::update_workspace_not_on_remote(repo_path, workspace_id, true)?;
-    }
-
-    local_db::update_workspace_target_branch(repo_path, workspace_id, &effective_target_branch)
-      .map_err(|e| format!("Failed to set target branch: {}", e))?;
-
-    let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-      .map_err(|e| format!("Failed to get workspace from db: {}", e))?;
-    let Some(workspace) = workspace else {
-      return Err(format!(
-        "Workspace not found in database after creation: {}",
-        workspace_id
-      ));
-    };
+    registered_id = Some(workspace.id);
 
     // If moved_files are specified, perform the squash operation
     if let Some(files) = moved_files.clone() {
