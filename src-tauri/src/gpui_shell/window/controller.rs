@@ -11,7 +11,7 @@ use tauri_plugin_gpui::gpui::{prelude::*, App, Context, Task};
 
 use super::{
   actions::{Menu, Shortcut},
-  data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
+  data::{Data, Flags, Read, RepoRead, POLL, SESSIONS_POLL},
   host::{read_repo, FileWatch, WindowHost},
   model::{self, Confirm, Effect, FolderPurpose, Model},
   remote::{self, Opened, RemoteEffect},
@@ -74,6 +74,7 @@ impl WindowController {
     host: Arc<dyn WindowHost>,
     repo: Option<String>,
     present: Presenter,
+    system_dark: Option<bool>,
     cx: &mut Context<Self>,
   ) -> Self {
     let repo = repo.filter(|r| !r.is_empty());
@@ -101,10 +102,16 @@ impl WindowController {
       watching: None,
       _pollers: pollers,
     };
+    this.model.prefs.system_dark = system_dark.unwrap_or_default();
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
-    let mut effects = vec![Effect::ReadPrefs, Effect::Refresh { revision: false }];
+    // The saved theme, zoom and sidebar width are in the first frame, not a
+    // frame later: a read of a few settings costs far less than a flash of
+    // the default theme.
+    let (values, flags) = read_prefs(&*this.host, &settings_keys(&this.model.main_repo));
+    this.apply_prefs(&values, flags);
+    let mut effects = vec![Effect::Refresh { revision: false }];
     match repo {
       // The first read races `prepare_repo`'s jj init: a branch read before
       // `.jj` exists fails, and only a refresh reads the branch again. So
@@ -128,6 +135,13 @@ impl WindowController {
     }
     this.run(effects, cx);
     this
+  }
+
+  fn apply_prefs(&mut self, values: &HashMap<String, Option<String>>, flags: Flags) {
+    self
+      .model
+      .apply_settings(|key| values.get(key).cloned().flatten());
+    self.data.flags = flags;
   }
 
   /// Workspace `id` of `repo`, as last read.
@@ -450,18 +464,9 @@ impl WindowController {
       Effect::ReadPrefs => {
         let keys = settings_keys(&main);
         self.background(
-          move |host| {
-            let values: HashMap<String, Option<String>> = keys
-              .into_iter()
-              .map(|k| (k.clone(), host.setting(&k)))
-              .collect();
-            (values, host.flags())
-          },
+          move |host| read_prefs(host, &keys),
           |this, (values, flags), cx| {
-            this
-              .model
-              .apply_settings(|key| values.get(key).cloned().flatten());
-            this.data.flags = flags;
+            this.apply_prefs(&values, flags);
             this.present(cx);
           },
           cx,
@@ -913,6 +918,12 @@ fn read_all(
     })
     .collect();
   (main.to_string(), listed, reads)
+}
+
+/// The values of settings `keys`, and the preview flags.
+fn read_prefs(host: &dyn WindowHost, keys: &[String]) -> (HashMap<String, Option<String>>, Flags) {
+  let values = keys.iter().map(|k| (k.clone(), host.setting(k))).collect();
+  (values, host.flags())
 }
 
 /// The app settings the model follows for a window on `main`.

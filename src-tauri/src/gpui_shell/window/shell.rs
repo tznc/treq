@@ -62,10 +62,8 @@ pub(in crate::gpui_shell) fn start(
       });
     });
     let host = Arc::new(Backend::new(app.clone(), label.clone()));
-    let controller = cx.new(|cx| WindowController::new(host, repo, present, cx));
-    if let Some(dark) = shell.os_dark {
-      controller.update(cx, |c, cx| c.set_system_dark(dark, cx));
-    }
+    let dark = shell.os_dark;
+    let controller = cx.new(|cx| WindowController::new(host, repo, present, dark, cx));
     shell.window = Some(controller);
   })
 }

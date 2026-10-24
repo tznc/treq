@@ -435,7 +435,13 @@ impl Window {
     let repo = repo.map(String::from);
     let controller = cx.update(|cx| {
       cx.new(|cx| {
-        WindowController::new(host, repo, Rc::new(move |p, _| s.borrow_mut().push(p)), cx)
+        WindowController::new(
+          host,
+          repo,
+          Rc::new(move |p, _| s.borrow_mut().push(p)),
+          None,
+          cx,
+        )
       })
     });
     cx.run_until_parked();
@@ -566,6 +572,18 @@ fn opens_on_its_repository_and_draws_it(cx: &mut TestAppContext) {
   assert_eq!(window.sidebar_ids(), [1, 2]);
   assert_eq!(window.route_workspace(), None, "the home view");
   assert!(window.last().modal.is_none());
+}
+
+#[gpui::test]
+fn draws_the_saved_theme_in_the_first_presentation(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("theme".into(), "dark".into());
+  let window = Window::open(cx, host, Some("/repo"));
+  assert!(window.shown.borrow().iter().all(|p| p.dark), "never light");
 }
 
 #[gpui::test]
