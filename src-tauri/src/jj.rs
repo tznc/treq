@@ -7369,9 +7369,39 @@ fn get_sync_revset_tips(
   Ok((local_tip, remote_tip))
 }
 
+/// When each repository last fetched, so a caller that fetched moments ago
+/// for the same purpose can skip the round trip.
+static LAST_FETCH: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> =
+  std::sync::OnceLock::new();
+
+/// [`jj_git_fetch`] unless `repo_path` fetched within `max_age`.
+pub fn jj_git_fetch_unless_recent(
+  repo_path: &str,
+  max_age: std::time::Duration,
+) -> Result<String, JjError> {
+  let recent = LAST_FETCH
+    .get()
+    .and_then(|m| m.lock().ok()?.get(repo_path).copied())
+    .is_some_and(|at| at.elapsed() < max_age);
+  if recent {
+    return Ok(String::new());
+  }
+  jj_git_fetch(repo_path)
+}
+
 /// Fetch remote branches using jj git fetch (without rebasing)
 /// This updates remote tracking refs and makes remote branches available
 pub fn jj_git_fetch(repo_path: &str) -> Result<String, JjError> {
+  let fetched = fetch_origin(repo_path);
+  if fetched.is_ok() {
+    if let Ok(mut last) = LAST_FETCH.get_or_init(Default::default).lock() {
+      last.insert(repo_path.to_string(), std::time::Instant::now());
+    }
+  }
+  fetched
+}
+
+fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
   if !get_git_remotes(repo_path).contains("origin") {
     return Ok(String::new());
   }
