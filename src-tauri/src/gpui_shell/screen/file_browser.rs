@@ -41,7 +41,7 @@ use super::{
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
     status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
   },
-  highlight, ActionSink, ScreenAction,
+  highlight, prefetch, ActionSink, ScreenAction,
 };
 use crate::{
   core::WorkspaceEntry,
@@ -200,6 +200,10 @@ pub struct FileBrowserView {
   /// The files' revision when the browser was hidden, while another tab
   /// or workspace shows.
   hidden_at: Option<u64>,
+  /// The file row the pointer rests on, and the files read ahead that way,
+  /// by path, until the workspace's files change.
+  hovered: prefetch::Intent<String>,
+  prefetched: prefetch::Lru<String, String>,
 }
 
 impl HasTooltips for FileBrowserView {
@@ -272,6 +276,8 @@ impl FileBrowserView {
       _copied_reset: None,
       _find_key: None,
       hidden_at: None,
+      hovered: prefetch::Intent::default(),
+      prefetched: prefetch::Lru::new(8),
     };
     this.start(route, cx);
     this
@@ -334,7 +340,9 @@ impl FileBrowserView {
       }
       (true, Some(at)) => {
         self.hidden_at = None;
-        if at == self.revision {
+        // Until its first read lands (a view made ahead), that read is
+        // still on the way.
+        if at == self.revision && self.ready() {
           self.refresh(cx);
         }
       }
@@ -363,6 +371,7 @@ impl FileBrowserView {
   /// The workspace's files changed: read the open file, the expanded
   /// directories and the changed files again.
   fn refresh(&mut self, cx: &mut Context<Self>) {
+    self.prefetched.clear();
     if let Some(path) = self.selected.clone() {
       self.select_file(&path, cx);
     }
@@ -618,6 +627,17 @@ impl FileBrowserView {
         cx,
       );
     }
+    // Read ahead while the pointer rested on its row: drawn at once.
+    let now = cx.background_executor().now();
+    if let Some(content) = (!refreshing)
+      .then(|| self.prefetched.take_fresh(&path.to_string(), now))
+      .flatten()
+    {
+      self.loading_file = false;
+      self.marks = LineMarks::default();
+      self.show_content(content, false, cx);
+      return;
+    }
     let file = path.to_string();
     self.run(
       move |host| host.read_file(&file),
@@ -652,6 +672,44 @@ impl FileBrowserView {
       cx,
     );
     cx.notify();
+  }
+
+  /// The pointer entered or left file `path`'s row.
+  fn hover_file(&mut self, path: String, hovered: bool, cx: &mut Context<Self>) {
+    let file = path.clone();
+    self.hovered.hover(path, hovered, cx, move |view, cx| {
+      view.prefetch_file(file, cx)
+    });
+  }
+
+  /// Reads file `path` ahead, unless it is open or was read ahead lately.
+  /// Nothing redraws.
+  fn prefetch_file(&mut self, path: String, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    if is_binary(&path)
+      || self.selected.as_ref() == Some(&path)
+      || self.prefetched.has_fresh(&path, now)
+    {
+      return;
+    }
+    let (host, key) = (self.host.clone(), self.parent.key());
+    cx.spawn(async move |this, cx| {
+      let file = path.clone();
+      let read = cx
+        .background_spawn(async move { host.read_file(&file) })
+        .await;
+      let content = match read {
+        Ok(content) if !too_large(&content) => content,
+        _ => return,
+      };
+      let _ = this.update(cx, |view, cx| {
+        if view.parent.key() == key {
+          let now = cx.background_executor().now();
+          view.prefetched.insert(path, now, content);
+        }
+      });
+    })
+    .detach();
   }
 
   fn show_content(&mut self, content: String, refreshing: bool, cx: &mut Context<Self>) {
@@ -1396,7 +1454,8 @@ impl FileBrowserView {
       .bg(p.sidebar)
       .overflow_hidden();
     let Some(root) = self.root.as_ref() else {
-      return panel.child(
+      return panel.child(ui::delayed(
+        "file-tree-loading",
         div()
           .debug_selector(|| "file-tree-loading".into())
           .flex()
@@ -1404,7 +1463,7 @@ impl FileBrowserView {
           .justify_center()
           .p_4()
           .child(ui::spinner("file-tree-spin", 24., p.muted_foreground)),
-      );
+      ));
     };
     let rows = self
       .tree_rows
@@ -1542,6 +1601,10 @@ impl FileBrowserView {
           cx,
         )))
       })
+      .on_hover({
+        let path = path.clone();
+        cx.listener(move |view, hovered: &bool, _, cx| view.hover_file(path.clone(), *hovered, cx))
+      })
       .on_click(cx.listener(move |view, _, _, cx| view.select_file(&path, cx)))
       .into_any_element()
   }
@@ -1574,10 +1637,13 @@ impl FileBrowserView {
         .into_any_element();
     }
     if self.loading_file {
-      return Self::centered(p)
-        .debug_selector(|| "file-browser-loading".into())
-        .child(ui::spinner("file-spin", 24., p.muted_foreground))
-        .into_any_element();
+      return ui::delayed(
+        "file-browser-loading",
+        Self::centered(p)
+          .debug_selector(|| "file-browser-loading".into())
+          .child(ui::spinner("file-spin", 24., p.muted_foreground)),
+      )
+      .into_any_element();
     }
     let Some(opened) = self.opened.clone().filter(|o| !o.content.is_empty()) else {
       return Self::centered(p)

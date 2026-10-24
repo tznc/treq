@@ -25,7 +25,7 @@ use crate::{
     confirm::Question,
     native::{NativeEvent, ToastTone},
     overlay::OverlaySnapshot,
-    screen::{file_picker::Scope, Modal, ScreenAction, ScreenSnapshot},
+    screen::{file_picker::Scope, workspace_data, Modal, ScreenAction, ScreenSnapshot, View},
     sidebar::{SidebarAction, SidebarSnapshot},
   },
 };
@@ -133,6 +133,18 @@ impl WindowController {
   /// Workspace `id` of `repo`, as last read.
   pub fn workspace(&self, repo: &str, id: i64) -> Option<&crate::local_db::Workspace> {
     self.data.workspaces(repo).iter().find(|w| w.id == id)
+  }
+
+  /// The workspace view's route were a click to select workspace `id` of
+  /// the shown repository, for reading it ahead.
+  pub fn workspace_route(&self, id: i64) -> Option<workspace_data::Route> {
+    let workspace = self.model.workspace_in(self.model.repo(), id, &self.data)?;
+    let mut model = self.model.clone();
+    model.select_workspace(Some(&workspace), &self.data);
+    match snapshots::screen(&model, &self.data)?.view {
+      View::Workspace(route) => Some(*route),
+      _ => None,
+    }
   }
 
   fn poll(every: std::time::Duration, read: Read, cx: &mut Context<Self>) -> Task<()> {

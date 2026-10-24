@@ -38,7 +38,7 @@ use super::{
   environment,
   file_picker::{FilePicker, FilePickerEvent, Scope},
   merge::full_path,
-  ActionSink, ScreenAction,
+  prefetch, ActionSink, ScreenAction,
 };
 use crate::{
   core::WorkspaceEntry,
@@ -116,7 +116,7 @@ impl Parent {
 }
 
 /// A stack row with its lines changed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StackRow {
   pub workspace: Workspace,
   pub current: bool,
@@ -129,6 +129,26 @@ struct Read {
   history: Result<JjLogResult, String>,
   stack: Option<Vec<StackRow>>,
   settings: TaskSettings,
+}
+
+impl Read {
+  /// Reads everything the tab shows for `parent`, `limit` commits of the
+  /// home repository's history. Blocks.
+  fn of(host: &dyn CodeHost, parent: &Parent, limit: usize) -> Self {
+    // Independent reads: run them side by side.
+    std::thread::scope(|scope| {
+      let overview = scope.spawn(|| host.overview(&parent.repo_path, parent.workspace_id()));
+      let history = scope.spawn(|| read_history(host, parent, limit));
+      let stack = scope.spawn(|| read_stack(host, parent));
+      let settings = task_settings(host, &parent.repo_path);
+      Read {
+        overview: Overview::or_unavailable(super::joined(overview)),
+        history: super::joined(history),
+        stack: super::joined(stack),
+        settings,
+      }
+    })
+  }
 }
 
 /// The commit history column: `limit` commits of the home repository, a
@@ -201,6 +221,8 @@ pub struct CodeView {
   pub(super) parent: Parent,
   /// The workspace the tab moves to once [`CodeView::load`] reads it.
   next: Option<Parent>,
+  /// Other workspaces read ahead of a switch to them (`prefetch`).
+  prefetched: prefetch::Lru<(String, Option<i64>), (Parent, Read)>,
   dark: bool,
   tips: Tooltips,
   pub(super) overview: Option<Overview>,
@@ -259,6 +281,7 @@ impl CodeView {
       react,
       parent,
       next: None,
+      prefetched: prefetch::Lru::new(2),
       dark,
       tips: Tooltips::new(popups, dark),
       overview: None,
@@ -312,7 +335,18 @@ impl CodeView {
     if parent.key() != self.parent.key() {
       // Another workspace: keep drawing this one until the new one is read,
       // then swap them in one frame (`apply`), so the tab never draws empty.
+      // Read ahead, it swaps now, and reads again behind.
+      let now = cx.background_executor().now();
+      let ahead = self
+        .prefetched
+        .take_fresh(&parent.key(), now)
+        .filter(|(read, _)| {
+          read.revision == parent.revision && read.default_branch == parent.default_branch
+        });
       self.next = Some(parent);
+      if let Some((read_for, read)) = ahead {
+        self.apply(read_for, read, cx);
+      }
     } else {
       self.next = None;
       self.parent = parent;
@@ -337,26 +371,42 @@ impl CodeView {
     cx.spawn(async move |this, cx| {
       let read = cx
         .background_spawn(async move {
-          let host = host.as_ref();
-          // Independent reads: run them side by side.
-          let read = std::thread::scope(|scope| {
-            let overview = scope.spawn(|| host.overview(&parent.repo_path, parent.workspace_id()));
-            let history = scope.spawn(|| read_history(host, &parent, limit));
-            let stack = scope.spawn(|| read_stack(host, &parent));
-            let settings = task_settings(host, &parent.repo_path);
-            Read {
-              overview: Overview::or_unavailable(super::joined(overview)),
-              history: super::joined(history),
-              stack: super::joined(stack),
-              settings,
-            }
-          });
+          let read = Read::of(host.as_ref(), &parent, limit);
           (parent, read)
         })
         .await;
       let _ = this.update(cx, |view, cx| view.apply(read.0, read.1, cx));
     })
     .detach();
+  }
+
+  /// Reads workspace `parent` ahead of a switch to it, which then draws at
+  /// once (`set_parent`). Nothing on screen changes.
+  pub(super) fn prefetch(&mut self, parent: Parent, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    let current = self.next.as_ref().unwrap_or(&self.parent);
+    if parent.key() == current.key() || self.prefetched.has_fresh(&parent.key(), now) {
+      return;
+    }
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let read = cx
+        .background_spawn(async move {
+          let read = Read::of(host.as_ref(), &parent, HISTORY_PAGE);
+          (parent, read)
+        })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        let now = cx.background_executor().now();
+        view.prefetched.insert(read.0.key(), now, read);
+      });
+    })
+    .detach();
+  }
+
+  /// It shows its workspace's read, with no other workspace's on the way.
+  pub(super) fn ready(&self) -> bool {
+    self.next.is_none() && self.overview.is_some()
   }
 
   /// Reads the tab again, drawing what it has meanwhile.
@@ -367,7 +417,7 @@ impl CodeView {
   /// Shows what [`Self::load`] read for `parent`, unless the tab moved on to
   /// another workspace meanwhile.
   fn apply(&mut self, parent: Parent, read: Read, cx: &mut Context<Self>) {
-    match &self.next {
+    let moved = match &self.next {
       Some(next) if next.key() == parent.key() => {
         self.parent = self.next.take().unwrap_or(parent);
         self.history_limit = HISTORY_PAGE;
@@ -380,15 +430,27 @@ impl CodeView {
         self.history = None;
         self.history_error = None;
         self.history_error_open = false;
+        true
       }
-      None if self.parent.key() == parent.key() => {}
+      None if self.parent.key() == parent.key() => false,
       _ => return,
-    }
+    };
+    // A read again that found what shows already (a revalidation) draws
+    // nothing new.
+    let unchanged = !moved
+      && !(self.history_loading && self.history_limit > HISTORY_PAGE)
+      && self.overview.as_ref() == Some(&read.overview)
+      && self.history.as_ref() == read.history.as_ref().ok()
+      && self.history_error.is_none()
+      && self.stack == read.stack
+      && self.settings.as_ref() == Some(&read.settings);
     self.overview = Some(read.overview);
     self.set_history(read.history);
     self.stack = read.stack;
     self.settings = Some(read.settings);
-    cx.notify();
+    if !unchanged {
+      cx.notify();
+    }
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved

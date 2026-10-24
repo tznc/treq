@@ -31,10 +31,11 @@ use super::{
   code::Parent,
   code_data::Agent,
   commits_data::{
-    comment_prompt, comment_target, empty_diff, first_diff, first_file_diff, first_line, headline,
-    line_label, resolve_session_name, revisions, selection, CommentTarget, CommitsHost, History,
-    Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
+    comment_prompt, comment_target, empty_diff, first_diff, first_file_diff, first_line,
+    has_content, headline, line_label, resolve_session_name, revisions, selection, CommentTarget,
+    CommitsHost, History, Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
   },
+  prefetch::{self, CommitDiffs},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -188,6 +189,8 @@ pub struct CommitsView {
   /// The revision the tab was hidden at, while another tab or workspace
   /// shows.
   hidden_at: Option<u64>,
+  /// The commit row the pointer rests on, whose diff is read ahead.
+  hovered: prefetch::Intent<String>,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -234,6 +237,7 @@ impl CommitsView {
       feed: rows::Feed::default(),
       layout_gen: 0,
       hidden_at: None,
+      hovered: prefetch::Intent::default(),
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -302,7 +306,9 @@ impl CommitsView {
       (false, None) => self.hidden_at = Some(self.parent.revision),
       (true, Some(at)) => {
         self.hidden_at = None;
-        if at == self.parent.revision {
+        // Until its first read lands (a view made ahead), that read is
+        // still on the way.
+        if at == self.parent.revision && self.ready() {
           self.load(cx);
         }
       }
@@ -457,6 +463,18 @@ impl CommitsView {
       return;
     }
     self.layout_gen += 1;
+    // Read ahead while the pointer rested on the row: drawn at once.
+    let key = (self.parent.repo_path.clone(), commit_id.to_string());
+    if let Some(diff) = cx.default_global::<CommitDiffs>().0.get(&key).cloned() {
+      self.diffs.insert(
+        commit_id.to_string(),
+        DiffState {
+          diff: Some(diff),
+          ..DiffState::default()
+        },
+      );
+      return;
+    }
     self.diffs.insert(
       commit_id.to_string(),
       DiffState {
@@ -487,6 +505,39 @@ impl CommitsView {
       },
       cx,
     );
+  }
+
+  /// The pointer entered or left commit `commit_id`'s row.
+  fn hover_commit(&mut self, commit_id: String, hovered: bool, cx: &mut Context<Self>) {
+    let id = commit_id.clone();
+    self.hovered.hover(commit_id, hovered, cx, move |view, cx| {
+      view.prefetch_diff(id, cx)
+    });
+  }
+
+  /// Reads commit `commit_id`'s diff into [`CommitDiffs`], unless it is
+  /// open or kept there already. Nothing redraws.
+  fn prefetch_diff(&mut self, commit_id: String, cx: &mut Context<Self>) {
+    let key = (self.parent.repo_path.clone(), commit_id);
+    if self.diffs.contains_key(&key.1) || cx.default_global::<CommitDiffs>().0.get(&key).is_some() {
+      return;
+    }
+    let (host, workspace_id) = (self.host.clone(), self.parent.workspace_id());
+    cx.spawn(async move |this, cx| {
+      let (repo, commit_id) = key.clone();
+      let read = cx
+        .background_spawn(async move { host.commit_diff(&repo, workspace_id, &commit_id) })
+        .await;
+      let diff = match read {
+        Ok(diff) if has_content(&diff) => diff,
+        _ => return,
+      };
+      let _ = this.update(cx, |_, cx| {
+        let now = cx.background_executor().now();
+        cx.default_global::<CommitDiffs>().0.insert(key, now, diff);
+      });
+    })
+    .detach();
   }
 
   fn load_file_diff(&mut self, commit_id: &str, path: &str, cx: &mut Context<Self>) {
@@ -1701,6 +1752,11 @@ impl CommitsView {
         )
       });
     let hover = if tentative { yellow_hover } else { p.muted };
+    // The working copy's commit moves as files change: never read ahead.
+    let read_ahead = (!tentative && !commit.is_working_copy).then(|| {
+      let id = commit.commit_id.clone();
+      cx.listener(move |view, hovered: &bool, _, cx| view.hover_commit(id.clone(), *hovered, cx))
+    });
     let row = div()
       .id(SharedString::from(format!(
         "commit-row-{}",
@@ -1797,6 +1853,7 @@ impl CommitsView {
               }),
           ),
       )
+      .when_some(read_ahead, |this, listener| this.on_hover(listener))
       .when(!tentative, |this| {
         let commit = commit.clone();
         this.on_mouse_down(

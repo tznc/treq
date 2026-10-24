@@ -518,6 +518,9 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
     let (app, label) = (app.clone(), label.clone());
     // The sidebar is mid-update while it sends; read it once it is done.
     cx.defer(move |cx| {
+      if let SidebarAction::PrefetchWorkspace { id } = action {
+        return prefetch_workspace(&label, id, cx);
+      }
       if window::sidebar_action(&label, &action, cx) || !sidebar_actions::handles(&action) {
         return;
       }
@@ -532,6 +535,22 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
       }
     });
   })
+}
+
+/// Reads ahead in window `label` what selecting workspace `id` of its
+/// repository would show.
+fn prefetch_workspace(label: &str, id: i64, cx: &mut gpui::App) {
+  let Some(route) = window::workspace_route(label, id, cx) else {
+    return;
+  };
+  let screen = cx
+    .try_global::<Shells>()
+    .and_then(|shells| shells.0.get(label))
+    .and_then(WeakEntity::upgrade)
+    .and_then(|shell| shell.read(cx).screen.clone());
+  if let Some(screen) = screen {
+    screen.update(cx, |screen, cx| screen.prefetch_workspace(route, cx));
+  }
 }
 
 /// Closes the terminals of a workspace GPUI removed, in window `label`.

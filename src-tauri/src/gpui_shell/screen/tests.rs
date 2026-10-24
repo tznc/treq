@@ -604,6 +604,10 @@ impl code_data::CodeHost for FakeHost {
     Ok(())
   }
 
+  fn warm_file_index(&self, _: &str, workspace_id: Option<i64>, _: &str) {
+    self.record(format!("read file index {workspace_id:?}"));
+  }
+
   fn search_files(
     &self,
     _: &str,
@@ -4768,7 +4772,7 @@ fn a_refresh_that_reads_the_same_diff_keeps_its_rows(cx: &mut TestAppContext) {
     h.drawn("changes-diff-viewer");
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
       (
         Arc::as_ptr(&changes.hunks["a.rs"].hunks),
         changes.layout_revision(),
@@ -7818,6 +7822,7 @@ mod logs_explorer;
 mod merge_queue;
 mod open_workspaces;
 mod pr_review;
+mod prefetch;
 mod review_comments;
 mod stack_panel;
 mod tab_badges;

@@ -85,7 +85,7 @@ pub const NEW_WORKSPACE_SETTING: &str = "home_task_new_workspace";
 pub const ENVIRONMENT_SETTING: &str = "environment";
 
 /// The files and README the Code tab lists.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Overview {
   pub entries: Vec<WorkspaceEntry>,
   pub readme: Option<String>,
@@ -163,6 +163,8 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// Builds the file index `search_files` reads, unless it is built.
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
   fn devcontainer_up(&self, repo_path: &str) -> Result<DevcontainerStatus, String>;
@@ -282,6 +284,19 @@ impl CodeHost for Backend {
       workspace_path.to_string(),
     )?;
     core::search_workspace_files(repo_path, workspace_id, query, limit)
+  }
+
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str) {
+    if self.remote_containing(repo_path).is_some() {
+      return;
+    }
+    if let Err(err) = crate::commands::workspace::ensure_workspace_indexed(
+      repo_path.to_string(),
+      workspace_id,
+      workspace_path.to_string(),
+    ) {
+      log::warn!("file index: {err}");
+    }
   }
 
   fn devcontainers_enabled(&self) -> bool {

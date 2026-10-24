@@ -2,7 +2,8 @@
 //! browser, one per workspace each. A tab or workspace shown again draws
 //! what it last read at once and reads again behind it; a workspace shown
 //! for the first time keeps the last one drawn until its first read lands,
-//! so a switch never flashes a loading placeholder.
+//! so a switch never flashes a loading placeholder. A view can also be made
+//! ahead of a switch (`prefetch`), so the switch draws it read already.
 
 use tauri_plugin_gpui::gpui::{App, Context, Entity, EntityId, Subscription};
 
@@ -65,26 +66,69 @@ impl<V: TabView> Views<V> {
   ) -> Entity<V> {
     if let Some(index) = self.views.iter().position(|(k, _)| *k == key) {
       if index + 1 < self.views.len() {
-        // Back to a workspace shown before: it draws what it read.
+        // Back to a workspace shown before, or made ahead: it draws what it
+        // read, or stands the last one in while its read is still on the way.
+        let drawn = self.drawn(cx).map(|(view, _)| view);
         let entry = self.views.remove(index);
+        let view = entry.1.clone();
         self.views.push(entry);
-        self.stand_in = None;
-        self._ready = None;
+        let stand_in = stand_in && !view.read(cx).ready();
+        self.stand_in_until_ready(drawn.filter(|_| stand_in), &view, cx);
       }
       return self.views[self.views.len() - 1].1.clone();
     }
     let drawn = self.drawn(cx).map(|(view, _)| view);
     let view = make(cx);
-    self.stand_in = drawn.filter(|_| stand_in);
-    self._ready = self
-      .stand_in
-      .is_some()
-      .then(|| cx.observe(&view, |_, _, cx| cx.notify()));
+    self.stand_in_until_ready(drawn.filter(|_| stand_in), &view, cx);
     self.views.push((key, view.clone()));
     if self.views.len() > KEPT {
       self.views.remove(0);
     }
     view
+  }
+
+  /// Draws `stand_in` in place of `view` until `view` is ready.
+  fn stand_in_until_ready(
+    &mut self,
+    stand_in: Option<Entity<V>>,
+    view: &Entity<V>,
+    cx: &mut Context<WorkspaceView>,
+  ) {
+    self.stand_in = stand_in;
+    self._ready = self
+      .stand_in
+      .is_some()
+      .then(|| cx.observe(view, |_, _, cx| cx.notify()));
+  }
+
+  /// Makes `key`'s view, hidden, before the tab asks for it, unless it has
+  /// one already, so showing it draws what it read. It goes below the
+  /// newest view, so what the tab draws stays.
+  pub fn prefetch(
+    &mut self,
+    key: Key,
+    make: impl FnOnce(&mut Context<WorkspaceView>) -> Entity<V>,
+    cx: &mut Context<WorkspaceView>,
+  ) {
+    if self.views.iter().any(|(k, _)| *k == key) {
+      return;
+    }
+    let view = make(cx);
+    view.update(cx, |view, cx| view.set_shown(false, cx));
+    let at = self.views.len().saturating_sub(1);
+    self.views.insert(at, (key, view));
+    if self.views.len() > KEPT {
+      self.views.remove(0);
+    }
+  }
+
+  /// Whether `key`'s view, if the tab keeps one, has read.
+  pub fn ready_for(&self, key: &Key, cx: &App) -> bool {
+    self
+      .views
+      .iter()
+      .filter(|(k, _)| k == key)
+      .all(|(_, view)| view.read(cx).ready())
   }
 
   /// What the tab draws: the newest view once ready, else its stand-in

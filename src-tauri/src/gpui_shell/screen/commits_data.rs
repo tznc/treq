@@ -431,6 +431,11 @@ pub fn revisions(commit_id: &str, change_id: Option<&str>) -> Vec<String> {
   out
 }
 
+/// Whether a revision's diff has something in it to show.
+pub fn has_content(diff: &JjRevisionDiff) -> bool {
+  diff.too_large_to_render || !diff.committed_files.is_empty() || !diff.hunks_by_file.is_empty()
+}
+
 /// `loadCommitDiff`: the first revision whose diff has something in it,
 /// else an empty diff, or the last error when every read failed.
 pub fn first_diff(
@@ -440,13 +445,7 @@ pub fn first_diff(
   let mut error = None;
   for revision in revisions {
     match read(revision) {
-      Ok(diff)
-        if diff.too_large_to_render
-          || !diff.committed_files.is_empty()
-          || !diff.hunks_by_file.is_empty() =>
-      {
-        return Ok(diff)
-      }
+      Ok(diff) if has_content(&diff) => return Ok(diff),
       Ok(_) => {}
       Err(err) => error = Some(err),
     }
