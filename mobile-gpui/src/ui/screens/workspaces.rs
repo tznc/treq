@@ -1,10 +1,12 @@
 //! A repository's workspaces, as the desktop sidebar shows them: stacked
-//! workspaces under their base, status dots, and a menu per row.
+//! workspaces under their base and status dots. A tap opens a workspace;
+//! holding one starts selecting, and the title bar's ⋯ acts on the picks.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -27,7 +29,7 @@ use crate::{
   backend, errors,
   remote::{self, Mutation},
   store,
-  ui::{self, load, nav, sheet, widgets, Load, Location, Machine, MachineStatus},
+  ui::{self, hold::hold, load, nav, sheet, widgets, Load, Location, Machine, MachineStatus},
 };
 
 /// What a workspace sheet calls after its change applied.
@@ -52,17 +54,26 @@ pub fn open(repo: String, cx: &mut App) {
     workspace: None,
   };
   let switcher_repo = repo.clone();
+  // The header's ⋯ reaches the screen once it exists.
+  let screen: Rc<RefCell<Option<WeakEntity<WorkspacesScreen>>>> = Default::default();
+  let menu_screen = screen.clone();
   nav::push_with(
     title,
     nav::Header {
-      on_title: Some(std::rc::Rc::new(move |_, cx| {
-        switcher(switcher_repo.clone(), cx)
+      on_title: Some(Rc::new(move |_, cx| switcher(switcher_repo.clone(), cx))),
+      more: Some(Rc::new(move |_, cx| {
+        if let Some(screen) = menu_screen.borrow().as_ref() {
+          screen.update(cx, |screen, cx| screen.menu(cx)).ok();
+        }
       })),
-      more: None,
     },
     location,
     cx,
-    move |window, cx| cx.new(|cx| WorkspacesScreen::new(repo, window, cx)),
+    move |window, cx| {
+      let entity = cx.new(|cx| WorkspacesScreen::new(repo, window, cx));
+      *screen.borrow_mut() = Some(entity.downgrade());
+      entity
+    },
   );
 }
 
@@ -311,71 +322,155 @@ impl WorkspacesScreen {
     self.list.ready()?.iter().find(|s| s.workspace.id == id)
   }
 
-  fn row_menu(&self, id: i64, cx: &mut Context<Self>) {
-    if self.pending.contains(&id) {
+  /// The title bar's ⋯: actions for the picked workspaces while selecting,
+  /// otherwise a way to start selecting.
+  fn menu(&mut self, cx: &mut Context<Self>) {
+    let this = cx.weak_entity();
+    let ids = self.visible_selection(cx);
+    if self.selection.is_none() {
+      let entries = vec![
+        sheet::MenuEntry::new("menu-select", "Select workspaces", {
+          let this = this.clone();
+          move |_, cx| {
+            this.update(cx, |screen, cx| screen.select(None, cx)).ok();
+          }
+        }),
+        sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
+          this.update(cx, |screen, cx| screen.reload(cx)).ok();
+        }),
+      ];
+      return sheet::menu(repo_name(&self.repo).to_string(), entries, cx);
+    }
+    let mut entries = Vec::new();
+    if let [id] = ids[..] {
+      let Some(workspace) = self.summary(id).map(|s| s.workspace.clone()) else {
+        return;
+      };
+      let repo = self.repo.clone();
+      let (open_ws, stack_ws, rename_ws, copy_ws) = (
+        workspace.clone(),
+        workspace.branch_name.clone(),
+        workspace.clone(),
+        workspace.branch_name.clone(),
+      );
+      entries.extend([
+        sheet::MenuEntry::new("menu-open", "Open", {
+          let this = this.clone();
+          move |_, cx| {
+            this.update(cx, |screen, cx| screen.end_selection(cx)).ok();
+            workspace::open(repo.clone(), open_ws.id.to_string(), title_of(&open_ws), cx)
+          }
+        }),
+        sheet::MenuEntry::new("menu-stack", "New workspace stacked on this", {
+          let this = this.clone();
+          move |_, cx| {
+            let branch = stack_ws.clone();
+            this
+              .update(cx, |screen, cx| {
+                screen.end_selection(cx);
+                screen.new_workspace(Some(branch), cx)
+              })
+              .ok();
+          }
+        }),
+        sheet::MenuEntry::new("menu-rename", "Rename…", {
+          let this = this.clone();
+          move |_, cx| {
+            let workspace = rename_ws.clone();
+            this
+              .update(cx, |screen, cx| {
+                screen.end_selection(cx);
+                screen.rename(workspace, cx)
+              })
+              .ok();
+          }
+        }),
+        sheet::MenuEntry::new("menu-copy", "Copy branch name", move |_, cx| {
+          cx.write_to_clipboard(ClipboardItem::new_string(copy_ws.clone()))
+        }),
+      ]);
+    }
+    if !ids.is_empty() {
+      let archive_ids = ids.clone();
+      entries.push(sheet::MenuEntry::new(
+        "menu-archive",
+        match ids.len() {
+          1 => "Archive".to_string(),
+          n => format!("Archive {n} workspaces"),
+        },
+        {
+          let this = this.clone();
+          move |_, cx| {
+            this
+              .update(cx, |screen, cx| {
+                screen.confirm_archive(archive_ids.clone(), cx)
+              })
+              .ok();
+          }
+        },
+      ));
+    }
+    if let [id] = ids[..] {
+      entries.push(
+        sheet::MenuEntry::new("menu-delete", "Delete…", {
+          let this = this.clone();
+          move |_, cx| {
+            this
+              .update(cx, |screen, cx| screen.confirm_delete(id, cx))
+              .ok();
+          }
+        })
+        .danger(),
+      );
+    }
+    entries.push(sheet::MenuEntry::new("menu-select-all", "Select all", {
+      let this = this.clone();
+      move |_, cx| {
+        this.update(cx, |screen, cx| screen.select_all(cx)).ok();
+      }
+    }));
+    entries.push(sheet::MenuEntry::new(
+      "menu-select-done",
+      "Cancel selection",
+      move |_, cx| {
+        this.update(cx, |screen, cx| screen.end_selection(cx)).ok();
+      },
+    ));
+    let title = match ids.len() {
+      0 => "Nothing selected".to_string(),
+      n => format!("{n} selected"),
+    };
+    sheet::menu(title, entries, cx);
+  }
+
+  /// Starts selecting, with `id` picked when given. Picking again keeps it.
+  fn select(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
+    if id.is_some_and(|id| self.pending.contains(&id)) {
       return;
     }
-    let Some(summary) = self.summary(id) else {
-      return;
-    };
-    let workspace = summary.workspace.clone();
-    let this = cx.weak_entity();
-    let repo = self.repo.clone();
-    let (open_ws, stack_ws, rename_ws, copy_ws, select_this, archive_this, delete_this) = (
-      workspace.clone(),
-      workspace.clone(),
-      workspace.clone(),
-      workspace.branch_name.clone(),
-      this.clone(),
-      this.clone(),
-      this.clone(),
-    );
-    let entries = vec![
-      sheet::MenuEntry::new("menu-open", "Open", move |_, cx| {
-        workspace::open(repo.clone(), open_ws.id.to_string(), title_of(&open_ws), cx)
-      }),
-      sheet::MenuEntry::new("menu-stack", "New workspace stacked on this", {
-        let this = this.clone();
-        move |_, cx| {
-          let branch = stack_ws.branch_name.clone();
-          this
-            .update(cx, |screen, cx| screen.new_workspace(Some(branch), cx))
-            .ok();
-        }
-      }),
-      sheet::MenuEntry::new("menu-rename", "Rename…", {
-        let this = this.clone();
-        move |_, cx| {
-          let workspace = rename_ws.clone();
-          this
-            .update(cx, |screen, cx| screen.rename(workspace, cx))
-            .ok();
-        }
-      }),
-      sheet::MenuEntry::new("menu-copy", "Copy branch name", move |_, cx| {
-        cx.write_to_clipboard(ClipboardItem::new_string(copy_ws.clone()))
-      }),
-      sheet::MenuEntry::new("menu-select", "Select", move |_, cx| {
-        select_this
-          .update(cx, |screen, cx| {
-            screen.selection = Some(HashSet::from([id]));
-            cx.notify();
-          })
-          .ok();
-      }),
-      sheet::MenuEntry::new("menu-archive", "Archive", move |_, cx| {
-        archive_this
-          .update(cx, |screen, cx| screen.confirm_archive(vec![id], cx))
-          .ok();
-      }),
-      sheet::MenuEntry::new("menu-delete", "Delete…", move |_, cx| {
-        delete_this
-          .update(cx, |screen, cx| screen.confirm_delete(id, cx))
-          .ok();
-      })
-      .danger(),
-    ];
-    sheet::menu(title_of(&workspace), entries, cx);
+    let selection = self.selection.get_or_insert_with(HashSet::new);
+    selection.extend(id);
+    cx.notify();
+  }
+
+  /// Picks every workspace the list shows.
+  fn select_all(&mut self, cx: &mut Context<Self>) {
+    let query = self.query.read(cx).value().to_string();
+    let ids: Vec<i64> = self
+      .list
+      .ready()
+      .into_iter()
+      .flatten()
+      .filter(|s| matches(s, &query) && !self.pending.contains(&s.workspace.id))
+      .map(|s| s.workspace.id)
+      .collect();
+    self.selection.get_or_insert_with(HashSet::new).extend(ids);
+    cx.notify();
+  }
+
+  fn end_selection(&mut self, cx: &mut Context<Self>) {
+    self.selection = None;
+    cx.notify();
   }
 
   /// Archive asks first only when a workspace has uncommitted changes,
@@ -558,10 +653,14 @@ impl WorkspacesScreen {
     );
   }
 
+  /// Picks or unpicks `id`. Unpicking the last one stops selecting.
   fn toggle(&mut self, id: i64, cx: &mut Context<Self>) {
     if let Some(selection) = &mut self.selection {
       if !selection.remove(&id) {
         selection.insert(id);
+      }
+      if selection.is_empty() {
+        self.selection = None;
       }
       cx.notify();
     }
@@ -605,23 +704,11 @@ impl WorkspacesScreen {
       status.push(Dot::new(Tone::Warning, &palette).into_any_element());
     }
 
-    let menu = Button::new(("ws-menu", id as u64))
-      .ghost()
-      .small()
-      .icon(IconName::Ellipsis)
-      .on_click(cx.listener(move |this, _, _, cx| {
-        cx.stop_propagation();
-        this.row_menu(id, cx);
-      }));
     let trailing = h_flex()
       .gap_2()
       .items_center()
       .children(status)
-      .map(|t| match (pending, selecting) {
-        (true, _) => t.child(Spinner::new().small()),
-        (false, None) => t.child(menu),
-        (false, Some(_)) => t,
-      })
+      .when(pending, |t| t.child(Spinner::new().small()))
       .into_any_element();
     let leading = selecting.map(|_| {
       Checkbox::new(SharedString::from(format!("ws-check-{id}")), &palette)
@@ -629,7 +716,8 @@ impl WorkspacesScreen {
         .into_any_element()
     });
     let (repo, name) = (self.repo.clone(), title_of(workspace));
-    widgets::row_full(
+    let screen = cx.weak_entity();
+    let row = widgets::row_full(
       SharedString::from(format!("ws-{id}")),
       leading,
       title_of(workspace),
@@ -649,7 +737,12 @@ impl WorkspacesScreen {
       } else {
         workspace::open(repo.clone(), id.to_string(), name.clone(), cx);
       }
-    }))
+    }));
+    hold(("ws-hold", id as u64), row, move |_, cx| {
+      screen
+        .update(cx, |screen, cx| screen.select(Some(id), cx))
+        .ok();
+    })
     .into_any_element()
   }
 
@@ -663,32 +756,25 @@ impl WorkspacesScreen {
       .bg(theme.background);
     match &self.selection {
       Some(_) => {
-        let ids = self.visible_selection(cx);
-        let count = ids.len();
-        let busy = !self.pending.is_empty();
+        let count = self.visible_selection(cx).len();
         bar
+          .items_center()
           .child(
-            Button::new("select-cancel")
-              .outline()
-              .large()
-              .label("Cancel")
-              .on_click(cx.listener(|this, _, _, cx| {
-                this.selection = None;
-                cx.notify();
-              })),
+            div()
+              .flex_1()
+              .pl_1()
+              .font_weight(FontWeight::SEMIBOLD)
+              .child(match count {
+                0 => "Tap workspaces to select them".to_string(),
+                n => format!("{n} selected"),
+              }),
           )
           .child(
-            Button::new("archive-selected")
-              .primary()
+            Button::new("select-done")
+              .outline()
               .large()
-              .flex_1()
-              .label(match count {
-                1 => "Archive 1 workspace".to_string(),
-                n => format!("Archive {n} workspaces"),
-              })
-              .disabled(count == 0 || busy)
-              .loading(busy)
-              .on_click(cx.listener(move |this, _, _, cx| this.confirm_archive(ids.clone(), cx))),
+              .label("Done")
+              .on_click(cx.listener(|this, _, _, cx| this.end_selection(cx))),
           )
       }
       None => bar.child(

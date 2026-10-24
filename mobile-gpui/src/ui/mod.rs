@@ -3,6 +3,7 @@
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
 
+mod hold;
 mod home;
 mod load;
 mod screens;
