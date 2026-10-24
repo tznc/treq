@@ -361,9 +361,10 @@ pub struct TerminalView {
   /// The cell of the last mouse report, so a move within it sends none.
   reported: Option<(usize, usize)>,
   cursor_on: bool,
-  /// Whether the last frame had focus. Only a focused cursor blinks, so an
-  /// unfocused terminal skips the blink's redraw.
-  focused: bool,
+  /// The blink's timer. Only a focused cursor in the window in front
+  /// blinks, and the timer runs only while one does, so an idle terminal
+  /// wakes nothing.
+  blink: Option<Task<()>>,
   /// Fires `Idle` once the process stops writing; each burst replaces it.
   idle: Option<Task<()>>,
   chat_due: bool,
@@ -415,7 +416,7 @@ impl TerminalView {
       selecting: false,
       reported: None,
       cursor_on: true,
-      focused: false,
+      blink: None,
       idle: None,
       chat_due: false,
       search: Search::default(),
@@ -622,24 +623,34 @@ impl TerminalView {
         }
       }
     }));
-    if self._tasks.len() == 1 {
-      self._tasks.push(cx.spawn(async move |this, cx| loop {
-        cx.background_executor().timer(BLINK).await;
-        if this
-          .update(cx, |view, cx| {
-            if view.focused {
-              view.cursor_on = !view.cursor_on;
-              cx.notify();
-            } else {
-              view.cursor_on = true;
-            }
-          })
-          .is_err()
-        {
-          break;
+  }
+
+  fn blinks(&self, window: &Window) -> bool {
+    self.focus.is_focused(window) && window.is_window_active()
+  }
+
+  /// Blinks the cursor until the terminal loses focus or the window goes
+  /// to the background, then leaves it on.
+  fn blink(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.blink = Some(cx.spawn_in(window, async move |this, cx| loop {
+      cx.background_executor().timer(BLINK).await;
+      let blinking = this.update_in(cx, |view, window, cx| {
+        if view.blinks(window) {
+          view.cursor_on = !view.cursor_on;
+          cx.notify();
+          return true;
         }
-      }));
-    }
+        view.blink = None;
+        if !view.cursor_on {
+          view.cursor_on = true;
+          cx.notify();
+        }
+        false
+      });
+      if !matches!(blinking, Ok(true)) {
+        break;
+      }
+    }));
   }
 
   fn on_output(&mut self, from_process: bool, cx: &mut Context<Self>) {
@@ -1490,7 +1501,9 @@ impl Render for TerminalView {
     self.tooltips.sync(cx);
     let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
-    self.focused = focused;
+    if self.blink.is_none() && self.blinks(window) {
+      self.blink(window, cx);
+    }
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
