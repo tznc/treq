@@ -5,18 +5,16 @@
 // The account deleted is always the one the bearer token names. The body is
 // never read for a user id.
 //
-// A user who is the only owner of an organization that has other members
-// is refused (409 last_owner) before anything is released: every shared
-// organization keeps at least one owner. They promote another member or
-// delete the organization first. An organization the user is the only
-// member of does not block; it is deleted with them (step 5).
+// A user who is the last owner of any organization is refused (409
+// last_owner) before anything is released: every organization keeps at
+// least one owner. They promote another member or delete the organization
+// first. This includes an organization the user is the only member of, so
+// a Team subscription is never ended as a side effect of account deletion.
 //
 // Order matters. Everything that holds an external resource or a charge is
 // released first, and any failure there stops the request before the auth
 // user is deleted, so the user can retry:
-//   1. Cancel live Stripe subscriptions immediately (the user's own, and the
-//      Team subscription of any organization the user is the only member
-//      of, since deleting the user deletes that organization).
+//   1. Cancel the user's live Stripe subscriptions immediately.
 //   2. Destroy cloud workspace machines at the provider. The provider id is
 //      lost once the rows cascade away, so a machine left running here
 //      could never be found again.
@@ -25,8 +23,8 @@
 //   4. Delete personal GitHub App installation rows. Their foreign key is
 //      SET NULL, which would otherwise leave them ownerless.
 //   5. Delete the auth user. Foreign keys cascade the remaining user rows,
-//      and the organizations_on_account_delete trigger (029) deletes the
-//      organizations left with no members.
+//      including the user's memberships in organizations that have another
+//      owner.
 //
 // billing_customers and billing_subscriptions have no foreign key to the
 // user and are kept on purpose, for invoices, refunds and disputes.
@@ -43,8 +41,8 @@ export type LiveInstance = { id: string; provider_resource_id: string | null };
 export type OrganizationRef = { id: string; name: string };
 
 export interface DeleteAccountStore {
-  /** Organizations with other members in which the user is the only owner. */
-  organizationsNeedingOwner(): Promise<OrganizationRef[]>;
+  /** Organizations in which the user is the only owner. */
+  lastOwnedOrganizations(): Promise<OrganizationRef[]>;
   /** Stripe subscription ids that may still bill once the user is gone. */
   subscriptionsToCancel(): Promise<string[]>;
   /** The user's remote instances not yet marked deleted. */
@@ -102,12 +100,12 @@ export async function deleteAccount(
 
   const store = deps.storeFor(user.id);
 
-  const needingOwner = await store.organizationsNeedingOwner();
+  const needingOwner = await store.lastOwnedOrganizations();
   if (needingOwner.length > 0) {
     return {
       status: 409,
       body: {
-        error: `You are the only owner of ${needingOwner
+        error: `You are the last owner of ${needingOwner
           .map((org) => org.name)
           .join(
             ", ",
@@ -233,7 +231,7 @@ export function deleteAccountStoreFor(
   userId: string,
 ): DeleteAccountStore {
   return {
-    async organizationsNeedingOwner() {
+    async lastOwnedOrganizations() {
       const owned = check(
         await client
           .from("organization_members")
@@ -244,24 +242,23 @@ export function deleteAccountStoreFor(
       ) as { org_id: string }[];
       if (owned.length === 0) return [];
 
-      const members = check(
+      const owners = check(
         await client
           .from("organization_members")
-          .select("org_id, user_id, role")
+          .select("org_id, user_id")
+          .eq("role", "owner")
           .in(
             "org_id",
             owned.map((row) => row.org_id),
           ),
-        "organization member lookup",
-      ) as { org_id: string; user_id: string; role: string }[];
+        "organization owner lookup",
+      ) as { org_id: string; user_id: string }[];
       const blocking = owned
         .map((row) => row.org_id)
-        .filter((orgId) => {
-          const others = members.filter(
-            (m) => m.org_id === orgId && m.user_id !== userId,
-          );
-          return others.length > 0 && !others.some((m) => m.role === "owner");
-        });
+        .filter(
+          (orgId) =>
+            !owners.some((o) => o.org_id === orgId && o.user_id !== userId),
+        );
       if (blocking.length === 0) return [];
 
       const orgs = check(
@@ -310,35 +307,6 @@ export function deleteAccountStoreFor(
           "customer subscription lookup",
         ) as { stripe_subscription_id: string }[];
         for (const row of byCustomer) ids.add(row.stripe_subscription_id);
-      }
-
-      const memberships = check(
-        await client
-          .from("organization_members")
-          .select("org_id")
-          .eq("user_id", userId),
-        "membership lookup",
-      ) as { org_id: string }[];
-      const soleOrgs: string[] = [];
-      for (const { org_id } of memberships) {
-        const { count, error } = await client
-          .from("organization_members")
-          .select("user_id", { count: "exact", head: true })
-          .eq("org_id", org_id);
-        if (error) throw new Error(`member count failed: ${error.message}`);
-        if (count === 1) soleOrgs.push(org_id);
-      }
-      if (soleOrgs.length > 0) {
-        const team = check(
-          await client
-            .from("billing_subscriptions")
-            .select("stripe_subscription_id")
-            .eq("owner_type", "organization")
-            .in("owner_id", soleOrgs)
-            .not("status", "in", ENDED_LIST),
-          "organization subscription lookup",
-        ) as { stripe_subscription_id: string }[];
-        for (const row of team) ids.add(row.stripe_subscription_id);
       }
 
       return [...ids];

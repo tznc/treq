@@ -27,7 +27,7 @@ function fakeStore(
   const log: string[] = [];
   const instances = [...(seed.instances ?? [])];
   const store: DeleteAccountStore = {
-    async organizationsNeedingOwner() {
+    async lastOwnedOrganizations() {
       return seed.lastOwnerOf ?? [];
     },
     async subscriptionsToCancel() {
@@ -146,7 +146,7 @@ describe("deleteAccount authorization", () => {
 });
 
 describe("deleteAccount organization ownership", () => {
-  it("refuses while the user is the last owner of an organization with other members", async () => {
+  it("refuses while the user is the last owner of any organization", async () => {
     const { store, log } = fakeStore({
       subscriptions: ["sub_a"],
       instances: [{ id: "inst-1", provider_resource_id: "dev-treq-1" }],
@@ -173,7 +173,7 @@ describe("deleteAccount organization ownership", () => {
       status: 409,
       body: {
         error:
-          "You are the only owner of Acme, Globex. Make another member an owner, or delete the organization, before deleting your account.",
+          "You are the last owner of Acme, Globex. Make another member an owner, or delete the organization, before deleting your account.",
         code: "last_owner",
         organizations: [
           { id: "org-1", name: "Acme" },

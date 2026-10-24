@@ -22,7 +22,7 @@ import {
   deleteAccountStoreFor,
 } from "../../../supabase/functions/delete-account/lib";
 import { handleOrganizationsRequest } from "../../../supabase/functions/organizations/lib";
-import { clearBilling, grantPro, grantTeam } from "../billing";
+import { clearBilling, endPro, grantPro, grantTeam } from "../billing";
 import { getAnonClient, getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
 import {
@@ -231,17 +231,21 @@ it("deletes only the caller and releases their billing, machines and integration
 
     const ownerToken = `Bearer ${await accessToken(owner)}`;
 
-    // The owner is the only owner of an organization that has another
-    // member, so deletion is refused before anything is released.
+    // The owner is the last owner of both organizations, the shared one and
+    // the one only they belong to, so deletion is refused before anything
+    // is released.
     const blockedStubs = newStubs();
     const blocked = await callDeleteAccount(admin, ownerToken, blockedStubs);
     expect(blocked).toEqual({
       status: 409,
       body: {
         error:
-          "You are the only owner of Shared QA. Make another member an owner, or delete the organization, before deleting your account.",
+          "You are the last owner of Shared QA, Solo QA. Make another member an owner, or delete the organization, before deleting your account.",
         code: "last_owner",
-        organizations: [{ id: sharedOrg, name: "Shared QA" }],
+        organizations: [
+          { id: sharedOrg, name: "Shared QA" },
+          { id: soloOrg, name: "Solo QA" },
+        ],
       },
     });
     expect(blockedStubs).toEqual(newStubs());
@@ -253,8 +257,8 @@ it("deletes only the caller and releases their billing, machines and integration
 
     await recordOutcome("delete-account-02-last-owner-blocked", {
       expectations: [
-        "While the user is the only owner of an organization with another member, delete-account answers 409 last_owner naming that organization.",
-        "The organization the user is the only member of does not block.",
+        "While the user is the last owner of an organization, delete-account answers 409 last_owner naming every such organization.",
+        "That includes the organization the user is the only member of, not just the shared one.",
         "Nothing is released: no Stripe, provider or Linear call, and the user, instance and organizations remain.",
       ],
       details: { blocked, stubs: blockedStubs },
@@ -269,6 +273,23 @@ it("deletes only the caller and releases their billing, machines and integration
       user_id: teammate.user.id,
     });
     expect(promoted.status).toBe(200);
+
+    // Promoting the teammate settles the shared organization; the solo one
+    // still blocks until it is deleted.
+    const stillBlocked = await callDeleteAccount(admin, ownerToken, newStubs());
+    expect(stillBlocked.status).toBe(409);
+    expect(stillBlocked.body.organizations).toEqual([
+      { id: soloOrg, name: "Solo QA" },
+    ]);
+    // organization_delete refuses while Team is live, so end it first, as
+    // the Stripe portal cancellation would.
+    await endPro(admin, soloTeam);
+    const removed = await organizations(
+      admin,
+      owner,
+    )({ action: "delete_organization", organization_id: soloOrg });
+    expect(removed.status).toBe(200);
+    expect(await rowCount(admin, "organizations", "id", soloOrg)).toBe(0);
 
     // The caller names another user in the body. It must be ignored.
     const stubs = newStubs();
@@ -306,12 +327,7 @@ it("deletes only the caller and releases their billing, machines and integration
 
     expect(
       stubs.stripeCalls.filter((c) => c.startsWith("DELETE")).sort(),
-    ).toEqual(
-      [
-        `DELETE /v1/subscriptions/${ownPro.subscriptionId}`,
-        `DELETE /v1/subscriptions/${soloTeam.subscriptionId}`,
-      ].sort(),
-    );
+    ).toEqual([`DELETE /v1/subscriptions/${ownPro.subscriptionId}`]);
     expect(stubs.stripeCalls).not.toContain(
       `DELETE /v1/subscriptions/${sharedTeam.subscriptionId}`,
     );
@@ -320,7 +336,7 @@ it("deletes only the caller and releases their billing, machines and integration
 
     await recordOutcome("delete-account-04-external-cleanup", {
       expectations: [
-        "Stripe cancels the user's Pro and the Team subscription of the organization they were the only member of, and not the shared organization's Team.",
+        "Stripe cancels only the user's own Pro, not the shared organization's Team.",
         "The user's cloud workspace machine is deleted at the provider.",
         "The user's Linear access token is revoked.",
       ],
@@ -366,7 +382,7 @@ it("deletes only the caller and releases their billing, machines and integration
     await recordOutcome("delete-account-05-rows", {
       expectations: [
         "The user's profile, remote instance, Linear token, memberships and personal GitHub installation (with its repositories) are gone.",
-        "The solo organization is deleted; the shared one survives with the teammate (promoted before deletion) as its only owner.",
+        "The shared organization survives with the teammate (promoted before deletion) as its only owner.",
         "billing_subscriptions keeps the user's subscription row for accounting.",
       ],
       details: { sharedMembers, soloOrg, sharedOrg },
