@@ -118,14 +118,21 @@ impl ChangesView {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
-    self.run(
+    // The poll mostly reads back what shows: only a change redraws and
+    // places the threads again.
+    self.run_changed(
       move |host, parent| host.agent_comments(&parent.repo_path, id),
       |view, result, _| match result {
-        Ok(comments) => {
+        Ok(comments) if comments != view.threads.agent => {
           view.threads.agent = comments;
           view.threads.revision += 1;
+          true
         }
-        Err(err) => log::warn!("Failed to read agent review comments: {err}"),
+        Ok(_) => false,
+        Err(err) => {
+          log::warn!("Failed to read agent review comments: {err}");
+          false
+        }
       },
       cx,
     );
