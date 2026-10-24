@@ -1581,14 +1581,12 @@ impl WorkspaceView {
     }))
   }
 
-  /// The shown workspace's branch; `None` for the home repository.
+  /// The shown workspace's branch, from the loaded header rather than a
+  /// workspace listing on the main thread; `None` for the home repository.
   fn snapshot_branch(&self) -> Option<String> {
     let id = self.route.workspace_id?;
-    super::code_data::CodeHost::workspaces(&*self.code_host, &self.route.repo_path)
-      .ok()?
-      .into_iter()
-      .find(|w| w.id == id)
-      .map(|w| w.branch_name)
+    let workspace = self.loaded.as_ref()?.workspace.as_ref()?;
+    (workspace.id == id).then(|| workspace.branch_name.clone())
   }
 
   /// Starts the session `request` builds, off the main thread; toasts

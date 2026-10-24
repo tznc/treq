@@ -141,6 +141,17 @@ pub(in crate::gpui_shell) fn sidebar_action(
   controller(label, cx).is_some_and(|c| c.update(cx, |c, cx| c.sidebar_action(action, cx)))
 }
 
+/// Workspace `id` of `repo`, as window `label` last read it; `None` when
+/// the window has not read it (or the model does not drive the window).
+pub(in crate::gpui_shell) fn workspace(
+  label: &str,
+  repo: &str,
+  id: i64,
+  cx: &App,
+) -> Option<crate::local_db::Workspace> {
+  controller(label, cx)?.read(cx).workspace(repo, id).cloned()
+}
+
 /// A keyboard shortcut pressed in window `label`.
 /// Window `label`'s confirmation answered: `yes` for its verb.
 pub(in crate::gpui_shell) fn answer(label: &str, yes: bool, cx: &mut App) {

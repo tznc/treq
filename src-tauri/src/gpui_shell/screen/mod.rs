@@ -43,6 +43,7 @@ pub(super) mod file_picker;
 mod github;
 mod github_data;
 mod highlight;
+pub(crate) use highlight::warm as warm_highlighting;
 mod intraline;
 pub(super) mod launch_data;
 mod linear;
