@@ -20,11 +20,11 @@ use super::{CommitsView, Kind};
 use crate::{
   gpui_shell::{
     screen::{
-      code_data::group_by_day,
       commits_data::{line_kind, line_numbers, History, LineKind},
       highlight,
     },
     theme::{self, Palette},
+    time,
     ui::{self, zpx},
   },
   jj::{JjDiffHunk, JjLogCommit},
@@ -177,6 +177,22 @@ fn ident<'a>(
   }
 }
 
+/// A day's label over `commit` when it starts a new day (`group_by_day`).
+fn day_row(
+  feed: &mut Feed,
+  rows: &mut Rows,
+  day: &mut Option<Option<chrono::NaiveDate>>,
+  commit: &JjLogCommit,
+) {
+  let this = time::day(&commit.timestamp);
+  if *day == Some(this) {
+    return;
+  }
+  *day = Some(this);
+  rows.push(Row::Day(feed.days.len()), 5, 0);
+  feed.days.push(time::day_label(&commit.timestamp));
+}
+
 impl CommitsView {
   fn layout_key(&self) -> Key {
     Key {
@@ -195,26 +211,32 @@ impl CommitsView {
     }
   }
 
-  /// The commits the list shows, and the banners over them.
+  /// The commits the list shows, and the banners over them. Each listed
+  /// commit is cloned once, into its entry.
   fn layout_rows(&mut self) -> Feed {
     let mut feed = Feed::default();
     let Some(history) = self.history.as_ref() else {
       return feed;
     };
     let home = self.home();
-    let own: Vec<JjLogCommit> = history
-      .own
-      .iter()
-      .filter(|c| !self.removed.contains(&c.commit_id))
-      .cloned()
-      .collect();
-    let tentative = history
-      .tentative
-      .clone()
-      .filter(|_| !home && !self.hide_tentative);
-    let visible = History {
-      own: own.clone(),
-      ..history.clone()
+    // Only a removal, rare and short-lived, needs a filtered copy.
+    let filtered;
+    let visible = if self.removed.is_empty() {
+      history
+    } else {
+      filtered = History {
+        own: history
+          .own
+          .iter()
+          .filter(|c| !self.removed.contains(&c.commit_id))
+          .cloned()
+          .collect(),
+        target: history.target.clone(),
+        tentative: history.tentative.clone(),
+        target_branch: String::new(),
+        default_workspace: history.default_workspace,
+      };
+      &filtered
     };
     if visible.is_empty() {
       return feed;
@@ -225,8 +247,13 @@ impl CommitsView {
       .into_iter()
       .map(|c| c.change_id)
       .collect();
-    let target = history.target.clone();
     let shows_target = visible.shows_target();
+    let own = visible.own.clone();
+    let target = shows_target.then(|| history.target.clone());
+    let tentative = history
+      .tentative
+      .clone()
+      .filter(|_| !home && !self.hide_tentative);
     let mut rows = Rows::default();
     let banner = if !feed.conflicted.is_empty() {
       4
@@ -240,31 +267,29 @@ impl CommitsView {
       self.commit_rows(&mut feed, &mut rows, commit, Kind::Tentative, Some(label));
       rows.pending = rows.pending.max(3);
     }
+    let own_len = own.len();
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
-      rows.push(Row::Day(feed.days.len()), 5, 0);
-      feed.days.push(label);
-      for commit in commits {
-        self.commit_rows(&mut feed, &mut rows, commit, Kind::Own { first }, None);
-        first = false;
-      }
+    let mut day = None;
+    for commit in own {
+      day_row(&mut feed, &mut rows, &mut day, &commit);
+      self.commit_rows(&mut feed, &mut rows, commit, Kind::Own { first }, None);
+      first = false;
     }
-    if home && own.len() + 1 >= self.home_limit {
+    if home && own_len + 1 >= self.home_limit {
       rows.push(Row::LoadMore(false), 3, 0);
     }
-    if shows_target {
-      if own.is_empty() {
+    if let Some(target) = target {
+      if own_len == 0 {
         rows.push(Row::OwnEmpty, 0, 3);
       }
       rows.push(Row::Divider, 4, 2);
-      for (label, commits) in group_by_day(&target) {
-        rows.push(Row::Day(feed.days.len()), 5, 0);
-        feed.days.push(label);
-        for commit in commits {
-          self.commit_rows(&mut feed, &mut rows, commit, Kind::Target, None);
-        }
+      let target_len = target.len();
+      let mut day = None;
+      for commit in target {
+        day_row(&mut feed, &mut rows, &mut day, &commit);
+        self.commit_rows(&mut feed, &mut rows, commit, Kind::Target, None);
       }
-      if target.len() >= self.target_limit {
+      if target_len >= self.target_limit {
         rows.push(Row::LoadMore(true), 3, 0);
       }
     }
