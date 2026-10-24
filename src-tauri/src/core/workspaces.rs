@@ -1108,14 +1108,37 @@ pub fn archive_workspace_removing_directory_later(
   repo_path: &str,
   workspace_id: i64,
 ) -> Result<(), String> {
-  if let Some(path) = archive_workspace_leaving_directory(repo_path, &workspace_id)? {
+  remove_directory_later(archive_workspace_leaving_directory(
+    repo_path,
+    &workspace_id,
+  )?);
+  Ok(())
+}
+
+/// [`delete_workspace`] that removes the directory in the background: the
+/// checkout has already moved out of `.treq/workspaces/`, and deleting a
+/// `node_modules` takes seconds the caller need not wait for.
+pub fn delete_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<(), String> {
+  remove_directory_later(forget_workspace_record(
+    repo_path,
+    &workspace_id,
+    RemoveWorkspaceDiskMode::JjForgetThenRemoveDir,
+    WorkspaceRecordMode::Delete,
+  )?);
+  Ok(())
+}
+
+fn remove_directory_later(leftover: Option<String>) {
+  if let Some(path) = leftover {
     std::thread::spawn(move || {
       if let Err(e) = jj::remove_workspace_directory_only(&path) {
         tracing::warn!("Background workspace directory removal failed: {}", e);
       }
     });
   }
-  Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -2968,6 +2991,27 @@ pub fn merge_workspace(
   message: &str,
   merge_strategy: MergeCommit,
 ) -> Result<(), String> {
+  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, false)
+}
+
+/// [`merge_workspace`] that removes the merged checkout in the background
+/// (see [`delete_workspace_removing_directory_later`]).
+pub fn merge_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+) -> Result<(), String> {
+  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, true)
+}
+
+fn merge_workspace_with(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+  defer_removal: bool,
+) -> Result<(), String> {
   // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
@@ -3037,9 +3081,19 @@ pub fn merge_workspace(
     sync_home_and_workspace_for_branch(repo_path, target_branch, SyncSource::WorkspaceToHome)?;
   }
 
-  // Remove the workspace from jj (also deletes the workspace directory)
-  jj::remove_workspace(repo_path, workspace_path_str)
+  // Remove the workspace from jj and its directory from disk.
+  jj::forget_workspace(repo_path, workspace_path_str)
     .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+  if defer_removal {
+    remove_directory_later(Some(move_workspace_dir_to_trash(
+      repo_path,
+      &workspace_path,
+      workspace_id,
+    )));
+  } else {
+    jj::remove_workspace_directory_only(workspace_path_str)
+      .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+  }
 
   // Remove from database
   local_db::delete_workspace(repo_path, workspace_id)
