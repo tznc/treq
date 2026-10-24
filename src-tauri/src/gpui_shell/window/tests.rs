@@ -1985,3 +1985,61 @@ fn draws_a_home_row_and_group_for_each_repository(cx: &mut TestAppContext) {
   assert_eq!(window.route_workspace(), None);
   assert!(window.last().sidebar.unwrap().repos[0].home_selected);
 }
+
+/// What the model costs per action and per poll with many workspaces
+/// (ignored): `cargo test --features gpui-shell --lib window_model_perf --
+/// --ignored --nocapture --test-threads=1`.
+#[gpui::test]
+#[ignore = "perf report"]
+fn window_model_perf(cx: &mut TestAppContext) {
+  fn report(name: &str, samples: &mut [std::time::Duration]) {
+    samples.sort();
+    let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.;
+    let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
+    println!(
+      "{name:<34} n={:<3} mean={mean:>8.3}ms  p50={:>8.3}ms  max={:>8.3}ms",
+      samples.len(),
+      ms(samples[samples.len() / 2]),
+      ms(samples[samples.len() - 1]),
+    );
+  }
+  for count in [50, 200] {
+    // Stacks of three, as agents stack work.
+    let workspaces: Vec<Workspace> = (1..=count)
+      .map(|i| {
+        let target = (i % 3 != 1).then(|| format!("feat/ws-{}", i - 1));
+        let mut w = workspace(i, &format!("feat/ws-{i}"), target.as_deref());
+        w.created_at = format!("2026-10-01T00:00:{:02}Z", i % 60);
+        w
+      })
+      .collect();
+    let host = Arc::new(FakeHost::on("/repo", workspaces));
+    let window = Window::open(cx, host, Some("/repo"));
+    let mut select: Vec<_> = (1..=30)
+      .map(|i| {
+        let start = std::time::Instant::now();
+        window.controller.update(cx, |c, cx| {
+          c.sidebar_action(
+            &SidebarAction::SelectWorkspace {
+              id: i,
+              shift: false,
+              toggle: false,
+            },
+            cx,
+          )
+        });
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} workspaces: select"), &mut select);
+    let mut poll: Vec<_> = (0..10)
+      .map(|_| {
+        let start = std::time::Instant::now();
+        cx.executor().advance_clock(POLL);
+        cx.run_until_parked();
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} workspaces: unchanged poll"), &mut poll);
+  }
+}
