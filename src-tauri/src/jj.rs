@@ -4432,36 +4432,87 @@ pub fn jj_get_file_hunks(
   if file_path.contains('\0') || file_path.is_empty() {
     return Err(JjError::IoError("Invalid file path".to_string()));
   }
+  let (_, mut hunks) = jj_get_file_hunks_batch(
+    workspace_path,
+    &[file_path.to_string()],
+    conflict_marker_style,
+  )?;
+  hunks
+    .pop()
+    .unwrap_or_else(|| Err(JjError::IoError("No hunks read".to_string())))
+}
 
-  let mut loaded = load_workspace_repo(workspace_path)?;
-  import_colocated_git_state(&mut loaded, workspace_path)?;
-  let workspace_name = loaded.workspace.workspace_name().to_owned();
-  let wc_commit_id = loaded
-    .repo
-    .view()
-    .get_wc_commit_id(&workspace_name)
-    .cloned()
-    .ok_or_else(|| JjError::IoError("No working-copy commit found".to_string()))?;
-  let wc_commit = loaded
-    .repo
-    .store()
-    .get_commit(&wc_commit_id)
-    .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))?;
-  let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref()))
-    .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
-  let mut tree = wc_commit.tree();
-  if let Some((_, snapshotted_tree)) = snapshot_working_copy_tree(&mut loaded, workspace_path)? {
-    tree = snapshotted_tree;
+/// The [`working_copy_token`] of a batch read, and each file's hunks.
+pub type FileHunksBatch = (String, Vec<Result<Vec<JjDiffHunk>, JjError>>);
+
+/// [`jj_get_file_hunks`] for several files from one load and snapshot,
+/// with the [`working_copy_token`] of the diff they were read from.
+pub fn jj_get_file_hunks_batch(
+  workspace_path: &str,
+  file_paths: &[String],
+  conflict_marker_style: &str,
+) -> Result<FileHunksBatch, JjError> {
+  let ignore_root =
+    derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
+  with_working_copy_lock(workspace_path, || {
+    let mut loaded = load_workspace_repo(workspace_path)?;
+    import_colocated_git_state(&mut loaded, workspace_path)?;
+    let (wc_commit, tree) = snapshot_up_to_date_working_copy(&mut loaded, &ignore_root)?
+      .ok_or_else(|| JjError::IoError("No working-copy commit found".to_string()))?;
+    let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref()))
+      .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
+    let merge_options = MergeOptions::from_settings(&loaded.settings)
+      .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
+    let style = parse_conflict_marker_style(conflict_marker_style);
+    let hunks = file_paths
+      .iter()
+      .map(|file_path| {
+        file_hunks_between(
+          &loaded,
+          &parent_tree,
+          &tree,
+          file_path,
+          style,
+          &merge_options,
+        )
+      })
+      .collect();
+    Ok((working_copy_token(&parent_tree, &tree), hunks))
+  })
+}
+
+/// Names a working-copy diff by its two trees: reads with the same token
+/// list the same files with the same hunks.
+fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
+  let hex = |tree: &MergedTree| {
+    tree
+      .tree_ids()
+      .iter()
+      .map(ObjectId::hex)
+      .collect::<Vec<_>>()
+      .join(",")
+  };
+  format!("{}..{}", hex(parent_tree), hex(tree))
+}
+
+/// One file's hunks between the working copy's parent tree and its tree.
+fn file_hunks_between(
+  loaded: &LoadedWorkspaceRepo,
+  parent_tree: &MergedTree,
+  tree: &MergedTree,
+  file_path: &str,
+  style: ConflictMarkerStyle,
+  merge_options: &MergeOptions,
+) -> Result<Vec<JjDiffHunk>, JjError> {
+  if file_path.contains('\0') || file_path.is_empty() {
+    return Err(JjError::IoError("Invalid file path".to_string()));
   }
-
   let target_repo_path = RepoPathBuf::from_internal_string(file_path)
     .map_err(|_| JjError::IoError("Invalid file path".to_string()))?;
   let before = block_on(parent_tree.path_value(target_repo_path.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent path value: {}", e)))?;
   let after = block_on(tree.path_value(target_repo_path.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read working path value: {}", e)))?;
-  let merge_options = MergeOptions::from_settings(&loaded.settings)
-    .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
   let labels = ConflictLabels::unlabeled();
   let before_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
     loaded.repo.store(),
@@ -4478,18 +4529,17 @@ pub fn jj_get_file_hunks(
   ))
   .map_err(|e| JjError::IoError(format!("Failed to materialize working value: {}", e)))?;
 
-  let style = parse_conflict_marker_style(conflict_marker_style);
   let before_bytes = block_on(materialized_value_to_bytes(
     target_repo_path.as_ref(),
     before_materialized,
     style,
-    Some(&merge_options),
+    Some(merge_options),
   ));
   let after_bytes = block_on(materialized_value_to_bytes(
     target_repo_path.as_ref(),
     after_materialized,
     style,
-    Some(&merge_options),
+    Some(merge_options),
   ));
   let (_, mut hunks, conflict_style, conflict_regions_raw) =
     build_file_diff_from_bytes(before_bytes, after_bytes);

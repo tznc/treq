@@ -550,7 +550,6 @@ impl Remote {
         let hunks = self.file_hunks(workspace_id, &path)?;
         Ok(WorkspaceFileHunksBatchFile {
           path,
-          content_hash: String::new(),
           hunks,
           error: None,
         })
