@@ -104,7 +104,7 @@ pub struct PendingReview {
 /// A local-only review comment anchored to a line range of some reviewed
 /// target. These are never pushed to GitHub and are structurally distinct from
 /// the read-only `GhReviewThread`/`GhReviewComment` types on the frontend.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct AgentReviewComment {
   pub id: String,
   pub repo_path: String,
