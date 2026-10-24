@@ -204,7 +204,7 @@ static JUST_INITIALIZED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
 /// for it.
 const JUST_INITIALIZED_FOR: Duration = Duration::from_secs(30);
 
-fn note_just_initialized(repo: &str) {
+pub(crate) fn note_just_initialized(repo: &str) {
   let mut noted = JUST_INITIALIZED.lock_or_recover();
   noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
   noted.push((repo.to_string(), std::time::Instant::now()));

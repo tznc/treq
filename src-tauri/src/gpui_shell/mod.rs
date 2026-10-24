@@ -53,6 +53,7 @@ use screen::Screen;
 pub use screen::{Modal, ScreenSnapshot};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
+pub(crate) use window::note_just_initialized;
 
 /// Tooltips, menus, toasts and the modal window are windows of their own,
 /// placed at screen positions (`popup`, `modal`), which a Wayland client
