@@ -193,3 +193,64 @@ fn commits_steady_perf(cx: &mut TestAppContext) {
   let mut steady: Vec<_> = (0..20).map(|_| frame(&mut h)).collect();
   report("steady frame, 100 commits", &mut steady);
 }
+
+/// 2,000 commits over 100 days, the first one's large diff aside.
+fn history_host() -> FakeHost {
+  let mut host = large_host();
+  let commits: Vec<_> = (0..2000)
+    .map(|i| {
+      let mut c = commit(&format!("c{i}"), 10, 4);
+      c["timestamp"] = format!("2026-07-{:02}T{:02}:00:00Z", 1 + (i / 20) % 28, i % 20).into();
+      c["description"] = format!("Commit number {i}\n\nA body that runs on for a while.").into();
+      c
+    })
+    .collect();
+  host.history = serde_json::from_value(serde_json::json!({
+    "commits": commits,
+    "target_branch": "main",
+    "workspace_branch": "feature/login"
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn commits_history_perf(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, history_host(), commits_route());
+  h.cx.run_until_parked();
+  assert!(h.drawn("commit-row-c0"));
+  let mut steady: Vec<_> = (0..20).map(|_| frame(&mut h)).collect();
+  report("steady frame, 2000 commits", &mut steady);
+
+  // Opening and closing a commit lays the rows out again.
+  let mut toggle: Vec<_> = (0..10)
+    .map(|_| timed(&mut h, |h| h.click("commit-row-c1")))
+    .collect();
+  report("open/close a commit", &mut toggle);
+
+  let origin = h.cx.debug_bounds("commits-list").expect("list").center();
+  let mut hover: Vec<_> = (0..30)
+    .map(|i| {
+      let at = gpui::point(origin.x, origin.y + gpui::px(i as f32 * 9.));
+      timed(&mut h, |h| {
+        h.cx.simulate_mouse_move(at, None, Modifiers::none())
+      })
+    })
+    .collect();
+  report("hover rows", &mut hover);
+
+  let mut scroll: Vec<_> = (0..30)
+    .map(|_| {
+      timed(&mut h, |h| {
+        h.cx.simulate_event(gpui::ScrollWheelEvent {
+          position: origin,
+          delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-400.))),
+          modifiers: Modifiers::none(),
+          touch_phase: gpui::TouchPhase::Moved,
+        })
+      })
+    })
+    .collect();
+  report("scroll 400px", &mut scroll);
+}

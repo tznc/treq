@@ -364,7 +364,7 @@ pub fn run(
 ) -> Result<Vec<NewWorkspaceRow>, String> {
   workspaces::sync_workspaces(repo_path)?;
   // Remote branches named in the text must be visible before they open.
-  let _ = jj::jj_git_fetch(repo_path);
+  let _ = jj::jj_git_fetch_unless_recent(repo_path, workspaces::RECENT_FETCH);
   let mut rows = plan(repo_path, text, stack_on)?;
   let default = super::get_repo_default_branch(repo_path)?;
   let copy_files = included_copy_files(repo_path);
@@ -435,8 +435,15 @@ fn create(
     metadata,
     copy_files,
   )?;
-  if stacked {
-    workspaces::apply_workspace_target_branch(repo_path, workspace.id, base)?;
+  // Stacked on a workspace's branch, creation already targets it (and starts
+  // on its tip); only a plain branch as the base needs the retarget.
+  if stacked && workspace.target_branch.as_deref() != Some(base) {
+    workspaces::apply_workspace_target_branch_after(
+      repo_path,
+      workspace.id,
+      base,
+      workspaces::RECENT_FETCH,
+    )?;
   }
   Ok(workspace.id)
 }

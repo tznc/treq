@@ -416,6 +416,8 @@ pub struct Snapshot {
   pub conflicted: Option<Vec<String>>,
   /// Listed paths that are generated, their diffs behind "Load diff".
   pub generated: HashSet<String>,
+  /// The diff `files` were read from (`working_copy_token`), when known.
+  pub token: Option<String>,
 }
 
 impl Snapshot {
@@ -456,6 +458,7 @@ impl Snapshot {
       committed_hunks,
       conflicted: Some(conflicted),
       generated: HashSet::new(),
+      token: diff.working_copy_token,
     }
   }
 
@@ -726,15 +729,20 @@ pub fn full_path(workspace_path: &str, path: &str) -> String {
 
 /// `computeHunksHash`: djb2 over each hunk's header and lines, in hex.
 pub fn hunks_hash(hunks: &[JjDiffHunk]) -> String {
-  let text = hunks
-    .iter()
-    .map(|h| format!("{}{}", h.header, h.lines.concat()))
-    .collect::<Vec<_>>()
-    .join("|");
   let mut hash: u64 = 5381;
-  // JavaScript's `charCodeAt` counts UTF-16 units.
-  for unit in text.encode_utf16() {
-    hash = (hash * 33 + u64::from(unit)) % (1 << 32);
+  // JavaScript's `charCodeAt` counts UTF-16 units. Hashed piece by piece,
+  // as the hunks' text joined with `|`, without building that string.
+  let mut add = |text: &str| {
+    for unit in text.encode_utf16() {
+      hash = (hash * 33 + u64::from(unit)) % (1 << 32);
+    }
+  };
+  for (i, hunk) in hunks.iter().enumerate() {
+    if i > 0 {
+      add("|");
+    }
+    add(&hunk.header);
+    hunk.lines.iter().for_each(|line| add(line));
   }
   format!("{hash:x}")
 }
@@ -1152,6 +1160,18 @@ mod tests {
   }
 
   #[test]
+  fn hunks_hash_joins_hunks_with_a_bar() {
+    let djb2 = |text: &str| {
+      let hash = text
+        .encode_utf16()
+        .fold(5381u64, |h, u| (h * 33 + u64::from(u)) % (1 << 32));
+      format!("{hash:x}")
+    };
+    let hunks = [hunk("@@ 1", &["+a", " é"]), hunk("@@ 2", &[])];
+    assert_eq!(hunks_hash(&hunks), djb2("@@ 1+a é|@@ 2"));
+  }
+
+  #[test]
   fn body_follows_the_display_rules() {
     let loaded = FileHunks {
       hunks: vec![hunk("@@ -1 +1 @@", &["+a"])].into(),
@@ -1297,6 +1317,7 @@ mod tests {
       conflicted_files: vec!["clash.rs".into(), "dirty.rs".into()],
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
     let snap = Snapshot::from_workspace_diff(diff, false);
     let committed: Vec<&str> = snap.committed.iter().map(|f| f.path.as_str()).collect();

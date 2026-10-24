@@ -40,8 +40,8 @@ pub(in crate::gpui_shell::screen) struct Threads {
   placed: Placed,
   /// Indices into `agent`.
   agent_lines: HashMap<(String, u32, Side), Vec<usize>>,
-  /// Bumped when `github` or `agent` is read again.
-  revision: u64,
+  /// Bumped when `github` or `agent` reads back changed.
+  pub(in crate::gpui_shell::screen) revision: u64,
   /// The rows' and the threads' revisions `placed` was derived from.
   placed_for: Option<(u64, u64)>,
   poll: Option<Task<()>>,
@@ -93,11 +93,19 @@ impl ChangesView {
       .as_ref()
       .map(|w| w.branch_name.clone())
       .unwrap_or_default();
-    self.run(
+    // Each poll redraws only when it read something new.
+    self.run_changed(
       move |host, parent| host.review_threads(&parent.repo_path, &branch),
       |view, result, _| match result {
-        Ok(threads) => view.set_github_threads(threads),
-        Err(err) => log::warn!("Failed to read review threads: {err}"),
+        Ok(threads) if threads == view.threads.github => false,
+        Ok(threads) => {
+          view.set_github_threads(threads);
+          true
+        }
+        Err(err) => {
+          log::warn!("Failed to read review threads: {err}");
+          false
+        }
       },
       cx,
     );
@@ -118,14 +126,19 @@ impl ChangesView {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
-    self.run(
+    self.run_changed(
       move |host, parent| host.agent_comments(&parent.repo_path, id),
       |view, result, _| match result {
+        Ok(comments) if comments == view.threads.agent => false,
         Ok(comments) => {
           view.threads.agent = comments;
           view.threads.revision += 1;
+          true
         }
-        Err(err) => log::warn!("Failed to read agent review comments: {err}"),
+        Err(err) => {
+          log::warn!("Failed to read agent review comments: {err}");
+          false
+        }
       },
       cx,
     );
