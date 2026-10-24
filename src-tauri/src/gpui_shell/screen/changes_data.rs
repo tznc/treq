@@ -416,6 +416,8 @@ pub struct Snapshot {
   pub conflicted: Option<Vec<String>>,
   /// Listed paths that are generated, their diffs behind "Load diff".
   pub generated: HashSet<String>,
+  /// The diff `files` were read from (`working_copy_token`), when known.
+  pub token: Option<String>,
 }
 
 impl Snapshot {
@@ -456,6 +458,7 @@ impl Snapshot {
       committed_hunks,
       conflicted: Some(conflicted),
       generated: HashSet::new(),
+      token: diff.working_copy_token,
     }
   }
 
@@ -1297,6 +1300,7 @@ mod tests {
       conflicted_files: vec!["clash.rs".into(), "dirty.rs".into()],
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
     let snap = Snapshot::from_workspace_diff(diff, false);
     let committed: Vec<&str> = snap.committed.iter().map(|f| f.path.as_str()).collect();

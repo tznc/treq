@@ -59,6 +59,9 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The token hunk reads report instead of the diff's: the disk moved on
+  /// between the two reads.
+  hunks_token: Mutex<Option<String>>,
   gitattributes: String,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
@@ -697,8 +700,11 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
     let working = self.working().ok_or("no changes")?;
+    let token = self.hunks_token.lock().unwrap().clone();
     Ok(crate::core::WorkspaceFileHunksBatch {
-      snapshot_token: "t".into(),
+      snapshot_token: token
+        .or_else(|| working.working_copy_token.clone())
+        .unwrap_or_default(),
       files: paths
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
@@ -4790,6 +4796,71 @@ fn a_refresh_that_reads_the_same_diff_keeps_its_rows(cx: &mut TestAppContext) {
   assert_ne!(after.0, before.0, "the edited file is read again");
   assert_ne!(after.1, before.1, "and laid out again");
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+/// `changes_host` whose reads name the working-copy diff they saw.
+fn tokened_changes_host() -> FakeHost {
+  let mut host = changes_host();
+  if let Some(working) = host.working.as_mut() {
+    working.working_copy_token = Some("t1".into());
+  }
+  host
+}
+
+fn bump_changes_revision(h: &mut Harness) {
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+}
+
+fn count_calls(host: &FakeHost, prefix: &str) -> usize {
+  host
+    .calls()
+    .iter()
+    .filter(|c| c.starts_with(prefix))
+    .count()
+}
+
+#[gpui::test]
+fn a_refresh_of_an_unchanged_working_copy_reads_no_hunks(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let (diffs, hunks) = (
+    count_calls(&host, "read workspace diff"),
+    count_calls(&host, "read hunks"),
+  );
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read workspace diff"), diffs + 1);
+  assert_eq!(
+    count_calls(&host, "read hunks"),
+    hunks,
+    "same diff, nothing to read"
+  );
+
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  assert!(count_calls(&host, "read hunks") > hunks, "an edit is read");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+#[gpui::test]
+fn hunks_read_from_a_newer_diff_are_read_again(cx: &mut TestAppContext) {
+  let host = tokened_changes_host();
+  *host.hunks_token.lock().unwrap() = Some("t2".into());
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.drawn("changes-diff-viewer");
+  let hunks = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  assert!(
+    count_calls(&host, "read hunks") > hunks,
+    "the diff names t1 but the hunks were read at t2"
+  );
 }
 
 #[gpui::test]
