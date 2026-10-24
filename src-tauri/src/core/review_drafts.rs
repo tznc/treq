@@ -44,14 +44,15 @@ pub fn create_review_draft(
   Ok(comment)
 }
 
-/// Edits a draft's text and/or the hash of the lines it comments on.
+/// Edits a draft's text and/or the hash and text of the lines it comments on.
 pub fn update_review_draft(
   repo_path: &str,
   id: &str,
   text: Option<&str>,
   line_hash: Option<&str>,
+  quoted_text: Option<&str>,
 ) -> Result<(), String> {
-  local_db::update_agent_review_comment(repo_path, id, text, line_hash, None)
+  local_db::update_agent_review_comment(repo_path, id, text, line_hash, quoted_text)
 }
 
 /// The review a workspace's changes page left unsent.
@@ -134,6 +135,21 @@ mod tests {
       listed[0].source,
       crate::review_aggregate::SOURCE_LOCAL_HUMAN
     );
+  }
+
+  #[test]
+  fn records_the_lines_an_agent_draft_covers() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let mut new = draft(None);
+    new.quoted_text = None;
+    let created = create_review_draft(repo, &new).unwrap();
+
+    update_review_draft(repo, &created.id, None, Some("h1"), Some("+x")).unwrap();
+
+    let listed = local_db::list_agent_review_comments(repo, "github_pr", "42").unwrap();
+    assert_eq!(listed[0].line_hash.as_deref(), Some("h1"));
+    assert_eq!(listed[0].quoted_text.as_deref(), Some("+x"));
   }
 
   #[test]

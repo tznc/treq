@@ -272,20 +272,28 @@ impl ChangesView {
       Vec::new()
     };
     self.review.comments = pr.drafts.iter().map(|d| d.comment.clone()).collect();
-    let unhashed: Vec<(String, String)> = pr
+    let unhashed: Vec<(String, String, Option<String>)> = pr
       .drafts
       .iter()
       .filter(|d| d.row.line_hash.is_none() && !pr.hashed.contains(&d.row.id))
-      .filter_map(|d| Some((d.row.id.clone(), d.line_hash.clone()?)))
+      .filter_map(|d| {
+        Some((
+          d.row.id.clone(),
+          d.line_hash.clone()?,
+          d.quoted_text.clone(),
+        ))
+      })
       .collect();
     if unhashed.is_empty() {
       return;
     }
-    pr.hashed.extend(unhashed.iter().map(|(id, _)| id.clone()));
+    pr.hashed
+      .extend(unhashed.iter().map(|(id, _, _)| id.clone()));
     self.run_pr(
       move |host, t| {
-        for (id, hash) in &unhashed {
-          if let Err(err) = host.update_draft(&t.repo_path, id, None, Some(hash)) {
+        for (id, hash, quoted) in &unhashed {
+          if let Err(err) = host.update_draft(&t.repo_path, id, None, Some(hash), quoted.as_deref())
+          {
             log::warn!("Failed to hash review draft: {err}");
           }
         }
@@ -328,14 +336,15 @@ impl ChangesView {
       "resolved_at": null,
     }))
     .expect("draft probe");
-    let line_hash = pr_review_data::draft_to_comment(&probe, &hunks).line_hash;
+    let current = pr_review_data::draft_to_comment(&probe, &hunks);
     let new = NewDraft {
       file_path: draft.file_path.clone(),
       start_line: i64::from(draft.start_line),
       end_line: i64::from(draft.end_line),
       side: draft.side,
       text,
-      line_hash,
+      line_hash: current.line_hash,
+      quoted_text: current.quoted_text,
     };
     self.run_pr(
       move |host, t| host.create_draft(&t.repo_path, t.number, &new),
@@ -354,7 +363,7 @@ impl ChangesView {
 
   pub(super) fn save_pr_edit(&mut self, id: String, text: String, cx: &mut Context<Self>) {
     self.run_pr(
-      move |host, t| host.update_draft(&t.repo_path, &id, Some(&text), None),
+      move |host, t| host.update_draft(&t.repo_path, &id, Some(&text), None, None),
       |view, result, cx| match result {
         Ok(()) => {
           view.review.editing = None;
