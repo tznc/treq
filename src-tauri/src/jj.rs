@@ -207,7 +207,9 @@ use jj_lib::settings::UserSettings;
 use jj_lib::str_util::StringExpression;
 use jj_lib::tree_merge::MergeOptions;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
-use jj_lib::workspace::{default_working_copy_factories, default_working_copy_factory, Workspace};
+use jj_lib::workspace::{
+  default_working_copy_factories, default_working_copy_factory, LockedWorkspace, Workspace,
+};
 use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -382,16 +384,36 @@ fn snapshot_fresh_working_copy(
     // was; the stale-workspace recovery flow owns updating it.
     return Ok(());
   }
+  snapshot_locked_working_copy(
+    &mut loaded.repo,
+    locked_ws,
+    workspace_name,
+    &wc_commit,
+    ignore_root,
+  )?;
+  Ok(())
+}
+
+/// Snapshots a fresh, locked working copy into `wc_commit`, finishes the
+/// lock and returns the snapshotted tree. `repo` moves to the snapshot
+/// operation when the tree changed.
+fn snapshot_locked_working_copy(
+  repo: &mut Arc<ReadonlyRepo>,
+  mut locked_ws: LockedWorkspace<'_>,
+  workspace_name: WorkspaceNameBuf,
+  wc_commit: &Commit,
+  ignore_root: &str,
+) -> Result<MergedTree, JjError> {
   let matcher = repo_root_matcher();
   let opts = snapshot_options_for_all_paths(ignore_root, &matcher);
   let (new_tree, _) = block_on(locked_ws.locked_wc().snapshot(&opts))
     .map_err(|e| JjError::IoError(format!("Failed to snapshot working copy: {e}")))?;
   if new_tree.tree_ids() != wc_commit.tree_ids() {
-    let mut tx = loaded.repo.start_transaction();
+    let mut tx = repo.start_transaction();
     let rewritten = block_on(
       tx.repo_mut()
-        .rewrite_commit(&wc_commit)
-        .set_tree(new_tree)
+        .rewrite_commit(wc_commit)
+        .set_tree(new_tree.clone())
         .write(),
     )
     .map_err(|e| JjError::IoError(format!("Failed to write working-copy snapshot: {e}")))?;
@@ -400,12 +422,72 @@ fn snapshot_fresh_working_copy(
       .map_err(|e| JjError::IoError(format!("Failed to set working-copy commit: {e}")))?;
     block_on(tx.repo_mut().rebase_descendants())
       .map_err(|e| JjError::IoError(format!("Failed to rebase after snapshot: {e}")))?;
-    loaded.repo = block_on(tx.commit("snapshot working copy"))
+    *repo = block_on(tx.commit("snapshot working copy"))
       .map_err(|e| JjError::IoError(format!("Failed to commit working-copy snapshot: {e}")))?;
   }
-  block_on(locked_ws.finish(loaded.repo.op_id().clone()))
+  block_on(locked_ws.finish(repo.op_id().clone()))
     .map_err(|e| JjError::IoError(format!("Failed to finish working-copy snapshot: {e}")))?;
-  Ok(())
+  Ok(new_tree)
+}
+
+/// Snapshots the working copy as the jj CLI does before a command. When
+/// another workspace's rewrite left the disk behind its working-copy commit,
+/// it first checks that commit out (`jj workspace update-stale`): a snapshot
+/// of the older disk would record it as a revert of the newer commit.
+/// Returns the working-copy commit from before the snapshot and the
+/// snapshotted tree. The caller holds [`with_working_copy_lock`].
+fn snapshot_up_to_date_working_copy(
+  loaded: &mut LoadedWorkspaceRepo,
+  ignore_root: &str,
+) -> Result<Option<(Commit, MergedTree)>, JjError> {
+  // Each pass resolves one staleness or snapshots; a third means another
+  // process keeps moving the working copy.
+  for _ in 0..3 {
+    let Some(wc_commit) = get_workspace_wc_commit(loaded)? else {
+      return Ok(None);
+    };
+    let workspace_name = loaded.workspace.workspace_name().to_owned();
+    let mut locked_ws = loaded
+      .workspace
+      .start_working_copy_mutation()
+      .map_err(|e| JjError::IoError(format!("Failed to lock working copy: {e}")))?;
+    let freshness = block_on(WorkingCopyFreshness::check_stale(
+      locked_ws.locked_wc(),
+      &wc_commit,
+      &loaded.repo,
+    ))
+    .map_err(|e| JjError::IoError(format!("Failed to check staleness: {e}")))?;
+    match freshness {
+      WorkingCopyFreshness::Fresh => {
+        let tree = snapshot_locked_working_copy(
+          &mut loaded.repo,
+          locked_ws,
+          workspace_name,
+          &wc_commit,
+          ignore_root,
+        )?;
+        return Ok(Some((wc_commit, tree)));
+      }
+      // Another process moved the working copy after `loaded` was read:
+      // keep its operation and read the repo again.
+      WorkingCopyFreshness::Updated(_) => {
+        let wc_op_id = locked_ws.locked_wc().old_operation_id().clone();
+        block_on(locked_ws.finish(wc_op_id))
+          .map_err(|e| JjError::IoError(format!("Failed to finish wc: {e}")))?;
+        loaded.repo = block_on(loaded.workspace.repo_loader().load_at_head())
+          .map_err(|e| JjError::IoError(format!("Failed to load repo: {e}")))?;
+      }
+      WorkingCopyFreshness::WorkingCopyStale | WorkingCopyFreshness::SiblingOperation => {
+        block_on(locked_ws.locked_wc().check_out(&wc_commit))
+          .map_err(|e| JjError::IoError(format!("Failed to check out: {e}")))?;
+        block_on(locked_ws.finish(loaded.repo.op_id().clone()))
+          .map_err(|e| JjError::IoError(format!("Failed to finish wc: {e}")))?;
+      }
+    }
+  }
+  Err(JjError::IoError(
+    "Working copy kept moving during the snapshot".to_string(),
+  ))
 }
 
 /// One load of a workspace's repository, for callers that make several
@@ -453,6 +535,38 @@ impl WorkspaceRepo {
     commits_ahead_in(&self.loaded, &self.path, target_branch)
   }
 
+  /// Loads for a whole Changes reload: brings a stale working copy up to
+  /// date, snapshots it, and reads its changed files and conflicts under one
+  /// working-copy lock. Queries on the result see the snapshot.
+  pub fn load_working_copy(workspace_path: &str) -> Result<(Self, WorkingCopyChanges), JjError> {
+    let ignore_root = match derive_repo_path_from_workspace(workspace_path) {
+      Some(repo_path) => repo_path,
+      None => {
+        // Takes the working-copy lock itself.
+        reconcile_colocated_home_repo(workspace_path)?;
+        workspace_path.to_string()
+      }
+    };
+    with_working_copy_lock(workspace_path, || {
+      let mut loaded = load_workspace_repo(workspace_path)?;
+      // As `jj_get_changed_files`, a failed snapshot lists no changes.
+      let files = match snapshot_up_to_date_working_copy(&mut loaded, &ignore_root) {
+        Ok(Some((wc_commit, tree))) => tree_changes(&loaded.repo, &wc_commit, &tree),
+        Ok(None) => Vec::new(),
+        Err(err) => {
+          tracing::warn!("Failed to snapshot {workspace_path}: {err}");
+          Vec::new()
+        }
+      };
+      let conflicted = conflicted_files_in(&mut loaded, workspace_path, false)?;
+      let repo = Self {
+        path: workspace_path.to_string(),
+        loaded,
+      };
+      Ok((repo, WorkingCopyChanges { files, conflicted }))
+    })
+  }
+
   /// `jj_get_merge_diff_between_revisions`.
   pub fn merge_diff_between_revisions(
     &self,
@@ -467,6 +581,15 @@ impl WorkspaceRepo {
       conflict_marker_style,
     )
   }
+}
+
+/// What a Changes reload reads from the working copy, from
+/// [`WorkspaceRepo::load_working_copy`].
+pub struct WorkingCopyChanges {
+  /// As [`jj_get_changed_files`] lists them.
+  pub files: Vec<JjFileChange>,
+  /// As [`get_conflicted_files`] lists them.
+  pub conflicted: Vec<String>,
 }
 
 fn load_workspace_repo(workspace_path: &str) -> Result<LoadedWorkspaceRepo, JjError> {
@@ -4137,8 +4260,6 @@ pub fn jj_workspace_update_stale(workspace_path: &str) -> Result<String, JjError
 /// Get list of changed files in working copy using jj-lib (no subprocess)
 /// Snapshots the working copy and diffs against the parent commit tree.
 pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, JjError> {
-  use futures::StreamExt as _;
-
   let path = Path::new(workspace_path);
   if !path.exists() {
     return Ok(Vec::new());
@@ -4221,47 +4342,51 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
       let _ = block_on(locked_ws.finish(repo.op_id().clone()));
     }
 
-    // Get the wc commit's parent tree to diff against
-    let parent_tree = if wc_commit.parent_ids().is_empty() {
-      repo.store().root_commit().tree()
-    } else {
-      match repo.store().get_commit(&wc_commit.parent_ids()[0]) {
-        Ok(parent) => parent.tree(),
-        Err(_) => return Ok(Vec::new()),
-      }
-    };
-
-    let diff_matcher = repo_root_matcher();
-    let diff_entries = block_on(
-      parent_tree
-        .diff_stream(&new_tree, &diff_matcher)
-        .collect::<Vec<_>>(),
-    );
-
-    let mut changes = Vec::new();
-    for entry in diff_entries {
-      let file_path = entry.path.as_internal_file_string().to_string();
-      let Ok(values) = entry.values else { continue };
-      let status = if !values.before.is_resolved() || !values.after.is_resolved() {
-        "C"
-      } else if values.before.is_absent() {
-        "A"
-      } else if values.after.is_absent() {
-        "D"
-      } else {
-        "M"
-      };
-      changes.push(JjFileChange {
-        path: file_path,
-        status: status.to_string(),
-        previous_path: None,
-        changed_line_count: 0,
-        diff_deferred: false,
-      });
-    }
-
-    Ok(changes)
+    Ok(tree_changes(&repo, &wc_commit, &new_tree))
   })
+}
+
+/// The files `tree` changes against `wc_commit`'s first parent.
+fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> Vec<JjFileChange> {
+  use futures::StreamExt as _;
+
+  let parent_tree = match wc_commit.parent_ids().first() {
+    None => repo.store().root_commit().tree(),
+    Some(parent_id) => match repo.store().get_commit(parent_id) {
+      Ok(parent) => parent.tree(),
+      Err(_) => return Vec::new(),
+    },
+  };
+
+  let diff_matcher = repo_root_matcher();
+  let diff_entries = block_on(
+    parent_tree
+      .diff_stream(tree, &diff_matcher)
+      .collect::<Vec<_>>(),
+  );
+
+  let mut changes = Vec::new();
+  for entry in diff_entries {
+    let file_path = entry.path.as_internal_file_string().to_string();
+    let Ok(values) = entry.values else { continue };
+    let status = if !values.before.is_resolved() || !values.after.is_resolved() {
+      "C"
+    } else if values.before.is_absent() {
+      "A"
+    } else if values.after.is_absent() {
+      "D"
+    } else {
+      "M"
+    };
+    changes.push(JjFileChange {
+      path: file_path,
+      status: status.to_string(),
+      previous_path: None,
+      changed_line_count: 0,
+      diff_deferred: false,
+    });
+  }
+  changes
 }
 
 /// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
@@ -6328,24 +6453,6 @@ pub fn get_conflicted_files(
   workspace_path: &str,
   target_branch: Option<&str>,
 ) -> Result<Vec<String>, JjError> {
-  conflicted_files(workspace_path, target_branch, true)
-}
-
-/// [`get_conflicted_files`] for a caller that has just snapshotted the
-/// working copy (e.g. through [`jj_get_changed_files`]): skips the second
-/// filesystem walk unless importing Git state moved the operation.
-pub fn get_conflicted_files_after_snapshot(
-  workspace_path: &str,
-  target_branch: Option<&str>,
-) -> Result<Vec<String>, JjError> {
-  conflicted_files(workspace_path, target_branch, false)
-}
-
-fn conflicted_files(
-  workspace_path: &str,
-  target_branch: Option<&str>,
-  snapshot: bool,
-) -> Result<Vec<String>, JjError> {
   // Validate workspace path
   if workspace_path.is_empty() {
     return Err(JjError::IoError("Workspace path is empty".to_string()));
@@ -6367,10 +6474,7 @@ fn conflicted_files(
   }
 
   // 1. Proactively check and update if stale
-  let mut snapshot = snapshot;
   if let Ok(true) = is_workspace_stale(workspace_path) {
-    // Updating rewrites the working copy, so an earlier snapshot is out of date.
-    snapshot = true;
     if let Err(update_err) = jj_workspace_update_stale(workspace_path) {
       tracing::warn!(
         "Failed to update stale workspace in get_conflicted_files for {}: {}",
@@ -6384,22 +6488,31 @@ fn conflicted_files(
     Some(branch) => branch.to_string(),
     None => get_default_branch(&workspace_repo_path(workspace_path))?,
   };
-  get_conflicted_files_from_branch_diff(workspace_path, &effective_target, snapshot)
+  get_conflicted_files_from_branch_diff(workspace_path, &effective_target)
 }
 
 fn get_conflicted_files_from_branch_diff(
   workspace_path: &str,
   _target_branch: &str,
-  snapshot: bool,
 ) -> Result<Vec<String>, JjError> {
   let mut loaded = load_workspace_repo(workspace_path)?;
+  conflicted_files_in(&mut loaded, workspace_path, true)
+}
+
+/// Conflicted paths after importing Git state. `snapshot` false trusts a
+/// snapshot the caller just took, unless the import moved the operation.
+fn conflicted_files_in(
+  loaded: &mut LoadedWorkspaceRepo,
+  workspace_path: &str,
+  snapshot: bool,
+) -> Result<Vec<String>, JjError> {
   let loaded_op_id = loaded.repo.op_id().clone();
-  import_colocated_git_state(&mut loaded, workspace_path)?;
+  import_colocated_git_state(loaded, workspace_path)?;
 
   // A Git import can move the working-copy commit, so the caller's snapshot
   // no longer covers it.
   let snapshotted_tree_override = if snapshot || loaded.repo.op_id() != &loaded_op_id {
-    snapshot_working_copy_tree(&mut loaded, workspace_path)?.map(|(_, tree)| tree)
+    snapshot_working_copy_tree(loaded, workspace_path)?.map(|(_, tree)| tree)
   } else {
     None
   };
