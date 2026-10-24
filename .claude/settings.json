@@ -66,5 +66,6 @@
       }
     ]
   },
-  "disableBundledSkills": true
+  "disableBundledSkills": true,
+  "maxEffortLevel": "medium"
 }
