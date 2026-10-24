@@ -811,7 +811,10 @@ impl TerminalView {
   fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
     // React's remote panel takes no drops.
     if self.status == Status::Ready && self.remote_target().is_none() {
-      self.write(text, cx);
+      // Pasted, as a native terminal does with a drop.
+      let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
+      let bytes = paste_bytes(text, bracketed);
+      self.write(&String::from_utf8_lossy(&bytes), cx);
     }
   }
 
@@ -869,7 +872,26 @@ impl TerminalView {
     }
     let paste = (m.platform && k.key == "v") || (m.control && m.shift && k.key == "v");
     if paste {
-      if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+      let item = cx.read_from_clipboard();
+      // A copied image goes in as the path of a file holding it: Claude Code
+      // and Codex attach a pasted image path, and nothing else reaches them
+      // through a PTY. A remote host can't read a local file.
+      let text = item.as_ref().and_then(|item| item.text()).or_else(|| {
+        let image = item?.into_entries().find_map(|entry| match entry {
+          gpui::ClipboardEntry::Image(image) => Some(image),
+          _ => None,
+        })?;
+        if self.remote_target().is_some() {
+          return None;
+        }
+        self
+          .host
+          .write_pasted_image(&image.bytes)
+          .map(|path| shell_quote(&path))
+          .inspect_err(|e| tracing::warn!("failed to save pasted image: {e}"))
+          .ok()
+      });
+      if let Some(text) = text {
         let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
         let bytes = paste_bytes(&text, bracketed);
         self.write(&String::from_utf8_lossy(&bytes), cx);
