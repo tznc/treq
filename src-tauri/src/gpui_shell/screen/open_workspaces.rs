@@ -27,6 +27,7 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   github::parts,
+  integrations_cache::cache,
   linear,
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
@@ -201,6 +202,13 @@ impl OpenWorkspacesDialog {
       errors: Vec::new(),
       dismissed: false,
     };
+    // A repository seen before lists its pull requests at once, without
+    // waiting for the remote to be read again.
+    let repo = view.route.repo_path.clone();
+    if let Some(name) = cache(cx).remote_names.get(&repo).cloned() {
+      view.github = Some(name);
+      view.load_prs(cx);
+    }
     view.load(cx);
     view.load_issues(cx);
     view
@@ -213,12 +221,49 @@ impl OpenWorkspacesDialog {
     }
   }
 
-  /// Reads the remotes, then lists pull requests and fetches, so pasted
-  /// branches check against the remote's latest.
+  /// Reads the remotes and lists pull requests at once, and the branch
+  /// settings beside them; then fetches, so pasted branches check against
+  /// the remote's latest.
   fn load(&mut self, cx: &mut Context<Self>) {
     let (host, route) = (self.host.clone(), self.route.clone());
+    // The pull request list needs only the remote, a file read: it does not
+    // wait for the branches and settings behind jj.
+    cx.spawn({
+      let (host, route) = (host.clone(), route.clone());
+      async move |this, cx| {
+        let remotes = cx
+          .background_spawn(async move { data::remotes(&*host, &route.repos) })
+          .await;
+        let _ = this.update(cx, |view, cx| {
+          let github = remotes
+            .iter()
+            .find(|(path, _)| *path == view.route.repo_path)
+            .map(|(_, name)| name.clone());
+          match &github {
+            Some(name) => cache(cx).remote_names.insert(
+              view.route.repo_path.clone(),
+              Instant::now(),
+              name.clone(),
+            ),
+            None => {
+              cache(cx).remote_names.take(&view.route.repo_path);
+            }
+          }
+          // Already listed from a remembered remote unless it changed.
+          let listed = view.prs.generation > 0 && view.github == github;
+          view.github = github;
+          view.remotes = Some(remotes);
+          if !listed {
+            view.load_prs(cx);
+          }
+          view.check_lines(cx);
+          cx.notify();
+        });
+      }
+    })
+    .detach();
     cx.spawn(async move |this, cx| {
-      let (remotes, open, settings) = cx
+      let (open, settings) = cx
         .background_spawn({
           let (host, route) = (host.clone(), route.clone());
           async move {
@@ -240,11 +285,7 @@ impl OpenWorkspacesDialog {
               .map(|b| b.name)
               .collect();
             let default = WorkspaceDialogHost::default_branch(&*host, repo).ok();
-            (
-              data::remotes(&*host, &route.repos),
-              open,
-              (pattern, default, branches),
-            )
+            (open, (pattern, default, branches))
           }
         })
         .await;
@@ -255,13 +296,7 @@ impl OpenWorkspacesDialog {
         }
         view.default_branch = default;
         view.branches = branches;
-        view.github = remotes
-          .iter()
-          .find(|(path, _)| *path == view.route.repo_path)
-          .map(|(_, name)| name.clone());
-        view.remotes = Some(remotes);
         view.open_branches = open;
-        view.load_prs(cx);
         cx.notify();
       });
       cx.background_spawn(async move {
@@ -289,6 +324,14 @@ impl OpenWorkspacesDialog {
     self.prs.loading = true;
     self.prs.error = None;
     let (host, query) = (self.host.clone(), self.query.trim().to_string());
+    let key = (repo.clone(), query.clone());
+    // What this search read last shows meanwhile, then the read replaces it.
+    if self.prs.items.is_empty() {
+      if let Some((items, mine)) = cache(cx).open_prs.get(&key).cloned() {
+        self.prs.items = items;
+        self.prs.mine = mine;
+      }
+    }
     cx.spawn(async move |this, cx| {
       let result = cx
         .background_spawn(async move {
@@ -302,6 +345,9 @@ impl OpenWorkspacesDialog {
         })
         .await;
       let _ = this.update(cx, |view, cx| {
+        if let Ok(read) = &result {
+          cache(cx).open_prs.insert(key, Instant::now(), read.clone());
+        }
         if view.prs.generation != generation {
           return;
         }
@@ -328,20 +374,43 @@ impl OpenWorkspacesDialog {
     self.issues.loading = true;
     self.issues.error = None;
     let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    if self.issues.items.is_empty() {
+      let cache = cache(cx);
+      if let Some(items) = cache.linear_issues.get(&(repo.clone(), None)).cloned() {
+        self.issues.items = items;
+        self.issues.viewer = cache.linear_viewer.get(&repo).map(|v| v.id.clone());
+      }
+    }
     cx.spawn(async move |this, cx| {
+      let key = repo.clone();
       let result = cx
         .background_spawn(async move {
-          let issues = host.linear_issues(&repo, None)?;
-          let viewer = host.linear_viewer(&repo).ok().map(|v| v.id);
-          Ok::<_, String>((issues, viewer))
+          // Two independent requests: run them side by side.
+          std::thread::scope(|scope| {
+            let viewer = scope.spawn(|| host.linear_viewer(&repo).ok());
+            let issues = host.linear_issues(&repo, None);
+            let viewer = super::joined(viewer);
+            issues.map(|issues| (issues, viewer))
+          })
         })
         .await;
       let _ = this.update(cx, |view, cx| {
+        if let Ok((items, viewer)) = &result {
+          let cache = cache(cx);
+          cache
+            .linear_issues
+            .insert((key.clone(), None), Instant::now(), items.clone());
+          if let Some(viewer) = viewer {
+            cache
+              .linear_viewer
+              .insert(key, Instant::now(), viewer.clone());
+          }
+        }
         view.issues.loading = false;
         match result {
           Ok((items, viewer)) => {
             view.issues.items = items;
-            view.issues.viewer = viewer;
+            view.issues.viewer = viewer.map(|v| v.id);
           }
           Err(err) => view.issues.error = Some(err),
         }
@@ -1177,14 +1246,15 @@ impl OpenWorkspacesDialog {
     } else {
       "Open issues"
     };
-    let list: gpui::AnyElement = if self.issues.loading {
-      div()
-        .py_12()
-        .child(crate::gpui_shell::ui::Loading::new(
-          "open-workspaces-issues-loading",
+    let list: gpui::AnyElement = if self.issues.loading && self.issues.items.is_empty() {
+      crate::gpui_shell::ui::delayed(
+        "open-workspaces-issues-loading",
+        div().py_12().child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-issues-loading-spinner",
           p,
-        ))
-        .into_any_element()
+        )),
+      )
+      .into_any_element()
     } else if let Some(err) = &self.issues.error {
       parts::error_state(
         "open-workspaces-issues",
@@ -1223,13 +1293,14 @@ impl OpenWorkspacesDialog {
       "Open pull requests"
     };
     let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
-      div()
-        .py_12()
-        .child(crate::gpui_shell::ui::Loading::new(
-          "open-workspaces-prs-loading",
+      crate::gpui_shell::ui::delayed(
+        "open-workspaces-prs-loading",
+        div().py_12().child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-prs-loading-spinner",
           p,
-        ))
-        .into_any_element()
+        )),
+      )
+      .into_any_element()
     } else if let Some(err) = &self.prs.error {
       parts::error_state(
         "open-workspaces-prs",
