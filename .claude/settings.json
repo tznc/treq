@@ -20,6 +20,14 @@
       "Read(./supabase/.temp/**)",
       "Read(./supabase/.branches/**)",
       "Read(./coverage/**)"
+    ],
+    "allow": [
+      "Read(./assets/screenshots/**)",
+      "Read(./crates/treq-ui/styleguide/snapshots/**)",
+      "Read(./e2e/desktop/qa/.shots/**)",
+      "Read(./e2e/desktop/test-results/**)",
+      "Read(./scripts/screenshot/.generated/**)",
+      "Read(./web/static/img/landing/**)"
     ]
   },
   "attribution": {
