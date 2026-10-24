@@ -685,8 +685,8 @@ pub fn diff_stats(commits: &[JjLogCommit]) -> (u32, u32) {
 /// `LinearCommitHistory`'s split of a log: the workspace's own commits
 /// (without the working copy, or the empty commit on top of it) and the
 /// target branch's.
-pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>) {
-  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().cloned().partition(|c| c.on_target_only);
+pub fn history_commits(log: &JjLogResult) -> (Vec<&JjLogCommit>, Vec<&JjLogCommit>) {
+  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().partition(|c| c.on_target_only);
   let own: Vec<_> = own.into_iter().filter(|c| !c.is_working_copy).collect();
   let own = match own.as_slice() {
     [first, second, ..]
@@ -703,17 +703,17 @@ pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>
 }
 
 /// `groupCommitsByDay`: runs of commits on the same local day, labelled.
-pub fn group_by_day(commits: &[JjLogCommit]) -> Vec<(String, Vec<JjLogCommit>)> {
-  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<JjLogCommit>)> = Vec::new();
+/// Takes the commits or references to them, and keeps what it is given.
+pub fn group_by_day<C: std::borrow::Borrow<JjLogCommit>>(
+  commits: impl IntoIterator<Item = C>,
+) -> Vec<(String, Vec<C>)> {
+  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<C>)> = Vec::new();
   for commit in commits {
-    let day = time::day(&commit.timestamp);
+    let timestamp = &commit.borrow().timestamp;
+    let day = time::day(timestamp);
     match groups.last_mut() {
-      Some((last, _, list)) if *last == day => list.push(commit.clone()),
-      _ => groups.push((
-        day,
-        time::day_label(&commit.timestamp),
-        vec![commit.clone()],
-      )),
+      Some((last, _, list)) if *last == day => list.push(commit),
+      _ => groups.push((day, time::day_label(timestamp), vec![commit])),
     }
   }
   groups

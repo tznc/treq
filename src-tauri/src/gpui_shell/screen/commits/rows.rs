@@ -241,7 +241,7 @@ impl CommitsView {
       rows.pending = rows.pending.max(3);
     }
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
+    for (label, commits) in group_by_day(own.iter().cloned()) {
       rows.push(Row::Day(feed.days.len()), 5, 0);
       feed.days.push(label);
       for commit in commits {
@@ -257,7 +257,7 @@ impl CommitsView {
         rows.push(Row::OwnEmpty, 0, 3);
       }
       rows.push(Row::Divider, 4, 2);
-      for (label, commits) in group_by_day(&target) {
+      for (label, commits) in group_by_day(target.iter().cloned()) {
         rows.push(Row::Day(feed.days.len()), 5, 0);
         feed.days.push(label);
         for commit in commits {
