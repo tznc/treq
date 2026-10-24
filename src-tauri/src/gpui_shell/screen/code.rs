@@ -12,6 +12,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use std::{
+  rc::Rc,
   sync::{Arc, LazyLock},
   time::Duration,
 };
@@ -79,13 +80,12 @@ pub struct Parent {
 
 impl PartialEq for Parent {
   fn eq(&self, other: &Self) -> bool {
-    let json = |w: &Option<Workspace>| serde_json::to_value(w).ok();
     self.repo_path == other.repo_path
       && self.remote == other.remote
       && self.conflicted_files == other.conflicted_files
       && self.default_branch == other.default_branch
       && self.revision == other.revision
-      && json(&self.workspace) == json(&other.workspace)
+      && self.workspace == other.workspace
   }
 }
 
@@ -226,7 +226,8 @@ pub struct CodeView {
   dark: bool,
   tips: Tooltips,
   pub(super) overview: Option<Overview>,
-  pub(super) history: Option<JjLogResult>,
+  /// Shared, so a frame takes it without copying every commit.
+  pub(super) history: Option<Rc<JjLogResult>>,
   pub(super) history_limit: usize,
   history_loading: bool,
   /// Why the last commit read failed, while there is no history to show.
@@ -440,7 +441,7 @@ impl CodeView {
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
-      && self.history.as_ref() == read.history.as_ref().ok()
+      && self.history.as_deref() == read.history.as_ref().ok()
       && self.history_error.is_none()
       && self.stack == read.stack
       && self.settings.as_ref() == Some(&read.settings);
@@ -502,7 +503,7 @@ impl CodeView {
     self.history_loading = false;
     match history {
       Ok(history) => {
-        self.history = Some(history);
+        self.history = Some(Rc::new(history));
         self.history_error = None;
         self.history_error_open = false;
       }
@@ -2418,7 +2419,7 @@ impl CodeView {
       )));
     }
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
+    for (label, commits) in group_by_day(own.iter().copied()) {
       // `first:mt-0` never applies (the track line is the first child);
       // block layout collapses the margin as Chromium does.
       let mut group = div().mt_5();
@@ -2477,7 +2478,7 @@ impl CodeView {
               .font_family(theme::MONO_FONT)
               .child(log.target_branch.clone()),
           )
-          .when_some(log.merge_base_id, |this, base| {
+          .when_some(log.merge_base_id.clone(), |this, base| {
             this.child(
               div()
                 .ml_1()
@@ -2490,7 +2491,7 @@ impl CodeView {
         div().child(format!("Recent on {}", log.target_branch))
       };
       track = track.child(separator(label, p));
-      for (label, commits) in group_by_day(&target) {
+      for (label, commits) in group_by_day(target.iter().copied()) {
         let mut group = div().mt_5().child(day_label(&label, p));
         for commit in &commits {
           group = group.child(self.commit_item(commit, Kind::Target, false, p, cx));
