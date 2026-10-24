@@ -158,6 +158,18 @@ fn abandon_tip() {
   assert!(assert_git_head_follows_wc_parent(&repo, Some("feature")).is_empty());
 }
 
+/// `origin/feature` is one commit behind, so the reset drops f2.
+#[test]
+fn reset_to_remote() {
+  let (repo, _) = home_on_feature();
+  let f1 = git(&repo, &["rev-parse", "feature~1"]);
+  git(&repo, &["update-ref", "refs/remotes/origin/feature", &f1]);
+  let dropped = jj::jj_reset_bookmark_to_remote(&repo.repo_path, "feature").expect("reset");
+  assert_eq!(dropped, 1);
+  assert!(assert_git_head_follows_wc_parent(&repo, Some("feature")).is_empty());
+  assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f1);
+}
+
 #[test]
 fn undo_commit() {
   let (repo, main) = home_on_feature();

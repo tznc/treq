@@ -5342,6 +5342,7 @@ pub fn jj_edit_bookmark(repo_path: &str, bookmark_name: &str) -> Result<String, 
 /// commits only this branch had, uncommitted changes included, are
 /// abandoned; ones another bookmark or working copy builds on are kept.
 /// Returns how many commits were abandoned, not counting the working copy.
+// home-head-test: reset_to_remote
 pub fn jj_reset_bookmark_to_remote(
   workspace_path: &str,
   branch_name: &str,
