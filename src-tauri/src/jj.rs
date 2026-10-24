@@ -3944,10 +3944,12 @@ fn reconcile_loaded_workspace(
   .map_err(|e| JjError::InitFailed(format!("Failed to check staleness: {}", e)))?;
 
   match freshness {
-    WorkingCopyFreshness::Fresh => {
-      block_on(locked_ws.finish(repo.op_id().clone()))
-        .map_err(|e| JjError::InitFailed(format!("Failed to finish wc: {}", e)))?;
-    }
+    // Already at `repo`'s operation, or behind it with the same tree: the
+    // files are right. Finishing would only record the newer operation, an
+    // fsynced write for every workspace after every rewrite, so leave the
+    // state as it is (dropping the lock without `finish`); jj compares trees
+    // again next time.
+    WorkingCopyFreshness::Fresh => {}
     WorkingCopyFreshness::Updated(_) => {
       // `repo` is the stale side here; keep the working copy's newer operation.
       let wc_op_id = locked_ws.locked_wc().old_operation_id().clone();
