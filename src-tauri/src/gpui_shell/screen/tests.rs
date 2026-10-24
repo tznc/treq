@@ -140,6 +140,8 @@ struct FakeHost {
   /// page (`Err` refuses it), and the merge queue (opt-in and entries).
   github_repos: Option<Result<Vec<crate::core::account::GithubRepository>, String>>,
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
+  /// Why deleting the account fails; `None` deletes it.
+  account_deletion: Option<crate::core::supabase::ApiError>,
   /// `None` fails the read, as when it never answers.
   queue: Mutex<Option<(bool, Vec<merge_queue_data::QueueEntry>)>>,
   /// What the agent launches read and did: each new session's start data
@@ -1434,6 +1436,11 @@ impl account_data::AccountHost for FakeHost {
       .oauth
       .clone()
       .unwrap_or_else(|| Ok("https://linear.app/oauth/authorize".into()))
+  }
+
+  fn delete_account(&self) -> Result<(), crate::core::supabase::ApiError> {
+    self.record("delete account".into());
+    self.account_deletion.clone().map_or(Ok(()), Err)
   }
 
   fn cloud_action(&self, action: account_data::CloudAction) {
@@ -3061,6 +3068,111 @@ fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
   );
   assert!(host.calls().contains(&"read cloud workspace".to_string()));
   assert!(h.sent().is_empty());
+}
+
+fn delete_dialog(h: &mut Harness) -> Option<settings::DeleteAccountDialog> {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedIn(signed_in)) => signed_in.delete_account,
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+fn signed_in_as_ada(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Harness {
+  let mut h = Harness::with_host(cx, account_route("account"), host);
+  h.set_account(account_state(
+    serde_json::json!({ "user": ada(), "subscription": pro() }),
+  ));
+  h
+}
+
+#[gpui::test]
+fn account_deletes_only_after_the_email_is_typed(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  assert_eq!(delete_dialog(&mut h), None);
+
+  h.click("account-delete");
+  assert!(h.drawn("account-delete-dialog"));
+  let dialog = delete_dialog(&mut h).expect("asked");
+  assert!(!dialog.can_confirm);
+
+  h.click("account-delete-confirm");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "eve@example.com".into()),
+  );
+  assert!(!delete_dialog(&mut h).unwrap().can_confirm);
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"delete account".to_string()));
+
+  settings_act(
+    &mut h,
+    field("account.delete.email", " ADA@example.com ".into()),
+  );
+  assert!(delete_dialog(&mut h).unwrap().can_confirm);
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host
+      .writes()
+      .iter()
+      .filter(|w| *w == "delete account")
+      .count(),
+    1
+  );
+  assert_eq!(delete_dialog(&mut h), None);
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_deletion_the_server_refuses_shows_why_and_keeps_the_dialog(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError {
+      status: 409,
+      code: "last_owner".into(),
+      message: "You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.".into(),
+      correlation_id: None,
+    }),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+
+  let dialog = delete_dialog(&mut h).expect("still open");
+  assert!(!dialog.deleting);
+  assert!(dialog.can_confirm);
+  assert_eq!(
+    dialog.error.as_deref(),
+    Some("You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.")
+  );
+  assert!(host.writes().contains(&"delete account".to_string()));
+}
+
+#[gpui::test]
+fn account_deletion_cancel_closes_without_deleting(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-cancel");
+  h.cx.run_until_parked();
+  assert_eq!(delete_dialog(&mut h), None);
+  assert!(!h.drawn("account-delete-dialog"));
+  assert!(!host.writes().contains(&"delete account".to_string()));
+
+  // Asking again starts from an empty field.
+  h.click("account-delete");
+  assert!(!delete_dialog(&mut h).unwrap().can_confirm);
 }
 
 #[gpui::test]

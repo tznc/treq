@@ -22,7 +22,7 @@ use super::{
   remote_control_plane::{SshAuthentication, SshEndpoint, SshEndpointSource},
   remote_local_keys::LocalSshIdentity,
   remote_ssh_transport::CutoffReason,
-  supabase::Supabase,
+  supabase::{ApiError, Supabase},
 };
 use crate::lock_ext::LockExt;
 
@@ -255,6 +255,24 @@ impl Cloud {
   /// Signing out ends the authorization behind managed SSH access, so open
   /// managed connections and terminals are cut off, not left running.
   pub async fn sign_out(&self) {
+    self.end_session(true).await;
+  }
+
+  /// Deletes the signed-in account (the `delete-account` Edge Function),
+  /// then ends the session here as signing out does. The user no longer
+  /// exists, so the session is forgotten locally, without a logout call.
+  /// A refusal (last owner of an organization, a failed cancellation)
+  /// keeps the session and returns the server's reason.
+  pub async fn delete_account(&self) -> Result<(), ApiError> {
+    self
+      .supabase
+      .invoke::<serde_json::Value>("delete-account", &serde_json::json!({}))
+      .await?;
+    self.end_session(false).await;
+    Ok(())
+  }
+
+  async fn end_session(&self, on_server: bool) {
     let stopped = {
       let mut managed = self.managed.lock_or_recover();
       managed.stop();
@@ -264,7 +282,11 @@ impl Cloud {
     self.effects.cut_off_managed().await;
     let flag = std::sync::atomic::Ordering::SeqCst;
     self.signing_out.store(true, flag);
-    self.supabase.auth.sign_out().await;
+    if on_server {
+      self.supabase.auth.sign_out().await;
+    } else {
+      self.supabase.auth.forget_session();
+    }
     self.signing_out.store(false, flag);
     *self.workspace.lock_or_recover() = CloudWorkspace::default();
     self.changed();
@@ -705,7 +727,7 @@ impl RenewalHooks for Hooks {
 mod tests {
   use serde_json::{json, Value};
   use wiremock::{
-    matchers::{body_partial_json, method, path},
+    matchers::{body_partial_json, header, method, path},
     Mock, MockServer, ResponseTemplate,
   };
 
@@ -874,6 +896,54 @@ mod tests {
     let snapshot = cloud.snapshot();
     assert_eq!(snapshot.subscription, None);
     assert_eq!(snapshot.auth.session, None);
+  }
+
+  #[tokio::test]
+  async fn deleting_the_account_cuts_off_access_and_forgets_the_session_locally() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/delete-account"))
+      .and(header("authorization", "Bearer a1"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(json!({"deleted": true})))
+      .expect(1)
+      .mount(&server)
+      .await;
+    // The user no longer exists, so there is no server session to end.
+    Mock::given(method("POST"))
+      .and(path("/auth/v1/logout"))
+      .respond_with(ResponseTemplate::new(204))
+      .expect(0)
+      .mount(&server)
+      .await;
+    let (cloud, fake) = signed_in(&server).await;
+    cloud.delete_account().await.unwrap();
+    assert_eq!(
+      *fake.log.lock().unwrap(),
+      vec!["cut off managed".to_string()]
+    );
+    let snapshot = cloud.snapshot();
+    assert_eq!(snapshot.auth.session, None);
+    assert_eq!(snapshot.subscription, None);
+  }
+
+  #[tokio::test]
+  async fn a_refused_account_deletion_keeps_the_session() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/delete-account"))
+      .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+        "error": "You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.",
+        "code": "last_owner",
+      })))
+      .mount(&server)
+      .await;
+    let (cloud, fake) = signed_in(&server).await;
+    let error = cloud.delete_account().await.unwrap_err();
+    assert_eq!(error.status, 409);
+    assert_eq!(error.code, "last_owner");
+    assert!(error.message.starts_with("You are the last owner of Acme."));
+    assert!(fake.log.lock().unwrap().is_empty());
+    assert!(cloud.snapshot().auth.session.is_some());
   }
 
   #[tokio::test]

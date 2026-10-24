@@ -351,6 +351,11 @@ impl Auth {
     }
   }
 
+  /// Forgets the session here only, for a user the server already deleted.
+  pub fn forget_session(&self) {
+    self.set_session(None);
+  }
+
   /// Ends the session on the server (best effort) and forgets it here.
   pub async fn sign_out(&self) {
     if let Some(session) = self.session() {
