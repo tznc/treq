@@ -86,6 +86,87 @@ fn with_working_copy_lock<T>(workspace_path: &str, f: impl FnOnce() -> T) -> T {
   f()
 }
 
+/// A read that callers asking at the same time share. A caller that arrives
+/// while the read runs waits for the next run, never the current one, so it
+/// still sees state from after it asked; any number of callers that pile up
+/// behind one run cost one more run, not one each.
+struct SharedRead<T> {
+  state: std::sync::Mutex<SharedReadState<T>>,
+  done: std::sync::Condvar,
+}
+
+struct SharedReadState<T> {
+  running: bool,
+  started: u64,
+  finished: u64,
+  result: Option<T>,
+}
+
+impl<T: Clone> SharedRead<T> {
+  fn new() -> Self {
+    Self {
+      state: std::sync::Mutex::new(SharedReadState {
+        running: false,
+        started: 0,
+        finished: 0,
+        result: None,
+      }),
+      done: std::sync::Condvar::new(),
+    }
+  }
+
+  fn run(&self, read: impl FnOnce() -> T) -> T {
+    /// Lets waiters run the read themselves if this run panics.
+    struct Running<'a, T>(&'a SharedRead<T>);
+    impl<T> Drop for Running<'_, T> {
+      fn drop(&mut self) {
+        let mut state = self
+          .0
+          .state
+          .lock()
+          .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.running = false;
+        drop(state);
+        self.0.done.notify_all();
+      }
+    }
+
+    let lock = || {
+      self
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    let mut state = lock();
+    let wanted = state.started + 1;
+    loop {
+      if state.finished >= wanted {
+        if let Some(result) = &state.result {
+          return result.clone();
+        }
+      }
+      if !state.running {
+        state.running = true;
+        state.started += 1;
+        let run = state.started;
+        drop(state);
+        let running = Running(self);
+        let result = read();
+        let mut state = lock();
+        state.result = Some(result.clone());
+        state.finished = run;
+        drop(state);
+        drop(running);
+        return result;
+      }
+      state = self
+        .done
+        .wait(state)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+  }
+}
+
 use gix::refs::transaction::{Change, PreviousValue, RefEdit};
 use gix::refs::Target;
 use imara_diff::intern::InternedInput;
@@ -8628,7 +8709,50 @@ fn build_wc_log_commit(
 /// One load and one snapshot serve both the emptiness check and the row,
 /// under the lock [`jj_get_changed_files`] takes. A working copy that cannot
 /// be read or snapshotted counts as empty, as it does there.
+///
+/// Each row of a stack reads the rows below it, and a workspace's tabs and
+/// header read at once, so many callers ask for the same row together; they
+/// share runs (see [`SharedRead`]).
 pub fn jj_get_tentative_working_copy(
+  workspace_path: &str,
+  workspace_label: &str,
+) -> Result<Option<JjTentativeWorkingCopy>, JjError> {
+  use std::collections::HashMap;
+  use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+  type Shared = SharedRead<Result<Option<JjTentativeWorkingCopy>, String>>;
+  type Reads = HashMap<(std::path::PathBuf, String), Weak<Shared>>;
+  static READS: OnceLock<Mutex<Reads>> = OnceLock::new();
+  let shared = {
+    let mut reads = READS
+      .get_or_init(|| Mutex::new(HashMap::new()))
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reads.retain(|_, read| read.strong_count() > 0);
+    let key = (
+      working_copy_lock_key(workspace_path),
+      workspace_label.to_string(),
+    );
+    match reads.get(&key).and_then(Weak::upgrade) {
+      Some(read) => read,
+      None => {
+        let read = Arc::new(Shared::new());
+        reads.insert(key, Arc::downgrade(&read));
+        read
+      }
+    }
+  };
+  shared
+    .run(|| {
+      read_tentative_working_copy(workspace_path, workspace_label).map_err(|e| match e {
+        JjError::IoError(message) => message,
+        other => other.to_string(),
+      })
+    })
+    .map_err(JjError::IoError)
+}
+
+fn read_tentative_working_copy(
   workspace_path: &str,
   workspace_label: &str,
 ) -> Result<Option<JjTentativeWorkingCopy>, JjError> {
@@ -9625,6 +9749,63 @@ mod tests {
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn shared_read_serves_callers_that_pile_up_with_one_more_run() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    let shared = SharedRead::new();
+    let runs = AtomicUsize::new(0);
+    let arrived = AtomicUsize::new(0);
+    thread::scope(|scope| {
+      let first = scope.spawn(|| {
+        shared.run(|| {
+          let run = runs.fetch_add(1, Ordering::SeqCst) + 1;
+          // Hold run 1 until every waiter has asked.
+          while arrived.load(Ordering::SeqCst) < 6 {
+            thread::yield_now();
+          }
+          thread::sleep(std::time::Duration::from_millis(50));
+          run
+        })
+      });
+      while runs.load(Ordering::SeqCst) == 0 {
+        thread::yield_now();
+      }
+      let waiters: Vec<_> = (0..6)
+        .map(|_| {
+          scope.spawn(|| {
+            arrived.fetch_add(1, Ordering::SeqCst);
+            shared.run(|| runs.fetch_add(1, Ordering::SeqCst) + 1)
+          })
+        })
+        .collect();
+      assert_eq!(first.join().unwrap(), 1);
+      for waiter in waiters {
+        assert_eq!(
+          waiter.join().unwrap(),
+          2,
+          "waiters share the run after theirs began"
+        );
+      }
+    });
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+    assert_eq!(
+      shared.run(|| runs.fetch_add(1, Ordering::SeqCst) + 1),
+      3,
+      "a later caller runs again"
+    );
+  }
+
+  #[test]
+  fn shared_read_recovers_when_a_run_panics() {
+    let shared = SharedRead::new();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      shared.run(|| -> u32 { panic!("read failed") })
+    }));
+    assert!(panicked.is_err());
+    assert_eq!(shared.run(|| 7), 7);
+  }
 
   #[test]
   fn working_copy_lock_is_shared_across_equivalent_paths() {
