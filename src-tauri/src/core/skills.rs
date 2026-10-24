@@ -545,6 +545,97 @@ pub fn customize_skill(skill_id: &str, repo_path: &str) -> Result<CustomizedSkil
   })
 }
 
+/// Where a user-owned skill lives: this repository or the user's home.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomSkillLevel {
+  Repo,
+  Global,
+}
+
+/// A skill folder Treq did not generate: hand-written, or a customized copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomSkill {
+  /// The folder name, which agents use as the skill's name.
+  pub name: String,
+  /// SKILL.md's frontmatter `description`.
+  pub description: Option<String>,
+  pub level: CustomSkillLevel,
+  /// Each copy's folder (`.agents/skills/<name>`, `.claude/skills/<name>`).
+  pub paths: Vec<String>,
+}
+
+fn skill_description(skill_md: &Path) -> Option<String> {
+  let text = fs::read_to_string(skill_md).ok()?;
+  let frontmatter = text.strip_prefix("---")?.split("\n---").next()?;
+  frontmatter.lines().find_map(|line| {
+    let value = line.trim().strip_prefix("description:")?.trim();
+    let value = value.trim_matches(|c| c == '"' || c == '\'');
+    (!value.is_empty()).then(|| value.to_string())
+  })
+}
+
+/// The user-owned skills under `root`'s agent skill folders, by name.
+fn custom_skills_in(root: &Path, level: CustomSkillLevel) -> Vec<CustomSkill> {
+  let mut found: Vec<CustomSkill> = Vec::new();
+  for parent in AGENT_SKILL_PARENTS {
+    let Ok(entries) = fs::read_dir(root.join(parent)) else {
+      continue;
+    };
+    let mut dirs: Vec<PathBuf> = entries
+      .filter_map(|entry| entry.ok().map(|e| e.path()))
+      .filter(|dir| dir.join("SKILL.md").is_file() && is_user_owned_dir(dir))
+      .collect();
+    dirs.sort();
+    for dir in dirs {
+      let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        continue;
+      };
+      let path = dir.to_string_lossy().into_owned();
+      match found.iter_mut().find(|skill| skill.name == name) {
+        Some(skill) => skill.paths.push(path),
+        None => found.push(CustomSkill {
+          name,
+          description: skill_description(&dir.join("SKILL.md")),
+          level,
+          paths: vec![path],
+        }),
+      }
+    }
+  }
+  found.sort_by(|a, b| a.name.cmp(&b.name));
+  found
+}
+
+/// User-owned skills in the repository's and the home folder's
+/// `.agents/skills` and `.claude/skills`: the repository's first. Folders
+/// with the generated-skill marker are Treq's and left out; missing paths
+/// give nothing.
+pub fn list_custom_skills(repo_path: Option<&str>, home: Option<&Path>) -> Vec<CustomSkill> {
+  let mut out = Vec::new();
+  if let Some(repo) = repo_path.filter(|p| !p.trim().is_empty()) {
+    out.extend(custom_skills_in(Path::new(repo), CustomSkillLevel::Repo));
+  }
+  if let Some(home) = home {
+    out.extend(custom_skills_in(home, CustomSkillLevel::Global));
+  }
+  out
+}
+
+/// The prompt for an agent session that edits a user-owned skill.
+pub fn edit_custom_skill_prompt(name: &str, paths: &[String]) -> String {
+  let folders = paths
+    .iter()
+    .map(|p| format!("{p}/"))
+    .collect::<Vec<_>>()
+    .join(" and ");
+  format!(
+    "Help me edit the \"{name}\" agent skill at {folders}. Read SKILL.md, ask me what I want to \
+     change, then make the edits and keep every copy identical."
+  )
+}
+
 const MAX_SKILL_ID_LENGTH: usize = 200;
 
 /// The catalog id from a `treq://skill/install?id=...` link, or `None`. The
@@ -723,6 +814,77 @@ mod tests {
     assert!(prompt.contains("\"demo\""));
     assert!(prompt.contains(".agents/skills/demo/"));
     assert!(prompt.contains(".claude/skills/demo/"));
+  }
+
+  fn write_user_skill(root: &Path, parent: &str, name: &str, description: &str) {
+    let dir = root.join(parent).join(name);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+      dir.join("SKILL.md"),
+      format!("---\nname: {name}\ndescription: {description}\n---\n# {name}\n"),
+    )
+    .unwrap();
+  }
+
+  #[test]
+  fn list_custom_skills_finds_user_owned_repo_and_global_skills() {
+    let repo = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    write_user_skill(repo.path(), ".agents/skills", "review", "Reviews diffs");
+    write_user_skill(repo.path(), ".claude/skills", "review", "Reviews diffs");
+    write_user_skill(repo.path(), ".claude/skills", "deploy", "Ships it");
+    write_user_skill(home.path(), ".claude/skills", "notes", "Takes notes");
+    let found = list_custom_skills(Some(repo.path().to_str().unwrap()), Some(home.path()));
+    let summary: Vec<_> = found
+      .iter()
+      .map(|s| {
+        (
+          s.name.as_str(),
+          s.level,
+          s.paths.len(),
+          s.description.as_deref(),
+        )
+      })
+      .collect();
+    assert_eq!(
+      summary,
+      [
+        ("deploy", CustomSkillLevel::Repo, 1, Some("Ships it")),
+        ("review", CustomSkillLevel::Repo, 2, Some("Reviews diffs")),
+        ("notes", CustomSkillLevel::Global, 1, Some("Takes notes")),
+      ]
+    );
+    assert!(found[1].paths[0].ends_with(".agents/skills/review"));
+  }
+
+  #[test]
+  fn list_custom_skills_skips_treq_generated_and_non_skill_dirs() {
+    let repo = TempDir::new().unwrap();
+    write_user_skill(repo.path(), ".agents/skills", "treq", "bundled");
+    fs::write(
+      repo
+        .path()
+        .join(".agents/skills/treq")
+        .join(PROJECT_SKILL_MARKER),
+      "",
+    )
+    .unwrap();
+    fs::create_dir_all(repo.path().join(".claude/skills/empty")).unwrap();
+    fs::write(repo.path().join(".claude/skills/README.md"), "not a skill").unwrap();
+    assert!(list_custom_skills(Some(repo.path().to_str().unwrap()), None).is_empty());
+  }
+
+  #[test]
+  fn list_custom_skills_returns_nothing_for_missing_paths() {
+    assert!(list_custom_skills(Some("/no/such/repo"), Some(Path::new("/no/such/home"))).is_empty());
+    assert!(list_custom_skills(None, None).is_empty());
+  }
+
+  #[test]
+  fn edit_custom_skill_prompt_names_its_folders() {
+    let prompt = edit_custom_skill_prompt("notes", &["/home/u/.claude/skills/notes".into()]);
+    assert!(prompt.contains("\"notes\""));
+    assert!(prompt.contains("/home/u/.claude/skills/notes/"));
   }
 
   #[test]

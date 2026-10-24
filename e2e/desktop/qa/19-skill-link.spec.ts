@@ -16,7 +16,7 @@
 // `QA_MARKS` (a file path) records when each step starts, for captioning a
 // screen recording of the run.
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { appBinary } from "../env.ts";
 import { appEnv } from "../harness.ts";
@@ -56,7 +56,22 @@ async function skillsTab(page: Page): Promise<void> {
   await settle(page, 1200);
 }
 
+/** A hand-written skill, as a user would add one outside Treq. */
+function handWritten(root: string, name: string, description: string): void {
+  const dir = `${root}/.claude/skills/${name}`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\n`);
+}
+
+/** A status filter chip, by label (its name ends with a count). */
+function chip(page: Page, label: string) {
+  return page.getByRole("button", { name: new RegExp(`^${label} \\d+$`) });
+}
+
 test("skill link: confirm, install, customize with an agent", async ({ page }) => {
+  const { repo: repoDir, home: homeDir } = fixture();
+  handWritten(repoDir, "release-notes", "Drafts release notes from merged PRs");
+  handWritten(homeDir, "standup", "Summarises yesterday's commits for standup");
   await home(page);
   mark("Treq is open on a repository");
   await settle(page, 1500);
@@ -85,17 +100,30 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   const customize = page.getByRole("button", { name: `Customize ${SKILL}` });
   await expect(customize).toBeVisible({ timeout: 60_000 });
   await settle(page, 2000);
-  mark("Installed for all agents: it lists under Installed, App-wide, with Customize");
+  mark("One list, labelled by status: installed, custom repo and custom global skills first");
   await settle(page, 1500);
   await capture(page, {
     name: "19-skill-link-installed",
-    title: "The linked skill, installed at the application level",
+    title: "Every skill in one list, labelled by install status",
     expectations: [
-      "An Installed heading with App-wide (frontend-design, Install level Application) and an empty Local group",
-      "The frontend-design row has Customize on the left and a trash icon top right",
-      "A Skill registry heading follows, listing skills that are not installed",
+      "Filter chips under the search: All, Installed, App-wide, Repository, Custom · Repo, Custom · Global, Not installed, each with a count; All is selected",
+      "First rows: frontend-design labelled App-wide (with Customize), release-notes labelled Custom · Repo, standup labelled Custom · Global",
+      "Registry skills that are not installed follow with no label and an Install… button",
     ],
   });
+  mark("Filter chips narrow the list, like VS Code's extension filters");
+  await chip(page, "Installed").click();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "19-skill-link-filter-installed",
+    title: "The Installed filter",
+    expectations: [
+      "The Installed chip is selected (filled)",
+      "Only frontend-design, release-notes and standup are listed",
+    ],
+  });
+  await chip(page, "All").click();
+  await settle(page, 800);
 
   // The QA agent prints a fixed transcript; for this step it shows the
   // prompt it was started with instead.
@@ -130,15 +158,17 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   });
 
   await skillsTab(page);
+  await chip(page, "Custom · Repo").click();
   await expect(page.getByRole("button", { name: `Edit ${SKILL} with an agent` })).toBeVisible();
-  mark("Customized: it moves to Local with a badge; catalog updates never overwrite the copy");
+  mark("Customized: frontend-design gains a Custom · Repo label; catalog updates never overwrite the copy");
   await settle(page, 2500);
   await capture(page, {
     name: "19-skill-link-customized",
     title: "The customized skill in the Skills tab",
     expectations: [
-      "App-wide is empty; frontend-design now lists under Local",
-      "Its row has a 'Customized' badge and an 'Edit with agent' button",
+      "The Custom · Repo chip is selected; frontend-design and release-notes are listed",
+      "frontend-design shows App-wide and Custom · Repo labels and an Edit with agent button",
+      "release-notes (hand-written) has only Edit with agent: no install level or trash icon",
     ],
   });
   const { repo } = fixture();

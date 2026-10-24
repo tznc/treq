@@ -36,7 +36,9 @@ use crate::{
   core::{
     app_setup_script::AppSetupScriptStatus,
     feature_preview::PreviewFeature,
-    skills::{self, InstalledSkill, SkillCatalogSkillView, SkillInstallScope},
+    skills::{
+      self, CustomSkill, CustomSkillLevel, InstalledSkill, SkillCatalogSkillView, SkillInstallScope,
+    },
     PrerequisiteStatus,
   },
   gpui_shell::{
@@ -129,11 +131,10 @@ pub struct SkillsTab {
   pub loading: bool,
   pub error: Option<String>,
   pub query: String,
-  /// Installed for every repository (application data).
-  pub app_wide: Vec<SkillRow>,
-  /// Installed in this repository, or customized in it.
-  pub local: Vec<SkillRow>,
-  /// The registry's skills that are not installed.
+  /// The status filter chips, each with how many skills it shows.
+  pub filters: Vec<SkillFilter>,
+  /// Every skill the search and the filter leave, labelled by status:
+  /// installed or customized ones first, then the rest of the registry.
   pub rows: Vec<SkillRow>,
   /// The skill whose install dialog is open, by name.
   pub dialog: Option<SkillDialog>,
@@ -157,6 +158,53 @@ pub struct SkillConfirm {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SkillFilter {
+  pub id: &'static str,
+  pub label: &'static str,
+  pub count: usize,
+  pub selected: bool,
+}
+
+pub const LABEL_APP_WIDE: &str = "App-wide";
+pub const LABEL_REPOSITORY: &str = "Repository";
+pub const LABEL_CUSTOM_REPO: &str = "Custom · Repo";
+pub const LABEL_CUSTOM_GLOBAL: &str = "Custom · Global";
+pub const LABEL_UNCATALOGUED: &str = "Not in registry";
+
+/// The filter chips, in order: id and label.
+const SKILL_FILTERS: [(&str, &str); 7] = [
+  ("all", "All"),
+  ("installed", "Installed"),
+  ("app-wide", LABEL_APP_WIDE),
+  ("repository", LABEL_REPOSITORY),
+  ("custom-repo", LABEL_CUSTOM_REPO),
+  ("custom-global", LABEL_CUSTOM_GLOBAL),
+  ("not-installed", "Not installed"),
+];
+
+/// A hand-written skill's row id: its level and name.
+fn custom_row_id(skill: &CustomSkill) -> String {
+  let level = match skill.level {
+    CustomSkillLevel::Repo => "repo",
+    CustomSkillLevel::Global => "global",
+  };
+  format!("custom-{level}/{}", skill.name)
+}
+
+fn skill_filter_matches(filter: &str, row: &SkillRow) -> bool {
+  let has = |label: &str| row.labels.iter().any(|l| l == label);
+  match filter {
+    "installed" => !row.labels.is_empty(),
+    "app-wide" => has(LABEL_APP_WIDE),
+    "repository" => has(LABEL_REPOSITORY),
+    "custom-repo" => has(LABEL_CUSTOM_REPO),
+    "custom-global" => has(LABEL_CUSTOM_GLOBAL),
+    "not-installed" => row.labels.is_empty(),
+    _ => true,
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SkillRow {
   pub id: String,
   pub name: String,
@@ -170,6 +218,10 @@ pub struct SkillRow {
   pub customized: bool,
   /// Installed but no longer listed in the registry.
   pub uncatalogued: bool,
+  /// A user-owned skill with no registry entry: hand-written.
+  pub custom: bool,
+  /// Its install status: level, custom copies, registry state.
+  pub labels: Vec<String>,
   pub busy: bool,
 }
 
@@ -390,7 +442,11 @@ struct Skills {
   /// `None` while the registry loads.
   catalog: Option<Result<Vec<SkillCatalogSkillView>, String>>,
   installed: Vec<InstalledSkill>,
+  /// User-owned skills in the repository and the home folder.
+  custom: Vec<CustomSkill>,
   query: String,
+  /// The status filter chip's id; empty is `all`.
+  filter: String,
   /// The skill an action runs for.
   pending: Option<String>,
   /// The skill whose install dialog is open.
@@ -652,12 +708,17 @@ impl SettingsView {
       cx,
       move |host| {
         let repo = repo.as_deref();
-        (host.skill_catalog(repo), host.installed_skills(repo))
+        (
+          host.skill_catalog(repo),
+          host.installed_skills(repo),
+          host.custom_skills(repo),
+        )
       },
-      |view, (catalog, installed), _| {
+      |view, (catalog, installed, custom), _| {
         if let Some(skills) = &mut view.skills {
           skills.catalog = Some(catalog);
           skills.installed = installed.unwrap_or_default();
+          skills.custom = custom;
         }
       },
     );
@@ -730,6 +791,11 @@ impl SettingsView {
         host.uninstall_skill(&id, repo)
       }),
       "skills.customize" => self.customize_skill(id, cx),
+      "skills.filter" => {
+        if let Some(skills) = &mut self.skills {
+          skills.filter = id;
+        }
+      }
       "skills.source" => {
         let url = self
           .skills
@@ -812,6 +878,18 @@ impl SettingsView {
   /// Customize: writes a user-owned copy of an installed skill into the
   /// repository (once), then asks the window for an agent to edit it.
   fn customize_skill(&mut self, id: String, cx: &mut Context<Self>) {
+    let custom = self.skills.as_ref().and_then(|skills| {
+      skills
+        .custom
+        .iter()
+        .find(|skill| custom_row_id(skill) == id)
+        .cloned()
+    });
+    if let Some(skill) = custom {
+      let prompt = skills::edit_custom_skill_prompt(&skill.name, &skill.paths);
+      self.start_skill_agent(prompt, cx);
+      return;
+    }
     let Some(view) = self.catalog_skill(&id) else {
       return;
     };
@@ -1254,65 +1332,143 @@ impl SettingsView {
           Some(Err(err)) => (false, Some(err.clone()), &[][..]),
           Some(Ok(list)) => (false, None, &list[..]),
         };
-        let row = |view: &SkillCatalogSkillView| SkillRow {
-          id: view.skill.id.clone(),
-          name: view.skill.name.clone(),
-          source: view.skill.source.clone(),
-          description: view.skill.description.clone().filter(|d| !d.is_empty()),
-          has_url: view.skill.url.is_some(),
-          proprietary: view.skill.proprietary,
-          installed: view
-            .installed
-            .as_ref()
-            .map(|i| data::scope_value(i.scope).to_string()),
-          customized: view.customized,
-          uncatalogued: false,
-          busy: pending == Some(view.skill.id.as_str()),
+        let query = skills.query.trim().to_lowercase();
+        let custom_named = |name: &str, level: CustomSkillLevel| {
+          skills
+            .custom
+            .iter()
+            .any(|c| c.level == level && c.name == name)
         };
-        let (mut app_wide, mut local, mut rows) = (Vec::new(), Vec::new(), Vec::new());
+        let level_label = |scope: SkillInstallScope| match scope {
+          SkillInstallScope::Application => LABEL_APP_WIDE,
+          SkillInstallScope::Repository => LABEL_REPOSITORY,
+        };
+        // Custom copies of installed registry skills join that skill's row.
+        let mut merged: Vec<(&str, CustomSkillLevel)> = Vec::new();
+        let (mut labelled, mut rest) = (Vec::new(), Vec::new());
         for view in data::filter_skills(catalog, &skills.query) {
-          match &view.installed {
-            None => rows.push(row(view)),
-            Some(i) if view.customized || i.scope == SkillInstallScope::Repository => {
-              local.push(row(view))
+          let mut labels = Vec::new();
+          let mut customized = view.customized;
+          if let Some(installed) = &view.installed {
+            labels.push(level_label(installed.scope).to_string());
+            for level in [CustomSkillLevel::Repo, CustomSkillLevel::Global] {
+              if custom_named(&installed.name, level) {
+                merged.push((installed.name.as_str(), level));
+                customized |= level == CustomSkillLevel::Repo;
+              }
             }
-            Some(_) => app_wide.push(row(view)),
+            if customized {
+              labels.push(LABEL_CUSTOM_REPO.into());
+            }
+            if custom_named(&installed.name, CustomSkillLevel::Global) {
+              labels.push(LABEL_CUSTOM_GLOBAL.into());
+            }
+          }
+          let row = SkillRow {
+            id: view.skill.id.clone(),
+            name: view.skill.name.clone(),
+            source: view.skill.source.clone(),
+            description: view.skill.description.clone().filter(|d| !d.is_empty()),
+            has_url: view.skill.url.is_some(),
+            proprietary: view.skill.proprietary,
+            installed: view
+              .installed
+              .as_ref()
+              .map(|i| data::scope_value(i.scope).to_string()),
+            customized,
+            uncatalogued: false,
+            custom: false,
+            labels,
+            busy: pending == Some(view.skill.id.as_str()),
+          };
+          if row.labels.is_empty() {
+            rest.push(row);
+          } else {
+            labelled.push(row);
           }
         }
         // Installed skills the registry dropped stay listed, to uninstall.
         if matches!(skills.catalog, Some(Ok(_))) {
-          let query = skills.query.trim().to_lowercase();
           for installed in &skills.installed {
             if catalog.iter().any(|v| v.skill.id == installed.id)
               || !installed.name.to_lowercase().contains(&query)
             {
               continue;
             }
-            let row = SkillRow {
+            labelled.push(SkillRow {
               id: installed.id.clone(),
               name: installed.name.clone(),
-              source: "Not in the registry".into(),
+              source: String::new(),
               description: None,
               has_url: false,
               proprietary: false,
               installed: Some(data::scope_value(installed.scope).to_string()),
               customized: false,
               uncatalogued: true,
+              custom: false,
+              labels: vec![
+                level_label(installed.scope).to_string(),
+                LABEL_UNCATALOGUED.into(),
+              ],
               busy: pending == Some(installed.id.as_str()),
-            };
-            match installed.scope {
-              SkillInstallScope::Application => app_wide.push(row),
-              SkillInstallScope::Repository => local.push(row),
-            }
+            });
           }
         }
+        for custom in &skills.custom {
+          let haystack = format!(
+            "{} {}",
+            custom.name,
+            custom.description.as_deref().unwrap_or_default()
+          )
+          .to_lowercase();
+          if merged.contains(&(custom.name.as_str(), custom.level)) || !haystack.contains(&query) {
+            continue;
+          }
+          labelled.push(SkillRow {
+            id: custom_row_id(custom),
+            name: custom.name.clone(),
+            source: String::new(),
+            description: custom.description.clone(),
+            has_url: false,
+            proprietary: false,
+            installed: None,
+            customized: true,
+            uncatalogued: false,
+            custom: true,
+            labels: vec![match custom.level {
+              CustomSkillLevel::Repo => LABEL_CUSTOM_REPO.into(),
+              CustomSkillLevel::Global => LABEL_CUSTOM_GLOBAL.into(),
+            }],
+            busy: false,
+          });
+        }
+        labelled.extend(rest);
+        let filter = match skills.filter.as_str() {
+          "" => "all",
+          other => other,
+        };
+        let filters = SKILL_FILTERS
+          .iter()
+          .map(|&(id, label)| SkillFilter {
+            id,
+            label,
+            count: labelled
+              .iter()
+              .filter(|row| skill_filter_matches(id, row))
+              .count(),
+            selected: id == filter,
+          })
+          .collect();
+        let rows = labelled
+          .into_iter()
+          .filter(|row| skill_filter_matches(filter, row))
+          .collect();
         SkillsTab {
           installed: skills.installed.len(),
           loading,
           error,
           query: skills.query.clone(),
-          app_wide,
-          local,
+          filters,
           rows,
           dialog: skills.dialog.as_ref().map(|id| SkillDialog {
             name: catalog
@@ -2154,43 +2310,18 @@ impl SettingsView {
         })
         .collect::<Vec<_>>()
     };
-    let app_wide = draw(&tab.app_wide, self, window, cx);
-    let local = draw(&tab.local, self, window, cx);
     let rows = draw(&tab.rows, self, window, cx);
-    let section = |title: &'static str| {
-      ui::text(div().mt_2(), TextSize::Sm)
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(title)
-    };
-    let group = |selector: &'static str,
-                 title: &'static str,
-                 help_text: &'static str,
-                 empty: &'static str,
-                 items: Vec<gpui::Div>| {
-      let is_empty = items.is_empty();
-      div()
-        .debug_selector(move || selector.into())
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(
-          div()
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .font_weight(FontWeight::MEDIUM)
-                .child(title),
-            )
-            .child(help(help_text, p, 1.)),
-        )
-        .when(is_empty, |this| {
-          this.child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(empty),
-          )
+    let chips = tab.filters.iter().map(|filter| {
+      Button::new(format!("skill-filter-{}", filter.id), p)
+        .variant(if filter.selected {
+          Variant::Default
+        } else {
+          Variant::Outline
         })
-        .child(div().flex().flex_col().gap_3().children(items))
-    };
+        .size(Size::Sm)
+        .label(format!("{} {}", filter.label, filter.count))
+        .on_click(self.press(&format!("skills.filter:{}", filter.id)))
+    });
     div()
       .flex()
       .flex_col()
@@ -2207,8 +2338,7 @@ impl SettingsView {
             "Browse the Treq skill registry and install skills into this application or the current repository. Installed skills are copied into new workspaces after checksum verification.",
             p,
             4.,
-          ))
-          .child(help(format!("{} installed", tab.installed), p, 4.)),
+          )),
       )
       .child(
         div()
@@ -2227,8 +2357,15 @@ impl SettingsView {
                 false,
                 false,
               ))),
-          )
-          ,
+          ),
+      )
+      .child(
+        div()
+          .debug_selector(|| "skill-filters".into())
+          .flex()
+          .flex_wrap()
+          .gap_2()
+          .children(chips),
       )
       .when(tab.loading, |this| {
         this.child(
@@ -2248,33 +2385,14 @@ impl SettingsView {
             .child(err),
         )
       })
-      .when(!tab.loading && tab.error.is_none(), |this| {
-        this
-          .child(section("Installed"))
-          .child(group(
-            "skills-installed-app",
-            "App-wide",
-            "In Treq application data. Every repository on this machine gets these.",
-            "No skills installed for every repository.",
-            app_wide,
-          ))
-          .child(group(
-            "skills-installed-local",
-            "Local",
-            "Installed in this repository, or customized here as a user-owned copy.",
-            "No skills installed or customized in this repository.",
-            local,
-          ))
-          .child(section("Skill registry"))
-          .when(tab.rows.is_empty(), |this| {
-            this.child(
-              ui::text(div(), TextSize::Sm)
-                .text_color(p.muted_foreground)
-                .child("No skills match this search."),
-            )
-          })
-          .child(div().flex().flex_col().gap_3().children(rows))
+      .when(!tab.loading && tab.error.is_none() && tab.rows.is_empty(), |this| {
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child("No skills match this search and filter."),
+        )
       })
+      .child(div().flex().flex_col().gap_3().children(rows))
   }
 
   /// `SkillRow`: one registry skill, with its install control.
@@ -2336,24 +2454,29 @@ impl SettingsView {
                       .truncate()
                       .child(row.name.clone()),
                   )
-                  .child(
-                    ui::text(div(), TextSize::Xs)
-                      .text_color(p.muted_foreground)
-                      .child(row.source.clone()),
-                  )
-                  .when(row.customized, |this| {
-                    let selector = format!("skill-customized-{id}");
+                  .when(!row.source.is_empty(), |this| {
                     this.child(
                       ui::text(div(), TextSize::Xs)
-                        .debug_selector(move || selector)
-                        .px_1p5()
-                        .rounded(radius::SM)
-                        .border_1()
-                        .border_color(p.border)
                         .text_color(p.muted_foreground)
-                        .child("Customized"),
+                        .child(row.source.clone()),
                     )
-                  }),
+                  })
+                  .children(row.labels.iter().map(|label| {
+                    let tone = match label.as_str() {
+                      LABEL_APP_WIDE | LABEL_REPOSITORY => p.primary,
+                      LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
+                      _ => p.muted_foreground,
+                    };
+                    ui::text(div(), TextSize::Xs)
+                      .flex_none()
+                      .px_1p5()
+                      .rounded(radius::SM)
+                      .border_1()
+                      .border_color(tone.opacity(0.5))
+                      .bg(tone.opacity(0.1))
+                      .text_color(tone)
+                      .child(label.clone())
+                  })),
               )
               .when_some(row.description.clone(), |this, description| {
                 this.child(
@@ -2386,6 +2509,18 @@ impl SettingsView {
             ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child("Proprietary skills cannot be installed from the registry."),
+          )
+        } else if row.custom {
+          this.child(
+            div().flex().child(
+              Button::new(format!("skill-customize-{id}"), p)
+                .variant(Variant::Outline)
+                .size(Size::Sm)
+                .aria_label(format!("Edit {} with an agent", row.name))
+                .icon(theme::ICON_PENCIL, 14.)
+                .label("Edit with agent")
+                .on_click(self.press(&format!("skills.customize:{id}"))),
+            ),
           )
         } else if let Some(level) = level {
           let (customize_label, customize_aria) = if row.customized {

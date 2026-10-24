@@ -9,7 +9,7 @@ use crate::{
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
     skills::{
-      self, CustomizedSkill, InstalledSkill, SkillCatalogEntry, SkillCatalogSkillView,
+      self, CustomSkill, CustomizedSkill, InstalledSkill, SkillCatalogEntry, SkillCatalogSkillView,
       SkillInstallScope,
     },
   },
@@ -50,6 +50,8 @@ pub trait SettingsHost: ToolsHost + AccountHost {
     scope: SkillInstallScope,
     repo_path: Option<&str>,
   ) -> Result<(), String>;
+  /// User-owned skills in the repository and the home folder.
+  fn custom_skills(&self, repo_path: Option<&str>) -> Vec<CustomSkill>;
   /// Writes a user-owned copy of an installed skill into the repository.
   fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String>;
   /// The bytes at `url`, for the account's avatar.
@@ -146,6 +148,12 @@ impl SettingsHost for Backend {
   ) -> Result<(), String> {
     skills::set_skill_install_scope(skill_id, scope, repo_path)?;
     self.with_db(skills::persist_app_index_setting)
+  }
+
+  fn custom_skills(&self, repo_path: Option<&str>) -> Vec<CustomSkill> {
+    let repo = repo_path.filter(|repo| self.remote_containing(repo).is_none());
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    skills::list_custom_skills(repo, home.as_deref())
   }
 
   fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String> {

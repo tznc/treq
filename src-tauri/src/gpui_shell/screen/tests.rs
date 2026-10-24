@@ -41,6 +41,8 @@ struct FakeHost {
   skills: Vec<crate::core::skills::SkillCatalogSkillView>,
   /// Installed skills the registry no longer lists.
   uncatalogued: Vec<crate::core::skills::InstalledSkill>,
+  /// User-owned skills in the repository and the home folder.
+  custom: Vec<crate::core::skills::CustomSkill>,
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
@@ -406,6 +408,10 @@ impl settings_data::SettingsHost for FakeHost {
   ) -> Result<(), String> {
     self.record(format!("scope {skill_id} {scope:?}"));
     Ok(())
+  }
+
+  fn custom_skills(&self, _: Option<&str>) -> Vec<crate::core::skills::CustomSkill> {
+    self.custom.clone()
   }
 
   fn customize_skill(
@@ -2759,51 +2765,46 @@ fn settings_act(h: &mut Harness, action: ScreenAction) {
   h.cx.run_until_parked();
 }
 
-fn names(rows: &[settings::SkillRow]) -> Vec<&str> {
-  rows.iter().map(|r| r.name.as_str()).collect()
+fn labels(rows: &[settings::SkillRow]) -> Vec<(&str, Vec<&str>)> {
+  rows
+    .iter()
+    .map(|r| {
+      (
+        r.name.as_str(),
+        r.labels.iter().map(String::as_str).collect(),
+      )
+    })
+    .collect()
 }
 
-#[gpui::test]
-fn skills_tab_lists_installed_apart_from_the_registry(cx: &mut TestAppContext) {
-  let (mut h, host) = skills_harness(cx);
-  let skills = drawn_settings(&mut h).skills.expect("skills tab");
-  assert_eq!(skills.installed, 1);
-  assert_eq!(names(&skills.app_wide), ["PDF"]);
-  assert!(skills.local.is_empty());
-  assert_eq!(
-    names(&skills.rows),
-    ["Word"],
-    "the registry lists what is not installed"
-  );
-  assert_eq!(skills.app_wide[0].installed.as_deref(), Some("application"));
-  assert!(h.drawn("skills-installed-app"));
-  assert!(h.drawn("skills-installed-local"));
-  assert!(h.drawn("skill-uninstall-pdf"));
-  assert!(h.drawn("skill-install-docx"));
-  assert_eq!(
-    host.calls().iter().filter(|c| *c == "read skills").count(),
-    1
-  );
-
-  settings_act(&mut h, field("skills.query", "WORD".into()));
-  let skills = drawn_settings(&mut h).skills.expect("skills tab");
-  assert_eq!(names(&skills.rows), ["Word"]);
-  assert!(
-    skills.app_wide.is_empty(),
-    "the search filters installed skills too"
-  );
+fn custom_skill(
+  name: &str,
+  level: crate::core::skills::CustomSkillLevel,
+) -> crate::core::skills::CustomSkill {
+  let root = match level {
+    crate::core::skills::CustomSkillLevel::Repo => "/repo",
+    crate::core::skills::CustomSkillLevel::Global => "/home/u",
+  };
+  crate::core::skills::CustomSkill {
+    name: name.into(),
+    description: Some(format!("{name} by hand")),
+    level,
+    paths: vec![format!("{root}/.claude/skills/{name}")],
+  }
 }
 
-#[gpui::test]
-fn installed_skills_split_into_app_wide_and_local(cx: &mut TestAppContext) {
-  let mut customized = skill("pptx", "PowerPoint", Some("application"));
-  customized.customized = true;
+/// Every kind of skill: registry ones at each level, one customized here,
+/// one the registry dropped, and hand-written ones in the repo and home.
+fn skills_status_harness(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
+  use crate::core::skills::CustomSkillLevel::{Global, Repo};
+  let mut pptx = skill("pptx", "PowerPoint", Some("application"));
+  pptx.customized = true;
   let host = Arc::new(FakeHost {
     skills: vec![
       skill("pdf", "PDF", Some("application")),
       skill("docx", "Word", None),
       skill("xlsx", "Excel", Some("repository")),
-      customized,
+      pptx,
     ],
     uncatalogued: vec![crate::core::skills::InstalledSkill {
       id: "old/gone".into(),
@@ -2811,24 +2812,104 @@ fn installed_skills_split_into_app_wide_and_local(cx: &mut TestAppContext) {
       checksum: "abc".into(),
       scope: crate::core::skills::SkillInstallScope::Application,
     }],
+    custom: vec![
+      custom_skill("PowerPoint", Repo),
+      custom_skill("deploy", Repo),
+      custom_skill("notes", Global),
+    ],
     ..FakeHost::default()
   });
-  let mut h = Harness::with_host(cx, settings_route("skills"), host);
+  let h = Harness::with_host(cx, settings_route("skills"), host.clone());
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  (h, host)
+}
+
+#[gpui::test]
+fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
+  let (mut h, _) = skills_status_harness(cx);
   let skills = drawn_settings(&mut h).skills.expect("skills tab");
-  assert_eq!(skills.installed, 4);
-  assert_eq!(names(&skills.app_wide), ["PDF", "gone"]);
-  assert_eq!(names(&skills.local), ["Excel", "PowerPoint"]);
-  assert_eq!(names(&skills.rows), ["Word"]);
-  let gone = &skills.app_wide[1];
-  assert_eq!(gone.source, "Not in the registry");
-  assert!(!gone.has_url);
-  assert!(h.drawn("skill-uninstall-old/gone"));
+  assert_eq!(
+    labels(&skills.rows),
+    [
+      ("PDF", vec!["App-wide"]),
+      ("Excel", vec!["Repository"]),
+      ("PowerPoint", vec!["App-wide", "Custom · Repo"]),
+      ("gone", vec!["App-wide", "Not in registry"]),
+      ("deploy", vec!["Custom · Repo"]),
+      ("notes", vec!["Custom · Global"]),
+      ("Word", vec![]),
+    ]
+  );
+  let chips: Vec<_> = skills
+    .filters
+    .iter()
+    .map(|f| (f.label, f.count, f.selected))
+    .collect();
+  assert_eq!(
+    chips,
+    [
+      ("All", 7, true),
+      ("Installed", 6, false),
+      ("App-wide", 3, false),
+      ("Repository", 1, false),
+      ("Custom · Repo", 2, false),
+      ("Custom · Global", 1, false),
+      ("Not installed", 1, false),
+    ]
+  );
+  assert_eq!(
+    skills.rows[4].description.as_deref(),
+    Some("deploy by hand")
+  );
+  assert!(h.drawn("skill-filter-all"));
+}
+
+#[gpui::test]
+fn skill_filter_chips_narrow_the_list(cx: &mut TestAppContext) {
+  let (mut h, _) = skills_status_harness(cx);
+  let shown = |h: &mut Harness| -> Vec<String> {
+    drawn_settings(h)
+      .skills
+      .expect("skills tab")
+      .rows
+      .into_iter()
+      .map(|r| r.name)
+      .collect()
+  };
+  h.click("skill-filter-custom-repo");
+  assert_eq!(shown(&mut h), ["PowerPoint", "deploy"]);
+  h.click("skill-filter-repository");
+  assert_eq!(shown(&mut h), ["Excel"]);
+  h.click("skill-filter-not-installed");
+  assert_eq!(shown(&mut h), ["Word"]);
+  h.click("skill-filter-installed");
+  settings_act(&mut h, field("skills.query", "NOTE".into()));
+  assert_eq!(shown(&mut h), ["notes"], "the search narrows the filter");
+  let chips = drawn_settings(&mut h).skills.expect("skills tab").filters;
+  assert!(chips.iter().any(|f| f.id == "installed" && f.selected));
+}
+
+#[gpui::test]
+fn hand_written_skill_edits_with_an_agent_and_cannot_uninstall(cx: &mut TestAppContext) {
+  let (mut h, host) = skills_status_harness(cx);
+  assert!(!h.drawn("skill-uninstall-custom-global/notes"));
   assert!(
     !h.drawn("skill-customize-old/gone"),
     "no catalog copy to customize from"
   );
+  assert!(h.drawn("skill-uninstall-old/gone"));
+  h.click("skill-filter-custom-global");
+  h.click("skill-customize-custom-global/notes");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty());
+  let sent = h.sent();
+  let [ScreenAction::Field { field, value }] = &sent[..] else {
+    panic!("not one field: {sent:?}");
+  };
+  assert_eq!(field, "skills.startAgent");
+  let prompt = value["prompt"].as_str().expect("prompt");
+  assert!(prompt.contains("/home/u/.claude/skills/notes/"), "{prompt}");
 }
 
 #[gpui::test]
@@ -3028,9 +3109,8 @@ fn customized_skill_shows_a_badge_and_edits_without_copying(cx: &mut TestAppCont
   let mut h = Harness::with_host(cx, settings_route("skills"), host.clone());
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
-  let local = drawn_settings(&mut h).skills.expect("skills tab").local;
-  assert!(local[0].customized, "customized skills list as local");
-  assert!(h.drawn("skill-customized-pdf"));
+  let rows = drawn_settings(&mut h).skills.expect("skills tab").rows;
+  assert_eq!(rows[0].labels, ["App-wide", "Custom · Repo"]);
   h.click("skill-customize-pdf");
   h.cx.run_until_parked();
   assert!(host.writes().is_empty(), "the copy is the user's");
