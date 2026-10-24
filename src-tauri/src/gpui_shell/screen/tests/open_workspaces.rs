@@ -31,6 +31,9 @@ impl OpenWorkspacesHost for FakeHost {
   fn open_prs(&self, repo: &str, mine: bool, query: &str) -> Result<Vec<GhPullRequest>, String> {
     let whose = if mine { "mine" } else { "all" };
     self.record(format!("read open prs {repo} {whose} {query:?}"));
+    if self.failing.contains(&"open_prs") {
+      return Err("gh: API rate limit exceeded".into());
+    }
     let prs = if mine {
       &self.open_workspaces.mine
     } else {
@@ -255,6 +258,77 @@ fn the_pull_request_list_shows_the_users_own_first(cx: &mut TestAppContext) {
   assert!(host
     .calls()
     .contains(&"read open prs acme/treq all \"6\"".to_string()));
+}
+
+/// The input's spinner while a search waits or runs.
+fn searching(screen: &gpui_testing_library::Screen) -> bool {
+  screen
+    .query_by_role(by::role(Role::ProgressIndicator).name("Searching pull requests"))
+    .is_some()
+}
+
+#[gpui::test]
+fn a_search_shows_a_spinner_until_its_results_arrive(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.all = vec![pr(5, "feat/a", "main"), pr(6, "feat/b", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  assert!(!searching(&screen));
+
+  // Typing shows the spinner at once, over the old list, before the debounce.
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "6");
+  screen.redraw();
+  assert!(searching(&screen));
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
+
+  let screen = self::screen(&mut h);
+  assert!(!searching(&screen));
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#5 Change 5"))
+    .is_none());
+}
+
+#[gpui::test]
+fn a_search_with_no_matches_says_so(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.open_workspaces.all = vec![pr(5, "feat/a", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "zzz");
+  let screen = self::screen(&mut h);
+  assert!(!searching(&screen));
+  // The empty states carry no accessible text; their ids tell them apart.
+  assert!(h
+    .cx
+    .debug_bounds("open-workspaces-no-matching-pull-requests")
+    .is_some());
+  assert!(h
+    .cx
+    .debug_bounds("open-workspaces-no-open-pull-requests")
+    .is_none());
+}
+
+#[gpui::test]
+fn a_failed_search_shows_its_error(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.failing = vec!["open_prs"];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  screen
+    .user()
+    .type_text(&screen.get_by_label_text("Search pull requests"), "6");
+  let screen = self::screen(&mut h);
+  assert!(!searching(&screen));
+  assert!(h.cx.debug_bounds("open-workspaces-prs-error").is_some());
+  expect(screen.get_by_role(by::role(Role::Button).name("Try again"))).to_be_visible();
 }
 
 #[gpui::test]
@@ -515,4 +589,47 @@ fn reopening_the_dialog_draws_the_pull_requests_it_read_last(cx: &mut TestAppCon
   // And the list is read again behind them.
   let _ = screen(&mut h);
   assert_eq!(reads(&host, "read open prs"), 2);
+}
+
+mod pr_list {
+  use super::pr;
+  use crate::gpui_shell::screen::open_workspaces::PrList;
+
+  #[test]
+  fn an_older_answer_does_not_end_a_newer_search() {
+    let mut list = PrList::default();
+    let older = list.start();
+    let newer = list.start();
+    assert!(!list.settle(older, Ok((vec![pr(5, "feat/a", "main")], false))));
+    assert!(list.loading);
+    assert!(list.items.is_empty());
+
+    assert!(list.settle(newer, Ok((vec![pr(6, "feat/b", "main")], false))));
+    assert!(!list.loading);
+    assert_eq!(list.items[0].number, 6);
+  }
+
+  #[test]
+  fn an_empty_answer_ends_the_search_and_clears_the_list() {
+    let mut list = PrList::default();
+    let first = list.start();
+    list.settle(first, Ok((vec![pr(5, "feat/a", "main")], true)));
+    let search = list.start();
+    assert!(list.loading);
+    assert!(list.settle(search, Ok((Vec::new(), false))));
+    assert!(!list.loading);
+    assert!(list.items.is_empty());
+    assert!(!list.mine);
+  }
+
+  #[test]
+  fn an_error_ends_the_search_and_the_next_start_clears_it() {
+    let mut list = PrList::default();
+    let search = list.start();
+    assert!(list.settle(search, Err("offline".into())));
+    assert!(!list.loading);
+    assert_eq!(list.error.as_deref(), Some("offline"));
+    list.start();
+    assert!(list.error.is_none());
+  }
 }
