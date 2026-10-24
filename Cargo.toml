@@ -29,7 +29,7 @@ debug = false           # Strip debug info from dependencies
 
 # Release profile - optimized for size and performance
 [profile.release]
-opt-level = "z"         # Optimize for size (alternative: "s" for slightly faster code)
+opt-level = "s"         # Size with speed: vs "z", jj diffs ~17% faster for an ~11% larger binary
 lto = "fat"             # Full Link Time Optimization across the whole dependency graph (smaller, slower build)
 codegen-units = 1       # Single codegen unit for better optimization (slower build, smaller binary)
 strip = true            # Strip symbols from binary (reduces size significantly)
