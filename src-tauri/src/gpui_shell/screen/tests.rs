@@ -7826,6 +7826,7 @@ mod prefetch;
 mod review_comments;
 mod stack_panel;
 mod tab_badges;
+mod terminal_perf;
 mod testing_library;
 mod text_editing;
 mod virtual_chaos;
