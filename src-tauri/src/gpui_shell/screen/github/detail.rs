@@ -276,17 +276,20 @@ impl GithubView {
       );
     let loaded = self.detail.issue.is_some() || self.detail.pr.is_some();
     let body = if self.detail.loading {
-      div()
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(ui::spinner(
-          "github-detail-loading",
-          20.,
-          p.muted_foreground,
-        ))
-        .into_any_element()
+      ui::delayed(
+        "github-detail-loading",
+        div()
+          .flex_1()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(ui::spinner(
+            "github-detail-loading-spinner",
+            20.,
+            p.muted_foreground,
+          )),
+      )
+      .into_any_element()
     } else if let (Some(err), false) = (self.detail.error.clone(), loaded) {
       let what = if issue { "issue" } else { "pull request" };
       parts::error_state(
