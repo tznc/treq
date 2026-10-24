@@ -1536,7 +1536,8 @@ impl Render for CommitsView {
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
     if self.history.is_none() {
-      return root.child(
+      return root.child(ui::delayed(
+        "commits-loading-row",
         ui::text(div(), TextSize::Sm)
           .size_full()
           .flex()
@@ -1553,7 +1554,7 @@ impl Render for CommitsView {
               .text_color(p.muted_foreground)
               .child("Loading commits..."),
           ),
-      );
+      ));
     }
     if self.feed_is_empty() {
       return root.child(
@@ -2038,19 +2039,22 @@ impl CommitsView {
         });
     }
     let content = match self.diffs.get(&commit.commit_id) {
-      Some(state) if state.loading => div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .p_3()
-        .text_color(p.muted_foreground)
-        .child(ui::spinner(
-          SharedString::from(format!("diff-spin-{}", commit.commit_id)),
-          16.,
-          p.muted_foreground,
-        ))
-        .child("Loading diff...")
-        .into_any_element(),
+      Some(state) if state.loading => ui::delayed(
+        format!("diff-loading-{}", commit.commit_id),
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .p_3()
+          .text_color(p.muted_foreground)
+          .child(ui::spinner(
+            SharedString::from(format!("diff-spin-{}", commit.commit_id)),
+            16.,
+            p.muted_foreground,
+          ))
+          .child("Loading diff..."),
+      )
+      .into_any_element(),
       Some(DiffState {
         error: Some(err), ..
       }) => div()
