@@ -13,7 +13,12 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
-use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
+use std::{
+  cell::Cell,
+  rc::Rc,
+  sync::Arc,
+  time::{Duration, Instant},
+};
 
 use futures::StreamExt as _;
 use gpui_kit::base::TestSupportExt as _;
@@ -364,8 +369,14 @@ pub struct TerminalView {
   /// Whether the last frame had focus. Only a focused cursor blinks, so an
   /// unfocused terminal skips the blink's redraw.
   focused: bool,
-  /// Fires `Idle` once the process stops writing; each burst replaces it.
+  /// Fires `Idle` once the process stops writing, started by a burst's
+  /// first output.
   idle: Option<Task<()>>,
+  /// Between a burst's first output and `Idle`: the pane hears of the
+  /// output only when this turns on.
+  streaming: bool,
+  /// When the process last wrote, on the executor's clock.
+  last_output: Instant,
   chat_due: bool,
   search: Search,
   tooltips: Tooltips,
@@ -417,6 +428,8 @@ impl TerminalView {
       cursor_on: true,
       focused: false,
       idle: None,
+      streaming: false,
+      last_output: cx.background_executor().now(),
       chat_due: false,
       search: Search::default(),
       tooltips: Tooltips::new(popups, dark),
@@ -643,18 +656,15 @@ impl TerminalView {
   }
 
   fn on_output(&mut self, from_process: bool, cx: &mut Context<Self>) {
-    (self.on_event)(TermEvent::Output { from_process }, cx);
     if from_process {
       // The channel works again, so its next drop gets its own attempt.
       self.remote.auto_spent = false;
-      self.idle = Some(cx.spawn(async move |this, cx| {
-        cx.background_executor().timer(IDLE_AFTER).await;
-        let _ = this.update(cx, |view, cx| {
-          view.chat_due = false;
-          view.record_chat();
-          (view.on_event)(TermEvent::Idle, cx);
-        });
-      }));
+      self.last_output = cx.background_executor().now();
+      if !self.streaming {
+        self.streaming = true;
+        (self.on_event)(TermEvent::Output { from_process }, cx);
+        self.idle = Some(self.idle_timer(cx));
+      }
       if !self.chat_due && self.is_agent() {
         self.chat_due = true;
         cx.spawn(async move |this, cx| {
@@ -669,6 +679,35 @@ impl TerminalView {
       }
     }
     cx.notify();
+  }
+
+  /// Fires `Idle` once the process has written nothing for `IDLE_AFTER`:
+  /// one timer per burst, which sleeps again for what is left whenever
+  /// output came in meanwhile.
+  fn idle_timer(&self, cx: &mut Context<Self>) -> Task<()> {
+    cx.spawn(async move |this, cx| {
+      let mut wait = IDLE_AFTER;
+      loop {
+        cx.background_executor().timer(wait).await;
+        let Ok(last) = this.read_with(cx, |view, _| view.last_output) else {
+          return;
+        };
+        let since = cx
+          .background_executor()
+          .now()
+          .saturating_duration_since(last);
+        if since >= IDLE_AFTER {
+          break;
+        }
+        wait = IDLE_AFTER - since;
+      }
+      let _ = this.update(cx, |view, cx| {
+        view.streaming = false;
+        view.chat_due = false;
+        view.record_chat();
+        (view.on_event)(TermEvent::Idle, cx);
+      });
+    })
   }
 
   /// `agentChatRecorder`: snapshots the agent's screen into its chat log.
@@ -825,6 +864,7 @@ impl TerminalView {
       if let Ok(mut emulator) = live.emulator.lock() {
         emulator.scroll_to_bottom();
       }
+      cx.notify();
     }
     if let Err(error) = self.host.write_pty(&self.pty, data) {
       log::warn!("pty write failed: {error}");
@@ -3396,7 +3436,9 @@ impl TerminalPane {
               on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
           })
-          .child(view)
+          // Its own redraws (output, the blink) leave the other
+          // terminals' drawing as it was.
+          .child(view.cached(gpui::StyleRefinement::default().size_full()))
           .children(previews)
       })
       // `ring-1 ring-inset ring-primary/40` on the active remote session.
