@@ -231,3 +231,7 @@ harness = false
 [[bench]]
 name = "workspace_ops"
 harness = false
+
+[[bench]]
+name = "code_files"
+harness = false

@@ -251,15 +251,17 @@ pub fn ls_workspace(
     }
 
     if let Some(name) = entry_path.file_name().and_then(|name| name.to_str()) {
-      let modified_at = std::fs::metadata(entry_path)
-        .ok()
-        .and_then(|metadata| metadata.modified().ok())
-        .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339());
+      // As `list_directory`: the listing's type, a stat only for a symlink,
+      // and no times, which no caller reads.
+      let is_directory = match entry.file_type() {
+        Some(t) if !t.is_symlink() => t.is_dir(),
+        _ => entry_path.is_dir(),
+      };
       entries.push(WorkspaceEntry {
         name: name.to_string(),
         path: entry_path.to_string_lossy().to_string(),
-        is_directory: entry_path.is_dir(),
-        modified_at,
+        is_directory,
+        modified_at: None,
         submodule_pin: None,
         submodule_synced: None,
         status: None,
@@ -286,8 +288,8 @@ pub fn ls_workspace(
 /// Like `ls_workspace`, but also annotates each entry with its jj file
 /// status (conflict/committed/working-copy) for the Code tab's file list.
 /// This is meaningfully more expensive (three extra jj computations), so it
-/// is kept separate from the plain `ls_workspace` used by callers (e.g.
-/// `get_workspace_readme`) that don't need status.
+/// is kept separate from the plain `ls_workspace` used by callers that
+/// don't need status.
 pub fn ls_workspace_with_status(
   repo_path: &str,
   workspace_id: Option<i64>,
@@ -311,12 +313,10 @@ pub fn ls_workspace_with_status(
   Ok(entries)
 }
 
-pub fn get_workspace_readme(
-  repo_path: &str,
-  workspace_id: Option<i64>,
-) -> Result<Option<String>, String> {
-  let readme = ls_workspace(repo_path, workspace_id)?
-    .into_iter()
+/// The README among a workspace root's `entries`, read.
+fn read_readme(entries: &[WorkspaceEntry]) -> Result<Option<String>, String> {
+  let readme = entries
+    .iter()
     .find(|entry| !entry.is_directory && entry.name.eq_ignore_ascii_case("README.md"));
 
   match readme {
@@ -325,6 +325,17 @@ pub fn get_workspace_readme(
       .map_err(|e| format!("Failed to read workspace README '{}': {}", entry.path, e)),
     None => Ok(None),
   }
+}
+
+/// The Code tab's overview: `ls_workspace_with_status` and the README it
+/// lists, from one listing of the root rather than two.
+pub fn workspace_overview(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+) -> Result<(Vec<WorkspaceEntry>, Option<String>), String> {
+  let entries = ls_workspace_with_status(repo_path, workspace_id)?;
+  let readme = read_readme(&entries)?;
+  Ok((entries, readme))
 }
 
 impl WorkspaceMetadata {

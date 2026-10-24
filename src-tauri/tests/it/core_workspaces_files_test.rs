@@ -64,7 +64,7 @@ fn test_ls_workspace_lists_top_level_entries_and_respects_gitignore() {
 }
 
 #[test]
-fn test_get_workspace_readme_returns_top_level_readme_contents() {
+fn test_workspace_overview_returns_top_level_readme_contents() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let workspace =
     treq_lib::core::create_workspace(&repo.repo_path, "feat/readme", None, None, None, None, None)
@@ -75,14 +75,14 @@ fn test_get_workspace_readme_returns_top_level_readme_contents() {
   TestRepo::write_workspace_file(workspace_path.to_str().unwrap(), "README.md", expected)
     .expect("Failed to write README.md");
 
-  let readme = treq_lib::core::get_workspace_readme(&repo.repo_path, Some(workspace.id))
-    .expect("get_workspace_readme should succeed");
+  let (_, readme) = treq_lib::core::workspace_overview(&repo.repo_path, Some(workspace.id))
+    .expect("workspace_overview should succeed");
 
   assert_eq!(readme.as_deref(), Some(expected));
 }
 
 #[test]
-fn test_get_workspace_readme_returns_none_when_missing() {
+fn test_workspace_overview_returns_no_readme_when_missing() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let workspace = treq_lib::core::create_workspace(
     &repo.repo_path,
@@ -98,8 +98,8 @@ fn test_get_workspace_readme_returns_none_when_missing() {
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   TestRepo::remove_file_path(workspace_path.join("README.md")).expect("Failed to remove README.md");
 
-  let readme = treq_lib::core::get_workspace_readme(&repo.repo_path, Some(workspace.id))
-    .expect("get_workspace_readme should succeed");
+  let (_, readme) = treq_lib::core::workspace_overview(&repo.repo_path, Some(workspace.id))
+    .expect("workspace_overview should succeed");
 
   assert_eq!(readme, None);
 }

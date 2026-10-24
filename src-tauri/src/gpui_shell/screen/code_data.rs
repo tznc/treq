@@ -192,9 +192,10 @@ impl CodeHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Err(unsupported("Browsing the file tree"));
     }
+    let (entries, readme) = core::workspace_overview(repo_path, workspace_id)?;
     Ok(Overview {
-      entries: core::ls_workspace_with_status(repo_path, workspace_id)?,
-      readme: core::get_workspace_readme(repo_path, workspace_id)?,
+      entries,
+      readme,
       unavailable: false,
     })
   }
