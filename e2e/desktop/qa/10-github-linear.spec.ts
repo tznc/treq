@@ -63,7 +63,7 @@ test("github-linear: issues", async ({ page }) => {
     ],
   });
   await closeDetail(page);
-  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New", exact: true }).click();
   await settle(page, 1500);
   await capture(page, {
     name: "10-github-new-issue",
@@ -168,7 +168,7 @@ test("github-linear: new pull request", async ({ page }) => {
   await github(page);
   await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
   await settle(page, 1500);
-  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New", exact: true }).click();
   await settle(page, 2000);
   await capture(page, {
     name: "10-github-new-pr",
