@@ -512,7 +512,7 @@ impl WorkspaceDialog {
             let path = path.clone();
             async move {
               host
-                .file_hunks(&repo, id, vec![path])
+                .file_hunks(&repo, id, vec![path], None)
                 .ok()
                 .and_then(|batch| batch.files.into_iter().next())
                 .filter(|file| file.error.is_none())

@@ -708,12 +708,18 @@ impl changes_data::ChangesHost for FakeHost {
     _: &str,
     _: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
+    if let Some(token) = token {
+      self.record(format!("hunks at {token}"));
+    }
     let working = self.working().ok_or("no changes")?;
-    let token = self.hunks_token.lock().unwrap().clone();
+    // As the backend: the diff `token` names, unless a test moved the disk.
+    let read_at = self.hunks_token.lock().unwrap().clone();
     Ok(crate::core::WorkspaceFileHunksBatch {
-      snapshot_token: token
+      snapshot_token: read_at
+        .or_else(|| token.map(str::to_string))
         .or_else(|| working.working_copy_token.clone())
         .unwrap_or_default(),
       files: paths
@@ -4947,6 +4953,110 @@ fn hunks_read_from_a_newer_diff_are_read_again(cx: &mut TestAppContext) {
     count_calls(&host, "read hunks") > hunks,
     "the diff names t1 but the hunks were read at t2"
   );
+}
+
+/// `tokened_changes_host` whose diff names each file's content.
+fn content_id_changes_host() -> FakeHost {
+  let mut host = tokened_changes_host();
+  if let Some(working) = host.working.as_mut() {
+    for file in &mut working.uncommitted_files {
+      file.content_id = Some(format!("{}@1", file.path));
+    }
+  }
+  host
+}
+
+#[gpui::test]
+fn a_one_file_edit_reads_only_that_files_hunks(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, content_id_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let b_rs = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
+      Arc::as_ptr(&changes.hunks["b.rs"].hunks)
+    })
+  };
+  let before = b_rs(&mut h);
+  let hunks = count_calls(&host, "read hunks");
+
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.uncommitted_files[0].content_id = Some("a.rs@2".into());
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .skip(hunks)
+    .collect();
+  assert_eq!(reads, ["read hunks [\"a.rs\"]"], "b.rs kept its id");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+  assert_eq!(b_rs(&mut h), before, "b.rs keeps its hunks");
+
+  // Both read at t2 now: the same diff again reads nothing.
+  let hunks = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read hunks"), hunks);
+}
+
+#[gpui::test]
+fn hunks_are_read_from_the_listed_diff(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let reads = count_calls(&host, "read hunks");
+  assert!(reads > 0);
+  assert_eq!(
+    count_calls(&host, "hunks at t1"),
+    reads,
+    "every batch names t1"
+  );
+}
+
+#[gpui::test]
+fn hunks_read_at_another_diff_keep_no_content_id(cx: &mut TestAppContext) {
+  let host = content_id_changes_host();
+  *host.hunks_token.lock().unwrap() = Some("t2".into());
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.drawn("changes-diff-viewer");
+  let hunks = count_calls(&host, "read hunks");
+  // Another token, same ids: the ids can't vouch for hunks read elsewhere.
+  let mut edited = host.working.clone().expect("working");
+  edited.working_copy_token = Some("t3".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .skip(hunks)
+    .collect();
+  assert_eq!(reads.concat().matches(".rs").count(), 2, "{reads:?}");
+}
+
+#[gpui::test]
+fn a_review_recheck_reads_only_files_whose_content_changed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, content_id_changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  let hunks = count_calls(&host, "read hunks");
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.uncommitted_files[0].content_id = Some("a.rs@2".into());
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .skip(hunks)
+    .collect();
+  assert_eq!(reads, ["read hunks [\"a.rs\"]"]);
+  assert!(h.drawn("stale-banner"));
 }
 
 #[gpui::test]
