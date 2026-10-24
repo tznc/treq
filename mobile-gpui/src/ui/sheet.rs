@@ -70,6 +70,24 @@ pub fn close(cx: &mut App) {
   });
 }
 
+/// Renames the open sheet, for a sheet with more than one step.
+pub fn set_title(title: impl Into<SharedString>, cx: &mut App) {
+  let Some(root) = cx.try_global::<Slot>().map(|s| s.root.clone()) else {
+    return;
+  };
+  let title = title.into();
+  cx.defer(move |cx| {
+    root
+      .update(cx, |root, cx| {
+        if let Some(sheet) = root.sheet.as_mut() {
+          sheet.title = Some(title);
+          cx.notify();
+        }
+      })
+      .ok();
+  });
+}
+
 /// How long taps are ignored after a sheet closes. A double tap on a sheet's
 /// button would otherwise land its second tap on the page below (a row, or
 /// the page's own button in the same spot).
