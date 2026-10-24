@@ -40,6 +40,10 @@ use crate::{
 /// Size used to start a session, until the view measures itself.
 const INITIAL_SIZE: (u16, u16) = (80, 24);
 
+/// How long a reattached session must stay up before a later drop gets
+/// its own automatic reattach.
+const AUTO_REATTACH_RESET: Duration = Duration::from_secs(10);
+
 /// The gap between a sent message and its Enter, so an agent's TUI reads
 /// the text as typed rather than pasted (a pasted newline doesn't submit).
 const SUBMIT_DELAY: Duration = Duration::from_millis(60);
@@ -505,6 +509,12 @@ pub struct TerminalScreen {
   /// connection dropped). Its last screen stays up so its final output
   /// (an error, a summary) can still be read.
   ended: Option<Option<u32>>,
+  /// The automatic reattach after a dropped connection was used. A
+  /// session that stays up again gives it back, so each drop gets one
+  /// before Reattach is offered.
+  auto_spent: bool,
+  /// Counts attaches, so a timer can tell whether its attach is current.
+  attaches: usize,
   message: Entity<InputState>,
   sessions: WeakEntity<Sessions>,
 }
@@ -596,6 +606,8 @@ impl TerminalScreen {
       program,
       view: Load::Loading,
       ended: None,
+      auto_spent: false,
+      attaches: 0,
       message,
       sessions,
     };
@@ -612,6 +624,8 @@ impl TerminalScreen {
       }
     };
     self.view = Load::Loading;
+    self.attaches += 1;
+    let attach_id = self.attaches;
     let repo = self.target.repo.clone();
     let workspace = self.workspace.clone();
     let label = self.label.clone();
@@ -665,8 +679,10 @@ impl TerminalScreen {
               session_id,
               INITIAL_SIZE,
               rx,
-              move |status, _, cx| {
-                screen.update(cx, |this, cx| this.ended(status, cx)).ok();
+              move |status, window, cx| {
+                screen
+                  .update(cx, |this, cx| this.ended(status, window, cx))
+                  .ok();
               },
               window,
               cx,
@@ -675,6 +691,17 @@ impl TerminalScreen {
           if this.program == Program::Shell {
             view.update(cx, |view, cx| view.focus(window, cx));
           }
+          cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(AUTO_REATTACH_RESET).await;
+            this
+              .update(cx, |this, _| {
+                if this.attaches == attach_id && this.ended.is_none() {
+                  this.auto_spent = false;
+                }
+              })
+              .ok();
+          })
+          .detach();
           Load::Ready(view)
         }
         Err(error) => Load::Failed(errors::describe(&error).message),
@@ -683,9 +710,16 @@ impl TerminalScreen {
     });
   }
 
-  /// The session's program exited, or the channel dropped: back to the
-  /// list, which says which.
-  fn ended(&mut self, status: Option<u32>, cx: &mut Context<Self>) {
+  /// The session's program exited, or the channel dropped. A drop
+  /// reattaches once on its own; after that, or when the program exited,
+  /// the last screen stays up with Reattach (or Start again).
+  fn ended(&mut self, status: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
+    if status.is_none() && !self.auto_spent {
+      self.auto_spent = true;
+      self.attach(self.program.launch(Vec::new()), window, cx);
+      cx.notify();
+      return;
+    }
     self.ended = Some(status);
     cx.notify();
   }
@@ -773,7 +807,7 @@ impl TerminalScreen {
       .id("keys")
       .gap_1()
       .p_1()
-      .overflow_hidden()
+      .overflow_x_scroll()
       .bg(cx.theme().secondary)
       .children(
         self
@@ -786,6 +820,7 @@ impl TerminalScreen {
             Button::new(("key", i))
               .outline()
               .small()
+              .flex_shrink_0()
               .min_w(px(36.))
               .label(*label)
               .on_click(move |_, window, cx| {
