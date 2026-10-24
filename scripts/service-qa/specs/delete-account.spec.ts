@@ -23,7 +23,12 @@ import {
 } from "../../../supabase/functions/delete-account/lib";
 import { handleOrganizationsRequest } from "../../../supabase/functions/organizations/lib";
 import { clearBilling, endPro, grantPro, grantTeam } from "../billing";
-import { getAnonClient, getServiceClient } from "../clients";
+import {
+  getAnonClient,
+  getAnonKey,
+  getFunctionsBaseUrl,
+  getServiceClient,
+} from "../clients";
 import { recordOutcome } from "../record";
 import {
   createTestUser,
@@ -457,5 +462,46 @@ it("keeps the account when Stripe fails and finishes on retry", async () => {
   } finally {
     await deleteTestUser(admin, user.user.id).catch(() => {});
     await clearBilling(admin, [user.user.id]);
+  }
+}, 60000);
+
+it("serves delete-account over HTTP through the real Edge runtime", async () => {
+  const admin = getServiceClient();
+  const user = await createTestUser();
+  const bystander = await createTestUser();
+  const post = (authorization: string, body: unknown = {}) =>
+    fetch(`${getFunctionsBaseUrl()}/delete-account`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: getAnonKey(),
+        Authorization: authorization,
+      },
+      body: JSON.stringify(body),
+    });
+  try {
+    // The anon key is a valid JWT for the gateway but names no user.
+    const anon = await post(`Bearer ${getAnonKey()}`);
+    expect(anon.status).toBe(401);
+    expect(await anon.json()).toEqual({ error: "Unauthorized" });
+
+    const ok = await post(`Bearer ${await accessToken(user)}`, {
+      user_id: bystander.user.id,
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ deleted: true });
+    expect(await userExists(admin, user.user.id)).toBe(false);
+    expect(await userExists(admin, bystander.user.id)).toBe(true);
+
+    await recordOutcome("delete-account-08-http", {
+      expectations: [
+        "Through functions/v1/delete-account, a token that names no user answers 401 Unauthorized.",
+        "A signed-in Free user's request answers 200 {deleted:true} and deletes that user only, ignoring a body user_id.",
+      ],
+      details: { anon: anon.status, ok: ok.status },
+    });
+  } finally {
+    await deleteTestUser(admin, user.user.id).catch(() => {});
+    await deleteTestUser(admin, bystander.user.id).catch(() => {});
   }
 }, 60000);
