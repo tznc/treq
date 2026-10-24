@@ -167,6 +167,8 @@ gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
 # Testing Library queries, user events and matchers for the GPUI screens. Its
 # `gpui-kit` feature reads what `.test_support()` observes.
 gpui-testing-library = { version = "=0.1.0", features = ["gpui-kit"] }
+# Round 6 font measurement only.
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.9" }
 
 [[bench]]
 name = "commit_workspace"

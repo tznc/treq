@@ -24,6 +24,8 @@ mod confirm;
 pub mod e2e;
 mod form;
 #[cfg(test)]
+mod fonts_perf;
+#[cfg(test)]
 mod fuzz;
 mod keys;
 pub mod launch;
