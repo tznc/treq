@@ -49,6 +49,7 @@
 //! does not know about.
 
 use crate::core::remote_pty::{build_launch_program, PtyLaunchSpec};
+use crate::result_ext::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
@@ -410,14 +411,16 @@ pub fn stop_session(repo: &str, workspace: &str, label: &str) -> Result<(), Stri
     PtyBackend::Tmux => {
       // `=` asks tmux for an exact match. Without it tmux falls back to
       // prefix matching, so stopping `...-shell` could kill `...-shell_2d2`.
-      let _ = Command::new("tmux")
+      Command::new("tmux")
         .args(["kill-session", "-t", &format!("={name}")])
-        .status();
+        .status()
+        .best_effort();
     }
     PtyBackend::Screen => {
-      let _ = Command::new("screen")
+      Command::new("screen")
         .args(["-S", &name, "-X", "quit"])
-        .status();
+        .status()
+        .best_effort();
     }
   }
   Ok(())

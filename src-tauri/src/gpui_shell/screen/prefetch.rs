@@ -3,6 +3,7 @@
 //! read consults, so it draws in the first frame. A read made ahead never
 //! changes what shows.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::VecDeque,
   time::{Duration, Instant},
@@ -126,7 +127,7 @@ impl<K: PartialEq + 'static> Intent<K> {
     self.key = Some(key);
     self._wait = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(HOVER_INTENT).await;
-      let _ = this.update(cx, read);
+      this.update(cx, read).ignore_closed();
     }));
   }
 }

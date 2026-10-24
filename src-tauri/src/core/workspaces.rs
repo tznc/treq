@@ -1,4 +1,5 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
@@ -844,7 +845,8 @@ pub fn create_workspace_with_symlinked_dirs(
       .join(".treq")
       .join("workspaces")
       .join(&source_workspace.workspace_path);
-    let _ = jj::jj_get_changed_files(&source_workspace_path.to_string_lossy());
+    jj::jj_get_changed_files(&source_workspace_path.to_string_lossy())
+      .warn_on_err("jj get changed files");
   }
 
   // One load answers the local and remote questions and reads the bookmark's
@@ -1331,9 +1333,10 @@ pub fn push_workspace_to_remote(
 
   // An ancestry-only merge cannot be abandoned cleanly while its bookmark still
   // points at it: jj preserves both parents and turns the bookmark into a conflict.
-  let _ = jj::jj_collapse_empty_merge_tip(&push_path, &branch_name);
+  jj::jj_collapse_empty_merge_tip(&push_path, &branch_name)
+    .warn_on_err("jj collapse empty merge tip");
   // Ensure no empty commits reach the remote; best-effort, never blocks the push.
-  let _ = jj::jj_abandon_empty_commits(&push_path, &target_branch);
+  jj::jj_abandon_empty_commits(&push_path, &target_branch).warn_on_err("jj abandon empty commits");
 
   // Perform the push
   let result = jj::jj_push(&push_path).map_err(|e| format!("Push failed: {}", e))?;
@@ -3083,7 +3086,8 @@ fn merge_workspace_with(
   let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
 
   // Abandon empty commits before merge to keep history clean
-  let _ = jj::jj_abandon_empty_commits(workspace_path_str, target_branch);
+  jj::jj_abandon_empty_commits(workspace_path_str, target_branch)
+    .warn_on_err("jj abandon empty commits");
 
   // Get commits ahead of target
   let commits_ahead = jj::jj_get_commits_ahead(workspace_path_str, target_branch)
@@ -3187,7 +3191,7 @@ fn sync_home_and_workspace_for_branch(
     SyncSource::HomeToWorkspace => repo_path,
     SyncSource::WorkspaceToHome => workspace_path_str,
   };
-  let _ = jj::jj_workspace_update_stale(source_path);
+  jj::jj_workspace_update_stale(source_path).warn_on_err("jj workspace update stale");
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
   let source_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
@@ -3196,7 +3200,7 @@ fn sync_home_and_workspace_for_branch(
     SyncSource::HomeToWorkspace => workspace_path_str,
     SyncSource::WorkspaceToHome => repo_path,
   };
-  let _ = jj::jj_workspace_update_stale(destination_path);
+  jj::jj_workspace_update_stale(destination_path).warn_on_err("jj workspace update stale");
   jj::jj_set_bookmark(destination_path, branch, &source_tip).map_err(|e| {
     format!(
       "Failed to force-sync destination bookmark '{}' to source tip: {}",
@@ -3211,10 +3215,10 @@ fn sync_home_and_workspace_for_branch(
           branch, e
         )
       })?;
-      let _ = jj::jj_workspace_update_stale(destination_path);
+      jj::jj_workspace_update_stale(destination_path).warn_on_err("jj workspace update stale");
     }
     SyncSource::HomeToWorkspace => {
-      let _ = jj::jj_workspace_update_stale(destination_path);
+      jj::jj_workspace_update_stale(destination_path).warn_on_err("jj workspace update stale");
       // Move @ onto the new bookmark tip so the workspace working copy stays in sync (avoids infinite auto-sync loop).
       if let Err(e) = jj::jj_sync_working_copy_if_safe(destination_path, branch) {
         log::warn!(
@@ -3365,7 +3369,7 @@ pub(crate) fn apply_workspace_target_branch_after(
     .to_str()
     .ok_or("Failed to convert workspace path to string")?;
 
-  let _ = jj::jj_git_fetch_unless_recent(repo_path, max_age);
+  jj::jj_git_fetch_unless_recent(repo_path, max_age).warn_on_err("jj git fetch unless recent");
 
   // Lifting off a parent workspace must leave that parent's commits in place.
   let parent_workspace = workspace.target_branch.as_deref().filter(|parent| {
@@ -3882,13 +3886,13 @@ pub fn move_workspace_changes(
   for (file_path, content) in &commit_moved_file_saves {
     let dest_file = std::path::Path::new(&destination_full_path_str).join(file_path);
     if let Some(parent) = dest_file.parent() {
-      let _ = std::fs::create_dir_all(parent);
+      std::fs::create_dir_all(parent).warn_on_err("create dir all");
     }
-    let _ = std::fs::write(&dest_file, content);
+    std::fs::write(&dest_file, content).warn_on_err("write");
   }
 
-  let _ = jj::update_stale_workspace(&source_full_path_str);
-  let _ = jj::update_stale_workspace(&destination_full_path_str);
+  jj::update_stale_workspace(&source_full_path_str).warn_on_err("update stale workspace");
+  jj::update_stale_workspace(&destination_full_path_str).warn_on_err("update stale workspace");
 
   Ok(result)
 }
@@ -3954,8 +3958,9 @@ pub fn pull_workspace_from_remote(
 
   if !is_conflicted {
     // No divergence — try to sync working copy if safe
-    let _ = jj::jj_workspace_update_stale(full_path_str);
-    let _ = jj::jj_sync_working_copy_if_safe(full_path_str, branch_name);
+    jj::jj_workspace_update_stale(full_path_str).warn_on_err("jj workspace update stale");
+    jj::jj_sync_working_copy_if_safe(full_path_str, branch_name)
+      .warn_on_err("jj sync working copy if safe");
 
     if target_moved {
       auto_review::notify(
@@ -4009,7 +4014,7 @@ pub fn pull_workspace_from_remote(
   }
 
   // Step 6: refresh stale working copy only; do not sync bookmark tip here.
-  let _ = jj::jj_workspace_update_stale(full_path_str);
+  jj::jj_workspace_update_stale(full_path_str).warn_on_err("jj workspace update stale");
   sync_home_and_workspace_for_branch(repo_path, branch_name, SyncSource::WorkspaceToHome)?;
 
   let has_conflicts = workspace_pull_has_conflicts(full_path_str, branch_name);
@@ -4653,18 +4658,21 @@ fn commit_workspace_locked(
   let result = jj::jj_commit(&workspace_root, message)
     .map_err(|e| format!("Failed to create commit: {}", e))?;
   // Check-pass autosaves are checkpoints. Fold them away once the user commits.
-  let _ = jj::jj_drop_autosave_ancestors(&workspace_root);
+  jj::jj_drop_autosave_ancestors(&workspace_root).warn_on_err("jj drop autosave ancestors");
   // Keep branch history free of empty commits; best-effort, never fails the commit.
-  let _ = jj::jj_abandon_empty_commits(&workspace_root, &target_branch);
+  jj::jj_abandon_empty_commits(&workspace_root, &target_branch)
+    .warn_on_err("jj abandon empty commits");
   if !committed_branch.is_empty() {
     if let Some(id) = workspace_id {
       if let Ok(new_tip) = jj::jj_get_commit_id(&workspace_root, &committed_branch) {
-        let _ = local_db::update_workspace_last_rebased_commit(repo_path, id, &new_tip);
+        local_db::update_workspace_last_rebased_commit(repo_path, id, &new_tip)
+          .warn_on_err("update workspace last rebased commit");
       }
     }
   }
   if !committed_branch.is_empty() {
-    let _ = auto_rebase::rebase_after_commit(repo_path, &committed_branch);
+    auto_rebase::rebase_after_commit(repo_path, &committed_branch)
+      .warn_on_err("rebase after commit");
   }
   match workspace_id {
     Some(_) => {

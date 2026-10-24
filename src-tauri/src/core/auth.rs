@@ -11,6 +11,7 @@
 //! each new access token to the SSH relay and the Linear proxy, and mirrors
 //! the session to its webview.
 
+use crate::result_ext::ResultExt;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -354,13 +355,14 @@ impl Auth {
   /// Ends the session on the server (best effort) and forgets it here.
   pub async fn sign_out(&self) {
     if let Some(session) = self.session() {
-      let _ = self
+      self
         .http
         .post(format!("{}/auth/v1/logout", self.url))
         .bearer_auth(&session.access_token)
         .header("apikey", &self.anon_key)
         .send()
-        .await;
+        .await
+        .ignore_closed();
     }
     self.set_session(None);
   }

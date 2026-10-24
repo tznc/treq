@@ -4,6 +4,7 @@
 //! `handleDelete` ran: workflow checks, pull requests, the merge queue,
 //! retargeting and the More menu's Reset to remote and Delete Workspace.
 
+use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{prelude::*, App, Context};
 
 use super::{
@@ -99,11 +100,13 @@ impl WorkspaceView {
       run,
       move |target, run| host.run_checks(target, run),
       move |_, cx| {
-        let _ = view.update(cx, |view, _| {
-          view
-            .host
-            .notify(NativeEvent::WorkspaceChanged { repo_path });
-        });
+        view
+          .update(cx, |view, _| {
+            view
+              .host
+              .notify(NativeEvent::WorkspaceChanged { repo_path });
+          })
+          .ignore_closed();
       },
     );
   }
@@ -127,12 +130,14 @@ impl WorkspaceView {
       let trusted = cx
         .background_spawn(async move { host.trust_repo(&repo) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if let Err(err) = trusted {
-          log::warn!("failed to trust the repository: {err}");
-        }
-        view.load(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Err(err) = trusted {
+            log::warn!("failed to trust the repository: {err}");
+          }
+          view.load(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -170,7 +175,9 @@ impl WorkspaceView {
           return;
         };
         let run = run.clone();
-        let _ = view.update(cx, |view, cx| run(view, action, cx));
+        view
+          .update(cx, |view, cx| run(view, action, cx))
+          .ignore_closed();
       }),
     );
     (self.popups)(
@@ -259,7 +266,9 @@ impl WorkspaceView {
         .background_spawn(async move { workspace_ops::delete(&*host, &workspace) })
         .await;
       if gone {
-        let _ = this.update(cx, |view, cx| view.close_terminals(path, cx));
+        this
+          .update(cx, |view, cx| view.close_terminals(path, cx))
+          .ignore_closed();
       }
     })
     .detach();
@@ -351,39 +360,41 @@ impl WorkspaceView {
         })
         .await
       };
-      let _ = this.update(cx, |view, cx| {
-        view.busy.creating_pr = false;
-        match created {
-          Ok(number) => {
-            let url = format!("https://github.com/{}/pull/{number}", request.full_name);
-            let opener = host.clone();
-            view.host.notify(NativeEvent::Toast {
-              title: if draft {
-                "Draft PR created"
-              } else {
-                "Pull request created"
-              }
-              .into(),
-              description: format!("#{number}"),
-              tone: ToastTone::Success,
-              action: Some(ToastAction {
-                label: "Open in Web".into(),
-                id: native::register_toast_action(move || opener.open_url(&url)),
-              }),
-            });
+      this
+        .update(cx, |view, cx| {
+          view.busy.creating_pr = false;
+          match created {
+            Ok(number) => {
+              let url = format!("https://github.com/{}/pull/{number}", request.full_name);
+              let opener = host.clone();
+              view.host.notify(NativeEvent::Toast {
+                title: if draft {
+                  "Draft PR created"
+                } else {
+                  "Pull request created"
+                }
+                .into(),
+                description: format!("#{number}"),
+                tone: ToastTone::Success,
+                action: Some(ToastAction {
+                  label: "Open in Web".into(),
+                  id: native::register_toast_action(move || opener.open_url(&url)),
+                }),
+              });
+            }
+            Err(err) => view.host.notify(NativeEvent::Toast {
+              title: "Failed to create PR".into(),
+              description: err,
+              tone: ToastTone::Error,
+              action: None,
+            }),
           }
-          Err(err) => view.host.notify(NativeEvent::Toast {
-            title: "Failed to create PR".into(),
-            description: err,
-            tone: ToastTone::Error,
-            action: None,
-          }),
-        }
-        view.host.notify(NativeEvent::WorkspaceChanged {
-          repo_path: request.repo_path.clone(),
-        });
-        view.rebuild(cx);
-      });
+          view.host.notify(NativeEvent::WorkspaceChanged {
+            repo_path: request.repo_path.clone(),
+          });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -418,23 +429,25 @@ impl WorkspaceView {
         })
         .await
       };
-      let _ = this.update(cx, |view, cx| {
-        view.busy.creating_pr = false;
-        match url {
-          Ok(url) => {
-            if request.push {
-              view.host.notify(NativeEvent::WorkspaceChanged {
-                repo_path: request.repo_path.clone(),
-              });
+      this
+        .update(cx, |view, cx| {
+          view.busy.creating_pr = false;
+          match url {
+            Ok(url) => {
+              if request.push {
+                view.host.notify(NativeEvent::WorkspaceChanged {
+                  repo_path: request.repo_path.clone(),
+                });
+              }
+              view.host.open_url(&url);
             }
-            view.host.open_url(&url);
+            Err(err) => {
+              workspace_ops::toast(&*view.host, ToastTone::Error, "Failed to push branch", &err)
+            }
           }
-          Err(err) => {
-            workspace_ops::toast(&*view.host, ToastTone::Error, "Failed to push branch", &err)
-          }
-        }
-        view.rebuild(cx);
-      });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -460,22 +473,24 @@ impl WorkspaceView {
         cx.background_spawn(async move { host.retarget(&repo_path, &workspace, &branch) })
           .await
       };
-      let _ = this.update(cx, |view, cx| {
-        view.busy.retargeting = false;
-        match done {
-          Ok(()) => workspace_ops::toast(
-            &*view.host,
-            ToastTone::Success,
-            &format!("Rebased onto {branch}"),
-            "",
-          ),
-          Err(err) => workspace_ops::toast(&*view.host, ToastTone::Error, "Rebase failed", &err),
-        }
-        view
-          .host
-          .notify(NativeEvent::WorkspaceChanged { repo_path });
-        view.rebuild(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.busy.retargeting = false;
+          match done {
+            Ok(()) => workspace_ops::toast(
+              &*view.host,
+              ToastTone::Success,
+              &format!("Rebased onto {branch}"),
+              "",
+            ),
+            Err(err) => workspace_ops::toast(&*view.host, ToastTone::Error, "Rebase failed", &err),
+          }
+          view
+            .host
+            .notify(NativeEvent::WorkspaceChanged { repo_path });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -506,50 +521,52 @@ impl WorkspaceView {
         cx.background_spawn(async move { host.queue(&request.full_name, &request.branch, action) })
           .await
       };
-      let _ = this.update(cx, |view, cx| {
-        view.busy.queueing = false;
-        let (title, description, tone, button) = match done {
-          Ok(()) => (
-            match action {
-              QueueAction::Enqueue => "Added to merge queue",
-              QueueAction::Dequeue => "Removed from merge queue",
-            }
-            .to_string(),
-            String::new(),
-            ToastTone::Success,
-            None,
-          ),
-          Err(err) if err.is_pro_required() => {
-            let url = format!("{}/dashboard", native::web_url());
-            let opener = host.clone();
-            (
-              "The merge queue needs Pro".to_string(),
+      this
+        .update(cx, |view, cx| {
+          view.busy.queueing = false;
+          let (title, description, tone, button) = match done {
+            Ok(()) => (
+              match action {
+                QueueAction::Enqueue => "Added to merge queue",
+                QueueAction::Dequeue => "Removed from merge queue",
+              }
+              .to_string(),
               String::new(),
-              ToastTone::Info,
-              Some(ToastAction {
-                label: "Upgrade to Pro".into(),
-                id: native::register_toast_action(move || opener.open_url(&url)),
-              }),
-            )
-          }
-          Err(err) => (
-            "Queue error".to_string(),
-            err.message,
-            ToastTone::Error,
-            None,
-          ),
-        };
-        view.host.notify(NativeEvent::Toast {
-          title,
-          description,
-          tone,
-          action: button,
-        });
-        view.host.notify(NativeEvent::WorkspaceChanged {
-          repo_path: request.repo_path.clone(),
-        });
-        view.rebuild(cx);
-      });
+              ToastTone::Success,
+              None,
+            ),
+            Err(err) if err.is_pro_required() => {
+              let url = format!("{}/dashboard", native::web_url());
+              let opener = host.clone();
+              (
+                "The merge queue needs Pro".to_string(),
+                String::new(),
+                ToastTone::Info,
+                Some(ToastAction {
+                  label: "Upgrade to Pro".into(),
+                  id: native::register_toast_action(move || opener.open_url(&url)),
+                }),
+              )
+            }
+            Err(err) => (
+              "Queue error".to_string(),
+              err.message,
+              ToastTone::Error,
+              None,
+            ),
+          };
+          view.host.notify(NativeEvent::Toast {
+            title,
+            description,
+            tone,
+            action: button,
+          });
+          view.host.notify(NativeEvent::WorkspaceChanged {
+            repo_path: request.repo_path.clone(),
+          });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }

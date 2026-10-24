@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -287,7 +288,7 @@ fn wait_with_deadline(
     std::thread::spawn(move || {
       let mut buf = Vec::new();
       if let Some(mut pipe) = pipe {
-        let _ = pipe.read_to_end(&mut buf);
+        pipe.read_to_end(&mut buf).best_effort();
       }
       buf
     })
@@ -301,8 +302,8 @@ fn wait_with_deadline(
       break status;
     }
     if std::time::Instant::now() >= deadline {
-      let _ = child.kill();
-      let _ = child.wait();
+      child.kill().best_effort();
+      child.wait().best_effort();
       return Err(format!("gh timed out after {}s", timeout.as_secs()));
     }
     std::thread::sleep(std::time::Duration::from_millis(50));

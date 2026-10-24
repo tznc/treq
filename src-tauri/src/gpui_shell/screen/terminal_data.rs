@@ -2,6 +2,7 @@
 //! runs: PTY sessions, agent start commands, chat logs, and the live
 //! terminal state that outlives any one view of it.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},
@@ -233,8 +234,8 @@ impl TerminalHost for Backend {
       let (id, command) = (spawn.id.clone(), agent_command::normalize_command(command));
       std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let _ = manager.set_auto_command(&id, &command);
-        let _ = manager.write_to_session(&id, &command);
+        manager.set_auto_command(&id, &command).ignore_closed();
+        manager.write_to_session(&id, &command).ignore_closed();
       });
     }
     Ok(())
@@ -524,7 +525,7 @@ fn remote_channel(backend: &Backend, id: &str, op: RemoteOp) {
     });
     tx
   });
-  let _ = sender.send(op);
+  sender.send(op).ignore_closed();
   if closing {
     channels.remove(id);
   }
@@ -690,7 +691,7 @@ pub fn attach(host: &Host, id: &str, cols: usize, rows: usize) -> (Arc<Live>, bo
     Box::new(move |chunk| {
       if let Some(terminal) = weak.upgrade() {
         for reply in terminal.push_bytes(chunk) {
-          let _ = writer.write_pty(&pty, &reply);
+          writer.write_pty(&pty, &reply).ignore_closed();
         }
       }
     }),

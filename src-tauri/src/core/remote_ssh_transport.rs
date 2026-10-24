@@ -22,6 +22,7 @@
 //!
 //! SFTP and port forwarding are out of scope, per the PRD.
 
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -850,13 +851,14 @@ impl SshConnectionPool {
       if let Some(pooled) = removed {
         pooled.alive.store(false, Ordering::SeqCst);
         let handle = pooled.handle.lock().await;
-        let _ = handle
+        handle
           .disconnect(
             Disconnect::ByApplication,
             "credential revoked or expired",
             "en",
           )
-          .await;
+          .await
+          .ignore_closed();
       }
     }
     tracing::warn!(endpoint_id = %endpoint_id, reason = %reason, "ssh endpoint credential cut off");
@@ -1111,9 +1113,10 @@ impl SshConnectionPool {
     };
     for pooled in stale {
       let handle = pooled.handle.lock().await;
-      let _ = handle
+      handle
         .disconnect(Disconnect::ByApplication, "idle timeout", "en")
-        .await;
+        .await
+        .ignore_closed();
     }
   }
 

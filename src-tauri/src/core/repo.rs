@@ -1,4 +1,5 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -43,7 +44,7 @@ pub fn commit_repo(repo_path: &str, message: &str) -> Result<String, String> {
   let _guard = lock.lock_or_recover();
   let result =
     jj::jj_commit(repo_path, message).map_err(|e| format!("Failed to create commit: {}", e))?;
-  let _ = jj::jj_drop_autosave_ancestors(repo_path);
+  jj::jj_drop_autosave_ancestors(repo_path).warn_on_err("jj drop autosave ancestors");
   Ok(result)
 }
 
@@ -118,7 +119,7 @@ pub fn repo_status(repo_path: &str) -> Result<RepoStatus, String> {
   // Step 1: fetch — capture error but continue
   let fetch_error = jj::jj_git_fetch(repo_path).err().map(|e| e.to_string());
   // Keep jj view aligned with colocated git state before status checks.
-  let _ = jj::jj_util_import_git_refs(repo_path);
+  jj::jj_util_import_git_refs(repo_path).warn_on_err("jj util import git refs");
 
   // Step 2: default branch for conflict/change checks
   let default_branch = get_repo_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());

@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use std::path::{Path, PathBuf};
 
 use crate::local_db::{self, AgentReviewComment};
@@ -149,7 +150,7 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), String> {
     })
     .and_then(|()| std::fs::rename(&temp, path));
   if result.is_err() {
-    let _ = std::fs::remove_file(&temp);
+    std::fs::remove_file(&temp).best_effort();
   }
   result.map_err(write_err)
 }

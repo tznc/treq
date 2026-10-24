@@ -4,6 +4,7 @@
 //! asks one question at a time: asking again while one is open does
 //! nothing, so a second click on Delete can't stack another dialog.
 
+use crate::result_ext::ResultExt;
 use std::rc::Rc;
 
 use tauri_plugin_gpui::gpui::{prelude::*, App, Context, FocusHandle, Window};
@@ -118,7 +119,9 @@ pub fn render<V: 'static>(
     pending
       .question
       .dialog(&focus, window, p, move |yes, _, cx| {
-        let _ = this.update(cx, |view, cx| answer(slot, view, yes, cx));
+        this
+          .update(cx, |view, cx| answer(slot, view, yes, cx))
+          .ignore_closed();
       }),
   )
 }

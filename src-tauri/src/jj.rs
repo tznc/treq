@@ -3,6 +3,7 @@
   reason = "slices hex commit/change ids and git ref names at ASCII separators"
 )]
 
+use crate::result_ext::ResultExt;
 use chrono::TimeZone;
 use futures::StreamExt as _;
 use futures::TryStreamExt as _;
@@ -1089,7 +1090,7 @@ fn build_log_commits(
       )
     })
     .collect();
-  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  local_db::cache_commit_rows(cache_repo_path, &misses).warn_on_err("cache commit rows");
   built
 }
 
@@ -1743,10 +1744,12 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
       return Ok(true); // Flag valid, .jj exists
     }
     // Flag stale — .jj was deleted. Clear flag, fall through to reinit
-    let _ = db.set_repo_setting(repo_path, flag_key, "false");
+    db.set_repo_setting(repo_path, flag_key, "false")
+      .warn_on_err("set repo setting");
   } else if is_jj_workspace(repo_path) {
     // Double-check filesystem in case flag got out of sync
-    let _ = db.set_repo_setting(repo_path, flag_key, "true");
+    db.set_repo_setting(repo_path, flag_key, "true")
+      .warn_on_err("set repo setting");
     ensure_treq_dirs_ignored(repo_path)?;
     return Ok(true);
   }
@@ -1757,7 +1760,7 @@ pub fn ensure_jj_initialized(db: &crate::db::Database, repo_path: &str) -> Resul
   }
 
   // Cache git user config so subsequent commits don't shell out
-  let _ = cache_git_user_config(db, repo_path);
+  cache_git_user_config(db, repo_path).warn_on_err("cache git user config");
 
   // Initialize jj
   init_jj_for_git_repo(repo_path)?;
@@ -1925,7 +1928,7 @@ pub fn create_workspace(
   let settings = create_user_settings(repo_path)?;
 
   // Import colocated git refs (HEAD + branches/remotes) so external commits are visible for parent resolution.
-  let _ = jj_util_import_git_refs(repo_path);
+  jj_util_import_git_refs(repo_path).warn_on_err("jj util import git refs");
 
   // Load parent workspace and repo (re-loaded after the git import so it sees fresh refs).
   let parent_workspace = Workspace::load(
@@ -1992,7 +1995,10 @@ pub fn create_workspace(
         name: RefName::new(&name),
         remote: RemoteName::new(&remote),
       };
-      let _ = import_tx.repo_mut().track_remote_bookmark(sym);
+      import_tx
+        .repo_mut()
+        .track_remote_bookmark(sym)
+        .warn_on_err("track remote bookmark");
     }
 
     if import_tx.repo().has_changes() {
@@ -2189,7 +2195,9 @@ pub fn create_workspace(
         name: RefName::new(branch_name),
         remote: RemoteName::new("origin"),
       };
-      let _ = tx.repo_mut().track_remote_bookmark(sym);
+      tx.repo_mut()
+        .track_remote_bookmark(sym)
+        .warn_on_err("track remote bookmark");
     }
   }
 
@@ -2198,7 +2206,7 @@ pub fn create_workspace(
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to rebase descendants: {}", e)))?;
 
   // Export to git refs (colocated repo)
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let _committed_repo = block_on(tx.commit("create_workspace"))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to commit transaction: {}", e)))?;
@@ -2340,7 +2348,7 @@ pub fn create_resolve_workspace(
       e
     ))
   })?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let committed = block_on(tx.commit("create_resolve_workspace")).map_err(|e| {
     JjError::GitWorkspaceError(format!("Failed to commit resolve workspace tx: {}", e))
   })?;
@@ -2573,7 +2581,7 @@ pub fn jj_resolve_conflict_sides(workspace_path: &str, sides: &[u8]) -> Result<(
     };
     let abs = Path::new(workspace_path).join(path.as_internal_file_string());
     if let Some(parent) = abs.parent() {
-      let _ = fs::create_dir_all(parent);
+      fs::create_dir_all(parent).warn_on_err("create dir all");
     }
     fs::write(&abs, resolved_text.as_bytes()).map_err(|e| {
       JjError::IoError(format!(
@@ -3065,7 +3073,8 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
       // With nothing rebased no WC commit moved, so every other working copy is current; reconciling
       // would only load each workspace to find that out.
       if rebased > 0 {
-        let _ = reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name));
+        reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name))
+          .warn_on_err("reconcile all workspaces after rewrite");
       }
     }
   }
@@ -3196,13 +3205,14 @@ pub fn squash_commit_to_workspace(
   tx.repo_mut().record_abandoned_commit(&commit);
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   block_on(tx.commit("move commit to workspace"))
     .map_err(|e| JjError::IoError(format!("Failed to commit move: {}", e)))?;
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(target_name.as_str()));
+  reconcile_all_workspaces_after_rewrite(&repo_path, Some(target_name.as_str()))
+    .warn_on_err("reconcile all workspaces after rewrite");
   update_stale_workspace(target_workspace_path)
     .map_err(|e| JjError::IoError(format!("Failed to update target working copy: {e}")))
 }
@@ -3434,7 +3444,8 @@ pub fn jj_abandon(workspace_path: &str, change_id: &str) -> Result<String, JjErr
   // rebase_descendants() may have rewritten WC commits of every workspace; reconcile all.
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(op_hex)
 }
@@ -3462,7 +3473,7 @@ pub fn jj_undo_operation(workspace_path: &str, operation_id: &str) -> Result<Str
 
   let mut tx = loaded.repo.start_transaction();
   tx.repo_mut().set_view(restored_view);
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit(format!("undo: restore to operation {}", parent.id().hex())))
     .map_err(|e| JjError::IoError(format!("Failed to commit undo: {}", e)))?;
   update_workspace_after_history_edit(&mut loaded, &new_repo, None, CheckoutMode::Immediate)?;
@@ -3627,7 +3638,8 @@ pub fn jj_revert_commit(workspace_path: &str, change_id: &str) -> Result<String,
   // rebase_descendants() may have rewritten WC commits of every workspace; reconcile all.
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(String::new())
 }
@@ -3665,7 +3677,8 @@ pub fn jj_describe(
   // rebase_descendants() may have rewritten WC commits of every workspace; reconcile all.
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(String::new())
 }
@@ -3982,7 +3995,8 @@ fn apply_lineage_timestamp_plan(
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
   Ok(())
 }
 
@@ -4342,23 +4356,27 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
       builder.set_tree(new_tree.clone());
       match block_on(builder.write(tx.repo_mut())) {
         Ok(rewritten_wc) => {
-          let _ = block_on(tx.repo_mut().edit(workspace_name, &rewritten_wc));
-          let _ = block_on(tx.repo_mut().rebase_descendants());
+          block_on(tx.repo_mut().edit(workspace_name, &rewritten_wc))
+            .warn_on_err("edit rewritten working copy");
+          block_on(tx.repo_mut().rebase_descendants()).warn_on_err("rebase descendants");
           match block_on(tx.commit("snapshot working copy")) {
             Ok(final_repo) => {
-              let _ = block_on(locked_ws.finish(final_repo.op_id().clone()));
+              block_on(locked_ws.finish(final_repo.op_id().clone()))
+                .warn_on_err("finish working copy update");
             }
             Err(_) => {
-              let _ = block_on(locked_ws.finish(repo.op_id().clone()));
+              block_on(locked_ws.finish(repo.op_id().clone()))
+                .warn_on_err("finish working copy update");
             }
           }
         }
         Err(_) => {
-          let _ = block_on(locked_ws.finish(repo.op_id().clone()));
+          block_on(locked_ws.finish(repo.op_id().clone()))
+            .warn_on_err("finish working copy update");
         }
       }
     } else {
-      let _ = block_on(locked_ws.finish(repo.op_id().clone()));
+      block_on(locked_ws.finish(repo.op_id().clone())).warn_on_err("finish working copy update");
     }
 
     Ok(tree_changes(&repo, &wc_commit, &new_tree))
@@ -5154,7 +5172,7 @@ pub fn jj_stash_working_copy(
   })?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after stash: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("stash working copy"))
     .map_err(|e| JjError::IoError(format!("Failed to commit stash transaction: {}", e)))?;
@@ -5256,7 +5274,7 @@ pub fn jj_stash_commit(
   tx.repo_mut().record_abandoned_commit(&commit);
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after stash: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("stash commit"))
     .map_err(|e| JjError::IoError(format!("Failed to commit stash-commit transaction: {}", e)))?;
@@ -5264,7 +5282,8 @@ pub fn jj_stash_commit(
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   let change_id_hex = HexPrefix::from_id(stash_commit.change_id()).reverse_hex()[..12].to_string();
   let short_commit_id = short_commit_id(&stash_commit);
@@ -5514,7 +5533,7 @@ pub fn jj_delete_bookmark(workspace_path: &str, bookmark_name: &str) -> Result<(
   let mut tx = loaded.repo.start_transaction();
   tx.repo_mut()
     .set_local_bookmark_target(RefName::new(bookmark_name), RefTarget::absent());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   block_on(tx.commit("delete bookmark")).map_err(|e| {
     JjError::IoError(format!(
       "Failed to delete bookmark '{}': {}",
@@ -5618,7 +5637,7 @@ pub fn jj_edit_bookmark(repo_path: &str, bookmark_name: &str) -> Result<String, 
     .map_err(|e| JjError::IoError(format!("Failed to move working copy: {}", e)))?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("edit bookmark"))
     .map_err(|e| JjError::IoError(format!("Failed to commit bookmark edit: {}", e)))?;
   update_workspace_after_history_edit(
@@ -5704,7 +5723,7 @@ pub fn jj_reset_bookmark_to_remote(
   set_local_bookmark_target(tx.repo_mut(), branch_name, remote_commit.id().clone());
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit(format!("reset {branch_name} to origin")))
     .map_err(|e| JjError::IoError(format!("Failed to commit reset: {}", e)))?;
   update_workspace_after_history_edit(
@@ -5819,7 +5838,7 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
             .map_err(|e| JjError::IoError(format!("Failed to repair home wc checkout: {}", e)))?;
             block_on(rtx.repo_mut().rebase_descendants())
               .map_err(|e| JjError::IoError(format!("Failed to rebase after wc repair: {}", e)))?;
-            let _ = git::export_refs(rtx.repo_mut());
+            git::export_refs(rtx.repo_mut()).warn_on_err("export refs");
             let _ = block_on(rtx.commit("repair home wc"))
               .map_err(|e| JjError::IoError(format!("Failed to commit wc repair: {}", e)))?;
             workspace = Workspace::load(
@@ -5948,7 +5967,7 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
   }
 
   // Keep colocated git refs aligned with jj refs to avoid stale/conflicted bookmark revsets.
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   // Commit the transaction and finalize working copy
   let new_repo = block_on(tx.commit("commit_workspace"))
@@ -5958,8 +5977,8 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
 
   // Reconcile sibling workspaces after rebase_descendants rewrites WCs (mirrors update_workspace_after_history_edit).
   let reconcile_repo_path = repo_path_opt.as_deref().unwrap_or(workspace_path);
-  let _ =
-    reconcile_all_workspaces_after_rewrite(reconcile_repo_path, Some(workspace_name.as_str()));
+  reconcile_all_workspaces_after_rewrite(reconcile_repo_path, Some(workspace_name.as_str()))
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   // For home repos, keep Git HEAD symbolic to the active branch (avoid detached HEAD after jj commit).
   if repo_path_opt.is_none() {
@@ -6392,7 +6411,7 @@ pub fn jj_split(
   }
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("split working copy"))
     .map_err(|e| JjError::IoError(format!("Failed to commit split transaction: {}", e)))?;
   // No old tree: the snapshot already moved tree_state, so a check would hit ConcurrentCheckout.
@@ -6587,7 +6606,7 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     ))
   })?;
 
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("rebase workspace bookmark lineage"))
     .map_err(|e| JjError::IoError(format!("Failed to commit rebase transaction: {}", e)))?;
@@ -7075,12 +7094,13 @@ pub fn jj_rebase_with_revset(
   if commits.is_empty() {
     // Nothing to rebase — still reconcile on-disk WC state so sibling workspaces stay consistent.
     let current_repo = Arc::clone(&loaded.repo);
-    let _ = update_workspace_after_history_edit(
+    update_workspace_after_history_edit(
       &mut loaded,
       &current_repo,
       old_wc_commit.as_ref(),
       CheckoutMode::Immediate,
-    );
+    )
+    .warn_on_err("update workspace after history edit");
     return Ok(JjRebaseResult {
       success: true,
       message: "Nothing to rebase (empty revision set)".to_string(),
@@ -7112,7 +7132,7 @@ pub fn jj_rebase_with_revset(
   .map_err(|e| JjError::IoError(format!("Failed to rebase revset roots: {}", e)))?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("rebase revset roots"))
     .map_err(|e| JjError::IoError(format!("Failed to commit rebase transaction: {}", e)))?;
   update_workspace_after_history_edit(
@@ -7240,7 +7260,7 @@ pub fn jj_resolve_bookmark_conflict_losslessly(
 
   tx.repo_mut()
     .set_local_bookmark_target(RefName::new(bookmark_name), RefTarget::normal(tip_id));
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   let new_repo = block_on(tx.commit("resolve bookmark conflict losslessly"))
     .map_err(|e| JjError::IoError(format!("Failed to commit bookmark resolution: {e}")))?;
   update_workspace_after_history_edit(
@@ -8805,13 +8825,14 @@ pub fn jj_drop_autosave_ancestors(workspace_path: &str) -> Result<Vec<String>, J
   }
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase after dropping autosaves: {e}")))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
   block_on(tx.commit("drop autosave commits"))
     .map_err(|e| JjError::IoError(format!("Failed to commit autosave drop: {e}")))?;
 
   let repo_path =
     derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, None);
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(dropped_ids)
 }
@@ -9027,7 +9048,7 @@ fn build_wc_log_commit(
     &cached,
     &mut misses,
   );
-  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  local_db::cache_commit_rows(cache_repo_path, &misses).warn_on_err("cache commit rows");
   row
 }
 
@@ -9164,14 +9185,16 @@ fn update_workspace_after_history_edit(
   if matches!(checkout_mode, CheckoutMode::Deferred) {
     loaded.repo = Arc::clone(new_repo);
     // In deferred mode still reconcile sibling workspaces; skip the loaded workspace (caller owns checkout).
-    let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name));
+    reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name))
+      .warn_on_err("reconcile all workspaces after rewrite");
     return Ok(());
   }
 
   let workspace_name = loaded.workspace.workspace_name().to_owned();
   let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name).cloned() else {
     // Primary workspace has no WC commit — still reconcile siblings.
-    let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name));
+    reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name))
+      .warn_on_err("reconcile all workspaces after rewrite");
     return Ok(());
   };
   let new_wc_commit = new_repo
@@ -9191,7 +9214,8 @@ fn update_workspace_after_history_edit(
   }
 
   // Reconcile every other workspace whose WC commit was rewritten by rebase_descendants.
-  let _ = reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name));
+  reconcile_all_workspaces_after_rewrite(&repo_path, Some(&primary_workspace_name))
+    .warn_on_err("reconcile all workspaces after rewrite");
 
   Ok(())
 }
@@ -9733,7 +9757,7 @@ pub fn jj_new_with_parents(
     .map_err(|e| JjError::IoError(format!("Failed to move working copy: {}", e)))?;
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants: {}", e)))?;
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("new commit"))
     .map_err(|e| JjError::IoError(format!("Failed to commit transaction: {}", e)))?;
@@ -9799,7 +9823,7 @@ pub fn jj_create_merge_commit(
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after merge: {}", e)))?;
 
   set_local_bookmark_target(tx.repo_mut(), target_branch, merge_commit.id().clone());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("create merge commit"))
     .map_err(|e| JjError::IoError(format!("Failed to commit merge transaction: {}", e)))?;
@@ -9954,7 +9978,7 @@ pub fn jj_rebase_merge_commit(
     ))
   })?;
   set_local_bookmark_target(tx.repo_mut(), target_branch, merge_commit.id().clone());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("rebase merge workspace"))
     .map_err(|e| JjError::IoError(format!("Failed to commit rebase transaction: {}", e)))?;
@@ -10016,7 +10040,7 @@ pub fn jj_squash_merge_commit(
   block_on(tx.repo_mut().rebase_descendants())
     .map_err(|e| JjError::IoError(format!("Failed to rebase descendants after squash: {}", e)))?;
   set_local_bookmark_target(tx.repo_mut(), target_branch, squashed_commit.id().clone());
-  let _ = git::export_refs(tx.repo_mut());
+  git::export_refs(tx.repo_mut()).warn_on_err("export refs");
 
   let new_repo = block_on(tx.commit("squash merge workspace"))
     .map_err(|e| JjError::IoError(format!("Failed to commit squash transaction: {}", e)))?;

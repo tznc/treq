@@ -11,6 +11,7 @@
 //! know which files exist (see
 //! <https://stackoverflow.com/questions/6824717/sqlite-how-do-you-join-tables-from-different-databases>).
 
+use crate::result_ext::ResultExt;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -421,9 +422,9 @@ fn cleanup_old_telemetry_dbs(dir: &Path, max_age: Duration) {
       continue;
     };
     if date < cutoff.date_naive() {
-      let _ = std::fs::remove_file(dir.join(name));
-      let _ = std::fs::remove_file(dir.join(format!("{}-wal", name)));
-      let _ = std::fs::remove_file(dir.join(format!("{}-shm", name)));
+      std::fs::remove_file(dir.join(name)).best_effort();
+      std::fs::remove_file(dir.join(format!("{}-wal", name))).best_effort();
+      std::fs::remove_file(dir.join(format!("{}-shm", name))).best_effort();
     }
   }
 }
