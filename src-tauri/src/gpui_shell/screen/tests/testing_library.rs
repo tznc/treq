@@ -462,3 +462,30 @@ fn a_new_shell_takes_focus_fully_in_view(cx: &mut TestAppContext) {
     host.calls()
   );
 }
+
+#[gpui::test]
+fn account_deletion_refusal_is_announced_as_an_alert_in_a_dialog(cx: &mut TestAppContext) {
+  let reason = "You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.";
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError {
+      status: 409,
+      code: "last_owner".into(),
+      message: reason.into(),
+      correlation_id: None,
+    }),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host);
+  let s = screen(&mut h);
+  s.user()
+    .click(&s.get_by_role(by::role(Role::Button).name("Delete Account")));
+  let s = screen(&mut h);
+  expect(s.get_by_role(by::role(Role::Dialog).name("Delete your Treq account?"))).to_be_visible();
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  let s = screen(&mut h);
+  expect(s.get_by_role(by::role(Role::Alert).name(reason))).to_be_visible();
+}

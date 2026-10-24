@@ -14,8 +14,11 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{self, div, prelude::*, AnyElement, Context, FontWeight, Window};
+use tauri_plugin_gpui::gpui::{
+  self, div, prelude::*, AnyElement, Context, FontWeight, SharedString, Window,
+};
 
 use super::{help, toast, SettingsView, Tab};
 use crate::gpui_shell::{
@@ -1708,6 +1711,9 @@ impl SettingsView {
         div()
           .id("account-delete-dialog")
           .debug_selector(|| "account-delete-dialog".into())
+          .role(gpui::Role::Dialog)
+          .aria_label(SharedString::from("Delete your Treq account?"))
+          .test_support()
           .w_full()
           .max_w(zpx(512.))
           .mx_4()
@@ -1751,8 +1757,12 @@ impl SettingsView {
               .when_some(dialog.error.clone(), |this, error| {
                 this.child(
                   ui::text(div(), TextSize::Sm)
+                    .id("account-delete-error")
+                    .role(gpui::Role::Alert)
+                    .aria_label(SharedString::from(error.clone()))
                     .text_color(Tone::Danger.color(p))
-                    .child(error),
+                    .child(error)
+                    .test_support(),
                 )
               }),
           )
