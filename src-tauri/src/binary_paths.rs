@@ -224,6 +224,21 @@ pub fn detect_binary(name: &str) -> Option<String> {
   detect_binary_in(name, get_extended_path())
 }
 
+/// `name` as an executable file in one of `search_path`'s directories: what
+/// [`detect_binary_in`] finds, without starting a `which`.
+#[cfg(unix)]
+pub fn find_executable_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<String> {
+  use std::os::unix::fs::PermissionsExt;
+  env::split_paths(search_path.as_ref())
+    .map(|dir| dir.join(name))
+    .find(|path| {
+      path
+        .metadata()
+        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    })
+    .map(|path| path.to_string_lossy().into_owned())
+}
+
 /// Finds `name` on `search_path` (a PATH-style list) and nowhere else, with
 /// the same `which` (Unix) or `where` (Windows) lookup as [`detect_binary`].
 pub fn detect_binary_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<String> {
@@ -305,6 +320,23 @@ pub fn get_editor_apps_cache() -> Option<HashMap<String, bool>> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[cfg(unix)]
+  #[test]
+  fn finds_an_executable_file_on_the_search_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let tool = dir.path().join("tool");
+    std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(dir.path().join("plain"), "").unwrap();
+    std::fs::create_dir(dir.path().join("folder")).unwrap();
+    let found = find_executable_in("tool", dir.path());
+    assert_eq!(found.as_deref(), tool.to_str());
+    assert_eq!(find_executable_in("plain", dir.path()), None);
+    assert_eq!(find_executable_in("folder", dir.path()), None);
+    assert_eq!(find_executable_in("absent", dir.path()), None);
+  }
 
   #[cfg(target_os = "macos")]
   #[test]
