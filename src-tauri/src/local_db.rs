@@ -2019,22 +2019,27 @@ pub fn sync_workspace_files(
   )
   .map_err(|e| format!("Failed to delete existing files: {}", e))?;
 
-  for file in &files {
-    tx.execute(
-      "INSERT INTO workspace_files
+  {
+    let mut insert = tx
+      .prepare_cached(
+        "INSERT INTO workspace_files
              (workspace_id, file_path, relative_path, is_directory, parent_path, cached_at, mtime)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-      params![
-        workspace_id,
-        &file.file_path,
-        &file.relative_path,
-        if file.is_directory { 1 } else { 0 },
-        &file.parent_path,
-        &file.cached_at,
-        &file.mtime,
-      ],
-    )
-    .map_err(|e| format!("Failed to insert file: {}", e))?;
+      )
+      .map_err(|e| format!("Failed to prepare file insert: {}", e))?;
+    for file in &files {
+      insert
+        .execute(params![
+          workspace_id,
+          &file.file_path,
+          &file.relative_path,
+          if file.is_directory { 1 } else { 0 },
+          &file.parent_path,
+          &file.cached_at,
+          &file.mtime,
+        ])
+        .map_err(|e| format!("Failed to insert file: {}", e))?;
+    }
   }
 
   tx.commit()
