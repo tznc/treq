@@ -569,3 +569,52 @@ fn lineage_rebase_keeps_commits_on_their_stacked_working_copy() {
     "C's commit should stay on B's working copy"
   );
 }
+
+/// A rewrite reconciles every workspace, but one it did not touch keeps its
+/// working-copy state as it was: rewriting it would be an fsynced write per
+/// workspace per rewrite, for nothing.
+#[test]
+fn rebase_leaves_an_untouched_sibling_working_copy_state_alone() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch().to_string();
+  let rebased = repo
+    .create_workspace_with_commit("feat/rebased", "rebased.txt", "rebased\n", None)
+    .expect("Failed to create rebased workspace");
+  let sibling = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/sibling",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create sibling workspace");
+  let rebased_path = repo.workspace_full_path(&rebased);
+  let sibling_path = repo.workspace_full_path(&sibling);
+  let checkout = std::path::Path::new(&sibling_path)
+    .join(".jj")
+    .join("working_copy")
+    .join("checkout");
+  let before = std::fs::read(&checkout).expect("Failed to read sibling checkout state");
+
+  repo
+    .commit_file("main.txt", "main\n", "advance main")
+    .expect("Failed to advance main");
+  jj::jj_rebase_with_revset(
+    &rebased_path,
+    &format!("roots({default_branch}..{})", rebased.branch_name),
+    &default_branch,
+    &rebased.branch_name,
+    "diff",
+  )
+  .expect("Failed to rebase");
+
+  assert_eq!(
+    std::fs::read(&checkout).expect("Failed to read sibling checkout state"),
+    before,
+    "the sibling's working-copy state is not rewritten"
+  );
+  assert!(!jj::is_workspace_stale(&sibling_path).expect("staleness"));
+  assert_working_copy_clean(&sibling_path);
+}
