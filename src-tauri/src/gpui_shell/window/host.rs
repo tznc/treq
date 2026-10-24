@@ -62,6 +62,12 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn summaries(&self, _repo: &str) -> Option<Vec<WorkspaceSummary>> {
     None
   }
+  /// The workspaces the local database lists, with no jj or network read,
+  /// so a window draws its rows before `statuses` and `has_changes` finish.
+  /// `None` where there is no such read (a repository over SSH).
+  fn listed_workspaces(&self, _repo: &str) -> Option<Vec<Workspace>> {
+    None
+  }
   fn sessions(&self, repo: &str) -> Vec<Session>;
   fn branch(&self, repo: &str) -> Option<RepoBranch>;
   fn default_branch(&self, repo: &str) -> Option<String>;
@@ -177,11 +183,16 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     out.sessions = Some(host.sessions(repo));
   }
   if read.detail {
-    out.branch = Some(host.branch(repo));
-    out.default_branch = Some(host.default_branch(repo));
-    out.remote = Some(host.remote(repo));
+    read_detail(host, repo, &mut out);
   }
   out
+}
+
+/// The repository's branch, default branch and remote.
+pub fn read_detail(host: &dyn WindowHost, repo: &str, out: &mut RepoRead) {
+  out.branch = Some(host.branch(repo));
+  out.default_branch = Some(host.default_branch(repo));
+  out.remote = Some(host.remote(repo));
 }
 
 /// Repositories `open_in_new_window` initialized for the window it opens,
@@ -263,6 +274,13 @@ impl WindowHost for Backend {
         .ok()
         .map(|status| status.partial.has_changes),
       None => core::workspace_has_changes(repo, workspace_id).ok(),
+    }
+  }
+
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    match self.remote(repo) {
+      Some(_) => None,
+      None => core::list_workspaces(repo).ok(),
     }
   }
 
