@@ -2,6 +2,7 @@
 //! workspaces under their base, status dots, and a menu per row.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -10,6 +11,7 @@ use gpui_kit::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    spinner::Spinner,
     v_flex, ActiveTheme, IconName, Sizable,
   },
   *,
@@ -33,6 +35,15 @@ pub type OnDone = std::rc::Rc<dyn Fn(&mut App)>;
 
 /// Indent per stacking level.
 const INDENT: f32 = 16.;
+
+/// How often the list checks the host for changes made elsewhere (the
+/// desktop app, the CLI, an agent).
+const MARKER_POLL: Duration = Duration::from_secs(10);
+
+#[derive(serde::Deserialize)]
+struct ChangeMarker {
+  operation_id: Option<String>,
+}
 
 pub fn open(repo: String, cx: &mut App) {
   let title = repo_name(&repo).to_string();
@@ -179,10 +190,17 @@ pub struct WorkspacesScreen {
   query: Entity<InputState>,
   /// The workspace ids picked for a bulk action, while selecting.
   selection: Option<HashSet<i64>>,
-  /// A bulk or row action in progress.
-  busy: bool,
+  /// Workspaces an archive or delete is running on. Their rows show a
+  /// spinner and take no taps until it ends.
+  pending: HashSet<i64>,
   message: Option<(bool, String)>,
+  /// Why the last refresh failed, while the list shows what it had.
+  refresh_error: Option<String>,
+  /// The host's last change marker, to refetch when something else changed
+  /// the repository.
+  marker: Option<String>,
   scroll: ScrollHandle,
+  _poll: Task<()>,
 }
 
 impl WorkspacesScreen {
@@ -197,15 +215,25 @@ impl WorkspacesScreen {
     .detach();
     // Shown at once when this list was read before; refetched either way.
     let list = remote::last(&summaries_request(&repo)).map_or(Load::Idle, Load::Ready);
+    let poll = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(MARKER_POLL).await;
+      if this.update(cx, |this, cx| this.poll_marker(cx)).is_err() {
+        break;
+      }
+    });
     let mut this = Self {
       repo,
       list,
       query,
       selection: None,
-      busy: false,
+      pending: HashSet::new(),
       message: None,
+      refresh_error: None,
+      marker: None,
       scroll: ScrollHandle::new(),
+      _poll: poll,
     };
+    this.poll_marker(cx);
     this.fetch(true, cx);
     this
   }
@@ -221,8 +249,62 @@ impl WorkspacesScreen {
     load::run(
       cx,
       load_summaries(self.repo.clone(), join),
-      |this, result, _| this.list = Load::from_result(result),
+      |this, result, _| {
+        match result {
+          Ok(list) => {
+            // Drop picks the host no longer has.
+            if let Some(selection) = &mut this.selection {
+              selection.retain(|id| list.iter().any(|s| s.workspace.id == *id));
+            }
+            this.list = Load::Ready(list);
+            this.refresh_error = None;
+          }
+          // Keep what's on screen; a refresh that fails says so below it.
+          Err(error) if this.list.ready().is_some() => {
+            this.refresh_error = Some(format!(
+              "Couldn't refresh: {}",
+              errors::describe(&error).message
+            ));
+          }
+          Err(error) => this.list = Load::Failed(error),
+        }
+      },
     );
+  }
+
+  /// Refetches when the repository changed on the host since the last poll.
+  fn poll_marker(&mut self, cx: &mut Context<Self>) {
+    let repo = self.repo.clone();
+    load::run(
+      cx,
+      remote::read::<ChangeMarker>(TreqCommandRequest::WorkspaceChangeMarker {
+        repo,
+        workspace: None,
+      }),
+      |this, result, cx| {
+        if let Ok(marker) = result {
+          let changed = this.marker.is_some() && this.marker != marker.operation_id;
+          this.marker = marker.operation_id;
+          if changed && this.pending.is_empty() {
+            this.reload(cx);
+          }
+        }
+      },
+    );
+  }
+
+  /// The picked workspaces the list shows: on the host and matching the
+  /// search, so a bulk action never reaches rows the user can't see.
+  fn visible_selection(&self, cx: &App) -> Vec<i64> {
+    let (Some(selection), Some(list)) = (&self.selection, self.list.ready()) else {
+      return Vec::new();
+    };
+    let query = self.query.read(cx).value().to_string();
+    list
+      .iter()
+      .filter(|s| selection.contains(&s.workspace.id) && matches(s, &query))
+      .map(|s| s.workspace.id)
+      .collect()
   }
 
   fn summary(&self, id: i64) -> Option<&WorkspaceSummary> {
@@ -230,6 +312,9 @@ impl WorkspacesScreen {
   }
 
   fn row_menu(&self, id: i64, cx: &mut Context<Self>) {
+    if self.pending.contains(&id) {
+      return;
+    }
     let Some(summary) = self.summary(id) else {
       return;
     };
@@ -337,10 +422,21 @@ impl WorkspacesScreen {
   }
 
   fn archive(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
-    self.busy = true;
+    let ids: Vec<i64> = ids
+      .into_iter()
+      .filter(|id| !self.pending.contains(id))
+      .collect();
+    if ids.is_empty() {
+      return;
+    }
+    self.pending.extend(&ids);
     self.message = None;
     let repo = self.repo.clone();
     let count = ids.len();
+    let title = (count == 1)
+      .then(|| self.summary(ids[0]).map(|s| title_of(&s.workspace)))
+      .flatten();
+    let done_ids = ids.clone();
     load::run(
       cx,
       async move {
@@ -358,12 +454,21 @@ impl WorkspacesScreen {
         failed
       },
       move |this, failed, cx| {
-        this.busy = false;
+        for id in &done_ids {
+          this.pending.remove(id);
+        }
         this.selection = None;
-        this.message = Some(match failed.first() {
-          None if count == 1 => (true, "Workspace archived.".into()),
-          None => (true, format!("{count} workspaces archived.")),
-          Some(error) => (
+        this.message = Some(match (failed.first(), title) {
+          (None, Some(title)) => (true, format!("{title} archived.")),
+          (None, None) => (true, format!("{count} workspaces archived.")),
+          (Some(error), Some(title)) => (
+            false,
+            format!(
+              "Couldn't archive {title}: {}",
+              errors::describe(error).message
+            ),
+          ),
+          (Some(error), None) => (
             false,
             format!(
               "{} of {count} not archived: {}",
@@ -400,14 +505,25 @@ impl WorkspacesScreen {
   }
 
   fn delete(&mut self, id: i64, cx: &mut Context<Self>) {
-    self.busy = true;
+    if !self.pending.insert(id) {
+      return;
+    }
+    self.message = None;
     let request = TreqCommandRequest::DeleteWorkspace {
       repo: self.repo.clone(),
       workspace: id.to_string(),
     };
-    load::run(cx, remote::mutate(request), |this, outcome, cx| {
-      this.busy = false;
-      this.message = Some(mutation_message(&outcome, "Workspace deleted."));
+    load::run(cx, remote::mutate(request), move |this, outcome, cx| {
+      this.pending.remove(&id);
+      let (ok, text) = mutation_message(&outcome, "Workspace deleted.");
+      this.message = Some((
+        ok,
+        if ok {
+          text
+        } else {
+          errors::describe(&text).message
+        },
+      ));
       this.reload(cx);
     });
     cx.notify();
@@ -459,6 +575,7 @@ impl WorkspacesScreen {
     let theme = cx.theme();
     let selecting = self.selection.as_ref();
     let selected = selecting.is_some_and(|s| s.contains(&id));
+    let pending = self.pending.contains(&id);
 
     let mut status: Vec<AnyElement> = Vec::new();
     if summary.terminals > 0 {
@@ -500,7 +617,11 @@ impl WorkspacesScreen {
       .gap_2()
       .items_center()
       .children(status)
-      .when(selecting.is_none(), |t| t.child(menu))
+      .map(|t| match (pending, selecting) {
+        (true, _) => t.child(Spinner::new().small()),
+        (false, None) => t.child(menu),
+        (false, Some(_)) => t,
+      })
       .into_any_element();
     let leading = selecting.map(|_| {
       Checkbox::new(SharedString::from(format!("ws-check-{id}")), &palette)
@@ -518,7 +639,11 @@ impl WorkspacesScreen {
     )
     .pl(px(16. + INDENT * entry.depth as f32))
     .when(selected, |row| row.bg(palette.selected()))
+    .when(pending, |row| row.opacity(0.6))
     .on_click(cx.listener(move |this, _, _, cx| {
+      if this.pending.contains(&id) {
+        return;
+      }
       if this.selection.is_some() {
         this.toggle(id, cx);
       } else {
@@ -537,9 +662,10 @@ impl WorkspacesScreen {
       .border_color(theme.border)
       .bg(theme.background);
     match &self.selection {
-      Some(selection) => {
-        let ids: Vec<i64> = selection.iter().copied().collect();
+      Some(_) => {
+        let ids = self.visible_selection(cx);
         let count = ids.len();
+        let busy = !self.pending.is_empty();
         bar
           .child(
             Button::new("select-cancel")
@@ -560,8 +686,8 @@ impl WorkspacesScreen {
                 1 => "Archive 1 workspace".to_string(),
                 n => format!("Archive {n} workspaces"),
               })
-              .disabled(count == 0 || self.busy)
-              .loading(self.busy)
+              .disabled(count == 0 || busy)
+              .loading(busy)
               .on_click(cx.listener(move |this, _, _, cx| this.confirm_archive(ids.clone(), cx))),
           )
       }
@@ -664,6 +790,12 @@ impl Render for WorkspacesScreen {
                       .loading(self.list.is_loading())
                       .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
                   ),
+              )
+              .children(
+                self
+                  .refresh_error
+                  .clone()
+                  .map(|error| widgets::error_text(error, cx)),
               )
               .child(body)
               .children(self.message.clone().map(|(ok, text)| {
