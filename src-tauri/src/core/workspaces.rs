@@ -4203,6 +4203,7 @@ fn workspace_diff_with_conflict_style(
   let jj::WorkingCopyChanges {
     files: uncommitted_files,
     conflicted: conflicted_files,
+    token,
   } = working_copy;
   let uncommitted_paths: std::collections::HashSet<String> = uncommitted_files
     .iter()
@@ -4219,6 +4220,9 @@ fn workspace_diff_with_conflict_style(
   });
   diff.uncommitted_files = uncommitted_files;
   diff.conflicted_files = conflicted_files;
+  // As `list_file_hunks_batch` names its reads, so the Changes tab can tell
+  // that hunks it read are still current.
+  diff.working_copy_token = token.map(|token| format!("{token}:{conflict_marker_style}"));
 
   Ok(diff)
 }

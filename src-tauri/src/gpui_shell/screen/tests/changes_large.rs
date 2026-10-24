@@ -326,3 +326,38 @@ fn measure(h: &mut Harness) {
     .collect();
   report("type in the message", &mut typing);
 }
+
+/// A refresh (window focus) of the large working copy that reads back the
+/// same diff: from the revision bump to the settled frame. Without a token
+/// every file's hunks are read and compared again; with one, none are.
+#[gpui::test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn changes_refresh_perf(cx: &mut TestAppContext) {
+  refresh_perf(cx, None);
+}
+
+#[gpui::test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn changes_refresh_token_perf(cx: &mut TestAppContext) {
+  refresh_perf(cx, Some("t1"));
+}
+
+fn refresh_perf(cx: &mut TestAppContext, token: Option<&str>) {
+  let mut host = large_host();
+  if let Some(working) = host.working.as_mut() {
+    working.working_copy_token = token.map(str::to_string);
+  }
+  let mut h = expanded_with(cx, host);
+  let mut samples: Vec<_> = (0..10)
+    .map(|_| {
+      timed(&mut h, |h| {
+        h.update(|s| {
+          if let View::Workspace(r) = &mut s.view {
+            r.changes_revision += 1;
+          }
+        })
+      })
+    })
+    .collect();
+  report(&format!("refresh, token {token:?}"), &mut samples);
+}

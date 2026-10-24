@@ -560,6 +560,7 @@ mod tests {
       conflicted_files: vec!["src/app.rs".to_string()],
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
 
     let lines = format_workspace_diff_lines(
@@ -588,6 +589,7 @@ mod tests {
       conflicted_files: Vec::new(),
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
     assert_eq!(
       format_workspace_diff_lines(&diff, &[]),
