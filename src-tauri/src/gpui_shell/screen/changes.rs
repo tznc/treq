@@ -566,19 +566,6 @@ impl ChangesView {
   }
 
   fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-    let files: Vec<serde_json::Value> = snapshot
-      .files
-      .iter()
-      .map(|f| {
-        json!({
-          "path": f.path,
-          "workspaceStatus": f.status,
-          "oldPath": f.old_path,
-          "isConflicted": f.status == "C",
-        })
-      })
-      .collect();
-    self.field("changes.files", files.into(), cx);
     self.staging.retain(&snapshot.files);
     // Generated files are read only once "Load diff" asks.
     let paths: Vec<String> = snapshot
