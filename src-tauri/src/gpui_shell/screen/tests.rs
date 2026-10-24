@@ -61,6 +61,9 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The token hunk reads report instead of the diff's: the disk moved on
+  /// between the two reads.
+  hunks_token: Mutex<Option<String>>,
   gitattributes: String,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
@@ -703,13 +706,15 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
     let working = self.working().ok_or("no changes")?;
+    let token = self.hunks_token.lock().unwrap().clone();
     Ok(crate::core::WorkspaceFileHunksBatch {
-      snapshot_token: "t".into(),
+      snapshot_token: token
+        .or_else(|| working.working_copy_token.clone())
+        .unwrap_or_default(),
       files: paths
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
           path: path.clone(),
-          content_hash: format!("h-{path}"),
           hunks: working
             .hunks_by_file
             .iter()
@@ -1246,6 +1251,9 @@ impl commits_data::CommitsHost for FakeHost {
 
   fn abandon(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("abandon {change_id}"));
+    if self.failing.contains(&"abandon") {
+      return Err("abandon failed".into());
+    }
     Ok("op1".into())
   }
 
@@ -4189,6 +4197,22 @@ fn commits_tab_removes_an_abandoned_commit(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn commits_tab_keeps_a_commit_it_failed_to_abandon(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  host.failing = vec!["abandon"];
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-a");
+  h.click("delete-commit-a");
+  h.answer("Delete commit");
+  assert!(host.writes().contains(&"abandon a".to_string()));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  assert!(h.drawn("commit-row-a"), "put back");
+  assert!(h.drawn("delete-commit-a"));
+}
+
+#[gpui::test]
 fn commits_tab_opens_the_commit_react_asked_for(cx: &mut TestAppContext) {
   let mut route = commits_route();
   if let View::Workspace(r) = &mut route.view {
@@ -4835,6 +4859,71 @@ fn a_refresh_that_reads_the_same_diff_keeps_its_rows(cx: &mut TestAppContext) {
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
 
+/// `changes_host` whose reads name the working-copy diff they saw.
+fn tokened_changes_host() -> FakeHost {
+  let mut host = changes_host();
+  if let Some(working) = host.working.as_mut() {
+    working.working_copy_token = Some("t1".into());
+  }
+  host
+}
+
+fn bump_changes_revision(h: &mut Harness) {
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+}
+
+fn count_calls(host: &FakeHost, prefix: &str) -> usize {
+  host
+    .calls()
+    .iter()
+    .filter(|c| c.starts_with(prefix))
+    .count()
+}
+
+#[gpui::test]
+fn a_refresh_of_an_unchanged_working_copy_reads_no_hunks(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let (diffs, hunks) = (
+    count_calls(&host, "read workspace diff"),
+    count_calls(&host, "read hunks"),
+  );
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read workspace diff"), diffs + 1);
+  assert_eq!(
+    count_calls(&host, "read hunks"),
+    hunks,
+    "same diff, nothing to read"
+  );
+
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  assert!(count_calls(&host, "read hunks") > hunks, "an edit is read");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+#[gpui::test]
+fn hunks_read_from_a_newer_diff_are_read_again(cx: &mut TestAppContext) {
+  let host = tokened_changes_host();
+  *host.hunks_token.lock().unwrap() = Some("t2".into());
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.drawn("changes-diff-viewer");
+  let hunks = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  assert!(
+    count_calls(&host, "read hunks") > hunks,
+    "the diff names t1 but the hunks were read at t2"
+  );
+}
+
 #[gpui::test]
 fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -5263,6 +5352,39 @@ fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
   h.click("agent-resolve-ag");
   h.cx.run_until_parked();
   assert!(!h.drawn("agent-review-comment-count"));
+}
+
+#[gpui::test]
+fn an_agent_comment_poll_that_reads_the_same_comments_changes_nothing(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("agent-review-comment-card"));
+  let revision = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      workspace
+        .changes()
+        .expect("changes")
+        .read(cx)
+        .threads
+        .revision
+    })
+  };
+  let (before, reads) = (revision(&mut h), count_calls(&host, "read agent comments"));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
+  h.cx.run_until_parked();
+  assert!(count_calls(&host, "read agent comments") > reads, "polled");
+  assert_eq!(revision(&mut h), before, "nothing new, nothing redone");
+
+  host.agent.lock().unwrap()[0].comment_text = "Changed".into();
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
+  h.cx.run_until_parked();
+  assert_ne!(revision(&mut h), before);
 }
 
 #[gpui::test]

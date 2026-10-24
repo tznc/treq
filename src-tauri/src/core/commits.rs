@@ -19,10 +19,12 @@ fn append_target_branch_commits(
   }
 }
 
-fn collect_stacked_workspace_labels(
+/// The workspaces `workspace` is stacked on, nearest first, from one read
+/// of the workspace list.
+fn collect_stacked_workspaces(
   repo_path: &str,
   workspace: &local_db::Workspace,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<local_db::Workspace>, String> {
   let workspaces =
     local_db::get_workspaces(repo_path).map_err(|e| format!("Failed to get workspaces: {}", e))?;
   let by_branch: std::collections::HashMap<String, local_db::Workspace> = workspaces
@@ -30,26 +32,28 @@ fn collect_stacked_workspace_labels(
     .map(|workspace| (workspace.branch_name.clone(), workspace))
     .collect();
 
-  let mut labels = Vec::new();
+  let mut stacked = Vec::new();
   let mut current_branch = workspace.branch_name.clone();
   let mut visited = HashSet::new();
 
   while visited.insert(current_branch.clone()) {
-    labels.push(current_branch.clone());
     let Some(next_branch) = by_branch
       .get(&current_branch)
       .and_then(|workspace| workspace.target_branch.clone())
     else {
       break;
     };
-
-    if !by_branch.contains_key(&next_branch) {
+    if visited.contains(&next_branch) {
       break;
     }
+    let Some(next) = by_branch.get(&next_branch) else {
+      break;
+    };
+    stacked.push(next.clone());
     current_branch = next_branch;
   }
 
-  Ok(labels)
+  Ok(stacked)
 }
 
 /// Lists commits for a workspace by its database ID, or for the home repo
@@ -106,13 +110,8 @@ pub fn list_commits(
       )
       .map_err(|e| format!("Failed to list commits: {}", e))?;
 
-      if let Ok(labels) = collect_stacked_workspace_labels(repo_path, &workspace) {
-        for branch_label in labels.into_iter().skip(1) {
-          let Some(stacked_workspace) = local_db::get_workspace_by_branch(repo_path, &branch_label)
-            .map_err(|e| format!("Failed to get workspace: {}", e))?
-          else {
-            continue;
-          };
+      if let Ok(stacked) = collect_stacked_workspaces(repo_path, &workspace) {
+        for stacked_workspace in stacked {
           let stacked_workspace_dir = Path::new(repo_path)
             .join(".treq")
             .join("workspaces")

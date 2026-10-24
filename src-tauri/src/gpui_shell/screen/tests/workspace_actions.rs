@@ -158,10 +158,32 @@ fn deletes_the_workspace_from_the_more_menu(cx: &mut TestAppContext) {
   assert_eq!(
     calls_starting(&host, &["delete workspace", "notify"]),
     [
+      "notify workspacesRemoving",
       "delete workspace 7",
       "notify workspaceChanged",
       "notify workspacesRemoved",
       "notify toast Workspace deleted",
+    ]
+  );
+}
+
+#[gpui::test]
+fn restores_the_row_when_delete_fails(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    failing: vec!["delete_workspace"],
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-more");
+  h.pick("Delete Workspace");
+  h.answer("Delete workspace");
+  assert_eq!(
+    calls_starting(&host, &["delete workspace", "notify"]),
+    [
+      "notify workspacesRemoving",
+      "delete workspace 7",
+      "notify workspacesRestored",
+      "notify toast Delete Failed",
     ]
   );
 }

@@ -1,6 +1,7 @@
 use crate::lock_ext::LockExt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Duration;
 
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -509,16 +510,12 @@ pub fn create_new_workspace(
     metadata.sparse_patterns,
     metadata.symlinked_dirs,
   )?;
-  if let Some(title) = metadata
+  let title = metadata
     .title
     .as_deref()
     .map(str::trim)
-    .filter(|t| !t.is_empty())
-  {
-    local_db::update_workspace_title(repo_path, workspace.id, title)?;
-  }
-  local_db::update_workspace_last_rebased_commit(repo_path, workspace.id, "")?;
-  local_db::get_workspace_by_id(repo_path, workspace.id)?
+    .filter(|t| !t.is_empty());
+  local_db::init_new_workspace_state(repo_path, workspace.id, title)?
     .ok_or_else(|| format!("Workspace not found after creation: {}", workspace.id))
 }
 
@@ -561,6 +558,11 @@ pub fn open_or_create_workspace_from_pr(
   open_or_create_synced(repo_path, &request)
 }
 
+/// How recent a fetch must be for creating or retargeting a workspace to rely
+/// on it: the New Workspaces dialog fetches when it opens, and each workspace
+/// it makes would fetch again.
+pub(super) const RECENT_FETCH: Duration = Duration::from_secs(30);
+
 /// A branch to open a workspace for, as [`open_or_create_workspaces`] takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchWorkspaceRequest {
@@ -593,7 +595,7 @@ pub fn open_or_create_workspaces(
   if let Err(err) = sync_workspaces(repo_path) {
     return requests.iter().map(|_| Err(err.clone())).collect();
   }
-  if let Err(error) = jj::jj_git_fetch(repo_path) {
+  if let Err(error) = jj::jj_git_fetch_unless_recent(repo_path, RECENT_FETCH) {
     tracing::warn!(%error, repo_path, "fetch before opening workspaces failed; using local bookmarks");
   }
   requests
@@ -652,7 +654,7 @@ pub(crate) fn open_or_create_synced(
 
   // create_workspace may default the target to the repo default branch; retarget
   // onto the PR base so stacked rebases follow the PR's merge base.
-  apply_workspace_target_branch(repo_path, workspace.id, base_branch)?;
+  apply_workspace_target_branch_after(repo_path, workspace.id, base_branch, RECENT_FETCH)?;
 
   if let Some(title) = request
     .title
@@ -821,15 +823,12 @@ pub fn create_workspace_with_symlinked_dirs(
     let _ = jj::jj_get_changed_files(&source_workspace_path.to_string_lossy());
   }
 
-  let branches =
-    jj::get_branches(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
-
-  let branch_exists: bool = branches.iter().any(|b| b.name == branch_name);
-
-  // Always check if branch exists on remote
+  // One load answers the local and remote questions and reads the bookmark's
+  // commit for the rollback below.
   let remote_ref = format!("{}@origin", branch_name);
-  let branch_exists_on_remote = jj::check_remote_branch_exists(repo_path, &remote_ref)
-    .map_err(|e| format!("Failed to check remote branch: {}", e))?;
+  let existing =
+    jj::WorkspaceRepo::load(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
+  let (branch_exists, branch_exists_on_remote) = existing.bookmark_presence(branch_name, "origin");
 
   let resolved_source_branch = if source_branch.is_none() {
     // A local tracking branch can lag its remote after fetching. In that case,
@@ -854,7 +853,8 @@ pub fn create_workspace_with_symlinked_dirs(
   };
 
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
-  let prior_bookmark = branch_exists.then(|| jj::jj_get_commit_id(repo_path, branch_name));
+  let prior_bookmark = branch_exists.then(|| existing.commit_id(branch_name));
+  drop(existing);
   let workspace_name = jj::create_workspace(
     repo_path,
     branch_name,
@@ -919,7 +919,9 @@ pub fn create_workspace_with_symlinked_dirs(
       .map_err(|e| format!("Failed to install library skills into workspace: {e}"))?;
     }
 
-    let workspace_id = local_db::add_workspace(
+    // One transaction: the row, the not_on_remote flag (set when the branch
+    // isn't on the remote) and the target branch.
+    let workspace = local_db::add_workspace_targeting(
       repo_path,
       workspace_path.clone(),
       workspace_path,
@@ -927,26 +929,11 @@ pub fn create_workspace_with_symlinked_dirs(
       description,
       moved_files.clone(),
       sparse_patterns.clone(),
+      !branch_exists_on_remote,
+      &effective_target_branch,
     )
     .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
-    registered_id = Some(workspace_id);
-
-    // Set not_on_remote flag if branch doesn't exist on remote
-    if !branch_exists_on_remote {
-      local_db::update_workspace_not_on_remote(repo_path, workspace_id, true)?;
-    }
-
-    local_db::update_workspace_target_branch(repo_path, workspace_id, &effective_target_branch)
-      .map_err(|e| format!("Failed to set target branch: {}", e))?;
-
-    let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-      .map_err(|e| format!("Failed to get workspace from db: {}", e))?;
-    let Some(workspace) = workspace else {
-      return Err(format!(
-        "Workspace not found in database after creation: {}",
-        workspace_id
-      ));
-    };
+    registered_id = Some(workspace.id);
 
     // If moved_files are specified, perform the squash operation
     if let Some(files) = moved_files.clone() {
@@ -1108,14 +1095,37 @@ pub fn archive_workspace_removing_directory_later(
   repo_path: &str,
   workspace_id: i64,
 ) -> Result<(), String> {
-  if let Some(path) = archive_workspace_leaving_directory(repo_path, &workspace_id)? {
+  remove_directory_later(archive_workspace_leaving_directory(
+    repo_path,
+    &workspace_id,
+  )?);
+  Ok(())
+}
+
+/// [`delete_workspace`] that removes the directory in the background: the
+/// checkout has already moved out of `.treq/workspaces/`, and deleting a
+/// `node_modules` takes seconds the caller need not wait for.
+pub fn delete_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<(), String> {
+  remove_directory_later(forget_workspace_record(
+    repo_path,
+    &workspace_id,
+    RemoveWorkspaceDiskMode::JjForgetThenRemoveDir,
+    WorkspaceRecordMode::Delete,
+  )?);
+  Ok(())
+}
+
+fn remove_directory_later(leftover: Option<String>) {
+  if let Some(path) = leftover {
     std::thread::spawn(move || {
       if let Err(e) = jj::remove_workspace_directory_only(&path) {
         tracing::warn!("Background workspace directory removal failed: {}", e);
       }
     });
   }
-  Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -1264,7 +1274,7 @@ pub fn push_workspace_to_remote(
   workspace_id: Option<i64>,
 ) -> Result<String, String> {
   // Determine the push path and target branch based on workspace_id
-  let (push_path, branch_name, target_branch) = if let Some(id) = workspace_id {
+  let (push_path, branch_name, target_branch, not_on_remote) = if let Some(id) = workspace_id {
     // For workspace, look up the path from database
     let workspace = local_db::get_workspace_by_id(repo_path, id)
       .map_err(|e| format!("Failed to get workspace: {}", e))?
@@ -1281,13 +1291,18 @@ pub fn push_workspace_to_remote(
       .target_branch
       .clone()
       .unwrap_or_else(|| "main".to_string());
-    (push_path, workspace.branch_name, target_branch)
+    (
+      push_path,
+      workspace.branch_name,
+      target_branch,
+      workspace.not_on_remote,
+    )
   } else {
     // For home repo, use repo_path directly
     let branch_name = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
     let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
-    (repo_path.to_string(), branch_name, target_branch)
+    (repo_path.to_string(), branch_name, target_branch, false)
   };
 
   // An ancestry-only merge cannot be abandoned cleanly while its bookmark still
@@ -1299,8 +1314,9 @@ pub fn push_workspace_to_remote(
   // Perform the push
   let result = jj::jj_push(&push_path).map_err(|e| format!("Push failed: {}", e))?;
 
-  // Clear the not_on_remote flag after successful push (only for workspaces)
-  if let Some(id) = workspace_id {
+  // Clear the not_on_remote flag after successful push (only for workspaces).
+  // A write is a commit with fsyncs, so skip it when the flag is clear.
+  if let (Some(id), true) = (workspace_id, not_on_remote) {
     local_db::update_workspace_not_on_remote(repo_path, id, false)?;
   }
 
@@ -2968,6 +2984,27 @@ pub fn merge_workspace(
   message: &str,
   merge_strategy: MergeCommit,
 ) -> Result<(), String> {
+  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, false)
+}
+
+/// [`merge_workspace`] that removes the merged checkout in the background
+/// (see [`delete_workspace_removing_directory_later`]).
+pub fn merge_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+) -> Result<(), String> {
+  merge_workspace_with(repo_path, workspace_id, message, merge_strategy, true)
+}
+
+fn merge_workspace_with(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+  defer_removal: bool,
+) -> Result<(), String> {
   // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
@@ -3037,9 +3074,19 @@ pub fn merge_workspace(
     sync_home_and_workspace_for_branch(repo_path, target_branch, SyncSource::WorkspaceToHome)?;
   }
 
-  // Remove the workspace from jj (also deletes the workspace directory)
-  jj::remove_workspace(repo_path, workspace_path_str)
+  // Remove the workspace from jj and its directory from disk.
+  jj::forget_workspace(repo_path, workspace_path_str)
     .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+  if defer_removal {
+    remove_directory_later(Some(move_workspace_dir_to_trash(
+      repo_path,
+      &workspace_path,
+      workspace_id,
+    )));
+  } else {
+    jj::remove_workspace_directory_only(workspace_path_str)
+      .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+  }
 
   // Remove from database
   local_db::delete_workspace(repo_path, workspace_id)
@@ -3235,6 +3282,17 @@ pub fn apply_workspace_target_branch(
   workspace_id: i64,
   target_branch: &str,
 ) -> Result<local_db::Workspace, String> {
+  apply_workspace_target_branch_after(repo_path, workspace_id, target_branch, Duration::ZERO)
+}
+
+/// [`apply_workspace_target_branch`] for a flow that fetched already: it
+/// fetches again only if the last fetch is older than `max_age`.
+pub(crate) fn apply_workspace_target_branch_after(
+  repo_path: &str,
+  workspace_id: i64,
+  target_branch: &str,
+  max_age: Duration,
+) -> Result<local_db::Workspace, String> {
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
@@ -3247,7 +3305,7 @@ pub fn apply_workspace_target_branch(
     .to_str()
     .ok_or("Failed to convert workspace path to string")?;
 
-  let _ = jj::jj_git_fetch(repo_path);
+  let _ = jj::jj_git_fetch_unless_recent(repo_path, max_age);
 
   // Lifting off a parent workspace must leave that parent's commits in place.
   let parent_workspace = workspace.target_branch.as_deref().filter(|parent| {
@@ -4113,7 +4171,6 @@ fn workspace_diff_with_conflict_style(
     .map_err(|e| format!("Failed to get workspace: {}", e))?
     .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
 
-  let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
   let workspace_dir = Path::new(repo_path)
     .join(".treq")
     .join("workspaces")
@@ -4124,7 +4181,9 @@ fn workspace_diff_with_conflict_style(
   if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
     return Ok(empty);
   }
-  let repo = jj::WorkspaceRepo::load(workspace_dir_str)
+  // One load, lock and snapshot for the whole reload; the revision queries
+  // below see the same snapshot as the uncommitted files.
+  let (repo, working_copy) = jj::WorkspaceRepo::load_working_copy(workspace_dir_str)
     .map_err(|e| format!("Failed to load workspace repo: {}", e))?;
   let base_revision = resolve_workspace_diff_base_revision(repo_path, &workspace, &repo)?;
   let tip_revision = resolve_workspace_diff_tip_revision(&workspace, &repo)?;
@@ -4141,15 +4200,15 @@ fn workspace_diff_with_conflict_style(
     .merge_diff_between_revisions(&base_revision, &tip_revision, conflict_marker_style)
     .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
 
-  let uncommitted_files = jj::jj_get_changed_files(workspace_dir_str)
-    .map_err(|e| format!("Failed to get uncommitted workspace changes: {}", e))?;
+  let jj::WorkingCopyChanges {
+    files: uncommitted_files,
+    conflicted: conflicted_files,
+    token,
+  } = working_copy;
   let uncommitted_paths: std::collections::HashSet<String> = uncommitted_files
     .iter()
     .map(|file| file.path.clone())
     .collect();
-  let conflicted_files =
-    jj::get_conflicted_files_after_snapshot(workspace_dir_str, Some(target_branch))
-      .map_err(|e| format!("Failed to get conflicted workspace files: {}", e))?;
   let conflicted_paths: std::collections::HashSet<String> =
     conflicted_files.iter().cloned().collect();
   // Drop clean overlap with the working copy so WC-only edits (bookmark at @)
@@ -4161,6 +4220,9 @@ fn workspace_diff_with_conflict_style(
   });
   diff.uncommitted_files = uncommitted_files;
   diff.conflicted_files = conflicted_files;
+  // As `list_file_hunks_batch` names its reads, so the Changes tab can tell
+  // that hunks it read are still current.
+  diff.working_copy_token = token.map(|token| format!("{token}:{conflict_marker_style}"));
 
   Ok(diff)
 }

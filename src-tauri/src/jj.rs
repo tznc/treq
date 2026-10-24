@@ -86,6 +86,87 @@ fn with_working_copy_lock<T>(workspace_path: &str, f: impl FnOnce() -> T) -> T {
   f()
 }
 
+/// A read that callers asking at the same time share. A caller that arrives
+/// while the read runs waits for the next run, never the current one, so it
+/// still sees state from after it asked; any number of callers that pile up
+/// behind one run cost one more run, not one each.
+struct SharedRead<T> {
+  state: std::sync::Mutex<SharedReadState<T>>,
+  done: std::sync::Condvar,
+}
+
+struct SharedReadState<T> {
+  running: bool,
+  started: u64,
+  finished: u64,
+  result: Option<T>,
+}
+
+impl<T: Clone> SharedRead<T> {
+  fn new() -> Self {
+    Self {
+      state: std::sync::Mutex::new(SharedReadState {
+        running: false,
+        started: 0,
+        finished: 0,
+        result: None,
+      }),
+      done: std::sync::Condvar::new(),
+    }
+  }
+
+  fn run(&self, read: impl FnOnce() -> T) -> T {
+    /// Lets waiters run the read themselves if this run panics.
+    struct Running<'a, T>(&'a SharedRead<T>);
+    impl<T> Drop for Running<'_, T> {
+      fn drop(&mut self) {
+        let mut state = self
+          .0
+          .state
+          .lock()
+          .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.running = false;
+        drop(state);
+        self.0.done.notify_all();
+      }
+    }
+
+    let lock = || {
+      self
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    let mut state = lock();
+    let wanted = state.started + 1;
+    loop {
+      if state.finished >= wanted {
+        if let Some(result) = &state.result {
+          return result.clone();
+        }
+      }
+      if !state.running {
+        state.running = true;
+        state.started += 1;
+        let run = state.started;
+        drop(state);
+        let running = Running(self);
+        let result = read();
+        let mut state = lock();
+        state.result = Some(result.clone());
+        state.finished = run;
+        drop(state);
+        drop(running);
+        return result;
+      }
+      state = self
+        .done
+        .wait(state)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+  }
+}
+
 use gix::refs::transaction::{Change, PreviousValue, RefEdit};
 use gix::refs::Target;
 use imara_diff::intern::InternedInput;
@@ -126,7 +207,9 @@ use jj_lib::settings::UserSettings;
 use jj_lib::str_util::StringExpression;
 use jj_lib::tree_merge::MergeOptions;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
-use jj_lib::workspace::{default_working_copy_factories, default_working_copy_factory, Workspace};
+use jj_lib::workspace::{
+  default_working_copy_factories, default_working_copy_factory, LockedWorkspace, Workspace,
+};
 use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -301,16 +384,36 @@ fn snapshot_fresh_working_copy(
     // was; the stale-workspace recovery flow owns updating it.
     return Ok(());
   }
+  snapshot_locked_working_copy(
+    &mut loaded.repo,
+    locked_ws,
+    workspace_name,
+    &wc_commit,
+    ignore_root,
+  )?;
+  Ok(())
+}
+
+/// Snapshots a fresh, locked working copy into `wc_commit`, finishes the
+/// lock and returns the snapshotted tree. `repo` moves to the snapshot
+/// operation when the tree changed.
+fn snapshot_locked_working_copy(
+  repo: &mut Arc<ReadonlyRepo>,
+  mut locked_ws: LockedWorkspace<'_>,
+  workspace_name: WorkspaceNameBuf,
+  wc_commit: &Commit,
+  ignore_root: &str,
+) -> Result<MergedTree, JjError> {
   let matcher = repo_root_matcher();
   let opts = snapshot_options_for_all_paths(ignore_root, &matcher);
   let (new_tree, _) = block_on(locked_ws.locked_wc().snapshot(&opts))
     .map_err(|e| JjError::IoError(format!("Failed to snapshot working copy: {e}")))?;
   if new_tree.tree_ids() != wc_commit.tree_ids() {
-    let mut tx = loaded.repo.start_transaction();
+    let mut tx = repo.start_transaction();
     let rewritten = block_on(
       tx.repo_mut()
-        .rewrite_commit(&wc_commit)
-        .set_tree(new_tree)
+        .rewrite_commit(wc_commit)
+        .set_tree(new_tree.clone())
         .write(),
     )
     .map_err(|e| JjError::IoError(format!("Failed to write working-copy snapshot: {e}")))?;
@@ -319,12 +422,72 @@ fn snapshot_fresh_working_copy(
       .map_err(|e| JjError::IoError(format!("Failed to set working-copy commit: {e}")))?;
     block_on(tx.repo_mut().rebase_descendants())
       .map_err(|e| JjError::IoError(format!("Failed to rebase after snapshot: {e}")))?;
-    loaded.repo = block_on(tx.commit("snapshot working copy"))
+    *repo = block_on(tx.commit("snapshot working copy"))
       .map_err(|e| JjError::IoError(format!("Failed to commit working-copy snapshot: {e}")))?;
   }
-  block_on(locked_ws.finish(loaded.repo.op_id().clone()))
+  block_on(locked_ws.finish(repo.op_id().clone()))
     .map_err(|e| JjError::IoError(format!("Failed to finish working-copy snapshot: {e}")))?;
-  Ok(())
+  Ok(new_tree)
+}
+
+/// Snapshots the working copy as the jj CLI does before a command. When
+/// another workspace's rewrite left the disk behind its working-copy commit,
+/// it first checks that commit out (`jj workspace update-stale`): a snapshot
+/// of the older disk would record it as a revert of the newer commit.
+/// Returns the working-copy commit from before the snapshot and the
+/// snapshotted tree. The caller holds [`with_working_copy_lock`].
+fn snapshot_up_to_date_working_copy(
+  loaded: &mut LoadedWorkspaceRepo,
+  ignore_root: &str,
+) -> Result<Option<(Commit, MergedTree)>, JjError> {
+  // Each pass resolves one staleness or snapshots; a third means another
+  // process keeps moving the working copy.
+  for _ in 0..3 {
+    let Some(wc_commit) = get_workspace_wc_commit(loaded)? else {
+      return Ok(None);
+    };
+    let workspace_name = loaded.workspace.workspace_name().to_owned();
+    let mut locked_ws = loaded
+      .workspace
+      .start_working_copy_mutation()
+      .map_err(|e| JjError::IoError(format!("Failed to lock working copy: {e}")))?;
+    let freshness = block_on(WorkingCopyFreshness::check_stale(
+      locked_ws.locked_wc(),
+      &wc_commit,
+      &loaded.repo,
+    ))
+    .map_err(|e| JjError::IoError(format!("Failed to check staleness: {e}")))?;
+    match freshness {
+      WorkingCopyFreshness::Fresh => {
+        let tree = snapshot_locked_working_copy(
+          &mut loaded.repo,
+          locked_ws,
+          workspace_name,
+          &wc_commit,
+          ignore_root,
+        )?;
+        return Ok(Some((wc_commit, tree)));
+      }
+      // Another process moved the working copy after `loaded` was read:
+      // keep its operation and read the repo again.
+      WorkingCopyFreshness::Updated(_) => {
+        let wc_op_id = locked_ws.locked_wc().old_operation_id().clone();
+        block_on(locked_ws.finish(wc_op_id))
+          .map_err(|e| JjError::IoError(format!("Failed to finish wc: {e}")))?;
+        loaded.repo = block_on(loaded.workspace.repo_loader().load_at_head())
+          .map_err(|e| JjError::IoError(format!("Failed to load repo: {e}")))?;
+      }
+      WorkingCopyFreshness::WorkingCopyStale | WorkingCopyFreshness::SiblingOperation => {
+        block_on(locked_ws.locked_wc().check_out(&wc_commit))
+          .map_err(|e| JjError::IoError(format!("Failed to check out: {e}")))?;
+        block_on(locked_ws.finish(loaded.repo.op_id().clone()))
+          .map_err(|e| JjError::IoError(format!("Failed to finish wc: {e}")))?;
+      }
+    }
+  }
+  Err(JjError::IoError(
+    "Working copy kept moving during the snapshot".to_string(),
+  ))
 }
 
 /// One load of a workspace's repository, for callers that make several
@@ -354,9 +517,66 @@ impl WorkspaceRepo {
     commit_id_in(&self.loaded, &self.path, revision)
   }
 
+  /// Whether `name` is a listed local bookmark (`get_branches`), and
+  /// whether `remote` has it (`check_remote_branch_exists`).
+  pub fn bookmark_presence(&self, name: &str, remote: &str) -> (bool, bool) {
+    let view = self.loaded.repo.view();
+    let local = !name.starts_with(STASH_BOOKMARK_PREFIX)
+      && view.local_bookmarks().any(|(n, _)| n.as_str() == name);
+    let remote_ref = view.get_remote_bookmark(RemoteRefSymbol {
+      name: RefName::new(name),
+      remote: RemoteName::new(remote),
+    });
+    (local, !remote_ref.target.is_absent())
+  }
+
   /// `jj_get_commits_ahead`.
   pub fn commits_ahead(&self, target_branch: &str) -> Result<JjCommitsAhead, JjError> {
     commits_ahead_in(&self.loaded, &self.path, target_branch)
+  }
+
+  /// Loads for a whole Changes reload: brings a stale working copy up to
+  /// date, snapshots it, and reads its changed files and conflicts under one
+  /// working-copy lock. Queries on the result see the snapshot.
+  pub fn load_working_copy(workspace_path: &str) -> Result<(Self, WorkingCopyChanges), JjError> {
+    let ignore_root = match derive_repo_path_from_workspace(workspace_path) {
+      Some(repo_path) => repo_path,
+      None => {
+        // Takes the working-copy lock itself.
+        reconcile_colocated_home_repo(workspace_path)?;
+        workspace_path.to_string()
+      }
+    };
+    with_working_copy_lock(workspace_path, || {
+      let mut loaded = load_workspace_repo(workspace_path)?;
+      // As `jj_get_changed_files`, a failed snapshot lists no changes.
+      let files = match snapshot_up_to_date_working_copy(&mut loaded, &ignore_root) {
+        Ok(Some((wc_commit, tree))) => tree_changes(&loaded.repo, &wc_commit, &tree),
+        Ok(None) => Vec::new(),
+        Err(err) => {
+          tracing::warn!("Failed to snapshot {workspace_path}: {err}");
+          Vec::new()
+        }
+      };
+      let conflicted = conflicted_files_in(&mut loaded, workspace_path, false)?;
+      let token = get_workspace_wc_commit(&loaded)
+        .ok()
+        .flatten()
+        .and_then(|wc_commit| {
+          let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref())).ok()?;
+          Some(working_copy_token(&parent_tree, &wc_commit.tree()))
+        });
+      let repo = Self {
+        path: workspace_path.to_string(),
+        loaded,
+      };
+      let changes = WorkingCopyChanges {
+        files,
+        conflicted,
+        token,
+      };
+      Ok((repo, changes))
+    })
   }
 
   /// `jj_get_merge_diff_between_revisions`.
@@ -373,6 +593,18 @@ impl WorkspaceRepo {
       conflict_marker_style,
     )
   }
+}
+
+/// What a Changes reload reads from the working copy, from
+/// [`WorkspaceRepo::load_working_copy`].
+pub struct WorkingCopyChanges {
+  /// As [`jj_get_changed_files`] lists them.
+  pub files: Vec<JjFileChange>,
+  /// As [`get_conflicted_files`] lists them.
+  pub conflicted: Vec<String>,
+  /// The [`working_copy_token`] that [`jj_get_file_hunks_batch`] would
+  /// return now.
+  pub token: Option<String>,
 }
 
 fn load_workspace_repo(workspace_path: &str) -> Result<LoadedWorkspaceRepo, JjError> {
@@ -1257,6 +1489,10 @@ pub struct JjRevisionDiff {
   pub too_large_to_render: bool,
   #[serde(default)]
   pub render_block_reason: Option<String>,
+  /// Names the working-copy diff `uncommitted_files` came from, as
+  /// `WorkspaceFileHunksBatch::snapshot_token` does; `None` when unknown.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub working_copy_token: Option<String>,
 }
 
 const LARGE_COMMIT_FILE_DIFF_THRESHOLD: usize = 500;
@@ -2816,7 +3052,7 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
     if let Some(ws_name) = ws_name {
       block_on(tx.repo_mut().remove_wc_commit(&ws_name))
         .map_err(|e| JjError::IoError(format!("Failed to forget workspace: {}", e)))?;
-      block_on(tx.repo_mut().rebase_descendants()).map_err(|e| {
+      let rebased = block_on(tx.repo_mut().rebase_descendants()).map_err(|e| {
         JjError::IoError(format!(
           "Failed to rebase descendants while forgetting workspace: {}",
           e
@@ -2826,7 +3062,11 @@ pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjE
         .map_err(|e| JjError::IoError(format!("Failed to forget workspace: {}", e)))?;
 
       // Reconcile remaining workspaces — WC commits may have been rewritten by rebase_descendants; skip the workspace being removed.
-      let _ = reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name));
+      // With nothing rebased no WC commit moved, so every other working copy is current; reconciling
+      // would only load each workspace to find that out.
+      if rebased > 0 {
+        let _ = reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name));
+      }
     }
   }
 
@@ -3863,10 +4103,12 @@ fn reconcile_loaded_workspace(
   .map_err(|e| JjError::InitFailed(format!("Failed to check staleness: {}", e)))?;
 
   match freshness {
-    WorkingCopyFreshness::Fresh => {
-      block_on(locked_ws.finish(repo.op_id().clone()))
-        .map_err(|e| JjError::InitFailed(format!("Failed to finish wc: {}", e)))?;
-    }
+    // Already at `repo`'s operation, or behind it with the same tree: the
+    // files are right. Finishing would only record the newer operation, an
+    // fsynced write for every workspace after every rewrite, so leave the
+    // state as it is (dropping the lock without `finish`); jj compares trees
+    // again next time.
+    WorkingCopyFreshness::Fresh => {}
     WorkingCopyFreshness::Updated(_) => {
       // `repo` is the stale side here; keep the working copy's newer operation.
       let wc_op_id = locked_ws.locked_wc().old_operation_id().clone();
@@ -4037,8 +4279,6 @@ pub fn jj_workspace_update_stale(workspace_path: &str) -> Result<String, JjError
 /// Get list of changed files in working copy using jj-lib (no subprocess)
 /// Snapshots the working copy and diffs against the parent commit tree.
 pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, JjError> {
-  use futures::StreamExt as _;
-
   let path = Path::new(workspace_path);
   if !path.exists() {
     return Ok(Vec::new());
@@ -4121,47 +4361,51 @@ pub fn jj_get_changed_files(workspace_path: &str) -> Result<Vec<JjFileChange>, J
       let _ = block_on(locked_ws.finish(repo.op_id().clone()));
     }
 
-    // Get the wc commit's parent tree to diff against
-    let parent_tree = if wc_commit.parent_ids().is_empty() {
-      repo.store().root_commit().tree()
-    } else {
-      match repo.store().get_commit(&wc_commit.parent_ids()[0]) {
-        Ok(parent) => parent.tree(),
-        Err(_) => return Ok(Vec::new()),
-      }
-    };
-
-    let diff_matcher = repo_root_matcher();
-    let diff_entries = block_on(
-      parent_tree
-        .diff_stream(&new_tree, &diff_matcher)
-        .collect::<Vec<_>>(),
-    );
-
-    let mut changes = Vec::new();
-    for entry in diff_entries {
-      let file_path = entry.path.as_internal_file_string().to_string();
-      let Ok(values) = entry.values else { continue };
-      let status = if !values.before.is_resolved() || !values.after.is_resolved() {
-        "C"
-      } else if values.before.is_absent() {
-        "A"
-      } else if values.after.is_absent() {
-        "D"
-      } else {
-        "M"
-      };
-      changes.push(JjFileChange {
-        path: file_path,
-        status: status.to_string(),
-        previous_path: None,
-        changed_line_count: 0,
-        diff_deferred: false,
-      });
-    }
-
-    Ok(changes)
+    Ok(tree_changes(&repo, &wc_commit, &new_tree))
   })
+}
+
+/// The files `tree` changes against `wc_commit`'s first parent.
+fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> Vec<JjFileChange> {
+  use futures::StreamExt as _;
+
+  let parent_tree = match wc_commit.parent_ids().first() {
+    None => repo.store().root_commit().tree(),
+    Some(parent_id) => match repo.store().get_commit(parent_id) {
+      Ok(parent) => parent.tree(),
+      Err(_) => return Vec::new(),
+    },
+  };
+
+  let diff_matcher = repo_root_matcher();
+  let diff_entries = block_on(
+    parent_tree
+      .diff_stream(tree, &diff_matcher)
+      .collect::<Vec<_>>(),
+  );
+
+  let mut changes = Vec::new();
+  for entry in diff_entries {
+    let file_path = entry.path.as_internal_file_string().to_string();
+    let Ok(values) = entry.values else { continue };
+    let status = if !values.before.is_resolved() || !values.after.is_resolved() {
+      "C"
+    } else if values.before.is_absent() {
+      "A"
+    } else if values.after.is_absent() {
+      "D"
+    } else {
+      "M"
+    };
+    changes.push(JjFileChange {
+      path: file_path,
+      status: status.to_string(),
+      previous_path: None,
+      changed_line_count: 0,
+      diff_deferred: false,
+    });
+  }
+  changes
 }
 
 /// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
@@ -4307,36 +4551,87 @@ pub fn jj_get_file_hunks(
   if file_path.contains('\0') || file_path.is_empty() {
     return Err(JjError::IoError("Invalid file path".to_string()));
   }
+  let (_, mut hunks) = jj_get_file_hunks_batch(
+    workspace_path,
+    &[file_path.to_string()],
+    conflict_marker_style,
+  )?;
+  hunks
+    .pop()
+    .unwrap_or_else(|| Err(JjError::IoError("No hunks read".to_string())))
+}
 
-  let mut loaded = load_workspace_repo(workspace_path)?;
-  import_colocated_git_state(&mut loaded, workspace_path)?;
-  let workspace_name = loaded.workspace.workspace_name().to_owned();
-  let wc_commit_id = loaded
-    .repo
-    .view()
-    .get_wc_commit_id(&workspace_name)
-    .cloned()
-    .ok_or_else(|| JjError::IoError("No working-copy commit found".to_string()))?;
-  let wc_commit = loaded
-    .repo
-    .store()
-    .get_commit(&wc_commit_id)
-    .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))?;
-  let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref()))
-    .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
-  let mut tree = wc_commit.tree();
-  if let Some((_, snapshotted_tree)) = snapshot_working_copy_tree(&mut loaded, workspace_path)? {
-    tree = snapshotted_tree;
+/// The [`working_copy_token`] of a batch read, and each file's hunks.
+pub type FileHunksBatch = (String, Vec<Result<Vec<JjDiffHunk>, JjError>>);
+
+/// [`jj_get_file_hunks`] for several files from one load and snapshot,
+/// with the [`working_copy_token`] of the diff they were read from.
+pub fn jj_get_file_hunks_batch(
+  workspace_path: &str,
+  file_paths: &[String],
+  conflict_marker_style: &str,
+) -> Result<FileHunksBatch, JjError> {
+  let ignore_root =
+    derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
+  with_working_copy_lock(workspace_path, || {
+    let mut loaded = load_workspace_repo(workspace_path)?;
+    import_colocated_git_state(&mut loaded, workspace_path)?;
+    let (wc_commit, tree) = snapshot_up_to_date_working_copy(&mut loaded, &ignore_root)?
+      .ok_or_else(|| JjError::IoError("No working-copy commit found".to_string()))?;
+    let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref()))
+      .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
+    let merge_options = MergeOptions::from_settings(&loaded.settings)
+      .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
+    let style = parse_conflict_marker_style(conflict_marker_style);
+    let hunks = file_paths
+      .iter()
+      .map(|file_path| {
+        file_hunks_between(
+          &loaded,
+          &parent_tree,
+          &tree,
+          file_path,
+          style,
+          &merge_options,
+        )
+      })
+      .collect();
+    Ok((working_copy_token(&parent_tree, &tree), hunks))
+  })
+}
+
+/// Names a working-copy diff by its two trees: reads with the same token
+/// list the same files with the same hunks.
+fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
+  let hex = |tree: &MergedTree| {
+    tree
+      .tree_ids()
+      .iter()
+      .map(ObjectId::hex)
+      .collect::<Vec<_>>()
+      .join(",")
+  };
+  format!("{}..{}", hex(parent_tree), hex(tree))
+}
+
+/// One file's hunks between the working copy's parent tree and its tree.
+fn file_hunks_between(
+  loaded: &LoadedWorkspaceRepo,
+  parent_tree: &MergedTree,
+  tree: &MergedTree,
+  file_path: &str,
+  style: ConflictMarkerStyle,
+  merge_options: &MergeOptions,
+) -> Result<Vec<JjDiffHunk>, JjError> {
+  if file_path.contains('\0') || file_path.is_empty() {
+    return Err(JjError::IoError("Invalid file path".to_string()));
   }
-
   let target_repo_path = RepoPathBuf::from_internal_string(file_path)
     .map_err(|_| JjError::IoError("Invalid file path".to_string()))?;
   let before = block_on(parent_tree.path_value(target_repo_path.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent path value: {}", e)))?;
   let after = block_on(tree.path_value(target_repo_path.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read working path value: {}", e)))?;
-  let merge_options = MergeOptions::from_settings(&loaded.settings)
-    .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
   let labels = ConflictLabels::unlabeled();
   let before_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
     loaded.repo.store(),
@@ -4353,18 +4648,17 @@ pub fn jj_get_file_hunks(
   ))
   .map_err(|e| JjError::IoError(format!("Failed to materialize working value: {}", e)))?;
 
-  let style = parse_conflict_marker_style(conflict_marker_style);
   let before_bytes = block_on(materialized_value_to_bytes(
     target_repo_path.as_ref(),
     before_materialized,
     style,
-    Some(&merge_options),
+    Some(merge_options),
   ));
   let after_bytes = block_on(materialized_value_to_bytes(
     target_repo_path.as_ref(),
     after_materialized,
     style,
-    Some(&merge_options),
+    Some(merge_options),
   ));
   let (_, mut hunks, conflict_style, conflict_regions_raw) =
     build_file_diff_from_bytes(before_bytes, after_bytes);
@@ -5284,14 +5578,19 @@ pub fn is_bookmark_tracked(
   Ok(loaded.repo.view().get_remote_bookmark(symbol).is_tracked())
 }
 
-fn remote_bookmark_exists(workspace_path: &str, bookmark_name: &str, remote_name: &str) -> bool {
-  load_workspace_repo(workspace_path).is_ok_and(|loaded| {
-    let symbol = RemoteRefSymbol {
-      name: RefName::new(bookmark_name),
-      remote: RemoteName::new(remote_name),
-    };
-    loaded.repo.view().get_remote_bookmark(symbol).is_present()
-  })
+/// Whether origin's `bookmark_name` is tracked, and whether it is there at
+/// all, from one load.
+fn origin_bookmark_state(
+  workspace_path: &str,
+  bookmark_name: &str,
+) -> Result<(bool, bool), JjError> {
+  let loaded = load_workspace_repo(workspace_path)?;
+  let symbol = RemoteRefSymbol {
+    name: RefName::new(bookmark_name),
+    remote: RemoteName::new("origin"),
+  };
+  let remote_ref = loaded.repo.view().get_remote_bookmark(symbol);
+  Ok((remote_ref.is_tracked(), remote_ref.is_present()))
 }
 
 /// Edit/switch to a bookmark (similar to git checkout)
@@ -6081,14 +6380,16 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
 
   let mut loaded = load_workspace_repo_for_history_edit(workspace_path)?;
   let old_wc_commit = get_workspace_wc_commit(&loaded)?;
-  let workspace_revision = resolve_branch_revision_for_rebase(workspace_path, workspace_branch)?;
-  let target_revision = resolve_branch_revision_for_rebase(workspace_path, target_branch)?;
+  let workspace_revision =
+    resolve_local_target_branch_revision(&loaded, workspace_path, workspace_branch)?;
+  let target_revision =
+    resolve_local_target_branch_revision(&loaded, workspace_path, target_branch)?;
   let workspace_tip_commit = resolve_commit_by_revision(&loaded, &workspace_revision)?;
   let target_commit = resolve_commit_by_revision(&loaded, &target_revision)?;
   let mut lineage_base = target_commit.id().hex();
   if let Some(old_target) = old_target_branch.filter(|old| *old != target_branch) {
     // Without the old parent's tip the rebase would drag its commits along.
-    let old_revision = resolve_branch_revision_for_rebase(workspace_path, old_target)?;
+    let old_revision = resolve_local_target_branch_revision(&loaded, workspace_path, old_target)?;
     let old_commit = resolve_commit_by_revision(&loaded, &old_revision)?;
     lineage_base = format!("({lineage_base} | {})", old_commit.id().hex());
   }
@@ -6221,24 +6522,6 @@ pub fn get_conflicted_files(
   workspace_path: &str,
   target_branch: Option<&str>,
 ) -> Result<Vec<String>, JjError> {
-  conflicted_files(workspace_path, target_branch, true)
-}
-
-/// [`get_conflicted_files`] for a caller that has just snapshotted the
-/// working copy (e.g. through [`jj_get_changed_files`]): skips the second
-/// filesystem walk unless importing Git state moved the operation.
-pub fn get_conflicted_files_after_snapshot(
-  workspace_path: &str,
-  target_branch: Option<&str>,
-) -> Result<Vec<String>, JjError> {
-  conflicted_files(workspace_path, target_branch, false)
-}
-
-fn conflicted_files(
-  workspace_path: &str,
-  target_branch: Option<&str>,
-  snapshot: bool,
-) -> Result<Vec<String>, JjError> {
   // Validate workspace path
   if workspace_path.is_empty() {
     return Err(JjError::IoError("Workspace path is empty".to_string()));
@@ -6260,10 +6543,7 @@ fn conflicted_files(
   }
 
   // 1. Proactively check and update if stale
-  let mut snapshot = snapshot;
   if let Ok(true) = is_workspace_stale(workspace_path) {
-    // Updating rewrites the working copy, so an earlier snapshot is out of date.
-    snapshot = true;
     if let Err(update_err) = jj_workspace_update_stale(workspace_path) {
       tracing::warn!(
         "Failed to update stale workspace in get_conflicted_files for {}: {}",
@@ -6277,22 +6557,31 @@ fn conflicted_files(
     Some(branch) => branch.to_string(),
     None => get_default_branch(&workspace_repo_path(workspace_path))?,
   };
-  get_conflicted_files_from_branch_diff(workspace_path, &effective_target, snapshot)
+  get_conflicted_files_from_branch_diff(workspace_path, &effective_target)
 }
 
 fn get_conflicted_files_from_branch_diff(
   workspace_path: &str,
   _target_branch: &str,
-  snapshot: bool,
 ) -> Result<Vec<String>, JjError> {
   let mut loaded = load_workspace_repo(workspace_path)?;
+  conflicted_files_in(&mut loaded, workspace_path, true)
+}
+
+/// Conflicted paths after importing Git state. `snapshot` false trusts a
+/// snapshot the caller just took, unless the import moved the operation.
+fn conflicted_files_in(
+  loaded: &mut LoadedWorkspaceRepo,
+  workspace_path: &str,
+  snapshot: bool,
+) -> Result<Vec<String>, JjError> {
   let loaded_op_id = loaded.repo.op_id().clone();
-  import_colocated_git_state(&mut loaded, workspace_path)?;
+  import_colocated_git_state(loaded, workspace_path)?;
 
   // A Git import can move the working-copy commit, so the caller's snapshot
   // no longer covers it.
   let snapshotted_tree_override = if snapshot || loaded.repo.op_id() != &loaded_op_id {
-    snapshot_working_copy_tree(&mut loaded, workspace_path)?.map(|(_, tree)| tree)
+    snapshot_working_copy_tree(loaded, workspace_path)?.map(|(_, tree)| tree)
   } else {
     None
   };
@@ -6710,7 +6999,7 @@ pub fn jj_rebase_with_revset(
       message: "Nothing to rebase (empty revision set)".to_string(),
     });
   }
-  let target_revision = resolve_branch_revision_for_rebase(working_dir, target_branch)?;
+  let target_revision = resolve_local_target_branch_revision(&loaded, working_dir, target_branch)?;
   let target_commit = resolve_commit_by_revision(&loaded, &target_revision)?;
 
   let rebase_options = RebaseOptions {
@@ -6930,13 +7219,13 @@ pub fn jj_push(workspace_path: &str) -> Result<String, JjError> {
   // Ensure bookmark is tracked before push to avoid non-tracking bookmark warnings.
   let mut tracking_message = String::new();
 
-  match is_bookmark_tracked(workspace_path, &branch_name, "origin") {
-    Ok(true) => {
+  match origin_bookmark_state(workspace_path, &branch_name) {
+    Ok((true, _)) => {
       // Already tracked, proceed normally
     }
     // A branch not yet on origin has nothing to track; the push creates it.
-    Ok(false) if !remote_bookmark_exists(workspace_path, &branch_name, "origin") => {}
-    Ok(false) => {
+    Ok((false, false)) => {}
+    Ok((false, true)) => {
       // Not tracked, attempt to set up tracking
       tracking_message.push_str(&format!(
         "Warning: Bookmark '{}' was not tracked. Attempting to set up tracking...\n",
@@ -7262,9 +7551,39 @@ fn get_sync_revset_tips(
   Ok((local_tip, remote_tip))
 }
 
+/// When each repository last fetched, so a caller that fetched moments ago
+/// for the same purpose can skip the round trip.
+static LAST_FETCH: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> =
+  std::sync::OnceLock::new();
+
+/// [`jj_git_fetch`] unless `repo_path` fetched within `max_age`.
+pub fn jj_git_fetch_unless_recent(
+  repo_path: &str,
+  max_age: std::time::Duration,
+) -> Result<String, JjError> {
+  let recent = LAST_FETCH
+    .get()
+    .and_then(|m| m.lock().ok()?.get(repo_path).copied())
+    .is_some_and(|at| at.elapsed() < max_age);
+  if recent {
+    return Ok(String::new());
+  }
+  jj_git_fetch(repo_path)
+}
+
 /// Fetch remote branches using jj git fetch (without rebasing)
 /// This updates remote tracking refs and makes remote branches available
 pub fn jj_git_fetch(repo_path: &str) -> Result<String, JjError> {
+  let fetched = fetch_origin(repo_path);
+  if fetched.is_ok() {
+    if let Ok(mut last) = LAST_FETCH.get_or_init(Default::default).lock() {
+      last.insert(repo_path.to_string(), std::time::Instant::now());
+    }
+  }
+  fetched
+}
+
+fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
   if !get_git_remotes(repo_path).contains("origin") {
     return Ok(String::new());
   }
@@ -7638,18 +7957,17 @@ fn resolve_local_target_branch_revision(
 /// Find the newest workspace ancestor whose tree is identical to the target.
 /// This recognizes the old tip represented by a GitHub squash commit, allowing
 /// stacked child commits to be separated from the already-merged parent commits.
+/// A squash commit is new, so the old tip is never the target's ancestor: only
+/// the workspace's side is read, not the whole history below it.
 fn resolve_tree_equivalent_workspace_base(
   loaded: &LoadedWorkspaceRepo,
   target_revision: &str,
 ) -> Option<String> {
   let target = resolve_commit_by_revision(loaded, target_revision).ok()?;
-  let target_descendants = evaluate_revset(
-    loaded,
-    &format!("{}::", format_revset_symbol(&target.id().hex())),
-  )
-  .ok()?;
+  let target_symbol = format_revset_symbol(&target.id().hex());
+  let target_descendants = evaluate_revset(loaded, &format!("{target_symbol}::")).ok()?;
   let is_target_descendant = target_descendants.containing_fn();
-  let ancestors = evaluate_revset(loaded, "::@-").ok()?;
+  let ancestors = evaluate_revset(loaded, &format!("{target_symbol}..@-")).ok()?;
   ancestors
     .iter()
     .commits(loaded.repo.store())
@@ -7825,9 +8143,10 @@ pub fn jj_get_log(
       None
     } else {
       get_workspace_wc_commit(&loaded).map(|wc_commit| {
-        wc_commit.map(|commit| {
-          let mut misses = Vec::new();
-          let commit = build_log_commit(
+        wc_commit.map(|commit| JjTentativeWorkingCopy {
+          workspace_label: workspace_branch.clone(),
+          commit: build_wc_log_commit(
+            &cache_repo_path,
             &loaded.repo,
             &commit,
             &wc_commit_ids,
@@ -7835,14 +8154,7 @@ pub fn jj_get_log(
               .as_ref()
               .map(|(commit_id, tree)| (commit_id, tree)),
             &is_immutable,
-            &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
-            &mut misses,
-          );
-          let _ = local_db::cache_commit_rows(&cache_repo_path, &misses);
-          JjTentativeWorkingCopy {
-            workspace_label: workspace_branch.clone(),
-            commit,
-          }
+          ),
         })
       })?
     };
@@ -7859,8 +8171,9 @@ pub fn jj_get_log(
 
 /// Get the most recent commits on a target branch (for display below active workspace commits).
 ///
-/// Uses revset: `latest(::{target_branch}, {limit})` to get the N most recent commits
-/// on the target branch.
+/// Takes the first `limit` of `::{target_branch}` in topological order, as the
+/// home-repo log does: `latest(::{target_branch}, {limit})` read every commit in
+/// the branch's history for its timestamp.
 pub fn jj_get_target_branch_log(
   workspace_path: &str,
   target_branch: &str,
@@ -7877,7 +8190,7 @@ pub fn jj_get_target_branch_log(
   let loaded = load_workspace_repo(workspace_path)?;
   let selected_target_ref =
     resolve_local_target_branch_revision(&loaded, workspace_path, target_branch)?;
-  let revset_expr = build_target_branch_revset(&selected_target_ref, fetch_limit);
+  let revset_expr = build_target_branch_revset(&selected_target_ref);
   let revset = evaluate_revset(&loaded, &revset_expr).map_err(|e| {
     JjError::IoError(format!(
       "Failed to evaluate target branch revset '{}': {}",
@@ -7898,6 +8211,7 @@ pub fn jj_get_target_branch_log(
     .collect();
   let commits = revset
     .iter()
+    .take(fetch_limit)
     .commits(loaded.repo.store())
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| JjError::IoError(format!("Failed to iterate revset '{}': {}", revset_expr, e)))?;
@@ -7926,8 +8240,8 @@ pub fn jj_get_target_branch_log(
   ))
 }
 
-fn build_target_branch_revset(target_ref: &str, limit: usize) -> String {
-  format!("latest(::{}, {})", format_revset_symbol(target_ref), limit)
+fn build_target_branch_revset(target_ref: &str) -> String {
+  format!("::{}", format_revset_symbol(target_ref))
 }
 
 /// Get commits that are in workspace but not in target branch
@@ -8235,11 +8549,11 @@ pub fn jj_dry_run_home_repo_rebase(
 /// Abandon every commit matched by `revset_expr` (by change id) in `workspace_path`.
 /// Returns the list of abandoned change IDs.
 fn abandon_commits_matching_revset(
+  loaded: &LoadedWorkspaceRepo,
   workspace_path: &str,
   revset_expr: &str,
 ) -> Result<Vec<String>, JjError> {
-  let loaded = load_workspace_repo(workspace_path)?;
-  let revset = evaluate_revset(&loaded, revset_expr).map_err(|e| {
+  let revset = evaluate_revset(loaded, revset_expr).map_err(|e| {
     JjError::IoError(format!(
       "Failed to evaluate revset '{}': {}",
       revset_expr, e
@@ -8296,7 +8610,7 @@ pub fn jj_abandon_empty_commits(
     "({}..@-) & empty()",
     format_revset_symbol(&selected_target_ref)
   );
-  abandon_commits_matching_revset(workspace_path, &revset_expr)
+  abandon_commits_matching_revset(&loaded, workspace_path, &revset_expr)
 }
 
 /// Collapse an undescribed merge at the workspace bookmark when its tree is
@@ -8423,6 +8737,7 @@ fn too_large_revision_diff() -> JjRevisionDiff {
     conflicted_files: Vec::new(),
     too_large_to_render: true,
     render_block_reason: Some(TOO_LARGE_COMMIT_DIFF_MESSAGE.to_string()),
+    working_copy_token: None,
   }
 }
 
@@ -8434,6 +8749,7 @@ pub fn empty_revision_diff() -> JjRevisionDiff {
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   }
 }
 
@@ -8599,71 +8915,139 @@ fn get_workspace_wc_commit(loaded: &LoadedWorkspaceRepo) -> Result<Option<Commit
     .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))
 }
 
-fn build_tentative_working_copy(
+/// A log row for a working-copy commit. Its id changes whenever its tree
+/// does, so a cached diff stat for that id is current: reading it skips
+/// diffing the working copy, and the cache is written only on a miss.
+fn build_wc_log_commit(
   cache_repo_path: &str,
   repo: &Arc<ReadonlyRepo>,
   commit: &Commit,
-  workspace_label: &str,
   wc_commit_ids: &HashSet<jj_lib::backend::CommitId>,
   wc_tree_override: Option<(&jj_lib::backend::CommitId, &MergedTree)>,
   is_immutable: &impl Fn(
     &jj_lib::backend::CommitId,
   ) -> Result<bool, jj_lib::revset::RevsetEvaluationError>,
-) -> JjTentativeWorkingCopy {
-  JjTentativeWorkingCopy {
-    workspace_label: workspace_label.to_string(),
-    commit: {
-      let mut misses = Vec::new();
-      let mut commit = build_log_commit(
-        repo,
-        commit,
-        wc_commit_ids,
-        wc_tree_override,
-        is_immutable,
-        &std::collections::HashMap::<String, local_db::CachedCommitDiffStat>::new(),
-        &mut misses,
-      );
-      let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
-      commit.workspace_label = Some(workspace_label.to_string());
-      commit
-    },
-  }
+) -> JjLogCommit {
+  let cached = local_db::get_cached_commit_diff_stats_batch(cache_repo_path, &[commit.id().hex()])
+    .unwrap_or_default();
+  let mut misses = Vec::new();
+  let row = build_log_commit(
+    repo,
+    commit,
+    wc_commit_ids,
+    wc_tree_override,
+    is_immutable,
+    &cached,
+    &mut misses,
+  );
+  let _ = local_db::cache_commit_rows(cache_repo_path, &misses);
+  row
 }
 
+/// A stacked workspace's working-copy commit, for the Commits list of a
+/// workspace above it; `None` when the working copy has no changes.
+///
+/// One load and one snapshot serve both the emptiness check and the row,
+/// under the lock [`jj_get_changed_files`] takes. A working copy that cannot
+/// be read or snapshotted counts as empty, as it does there.
+///
+/// Each row of a stack reads the rows below it, and a workspace's tabs and
+/// header read at once, so many callers ask for the same row together; they
+/// share runs (see [`SharedRead`]).
 pub fn jj_get_tentative_working_copy(
   workspace_path: &str,
   workspace_label: &str,
 ) -> Result<Option<JjTentativeWorkingCopy>, JjError> {
-  if jj_is_working_copy_empty(workspace_path)? {
+  use std::collections::HashMap;
+  use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+  type Shared = SharedRead<Result<Option<JjTentativeWorkingCopy>, String>>;
+  type Reads = HashMap<(std::path::PathBuf, String), Weak<Shared>>;
+  static READS: OnceLock<Mutex<Reads>> = OnceLock::new();
+  let shared = {
+    let mut reads = READS
+      .get_or_init(|| Mutex::new(HashMap::new()))
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reads.retain(|_, read| read.strong_count() > 0);
+    let key = (
+      working_copy_lock_key(workspace_path),
+      workspace_label.to_string(),
+    );
+    match reads.get(&key).and_then(Weak::upgrade) {
+      Some(read) => read,
+      None => {
+        let read = Arc::new(Shared::new());
+        reads.insert(key, Arc::downgrade(&read));
+        read
+      }
+    }
+  };
+  shared
+    .run(|| {
+      read_tentative_working_copy(workspace_path, workspace_label).map_err(|e| match e {
+        JjError::IoError(message) => message,
+        other => other.to_string(),
+      })
+    })
+    .map_err(JjError::IoError)
+}
+
+fn read_tentative_working_copy(
+  workspace_path: &str,
+  workspace_label: &str,
+) -> Result<Option<JjTentativeWorkingCopy>, JjError> {
+  if !Path::new(workspace_path).join(".jj").exists() {
     return Ok(None);
   }
-
-  let loaded = load_workspace_repo(workspace_path)?;
-  let immutable_revset = evaluate_revset(
-    &loaded,
-    &format!("::{}", format_revset_symbol(workspace_label)),
-  )?;
-  let is_immutable_val = immutable_revset.containing_fn();
-  let wc_commit_ids: HashSet<_> = loaded
-    .repo
-    .view()
-    .wc_commit_ids()
-    .values()
-    .cloned()
-    .collect();
-
-  get_workspace_wc_commit(&loaded).map(|maybe_commit| {
-    maybe_commit.map(|commit| {
-      build_tentative_working_copy(
-        workspace_path,
-        &loaded.repo,
-        &commit,
-        workspace_label,
-        &wc_commit_ids,
-        None,
-        &is_immutable_val,
-      )
-    })
+  let cache_repo_path = match derive_repo_path_from_workspace(workspace_path) {
+    Some(repo_path) => repo_path,
+    None => {
+      reconcile_colocated_home_repo(workspace_path)?;
+      workspace_path.to_string()
+    }
+  };
+  with_working_copy_lock(workspace_path, || {
+    let Ok(mut loaded) = load_workspace_repo(workspace_path) else {
+      return Ok(None);
+    };
+    let Ok(Some(snapshot)) = snapshot_working_copy_tree(&mut loaded, workspace_path) else {
+      return Ok(None);
+    };
+    if snapshot_is_empty(&loaded, workspace_path, Some(&snapshot))? {
+      return Ok(None);
+    }
+    let immutable_revset = evaluate_revset(
+      &loaded,
+      &format!("::{}", format_revset_symbol(workspace_label)),
+    )?;
+    let is_immutable = immutable_revset.containing_fn();
+    let wc_commit_ids: HashSet<_> = loaded
+      .repo
+      .view()
+      .wc_commit_ids()
+      .values()
+      .cloned()
+      .collect();
+    let (wc_commit_id, tree) = &snapshot;
+    let commit = loaded
+      .repo
+      .store()
+      .get_commit(wc_commit_id)
+      .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))?;
+    let mut row = build_wc_log_commit(
+      &cache_repo_path,
+      &loaded.repo,
+      &commit,
+      &wc_commit_ids,
+      Some((wc_commit_id, tree)),
+      &is_immutable,
+    );
+    row.workspace_label = Some(workspace_label.to_string());
+    Ok(Some(JjTentativeWorkingCopy {
+      workspace_label: workspace_label.to_string(),
+      commit: row,
+    }))
   })
 }
 
@@ -8991,6 +9375,7 @@ fn merge_diff_between_revisions_in(
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   })
 }
 
@@ -9090,6 +9475,7 @@ pub fn jj_get_commit_diff(
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   })
 }
 
@@ -9606,6 +9992,63 @@ mod tests {
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn shared_read_serves_callers_that_pile_up_with_one_more_run() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    let shared = SharedRead::new();
+    let runs = AtomicUsize::new(0);
+    let arrived = AtomicUsize::new(0);
+    thread::scope(|scope| {
+      let first = scope.spawn(|| {
+        shared.run(|| {
+          let run = runs.fetch_add(1, Ordering::SeqCst) + 1;
+          // Hold run 1 until every waiter has asked.
+          while arrived.load(Ordering::SeqCst) < 6 {
+            thread::yield_now();
+          }
+          thread::sleep(std::time::Duration::from_millis(50));
+          run
+        })
+      });
+      while runs.load(Ordering::SeqCst) == 0 {
+        thread::yield_now();
+      }
+      let waiters: Vec<_> = (0..6)
+        .map(|_| {
+          scope.spawn(|| {
+            arrived.fetch_add(1, Ordering::SeqCst);
+            shared.run(|| runs.fetch_add(1, Ordering::SeqCst) + 1)
+          })
+        })
+        .collect();
+      assert_eq!(first.join().unwrap(), 1);
+      for waiter in waiters {
+        assert_eq!(
+          waiter.join().unwrap(),
+          2,
+          "waiters share the run after theirs began"
+        );
+      }
+    });
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+    assert_eq!(
+      shared.run(|| runs.fetch_add(1, Ordering::SeqCst) + 1),
+      3,
+      "a later caller runs again"
+    );
+  }
+
+  #[test]
+  fn shared_read_recovers_when_a_run_panics() {
+    let shared = SharedRead::new();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      shared.run(|| -> u32 { panic!("read failed") })
+    }));
+    assert!(panicked.is_err());
+    assert_eq!(shared.run(|| 7), 7);
+  }
 
   #[test]
   fn working_copy_lock_is_shared_across_equivalent_paths() {

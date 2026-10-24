@@ -209,6 +209,7 @@ impl ChangesView {
           // The poll reads the diff again; an unchanged one keeps its rows.
           if view.hunks != hunks || view.snapshot.as_ref() != Some(&snapshot) {
             view.hunks = hunks;
+            view.hunks_token = None;
             view.snapshot = Some(snapshot);
             view.layout_gen += 1;
           }

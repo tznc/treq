@@ -104,7 +104,7 @@ pub struct PendingReview {
 /// A local-only review comment anchored to a line range of some reviewed
 /// target. These are never pushed to GitHub and are structurally distinct from
 /// the read-only `GhReviewThread`/`GhReviewComment` types on the frontend.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct AgentReviewComment {
   pub id: String,
   pub repo_path: String,
@@ -1113,18 +1113,24 @@ pub fn get_workspaces(repo_path: &str) -> Result<Vec<Workspace>, String> {
 
 pub fn get_workspace_by_id(repo_path: &str, id: i64) -> Result<Option<Workspace>, String> {
   let conn = get_connection(repo_path)?;
+  workspace_by_id(&conn, repo_path, id)
+}
+
+fn workspace_by_id(
+  conn: &Connection,
+  repo_path: &str,
+  id: i64,
+) -> Result<Option<Workspace>, String> {
   let mut stmt = conn
     .prepare(&format!(
       "SELECT {WORKSPACE_SELECT_COLUMNS} FROM workspaces WHERE id = ?1"
     ))
     .map_err(|e| format!("Failed to prepare workspace query: {}", e))?;
 
-  let workspace = stmt
+  stmt
     .query_row([id], |row| workspace_from_row(repo_path, row))
     .optional()
-    .map_err(|e| format!("Failed to query workspace: {}", e))?;
-
-  Ok(workspace)
+    .map_err(|e| format!("Failed to query workspace: {}", e))
 }
 
 pub fn get_workspace_by_path(
@@ -1189,6 +1195,102 @@ pub fn add_workspace(
   sparse_patterns: Option<Vec<String>>,
 ) -> Result<i64, String> {
   let conn = get_connection(repo_path)?;
+  // Releasing the archived row's path and inserting must land together.
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  let id = insert_workspace(
+    &tx,
+    &workspace_name,
+    &workspace_path,
+    &branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+  )?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
+  Ok(id)
+}
+
+/// [`add_workspace`] that also sets what a creation knows (whether the branch
+/// is missing on the remote, the target branch) in the same transaction, and
+/// returns the row. Each separate write is a commit with its own fsyncs.
+#[allow(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+pub fn add_workspace_targeting(
+  repo_path: &str,
+  workspace_name: String,
+  workspace_path: String,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+) -> Result<Workspace, String> {
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  let id = insert_workspace(
+    &tx,
+    &workspace_name,
+    &workspace_path,
+    &branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+  )?;
+  tx.execute(
+    "UPDATE workspaces SET not_on_remote = ?1, target_branch = ?2 WHERE id = ?3",
+    params![not_on_remote as i64, target_branch, id],
+  )
+  .map_err(|e| format!("Failed to set workspace target branch: {}", e))?;
+  let workspace = workspace_by_id(&tx, repo_path, id)?
+    .ok_or_else(|| format!("Workspace not found in database after creation: {id}"))?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
+  Ok(workspace)
+}
+
+/// Prepares a freshly created workspace to show: sets its `title` when given,
+/// and clears the last rebased target commit, which makes its first view
+/// rebase. One transaction, and the row back.
+pub fn init_new_workspace_state(
+  repo_path: &str,
+  id: i64,
+  title: Option<&str>,
+) -> Result<Option<Workspace>, String> {
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace update: {}", e))?;
+  if let Some(title) = title {
+    tx.execute(
+      "UPDATE workspaces SET title = ?1 WHERE id = ?2",
+      params![title, id],
+    )
+    .map_err(|e| format!("Failed to update workspace title: {}", e))?;
+  }
+  set_last_rebased_commit(&tx, id, "")?;
+  let workspace = workspace_by_id(&tx, repo_path, id)?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace update: {}", e))?;
+  Ok(workspace)
+}
+
+fn insert_workspace(
+  conn: &Connection,
+  workspace_name: &str,
+  workspace_path: &str,
+  branch_name: &str,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+) -> Result<i64, String> {
   let created_at = Utc::now().to_rfc3339();
   let refreshed_at = created_at.clone();
 
@@ -1208,12 +1310,8 @@ pub fn add_workspace(
     }
   });
 
-  // Releasing the archived row's path and inserting must land together.
-  let tx = conn
-    .unchecked_transaction()
-    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
-  release_archived_workspace_path(&tx, &workspace_path)?;
-  tx.execute(
+  release_archived_workspace_path(conn, workspace_path)?;
+  conn.execute(
         "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at, description, moved_files, sparse_patterns)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
@@ -1228,10 +1326,7 @@ pub fn add_workspace(
         ],
     )
     .map_err(|e| format!("Failed to insert workspace: {}", e))?;
-  let id = tx.last_insert_rowid();
-  tx.commit()
-    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
-  Ok(id)
+  Ok(conn.last_insert_rowid())
 }
 
 pub fn delete_workspace(repo_path: &str, id: i64) -> Result<(), String> {
@@ -1621,7 +1716,10 @@ pub fn update_workspace_last_rebased_commit(
   commit_id: &str,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
+  set_last_rebased_commit(&conn, id, commit_id)
+}
 
+fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Result<(), String> {
   let current_metadata: Option<String> = conn
     .query_row(
       "SELECT metadata FROM workspaces WHERE id = ?1",
@@ -3131,6 +3229,65 @@ mod tests {
     assert!(get_workspace_by_branch(repo_path, "fix/example")
       .expect("lookup")
       .is_none());
+  }
+
+  #[test]
+  fn add_workspace_targeting_sets_its_flags_with_the_row() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let workspace = add_workspace_targeting(
+      repo_path,
+      "feat-x".to_string(),
+      "feat-x".to_string(),
+      "feat/x".to_string(),
+      Some("about x".to_string()),
+      None,
+      None,
+      true,
+      "release",
+    )
+    .expect("register workspace");
+
+    assert!(workspace.not_on_remote);
+    assert_eq!(workspace.target_branch.as_deref(), Some("release"));
+    assert_eq!(workspace.description.as_deref(), Some("about x"));
+    let stored = get_workspace_by_id(repo_path, workspace.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("release"));
+    assert!(stored.not_on_remote);
+  }
+
+  #[test]
+  fn init_new_workspace_state_sets_the_title_and_clears_the_rebase_mark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let id = add_workspace(
+      repo_path,
+      "feat-y".to_string(),
+      "feat-y".to_string(),
+      "feat/y".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+
+    let workspace = init_new_workspace_state(repo_path, id, Some("A title"))
+      .expect("init state")
+      .expect("row");
+
+    assert_eq!(workspace.title, "A title");
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref().expect("metadata")).expect("json");
+    assert_eq!(metadata["last_rebased_target_commit"], "");
+    let untitled = init_new_workspace_state(repo_path, id, None)
+      .expect("init state")
+      .expect("row");
+    assert_eq!(untitled.title, "A title", "no title leaves the title alone");
   }
 
   #[test]
