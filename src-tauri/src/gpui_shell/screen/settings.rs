@@ -131,7 +131,7 @@ pub struct SkillsTab {
   pub loading: bool,
   pub error: Option<String>,
   pub query: String,
-  /// The status filter chips, each with how many skills it shows.
+  /// The status filter chips.
   pub filters: Vec<SkillFilter>,
   /// Every skill the search and the filter leave, labelled by status:
   /// installed or customized ones first, then the rest of the registry.
@@ -161,7 +161,6 @@ pub struct SkillConfirm {
 pub struct SkillFilter {
   pub id: &'static str,
   pub label: &'static str,
-  pub count: usize,
   pub selected: bool,
 }
 
@@ -172,13 +171,12 @@ pub const LABEL_CUSTOM_GLOBAL: &str = "Custom · Global";
 pub const LABEL_UNCATALOGUED: &str = "Not in registry";
 
 /// The filter chips, in order: id and label.
-const SKILL_FILTERS: [(&str, &str); 7] = [
+const SKILL_FILTERS: [(&str, &str); 6] = [
   ("all", "All"),
   ("installed", "Installed"),
   ("app-wide", LABEL_APP_WIDE),
   ("repository", LABEL_REPOSITORY),
-  ("custom-repo", LABEL_CUSTOM_REPO),
-  ("custom-global", LABEL_CUSTOM_GLOBAL),
+  ("custom", "Custom"),
   ("not-installed", "Not installed"),
 ];
 
@@ -197,8 +195,7 @@ fn skill_filter_matches(filter: &str, row: &SkillRow) -> bool {
     "installed" => !row.labels.is_empty(),
     "app-wide" => has(LABEL_APP_WIDE),
     "repository" => has(LABEL_REPOSITORY),
-    "custom-repo" => has(LABEL_CUSTOM_REPO),
-    "custom-global" => has(LABEL_CUSTOM_GLOBAL),
+    "custom" => has(LABEL_CUSTOM_REPO) || has(LABEL_CUSTOM_GLOBAL),
     "not-installed" => row.labels.is_empty(),
     _ => true,
   }
@@ -1452,10 +1449,6 @@ impl SettingsView {
           .map(|&(id, label)| SkillFilter {
             id,
             label,
-            count: labelled
-              .iter()
-              .filter(|row| skill_filter_matches(id, row))
-              .count(),
             selected: id == filter,
           })
           .collect();
@@ -2319,7 +2312,7 @@ impl SettingsView {
           Variant::Outline
         })
         .size(Size::Sm)
-        .label(format!("{} {}", filter.label, filter.count))
+        .label(filter.label)
         .on_click(self.press(&format!("skills.filter:{}", filter.id)))
     });
     div()

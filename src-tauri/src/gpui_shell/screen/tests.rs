@@ -2844,18 +2844,17 @@ fn skills_list_labels_every_skill_by_install_status(cx: &mut TestAppContext) {
   let chips: Vec<_> = skills
     .filters
     .iter()
-    .map(|f| (f.label, f.count, f.selected))
+    .map(|f| (f.label, f.selected))
     .collect();
   assert_eq!(
     chips,
     [
-      ("All", 7, true),
-      ("Installed", 6, false),
-      ("App-wide", 3, false),
-      ("Repository", 1, false),
-      ("Custom · Repo", 2, false),
-      ("Custom · Global", 1, false),
-      ("Not installed", 1, false),
+      ("All", true),
+      ("Installed", false),
+      ("App-wide", false),
+      ("Repository", false),
+      ("Custom", false),
+      ("Not installed", false),
     ]
   );
   assert_eq!(
@@ -2877,8 +2876,12 @@ fn skill_filter_chips_narrow_the_list(cx: &mut TestAppContext) {
       .map(|r| r.name)
       .collect()
   };
-  h.click("skill-filter-custom-repo");
-  assert_eq!(shown(&mut h), ["PowerPoint", "deploy"]);
+  h.click("skill-filter-custom");
+  assert_eq!(
+    shown(&mut h),
+    ["PowerPoint", "deploy", "notes"],
+    "Custom covers repo and global copies"
+  );
   h.click("skill-filter-repository");
   assert_eq!(shown(&mut h), ["Excel"]);
   h.click("skill-filter-not-installed");
@@ -2899,7 +2902,7 @@ fn hand_written_skill_edits_with_an_agent_and_cannot_uninstall(cx: &mut TestAppC
     "no catalog copy to customize from"
   );
   assert!(h.drawn("skill-uninstall-old/gone"));
-  h.click("skill-filter-custom-global");
+  h.click("skill-filter-custom");
   h.click("skill-customize-custom-global/notes");
   h.cx.run_until_parked();
   assert!(host.writes().is_empty());

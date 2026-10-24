@@ -63,9 +63,9 @@ function handWritten(root: string, name: string, description: string): void {
   writeFileSync(`${dir}/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\n`);
 }
 
-/** A status filter chip, by label (its name ends with a count). */
+/** A status filter chip, by label. */
 function chip(page: Page, label: string) {
-  return page.getByRole("button", { name: new RegExp(`^${label} \\d+$`) });
+  return page.getByRole("button", { name: label, exact: true });
 }
 
 test("skill link: confirm, install, customize with an agent", async ({ page }) => {
@@ -106,7 +106,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
     name: "19-skill-link-installed",
     title: "Every skill in one list, labelled by install status",
     expectations: [
-      "Filter chips under the search: All, Installed, App-wide, Repository, Custom · Repo, Custom · Global, Not installed, each with a count; All is selected",
+      "Filter chips under the search, no counts: All, Installed, App-wide, Repository, Custom, Not installed; All is selected",
       "First rows: frontend-design labelled App-wide (with Customize), release-notes labelled Custom · Repo, standup labelled Custom · Global",
       "Registry skills that are not installed follow with no label and an Install… button",
     ],
@@ -158,7 +158,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
   });
 
   await skillsTab(page);
-  await chip(page, "Custom · Repo").click();
+  await chip(page, "Custom").click();
   await expect(page.getByRole("button", { name: `Edit ${SKILL} with an agent` })).toBeVisible();
   mark("Customized: frontend-design gains a Custom · Repo label; catalog updates never overwrite the copy");
   await settle(page, 2500);
@@ -166,7 +166,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
     name: "19-skill-link-customized",
     title: "The customized skill in the Skills tab",
     expectations: [
-      "The Custom · Repo chip is selected; frontend-design and release-notes are listed",
+      "The Custom chip is selected; frontend-design, release-notes (Custom · Repo) and standup (Custom · Global) are listed",
       "frontend-design shows App-wide and Custom · Repo labels and an Edit with agent button",
       "release-notes (hand-written) has only Edit with agent: no install level or trash icon",
     ],
