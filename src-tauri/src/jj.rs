@@ -559,11 +559,23 @@ impl WorkspaceRepo {
         }
       };
       let conflicted = conflicted_files_in(&mut loaded, workspace_path, false)?;
+      let token = get_workspace_wc_commit(&loaded)
+        .ok()
+        .flatten()
+        .and_then(|wc_commit| {
+          let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref())).ok()?;
+          Some(working_copy_token(&parent_tree, &wc_commit.tree()))
+        });
       let repo = Self {
         path: workspace_path.to_string(),
         loaded,
       };
-      Ok((repo, WorkingCopyChanges { files, conflicted }))
+      let changes = WorkingCopyChanges {
+        files,
+        conflicted,
+        token,
+      };
+      Ok((repo, changes))
     })
   }
 
@@ -590,6 +602,9 @@ pub struct WorkingCopyChanges {
   pub files: Vec<JjFileChange>,
   /// As [`get_conflicted_files`] lists them.
   pub conflicted: Vec<String>,
+  /// The [`working_copy_token`] that [`jj_get_file_hunks_batch`] would
+  /// return now.
+  pub token: Option<String>,
 }
 
 fn load_workspace_repo(workspace_path: &str) -> Result<LoadedWorkspaceRepo, JjError> {
@@ -1474,6 +1489,10 @@ pub struct JjRevisionDiff {
   pub too_large_to_render: bool,
   #[serde(default)]
   pub render_block_reason: Option<String>,
+  /// Names the working-copy diff `uncommitted_files` came from, as
+  /// `WorkspaceFileHunksBatch::snapshot_token` does; `None` when unknown.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub working_copy_token: Option<String>,
 }
 
 const LARGE_COMMIT_FILE_DIFF_THRESHOLD: usize = 500;
@@ -8805,6 +8824,7 @@ fn too_large_revision_diff() -> JjRevisionDiff {
     conflicted_files: Vec::new(),
     too_large_to_render: true,
     render_block_reason: Some(TOO_LARGE_COMMIT_DIFF_MESSAGE.to_string()),
+    working_copy_token: None,
   }
 }
 
@@ -8816,6 +8836,7 @@ pub fn empty_revision_diff() -> JjRevisionDiff {
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   }
 }
 
@@ -9441,6 +9462,7 @@ fn merge_diff_between_revisions_in(
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   })
 }
 
@@ -9540,6 +9562,7 @@ pub fn jj_get_commit_diff(
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   })
 }
 

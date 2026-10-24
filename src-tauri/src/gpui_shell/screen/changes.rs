@@ -119,6 +119,9 @@ pub struct ChangesView {
   /// Another read was asked for while one ran.
   reload: bool,
   pub(super) hunks: HashMap<String, FileHunks>,
+  /// The working-copy diff every file in `hunks` was read from, once all
+  /// were read from the same one.
+  hunks_token: Option<String>,
   generation: u64,
   /// Bumped when the snapshot, the hunks, the lines read around them or
   /// the parent change: what the diff's rows are laid out from.
@@ -220,6 +223,7 @@ impl ChangesView {
       loading: false,
       reload: false,
       hunks: HashMap::new(),
+      hunks_token: None,
       generation: 0,
       layout_gen: 0,
       staging: Staging::default(),
@@ -289,6 +293,7 @@ impl ChangesView {
     if moved {
       self.snapshot = None;
       self.hunks.clear();
+      self.hunks_token = None;
       self.staging = Staging::default();
       self.active = None;
       self.collapsed_files.clear();
@@ -539,6 +544,11 @@ impl ChangesView {
             view.apply(snapshot, cx)
           }
           Ok(snapshot) if view.park(&snapshot) => {}
+          // The reviewed hunks were read from this same diff.
+          Ok(snapshot)
+            if view.in_review()
+              && snapshot.token.is_some()
+              && snapshot.token == view.hunks_token => {}
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
           Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
@@ -577,13 +587,27 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
+    // A refresh of an unchanged working copy (window focus, a watcher event
+    // for an ignored write) has no hunk to read again.
+    let current = snapshot.token.is_some()
+      && snapshot.token == self.hunks_token
+      && paths.len() == self.hunks.len()
+      && paths.iter().all(|p| {
+        self
+          .hunks
+          .get(p)
+          .is_some_and(|d| !d.loading && d.error.is_none())
+      });
+    let token = snapshot.token.clone();
     // A refresh that finds the same files keeps the snapshot, and with it
     // the committed hunks the rows were laid out from.
     if self.snapshot.as_ref() != Some(&snapshot) {
       self.snapshot = Some(snapshot);
       self.layout_gen += 1;
     }
-    self.load_hunks(paths, cx);
+    if !current {
+      self.load_hunks(paths, token, cx);
+    }
     self.unmark_stale(cx);
   }
 
@@ -601,7 +625,8 @@ impl ChangesView {
           ..FileHunks::default()
         },
       );
-      self.load_batches(self.generation, vec![vec![path.to_string()]], cx);
+      let token = self.hunks_token.clone();
+      self.load_batches(self.generation, vec![vec![path.to_string()]], token, cx);
     }
     cx.notify();
   }
@@ -615,8 +640,9 @@ impl ChangesView {
 
   /// `loadAllFileHunks`: the first files, then the rest in batches, each
   /// shown as it arrives. What was read before stays until replaced.
-  fn load_hunks(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+  fn load_hunks(&mut self, paths: Vec<String>, token: Option<String>, cx: &mut Context<Self>) {
     self.generation += 1;
+    self.hunks_token = None;
     let listed: HashSet<&String> = paths.iter().collect();
     let before = self.hunks.len();
     self.hunks.retain(|p, _| listed.contains(p));
@@ -636,16 +662,20 @@ impl ChangesView {
       batches.push(first.to_vec());
     }
     batches.extend(rest.chunks(BATCH).map(<[String]>::to_vec));
-    self.load_batches(self.generation, batches, cx);
+    self.load_batches(self.generation, batches, token, cx);
   }
 
+  /// Reads `batches` in turn. `token` is the diff they should all read
+  /// from; once every one did, it names the hunks.
   fn load_batches(
     &mut self,
     generation: u64,
     mut batches: Vec<Vec<String>>,
+    mut token: Option<String>,
     cx: &mut Context<Self>,
   ) {
     if batches.is_empty() {
+      self.hunks_token = token;
       return;
     }
     let batch = batches.remove(0);
@@ -659,6 +689,9 @@ impl ChangesView {
         let mut changed = false;
         match result {
           Ok(batch) => {
+            if token.as_ref() != Some(&batch.snapshot_token) {
+              token = None;
+            }
             for file in batch.files {
               // A refresh reads every file again; one that reads the same
               // keeps its hunks, so its rows and marks are not redone.
@@ -679,14 +712,17 @@ impl ChangesView {
               changed = true;
             }
           }
-          Err(err) => log::warn!("Failed to load file hunks: {err}"),
+          Err(err) => {
+            token = None;
+            log::warn!("Failed to load file hunks: {err}");
+          }
         }
         let marks = (view.viewed.len(), view.review.comments.len());
         view.unmark_stale(cx);
         if batches.is_empty() {
           view.prune_comments(cx);
         }
-        view.load_batches(generation, batches, cx);
+        view.load_batches(generation, batches, token, cx);
         changed || marks != (view.viewed.len(), view.review.comments.len())
       },
       cx,
