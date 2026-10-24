@@ -67,5 +67,6 @@
     ]
   },
   "disableBundledSkills": true,
-  "maxEffortLevel": "medium"
+  "maxEffortLevel": "medium",
+  "precomputeCompactionEnabled": false
 }
