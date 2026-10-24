@@ -5637,6 +5637,42 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   );
 }
 
+/// The pane hears of a terminal's output once per burst, and of its end
+/// once the process has written nothing for two seconds.
+#[gpui::test]
+fn terminal_streams_until_the_process_goes_quiet(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  let streaming = |h: &Harness| {
+    h.sent().into_iter().rev().find_map(|a| match a {
+      ScreenAction::Field { field, value } if field == "terminal.summaries" => {
+        value[0]["isStreaming"].as_bool()
+      }
+      _ => None,
+    })
+  };
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  host.output(&pty, "working");
+  h.cx.run_until_parked();
+  assert_eq!(streaming(&h), Some(true));
+  wait(&mut h, 1500);
+  host.output(&pty, " more");
+  h.cx.run_until_parked();
+  wait(&mut h, 1000);
+  assert_eq!(streaming(&h), Some(true), "it wrote a second ago");
+  wait(&mut h, 1100);
+  assert_eq!(streaming(&h), Some(false));
+  host.output(&pty, " again");
+  h.cx.run_until_parked();
+  assert_eq!(streaming(&h), Some(true));
+}
+
 /// A terminal resized while its session starts hands the PTY the new size
 /// once it runs: a program drawing for a wider PTY than the grid wraps
 /// every line, so redraws stack up and overwrite each other.
