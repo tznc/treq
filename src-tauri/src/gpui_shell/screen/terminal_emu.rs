@@ -7,10 +7,12 @@
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Direction, Line, Point, Side};
+use alacritty_terminal::selection::SelectionRange;
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::search::{Match, RegexSearch};
-use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
 use std::sync::{Arc, Mutex};
 
@@ -118,7 +120,9 @@ pub struct Run {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Frame {
-  pub lines: Vec<Vec<Run>>,
+  /// Each viewport row's runs, shared with the next frame when the row
+  /// didn't change.
+  pub lines: Vec<Arc<Vec<Run>>>,
   /// Cursor position in the viewport, when shown and scrolled into view.
   pub cursor: Option<(usize, usize)>,
 }
@@ -130,6 +134,16 @@ pub struct Emulator {
   size: Size,
   /// The find bar's current match.
   found: Option<Match>,
+  /// The last frame built and the scheme it was built in. Redraws that
+  /// change nothing here (another terminal's output, the cursor's blink)
+  /// take it as it is.
+  drawn: Option<(Scheme, Arc<Frame>)>,
+  /// Whether the grid or the view of it changed since `drawn`; the
+  /// terminal's damage says which rows.
+  changed: bool,
+  /// Whether every row needs rebuilding: the selection, which the damage
+  /// doesn't track, changed.
+  stale: bool,
 }
 
 impl Emulator {
@@ -149,6 +163,9 @@ impl Emulator {
       outputs,
       size,
       found: None,
+      drawn: None,
+      changed: false,
+      stale: false,
     }
   }
 
@@ -157,6 +174,7 @@ impl Emulator {
   }
 
   pub fn feed(&mut self, bytes: &[u8]) {
+    self.changed = true;
     self.parser.advance(&mut self.term, bytes);
   }
 
@@ -178,6 +196,7 @@ impl Emulator {
     if size == self.size {
       return false;
     }
+    self.changed = true;
     if size.cols != self.size.cols && !self.alt_screen() {
       self.hold_cursor_line(size.cols);
     }
@@ -224,11 +243,20 @@ impl Emulator {
   }
 
   pub fn scroll(&mut self, lines: i32) {
-    self.term.scroll_display(Scroll::Delta(lines));
+    self.scroll_display(Scroll::Delta(lines));
   }
 
   pub fn scroll_to_bottom(&mut self) {
-    self.term.scroll_display(Scroll::Bottom);
+    self.scroll_display(Scroll::Bottom);
+  }
+
+  /// Every keystroke scrolls to the bottom; only a move redraws.
+  fn scroll_display(&mut self, scroll: Scroll) {
+    let offset = self.display_offset();
+    self.term.scroll_display(scroll);
+    if self.display_offset() != offset {
+      self.changed = true;
+    }
   }
 
   pub fn display_offset(&self) -> usize {
@@ -331,6 +359,7 @@ impl Emulator {
       SelectKind::Line => SelectionType::Lines,
     };
     self.term.selection = Some(Selection::new(ty, self.point(line, col), side));
+    self.redraw_all();
   }
 
   pub fn select_extend(&mut self, line: usize, col: usize, right_half: bool) {
@@ -338,6 +367,7 @@ impl Emulator {
     let side = if right_half { Side::Right } else { Side::Left };
     if let Some(selection) = self.term.selection.as_mut() {
       selection.update(point, side);
+      self.redraw_all();
     }
   }
 
@@ -350,10 +380,13 @@ impl Emulator {
     let mut selection = Selection::new(SelectionType::Simple, top, Side::Left);
     selection.update(bottom, Side::Right);
     self.term.selection = Some(selection);
+    self.redraw_all();
   }
 
   pub fn clear_selection(&mut self) {
-    self.term.selection = None;
+    if self.term.selection.take().is_some() {
+      self.redraw_all();
+    }
   }
 
   pub fn selection_text(&self) -> Option<String> {
@@ -406,12 +439,14 @@ impl Emulator {
     self.term.selection = Some(selection);
     self.term.scroll_to_point(*found.start());
     self.found = Some(found);
+    self.redraw_all();
     true
   }
 
   pub fn clear_find(&mut self) {
     if self.found.take().is_some() {
       self.term.selection = None;
+      self.redraw_all();
     }
   }
 
@@ -429,15 +464,103 @@ impl Emulator {
     lines.join("\n").trim_end().to_string()
   }
 
-  pub fn frame(&self, scheme: &Scheme) -> Frame {
+  fn redraw_all(&mut self) {
+    self.changed = true;
+    self.stale = true;
+  }
+
+  /// The viewport's runs, built once per change: only the rows the
+  /// terminal damaged are built again (an echo, a spinner's tick), the
+  /// rest taken from the last frame.
+  pub fn frame(&mut self, scheme: &Scheme) -> Arc<Frame> {
+    if let Some((drawn, frame)) = &self.drawn {
+      if drawn == scheme && !self.changed {
+        return frame.clone();
+      }
+    }
+    let stale = std::mem::take(&mut self.stale);
+    self.changed = false;
+    let rows = self.size.rows;
+    let damaged = match self.term.damage() {
+      TermDamage::Full => None,
+      TermDamage::Partial(lines) => {
+        let mut damaged = vec![false; rows];
+        for line in lines {
+          if let Some(row) = damaged.get_mut(line.line) {
+            *row = true;
+          }
+        }
+        Some(damaged)
+      }
+    };
+    self.term.reset_damage();
+    let previous = self
+      .drawn
+      .take()
+      .filter(|(drawn, frame)| !stale && drawn == scheme && frame.lines.len() == rows)
+      .map(|(_, frame)| frame);
+    let reuse = previous.as_deref().zip(damaged.as_deref());
+    let frame = Arc::new(self.build_frame(scheme, reuse));
+    self.drawn = Some((*scheme, frame.clone()));
+    frame
+  }
+
+  /// Builds the frame, taking the rows `reuse` marks undamaged from its
+  /// frame.
+  fn build_frame(&self, scheme: &Scheme, reuse: Option<(&Frame, &[bool])>) -> Frame {
     let content = self.term.renderable_content();
     let offset = content.display_offset as i32;
-    let selection = content.selection;
-    let colors = content.colors;
-    let mut lines: Vec<Vec<Run>> = vec![Vec::new(); self.size.rows];
-    for cell in content.display_iter {
-      let row = (cell.point.line.0 + offset) as usize;
-      if row >= lines.len() || cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+    let lines = (0..self.size.rows)
+      .map(|row| match reuse {
+        Some((previous, damaged)) if !damaged[row] => previous.lines[row].clone(),
+        _ => Arc::new(self.build_line(
+          Line(row as i32 - offset),
+          scheme,
+          content.selection.as_ref(),
+          content.colors,
+        )),
+      })
+      .collect();
+    let cursor = content.cursor.point;
+    let row = cursor.line.0 + offset;
+    let shown =
+      content.mode.contains(TermMode::SHOW_CURSOR) && row >= 0 && (row as usize) < self.size.rows;
+    Frame {
+      lines,
+      cursor: shown.then_some((row as usize, cursor.column.0)),
+    }
+  }
+
+  fn build_line(
+    &self,
+    line: Line,
+    scheme: &Scheme,
+    selection: Option<&SelectionRange>,
+    colors: &Colors,
+  ) -> Vec<Run> {
+    let cells = &self.term.grid()[line];
+    let selected =
+      |col: usize| selection.is_some_and(|range| range.contains(Point::new(line, Column(col))));
+    // Trailing blanks draw nothing: stop after the last cell that does.
+    let mut end = self.size.cols;
+    while end > 0 {
+      let cell = &cells[Column(end - 1)];
+      let blank = cell.c.is_whitespace()
+        && cell.bg == Color::Named(NamedColor::Background)
+        && !cell
+          .flags
+          .intersects(Flags::INVERSE | Flags::ALL_UNDERLINES | Flags::STRIKEOUT)
+        && cell.zerowidth().is_none_or(<[char]>::is_empty)
+        && !selected(end - 1);
+      if !blank {
+        break;
+      }
+      end -= 1;
+    }
+    let mut runs: Vec<Run> = Vec::new();
+    for col in 0..end {
+      let cell = &cells[Column(col)];
+      if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
         continue;
       }
       let flags = cell.flags;
@@ -457,7 +580,7 @@ impl Emulator {
       if flags.contains(Flags::HIDDEN) {
         fg = bg.unwrap_or(scheme.background);
       }
-      if selection.is_some_and(|range| range.contains(cell.point)) {
+      if selected(col) {
         bg = Some(scheme.selection);
       }
       let width = if flags.contains(Flags::WIDE_CHAR) {
@@ -466,7 +589,7 @@ impl Emulator {
         1
       };
       let style = Run {
-        col: cell.point.column.0,
+        col,
         cells: width,
         text: String::new(),
         fg,
@@ -476,7 +599,6 @@ impl Emulator {
         underline: flags.intersects(Flags::ALL_UNDERLINES),
         strike: flags.contains(Flags::STRIKEOUT),
       };
-      let runs = &mut lines[row];
       match runs.last_mut() {
         Some(last)
           if same_style(last, &style) && width == 1 && last.col + last.cells == style.col =>
@@ -494,28 +616,19 @@ impl Emulator {
         }
       }
     }
-    for runs in &mut lines {
-      let blank = |run: &Run| run.bg.is_none() && !run.underline && !run.strike;
-      while runs
-        .last()
-        .is_some_and(|run| blank(run) && run.text.trim().is_empty())
-      {
-        runs.pop();
-      }
-      if let Some(last) = runs.last_mut().filter(|run| blank(run)) {
-        let trimmed = last.text.trim_end().len();
-        last.cells -= last.text.len() - trimmed;
-        last.text.truncate(trimmed);
-      }
+    let blank = |run: &Run| run.bg.is_none() && !run.underline && !run.strike;
+    while runs
+      .last()
+      .is_some_and(|run| blank(run) && run.text.trim().is_empty())
+    {
+      runs.pop();
     }
-    let cursor = content.cursor.point;
-    let row = cursor.line.0 + offset;
-    let shown =
-      content.mode.contains(TermMode::SHOW_CURSOR) && row >= 0 && (row as usize) < self.size.rows;
-    Frame {
-      lines,
-      cursor: shown.then_some((row as usize, cursor.column.0)),
+    if let Some(last) = runs.last_mut().filter(|run| blank(run)) {
+      let trimmed = last.text.trim_end().len();
+      last.cells -= last.text.len() - trimmed;
+      last.text.truncate(trimmed);
     }
+    runs
   }
 }
 
@@ -764,7 +877,8 @@ mod tests {
   fn colours_runs_with_sgr() {
     let mut emu = Emulator::new(20, 1);
     emu.feed(b"a\x1b[31mred\x1b[0m\x1b[1;32mok\x1b[38;5;196mx\x1b[48;2;1;2;3my");
-    let runs = &emu.frame(&DARK).lines[0];
+    let frame = emu.frame(&DARK);
+    let runs = &frame.lines[0];
     let texts: Vec<_> = runs
       .iter()
       .map(|run| (run.text.as_str(), run.fg, run.bg))
@@ -806,7 +920,8 @@ mod tests {
   fn inverse_swaps_colours() {
     let mut emu = Emulator::new(10, 1);
     emu.feed(b"\x1b[7mx");
-    let run = &emu.frame(&DARK).lines[0][0];
+    let frame = emu.frame(&DARK);
+    let run = &frame.lines[0][0];
     assert_eq!((run.fg, run.bg), (DARK.background, Some(DARK.foreground)));
   }
 
@@ -1109,6 +1224,89 @@ mod tests {
         .as_deref(),
       Some("\x1bOA")
     );
+  }
+
+  #[test]
+  fn reuses_the_frame_until_the_grid_changes() {
+    let mut emu = Emulator::new(10, 2);
+    emu.feed(b"ab");
+    let first = emu.frame(&DARK);
+    assert!(Arc::ptr_eq(&first, &emu.frame(&DARK)));
+    assert!(!Arc::ptr_eq(&first, &emu.frame(&LIGHT)));
+    emu.select_start(0, 0, false, SelectKind::Simple);
+    emu.select_extend(0, 1, true);
+    assert_eq!(emu.frame(&LIGHT).lines[0][0].bg, Some(LIGHT.selection));
+    emu.clear_selection();
+    assert_eq!(emu.frame(&LIGHT).lines[0][0].bg, None);
+    emu.feed(b"c");
+    assert_eq!(emu.frame(&LIGHT).lines[0][0].text, "abc");
+    // Typing scrolls to the bottom; already there, nothing changed.
+    let drawn = emu.frame(&LIGHT);
+    emu.scroll_to_bottom();
+    assert!(Arc::ptr_eq(&drawn, &emu.frame(&LIGHT)));
+    emu.feed(b"\r\n1\r\n2\r\n3");
+    emu.scroll(1);
+    assert_eq!(emu.frame(&LIGHT).lines[0][0].text, "1");
+    emu.scroll_to_bottom();
+    assert_eq!(emu.frame(&LIGHT).lines[0][0].text, "2");
+  }
+
+  #[test]
+  fn builds_again_only_the_rows_that_changed() {
+    let mut emu = Emulator::new(10, 3);
+    emu.feed(b"one\r\ntwo\r\n$ ");
+    let first = emu.frame(&DARK);
+    emu.feed(b"l");
+    let second = emu.frame(&DARK);
+    assert!(Arc::ptr_eq(&first.lines[0], &second.lines[0]));
+    assert_eq!(second.lines[2][0].text, "$ l");
+    assert_eq!(second.cursor, Some((2, 3)));
+    // The damage doesn't cover a selection: it redraws every row.
+    emu.select_start(0, 0, false, SelectKind::Line);
+    assert_eq!(emu.frame(&DARK).lines[0][0].bg, Some(DARK.selection));
+    emu.clear_selection();
+    assert_eq!(emu.frame(&DARK).lines[0][0].bg, None);
+  }
+
+  /// What a frame costs on a full screen of colored output: built after
+  /// output scrolls the screen, after an echo, and reused when nothing
+  /// changed.
+  /// `cargo test --features gpui-shell --lib terminal_emu::tests::frame_cost -- --ignored --nocapture`
+  #[test]
+  #[ignore = "benchmark"]
+  fn frame_cost() {
+    let mut emu = Emulator::new(250, 70);
+    for i in 0..1000 {
+      emu.feed(
+        format!(
+          "\x1b[3{}m{i:>6}\x1b[0m \x1b[1;3{}m✓ passed\x1b[0m src/日本/mod_{i}.rs:7 \x1b[4{}m##\x1b[0m {}\r\n",
+          i % 8,
+          (i + 3) % 8,
+          i % 8,
+          "word ".repeat(10 + i % 30)
+        )
+        .as_bytes(),
+      );
+    }
+    let n = 200;
+    let start = std::time::Instant::now();
+    for i in 0..n {
+      emu.feed(format!("\x1b[3{}m{i}\x1b[0m {}\r\n", i % 8, "word ".repeat(30)).as_bytes());
+      std::hint::black_box(emu.frame(&DARK));
+    }
+    let scrolled = start.elapsed() / n;
+    let start = std::time::Instant::now();
+    for _ in 0..n {
+      emu.feed(b"x");
+      std::hint::black_box(emu.frame(&DARK));
+    }
+    let echoed = start.elapsed() / n;
+    let start = std::time::Instant::now();
+    for _ in 0..n {
+      std::hint::black_box(emu.frame(&DARK));
+    }
+    let reused = start.elapsed() / n;
+    println!("frame 250x70: scrolled {scrolled:?}, echoed {echoed:?}, reused {reused:?}");
   }
 
   #[test]

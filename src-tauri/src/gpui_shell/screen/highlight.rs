@@ -25,6 +25,11 @@ static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_new
 /// reaches without holding much memory.
 const CACHE_MAX: usize = 20_000;
 
+/// Lines longer than this (minified code) are drawn plain, as VS Code
+/// stops tokenizing at 20,000 characters: syntect takes seconds on a
+/// 200 KB line, on the main thread.
+const LONG_LINE: usize = 20_000;
+
 /// What Prism would call a span, reduced to what the two themes color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Token {
@@ -203,6 +208,13 @@ pub(super) fn spans(language: &'static str, line: &str) -> Spans {
 
 /// `read` of `line`'s cache entry, highlighting it first on a miss.
 fn highlighted<R>(language: &'static str, line: &str, read: impl Fn(&Line) -> R) -> R {
+  if line.len() > LONG_LINE {
+    return read(&Line {
+      language,
+      text: SharedString::from(line.to_string()),
+      spans: Rc::default(),
+    });
+  }
   let key = CACHE.with(|c| {
     let mut c = c.borrow_mut();
     let key = c.hasher.hash_one((language, line));
@@ -504,6 +516,13 @@ mod tests {
     assert!(cache.get(0, "rs", "collides", |_| ()).is_none());
     assert!(cache.get(0, "ts", "kept", |_| ()).is_none());
     assert!(cache.current.len() + cache.previous.len() <= CACHE_MAX);
+  }
+
+  #[test]
+  fn long_lines_are_left_plain() {
+    let long = format!("let s = \"{}\";", "a".repeat(LONG_LINE));
+    assert!(spans("rs", &long).is_empty());
+    assert!(!spans("rs", "let s = 1;").is_empty());
   }
 
   #[test]

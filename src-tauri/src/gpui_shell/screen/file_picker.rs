@@ -21,9 +21,6 @@ use crate::gpui_shell::{
   ui::{self, TextSize},
 };
 
-/// `useDebounce(query, 150)`.
-const DEBOUNCE: Duration = Duration::from_millis(150);
-
 /// Which files the picker searches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
@@ -70,15 +67,20 @@ impl FilePicker {
     this
   }
 
-  /// Searches for `query` once typing pauses (an empty one lists nothing,
-  /// at once: the picker opening, or the query cleared).
+  /// Searches for `query` once typing pauses, if the host wants a pause (an
+  /// empty one searches at once: the picker opening, or the query cleared).
+  /// The shown results stay until the new ones arrive.
   pub(super) fn search(&mut self, query: String, cx: &mut Context<Self>) {
     self.query = query.clone();
     let (host, scope) = (self.host.clone(), self.scope.clone());
-    let debounce = !query.trim().is_empty();
+    let delay = if query.trim().is_empty() {
+      Duration::ZERO
+    } else {
+      host.file_search_delay(&scope.repo_path)
+    };
     self._search = Some(cx.spawn(async move |this, cx| {
-      if debounce {
-        cx.background_executor().timer(DEBOUNCE).await;
+      if !delay.is_zero() {
+        cx.background_executor().timer(delay).await;
       }
       let results = cx
         .background_spawn(async move {

@@ -24,6 +24,10 @@ pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// the background thread so the UI never blocks on `gh`.
 pub const DEFAULT_CI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+/// While no window is in front, both cadences are this many times slower:
+/// nobody is looking, and coming to the front polls whatever is due at once.
+pub const BACKGROUND_SLOWDOWN: u32 = 5;
+
 /// Fetch PR info for `(repo_path, branch_name)`.
 pub type PrFetchFn = Arc<dyn Fn(&str, &str) -> Result<Option<PrInfo>, String> + Send + Sync>;
 
@@ -73,8 +77,28 @@ struct Inner {
   wake: (Mutex<()>, Condvar),
   /// Set while a wake should trigger an immediate poll of all watched repos.
   pending_wake: AtomicBool,
+  /// No window is in front: polls run [`BACKGROUND_SLOWDOWN`] times slower.
+  background: AtomicBool,
+  /// Set when a window comes to the front, so the loop works out again what
+  /// is due by the foreground cadence.
+  recheck: AtomicBool,
   shutdown: AtomicBool,
   loop_started: AtomicBool,
+}
+
+impl Inner {
+  /// The PR and CI cadences, slowed while in the background.
+  fn intervals(&self) -> (Duration, Duration) {
+    let slowdown = if self.background.load(Ordering::SeqCst) {
+      BACKGROUND_SLOWDOWN
+    } else {
+      1
+    };
+    (
+      self.poll_interval * slowdown,
+      self.ci_poll_interval * slowdown,
+    )
+  }
 }
 
 /// Process-wide background PR status poller + cache.
@@ -128,6 +152,8 @@ impl PrStatusManager {
         branch_refresh_inflight: Mutex::new(HashSet::new()),
         wake: (Mutex::new(()), Condvar::new()),
         pending_wake: AtomicBool::new(false),
+        background: AtomicBool::new(false),
+        recheck: AtomicBool::new(false),
         shutdown: AtomicBool::new(false),
         loop_started: AtomicBool::new(false),
       }),
@@ -324,6 +350,18 @@ impl PrStatusManager {
       .cloned()
   }
 
+  /// Whether any window is in front. In the background polls slow down by
+  /// [`BACKGROUND_SLOWDOWN`]; back in front, what the foreground cadence
+  /// says is due polls at once, so a returning user sees fresh statuses.
+  pub fn set_background(&self, background: bool) {
+    let was = self.inner.background.swap(background, Ordering::SeqCst);
+    if was && !background {
+      self.inner.recheck.store(true, Ordering::SeqCst);
+      let _guard = self.inner.wake.0.lock_or_recover();
+      self.inner.wake.1.notify_one();
+    }
+  }
+
   fn request_wake(&self) {
     self.inner.pending_wake.store(true, Ordering::SeqCst);
     self.inner.wake.1.notify_one();
@@ -356,13 +394,15 @@ fn background_loop(inner: Arc<Inner>) {
 
     let now = Instant::now();
     let wake_requested = inner.pending_wake.swap(false, Ordering::SeqCst);
+    inner.recheck.store(false, Ordering::SeqCst);
+    let (poll_interval, ci_poll_interval) = inner.intervals();
     let pr_due = wake_requested
       || last_pr
-        .map(|t| now.duration_since(t) >= inner.poll_interval)
+        .map(|t| now.duration_since(t) >= poll_interval)
         .unwrap_or(true);
     let ci_due = wake_requested
       || last_ci
-        .map(|t| now.duration_since(t) >= inner.ci_poll_interval)
+        .map(|t| now.duration_since(t) >= ci_poll_interval)
         .unwrap_or(true);
 
     if pr_due || ci_due {
@@ -393,11 +433,12 @@ fn background_loop(inner: Arc<Inner>) {
 
     // Sleep until the sooner of the next PR or CI deadline (or wake early).
     let now = Instant::now();
+    let (poll_interval, ci_poll_interval) = inner.intervals();
     let until_pr = last_pr
-      .map(|t| inner.poll_interval.saturating_sub(now.duration_since(t)))
+      .map(|t| poll_interval.saturating_sub(now.duration_since(t)))
       .unwrap_or(Duration::ZERO);
     let until_ci = last_ci
-      .map(|t| inner.ci_poll_interval.saturating_sub(now.duration_since(t)))
+      .map(|t| ci_poll_interval.saturating_sub(now.duration_since(t)))
       .unwrap_or(Duration::ZERO);
     let wait = until_pr.min(until_ci).max(Duration::from_millis(5));
 
@@ -405,7 +446,9 @@ fn background_loop(inner: Arc<Inner>) {
     let guard = lock.lock_or_recover();
     let (_guard, _timeout) = cvar
       .wait_timeout_while(guard, wait, |_| {
-        !inner.pending_wake.load(Ordering::SeqCst) && !inner.shutdown.load(Ordering::SeqCst)
+        !inner.pending_wake.load(Ordering::SeqCst)
+          && !inner.recheck.load(Ordering::SeqCst)
+          && !inner.shutdown.load(Ordering::SeqCst)
       })
       .unwrap_or_else(|poisoned| poisoned.into_inner());
   }
@@ -1202,6 +1245,42 @@ mod tests {
     }
     thread::sleep(Duration::from_millis(200));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    mgr.shutdown();
+  }
+
+  #[test]
+  fn polls_slow_down_in_the_background_and_catch_up_in_front() {
+    use std::sync::atomic::AtomicUsize;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_fetch = Arc::clone(&calls);
+    let fetch: PrFetchFn = Arc::new(move |_, _| {
+      calls_fetch.fetch_add(1, Ordering::SeqCst);
+      Ok(None)
+    });
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat".into()]));
+    let every = Duration::from_millis(100);
+    let mgr = PrStatusManager::new(fetch, list).with_intervals(every, every);
+    mgr.set_background(true);
+
+    mgr.watch_repo("/tmp/background");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while calls.load(Ordering::SeqCst) == 0 {
+      assert!(std::time::Instant::now() < deadline, "first poll never ran");
+      thread::sleep(Duration::from_millis(10));
+    }
+    // Several foreground intervals, well inside one background interval.
+    thread::sleep(every * 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    mgr.set_background(false);
+    let deadline = std::time::Instant::now() + every;
+    while calls.load(Ordering::SeqCst) == 1 {
+      assert!(
+        std::time::Instant::now() < deadline,
+        "coming to the front polls what is due"
+      );
+      thread::sleep(Duration::from_millis(5));
+    }
     mgr.shutdown();
   }
 

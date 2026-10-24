@@ -39,7 +39,7 @@ use super::{
   file_browser_data::{
     comment_counts, comment_target, dir_status, file_name, filter_hidden, flatten, is_binary,
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
-    status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
+    sorted, status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
   },
   highlight, prefetch, ActionSink, ScreenAction,
 };
@@ -87,11 +87,29 @@ pub struct Opening {
   pub revision: u64,
 }
 
-/// The open file's text, split as React splits it.
+/// The open file's text, split as React splits it. Both halves are shared,
+/// so drawing a row or a frame copies neither.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Opened {
-  pub content: String,
+  pub content: SharedString,
   pub lines: Rc<Vec<String>>,
+}
+
+/// [`Opened`] before it reaches the main thread: split off it, then shared.
+struct Read {
+  content: String,
+  lines: Vec<String>,
+}
+
+impl Read {
+  /// `content` split, or `None` when it is too large to show.
+  fn of(content: String) -> Option<Self> {
+    if too_large(&content) {
+      return None;
+    }
+    let lines = content.split('\n').map(str::to_string).collect();
+    Some(Self { content, lines })
+  }
 }
 
 /// The comment box: what it covers, and whether it shows.
@@ -178,6 +196,8 @@ pub struct FileBrowserView {
   selecting: bool,
   // The review.
   pub(super) comments: Vec<LineComment>,
+  /// The open file's comments, gathered once a frame for its rows.
+  file_comments: Rc<Vec<LineComment>>,
   pub(super) summary: String,
   pub(super) draft: Option<Draft>,
   pub(super) draft_open: bool,
@@ -203,7 +223,7 @@ pub struct FileBrowserView {
   /// The file row the pointer rests on, and the files read ahead that way,
   /// by path, until the workspace's files change.
   hovered: prefetch::Intent<String>,
-  prefetched: prefetch::Lru<String, String>,
+  prefetched: prefetch::Lru<String, Read>,
 }
 
 impl HasTooltips for FileBrowserView {
@@ -256,6 +276,7 @@ impl FileBrowserView {
       anchor: None,
       selecting: false,
       comments: Vec::new(),
+      file_comments: Rc::default(),
       summary: String::new(),
       draft: None,
       draft_open: false,
@@ -442,7 +463,7 @@ impl FileBrowserView {
   fn load_root(&mut self, cx: &mut Context<Self>) {
     let base = self.base();
     self.run(
-      move |host| host.list_directory(&base).map(filter_hidden),
+      move |host| host.list_directory(&base).map(|e| sorted(filter_hidden(e))),
       |view, result, cx| match result {
         Ok(entries) => {
           let first = view.root.is_none();
@@ -500,7 +521,7 @@ impl FileBrowserView {
     }
     let path = dir.clone();
     self.run(
-      move |host| host.list_directory(&path).map(filter_hidden),
+      move |host| host.list_directory(&path).map(|e| sorted(filter_hidden(e))),
       move |view, result, _| {
         let entries = match result {
           Ok(entries) => entries,
@@ -640,7 +661,7 @@ impl FileBrowserView {
     }
     let file = path.to_string();
     self.run(
-      move |host| host.read_file(&file),
+      move |host| host.read_file(&file).map(Read::of),
       move |view, result, cx| {
         if view.reads != read {
           return;
@@ -652,7 +673,7 @@ impl FileBrowserView {
           view.marks = LineMarks::default();
         }
         match result {
-          Ok(content) if too_large(&content) => {
+          Ok(None) => {
             view.toast(
               ToastTone::Warning,
               "File too large",
@@ -661,7 +682,7 @@ impl FileBrowserView {
             view.selected = None;
             view.opened = None;
           }
-          Ok(content) => view.show_content(content, refreshing, cx),
+          Ok(Some(read)) => view.show_content(read, refreshing, cx),
           Err(err) => {
             view.toast(ToastTone::Error, "Failed to read file", err);
             view.opened = Some(Opened::default());
@@ -696,11 +717,10 @@ impl FileBrowserView {
     cx.spawn(async move |this, cx| {
       let file = path.clone();
       let read = cx
-        .background_spawn(async move { host.read_file(&file) })
+        .background_spawn(async move { host.read_file(&file).map(Read::of) })
         .await;
-      let content = match read {
-        Ok(content) if !too_large(&content) => content,
-        _ => return,
+      let Ok(Some(content)) = read else {
+        return;
       };
       let _ = this.update(cx, |view, cx| {
         if view.parent.key() == key {
@@ -712,14 +732,22 @@ impl FileBrowserView {
     .detach();
   }
 
-  fn show_content(&mut self, content: String, refreshing: bool, cx: &mut Context<Self>) {
-    let lines: Vec<String> = content.split('\n').map(str::to_string).collect();
-    let count = lines.len();
+  fn show_content(&mut self, read: Read, refreshing: bool, cx: &mut Context<Self>) {
+    // A file read again as it was keeps its rows and their measurements.
+    if refreshing
+      && self
+        .opened
+        .as_ref()
+        .is_some_and(|o| o.content.as_ref() == read.content)
+    {
+      return;
+    }
+    let count = read.lines.len();
     let old = self.opened.as_ref().map_or(0, |o| o.lines.len());
     self.language = self.selected.as_deref().and_then(highlight::language);
     self.opened = Some(Opened {
-      content,
-      lines: Rc::new(lines),
+      content: read.content.into(),
+      lines: Rc::new(read.lines),
     });
     if refreshing {
       self.list.splice(0..old, count);
@@ -754,7 +782,7 @@ impl FileBrowserView {
     let Some(opened) = self.opened.as_ref() else {
       return;
     };
-    cx.write_to_clipboard(ClipboardItem::new_string(opened.content.clone()));
+    cx.write_to_clipboard(ClipboardItem::new_string(opened.content.to_string()));
     self.copy_flag(Copied::Contents, cx);
   }
 
@@ -1084,8 +1112,9 @@ impl FileBrowserView {
 
   /// Measures rows again when what follows a line changed.
   fn sync_rows(&mut self) {
+    self.file_comments = Rc::new(self.file_comments().into_iter().cloned().collect());
     let mut key: Vec<(u32, String, usize)> = self
-      .file_comments()
+      .file_comments
       .iter()
       .map(|c| (c.end_line, c.id.clone(), c.text.len()))
       .collect();
@@ -1654,15 +1683,16 @@ impl FileBrowserView {
     let markdown = is_markdown(&path);
     let previewing = markdown && self.preview.as_deref() == Some(path.as_str());
     let body = if previewing {
+      // The preview scrolls itself, so a long README draws only the blocks
+      // on screen.
       div()
         .id("markdown-preview")
         .debug_selector(|| "file-markdown-preview".into())
         .size_full()
-        .overflow_y_scroll()
         .bg(p.background)
         .px_8()
         .py_6()
-        .child(super::code::markdown(
+        .child(super::code::scrolling_markdown(
           "file-markdown",
           &opened.content,
           14.,
@@ -1836,21 +1866,21 @@ impl FileBrowserView {
   /// A source line, and the comments under it (`FileBrowserListRow`).
   fn code_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
-    let Some(opened) = self.opened.clone() else {
+    let Some(lines) = self.opened.as_ref().map(|o| o.lines.clone()) else {
       return div().into_any_element();
     };
-    let Some(text) = opened.lines.get(ix) else {
+    let Some(text) = lines.get(ix) else {
       return div().into_any_element();
     };
     let n = ix as u32 + 1;
     let added = self.marks.added.contains(&n);
     let deleted = self.marks.deleted_after.contains(&n);
-    let comments: Vec<LineComment> = self.file_comments().into_iter().cloned().collect();
+    let comments = self.file_comments.clone();
     let has_comment = comments
       .iter()
       .any(|c| n >= c.start_line && n <= c.end_line);
     let selected = self.selection.is_some_and(|(s, e)| n >= s && n <= e);
-    let width = line_number_width(opened.lines.len());
+    let width = line_number_width(lines.len());
     let bg = if selected {
       Some(p.selected())
     } else if added {
@@ -1986,17 +2016,19 @@ impl FileBrowserView {
 
   /// A line's text, highlighted, with its search matches marked.
   fn marked_line(&self, ix: usize, text: &str) -> gpui::AnyElement {
-    if self.search.applied.is_empty() || !self.search.matches.iter().any(|(l, _)| *l == ix) {
+    // The matches run in line order: this line's are one run of them.
+    let matches = &self.search.matches;
+    let first = matches.partition_point(|(l, _)| *l < ix);
+    let count = matches[first..].partition_point(|(l, _)| *l == ix);
+    if self.search.applied.is_empty() || count == 0 {
       return highlight::styled(text, self.language, self.dark).into_any_element();
     }
     let primary = theme::palette(self.dark).primary;
-    let marks: Vec<(Range<usize>, Hsla)> = self
-      .search
-      .matches
+    let marks: Vec<(Range<usize>, Hsla)> = matches[first..first + count]
       .iter()
       .enumerate()
-      .filter(|(_, (l, _))| *l == ix)
       .map(|(i, (_, r))| {
+        let i = first + i;
         let current = i == self.search.current;
         (r.clone(), primary.opacity(if current { 0.6 } else { 0.3 }))
       })

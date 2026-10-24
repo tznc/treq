@@ -13,7 +13,12 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
-use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
+use std::{
+  cell::Cell,
+  rc::Rc,
+  sync::Arc,
+  time::{Duration, Instant},
+};
 
 use futures::StreamExt as _;
 use gpui_kit::base::TestSupportExt as _;
@@ -361,11 +366,18 @@ pub struct TerminalView {
   /// The cell of the last mouse report, so a move within it sends none.
   reported: Option<(usize, usize)>,
   cursor_on: bool,
-  /// Whether the last frame had focus. Only a focused cursor blinks, so an
-  /// unfocused terminal skips the blink's redraw.
-  focused: bool,
-  /// Fires `Idle` once the process stops writing; each burst replaces it.
+  /// The blink's timer. Only a focused cursor in the window in front
+  /// blinks, and the timer runs only while one does, so an idle terminal
+  /// wakes nothing.
+  blink: Option<Task<()>>,
+  /// Fires `Idle` once the process stops writing, started by a burst's
+  /// first output.
   idle: Option<Task<()>>,
+  /// Between a burst's first output and `Idle`: the pane hears of the
+  /// output only when this turns on.
+  streaming: bool,
+  /// When the process last wrote, on the executor's clock.
+  last_output: Instant,
   chat_due: bool,
   search: Search,
   tooltips: Tooltips,
@@ -415,8 +427,10 @@ impl TerminalView {
       selecting: false,
       reported: None,
       cursor_on: true,
-      focused: false,
+      blink: None,
       idle: None,
+      streaming: false,
+      last_output: cx.background_executor().now(),
       chat_due: false,
       search: Search::default(),
       tooltips: Tooltips::new(popups, dark),
@@ -622,39 +636,46 @@ impl TerminalView {
         }
       }
     }));
-    if self._tasks.len() == 1 {
-      self._tasks.push(cx.spawn(async move |this, cx| loop {
-        cx.background_executor().timer(BLINK).await;
-        if this
-          .update(cx, |view, cx| {
-            if view.focused {
-              view.cursor_on = !view.cursor_on;
-              cx.notify();
-            } else {
-              view.cursor_on = true;
-            }
-          })
-          .is_err()
-        {
-          break;
+  }
+
+  fn blinks(&self, window: &Window) -> bool {
+    self.focus.is_focused(window) && window.is_window_active()
+  }
+
+  /// Blinks the cursor until the terminal loses focus or the window goes
+  /// to the background, then leaves it on.
+  fn blink(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.blink = Some(cx.spawn_in(window, async move |this, cx| loop {
+      cx.background_executor().timer(BLINK).await;
+      let blinking = this.update_in(cx, |view, window, cx| {
+        if view.blinks(window) {
+          view.cursor_on = !view.cursor_on;
+          cx.notify();
+          return true;
         }
-      }));
-    }
+        view.blink = None;
+        if !view.cursor_on {
+          view.cursor_on = true;
+          cx.notify();
+        }
+        false
+      });
+      if !matches!(blinking, Ok(true)) {
+        break;
+      }
+    }));
   }
 
   fn on_output(&mut self, from_process: bool, cx: &mut Context<Self>) {
-    (self.on_event)(TermEvent::Output { from_process }, cx);
     if from_process {
       // The channel works again, so its next drop gets its own attempt.
       self.remote.auto_spent = false;
-      self.idle = Some(cx.spawn(async move |this, cx| {
-        cx.background_executor().timer(IDLE_AFTER).await;
-        let _ = this.update(cx, |view, cx| {
-          view.chat_due = false;
-          view.record_chat();
-          (view.on_event)(TermEvent::Idle, cx);
-        });
-      }));
+      self.last_output = cx.background_executor().now();
+      if !self.streaming {
+        self.streaming = true;
+        (self.on_event)(TermEvent::Output { from_process }, cx);
+        self.idle = Some(self.idle_timer(cx));
+      }
       if !self.chat_due && self.is_agent() {
         self.chat_due = true;
         cx.spawn(async move |this, cx| {
@@ -669,6 +690,35 @@ impl TerminalView {
       }
     }
     cx.notify();
+  }
+
+  /// Fires `Idle` once the process has written nothing for `IDLE_AFTER`:
+  /// one timer per burst, which sleeps again for what is left whenever
+  /// output came in meanwhile.
+  fn idle_timer(&self, cx: &mut Context<Self>) -> Task<()> {
+    cx.spawn(async move |this, cx| {
+      let mut wait = IDLE_AFTER;
+      loop {
+        cx.background_executor().timer(wait).await;
+        let Ok(last) = this.read_with(cx, |view, _| view.last_output) else {
+          return;
+        };
+        let since = cx
+          .background_executor()
+          .now()
+          .saturating_duration_since(last);
+        if since >= IDLE_AFTER {
+          break;
+        }
+        wait = IDLE_AFTER - since;
+      }
+      let _ = this.update(cx, |view, cx| {
+        view.streaming = false;
+        view.chat_due = false;
+        view.record_chat();
+        (view.on_event)(TermEvent::Idle, cx);
+      });
+    })
   }
 
   /// `agentChatRecorder`: snapshots the agent's screen into its chat log.
@@ -828,6 +878,7 @@ impl TerminalView {
       if let Ok(mut emulator) = live.emulator.lock() {
         emulator.scroll_to_bottom();
       }
+      cx.notify();
     }
     if let Err(error) = self.host.write_pty(&self.pty, data) {
       log::warn!("pty write failed: {error}");
@@ -1263,7 +1314,6 @@ impl TerminalView {
           .border_color(theme::data_color(scheme.foreground))
       }
     });
-    let lines = frame.lines;
     div()
       .absolute()
       .inset_0()
@@ -1271,9 +1321,9 @@ impl TerminalView {
         gpui::canvas(
           |_, _, _| {},
           move |bounds, _, window, cx| {
-            for (row, runs) in lines.into_iter().enumerate() {
+            for (row, runs) in frame.lines.iter().enumerate() {
               let y = bounds.origin.y + px(TOP_PAD + row as f32 * h);
-              for run in runs {
+              for run in runs.iter() {
                 let x = bounds.origin.x + px(run.col as f32 * w);
                 if let Some(bg) = run.bg {
                   window.paint_quad(gpui::fill(
@@ -1284,7 +1334,7 @@ impl TerminalView {
                 if run.text.trim().is_empty() && !run.underline && !run.strike {
                   continue;
                 }
-                paint_run(&run, point(x, y), (w, h, advance), font_size, window, cx);
+                paint_run(run, point(x, y), (w, h, advance), font_size, window, cx);
               }
             }
           },
@@ -1512,7 +1562,9 @@ impl Render for TerminalView {
     self.tooltips.sync(cx);
     let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
-    self.focused = focused;
+    if self.blink.is_none() && self.blinks(window) {
+      self.blink(window, cx);
+    }
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
@@ -3419,7 +3471,9 @@ impl TerminalPane {
               on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
           })
-          .child(view)
+          // Its own redraws (output, the blink) leave the other
+          // terminals' drawing as it was.
+          .child(view.cached(gpui::StyleRefinement::default().size_full()))
           .children(previews)
       })
       // `ring-1 ring-inset ring-primary/40` on the active remote session.

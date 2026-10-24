@@ -23,6 +23,9 @@ use crate::{
 pub const POLL: Duration = Duration::from_secs(10);
 /// `sessions` and the linked repositories': `refreshInterval: 30000`.
 pub const SESSIONS_POLL: Duration = Duration::from_secs(30);
+/// In the background a window's polls read on every this many ticks, so
+/// every 30 s and 90 s; back in front, it reads what they skipped at once.
+pub const BACKGROUND_EVERY: u32 = 3;
 
 /// What to read of a repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -196,7 +199,7 @@ impl Data {
       repo.hidden.retain(|id| listed.contains(id));
       let ids = |list: &[Workspace]| list.iter().map(|w| w.id).collect::<Vec<_>>();
       let before = repo.workspaces.as_deref().map(ids);
-      if repo.workspaces.as_deref().map(json) != Some(json(&workspaces)) {
+      if repo.workspaces.as_ref() != Some(&workspaces) {
         applied.changed = true;
       }
       applied.before = Some(before.unwrap_or_default());
@@ -204,7 +207,7 @@ impl Data {
     }
     if let Some(mut statuses) = read.statuses {
       statuses.retain(|s| !repo.hidden.contains(&s.current.id));
-      if json(&repo.statuses) != json(&statuses) {
+      if repo.statuses != statuses {
         applied.changed = true;
       }
       repo.statuses = statuses;

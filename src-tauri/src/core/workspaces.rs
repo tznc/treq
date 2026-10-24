@@ -125,7 +125,7 @@ pub struct WorkspacePartialStatus {
   pub commits_ahead: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct WorkspaceSidebarStatus {
   pub current: local_db::Workspace,
   pub has_conflicts: bool,
@@ -251,15 +251,17 @@ pub fn ls_workspace(
     }
 
     if let Some(name) = entry_path.file_name().and_then(|name| name.to_str()) {
-      let modified_at = std::fs::metadata(entry_path)
-        .ok()
-        .and_then(|metadata| metadata.modified().ok())
-        .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339());
+      // As `list_directory`: the listing's type, a stat only for a symlink,
+      // and no times, which no caller reads.
+      let is_directory = match entry.file_type() {
+        Some(t) if !t.is_symlink() => t.is_dir(),
+        _ => entry_path.is_dir(),
+      };
       entries.push(WorkspaceEntry {
         name: name.to_string(),
         path: entry_path.to_string_lossy().to_string(),
-        is_directory: entry_path.is_dir(),
-        modified_at,
+        is_directory,
+        modified_at: None,
         submodule_pin: None,
         submodule_synced: None,
         status: None,
@@ -286,8 +288,8 @@ pub fn ls_workspace(
 /// Like `ls_workspace`, but also annotates each entry with its jj file
 /// status (conflict/committed/working-copy) for the Code tab's file list.
 /// This is meaningfully more expensive (three extra jj computations), so it
-/// is kept separate from the plain `ls_workspace` used by callers (e.g.
-/// `get_workspace_readme`) that don't need status.
+/// is kept separate from the plain `ls_workspace` used by callers that
+/// don't need status.
 pub fn ls_workspace_with_status(
   repo_path: &str,
   workspace_id: Option<i64>,
@@ -311,12 +313,10 @@ pub fn ls_workspace_with_status(
   Ok(entries)
 }
 
-pub fn get_workspace_readme(
-  repo_path: &str,
-  workspace_id: Option<i64>,
-) -> Result<Option<String>, String> {
-  let readme = ls_workspace(repo_path, workspace_id)?
-    .into_iter()
+/// The README among a workspace root's `entries`, read.
+fn read_readme(entries: &[WorkspaceEntry]) -> Result<Option<String>, String> {
+  let readme = entries
+    .iter()
     .find(|entry| !entry.is_directory && entry.name.eq_ignore_ascii_case("README.md"));
 
   match readme {
@@ -325,6 +325,17 @@ pub fn get_workspace_readme(
       .map_err(|e| format!("Failed to read workspace README '{}': {}", entry.path, e)),
     None => Ok(None),
   }
+}
+
+/// The Code tab's overview: `ls_workspace_with_status` and the README it
+/// lists, from one listing of the root rather than two.
+pub fn workspace_overview(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+) -> Result<(Vec<WorkspaceEntry>, Option<String>), String> {
+  let entries = ls_workspace_with_status(repo_path, workspace_id)?;
+  let readme = read_readme(&entries)?;
+  Ok((entries, readme))
 }
 
 impl WorkspaceMetadata {
@@ -1611,6 +1622,53 @@ pub fn workspace_has_changes(repo_path: &str, workspace_id: i64) -> Result<bool,
       .map(|files| !files.is_empty())
       .unwrap_or(false),
   )
+}
+
+/// [`workspace_has_changes`] of each of `workspaces`, which snapshot their
+/// working copies a few at a time instead of one after another: a window
+/// reads every workspace's on each invalidation.
+pub fn workspaces_have_changes(
+  repo_path: &str,
+  workspaces: &[local_db::Workspace],
+) -> HashMap<i64, bool> {
+  let has_changes = |workspace: &local_db::Workspace| {
+    let path = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&workspace.workspace_path);
+    let changed = path
+      .to_str()
+      .and_then(|path| jj::jj_get_changed_files(path).ok())
+      .is_some_and(|files| !files.is_empty());
+    (workspace.id, changed)
+  };
+  let threads = std::thread::available_parallelism()
+    .map_or(1, |n| n.get())
+    .clamp(1, 4);
+  if workspaces.len() < 2 || threads == 1 {
+    return workspaces.iter().map(has_changes).collect();
+  }
+  let next = std::sync::atomic::AtomicUsize::new(0);
+  std::thread::scope(|scope| {
+    let workers: Vec<_> = (0..threads.min(workspaces.len()))
+      .map(|_| {
+        scope.spawn(|| {
+          let mut found = Vec::new();
+          loop {
+            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(workspace) = workspaces.get(index) else {
+              break found;
+            };
+            found.push(has_changes(workspace));
+          }
+        })
+      })
+      .collect();
+    workers
+      .into_iter()
+      .flat_map(|worker| worker.join().unwrap_or_default())
+      .collect()
+  })
 }
 
 pub fn workspace_status(
