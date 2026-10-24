@@ -93,6 +93,13 @@ pub struct OnboardingView {
   confirm: Option<confirm::Pending<Self>>,
 }
 
+/// The listing the last onboarding screen read, which the next one draws
+/// until its own read returns: opening a window or coming back to the
+/// start screen shows the machines and recent repositories at once.
+struct LastListing(Listing);
+
+impl gpui::Global for LastListing {}
+
 /// What of the account the cloud row shows.
 fn cloud_seen(cx: &gpui::App) -> (bool, Option<String>) {
   let account = super::account_data::account(cx);
@@ -114,7 +121,10 @@ impl OnboardingView {
     let mut this = Self {
       react,
       sink,
-      listing: Listing::default(),
+      listing: cx
+        .try_global::<LastListing>()
+        .map(|last| last.0.clone())
+        .unwrap_or_default(),
       container: None,
       tools: HashMap::new(),
       popover: None,
@@ -161,16 +171,71 @@ impl OnboardingView {
   }
 
   /// Lists the machines and recent repositories again, off the main thread.
+  /// Docker answers last: the rows draw without it, and the dev containers
+  /// join them (the last ones stay until then).
   fn load(&mut self, cx: &mut Context<Self>) {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
-      let listing = cx.background_spawn(async move { host.listing() }).await;
+      let listed = host.clone();
+      let mut listing = cx.background_spawn(async move { listed.listing() }).await;
+      let containers = listing.containers;
       let _ = this.update(cx, |view, cx| {
-        view.listing = listing;
-        cx.notify();
+        if containers {
+          let (machines, recents) = view.dev_containers();
+          listing.machines.extend(machines);
+          listing.recents.extend(recents);
+        }
+        view.show(listing, cx);
+      });
+      if !containers {
+        return;
+      }
+      let (machines, recents) = cx.background_spawn(async move { host.containers() }).await;
+      let _ = this.update(cx, |view, cx| {
+        let mut listing = view.listing.clone();
+        listing
+          .machines
+          .retain(|m| !matches!(m.place, Place::DevContainer { .. }));
+        listing
+          .recents
+          .retain(|r| !r.machine_id.starts_with("devcontainer:"));
+        listing.machines.extend(machines);
+        listing.recents.extend(recents);
+        view.show(listing, cx);
       });
     })
     .detach();
+  }
+
+  /// The dev containers the last listing had.
+  fn dev_containers(&self) -> (Vec<Machine>, Vec<Recent>) {
+    (
+      self
+        .listing
+        .machines
+        .iter()
+        .filter(|m| matches!(m.place, Place::DevContainer { .. }))
+        .cloned()
+        .collect(),
+      self
+        .listing
+        .recents
+        .iter()
+        .filter(|r| r.machine_id.starts_with("devcontainer:"))
+        .cloned()
+        .collect(),
+    )
+  }
+
+  /// Draws `listing` and keeps it for the next screen, unless it is the
+  /// one drawn.
+  fn show(&mut self, listing: Listing, cx: &mut Context<Self>) {
+    crate::startup::mark("onboarding: machines listed");
+    cx.set_global(LastListing(listing.clone()));
+    if self.listing != listing {
+      self.listing = listing;
+      cx.notify();
+    }
   }
 
   /// Looks up the machine's tools again, off the main thread.

@@ -28,6 +28,8 @@ struct FakeHost {
   container_error: Option<String>,
   /// The Overview screen's machines and recent repositories.
   listing: machines::Listing,
+  /// The dev containers Docker lists, which join the listing.
+  containers: (Vec<machines::Machine>, Vec<machines::Recent>),
   /// What a host machine says is installed on it.
   host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
   /// What `check_prerequisites` reports.
@@ -257,6 +259,10 @@ impl FakeHost {
 impl machines::MachinesHost for FakeHost {
   fn listing(&self) -> machines::Listing {
     self.listing.clone()
+  }
+
+  fn containers(&self) -> (Vec<machines::Machine>, Vec<machines::Recent>) {
+    self.containers.clone()
   }
 
   fn machine_tools(
@@ -1845,6 +1851,42 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
     ]
   );
   assert_eq!(host.calls(), ["check", "open_local /home/me/web"]);
+}
+
+#[gpui::test]
+fn onboarding_adds_the_dev_containers_docker_lists_to_its_rows(cx: &mut TestAppContext) {
+  use machines::{Machine, Place, Recent};
+  let mut base = listing();
+  base
+    .machines
+    .retain(|m| !matches!(m.place, Place::DevContainer { .. }));
+  base.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: base,
+    containers: (
+      vec![Machine {
+        id: "devcontainer:c2".into(),
+        place: Place::DevContainer {
+          container_id: "c2".into(),
+          repo_path: "/home/me/api".into(),
+          running: true,
+        },
+        name: "api".into(),
+        detail: "Running".into(),
+      }],
+      vec![Recent {
+        machine_id: "devcontainer:c2".into(),
+        name: "api".into(),
+        path: "/home/me/api".into(),
+        saved_id: None,
+      }],
+    ),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.drawn("machine-local"));
+  assert!(h.drawn("machine-devcontainer:c2"));
+  assert!(!h.drawn("machine-devcontainer:c1"));
 }
 
 #[gpui::test]
