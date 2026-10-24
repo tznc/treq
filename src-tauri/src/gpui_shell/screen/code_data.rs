@@ -85,7 +85,7 @@ pub const NEW_WORKSPACE_SETTING: &str = "home_task_new_workspace";
 pub const ENVIRONMENT_SETTING: &str = "environment";
 
 /// The files and README the Code tab lists.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Overview {
   pub entries: Vec<WorkspaceEntry>,
   pub readme: Option<String>,
@@ -144,7 +144,7 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     include_target: bool,
     limit: Option<usize>,
   ) -> Result<JjLogResult, String>;
-  /// Every workspace's current record (`listWorkspaceStatuses`).
+  /// Every workspace's current record, for the stack panel.
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
@@ -163,6 +163,8 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// Builds the file index `search_files` reads, unless it is built.
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
   fn devcontainer_up(&self, repo_path: &str) -> Result<DevcontainerStatus, String>;
@@ -209,12 +211,10 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.workspaces();
     }
-    Ok(
-      core::list_workspace_statuses(repo_path)?
-        .into_iter()
-        .map(|status| status.current)
-        .collect(),
-    )
+    // The stored records: the stack needs only branches and targets, and
+    // the window poll keeps them in step with jj. Statuses would rediscover
+    // every workspace under the repo's commit lock, behind any rebase.
+    core::list_all_workspaces(repo_path)
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {
@@ -284,6 +284,19 @@ impl CodeHost for Backend {
     core::search_workspace_files(repo_path, workspace_id, query, limit)
   }
 
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str) {
+    if self.remote_containing(repo_path).is_some() {
+      return;
+    }
+    if let Err(err) = crate::commands::workspace::ensure_workspace_indexed(
+      repo_path.to_string(),
+      workspace_id,
+      workspace_path.to_string(),
+    ) {
+      log::warn!("file index: {err}");
+    }
+  }
+
   fn devcontainers_enabled(&self) -> bool {
     self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::Devcontainers))
   }
@@ -304,7 +317,13 @@ impl CodeHost for Backend {
 
   fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
     let (workspaces, branches) = match self.remote_containing(repo_path) {
-      Some(remote) => (remote.workspaces()?, remote.branches()?),
+      Some(remote) => {
+        let (workspaces, branches) = std::thread::scope(|scope| {
+          let branches = scope.spawn(|| remote.branches());
+          (remote.workspaces(), super::joined(branches))
+        });
+        (workspaces?, branches?)
+      }
       None => (
         core::list_workspaces(repo_path)?,
         core::list_repo_branches(repo_path)?,
@@ -417,10 +436,15 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
 pub use crate::core::new_workspaces::apply_branch_name_pattern;
 
 /// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
+#[allow(
+  clippy::string_slice,
+  reason = "the slug holds only [a-z0-9-], so every byte is a char boundary"
+)]
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn task_branch_slug(prompt: &str) -> String {
   const MAX: usize = 48;
-  let slug = Regex::new("[a-z0-9]+")
-    .expect("regex")
+  static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new("[a-z0-9]+").expect("regex"));
+  let slug = WORD
     .find_iter(&prompt.to_lowercase())
     .map(|m| m.as_str().to_string())
     .collect::<Vec<_>>()
@@ -450,8 +474,25 @@ pub fn task_branch_name(prompt: &str, taken: &HashSet<String>, pattern: &str) ->
 
 pub use crate::core::agent_launch::session_name;
 
+/// `text` with the bytes from `start` to `end` replaced by `insertion`. Both
+/// offsets are clamped to the text and moved back to a char boundary, so a
+/// stale offset never splits a multi-byte char.
+pub fn replace_range(text: &str, start: usize, end: usize, insertion: &str) -> String {
+  let start = text.floor_char_boundary(start);
+  let end = text.floor_char_boundary(end);
+  format!(
+    "{}{insertion}{}",
+    text.get(..start).unwrap_or_default(),
+    text.get(end.max(start)..).unwrap_or_default()
+  )
+}
+
 /// The `@` being typed before `cursor` (a byte offset): its offset and the
 /// query after it, if it starts the text or follows whitespace.
+#[allow(
+  clippy::string_slice,
+  reason = "offsets come from char_indices() and a checked get(..cursor)"
+)]
 pub fn mention_at(text: &str, cursor: usize) -> Option<(usize, String)> {
   let before = text.get(..cursor)?;
   for (i, ch) in before.char_indices().rev() {
@@ -489,6 +530,7 @@ pub fn insert_at(text: &str, cursor: usize, insertion: &str) -> (String, usize) 
 /// `looksLikeMarkdown`: block syntax at a line start, or inline emphasis,
 /// code or a link.
 pub fn looks_like_markdown(text: &str) -> bool {
+  #[allow(clippy::expect_used, reason = "constant patterns")]
   static PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
       r"(?m)^#{1,6}\s",
@@ -509,6 +551,7 @@ pub fn looks_like_markdown(text: &str) -> bool {
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
 /// shortcodes stay as typed.
 pub fn emojify(text: &str) -> String {
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   static SHORTCODE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r":([a-z0-9_+-]+):").expect("regex"));
   let mut fenced = false;
@@ -793,6 +836,19 @@ mod tests {
     assert_eq!(mention_at("a@b", 3), None);
     assert_eq!(mention_at("@a b", 4), None);
     assert_eq!(mention_at("@", 1), Some((0, String::new())));
+  }
+
+  #[test]
+  fn replace_range_never_splits_a_char() {
+    assert_eq!(
+      replace_range("look @ma now", 5, 8, "@main.rs "),
+      "look @main.rs  now"
+    );
+    // Offsets inside a multi-byte char used to panic the slice.
+    assert_eq!(replace_range("你好@ma", 1, 100, "@x "), "@x ");
+    assert_eq!(replace_range("😀@ma", 4, 7, "@x "), "😀@x ");
+    assert_eq!(replace_range("😀@ma", 1, 6, "@x "), "@x a");
+    assert_eq!(replace_range("é", 1, 0, "@"), "@é");
   }
 
   #[test]

@@ -973,6 +973,7 @@ impl SshConnectionPool {
         alive,
       },
     );
+    drop(connections);
     Ok(handle)
   }
 
@@ -984,11 +985,13 @@ impl SshConnectionPool {
       return None;
     }
     existing.last_used = Instant::now();
+    let handle = existing.handle.clone();
+    drop(connections);
     self
       .metrics
       .pooled_connection_reuse_count
       .fetch_add(1, Ordering::Relaxed);
-    Some(existing.handle.clone())
+    Some(handle)
   }
 
   async fn connect(
@@ -1446,7 +1449,10 @@ impl RemotePtyChannel {
         Some(ChannelMsg::ExitStatus { exit_status }) => {
           return Ok(PtyReadEvent::ExitStatus(exit_status))
         }
-        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => return Ok(PtyReadEvent::Closed),
+        // Servers send `Eof` before the `ExitStatus` request (see
+        // `exec_command`), so only `Close` ends the channel.
+        Some(ChannelMsg::Eof) => continue,
+        Some(ChannelMsg::Close) | None => return Ok(PtyReadEvent::Closed),
         Some(_) => continue,
       }
     }
@@ -1811,6 +1817,13 @@ mod tests {
             session.data(channel, bytes::Bytes::from(body.as_bytes().to_vec()))?;
             session.exit_status_request(channel, 0)?;
           }
+        }
+        6 => {
+          // A real sshd's order for a process that exits: output, `Eof`,
+          // then the exit status.
+          session.data(channel, bytes::Bytes::from_static(b"bye"))?;
+          session.eof(channel)?;
+          session.exit_status_request(channel, 7)?;
         }
         _ => {
           let response = format!("{{\"echo\":\"{command}\"}}");
@@ -2634,6 +2647,28 @@ mod tests {
     let snapshot = pool.metrics_snapshot();
     assert_eq!(snapshot.pty_start_count, 1);
     assert_eq!(snapshot.pty_exit_count, 1);
+  }
+
+  #[tokio::test]
+  async fn pty_read_event_reports_an_exit_status_sent_after_eof() {
+    let (addr, host_key) = start_mock_server(6).await;
+    let client_key = test_host_key();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let key_reference = write_client_key(temp_dir.path(), &client_key);
+    let endpoint = test_endpoint(addr, &host_key, key_reference);
+
+    let pool = SshConnectionPool::new();
+    let pty = RemotePtyChannel::open(&pool, &endpoint, "xterm", 80, 24, Some("exit 7"))
+      .await
+      .unwrap();
+    assert!(matches!(
+      pty.read_event().await.unwrap(),
+      PtyReadEvent::Data(_)
+    ));
+    assert!(matches!(
+      pty.read_event().await.unwrap(),
+      PtyReadEvent::ExitStatus(7)
+    ));
   }
 
   #[tokio::test]

@@ -103,7 +103,12 @@ impl MergeHost for Backend {
     message: &str,
     strategy: Strategy,
   ) -> Result<(), String> {
-    core::merge_workspace(repo_path, workspace_id, message, strategy.commit())
+    core::merge_workspace_removing_directory_later(
+      repo_path,
+      workspace_id,
+      message,
+      strategy.commit(),
+    )
   }
 }
 

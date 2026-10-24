@@ -747,6 +747,7 @@ fn deletion_lists_what_can_be_deleted(cx: &mut TestAppContext) {
   assert_eq!(
     calls,
     [
+      "notify workspacesRemoving",
       "delete workspace 8",
       "notify workspaceChanged",
       "notify workspacesRemoved",

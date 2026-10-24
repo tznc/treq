@@ -3,7 +3,8 @@
 // (PR status, checks, the GitHub panel's lists, review threads) with fixture
 // data for lorem-ipsum/event-bus. No network, no token.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 if (process.env.TREQ_FAKE_GH_LOG) {
@@ -292,7 +293,14 @@ if (group === "pr" && command === "checks") {
   out(list);
 }
 if (group === "pr" && command === "diff") {
+  // A test can give a PR a diff, and change it mid-run, by writing
+  // pr-diff-<n>.diff next to this script; read on every call.
+  const file = join(dirname(fileURLToPath(import.meta.url)), `pr-diff-${args[2]}.diff`);
+  if (existsSync(file)) process.stdout.write(readFileSync(file, "utf8"));
   process.exit(0);
+}
+if (group === "api" && /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(command ?? "")) {
+  out({ id: 1, state: "COMMENTED" });
 }
 if (group === "api" && command === "graphql") {
   const input =
@@ -348,7 +356,13 @@ if (group === "api" && command === "graphql") {
   }
   out({ data: {} });
 }
-if (group === "api" && command === "user") out({ login: "octocat" });
+if (group === "api" && command === "user") {
+  if (after("--jq") === ".login") {
+    process.stdout.write("octocat\n");
+    process.exit(0);
+  }
+  out({ login: "octocat" });
+}
 if (group === "issue" && command === "view") {
   const issue = issues.find((i) => String(i.number) === args[2]);
   if (!issue) fail("issue not found");

@@ -3,7 +3,7 @@
 //! unified diff as files and hunks, review drafts kept in the local
 //! database as line comments, and drafts back to a GitHub review.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use super::{
   changes_data::{ChangedFile, ChangesHost},
@@ -32,6 +32,8 @@ pub struct NewDraft {
   pub side: Side,
   pub text: String,
   pub line_hash: Option<String>,
+  /// The commented diff lines, shown if the draft goes outdated.
+  pub quoted_text: Option<String>,
 }
 
 /// What the PR review asks of the backend; faked in tests. Everything
@@ -57,13 +59,14 @@ pub trait PrReviewHost: ChangesHost {
   /// The drafts kept for the PR, the user's and the review agent's.
   fn drafts(&self, repo_path: &str, number: u64) -> Result<Vec<AgentReviewComment>, String>;
   fn create_draft(&self, repo_path: &str, number: u64, draft: &NewDraft) -> Result<(), String>;
-  /// Edits a draft's text and/or records its line hash.
+  /// Edits a draft's text and/or records the hash and text of its lines.
   fn update_draft(
     &self,
     repo_path: &str,
     id: &str,
     text: Option<&str>,
     line_hash: Option<&str>,
+    quoted_text: Option<&str>,
   ) -> Result<(), String>;
 }
 
@@ -120,6 +123,7 @@ impl PrReviewHost for Backend {
       side: Some(side_name(draft.side).into()),
       comment_text: draft.text.clone(),
       line_hash: draft.line_hash.clone(),
+      quoted_text: draft.quoted_text.clone(),
     };
     crate::core::review_drafts::create_review_draft(repo_path, &draft).map(|_| ())
   }
@@ -130,8 +134,9 @@ impl PrReviewHost for Backend {
     id: &str,
     text: Option<&str>,
     line_hash: Option<&str>,
+    quoted_text: Option<&str>,
   ) -> Result<(), String> {
-    core::review_drafts::update_review_draft(repo_path, id, text, line_hash)
+    core::review_drafts::update_review_draft(repo_path, id, text, line_hash, quoted_text)
   }
 }
 
@@ -157,6 +162,7 @@ pub struct ParsedDiff {
 }
 
 /// `parseUnifiedDiff`: `gh pr diff` output as changed files and hunks.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
   let mut out = ParsedDiff::default();
   let mut file: Option<ChangedFile> = None;
@@ -168,7 +174,9 @@ pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
       out.files.push(f);
     }
   };
-  let git = regex::Regex::new(r"^diff --git a/(.*) b/(.*)$").expect("diff header regex");
+  static GIT: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^diff --git a/(.*) b/(.*)$").expect("diff header regex"));
+  let git = &*GIT;
   for line in diff.split('\n') {
     if let Some(rest) = line.strip_prefix("diff --git ") {
       flush(&mut file, &mut hunks);
@@ -278,6 +286,46 @@ fn commented_lines(
   None
 }
 
+/// Where a draft's lines moved to (`findMovedLines`): the run of diff lines
+/// on its side that hashes to `line_hash`, nearest its old start. Only lines
+/// in the diff can be found.
+fn moved_lines(
+  hunks: &HashMap<String, Vec<JjDiffHunk>>,
+  draft: &AgentReviewComment,
+  line_hash: &str,
+) -> Option<(String, Vec<String>, i64)> {
+  let old_side = draft.side.as_deref() == Some("old");
+  let size = usize::try_from(draft.end_line - draft.start_line + 1).ok()?;
+  let mut best: Option<(String, Vec<String>, i64)> = None;
+  for hunk in hunks.get(&draft.file_path)? {
+    // Consecutive lines on one side of a hunk have consecutive numbers.
+    let side_lines: Vec<(&String, i64)> = hunk
+      .lines
+      .iter()
+      .zip(line_numbers(hunk))
+      .filter_map(|(text, (old, new))| match (old_side, old, new) {
+        (true, Some(o), None) => Some((text, i64::from(o))),
+        (false, _, Some(n)) => Some((text, i64::from(n))),
+        _ => None,
+      })
+      .collect();
+    for window in side_lines.windows(size) {
+      let lines: Vec<String> = window.iter().map(|(t, _)| (*t).clone()).collect();
+      if hash_diff_lines(&lines) != line_hash {
+        continue;
+      }
+      let start = window[0].1;
+      let nearer = best
+        .as_ref()
+        .is_none_or(|(_, _, b)| (start - draft.start_line).abs() < (b - draft.start_line).abs());
+      if nearer {
+        best = Some((hunk.id.clone(), lines, start));
+      }
+    }
+  }
+  best
+}
+
 /// A kept draft as the diff shows it.
 #[derive(Debug, Clone)]
 pub struct Draft {
@@ -285,16 +333,32 @@ pub struct Draft {
   pub comment: LineComment,
   /// The hash of the lines it covers now, `None` when they are gone.
   pub line_hash: Option<String>,
+  /// The lines it covers now, joined, `None` when they are gone.
+  pub quoted_text: Option<String>,
   pub outdated: bool,
 }
 
-/// `draftToLineComment`: outdated when its lines left the diff or no longer
-/// hash as when it was written.
+/// `draftToLineComment`: follows its lines if a PR update moved them
+/// unchanged; outdated when they left the diff or no longer hash as when it
+/// was written, and then shows the lines it was written on.
 pub fn draft_to_comment(
   row: &AgentReviewComment,
   hunks: &HashMap<String, Vec<JjDiffHunk>>,
 ) -> Draft {
-  let found = commented_lines(hunks, row);
+  let mut found = commented_lines(hunks, row);
+  let mut start_line = row.start_line;
+  if let Some(stored) = row.line_hash.as_deref() {
+    let unchanged = found
+      .as_ref()
+      .is_some_and(|(_, lines)| hash_diff_lines(lines) == stored);
+    if !unchanged {
+      if let Some((id, lines, start)) = moved_lines(hunks, row, stored) {
+        found = Some((id, lines));
+        start_line = start;
+      }
+    }
+  }
+  let end_line = start_line + (row.end_line - row.start_line);
   let line_hash = found.as_ref().map(|(_, lines)| hash_diff_lines(lines));
   let outdated = found.is_none()
     || row
@@ -309,16 +373,24 @@ pub fn draft_to_comment(
   };
   let (hunk_id, line_content) = match (&found, outdated) {
     (Some((id, lines)), false) => (id.clone(), lines.clone()),
-    _ => (OUTDATED_HUNK.to_string(), Vec::new()),
+    _ => (
+      OUTDATED_HUNK.to_string(),
+      row
+        .quoted_text
+        .as_deref()
+        .map(|q| q.split('\n').map(str::to_string).collect())
+        .unwrap_or_default(),
+    ),
   };
+  let quoted_text = found.as_ref().map(|(_, lines)| lines.join("\n"));
   let n = |v: i64| u32::try_from(v).unwrap_or(0);
   Draft {
     comment: LineComment {
       id: row.id.clone(),
       file_path: row.file_path.clone(),
       hunk_id,
-      start_line: n(row.start_line),
-      end_line: n(row.end_line),
+      start_line: n(start_line),
+      end_line: n(end_line),
       line_content,
       text,
       created_at: row.created_at.clone(),
@@ -334,6 +406,7 @@ pub fn draft_to_comment(
     },
     row: row.clone(),
     line_hash,
+    quoted_text,
     outdated,
   }
 }
@@ -564,6 +637,49 @@ rename to moved.rs
     let gone = draft_to_comment(&row(40, 41, "new", None), &hunks);
     assert!(gone.outdated);
     assert_eq!(gone.line_hash, None);
+  }
+
+  #[test]
+  fn outdated_draft_shows_the_lines_it_was_written_on() {
+    let hunks = parse_unified_diff(DIFF).hunks;
+    let mut r = row(2, 2, "new", Some("deadbeef"));
+    r.quoted_text = Some("-older\n+old".into());
+    let stale = draft_to_comment(&r, &hunks);
+    assert!(stale.outdated);
+    assert_eq!(stale.comment.line_content, ["-older", "+old"]);
+  }
+
+  #[test]
+  fn draft_reports_its_current_lines_to_store() {
+    let hunks = parse_unified_diff(DIFF).hunks;
+    let draft = draft_to_comment(&row(2, 3, "new", None), &hunks);
+    assert_eq!(draft.quoted_text.as_deref(), Some("+two\n three"));
+    assert_eq!(
+      draft_to_comment(&row(40, 41, "new", None), &hunks).quoted_text,
+      None
+    );
+  }
+
+  #[test]
+  fn draft_follows_lines_that_moved_unchanged() {
+    let hunks = parse_unified_diff(DIFF).hunks;
+    let hash = hash_diff_lines(&["+two".into(), " three".into()]);
+    let moved = draft_to_comment(&row(7, 8, "new", Some(&hash)), &hunks);
+    assert!(!moved.outdated);
+    assert_eq!(moved.comment.hunk_id, "src/a.rs#0");
+    assert_eq!((moved.comment.start_line, moved.comment.end_line), (2, 3));
+    assert_eq!(moved.comment.line_content, ["+two", " three"]);
+  }
+
+  #[test]
+  fn moved_draft_takes_the_copy_nearest_its_old_line() {
+    let hunks = parse_unified_diff(
+      "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -0,0 +1,9 @@\n+x\n+a\n+b\n+c\n+d\n+e\n+f\n+x\n+g\n",
+    )
+    .hunks;
+    let hash = hash_diff_lines(&["+x".into()]);
+    let moved = draft_to_comment(&row(7, 7, "new", Some(&hash)), &hunks);
+    assert_eq!(moved.comment.start_line, 8);
   }
 
   #[test]

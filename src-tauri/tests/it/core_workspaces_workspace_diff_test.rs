@@ -696,3 +696,42 @@ fn test_workspace_diff_ignores_target_advance_before_rebase() {
     "committed diff should be measured from the fork point, not the moved target tip"
   );
 }
+
+#[test]
+fn test_workspace_diff_updates_stale_working_copy_before_snapshotting() {
+  let repo = TestRepo::new().unwrap();
+  let ws = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/stale-reload",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .unwrap();
+  workspace_write_file(&repo, &ws, "workspace.txt", "workspace change\n");
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "workspace change").unwrap();
+  repo
+    .commit_file("advanced.txt", "advanced main\n", "advance main")
+    .unwrap();
+  // Rebases the workspace's commits without checking them out: its disk is
+  // now behind its working-copy commit.
+  let ws_dir = repo.workspace_full_path(&ws);
+  treq_lib::jj::jj_rebase_workspace_bookmark_onto_deferred_checkout(
+    &ws_dir,
+    &ws.branch_name,
+    repo.default_branch(),
+  )
+  .unwrap();
+
+  init_test_app_db(&repo, Some("git"));
+  let diff = treq_lib::core::workspace_diff(&repo.repo_path, ws.id).unwrap();
+
+  assert!(
+    diff.uncommitted_files.is_empty(),
+    "a stale working copy must not be snapshotted as a revert: {:?}",
+    diff.uncommitted_files
+  );
+  assert!(Path::new(&ws_dir).join("advanced.txt").exists());
+}

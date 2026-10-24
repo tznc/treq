@@ -17,11 +17,12 @@ pub const WORKSPACE_DIFF: &str = "workspace_diff";
 /// A thread's or comment's line: file, hunk id, number and side.
 pub type LineKey = (String, String, u32, Side);
 
-/// Threads anchored on a line of the diff, and those that are not.
+/// Threads anchored on a line of the diff, and those that are not, as
+/// indices into the threads placed.
 #[derive(Default, Clone)]
 pub struct Placed {
-  pub by_line: HashMap<LineKey, Vec<GhReviewThread>>,
-  pub unplaced: HashMap<String, Vec<GhReviewThread>>,
+  pub by_line: HashMap<LineKey, Vec<usize>>,
+  pub unplaced: HashMap<String, Vec<usize>>,
 }
 
 /// `placeGithubReviewThreads`: a thread sits on the first hunk that has
@@ -32,14 +33,14 @@ pub fn place_threads(
   maps: &[&HashMap<String, &[JjDiffHunk]>],
 ) -> Placed {
   let mut placed = Placed::default();
-  for thread in threads {
+  for (i, thread) in threads.iter().enumerate() {
     match place(thread, maps) {
-      Some(key) => placed.by_line.entry(key).or_default().push(thread.clone()),
+      Some(key) => placed.by_line.entry(key).or_default().push(i),
       None => placed
         .unplaced
         .entry(thread.path.clone())
         .or_default()
-        .push(thread.clone()),
+        .push(i),
     }
   }
   placed
@@ -69,12 +70,15 @@ fn place(thread: &GhReviewThread, maps: &[&HashMap<String, &[JjDiffHunk]>]) -> O
   None
 }
 
-/// Open agent comments by the last line of their range and side.
-pub fn agent_by_line(
-  comments: &[AgentReviewComment],
-) -> HashMap<(String, u32, Side), Vec<AgentReviewComment>> {
+/// Open agent comments by the last line of their range and side, as
+/// indices into `comments`.
+pub fn agent_by_line(comments: &[AgentReviewComment]) -> HashMap<(String, u32, Side), Vec<usize>> {
   let mut out: HashMap<_, Vec<_>> = HashMap::new();
-  for c in comments.iter().filter(|c| c.status != "resolved") {
+  for (i, c) in comments
+    .iter()
+    .enumerate()
+    .filter(|(_, c)| c.status != "resolved")
+  {
     let side = if c.side.as_deref() == Some("old") {
       Side::Old
     } else {
@@ -86,7 +90,7 @@ pub fn agent_by_line(
     out
       .entry((c.file_path.clone(), end, side))
       .or_default()
-      .push(c.clone());
+      .push(i);
   }
   out
 }
@@ -198,6 +202,7 @@ fn diff_tokens<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(ChangeTag, &'a str)
 }
 
 /// Runs of whitespace and of everything else, as `diffWords` splits them.
+#[allow(clippy::string_slice, reason = "offsets come from char_indices()")]
 fn words(text: &str) -> Vec<&str> {
   let mut out = Vec::new();
   let mut start = 0;

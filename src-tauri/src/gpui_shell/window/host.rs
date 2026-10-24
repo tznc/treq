@@ -5,7 +5,11 @@
 //! disk for a local one, and has nothing of what only a local checkout
 //! has (pull requests, supporting repositories).
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+  collections::HashMap,
+  path::{Path, PathBuf},
+  time::Duration,
+};
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 
@@ -27,6 +31,7 @@ use crate::{
     remote_records::{self, RestoreFailure, RestoreSteps, SavedRepository, UserManagedEndpoint},
     repo::RepoBranch,
     supporting_repos::{self, SupportingRepo},
+    workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
   github::{GitRemoteInfo, PrInfo},
@@ -51,9 +56,26 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn statuses(&self, repo: &str) -> Result<Vec<WorkspaceSidebarStatus>, String>;
   /// `has_changes` of `useWorkspaceGitDetail`.
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool>;
+  /// Every workspace's sidebar status and uncommitted changes in one read,
+  /// for a repository where that is one round trip. `None` falls back to
+  /// `workspaces`, `statuses` and `has_changes`.
+  fn summaries(&self, _repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    None
+  }
+  /// The workspaces the local database lists, with no jj or network read,
+  /// so a window draws its rows before `statuses` and `has_changes` finish.
+  /// `None` where there is no such read (a repository over SSH).
+  fn listed_workspaces(&self, _repo: &str) -> Option<Vec<Workspace>> {
+    None
+  }
   fn sessions(&self, repo: &str) -> Vec<Session>;
   fn branch(&self, repo: &str) -> Option<RepoBranch>;
   fn default_branch(&self, repo: &str) -> Option<String>;
+  /// [`Self::branch`] and [`Self::default_branch`], for a repository where
+  /// one read answers both.
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    (self.branch(repo), self.default_branch(repo))
+  }
   fn remote(&self, repo: &str) -> Option<GitRemoteInfo>;
   /// The pull request poller's cache, by branch.
   fn prs(&self, repo: &str) -> HashMap<String, Option<PrInfo>>;
@@ -108,8 +130,23 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     ..RepoRead::default()
   };
   if read.workspaces {
-    let workspaces = host.workspaces(repo).ok();
-    let statuses = host.statuses(repo).ok();
+    let summaries = host.summaries(repo);
+    let (workspaces, statuses) = match &summaries {
+      Some(summaries) => (
+        Some(summaries.iter().map(|s| s.workspace.clone()).collect()),
+        Some(
+          summaries
+            .iter()
+            .map(|s| WorkspaceSidebarStatus {
+              current: s.workspace.clone(),
+              has_conflicts: s.has_conflicts,
+              last_activity_at: s.last_activity_at.clone(),
+            })
+            .collect::<Vec<_>>(),
+        ),
+      ),
+      None => (host.workspaces(repo).ok(), host.statuses(repo).ok()),
+    };
     let open: Vec<i64> = match (&workspaces, &statuses) {
       (Some(workspaces), statuses) => workspaces
         .iter()
@@ -131,7 +168,16 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
       out.has_changes = Some(
         open
           .iter()
-          .filter_map(|id| host.has_changes(repo, *id).map(|c| (*id, c)))
+          .filter_map(|id| {
+            match &summaries {
+              Some(summaries) => summaries
+                .iter()
+                .find(|s| s.workspace.id == *id)
+                .map(|s| s.has_changes),
+              None => host.has_changes(repo, *id),
+            }
+            .map(|c| (*id, c))
+          })
           .collect(),
       );
     }
@@ -142,11 +188,68 @@ pub fn read_repo(host: &dyn WindowHost, repo: &str, read: Read, known: &[i64]) -
     out.sessions = Some(host.sessions(repo));
   }
   if read.detail {
-    out.branch = Some(host.branch(repo));
-    out.default_branch = Some(host.default_branch(repo));
-    out.remote = Some(host.remote(repo));
+    read_detail(host, repo, &mut out);
   }
   out
+}
+
+/// The repository's branch, default branch and remote.
+pub fn read_detail(host: &dyn WindowHost, repo: &str, out: &mut RepoRead) {
+  // Side by side: for a remote repository each is a round trip.
+  let ((branch, default_branch), remote) = std::thread::scope(|scope| {
+    let remote = scope.spawn(|| host.remote(repo));
+    let branches = host.branches(repo);
+    (
+      branches,
+      remote
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+    )
+  });
+  out.branch = Some(branch);
+  out.default_branch = Some(default_branch);
+  out.remote = Some(remote);
+}
+
+/// Repositories `open_in_new_window` initialized for the window it opens,
+/// so that window's `prepare_repo` doesn't initialize them again.
+static JUST_INITIALIZED: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+  std::sync::Mutex::new(Vec::new());
+
+/// How long a window may take to open after its repository was initialized
+/// for it.
+const JUST_INITIALIZED_FOR: Duration = Duration::from_secs(30);
+
+pub(crate) fn note_just_initialized(repo: &str) {
+  let mut noted = JUST_INITIALIZED.lock_or_recover();
+  noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
+  noted.push((repo.to_string(), std::time::Instant::now()));
+}
+
+/// Whether `repo` was initialized for the window being prepared; a note
+/// serves one window.
+fn take_just_initialized(repo: &str) -> bool {
+  let mut noted = JUST_INITIALIZED.lock_or_recover();
+  noted.retain(|(_, at)| at.elapsed() < JUST_INITIALIZED_FOR);
+  match noted.iter().position(|(noted, _)| noted == repo) {
+    Some(index) => {
+      noted.remove(index);
+      true
+    }
+    None => false,
+  }
+}
+
+/// The branch an `InspectRepository` answer shows.
+fn repo_branch(inspection: RepositoryInspection) -> RepoBranch {
+  RepoBranch {
+    display_ref: inspection
+      .current_branch
+      .clone()
+      .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
+    is_detached: inspection.current_branch.is_none(),
+    current_branch: inspection.current_branch,
+  }
 }
 
 impl Backend {
@@ -174,30 +277,41 @@ impl WindowHost for Backend {
       return core::list_workspace_statuses(repo);
     };
     // The host has no sidebar listing: each workspace's own inspection.
-    Ok(
-      remote
-        .workspaces()?
-        .into_iter()
-        .map(|workspace| {
-          let has_conflicts = remote
-            .status(Some(workspace.id))
-            .is_ok_and(|s| !s.conflicted_files.is_empty());
-          WorkspaceSidebarStatus {
-            current: workspace,
-            has_conflicts,
-            last_activity_at: None,
-          }
-        })
-        .collect(),
-    )
+    Ok(remote_repo::parallel_map(
+      remote.workspaces()?,
+      |workspace| {
+        let has_conflicts = remote
+          .status(Some(workspace.id))
+          .is_ok_and(|s| !s.conflicted_files.is_empty());
+        WorkspaceSidebarStatus {
+          current: workspace,
+          has_conflicts,
+          last_activity_at: None,
+        }
+      },
+    ))
   }
 
   fn has_changes(&self, repo: &str, workspace_id: i64) -> Option<bool> {
-    let status = match self.remote(repo) {
-      Some(remote) => remote.status(Some(workspace_id)),
-      None => core::workspace_status(repo, Some(workspace_id)),
-    };
-    status.ok().map(|status| status.partial.has_changes)
+    match self.remote(repo) {
+      Some(remote) => remote
+        .status(Some(workspace_id))
+        .ok()
+        .map(|status| status.partial.has_changes),
+      None => core::workspace_has_changes(repo, workspace_id).ok(),
+    }
+  }
+
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    match self.remote(repo) {
+      Some(_) => None,
+      None => core::list_workspaces(repo).ok(),
+    }
+  }
+
+  fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    let remote = self.remote(repo)?;
+    remote.workspace_summaries_if_supported()
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -206,17 +320,19 @@ impl WindowHost for Backend {
 
   fn branch(&self, repo: &str) -> Option<RepoBranch> {
     if self.remote(repo).is_some() {
-      let inspection = self.inspect_remote(repo)?;
-      return Some(RepoBranch {
-        display_ref: inspection
-          .current_branch
-          .clone()
-          .unwrap_or_else(|| inspection.current_change_id.chars().take(8).collect()),
-        is_detached: inspection.current_branch.is_none(),
-        current_branch: inspection.current_branch,
-      });
+      return self.inspect_remote(repo).map(repo_branch);
     }
     core::repo::get_repo_current_branch(repo).ok()
+  }
+
+  fn branches(&self, repo: &str) -> (Option<RepoBranch>, Option<String>) {
+    if Backend::remote(self, repo).is_some() {
+      // One `InspectRepository` answers both.
+      let inspection = self.inspect_remote(repo);
+      let default_branch = inspection.as_ref().map(|i| i.default_branch.clone());
+      return (inspection.map(repo_branch), default_branch);
+    }
+    (self.branch(repo), self.default_branch(repo))
   }
 
   fn default_branch(&self, repo: &str) -> Option<String> {
@@ -275,8 +391,10 @@ impl WindowHost for Backend {
   }
 
   fn prepare_repo(&self, main_repo: &str) {
-    if let Err(err) = core::init(main_repo) {
-      log::error!("Failed to init repo: {err}");
+    if !take_just_initialized(main_repo) {
+      if let Err(err) = core::init_deferring_rebase(main_repo) {
+        log::error!("Failed to init repo: {err}");
+      }
     }
     self.set_window_repo_path(main_repo);
     crate::pr_status::global().watch_repo(main_repo);
@@ -312,7 +430,7 @@ impl WindowHost for Backend {
   }
 
   fn open_in_new_window(&self, path: &str) {
-    if !core::init(path).unwrap_or(false) {
+    if !core::init_deferring_rebase(path).unwrap_or(false) {
       self.toast(
         ToastTone::Error,
         "Not a Git Repository",
@@ -320,6 +438,7 @@ impl WindowHost for Backend {
       );
       return;
     }
+    note_just_initialized(path);
     let label = crate::open_new_window::new_repo_window_label();
     let title = crate::open_new_window::new_repo_window_title(path);
     let (app, path) = (self.app().clone(), path.to_string());
@@ -357,6 +476,7 @@ impl WindowHost for Backend {
       return None;
     }
     let (tx, changes) = unbounded();
+    let mut gitignore = GitignoreFilter::new(Path::new(path));
     let mut watcher = notify_debouncer_full::new_debouncer(
       WATCH_SETTLE,
       None,
@@ -365,7 +485,7 @@ impl WindowHost for Backend {
           if events
             .iter()
             .flat_map(|e| e.paths.iter())
-            .any(|p| !is_ignored(p))
+            .any(|p| !is_ignored(p) && !gitignore.ignores(p))
           {
             let _ = tx.unbounded_send(());
           }
@@ -631,9 +751,101 @@ fn is_ignored(path: &Path) -> bool {
     .is_some_and(|p| p.ends_with(".swp") || p.ends_with('~'))
 }
 
+/// Applies the checkout's gitignore rules, so `dist/`, `.next/` and other
+/// ignored output stop triggering reloads of the Changes tab. Rules come from
+/// every `.gitignore` between the changed path and the root, plus
+/// `.git/info/exclude` and the user's global ignore file, with git's
+/// precedence (deeper files win).
+struct GitignoreFilter {
+  root: PathBuf,
+  /// Lowest precedence first: global ignore file, then `.git/info/exclude`.
+  base: Vec<ignore::gitignore::Gitignore>,
+  /// Each directory's own `.gitignore`, read on first use.
+  dirs: HashMap<PathBuf, Option<ignore::gitignore::Gitignore>>,
+}
+
+impl GitignoreFilter {
+  fn new(root: &Path) -> Self {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut exclude = ignore::gitignore::GitignoreBuilder::new(&root);
+    exclude.add(root.join(".git").join("info").join("exclude"));
+    let base = [
+      Some(ignore::gitignore::Gitignore::global().0),
+      exclude.build().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Self {
+      root,
+      base,
+      dirs: HashMap::new(),
+    }
+  }
+
+  fn ignores(&mut self, path: &Path) -> bool {
+    if path.file_name().is_some_and(|name| name == ".gitignore") {
+      // The rules themselves changed: drop what was read and let it reload.
+      self.dirs.clear();
+      return false;
+    }
+    let Ok(relative) = path.strip_prefix(&self.root) else {
+      return false;
+    };
+    let is_dir = path.is_dir();
+    // Deepest directory first: its rules override its ancestors'.
+    let dirs: Vec<PathBuf> = relative
+      .ancestors()
+      .skip(1)
+      .map(|dir| self.root.join(dir))
+      .collect();
+    for dir in dirs {
+      let matcher = self.dirs.entry(dir.clone()).or_insert_with(|| {
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(&dir);
+        builder.add(dir.join(".gitignore"));
+        builder.build().ok()
+      });
+      if let Some(matcher) = matcher {
+        match matcher.matched_path_or_any_parents(path, is_dir) {
+          ignore::Match::Ignore(_) => return true,
+          ignore::Match::Whitelist(_) => return false,
+          ignore::Match::None => {}
+        }
+      }
+    }
+    for matcher in self.base.iter().rev() {
+      match matcher.matched_path_or_any_parents(path, is_dir) {
+        ignore::Match::Ignore(_) => return true,
+        ignore::Match::Whitelist(_) => return false,
+        ignore::Match::None => {}
+      }
+    }
+    false
+  }
+}
+
 #[cfg(test)]
 mod watch_tests {
   use super::*;
+
+  #[test]
+  fn gitignore_filter_follows_nested_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("sub/dist")).unwrap();
+    std::fs::write(root.join(".gitignore"), "dist/\n*.log\n").unwrap();
+    std::fs::write(root.join("sub/.gitignore"), "!keep.log\n").unwrap();
+    let mut filter = GitignoreFilter::new(&root);
+    assert!(filter.ignores(&root.join("dist/app.js")));
+    assert!(filter.ignores(&root.join("sub/dist/app.js")));
+    assert!(filter.ignores(&root.join("debug.log")));
+    assert!(!filter.ignores(&root.join("sub/keep.log")));
+    assert!(!filter.ignores(&root.join("src/main.rs")));
+    // Editing a `.gitignore` is a change worth reloading for.
+    assert!(!filter.ignores(&root.join(".gitignore")));
+    // Paths outside the root are never filtered out.
+    assert!(!filter.ignores(Path::new("/elsewhere/dist/app.js")));
+  }
 
   #[test]
   fn ignores_vcs_state_and_build_output() {

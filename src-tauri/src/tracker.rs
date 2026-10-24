@@ -4,6 +4,10 @@
 /// Lowercase, hyphen-separated slug of `title`, capped at `max_len` bytes on
 /// a word boundary where possible. Returns an empty string for titles with no
 /// ASCII alphanumerics.
+#[allow(
+  clippy::string_slice,
+  reason = "the slug holds only ASCII alphanumerics and dashes"
+)]
 pub fn branch_slug(title: &str, max_len: usize) -> String {
   let mut slug = String::new();
   let mut pending_dash = false;

@@ -11,8 +11,8 @@ use tauri_plugin_gpui::gpui::{prelude::*, App, Context, Task};
 
 use super::{
   actions::{Menu, Shortcut},
-  data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
-  host::{read_repo, FileWatch, WindowHost},
+  data::{Data, Flags, Read, RepoRead, POLL, SESSIONS_POLL},
+  host::{read_detail, read_repo, FileWatch, WindowHost},
   model::{self, Confirm, Effect, FolderPurpose, Model},
   remote::{self, Opened, RemoteEffect},
   sidebar, snapshots,
@@ -25,7 +25,7 @@ use crate::{
     confirm::Question,
     native::{NativeEvent, ToastTone},
     overlay::OverlaySnapshot,
-    screen::{file_picker::Scope, Modal, ScreenAction, ScreenSnapshot},
+    screen::{file_picker::Scope, workspace_data, Modal, ScreenAction, ScreenSnapshot, View},
     sidebar::{SidebarAction, SidebarSnapshot},
   },
 };
@@ -74,6 +74,7 @@ impl WindowController {
     host: Arc<dyn WindowHost>,
     repo: Option<String>,
     present: Presenter,
+    system_dark: Option<bool>,
     cx: &mut Context<Self>,
   ) -> Self {
     let repo = repo.filter(|r| !r.is_empty());
@@ -101,10 +102,16 @@ impl WindowController {
       watching: None,
       _pollers: pollers,
     };
+    this.model.prefs.system_dark = system_dark.unwrap_or_default();
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
-    let mut effects = vec![Effect::ReadPrefs, Effect::Refresh { revision: false }];
+    // The saved theme, zoom and sidebar width are in the first frame, not a
+    // frame later: a read of a few settings costs far less than a flash of
+    // the default theme.
+    let (values, flags) = read_prefs(&*this.host, &settings_keys(&this.model.main_repo));
+    this.apply_prefs(&values, flags);
+    let mut effects = vec![Effect::Refresh { revision: false }];
     match repo {
       // The first read races `prepare_repo`'s jj init: a branch read before
       // `.jj` exists fails, and only a refresh reads the branch again. So
@@ -128,6 +135,30 @@ impl WindowController {
     }
     this.run(effects, cx);
     this
+  }
+
+  fn apply_prefs(&mut self, values: &HashMap<String, Option<String>>, flags: Flags) {
+    self
+      .model
+      .apply_settings(|key| values.get(key).cloned().flatten());
+    self.data.flags = flags;
+  }
+
+  /// Workspace `id` of `repo`, as last read.
+  pub fn workspace(&self, repo: &str, id: i64) -> Option<&crate::local_db::Workspace> {
+    self.data.workspaces(repo).iter().find(|w| w.id == id)
+  }
+
+  /// The workspace view's route were a click to select workspace `id` of
+  /// the shown repository, for reading it ahead.
+  pub fn workspace_route(&self, id: i64) -> Option<workspace_data::Route> {
+    let workspace = self.model.workspace_in(self.model.repo(), id, &self.data)?;
+    let mut model = self.model.clone();
+    model.select_workspace(Some(&workspace), &self.data);
+    match snapshots::screen(&model, &self.data)?.view {
+      View::Workspace(route) => Some(*route),
+      _ => None,
+    }
   }
 
   fn poll(every: std::time::Duration, read: Read, cx: &mut Context<Self>) -> Task<()> {
@@ -171,6 +202,13 @@ impl WindowController {
         .detach();
     }
     let effects = self.model.native_event(event, &self.data);
+    // After the model: leaving a removed workspace reads its stack parent
+    // from the list the rows are about to leave.
+    match event {
+      NativeEvent::WorkspacesRemoving { repo_path, ids } => self.data.hide(repo_path, ids),
+      NativeEvent::WorkspacesRestored { repo_path, ids } => self.data.unhide(repo_path, ids),
+      _ => {}
+    }
     self.run(effects, cx);
   }
 
@@ -252,17 +290,22 @@ impl WindowController {
     });
   }
 
-  /// `pr-statuses-updated`: the PR poller's cache changed, and with
-  /// `stacks_moved` it retargeted workspaces to follow GitHub.
-  pub fn prs_changed(&mut self, stacks_moved: bool, cx: &mut Context<Self>) {
-    self.read(
-      if stacks_moved {
-        Read::POLL
-      } else {
-        Read::default()
-      },
-      cx,
-    );
+  /// `pr-statuses-updated`: the PR poller's cache for `repo_path` changed,
+  /// and with `stacks_moved` it retargeted workspaces to follow GitHub.
+  /// Windows that show other repositories have nothing to refresh.
+  pub fn prs_changed(&mut self, repo_path: &str, stacks_moved: bool, cx: &mut Context<Self>) {
+    let shown = self.model.main_repo == repo_path
+      || self.data.supporting().iter().any(|r| r.path == repo_path);
+    if shown {
+      self.read(
+        if stacks_moved {
+          Read::POLL
+        } else {
+          Read::default()
+        },
+        cx,
+      );
+    }
   }
 
   /// `listenManagedEndpoint`: the cloud workspace connected, or its
@@ -436,18 +479,9 @@ impl WindowController {
       Effect::ReadPrefs => {
         let keys = settings_keys(&main);
         self.background(
-          move |host| {
-            let values: HashMap<String, Option<String>> = keys
-              .into_iter()
-              .map(|k| (k.clone(), host.setting(&k)))
-              .collect();
-            (values, host.flags())
-          },
+          move |host| read_prefs(host, &keys),
           |this, (values, flags), cx| {
-            this
-              .model
-              .apply_settings(|key| values.get(key).cloned().flatten());
-            this.data.flags = flags;
+            this.apply_prefs(&values, flags);
             this.present(cx);
           },
           cx,
@@ -769,6 +803,11 @@ impl WindowController {
         (path, ids)
       })
       .collect();
+    // Nothing of this repository is read yet: draw it as it arrives.
+    if read == Read::ALL && !self.data.loaded(&main) {
+      self.read_first(main, supporting, known, cx);
+      return;
+    }
     self.background(
       // A read that panics must not leave `reading` set, or the window
       // never reads again.
@@ -778,24 +817,73 @@ impl WindowController {
         }))
       },
       move |this, result, cx| {
-        this.reading = false;
+        let panicked = result.is_err();
         match result {
           // A repository opened while reading the one before.
-          Ok((main, supporting, reads)) if main == this.model.main_repo => {
-            this.apply(supporting, reads, cx);
-            if std::mem::take(&mut this.recheck_branch) {
-              this.reread_missing_branch(cx);
-            }
-          }
-          Ok(_) => {}
+          Ok(stage) => this.apply_stage(stage, cx),
           Err(_) => log::error!("reading the window's repositories panicked"),
         }
-        if let Some(next) = this.queued.take() {
-          this.read(next, cx);
-        }
+        this.read_done(panicked, cx);
       },
       cx,
     );
+  }
+
+  /// [`read_first`]'s stages, each applied as it arrives.
+  fn read_first(
+    &mut self,
+    main: String,
+    supporting: Vec<SupportingRepo>,
+    known: HashMap<String, Vec<i64>>,
+    cx: &mut Context<Self>,
+  ) {
+    let host = self.host.clone();
+    let (send, mut stages) = futures::channel::mpsc::unbounded();
+    cx.background_spawn(async move {
+      let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_first(&*host, &main, supporting, &known, |stage| {
+          let _ = send.unbounded_send(Some(stage));
+        })
+      }));
+      if read.is_err() {
+        let _ = send.unbounded_send(None);
+      }
+    })
+    .detach();
+    cx.spawn(async move |this, cx| {
+      let mut panicked = false;
+      while let Some(stage) = stages.next().await {
+        match stage {
+          Some(stage) => {
+            let _ = this.update(cx, |this, cx| this.apply_stage(stage, cx));
+          }
+          None => {
+            log::error!("reading the window's repositories panicked");
+            panicked = true;
+          }
+        }
+      }
+      let _ = this.update(cx, |this, cx| this.read_done(panicked, cx));
+    })
+    .detach();
+  }
+
+  /// Takes one stage of a read, unless a repository opened meanwhile.
+  fn apply_stage(&mut self, (main, supporting, reads): ReadAll, cx: &mut Context<Self>) {
+    if main == self.model.main_repo {
+      self.apply(supporting, reads, cx);
+    }
+  }
+
+  /// The read in flight returned: the next one queued starts.
+  fn read_done(&mut self, panicked: bool, cx: &mut Context<Self>) {
+    self.reading = false;
+    if std::mem::take(&mut self.recheck_branch) && !panicked {
+      self.reread_missing_branch(cx);
+    }
+    if let Some(next) = self.queued.take() {
+      self.read(next, cx);
+    }
   }
 
   fn apply(
@@ -872,6 +960,89 @@ impl WindowController {
 /// repository's read, main first.
 type ReadAll = (String, Option<Vec<SupportingRepo>>, Vec<(String, RepoRead)>);
 
+/// The first read of a window's repositories, handed on in stages so the
+/// sidebar draws from the database at once, the header follows with the
+/// branch, and the jj reads (statuses, uncommitted changes), which wait on
+/// repository locks, come last. A repository over SSH has no database to
+/// list, so it is read whole.
+fn read_first(
+  host: &dyn WindowHost,
+  main: &str,
+  supporting: Vec<SupportingRepo>,
+  known: &HashMap<String, Vec<i64>>,
+  emit: impl Fn(ReadAll),
+) {
+  let listed = |path: &str| {
+    let workspaces = host.listed_workspaces(path)?;
+    Some(RepoRead {
+      sessions: Some(host.sessions(path)),
+      workspaces: Some(workspaces),
+      prs: host.prs(path),
+      ..RepoRead::default()
+    })
+  };
+  let Some(first) = listed(main) else {
+    emit(read_all(host, main, supporting, Read::ALL, known));
+    return;
+  };
+  let supporting = host.supporting(main);
+  host.set_supporting_paths(
+    supporting
+      .iter()
+      .filter(|r| r.exists)
+      .map(|r| r.path.clone())
+      .collect(),
+  );
+  let paths: Vec<String> = std::iter::once(main.to_string())
+    .chain(
+      supporting
+        .iter()
+        .filter(|r| r.exists)
+        .map(|r| r.path.clone()),
+    )
+    .collect();
+  let rows = paths
+    .iter()
+    .map(|path| {
+      let read = if path == main {
+        first.clone()
+      } else {
+        listed(path).unwrap_or_else(|| RepoRead {
+          prs: host.prs(path),
+          ..RepoRead::default()
+        })
+      };
+      (path.clone(), read)
+    })
+    .collect();
+  crate::startup::mark("first read: rows listed");
+  emit((main.to_string(), Some(supporting), rows));
+  let detail = paths
+    .iter()
+    .map(|path| {
+      let mut read = RepoRead {
+        prs: host.prs(path),
+        ..RepoRead::default()
+      };
+      read_detail(host, path, &mut read);
+      (path.clone(), read)
+    })
+    .collect();
+  crate::startup::mark("first read: branch");
+  emit((main.to_string(), None, detail));
+  let rest = Read {
+    workspaces: true,
+    sessions: false,
+    detail: false,
+  };
+  let jj = paths
+    .iter()
+    .map(|path| (path.clone(), read_repo(host, path, rest, &[])))
+    .collect();
+  crate::startup::mark("first read: statuses and changes");
+  emit((main.to_string(), None, jj));
+}
+
 fn read_all(
   host: &dyn WindowHost,
   main: &str,
@@ -899,6 +1070,12 @@ fn read_all(
     })
     .collect();
   (main.to_string(), listed, reads)
+}
+
+/// The values of settings `keys`, and the preview flags.
+fn read_prefs(host: &dyn WindowHost, keys: &[String]) -> (HashMap<String, Option<String>>, Flags) {
+  let values = keys.iter().map(|k| (k.clone(), host.setting(k))).collect();
+  (values, host.flags())
 }
 
 /// The app settings the model follows for a window on `main`.

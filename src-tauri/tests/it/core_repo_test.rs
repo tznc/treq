@@ -601,3 +601,21 @@ fn test_commit_repo_after_create_workspace() {
       .collect::<Vec<_>>()
   );
 }
+
+#[test]
+fn bookmark_presence_reads_local_and_remote_from_one_load() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let default_branch = repo.default_branch();
+
+  let loaded = treq_lib::jj::WorkspaceRepo::load(&repo.repo_path).expect("load repo");
+
+  assert_eq!(
+    loaded.bookmark_presence(default_branch, "origin"),
+    (true, true)
+  );
+  assert!(loaded.bookmark_presence("feature-remote", "origin").1);
+  assert_eq!(
+    loaded.bookmark_presence("no-such-branch", "origin"),
+    (false, false)
+  );
+}

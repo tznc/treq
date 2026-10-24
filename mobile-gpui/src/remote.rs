@@ -4,7 +4,7 @@
 //! `retry_after_reconnect`, which verifies state before any retry and never
 //! blindly resends (see `core::remote`).
 
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future, sync::LazyLock};
 
 use serde::de::DeserializeOwned;
 use treq_lib::core::{
@@ -16,7 +16,12 @@ use treq_lib::core::{
   remote_ssh_transport::{CancellationToken, ExecLimits},
 };
 
-use crate::backend::{self, AppEvent};
+use crate::{
+  backend::{self, AppEvent},
+  reads::Reads,
+};
+
+static READS: LazyLock<Reads> = LazyLock::new(Reads::default);
 
 /// Outcome of a mutation, as the UI reports it.
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +78,68 @@ pub async fn read_on<T: DeserializeOwned>(
     note_cutoff(error);
   }
   result
+}
+
+/// Names `request` on `endpoint`. The address is part of it, so a host
+/// edited to point elsewhere never shows the old machine's data.
+fn read_key(endpoint: &SshEndpoint, request: &TreqCommandRequest) -> String {
+  format!(
+    "{}#{}#{}@{}:{}#{}",
+    endpoint.id,
+    crate::store::endpoint_generation(endpoint),
+    endpoint.username,
+    endpoint.hostname,
+    endpoint.port,
+    serde_json::to_string(request).unwrap_or_default()
+  )
+}
+
+/// The last result of `request` on the active machine this session, to show
+/// while it is read again.
+pub fn last<T: Clone + 'static>(request: &TreqCommandRequest) -> Option<T> {
+  let endpoint = backend::get().endpoint().ok()?;
+  READS.last(&read_key(&endpoint, request))
+}
+
+/// [`read`], remembered for [`last`]. With `join`, the same read already in
+/// flight (a prefetch) is awaited instead of sent again; reloads pass
+/// `false`, so a result read before a change never stands for after it.
+pub async fn read_cached<T>(request: TreqCommandRequest, join: bool) -> Result<T, String>
+where
+  T: DeserializeOwned + Clone + Send + Sync + 'static,
+{
+  let endpoint = backend::get().endpoint()?;
+  read_cached_on(endpoint, request, join).await
+}
+
+/// [`read_cached`] on a given machine's endpoint, active or not.
+pub fn read_cached_on<T>(
+  endpoint: SshEndpoint,
+  request: TreqCommandRequest,
+  join: bool,
+) -> impl Future<Output = Result<T, String>> + Send + 'static
+where
+  T: DeserializeOwned + Clone + Send + Sync + 'static,
+{
+  let key = read_key(&endpoint, &request);
+  READS.fetch(key, join, move || async move {
+    read_on::<T>(&endpoint, request).await
+  })
+}
+
+/// Starts reading `request` now, for a screen about to open.
+pub fn prefetch_on<T>(endpoint: SshEndpoint, request: TreqCommandRequest)
+where
+  T: DeserializeOwned + Clone + Send + Sync + 'static,
+{
+  backend::spawn_detached(async move {
+    let _ = read_cached_on::<T>(endpoint, request, true).await;
+  });
+}
+
+/// Forgets every remembered read (sign-out, a forgotten host).
+pub fn forget_reads() {
+  READS.clear();
 }
 
 /// Whether a read failed on a pooled connection that has since died.

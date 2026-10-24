@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::expect_used,
+  clippy::string_slice,
+  reason = "test code"
+)]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::fs;
 
@@ -81,7 +86,7 @@ fn bench_auto_rebase_two_levels(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("hierarchy", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       || {
         let repo = TestRepo::new().expect("failed to init test repo");
         let targets = setup_auto_rebase_hierarchy(&repo, 2);
@@ -91,7 +96,7 @@ fn bench_auto_rebase_two_levels(c: &mut Criterion) {
         for target in targets {
           treq_lib::auto_rebase::rebase_workspaces_for_target(
             std::hint::black_box(&repo.repo_path),
-            std::hint::black_box(&target),
+            std::hint::black_box(target),
             std::hint::black_box("diff"),
           )
           .expect("auto_rebase failed");
@@ -109,7 +114,7 @@ fn bench_auto_rebase_four_levels(c: &mut Criterion) {
   group.sample_size(10);
 
   group.bench_function("hierarchy", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       || {
         let repo = TestRepo::new().expect("failed to init test repo");
         let targets = setup_auto_rebase_hierarchy(&repo, 4);
@@ -119,7 +124,7 @@ fn bench_auto_rebase_four_levels(c: &mut Criterion) {
         for target in targets {
           treq_lib::auto_rebase::rebase_workspaces_for_target(
             std::hint::black_box(&repo.repo_path),
-            std::hint::black_box(&target),
+            std::hint::black_box(target),
             std::hint::black_box("diff"),
           )
           .expect("auto_rebase failed");

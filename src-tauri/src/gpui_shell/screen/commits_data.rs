@@ -431,6 +431,11 @@ pub fn revisions(commit_id: &str, change_id: Option<&str>) -> Vec<String> {
   out
 }
 
+/// Whether a revision's diff has something in it to show.
+pub fn has_content(diff: &JjRevisionDiff) -> bool {
+  diff.too_large_to_render || !diff.committed_files.is_empty() || !diff.hunks_by_file.is_empty()
+}
+
 /// `loadCommitDiff`: the first revision whose diff has something in it,
 /// else an empty diff, or the last error when every read failed.
 pub fn first_diff(
@@ -440,13 +445,7 @@ pub fn first_diff(
   let mut error = None;
   for revision in revisions {
     match read(revision) {
-      Ok(diff)
-        if diff.too_large_to_render
-          || !diff.committed_files.is_empty()
-          || !diff.hunks_by_file.is_empty() =>
-      {
-        return Ok(diff)
-      }
+      Ok(diff) if has_content(&diff) => return Ok(diff),
       Ok(_) => {}
       Err(err) => error = Some(err),
     }
@@ -465,6 +464,7 @@ pub fn empty_diff() -> JjRevisionDiff {
     conflicted_files: Vec::new(),
     too_large_to_render: false,
     render_block_reason: None,
+    working_copy_token: None,
   }
 }
 
@@ -483,6 +483,7 @@ pub fn first_file_diff(
   Err(error.unwrap_or_else(|| "Failed to load commit file diff".into()))
 }
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
 static HUNK_HEADER: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk header regex")
 });
@@ -658,10 +659,12 @@ impl Default for ShiftForm {
 
 impl ShiftForm {
   /// The shift to apply, or `None` while the form can't be submitted.
+  #[allow(clippy::expect_used, reason = "constant pattern")]
   pub fn shift(&self) -> Option<TimeShift> {
     if self.to_day {
-      let re = Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex");
-      return re
+      static DAY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("day regex"));
+      return DAY
         .is_match(&self.day)
         .then(|| TimeShift::ToDay(self.day.clone()));
     }

@@ -37,7 +37,7 @@ fn get_arg_flag(matches: &Matches, name: &str) -> bool {
 fn github_pr_status(repo_path: &str, branch_name: &str) -> Option<WorkspacePrStatus> {
   let remote = crate::github::get_git_remote_url_impl(repo_path).ok()??;
   let gh = crate::binary_paths::get_binary_path("gh")
-    .or_else(|| crate::binary_paths::detect_binary("gh"))?;
+    .or_else(|| crate::binary_paths::detect_binary_cached("gh"))?;
   let path = crate::binary_paths::get_extended_path();
   let pr = crate::github::get_pr_info_via_gh_impl(&gh, repo_path, branch_name, &path).ok()??;
   let checks = crate::github::get_pr_checks_via_gh_impl(&gh, repo_path, branch_name, &path)

@@ -20,6 +20,7 @@ use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
   rc::Rc,
+  sync::Arc,
 };
 
 use gpui_kit::base::TestSupportExt as _;
@@ -119,7 +120,13 @@ pub struct ChangesView {
   /// Another read was asked for while one ran.
   reload: bool,
   pub(super) hunks: HashMap<String, FileHunks>,
+  /// The working-copy diff every file in `hunks` was read from, once all
+  /// were read from the same one.
+  hunks_token: Option<String>,
   generation: u64,
+  /// Bumped when the snapshot, the hunks, the lines read around them or
+  /// the parent change: what the diff's rows are laid out from.
+  pub(super) layout_gen: u64,
   pub(super) staging: Staging,
   pub(super) active: Option<String>,
   collapsed_sections: HashSet<Section>,
@@ -166,6 +173,8 @@ pub struct ChangesView {
   pub(super) pr: Option<pr::PrMode>,
   /// Held by the diff, so it takes the arrow keys.
   focus: FocusHandle,
+  /// Hidden while another tab or workspace shows.
+  hidden: bool,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -215,7 +224,9 @@ impl ChangesView {
       loading: false,
       reload: false,
       hunks: HashMap::new(),
+      hunks_token: None,
       generation: 0,
+      layout_gen: 0,
       staging: Staging::default(),
       active: None,
       collapsed_sections: HashSet::new(),
@@ -247,6 +258,7 @@ impl ChangesView {
       threads: threads::Threads::default(),
       pr: None,
       focus: cx.focus_handle(),
+      hidden: false,
       _subscriptions: Vec::new(),
     }
   }
@@ -273,11 +285,16 @@ impl ChangesView {
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // The status's conflicts stand in until the diff lists its own.
+    if moved || self.parent.conflicted_files != parent.conflicted_files {
+      self.layout_gen += 1;
+    }
     self.parent = parent;
     self.options = options;
     if moved {
       self.snapshot = None;
       self.hunks.clear();
+      self.hunks_token = None;
       self.staging = Staging::default();
       self.active = None;
       self.collapsed_files.clear();
@@ -302,6 +319,31 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// Its first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.snapshot.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows, it stops polling its
+  /// threads and hearing Cmd+F; shown again, it reads the diff, the threads and the pull
+  /// request again behind what it draws.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    if self.hidden != shown {
+      return;
+    }
+    self.hidden = !shown;
+    if !shown {
+      self.stop_threads();
+      self.unwatch_find_key();
+      return;
+    }
+    self.poll_threads(cx);
+    self.load_pr(cx);
+    if !self.loading {
+      self.load(cx);
+    }
+  }
+
   pub(super) fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
     if self.dark != dark {
       self.dark = dark;
@@ -323,6 +365,23 @@ impl ChangesView {
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
+    self.run_changed(
+      work,
+      |view, value, cx| {
+        apply(view, value, cx);
+        true
+      },
+      cx,
+    );
+  }
+
+  /// [`Self::run`], redrawing only when `apply` says what shows changed.
+  fn run_changed<T: Send + 'static>(
+    &self,
+    work: impl FnOnce(&dyn ChangesHost, &Parent) -> T + Send + 'static,
+    apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> bool + 'static,
+    cx: &mut Context<Self>,
+  ) {
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
     cx.spawn(async move |this, cx| {
@@ -330,8 +389,7 @@ impl ChangesView {
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
       let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
+        if view.parent.key() == key && apply(view, value, cx) {
           cx.notify();
         }
       });
@@ -460,57 +518,73 @@ impl ChangesView {
     }
     self.loading = true;
     let show = self.show_committed();
-    self.run(
+    self.run_changed(
       move |host, parent| {
-        let snapshot = match parent.workspace_id() {
-          Some(id) => host
-            .workspace_diff(&parent.repo_path, id)
-            .map(|diff| Snapshot::from_workspace_diff(diff, show)),
-          None => host
-            .changed_files(&parent.repo_path, None)
-            .map(|files| Snapshot::from_home(&files)),
-        };
-        let rules = host.generated_files(&parent.repo_path, parent.workspace_id());
-        snapshot.map(|s| s.with_generated(&rules))
+        // The generated-file rules don't depend on the diff: read both at once.
+        std::thread::scope(|scope| {
+          let rules =
+            scope.spawn(|| host.generated_files(&parent.repo_path, parent.workspace_id()));
+          let snapshot = match parent.workspace_id() {
+            Some(id) => host
+              .workspace_diff(&parent.repo_path, id)
+              .map(|diff| Snapshot::from_workspace_diff(diff, show)),
+            None => host
+              .changed_files(&parent.repo_path, None)
+              .map(|files| Snapshot::from_home(&files)),
+          };
+          let rules = super::joined(rules);
+          snapshot.map(|s| s.with_generated(&rules))
+        })
       },
       |view, result, cx| {
         view.loading = false;
-        match result {
+        // A refresh that reads back what shows draws no frame.
+        let changed = match result {
           Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
             view.review.stale.clear();
             view.review.parked = None;
-            view.apply(snapshot, cx)
+            view.apply(snapshot, cx);
+            true
           }
-          Ok(snapshot) if view.park(&snapshot) => {}
-          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
+          Ok(snapshot) if view.park(&snapshot) => true,
+          // The reviewed hunks were read from this same diff.
+          Ok(snapshot)
+            if view.in_review()
+              && snapshot.token.is_some()
+              && snapshot.token == view.hunks_token =>
+          {
+            false
+          }
+          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
+            view.recheck(snapshot, cx);
+            false
+          }
           Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
             view.toast(ToastTone::Error, "JJ Error", err);
             view.snapshot.get_or_insert_with(Snapshot::default);
+            view.layout_gen += 1;
+            true
           }
-        }
+        };
         if std::mem::take(&mut view.reload) {
           view.load(cx);
         }
+        changed
       },
       cx,
     );
   }
 
-  fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-    let files: Vec<serde_json::Value> = snapshot
-      .files
-      .iter()
-      .map(|f| {
-        json!({
-          "path": f.path,
-          "workspaceStatus": f.status,
-          "oldPath": f.old_path,
-          "isConflicted": f.status == "C",
-        })
-      })
-      .collect();
-    self.field("changes.files", files.into(), cx);
+  /// Shows `snapshot`; `true` when that changed what is drawn. Hunks still
+  /// to read redraw as they land.
+  fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) -> bool {
+    let marks = |view: &Self| {
+      let s = &view.staging;
+      let staging = s.staged.len() + s.selected.len() + s.selected_staged.len();
+      (view.layout_gen, view.viewed.len(), staging)
+    };
+    let before = marks(self);
     self.staging.retain(&snapshot.files);
     // Generated files are read only once "Load diff" asks.
     let paths: Vec<String> = snapshot
@@ -519,9 +593,29 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
-    self.snapshot = Some(snapshot);
-    self.load_hunks(paths, cx);
-    self.unmark_stale(cx);
+    // A refresh of an unchanged working copy (window focus, a watcher event
+    // for an ignored write) has no hunk to read again.
+    let current = snapshot.token.is_some()
+      && snapshot.token == self.hunks_token
+      && paths.len() == self.hunks.len()
+      && paths.iter().all(|p| {
+        self
+          .hunks
+          .get(p)
+          .is_some_and(|d| !d.loading && d.error.is_none())
+      });
+    let token = snapshot.token.clone();
+    // A refresh that finds the same files keeps the snapshot, and with it
+    // the committed hunks the rows were laid out from.
+    if self.snapshot.as_ref() != Some(&snapshot) {
+      self.snapshot = Some(snapshot);
+      self.layout_gen += 1;
+    }
+    if !current {
+      self.load_hunks(paths, token, cx);
+    }
+    self.unmark_stale(None, cx);
+    marks(self) != before
   }
 
   /// "Load diff" on a generated file: its diff, read now if it is the
@@ -530,6 +624,7 @@ impl ChangesView {
     self.loaded_generated.insert(path.to_string());
     let working = self.files().iter().any(|f| f.path == path);
     if working && self.pr.is_none() && !self.hunks.contains_key(path) {
+      self.layout_gen += 1;
       self.hunks.insert(
         path.to_string(),
         FileHunks {
@@ -537,7 +632,8 @@ impl ChangesView {
           ..FileHunks::default()
         },
       );
-      self.load_batches(self.generation, vec![vec![path.to_string()]], cx);
+      let token = self.hunks_token.clone();
+      self.load_batches(self.generation, vec![vec![path.to_string()]], token, cx);
     }
     cx.notify();
   }
@@ -551,15 +647,21 @@ impl ChangesView {
 
   /// `loadAllFileHunks`: the first files, then the rest in batches, each
   /// shown as it arrives. What was read before stays until replaced.
-  fn load_hunks(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+  fn load_hunks(&mut self, paths: Vec<String>, token: Option<String>, cx: &mut Context<Self>) {
     self.generation += 1;
+    self.hunks_token = None;
     let listed: HashSet<&String> = paths.iter().collect();
+    let before = self.hunks.len();
     self.hunks.retain(|p, _| listed.contains(p));
+    let kept = self.hunks.len();
     for path in &paths {
       self.hunks.entry(path.clone()).or_insert_with(|| FileHunks {
         loading: true,
         ..FileHunks::default()
       });
+    }
+    if self.hunks.len() != before || kept != before {
+      self.layout_gen += 1;
     }
     let mut batches: Vec<Vec<String>> = Vec::new();
     let (first, rest) = paths.split_at(paths.len().min(FIRST_BATCH));
@@ -567,43 +669,93 @@ impl ChangesView {
       batches.push(first.to_vec());
     }
     batches.extend(rest.chunks(BATCH).map(<[String]>::to_vec));
-    self.load_batches(self.generation, batches, cx);
+    self.load_batches(self.generation, batches, token, cx);
   }
 
+  /// Reads `batches` in turn. `token` is the diff they should all read
+  /// from; once every one did, it names the hunks.
   fn load_batches(
     &mut self,
     generation: u64,
     mut batches: Vec<Vec<String>>,
+    mut token: Option<String>,
     cx: &mut Context<Self>,
   ) {
     if batches.is_empty() {
+      self.hunks_token = token;
       return;
     }
     let batch = batches.remove(0);
-    self.run(
-      move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), batch),
+    // What the batch's files show now, so the read compares against it off
+    // the main thread.
+    let shown: HashMap<String, (Arc<Vec<JjDiffHunk>>, Option<String>)> = batch
+      .iter()
+      .filter_map(|path| {
+        let d = self.hunks.get(path).filter(|d| !d.loading)?;
+        Some((path.clone(), (d.hunks.clone(), d.error.clone())))
+      })
+      .collect();
+    self.run_changed(
+      move |host, parent| {
+        let read = host.file_hunks(&parent.repo_path, parent.workspace_id(), batch)?;
+        // A refresh reads every file again; one that reads the same keeps
+        // its hunks, so its rows and marks are not redone.
+        let files: Vec<_> = read
+          .files
+          .into_iter()
+          .map(|file| {
+            let same = shown
+              .get(&file.path)
+              .filter(|(hunks, error)| *error == file.error && **hunks == file.hunks)
+              .map(|(hunks, _)| hunks.clone());
+            let data = FileHunks {
+              hunks: same.clone().unwrap_or_else(|| file.hunks.into()),
+              loading: false,
+              error: file.error,
+            };
+            (file.path, same.is_some(), data)
+          })
+          .collect();
+        Ok::<_, String>((read.snapshot_token, files))
+      },
       move |view, result, cx| {
         if view.generation != generation {
-          return;
+          return false;
         }
+        // A file read again unchanged (a refresh) draws nothing new.
+        let mut changed = HashSet::new();
         match result {
-          Ok(batch) => {
-            for file in batch.files {
-              let data = FileHunks {
-                hunks: file.hunks.into(),
-                loading: false,
-                error: file.error,
-              };
-              view.hunks.insert(file.path, data);
+          Ok((snapshot_token, files)) => {
+            if token.as_ref() != Some(&snapshot_token) {
+              token = None;
+            }
+            for (path, same, data) in files {
+              // Still showing the hunks it read the same as.
+              let kept = same
+                && view
+                  .hunks
+                  .get(&path)
+                  .is_some_and(|d| !d.loading && Arc::ptr_eq(&d.hunks, &data.hunks));
+              if kept {
+                continue;
+              }
+              view.layout_gen += 1;
+              view.hunks.insert(path.clone(), data);
+              changed.insert(path);
             }
           }
-          Err(err) => log::warn!("Failed to load file hunks: {err}"),
+          Err(err) => {
+            token = None;
+            log::warn!("Failed to load file hunks: {err}");
+          }
         }
-        view.unmark_stale(cx);
+        let marks = (view.viewed.len(), view.review.comments.len());
+        view.unmark_stale(Some(&changed), cx);
         if batches.is_empty() {
           view.prune_comments(cx);
         }
-        view.load_batches(generation, batches, cx);
+        view.load_batches(generation, batches, token, cx);
+        !changed.is_empty() || marks != (view.viewed.len(), view.review.comments.len())
       },
       cx,
     );
@@ -615,7 +767,7 @@ impl ChangesView {
       .workspace
       .as_ref()
       .map(|w| w.branch_name.clone());
-    self.run(
+    self.run_changed(
       move |host, parent| {
         let github = host.github_remote(&parent.repo_path);
         let pr = branch
@@ -624,8 +776,10 @@ impl ChangesView {
         (github, pr)
       },
       |view, (github, pr), _| {
+        let changed = view.github != github || view.pr_state != pr;
         view.github = github;
         view.pr_state = pr;
+        changed
       },
       cx,
     );
@@ -636,8 +790,9 @@ impl ChangesView {
     self.shown_hunks(path).cloned()
   }
 
-  /// Viewed files whose diff changed since are viewed no longer.
-  fn unmark_stale(&mut self, cx: &mut Context<Self>) {
+  /// Viewed files whose diff changed since are viewed no longer. `read`
+  /// limits the check to the files whose hunks were just replaced.
+  fn unmark_stale(&mut self, read: Option<&HashSet<String>>, cx: &mut Context<Self>) {
     // Committed files can be marked viewed too, so they stay listed.
     let listed: HashSet<String> = self
       .snapshot
@@ -653,6 +808,7 @@ impl ChangesView {
       .iter()
       .filter(|(path, hash)| {
         !hash.is_empty()
+          && read.is_none_or(|read| read.contains(*path))
           && self
             .file_hunks(path)
             .filter(|d| !d.loading && !d.hunks.is_empty())
@@ -915,34 +1071,36 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .collect();
     let split = !staged.is_empty();
-    self.run(
-      move |host, parent| {
-        let result = if split {
-          host.split(&parent.working_directory(), &message, staged)
-        } else {
-          host.commit(&parent.repo_path, parent.workspace_id(), &message)
-        };
-        let result = result.map_err(|e| ("Commit failed", e))?;
-        if action == CommitAction::Push {
-          host
-            .push_remote(&parent.repo_path, parent.workspace_id())
-            .map_err(|e| ("Failed to push", e))?;
+    let (host, parent) = (self.host.clone(), self.parent.clone());
+    let key = parent.key();
+    // The commit is reported as soon as it lands; the push is a second stage
+    // with its own feedback, and runs even if the tab moved on meanwhile.
+    cx.spawn(async move |this, cx| {
+      let (work_host, work_parent) = (host.clone(), parent.clone());
+      let committed = cx
+        .background_spawn(async move {
+          if split {
+            work_host.split(&work_parent.working_directory(), &message, staged)
+          } else {
+            work_host.commit(&work_parent.repo_path, work_parent.workspace_id(), &message)
+          }
+        })
+        .await;
+      let pushing = committed.is_ok() && action == CommitAction::Push;
+      let _ = this.update(cx, |view, cx| {
+        if view.parent.key() != key {
+          return;
         }
-        Ok::<_, (&str, String)>(result)
-      },
-      move |view, result, cx| {
-        view.pending = None;
+        if !pushing {
+          view.pending = None;
+        }
         if split {
           view.staging.staged.clear();
         }
-        match result {
+        match committed {
           Ok(result) => {
-            let text = result.trim();
-            view.toast(ToastTone::Success, "Commit created", text);
+            view.toast(ToastTone::Success, "Commit created", result.trim());
             view.committed_collapsed = true;
-            if action == CommitAction::Push {
-              view.toast(ToastTone::Success, "Pushed to remote", "");
-            }
             if action == CommitAction::Pr {
               view.send_react(
                 ScreenAction::Press {
@@ -952,13 +1110,33 @@ impl ChangesView {
               );
             }
           }
-          Err((title, err)) => view.toast(ToastTone::Error, title, err),
+          Err(err) => view.toast(ToastTone::Error, "Commit failed", err),
         }
         Self::changed(view.host.as_ref(), &view.parent);
         view.load(cx);
-      },
-      cx,
-    );
+        cx.notify();
+      });
+      if !pushing {
+        return;
+      }
+      let pushed = cx
+        .background_spawn(async move { host.push_remote(&parent.repo_path, parent.workspace_id()) })
+        .await;
+      let _ = this.update(cx, |view, cx| {
+        if view.parent.key() != key {
+          return;
+        }
+        view.pending = None;
+        match pushed {
+          Ok(_) => view.toast(ToastTone::Success, "Pushed to remote", ""),
+          Err(err) => view.toast(ToastTone::Error, "Failed to push", err),
+        }
+        Self::changed(view.host.as_ref(), &view.parent);
+        view.load(cx);
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   fn ensure_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -976,9 +1154,13 @@ impl ChangesView {
       ._subscriptions
       .push(cx.subscribe(&state, |view, state, event: &InputEvent, cx| {
         if let InputEvent::Change = event {
+          let was_empty = view.message.trim().is_empty();
           view.message = state.read(cx).value().to_string();
-          view.message_error = None;
-          cx.notify();
+          // The view draws only whether the message is empty, and the
+          // error a keystroke clears; the box redraws itself.
+          if view.message_error.take().is_some() || was_empty != view.message.trim().is_empty() {
+            cx.notify();
+          }
         }
       }));
     self.message_input = Some(state);
@@ -1084,6 +1266,7 @@ impl ChangesView {
         let Ok(lines) = result else {
           return;
         };
+        view.layout_gen += 1;
         if dir == Dir::After && lines.len() <= end - start {
           view.context_ended.insert((key.0.clone(), h));
         }
@@ -1384,9 +1567,10 @@ impl Render for ChangesView {
     self.ensure_reply_inputs(window, cx);
     self.watch_find_key(window, cx);
     self.ensure_search_input(window, cx);
+    // The rows first: the threads and the find index follow their revision.
+    self.sync_rows(window);
     self.place_threads();
     self.index_matches();
-    self.sync_rows(window);
     self.reveal_match(window, cx);
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);

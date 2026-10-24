@@ -49,6 +49,10 @@ impl Model {
   }
 
   /// The remote presses; `None` for any other.
+  #[allow(
+    clippy::string_slice,
+    reason = "slices after a checked starts_with() of an ASCII prefix"
+  )]
   pub fn remote_press(&mut self, id: &str) -> Option<Vec<Effect>> {
     let cloud = |action| vec![Effect::from(RemoteEffect::Cloud(action))];
     let effects = match id {

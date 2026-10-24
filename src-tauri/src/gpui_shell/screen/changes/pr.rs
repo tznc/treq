@@ -186,7 +186,7 @@ impl ChangesView {
       |view, result, cx| match result {
         Ok(diff) => {
           let parsed = pr_review_data::parse_unified_diff(&diff);
-          view.hunks = parsed
+          let hunks: HashMap<String, FileHunks> = parsed
             .hunks
             .into_iter()
             .map(|(path, hunks)| {
@@ -201,13 +201,18 @@ impl ChangesView {
             .collect();
           let listed: HashSet<String> = parsed.files.iter().map(|f| f.path.clone()).collect();
           view.viewed.retain(|p, _| listed.contains(p));
-          view.snapshot = Some(
-            Snapshot {
-              files: parsed.files,
-              ..Snapshot::default()
-            }
-            .with_generated(&GeneratedFiles::default()),
-          );
+          let snapshot = Snapshot {
+            files: parsed.files,
+            ..Snapshot::default()
+          }
+          .with_generated(&GeneratedFiles::default());
+          // The poll reads the diff again; an unchanged one keeps its rows.
+          if view.hunks != hunks || view.snapshot.as_ref() != Some(&snapshot) {
+            view.hunks = hunks;
+            view.hunks_token = None;
+            view.snapshot = Some(snapshot);
+            view.layout_gen += 1;
+          }
           if let Some(pr) = view.pr.as_mut() {
             pr.error = None;
             pr.read = true;
@@ -268,20 +273,28 @@ impl ChangesView {
       Vec::new()
     };
     self.review.comments = pr.drafts.iter().map(|d| d.comment.clone()).collect();
-    let unhashed: Vec<(String, String)> = pr
+    let unhashed: Vec<(String, String, Option<String>)> = pr
       .drafts
       .iter()
       .filter(|d| d.row.line_hash.is_none() && !pr.hashed.contains(&d.row.id))
-      .filter_map(|d| Some((d.row.id.clone(), d.line_hash.clone()?)))
+      .filter_map(|d| {
+        Some((
+          d.row.id.clone(),
+          d.line_hash.clone()?,
+          d.quoted_text.clone(),
+        ))
+      })
       .collect();
     if unhashed.is_empty() {
       return;
     }
-    pr.hashed.extend(unhashed.iter().map(|(id, _)| id.clone()));
+    pr.hashed
+      .extend(unhashed.iter().map(|(id, _, _)| id.clone()));
     self.run_pr(
       move |host, t| {
-        for (id, hash) in &unhashed {
-          if let Err(err) = host.update_draft(&t.repo_path, id, None, Some(hash)) {
+        for (id, hash, quoted) in &unhashed {
+          if let Err(err) = host.update_draft(&t.repo_path, id, None, Some(hash), quoted.as_deref())
+          {
             log::warn!("Failed to hash review draft: {err}");
           }
         }
@@ -296,6 +309,10 @@ impl ChangesView {
   }
 
   /// `addComment`: the draft is kept with the hash of its lines.
+  #[allow(
+    clippy::expect_used,
+    reason = "the probe is a constant JSON shape of the comment type"
+  )]
   pub(super) fn submit_pr_draft(&mut self, draft: Pending, text: String, cx: &mut Context<Self>) {
     let hunks: HashMap<String, Vec<JjDiffHunk>> = self
       .hunks
@@ -320,14 +337,15 @@ impl ChangesView {
       "resolved_at": null,
     }))
     .expect("draft probe");
-    let line_hash = pr_review_data::draft_to_comment(&probe, &hunks).line_hash;
+    let current = pr_review_data::draft_to_comment(&probe, &hunks);
     let new = NewDraft {
       file_path: draft.file_path.clone(),
       start_line: i64::from(draft.start_line),
       end_line: i64::from(draft.end_line),
       side: draft.side,
       text,
-      line_hash,
+      line_hash: current.line_hash,
+      quoted_text: current.quoted_text,
     };
     self.run_pr(
       move |host, t| host.create_draft(&t.repo_path, t.number, &new),
@@ -346,7 +364,7 @@ impl ChangesView {
 
   pub(super) fn save_pr_edit(&mut self, id: String, text: String, cx: &mut Context<Self>) {
     self.run_pr(
-      move |host, t| host.update_draft(&t.repo_path, &id, Some(&text), None),
+      move |host, t| host.update_draft(&t.repo_path, &id, Some(&text), None, None),
       |view, result, cx| match result {
         Ok(()) => {
           view.review.editing = None;

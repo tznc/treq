@@ -2,14 +2,14 @@
 //! `useWorkspaceChecks`, `CreatePrButtonGroup`, `ViewPrButton`,
 //! `MergeQueueButton`, `handleTargetBranchSelect` and Dashboard's
 //! `handleDelete` ran: workflow checks, pull requests, the merge queue,
-//! retargeting and the More menu's Delete Workspace.
+//! retargeting and the More menu's Reset to remote and Delete Workspace.
 
 use tauri_plugin_gpui::gpui::{prelude::*, App, Context};
 
 use super::{
   super::{
     github_data::{compare_pr_url, conventional_pr_title},
-    workspace_data::needs_push,
+    workspace_data::{needs_push, Pending},
     workspace_ops::{self, Removed},
     ScreenAction,
   },
@@ -20,9 +20,12 @@ use crate::{
     account::QueueAction,
     context_menu::{self, MenuAction},
     running_checks::{CheckRun, ChecksTarget},
+    RemoteSyncStatus,
   },
   gpui_shell::{
-    checks_run, confirm, menus,
+    checks_run,
+    confirm::{self, Question},
+    menus,
     native::{self, NativeEvent, OpenRequest, ToastAction, ToastTone},
     popup::PopupRequest,
   },
@@ -96,11 +99,10 @@ impl WorkspaceView {
       run,
       move |target, run| host.run_checks(target, run),
       move |_, cx| {
-        let _ = view.update(cx, |view, cx| {
+        let _ = view.update(cx, |view, _| {
           view
             .host
             .notify(NativeEvent::WorkspaceChanged { repo_path });
-          view.load(cx);
         });
       },
     );
@@ -181,20 +183,53 @@ impl WorkspaceView {
     );
   }
 
-  /// The More menu: Delete Workspace.
+  /// The More menu: Reset to remote and Delete Workspace.
   fn more_menu(&mut self, cx: &mut Context<Self>) {
-    let Some(workspace) = self.loaded.as_ref().and_then(|l| l.workspace.clone()) else {
+    let Some(loaded) = self.loaded.as_ref() else {
       return;
     };
-    let items = context_menu::delete_workspace_items(&workspace.repo_path, workspace.id);
+    let Some(workspace) = loaded.workspace.clone() else {
+      return;
+    };
+    let ahead = match loaded.status.as_ref().map(|s| &s.remote_sync) {
+      Some(RemoteSyncStatus::NotOnRemote) | None => None,
+      Some(RemoteSyncStatus::Ahead { count }) => Some(*count),
+      Some(RemoteSyncStatus::Diverged { ahead, .. }) => Some(*ahead),
+      Some(_) => Some(0),
+    };
+    let reset = ahead.map(|ahead| {
+      workspace_ops::reset_question(&workspace.branch_name, ahead, loaded.uncommitted_count)
+    });
+    let items =
+      context_menu::workspace_more_items(&workspace.repo_path, workspace.id, reset.is_some());
     let removed = Removed::of(&workspace);
     self.dropdown(
       "workspace-more",
       items,
-      move |view, action, cx| {
-        if matches!(action, MenuAction::DeleteWorkspace { .. }) {
-          view.delete_workspace(removed.clone(), cx);
+      move |view, action, cx| match action {
+        MenuAction::ResetToRemote => {
+          if let Some(question) = reset.clone() {
+            view.reset_to_remote(question, removed.id, cx);
+          }
         }
+        MenuAction::DeleteWorkspace { .. } => view.delete_workspace(removed.clone(), cx),
+        _ => {}
+      },
+      cx,
+    );
+  }
+
+  /// Asks, then resets the branch to `origin`. The header's Sync spins
+  /// meanwhile, and its other actions wait.
+  fn reset_to_remote(&mut self, question: Question, workspace_id: i64, cx: &mut Context<Self>) {
+    confirm::ask(
+      &mut self.confirm,
+      question,
+      move |view, cx| {
+        let repo = view.route.repo_path.clone();
+        view.run(Pending::Reset, cx, move |host| {
+          host.reset_to_remote(&repo, workspace_id)
+        });
       },
       cx,
     );
@@ -347,7 +382,6 @@ impl WorkspaceView {
         view.host.notify(NativeEvent::WorkspaceChanged {
           repo_path: request.repo_path.clone(),
         });
-        view.load(cx);
         view.rebuild(cx);
       });
     })
@@ -392,7 +426,6 @@ impl WorkspaceView {
               view.host.notify(NativeEvent::WorkspaceChanged {
                 repo_path: request.repo_path.clone(),
               });
-              view.load(cx);
             }
             view.host.open_url(&url);
           }
@@ -441,7 +474,6 @@ impl WorkspaceView {
         view
           .host
           .notify(NativeEvent::WorkspaceChanged { repo_path });
-        view.load(cx);
         view.rebuild(cx);
       });
     })

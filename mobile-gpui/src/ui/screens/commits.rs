@@ -7,7 +7,7 @@ use gpui_kit::{
 };
 use treq_lib::{core::remote::TreqCommandRequest, jj::JjLogResult};
 
-use super::{on_epoch, workspace::Target};
+use super::workspace::Target;
 use crate::{
   remote,
   ui::{load, widgets, Load},
@@ -21,27 +21,48 @@ pub struct CommitsScreen {
 
 impl CommitsScreen {
   pub fn new(target: Target, cx: &mut Context<Self>) -> Self {
-    on_epoch(cx, |this, cx| this.reload(cx));
+    // Its workspace screen reloads it (on a new epoch too), so it doesn't
+    // watch the epoch itself. The log is usually prefetched (see
+    // [`prefetch`]), or shown from the last visit.
+    let log = remote::last(&request(&target)).map_or(Load::Idle, Load::Ready);
     let mut this = Self {
       target,
-      log: Load::Idle,
+      log,
       scroll: ScrollHandle::new(),
     };
-    this.reload(cx);
+    this.fetch(true, cx);
     this
   }
 
   pub fn reload(&mut self, cx: &mut Context<Self>) {
-    self.log = Load::Loading;
-    let request = TreqCommandRequest::ListCommits {
-      repo: self.target.repo.clone(),
-      workspace: Some(self.target.id.clone()),
-    };
+    self.fetch(false, cx);
+  }
+
+  /// `join` as in [`remote::read_cached`]. Keeps the commits on screen
+  /// while they're read again.
+  fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
+    if self.log.ready().is_none() {
+      self.log = Load::Loading;
+    }
     load::run(
       cx,
-      remote::read::<JjLogResult>(request),
+      remote::read_cached::<JjLogResult>(request(&self.target), join),
       |this, result, _| this.log = Load::from_result(result),
     );
+  }
+}
+
+fn request(target: &Target) -> TreqCommandRequest {
+  TreqCommandRequest::ListCommits {
+    repo: target.repo.clone(),
+    workspace: Some(target.id.clone()),
+  }
+}
+
+/// Starts reading `target`'s commits before its tab is first shown.
+pub fn prefetch(target: &Target) {
+  if let Ok(endpoint) = crate::backend::get().endpoint() {
+    remote::prefetch_on::<JjLogResult>(endpoint, request(target));
   }
 }
 

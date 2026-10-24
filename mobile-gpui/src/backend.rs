@@ -8,7 +8,10 @@
 use std::{
   future::Future,
   path::PathBuf,
-  sync::{Arc, Mutex, OnceLock},
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+  },
 };
 
 use futures::channel::{mpsc, oneshot};
@@ -89,6 +92,18 @@ pub struct Backend {
 }
 
 static BACKEND: OnceLock<Arc<Backend>> = OnceLock::new();
+
+/// Cleared while the app is in the background, where polling the host
+/// would only spend battery.
+static FOREGROUND: AtomicBool = AtomicBool::new(true);
+
+pub fn set_foreground(foreground: bool) {
+  FOREGROUND.store(foreground, Ordering::Relaxed);
+}
+
+pub fn in_foreground() -> bool {
+  FOREGROUND.load(Ordering::Relaxed)
+}
 
 /// The backend, once `init` has run (TAO reports `Resumed` before setup).
 pub fn try_get() -> Option<&'static Arc<Backend>> {

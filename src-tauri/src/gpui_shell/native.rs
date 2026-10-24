@@ -7,7 +7,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use super::remote_repo::{self, Cutoff, Mutation, Remote, Transport};
+use super::remote_repo::{self, Cutoff, Mutation, Reads, Remote, Transport};
 use crate::{
   core::{
     feature_preview,
@@ -62,6 +62,16 @@ pub enum NativeEvent {
     pane_session_id: i64,
     select: bool,
   },
+  /// GPUI is removing (deleting or archiving) these workspaces of the
+  /// repository: the window hides their rows and leaves them at once, while
+  /// the removal runs. It ends in [`Self::WorkspacesRemoved`] or
+  /// [`Self::WorkspacesRestored`].
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRemoving { repo_path: String, ids: Vec<i64> },
+  /// The removal started by [`Self::WorkspacesRemoving`] failed: the rows
+  /// show again.
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRestored { repo_path: String, ids: Vec<i64> },
   /// GPUI removed (deleted or archived) these workspaces of the repository,
   /// so the window leaves them if they show.
   #[serde(rename_all = "camelCase")]
@@ -354,5 +364,10 @@ impl Transport for Backend {
       endpoint_id: endpoint_id.to_string(),
       reason: cutoff.id().to_string(),
     });
+  }
+
+  fn reads(&self) -> &Reads {
+    static READS: std::sync::OnceLock<Reads> = std::sync::OnceLock::new();
+    READS.get_or_init(Reads::default)
   }
 }

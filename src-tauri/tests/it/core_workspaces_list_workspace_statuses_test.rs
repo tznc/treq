@@ -244,7 +244,8 @@ fn test_workspace_list_statuses_preserves_existing_workspace_metadata_on_upsert(
     Some(vec!["src/lib.rs".to_string()])
   );
   assert!(status.current.not_on_remote);
-  assert_ne!(
+  // Nothing changed, so the poll leaves the row untouched.
+  assert_eq!(
     status.current.refreshed_at.as_deref(),
     Some("2001-01-01T00:00:00Z")
   );

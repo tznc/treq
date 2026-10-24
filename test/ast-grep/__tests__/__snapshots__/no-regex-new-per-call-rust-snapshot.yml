@@ -1,0 +1,32 @@
+id: no-regex-new-per-call-rust
+snapshots:
+  ? |
+    fn each(lines: &[&str]) {
+      for line in lines {
+        let re = Regex::new("^a").expect("regex");
+        re.is_match(line);
+      }
+    }
+  : labels:
+    - source: Regex::new("^a")
+      style: primary
+      start: 61
+      end: 77
+  ? |
+    fn words(s: &str) -> usize {
+      Regex::new("[a-z]+").expect("regex").find_iter(s).count()
+    }
+  : labels:
+    - source: Regex::new("[a-z]+")
+      style: primary
+      start: 31
+      end: 51
+  ? |
+    fn words(s: &str) -> usize {
+      regex::Regex::new("[a-z]+").expect("regex").find_iter(s).count()
+    }
+  : labels:
+    - source: regex::Regex::new("[a-z]+")
+      style: primary
+      start: 31
+      end: 58

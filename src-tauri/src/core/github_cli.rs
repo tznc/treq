@@ -2,7 +2,7 @@
 //! resolves the `gh` binary (and the PATH it runs with) itself, so a caller
 //! only names the repository, as `owner/name` unless it says otherwise.
 
-use crate::binary_paths::{detect_binary, get_binary_path, get_extended_path};
+use crate::binary_paths::{detect_binary_cached, get_binary_path, get_extended_path};
 use crate::github::{
   self, GhDraftReviewComment, GhIssue, GhListPage, GhPullRequest, GhReviewThread, GitRemoteInfo,
   PrCiStatus, GH_LIST_PAGE_SIZE,
@@ -22,7 +22,7 @@ fn resolve_gh_with(
 
 /// The `gh` binary's path.
 pub fn gh_path() -> Result<String, String> {
-  resolve_gh_with(|| get_binary_path("gh"), || detect_binary("gh"))
+  resolve_gh_with(|| get_binary_path("gh"), || detect_binary_cached("gh"))
 }
 
 /// The `gh` binary and the PATH to run it with.
@@ -95,8 +95,22 @@ pub fn pr_checks(repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> 
 
 /// The signed-in user's login.
 pub fn current_user() -> Result<String, String> {
+  // `gh api user` is a network round trip and the login rarely changes; a
+  // switch of `gh auth` account shows up after the TTL.
+  const TTL: std::time::Duration = std::time::Duration::from_secs(600);
+  static CACHE: std::sync::Mutex<Option<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+  if let Some((login, at)) = CACHE.lock().ok().and_then(|cache| cache.clone()) {
+    if at.elapsed() < TTL {
+      return Ok(login);
+    }
+  }
   let (gh, path) = gh()?;
-  github::gh_current_user_impl(&gh, &path)
+  let login = github::gh_current_user_impl(&gh, &path)?;
+  if let Ok(mut cache) = CACHE.lock() {
+    *cache = Some((login.clone(), std::time::Instant::now()));
+  }
+  Ok(login)
 }
 
 /// The review threads of pull request `number` in `full_name`; none when the

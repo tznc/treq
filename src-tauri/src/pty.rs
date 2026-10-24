@@ -8,6 +8,9 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// Receives each chunk of a session's output, as the bytes read.
+pub type PtyOutput = Box<dyn Fn(&[u8]) + Send + 'static>;
+
 /// Process a chunk of bytes, handling incomplete UTF-8 sequences at boundaries.
 ///
 /// - `pending`: mutable buffer containing incomplete bytes from the previous chunk
@@ -55,6 +58,11 @@ impl Utf8StreamDecoder {
     output
   }
 
+  /// Whether a character is waiting for its remaining bytes.
+  pub(crate) fn has_pending(&self) -> bool {
+    !self.pending.is_empty()
+  }
+
   pub(crate) fn finish(&mut self) -> String {
     let output = String::from_utf8_lossy(&self.pending).into_owned();
     self.pending.clear();
@@ -63,6 +71,7 @@ impl Utf8StreamDecoder {
 }
 
 /// Strip ANSI escape sequences from a string.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 pub fn strip_ansi_codes(s: &str) -> String {
   // Match CSI sequences (including private modes like ?1h), OSC sequences, and charset designations
   static ANSI_RE: OnceLock<Regex> = OnceLock::new();
@@ -390,7 +399,7 @@ impl PtyManager {
     shell_args: Vec<String>,
     initial_command: Option<String>,
     suppress_echo_for: Option<String>,
-    callback: Box<dyn Fn(String) + Send + 'static>,
+    callback: PtyOutput,
   ) -> Result<(), String> {
     {
       let mut creating = self.creating.lock_or_recover();
@@ -427,7 +436,7 @@ impl PtyManager {
     shell_args: Vec<String>,
     initial_command: Option<String>,
     suppress_echo_for: Option<String>,
-    callback: Box<dyn Fn(String) + Send + 'static>,
+    callback: PtyOutput,
   ) -> Result<(), String> {
     let stale = {
       let mut sessions = self.sessions.lock_or_recover();
@@ -542,11 +551,20 @@ impl PtyManager {
             }
             // Flush remaining line buffer
             if !line_buffer.is_empty() {
-              callback(line_buffer);
+              callback(line_buffer.as_bytes());
             }
             break;
           }
           Ok(n) => {
+            // Output nothing reads or rewrites goes on as the bytes read; the
+            // emulator takes a character split between reads in stride.
+            if !cfg!(windows)
+              && !utf8_decoder.has_pending()
+              && auto_command_reader.lock_or_recover().is_none()
+            {
+              callback(&buffer[..n]);
+              continue;
+            }
             let mut data = utf8_decoder.push(&buffer[..n]);
             if data.is_empty() {
               continue;
@@ -578,7 +596,7 @@ impl PtyManager {
 
             let Some(filter_cmd) = filter_cmd else {
               // No filter active, pass through directly
-              callback(data);
+              callback(data.as_bytes());
               continue;
             };
             let filter = match echo_filter.as_mut() {
@@ -593,7 +611,7 @@ impl PtyManager {
               if suppressed_tail.len() > MAX_FILTER_BUFFER {
                 let start = suppressed_tail.len() - MAX_FILTER_BUFFER;
                 let start = suppressed_tail.ceil_char_boundary(start);
-                callback(suppressed_tail[start..].to_string());
+                callback(suppressed_tail.split_off(start).as_bytes());
                 suppressed_tail.clear();
                 line_buffer.clear();
                 *auto_command_reader.lock_or_recover() = None;
@@ -603,11 +621,10 @@ impl PtyManager {
             }
 
             while let Some(newline_pos) = line_buffer.find('\n') {
-              let line = line_buffer[..=newline_pos].to_string();
-              line_buffer = line_buffer[newline_pos + 1..].to_string();
+              let line: String = line_buffer.drain(..=newline_pos).collect();
 
               if filter.show(&strip_ansi_codes(&line)) {
-                callback(line);
+                callback(line.as_bytes());
               }
               if filter.seen_echo() {
                 suppressed_tail.clear();
@@ -616,7 +633,7 @@ impl PtyManager {
               if filter.is_done() {
                 *auto_command_reader.lock_or_recover() = None;
                 if !line_buffer.is_empty() {
-                  callback(std::mem::take(&mut line_buffer));
+                  callback(std::mem::take(&mut line_buffer).as_bytes());
                 }
                 break;
               }
@@ -1029,7 +1046,7 @@ mod tests {
         Some("sleep 30 & echo GRANDCHILD_PID:$!".into()),
         None,
         Box::new(move |chunk| {
-          let _ = tx.send(chunk);
+          let _ = tx.send(String::from_utf8_lossy(chunk).into_owned());
         }),
       )
       .unwrap();
@@ -1122,7 +1139,7 @@ mod tests {
         Some(command),
         Some("echo-that-will-never-appear-0123456789".into()),
         Box::new(move |chunk| {
-          let _ = tx.send(chunk);
+          let _ = tx.send(String::from_utf8_lossy(chunk).into_owned());
         }),
       )
       .unwrap();

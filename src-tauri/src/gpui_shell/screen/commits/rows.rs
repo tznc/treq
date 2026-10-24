@@ -9,7 +9,7 @@
 //! timeline draws its own stretch of the rule.
 
 use crate::gpui_shell::ui::radius;
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset, ListState,
@@ -20,11 +20,11 @@ use super::{CommitsView, Kind};
 use crate::{
   gpui_shell::{
     screen::{
-      code_data::group_by_day,
       commits_data::{line_kind, line_numbers, History, LineKind},
       highlight,
     },
     theme::{self, Palette},
+    time,
     ui::{self, zpx},
   },
   jj::{JjDiffHunk, JjLogCommit},
@@ -101,6 +101,26 @@ pub(super) struct Feed {
   conflicted: Vec<String>,
   /// The rem size the rows were measured at.
   rem: Pixels,
+  /// What the rows were laid out from, so an unchanged frame keeps them.
+  key: Option<Key>,
+}
+
+/// Every input of `layout_rows`. The history and the diffs are too large to
+/// compare, so `CommitsView::layout_gen` stands for them: it is bumped
+/// wherever either one changes.
+#[derive(PartialEq)]
+struct Key {
+  generation: u64,
+  home: bool,
+  home_limit: usize,
+  target_limit: usize,
+  hide_tentative: bool,
+  removed: HashSet<String>,
+  expanded: HashSet<String>,
+  /// The commit, file and line the comment box is under.
+  comment: Option<(String, String, (usize, usize))>,
+  /// Day labels are relative ("Today"), so a new day relabels them.
+  today: chrono::NaiveDate,
 }
 
 impl Feed {
@@ -123,6 +143,7 @@ impl Default for Feed {
       shift: false,
       conflicted: Vec::new(),
       rem: px(0.),
+      key: None,
     }
   }
 }
@@ -156,27 +177,66 @@ fn ident<'a>(
   }
 }
 
+/// A day's label over `commit` when it starts a new day (`group_by_day`).
+fn day_row(
+  feed: &mut Feed,
+  rows: &mut Rows,
+  day: &mut Option<Option<chrono::NaiveDate>>,
+  commit: &JjLogCommit,
+) {
+  let this = time::day(&commit.timestamp);
+  if *day == Some(this) {
+    return;
+  }
+  *day = Some(this);
+  rows.push(Row::Day(feed.days.len()), 5, 0);
+  feed.days.push(time::day_label(&commit.timestamp));
+}
+
 impl CommitsView {
-  /// The commits the list shows, and the banners over them.
+  fn layout_key(&self) -> Key {
+    Key {
+      generation: self.layout_gen,
+      home: self.home(),
+      home_limit: self.home_limit,
+      target_limit: self.target_limit,
+      hide_tentative: self.hide_tentative,
+      removed: self.removed.clone(),
+      expanded: self.expanded.clone(),
+      comment: self
+        .comment
+        .as_ref()
+        .map(|c| (c.commit_id.clone(), c.target.file_path.clone(), c.target.at)),
+      today: chrono::Local::now().date_naive(),
+    }
+  }
+
+  /// The commits the list shows, and the banners over them. Each listed
+  /// commit is cloned once, into its entry.
   fn layout_rows(&mut self) -> Feed {
     let mut feed = Feed::default();
     let Some(history) = self.history.as_ref() else {
       return feed;
     };
     let home = self.home();
-    let own: Vec<JjLogCommit> = history
-      .own
-      .iter()
-      .filter(|c| !self.removed.contains(&c.commit_id))
-      .cloned()
-      .collect();
-    let tentative = history
-      .tentative
-      .clone()
-      .filter(|_| !home && !self.hide_tentative);
-    let visible = History {
-      own: own.clone(),
-      ..history.clone()
+    // Only a removal, rare and short-lived, needs a filtered copy.
+    let filtered;
+    let visible = if self.removed.is_empty() {
+      history
+    } else {
+      filtered = History {
+        own: history
+          .own
+          .iter()
+          .filter(|c| !self.removed.contains(&c.commit_id))
+          .cloned()
+          .collect(),
+        target: history.target.clone(),
+        tentative: history.tentative.clone(),
+        target_branch: String::new(),
+        default_workspace: history.default_workspace,
+      };
+      &filtered
     };
     if visible.is_empty() {
       return feed;
@@ -187,8 +247,13 @@ impl CommitsView {
       .into_iter()
       .map(|c| c.change_id)
       .collect();
-    let target = history.target.clone();
     let shows_target = visible.shows_target();
+    let own = visible.own.clone();
+    let target = shows_target.then(|| history.target.clone());
+    let tentative = history
+      .tentative
+      .clone()
+      .filter(|_| !home && !self.hide_tentative);
     let mut rows = Rows::default();
     let banner = if !feed.conflicted.is_empty() {
       4
@@ -202,31 +267,29 @@ impl CommitsView {
       self.commit_rows(&mut feed, &mut rows, commit, Kind::Tentative, Some(label));
       rows.pending = rows.pending.max(3);
     }
+    let own_len = own.len();
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
-      rows.push(Row::Day(feed.days.len()), 5, 0);
-      feed.days.push(label);
-      for commit in commits {
-        self.commit_rows(&mut feed, &mut rows, commit, Kind::Own { first }, None);
-        first = false;
-      }
+    let mut day = None;
+    for commit in own {
+      day_row(&mut feed, &mut rows, &mut day, &commit);
+      self.commit_rows(&mut feed, &mut rows, commit, Kind::Own { first }, None);
+      first = false;
     }
-    if home && own.len() + 1 >= self.home_limit {
+    if home && own_len + 1 >= self.home_limit {
       rows.push(Row::LoadMore(false), 3, 0);
     }
-    if shows_target {
-      if own.is_empty() {
+    if let Some(target) = target {
+      if own_len == 0 {
         rows.push(Row::OwnEmpty, 0, 3);
       }
       rows.push(Row::Divider, 4, 2);
-      for (label, commits) in group_by_day(&target) {
-        rows.push(Row::Day(feed.days.len()), 5, 0);
-        feed.days.push(label);
-        for commit in commits {
-          self.commit_rows(&mut feed, &mut rows, commit, Kind::Target, None);
-        }
+      let target_len = target.len();
+      let mut day = None;
+      for commit in target {
+        day_row(&mut feed, &mut rows, &mut day, &commit);
+        self.commit_rows(&mut feed, &mut rows, commit, Kind::Target, None);
       }
-      if target.len() >= self.target_limit {
+      if target_len >= self.target_limit {
         rows.push(Row::LoadMore(true), 3, 0);
       }
     }
@@ -306,12 +369,17 @@ impl CommitsView {
   /// Brings the list up to date with the rows, keeping the measured
   /// heights of the rows that did not change.
   pub(super) fn sync_rows(&mut self, window: &mut Window) {
-    let mut feed = self.layout_rows();
     let rem = window.rem_size();
     if rem != self.feed.rem {
       self.feed.rem = rem;
       self.feed.list.remeasure();
     }
+    let key = self.layout_key();
+    if self.feed.key.as_ref() == Some(&key) {
+      return;
+    }
+    let mut feed = self.layout_rows();
+    feed.key = Some(key);
     let old = &self.feed;
     let same = |a: (Row, u8), b: (Row, u8)| {
       a == b && ident(&old.entries, &old.days, a.0) == ident(&feed.entries, &feed.days, b.0)

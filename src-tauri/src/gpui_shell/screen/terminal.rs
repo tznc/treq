@@ -361,7 +361,11 @@ pub struct TerminalView {
   /// The cell of the last mouse report, so a move within it sends none.
   reported: Option<(usize, usize)>,
   cursor_on: bool,
-  idle: u64,
+  /// Whether the last frame had focus. Only a focused cursor blinks, so an
+  /// unfocused terminal skips the blink's redraw.
+  focused: bool,
+  /// Fires `Idle` once the process stops writing; each burst replaces it.
+  idle: Option<Task<()>>,
   chat_due: bool,
   search: Search,
   tooltips: Tooltips,
@@ -411,7 +415,8 @@ impl TerminalView {
       selecting: false,
       reported: None,
       cursor_on: true,
-      idle: 0,
+      focused: false,
+      idle: None,
       chat_due: false,
       search: Search::default(),
       tooltips: Tooltips::new(popups, dark),
@@ -622,8 +627,12 @@ impl TerminalView {
         cx.background_executor().timer(BLINK).await;
         if this
           .update(cx, |view, cx| {
-            view.cursor_on = !view.cursor_on;
-            cx.notify();
+            if view.focused {
+              view.cursor_on = !view.cursor_on;
+              cx.notify();
+            } else {
+              view.cursor_on = true;
+            }
           })
           .is_err()
         {
@@ -638,19 +647,14 @@ impl TerminalView {
     if from_process {
       // The channel works again, so its next drop gets its own attempt.
       self.remote.auto_spent = false;
-      self.idle += 1;
-      let idle = self.idle;
-      cx.spawn(async move |this, cx| {
+      self.idle = Some(cx.spawn(async move |this, cx| {
         cx.background_executor().timer(IDLE_AFTER).await;
         let _ = this.update(cx, |view, cx| {
-          if view.idle == idle {
-            view.chat_due = false;
-            view.record_chat();
-            (view.on_event)(TermEvent::Idle, cx);
-          }
+          view.chat_due = false;
+          view.record_chat();
+          (view.on_event)(TermEvent::Idle, cx);
         });
-      })
-      .detach();
+      }));
       if !self.chat_due && self.is_agent() {
         self.chat_due = true;
         cx.spawn(async move |this, cx| {
@@ -807,7 +811,10 @@ impl TerminalView {
   fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
     // React's remote panel takes no drops.
     if self.status == Status::Ready && self.remote_target().is_none() {
-      self.write(text, cx);
+      // Pasted, as a native terminal does with a drop.
+      let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
+      let bytes = paste_bytes(text, bracketed);
+      self.write(&String::from_utf8_lossy(&bytes), cx);
     }
   }
 
@@ -865,7 +872,26 @@ impl TerminalView {
     }
     let paste = (m.platform && k.key == "v") || (m.control && m.shift && k.key == "v");
     if paste {
-      if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+      let item = cx.read_from_clipboard();
+      // A copied image goes in as the path of a file holding it: Claude Code
+      // and Codex attach a pasted image path, and nothing else reaches them
+      // through a PTY. A remote host can't read a local file.
+      let text = item.as_ref().and_then(|item| item.text()).or_else(|| {
+        let image = item?.into_entries().find_map(|entry| match entry {
+          gpui::ClipboardEntry::Image(image) => Some(image),
+          _ => None,
+        })?;
+        if self.remote_target().is_some() {
+          return None;
+        }
+        self
+          .host
+          .write_pasted_image(&image.bytes)
+          .map(|path| shell_quote(&path))
+          .inspect_err(|e| tracing::warn!("failed to save pasted image: {e}"))
+          .ok()
+      });
+      if let Some(text) = text {
         let bracketed = self.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
         let bytes = paste_bytes(&text, bracketed);
         self.write(&String::from_utf8_lossy(&bytes), cx);
@@ -1486,6 +1512,7 @@ impl Render for TerminalView {
     self.tooltips.sync(cx);
     let p = theme::palette(self.dark);
     let focused = self.focus.is_focused(window);
+    self.focused = focused;
     let bounds = self.bounds.clone();
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
@@ -1701,6 +1728,8 @@ pub struct TerminalPane {
   adopt_due: bool,
   /// [`RELEASES`] when the pane last looked for kept columns.
   releases_seen: u64,
+  /// Agent sessions being read before their columns open, by pane id.
+  opening: std::collections::HashMap<i64, Task<()>>,
 }
 
 impl Drop for TerminalPane {
@@ -1783,6 +1812,7 @@ impl TerminalPane {
       starting_devcontainer: false,
       _environment_task: None,
       _keys: None,
+      opening: Default::default(),
     }
   }
 
@@ -2278,6 +2308,9 @@ impl TerminalPane {
   }
 
   /// Opens (or focuses) the agent session with the pane id `pane_id`.
+  /// Reading the session touches the database and the repository (SSH for
+  /// a remote one), so it runs in the background and the column joins the
+  /// row once it lands.
   fn open_agent(&mut self, pane_id: i64, window: &mut Window, cx: &mut Context<Self>) {
     let id = agent_column_id(pane_id);
     if self.columns.iter().any(|c| c.id == id) {
@@ -2288,104 +2321,34 @@ impl TerminalPane {
       }
       return;
     }
-    let Some(kind_and_start) = self.agent_session(pane_id) else {
-      return;
-    };
-    let (kind, pty, start) = kind_and_start;
-    self.push_column(id.clone(), pty, kind, start, cx);
-    self.publish(cx);
-    self.focus_column(&id, window, cx);
-  }
-
-  /// The session's column and what its terminal starts, read from the
-  /// session tables of the repository and its supporting ones.
-  fn agent_session(&self, pane_id: i64) -> Option<(Kind, String, Start)> {
     let main = match &self.route.main_repo_path {
       main if !main.is_empty() => main.clone(),
       _ => self.place.repo_path.clone(),
     };
-    let mut repos = vec![main.clone()];
-    repos.extend(self.host.supporting_repos(&main));
-    for repo in repos {
-      let sessions = self.host.sessions(&repo).unwrap_or_default();
-      let Some(session) = sessions
-        .into_iter()
-        .find(|s| terminal_data::pane_session_id(&repo, &main, s.id) == pane_id)
-      else {
-        continue;
-      };
-      // What the session starts with: the backend's, for a session it
-      // started, else React's.
-      let pending = self.host.pending_session(pane_id).or_else(|| {
-        self
-          .route
-          .pending
-          .iter()
-          .find(|p| p.session_id == pane_id)
-          .map(Pending::start)
+    let (host, pending) = (self.host.clone(), self.route.pending.clone());
+    let read = cx
+      .background_executor()
+      .spawn(async move { agent_session(&*host, &main, &pending, pane_id) });
+    // A newer read for the same session replaces (and drops) the older one.
+    let task = cx.spawn(async move |this, cx| {
+      let session = read.await;
+      let _ = this.update(cx, |pane, cx| {
+        pane.opening.remove(&pane_id);
+        let Some((kind, pty, start)) = session else {
+          return;
+        };
+        if !pane.columns.iter().any(|c| c.id == id) {
+          pane.push_column(id.clone(), pty, kind, start, cx);
+          pane.publish(cx);
+        }
+        // Another session may have become the active one meanwhile.
+        if pane.route.active_session_id == Some(pane_id) {
+          pane.focus_next = Some(id);
+        }
+        cx.notify();
       });
-      let pending = pending.as_ref();
-      let workspace = session.workspace_id.and_then(|id| {
-        super::code_data::CodeHost::workspaces(&*self.host, &repo)
-          .ok()?
-          .into_iter()
-          .find(|w| w.id == id)
-      });
-      let workspace_path = pending
-        .and_then(|p| p.workspace_path.clone())
-        .or_else(|| workspace.as_ref().map(super::merge::full_path));
-      let agent = pending
-        .and_then(|p| p.agent.clone())
-        .unwrap_or_else(|| self.default_agent(&repo));
-      let pty = terminal_data::agent_pty_id(&repo, session.id);
-      let start = AgentStart {
-        agent: agent.clone(),
-        repo_path: repo.clone(),
-        workspace_path: workspace_path.clone(),
-        session_id: session.id,
-        pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
-        permission_mode: pending.and_then(|p| p.permission_mode.clone()),
-      };
-      let kind = Kind::Agent {
-        pane_id,
-        name: session.name.clone(),
-        repo_path: repo,
-        workspace_path,
-        workspace_name: workspace.map(|w| w.branch_name),
-        agent,
-      };
-      return Some((
-        kind,
-        pty,
-        Start::Agent {
-          start,
-          name: session.name,
-          workspace_id: session.workspace_id,
-          working_dir: pending.and_then(|p| p.workspace_path.clone()),
-        },
-      ));
-    }
-    None
-  }
-
-  fn default_agent(&self, repo: &str) -> String {
-    let key = vec!["default_agent".to_string()];
-    let repo_agent = self
-      .host
-      .repo_settings(repo, &key)
-      .ok()
-      .and_then(|v| v.get("default_agent").cloned().flatten())
-      .filter(|v| !v.is_empty());
-    repo_agent
-      .or_else(|| {
-        self
-          .host
-          .settings(&key)
-          .ok()
-          .and_then(|v| v.get("default_agent").cloned().flatten())
-          .filter(|v| !v.is_empty())
-      })
-      .unwrap_or_else(|| "claude".into())
+    });
+    self.opening.insert(pane_id, task);
   }
 
   /// The active terminal's directory, else the workspace's.
@@ -3668,6 +3631,88 @@ fn paint_run(
     *line = Arc::new(snapped);
   }
   let _ = line.paint(origin, px(height), gpui::TextAlign::Left, None, window, cx);
+}
+
+/// The session's column and what its terminal starts, read from the
+/// session tables of the repository `main` and its supporting ones.
+fn agent_session(
+  host: &dyn terminal_data::TerminalHost,
+  main: &str,
+  route_pending: &[Pending],
+  pane_id: i64,
+) -> Option<(Kind, String, Start)> {
+  let mut repos = vec![main.to_string()];
+  repos.extend(host.supporting_repos(main));
+  for repo in repos {
+    let sessions = host.sessions(&repo).unwrap_or_default();
+    let Some(session) = sessions
+      .into_iter()
+      .find(|s| terminal_data::pane_session_id(&repo, main, s.id) == pane_id)
+    else {
+      continue;
+    };
+    // What the session starts with: the backend's, for a session it
+    // started, else React's.
+    let pending = host.pending_session(pane_id).or_else(|| {
+      route_pending
+        .iter()
+        .find(|p| p.session_id == pane_id)
+        .map(Pending::start)
+    });
+    let pending = pending.as_ref();
+    let workspace = session.workspace_id.and_then(|id| {
+      super::code_data::CodeHost::workspaces(host, &repo)
+        .ok()?
+        .into_iter()
+        .find(|w| w.id == id)
+    });
+    let workspace_path = pending
+      .and_then(|p| p.workspace_path.clone())
+      .or_else(|| workspace.as_ref().map(super::merge::full_path));
+    let agent = pending
+      .and_then(|p| p.agent.clone())
+      .unwrap_or_else(|| default_agent(host, &repo));
+    let pty = terminal_data::agent_pty_id(&repo, session.id);
+    let start = AgentStart {
+      agent: agent.clone(),
+      repo_path: repo.clone(),
+      workspace_path: workspace_path.clone(),
+      session_id: session.id,
+      pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
+      permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+    };
+    let kind = Kind::Agent {
+      pane_id,
+      name: session.name.clone(),
+      repo_path: repo,
+      workspace_path,
+      workspace_name: workspace.map(|w| w.branch_name),
+      agent,
+    };
+    return Some((
+      kind,
+      pty,
+      Start::Agent {
+        start,
+        name: session.name,
+        workspace_id: session.workspace_id,
+        working_dir: pending.and_then(|p| p.workspace_path.clone()),
+      },
+    ));
+  }
+  None
+}
+
+fn default_agent(host: &dyn terminal_data::TerminalHost, repo: &str) -> String {
+  let key = vec!["default_agent".to_string()];
+  let read = |v: Result<super::settings_data::Values, String>| {
+    v.ok()
+      .and_then(|v| v.get("default_agent").cloned().flatten())
+      .filter(|v| !v.is_empty())
+  };
+  read(host.repo_settings(repo, &key))
+    .or_else(|| read(host.settings(&key)))
+    .unwrap_or_else(|| "claude".into())
 }
 
 /// The emulator's name for a mouse button xterm reports.

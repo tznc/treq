@@ -139,8 +139,7 @@ Deno.serve(async (req) => {
   } = await supabaseUser.auth.getUser();
   if (authError || !user) return json({ error: "Unauthorized" }, 401);
 
-  // deno-lint-ignore no-explicit-any
-  let body: Record<string, any>;
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
@@ -209,8 +208,7 @@ function toClientKeyResponse(row: ClientKeyRow) {
 async function handleRegisterClientKey(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
 ): Promise<Response> {
   const idempotencyKey = requireIdempotencyKey(body);
@@ -267,8 +265,7 @@ async function handleListClientKeys(supabase: SupabaseClient, ownerUserId: strin
 async function handleRevokeClientKey(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
 ): Promise<Response> {
   const idempotencyKey = requireIdempotencyKey(body);
@@ -332,8 +329,7 @@ async function requireActiveOwnedKey(
 async function handleIssueCertificate(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
 ): Promise<Response> {
   const elapsed = startTimer();
@@ -461,8 +457,7 @@ async function handleIssueCertificate(
 async function handleAuthorizedKeyChange(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   mode: "install" | "remove",
   correlationId: string,
 ): Promise<Response> {
@@ -478,6 +473,8 @@ async function handleAuthorizedKeyChange(
   if (!key) throw new ValidationError("Key does not belong to this user", 404);
   if (mode === "install" && key.revoked_at) throw new ValidationError("Key has been revoked", 409);
   if (!instance.provider_resource_id) throw new ValidationError("Instance has no provider resource yet", 409);
+  const endpointId = instance.endpoint_id;
+  if (!endpointId) throw new ValidationError("Instance has no endpoint recorded yet", 409);
 
   const op = await beginOperation(supabase, {
     ownerUserId,
@@ -500,11 +497,11 @@ async function handleAuthorizedKeyChange(
     if (mode === "install") {
       await recordAuthorizedKeyInstalled(supabase, {
         ownerUserId,
-        endpointId: instance.endpoint_id!,
+        endpointId,
         clientKeyId: key.id,
       });
     } else {
-      await recordAuthorizedKeyRemoved(supabase, instance.endpoint_id!, key.id);
+      await recordAuthorizedKeyRemoved(supabase, endpointId, key.id);
     }
 
     await completeOperation(supabase, op.id, { status: "succeeded" });
@@ -532,8 +529,7 @@ async function handleAuthorizedKeyChange(
 async function handleKeyscanEndpoint(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
 ): Promise<Response> {
   const instanceId = requireString(body, "instance_id");
@@ -595,8 +591,7 @@ async function handleKeyscanEndpoint(
 async function handleReportCutoff(
   supabase: SupabaseClient,
   ownerUserId: string,
-  // deno-lint-ignore no-explicit-any
-  body: Record<string, any>,
+  body: Record<string, unknown>,
   correlationId: string,
 ): Promise<Response> {
   const reason = requireString(body, "reason");

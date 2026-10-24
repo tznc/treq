@@ -4,6 +4,7 @@
 //! [`run`] does it, in line order, so a stacked line's base exists first.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -17,21 +18,33 @@ const LINK_LINE: &str = "Paste the branch name; links open from the desktop app"
 /// A title's branch until the repository sets its own pattern.
 pub const DEFAULT_BRANCH_PATTERN: &str = "treq/{name}";
 
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static DASH_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static TRAILING_DASH_LETTER: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new("-[a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static TRAILING_SEPARATOR_LETTER: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"[/.\-][a-z]$").expect("regex"));
+#[allow(clippy::expect_used, reason = "constant pattern")]
+static TRAILING_SEPARATORS: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"[/.\-]+$").expect("regex"));
+
 /// `sanitizeForBranchName`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn sanitize_for_branch_name(text: &str) -> String {
   let lower: String = text
     .to_lowercase()
     .chars()
     .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c.is_whitespace() || *c == '-')
     .collect();
-  let dashed = Regex::new(r"\s+").expect("regex").replace_all(&lower, "-");
-  let single = Regex::new("-+").expect("regex").replace_all(&dashed, "-");
+  let dashed = WHITESPACE.replace_all(&lower, "-");
+  let single = DASH_RUN.replace_all(&dashed, "-");
   let cut: String = single.chars().take(50).collect();
   let trimmed = cut.trim_matches('-');
-  let sanitized = Regex::new("-[a-z]$")
-    .expect("regex")
-    .replace(trimmed, "")
-    .to_string();
+  let sanitized = TRAILING_DASH_LETTER.replace(trimmed, "").to_string();
   if sanitized.is_empty() {
     "unnamed".into()
   } else {
@@ -40,9 +53,10 @@ fn sanitize_for_branch_name(text: &str) -> String {
 }
 
 /// `cleanBranchNameTrailing`.
+#[allow(clippy::expect_used, reason = "constant pattern")]
 fn clean_branch_name_trailing(name: &str) -> String {
-  let single = Regex::new(r"[/.\-][a-z]$").expect("regex");
-  let separators = Regex::new(r"[/.\-]+$").expect("regex");
+  let single = &*TRAILING_SEPARATOR_LETTER;
+  let separators = &*TRAILING_SEPARATORS;
   let mut result = name.to_string();
   loop {
     let next = separators
@@ -350,7 +364,7 @@ pub fn run(
 ) -> Result<Vec<NewWorkspaceRow>, String> {
   workspaces::sync_workspaces(repo_path)?;
   // Remote branches named in the text must be visible before they open.
-  let _ = jj::jj_git_fetch(repo_path);
+  let _ = jj::jj_git_fetch_unless_recent(repo_path, workspaces::RECENT_FETCH);
   let mut rows = plan(repo_path, text, stack_on)?;
   let default = super::get_repo_default_branch(repo_path)?;
   let copy_files = included_copy_files(repo_path);
@@ -421,8 +435,15 @@ fn create(
     metadata,
     copy_files,
   )?;
-  if stacked {
-    workspaces::apply_workspace_target_branch(repo_path, workspace.id, base)?;
+  // Stacked on a workspace's branch, creation already targets it (and starts
+  // on its tip); only a plain branch as the base needs the retarget.
+  if stacked && workspace.target_branch.as_deref() != Some(base) {
+    workspaces::apply_workspace_target_branch_after(
+      repo_path,
+      workspace.id,
+      base,
+      workspaces::RECENT_FETCH,
+    )?;
   }
   Ok(workspace.id)
 }

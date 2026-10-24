@@ -17,7 +17,7 @@ struct Harness {
   popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
 }
 
-type Sink = Arc<dyn Fn(String) + Send + Sync>;
+type Sink = Arc<dyn Fn(&[u8]) + Send + Sync>;
 type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 
 /// The backend, as the screens see it, recording what they asked of it.
@@ -28,6 +28,8 @@ struct FakeHost {
   container_error: Option<String>,
   /// The Overview screen's machines and recent repositories.
   listing: machines::Listing,
+  /// The dev containers Docker lists, which join the listing.
+  containers: (Vec<machines::Machine>, Vec<machines::Recent>),
   /// What a host machine says is installed on it.
   host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
   /// What `check_prerequisites` reports.
@@ -59,6 +61,9 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The token hunk reads report instead of the diff's: the disk moved on
+  /// between the two reads.
+  hunks_token: Mutex<Option<String>>,
   gitattributes: String,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
@@ -259,6 +264,10 @@ impl machines::MachinesHost for FakeHost {
     self.listing.clone()
   }
 
+  fn containers(&self) -> (Vec<machines::Machine>, Vec<machines::Recent>) {
+    self.containers.clone()
+  }
+
   fn machine_tools(
     &self,
     place: &machines::Place,
@@ -423,7 +432,14 @@ impl settings_data::SettingsHost for FakeHost {
 impl workspace_data::WorkspaceHost for FakeHost {
   fn load(&self, route: &workspace_data::Route) -> workspace_data::Loaded {
     self.record(format!("read workspace {}", route.revision));
-    self.loaded.clone()
+    let mut loaded = self.loaded.clone();
+    // Another workspace of the list than the one `loaded` is for.
+    let listed = |id| self.workspaces.iter().find(|w| w.id == id).cloned();
+    match (route.workspace_id, loaded.workspace.as_ref().map(|w| w.id)) {
+      (Some(id), Some(loaded_id)) if id != loaded_id => loaded.workspace = listed(id),
+      _ => {}
+    }
+    loaded
   }
 
   fn pr_cache(&self, _: &str, branch: &str) -> workspace_data::PrCache {
@@ -439,6 +455,11 @@ impl workspace_data::WorkspaceHost for FakeHost {
   fn sync(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
     self.record(format!("sync {workspace_id:?}"));
     workspace_data::Outcome::failed("Sync failed", "offline".into())
+  }
+
+  fn reset_to_remote(&self, _: &str, workspace_id: i64) -> workspace_data::Outcome {
+    self.record(format!("reset {workspace_id}"));
+    workspace_data::Outcome::ok("Reset to remote", "Dropped 2 local commits".into())
   }
 
   fn rebase_home(&self, _: &str, branch: &str) -> workspace_data::Outcome {
@@ -597,6 +618,10 @@ impl code_data::CodeHost for FakeHost {
     Ok(())
   }
 
+  fn warm_file_index(&self, _: &str, workspace_id: Option<i64>, _: &str) {
+    self.record(format!("read file index {workspace_id:?}"));
+  }
+
   fn search_files(
     &self,
     _: &str,
@@ -686,13 +711,15 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<crate::core::WorkspaceFileHunksBatch, String> {
     self.record(format!("read hunks {paths:?}"));
     let working = self.working().ok_or("no changes")?;
+    let token = self.hunks_token.lock().unwrap().clone();
     Ok(crate::core::WorkspaceFileHunksBatch {
-      snapshot_token: "t".into(),
+      snapshot_token: token
+        .or_else(|| working.working_copy_token.clone())
+        .unwrap_or_default(),
       files: paths
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
           path: path.clone(),
-          content_hash: format!("h-{path}"),
           hunks: working
             .hunks_by_file
             .iter()
@@ -927,7 +954,7 @@ impl terminal_data::TerminalHost for FakeHost {
     Ok(())
   }
 
-  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> terminal_data::Listening {
+  fn listen(&self, id: &str, sink: terminal_data::OutputSink) -> terminal_data::Listening {
     self
       .sinks
       .lock()
@@ -1041,6 +1068,11 @@ impl terminal_data::TerminalHost for FakeHost {
     self.record(format!("write review image {name} ({} bytes)", png.len()));
     Ok(format!("{repo}/.treq/send/{name}"))
   }
+
+  fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String> {
+    self.record(format!("save pasted image ({} bytes)", bytes.len()));
+    Ok("/tmp/treq-pasted-images/paste-1.png".into())
+  }
 }
 
 impl FakeHost {
@@ -1080,7 +1112,7 @@ impl FakeHost {
       .map(|(_, sink)| sink.clone())
       .collect();
     for sink in sinks {
-      sink(data.to_string());
+      sink(data.as_bytes());
     }
   }
 }
@@ -1229,6 +1261,9 @@ impl commits_data::CommitsHost for FakeHost {
 
   fn abandon(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("abandon {change_id}"));
+    if self.failing.contains(&"abandon") {
+      return Err("abandon failed".into());
+    }
     Ok("op1".into())
   }
 
@@ -1834,6 +1869,42 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
     ]
   );
   assert_eq!(host.calls(), ["check", "open_local /home/me/web"]);
+}
+
+#[gpui::test]
+fn onboarding_adds_the_dev_containers_docker_lists_to_its_rows(cx: &mut TestAppContext) {
+  use machines::{Machine, Place, Recent};
+  let mut base = listing();
+  base
+    .machines
+    .retain(|m| !matches!(m.place, Place::DevContainer { .. }));
+  base.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: base,
+    containers: (
+      vec![Machine {
+        id: "devcontainer:c2".into(),
+        place: Place::DevContainer {
+          container_id: "c2".into(),
+          repo_path: "/home/me/api".into(),
+          running: true,
+        },
+        name: "api".into(),
+        detail: "Running".into(),
+      }],
+      vec![Recent {
+        machine_id: "devcontainer:c2".into(),
+        name: "api".into(),
+        path: "/home/me/api".into(),
+        saved_id: None,
+      }],
+    ),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.drawn("machine-local"));
+  assert!(h.drawn("machine-devcontainer:c2"));
+  assert!(!h.drawn("machine-devcontainer:c1"));
 }
 
 #[gpui::test]
@@ -2636,12 +2707,16 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
       "notify workspaceChanged",
     ]
   );
+  // The window reads again on `workspaceChanged` and bumps the route's
+  // revision, which reads the header again
+  // (`workspace_header_reads_again_when_the_model_refreshes`): the header
+  // doesn't read it twice.
   let reads = host
     .calls()
     .iter()
     .filter(|c| c.starts_with("read workspace "))
     .count();
-  assert_eq!(reads, 2, "it reads the workspace again after syncing");
+  assert_eq!(reads, 1);
 }
 
 #[gpui::test]
@@ -4132,6 +4207,22 @@ fn commits_tab_removes_an_abandoned_commit(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn commits_tab_keeps_a_commit_it_failed_to_abandon(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  host.failing = vec!["abandon"];
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-a");
+  h.click("delete-commit-a");
+  h.answer("Delete commit");
+  assert!(host.writes().contains(&"abandon a".to_string()));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  assert!(h.drawn("commit-row-a"), "put back");
+  assert!(h.drawn("delete-commit-a"));
+}
+
+#[gpui::test]
 fn commits_tab_opens_the_commit_react_asked_for(cx: &mut TestAppContext) {
   let mut route = commits_route();
   if let View::Workspace(r) = &mut route.view {
@@ -4643,7 +4734,7 @@ fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) 
   edit_a_rs(&mut h, &host);
   let viewed = h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
     changes.viewed.contains_key("c.rs")
   });
   assert!(viewed, "{:?}", host.writes());
@@ -4730,7 +4821,7 @@ fn shown_lines(h: &mut Harness, path: &str) -> Vec<String> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
     changes.hunks[path]
       .hunks
       .iter()
@@ -4746,6 +4837,101 @@ fn changes_tab_follows_edits_on_disk_outside_a_review(cx: &mut TestAppContext) {
   edit_a_rs(&mut h, &host);
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
   assert!(!h.drawn("stale-banner"));
+}
+
+#[gpui::test]
+fn a_refresh_that_reads_the_same_diff_keeps_its_rows(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  // The hunks `a.rs` shows and the rows' layout revision.
+  let state = |h: &mut Harness| {
+    h.drawn("changes-diff-viewer");
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
+      (
+        Arc::as_ptr(&changes.hunks["a.rs"].hunks),
+        changes.layout_revision(),
+      )
+    })
+  };
+  let before = state(&mut h);
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  assert_eq!(state(&mut h), before);
+  edit_a_rs(&mut h, &host);
+  let after = state(&mut h);
+  assert_ne!(after.0, before.0, "the edited file is read again");
+  assert_ne!(after.1, before.1, "and laid out again");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+/// `changes_host` whose reads name the working-copy diff they saw.
+fn tokened_changes_host() -> FakeHost {
+  let mut host = changes_host();
+  if let Some(working) = host.working.as_mut() {
+    working.working_copy_token = Some("t1".into());
+  }
+  host
+}
+
+fn bump_changes_revision(h: &mut Harness) {
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+}
+
+fn count_calls(host: &FakeHost, prefix: &str) -> usize {
+  host
+    .calls()
+    .iter()
+    .filter(|c| c.starts_with(prefix))
+    .count()
+}
+
+#[gpui::test]
+fn a_refresh_of_an_unchanged_working_copy_reads_no_hunks(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  h.drawn("changes-diff-viewer");
+  let (diffs, hunks) = (
+    count_calls(&host, "read workspace diff"),
+    count_calls(&host, "read hunks"),
+  );
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read workspace diff"), diffs + 1);
+  assert_eq!(
+    count_calls(&host, "read hunks"),
+    hunks,
+    "same diff, nothing to read"
+  );
+
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  assert!(count_calls(&host, "read hunks") > hunks, "an edit is read");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+#[gpui::test]
+fn hunks_read_from_a_newer_diff_are_read_again(cx: &mut TestAppContext) {
+  let host = tokened_changes_host();
+  *host.hunks_token.lock().unwrap() = Some("t2".into());
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.drawn("changes-diff-viewer");
+  let hunks = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  assert!(
+    count_calls(&host, "read hunks") > hunks,
+    "the diff names t1 but the hunks were read at t2"
+  );
 }
 
 #[gpui::test]
@@ -4769,7 +4955,7 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes.as_ref().expect("changes").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
     changes
       .review
       .selection
@@ -4837,7 +5023,7 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   assert_eq!(
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let changes = workspace.changes.as_ref().expect("changes").read(cx);
+      let changes = workspace.changes().expect("changes").read(cx);
       changes.review.draft_text.clone()
     }),
     "```suggestion\nb\nc\n```\n"
@@ -5049,7 +5235,7 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
     h.cx.run_until_parked();
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-      let search = &workspace.changes.as_ref().expect("changes").read(cx).search;
+      let search = &workspace.changes().expect("changes").read(cx).search;
       (search.current, search.total)
     })
   };
@@ -5176,6 +5362,39 @@ fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
   h.click("agent-resolve-ag");
   h.cx.run_until_parked();
   assert!(!h.drawn("agent-review-comment-count"));
+}
+
+#[gpui::test]
+fn an_agent_comment_poll_that_reads_the_same_comments_changes_nothing(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("agent-review-comment-card"));
+  let revision = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      workspace
+        .changes()
+        .expect("changes")
+        .read(cx)
+        .threads
+        .revision
+    })
+  };
+  let (before, reads) = (revision(&mut h), count_calls(&host, "read agent comments"));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
+  h.cx.run_until_parked();
+  assert!(count_calls(&host, "read agent comments") > reads, "polled");
+  assert_eq!(revision(&mut h), before, "nothing new, nothing redone");
+
+  host.agent.lock().unwrap()[0].comment_text = "Changed".into();
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
+  h.cx.run_until_parked();
+  assert_ne!(revision(&mut h), before);
 }
 
 #[gpui::test]
@@ -5592,6 +5811,76 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   );
 }
 
+#[gpui::test]
+fn pasting_text_into_a_terminal_types_the_text(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  h.click("terminal-body");
+  h.cx
+    .write_to_clipboard(gpui::ClipboardItem::new_string("hello agent".into()));
+  h.cx.simulate_keystrokes("cmd-v");
+  assert_eq!(
+    pty_writes(&host),
+    vec![format!("write {pty} \"hello agent\"")]
+  );
+}
+
+/// Claude Code and Codex attach an image whose path is pasted, as they do
+/// for an image file dropped onto a native terminal.
+#[gpui::test]
+fn pasting_a_clipboard_image_pastes_the_path_it_was_saved_to(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  host.output(&pty, "\x1b[?2004h");
+  h.cx.run_until_parked();
+  h.click("terminal-body");
+  let png = b"\x89PNG\r\n\x1a\n\0\0\0\0".to_vec();
+  h.cx
+    .write_to_clipboard(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
+      gpui::ImageFormat::Png,
+      png,
+    )));
+  h.cx.simulate_keystrokes("cmd-v");
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .calls()
+      .contains(&"save pasted image (12 bytes)".to_string()),
+    "{:?}",
+    host.calls()
+  );
+  assert_eq!(
+    pty_writes(&host),
+    vec![format!(
+      "write {pty} \"\\u{{1b}}[200~'/tmp/treq-pasted-images/paste-1.png'\\u{{1b}}[201~\""
+    )]
+  );
+}
+
+#[gpui::test]
+fn pasting_an_image_into_a_remote_session_saves_nothing(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  h.cx
+    .write_to_clipboard(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
+      gpui::ImageFormat::Png,
+      b"\x89PNG\r\n\x1a\n\0\0\0\0".to_vec(),
+    )));
+  h.cx.simulate_keystrokes("cmd-v");
+  h.cx.run_until_parked();
+  assert!(
+    !host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("save pasted image")),
+    "{:?}",
+    host.calls()
+  );
+  assert_eq!(pty_writes(&host), Vec::<String>::new());
+}
+
 /// A terminal resized while its session starts hands the PTY the new size
 /// once it runs: a program drawing for a wider PTY than the grid wraps
 /// every line, so redraws stack up and overwrite each other.
@@ -5764,7 +6053,7 @@ fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext)
   assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
 
   // A third window on it finds none left to show.
-  let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host.clone());
+  let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host);
   third.cx.run_until_parked();
   assert!(!third.drawn("terminal-column-shell"));
 }
@@ -6076,6 +6365,29 @@ fn files_dropped_on_a_shell_are_typed_but_not_on_a_remote_session(cx: &mut TestA
     .center();
   drop_files(&mut h, at);
   assert_eq!(writes(&host), 0, "{:?}", host.calls());
+}
+
+/// A native terminal pastes a drop, so an agent that asked for bracketed
+/// paste attaches a dropped image path as it would a pasted one.
+#[gpui::test]
+fn files_dropped_on_an_agent_are_pasted(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  host.output(&pty, "\x1b[?2004h");
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("terminal-column-agent")
+    .expect("agent")
+    .center();
+  drop_files(&mut h, at);
+  assert_eq!(
+    pty_writes(&host),
+    vec![format!(
+      "write {pty} \"\\u{{1b}}[200~'/tmp/a b.txt'\\u{{1b}}[201~\""
+    )]
+  );
 }
 
 #[gpui::test]
@@ -7771,11 +8083,13 @@ mod conflicts;
 mod file_browser;
 mod fuzz;
 mod github;
+mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
 mod merge_queue;
 mod open_workspaces;
 mod pr_review;
+mod prefetch;
 mod review_comments;
 mod stack_panel;
 mod tab_badges;

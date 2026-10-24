@@ -166,6 +166,34 @@ pub fn spin(id: impl Into<ElementId>, icon: gpui::Svg) -> impl IntoElement {
   )
 }
 
+/// How long a load runs before its spinner or skeleton shows: one that
+/// lands sooner draws nothing rather than flashing it.
+pub const SPINNER_DELAY: Duration = Duration::from_millis(150);
+
+/// `placeholder` (a spinner, skeleton or "Loading..." line), hidden for its
+/// first [`SPINNER_DELAY`], so a fast load flashes nothing. It takes its room
+/// from the start, so nothing moves when it shows. Once shown it also
+/// answers to the debug selector `{id}-shown`.
+pub fn delayed<E>(id: impl Into<SharedString>, placeholder: E) -> gpui::AnimationElement<E>
+where
+  E: Styled + InteractiveElement + IntoElement + 'static,
+{
+  let id: SharedString = id.into();
+  let shown = format!("{id}-shown");
+  placeholder.with_animation(
+    ElementId::Name(id),
+    Animation::new(SPINNER_DELAY),
+    move |el, delta| {
+      if delta < 1. {
+        el.opacity(0.)
+      } else {
+        let shown = shown.clone();
+        el.debug_selector(move || shown)
+      }
+    },
+  )
+}
+
 /// `ui/button.tsx` variants.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
@@ -187,13 +215,6 @@ pub enum Size {
   Sm,
   Xs,
 }
-
-/// How much of a filled variant's color a disabled button keeps, as
-/// gpui-kit's own disabled buttons do. React's `disabled:opacity-40` faded
-/// the whole button as one layer; GPUI fades each primitive on its own, so
-/// element opacity let the faded fill show through a translucent label and
-/// wash it out.
-const DISABLED_FILL_OPACITY: f32 = 0.15;
 
 /// A [`Button`] child. Icons take the button's color when it renders, so
 /// they fade with it whichever order `icon` and `disabled` were called in.
@@ -355,8 +376,9 @@ impl Styled for Button {
 impl Button {
   /// The colors of each interaction state, as gpui-bootstrap's
   /// `button-variant()` takes them. A disabled button keeps its shape: a
-  /// filled one fades its fill, an unfilled one its border, and the label
-  /// goes muted.
+  /// filled one swaps its fill for the neutral muted one, whatever its
+  /// variant or a caller's fill, so no state colour shows on a control that
+  /// can't act; an unfilled one fades its border, and the label goes muted.
   fn colors(&self) -> gpui_bootstrap::ButtonColors {
     let p = &self.palette;
     let clear = gpui::transparent_black();
@@ -376,10 +398,7 @@ impl Button {
     };
     let color = self.variant_foreground();
     let (disabled_bg, disabled_border) = if self.filled() {
-      (
-        bg.opacity(DISABLED_FILL_OPACITY),
-        border.opacity(DISABLED_FILL_OPACITY),
-      )
+      (p.muted, p.muted)
     } else {
       (bg, border.opacity(0.5))
     };
@@ -401,7 +420,7 @@ impl Button {
     }
   }
 
-  /// The label color while disabled. Over a tinted fill the muted color
+  /// The label color while disabled. Over the muted fill the muted color
   /// alone reads as disabled; over the page it needs fading too, or an
   /// outline button looks enabled.
   fn disabled_foreground(&self) -> Hsla {
@@ -425,7 +444,7 @@ impl RenderOnce for Button {
       let mut style = self.style.clone();
       if filled {
         style.background = style.background.take().map(|fill| match fill {
-          gpui::Fill::Color(bg) => gpui::Fill::Color(bg.opacity(DISABLED_FILL_OPACITY)),
+          gpui::Fill::Color(_) => gpui::Fill::Color(self.palette.muted.into()),
         });
       }
       style.border_color = style.border_color.map(|c| c.opacity(0.5));
@@ -718,7 +737,7 @@ mod tests {
     let p = theme::palette(false);
     let primary = Button::new("primary", &p);
     assert_eq!(primary.foreground(), p.primary_foreground);
-    // An opaque label over the tinted fill, so the fill can't wash it out.
+    // An opaque label over the muted fill, so the fill can't wash it out.
     let primary = primary.disabled(true);
     assert_eq!(primary.foreground(), p.muted_foreground);
     let outline = Button::new("outline", &p)

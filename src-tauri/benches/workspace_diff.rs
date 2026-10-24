@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(
+  clippy::unwrap_used,
+  clippy::expect_used,
+  clippy::string_slice,
+  reason = "test code"
+)]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::fs;
 use std::path::PathBuf;
@@ -86,6 +91,56 @@ fn setup_workspace_diff_ten_files_fifty_added_lines() -> (TestRepo, i64) {
   (repo, workspace.id)
 }
 
+/// A repo of 2,000 tracked files with one edit in the workspace: the reload
+/// walks the whole working copy to snapshot it.
+fn setup_workspace_diff_2000_files() -> (TestRepo, i64) {
+  let repo = TestRepo::new().expect("failed to init test repo");
+  for index in 0..2000 {
+    repo
+      .create_file(
+        &format!("src/module_{}/file_{index}.rs", index % 40),
+        &format!("pub const VALUE: usize = {index};\n"),
+      )
+      .expect("failed to write tracked file");
+  }
+  repo
+    .commit_file("README.md", "bench\n", "track 2,000 files")
+    .expect("failed to commit tracked files");
+
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat-bench-diff-2000-files",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("failed to create workspace");
+  write_workspace_file(&repo, &workspace, "src/module_0/file_0.rs", "edited\n");
+
+  init_bench_app_db(&repo);
+  (repo, workspace.id)
+}
+
+/// The 2,000-file repo with 500 of its files edited in the workspace: a
+/// large working-copy change, as after a refactor or a codegen run.
+fn setup_workspace_diff_2000_files_500_edits() -> (TestRepo, i64) {
+  let (repo, workspace_id) = setup_workspace_diff_2000_files();
+  let workspace = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, workspace_id)
+    .expect("failed to read workspace")
+    .expect("workspace should exist");
+  for index in 0..500 {
+    write_workspace_file(
+      &repo,
+      &workspace,
+      &format!("src/module_{}/file_{index}.rs", index % 40),
+      &format!("pub const VALUE: usize = {};\n", index + 1),
+    );
+  }
+  (repo, workspace_id)
+}
+
 fn init_bench_app_db(repo: &TestRepo) {
   let app_dir: PathBuf = repo.temp_dir.path().join("app-data");
   fs::create_dir_all(&app_dir).expect("failed to create benchmark app dir");
@@ -103,12 +158,13 @@ fn bench_workspace_diff(c: &mut Criterion) {
   group.sample_size(20);
 
   group.bench_function("committed_changes", |b| {
-    b.iter_batched(
+    // By reference, so deleting the temp repo stays out of the timing.
+    b.iter_batched_ref(
       setup_workspace_diff,
       |(repo, workspace_id)| {
         treq_lib::core::workspace_diff(
           std::hint::black_box(&repo.repo_path),
-          std::hint::black_box(workspace_id),
+          std::hint::black_box(*workspace_id),
         )
         .expect("workspace_diff failed");
       },
@@ -117,12 +173,43 @@ fn bench_workspace_diff(c: &mut Criterion) {
   });
 
   group.bench_function("10_files_50_added_lines_each", |b| {
-    b.iter_batched(
+    // By reference, so deleting the temp repo stays out of the timing.
+    b.iter_batched_ref(
       setup_workspace_diff_ten_files_fifty_added_lines,
       |(repo, workspace_id)| {
         treq_lib::core::workspace_diff(
           std::hint::black_box(&repo.repo_path),
-          std::hint::black_box(workspace_id),
+          std::hint::black_box(*workspace_id),
+        )
+        .expect("workspace_diff failed");
+      },
+      BatchSize::PerIteration,
+    );
+  });
+
+  group.bench_function("repo_2000_files_one_edit", |b| {
+    // By reference, so deleting the temp repo stays out of the timing.
+    b.iter_batched_ref(
+      setup_workspace_diff_2000_files,
+      |(repo, workspace_id)| {
+        treq_lib::core::workspace_diff(
+          std::hint::black_box(&repo.repo_path),
+          std::hint::black_box(*workspace_id),
+        )
+        .expect("workspace_diff failed");
+      },
+      BatchSize::PerIteration,
+    );
+  });
+
+  group.bench_function("repo_2000_files_500_edits", |b| {
+    // By reference, so deleting the temp repo stays out of the timing.
+    b.iter_batched_ref(
+      setup_workspace_diff_2000_files_500_edits,
+      |(repo, workspace_id)| {
+        treq_lib::core::workspace_diff(
+          std::hint::black_box(&repo.repo_path),
+          std::hint::black_box(*workspace_id),
         )
         .expect("workspace_diff failed");
       },
@@ -133,5 +220,33 @@ fn bench_workspace_diff(c: &mut Criterion) {
   group.finish();
 }
 
-criterion_group!(benches, bench_workspace_diff);
+/// One batch of the Changes tab's hunk reads (`BATCH` files) after a reload.
+fn bench_file_hunks_batch(c: &mut Criterion) {
+  let mut group = c.benchmark_group("file_hunks_batch");
+  group.sample_size(10);
+
+  group.bench_function("32_of_500_edits_in_2000_files", |b| {
+    let paths: Vec<String> = (0..32)
+      .map(|index| format!("src/module_{}/file_{index}.rs", index % 40))
+      .collect();
+    // By reference, so deleting the temp repo stays out of the timing.
+    b.iter_batched_ref(
+      setup_workspace_diff_2000_files_500_edits,
+      |(repo, workspace_id)| {
+        treq_lib::core::list_file_hunks_batch(
+          std::hint::black_box(&repo.repo_path),
+          std::hint::black_box(Some(*workspace_id)),
+          paths.clone(),
+          "git",
+        )
+        .expect("list_file_hunks_batch failed");
+      },
+      BatchSize::PerIteration,
+    );
+  });
+
+  group.finish();
+}
+
+criterion_group!(benches, bench_workspace_diff, bench_file_hunks_batch);
 criterion_main!(benches);

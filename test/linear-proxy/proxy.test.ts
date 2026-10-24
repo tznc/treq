@@ -40,10 +40,10 @@ function setup(opts: {
     async (url: string | URL | Request, init?: RequestInit) => {
       const target = String(url);
       if (target === "https://api.linear.app/graphql" && opts.graphql) {
-        return opts.graphql(init!);
+        return opts.graphql(init ?? {});
       }
       if (target === "https://api.linear.app/oauth/token" && opts.oauth) {
-        return opts.oauth(init!);
+        return opts.oauth(init ?? {});
       }
       throw new Error(`unexpected fetch ${target}`);
     },

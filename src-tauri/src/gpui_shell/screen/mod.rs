@@ -34,6 +34,7 @@ mod changes_threads;
 pub(super) mod checklist;
 mod code;
 mod code_data;
+pub(super) use code_data::display_title;
 mod commits;
 mod commits_data;
 mod environment;
@@ -43,6 +44,8 @@ pub(super) mod file_picker;
 mod github;
 mod github_data;
 mod highlight;
+mod integrations_cache;
+pub(crate) use highlight::warm as warm_highlighting;
 mod intraline;
 pub(super) mod launch_data;
 mod linear;
@@ -63,6 +66,7 @@ pub(super) use onboarding::open_repo_at;
 mod onboarding_remote;
 mod pr_review;
 mod pr_review_data;
+pub(super) mod prefetch;
 mod remote;
 pub(super) mod remote_chrome;
 mod remote_data;
@@ -400,6 +404,14 @@ impl Screen {
       }
     })
     .detach();
+  }
+
+  /// Reads ahead what showing workspace `route` would read, as the pointer
+  /// rests on its row in the sidebar. Nothing on screen changes.
+  pub fn prefetch_workspace(&mut self, route: workspace_data::Route, cx: &mut Context<Self>) {
+    if let Some(workspace) = &self.workspace {
+      workspace.update(cx, |workspace, cx| workspace.prefetch(route, cx));
+    }
   }
 
   /// Closes the terminals of a workspace GPUI removed.
@@ -753,4 +765,11 @@ impl Screen {
       }),
     }
   }
+}
+
+/// A scoped thread's result, its panic carried on to the caller.
+pub(super) fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+  handle
+    .join()
+    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }

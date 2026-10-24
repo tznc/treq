@@ -39,9 +39,9 @@ use super::{
   file_browser_data::{
     comment_counts, comment_target, dir_status, file_name, filter_hidden, flatten, is_binary,
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
-    status_title, too_large, FileBrowserHost, LineMarks, COMMENT_HUNK,
+    status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
   },
-  highlight, ActionSink, ScreenAction,
+  highlight, prefetch, ActionSink, ScreenAction,
 };
 use crate::{
   core::WorkspaceEntry,
@@ -81,6 +81,7 @@ pub struct Route {
 
 /// What React opens the browser on, and the files' revision
 /// (`changesRevision`), bumped when they change.
+#[derive(Clone)]
 pub struct Opening {
   pub route: Route,
   pub revision: u64,
@@ -150,6 +151,8 @@ pub struct FileBrowserView {
   pub(super) root: Option<Vec<WorkspaceEntry>>,
   cache: HashMap<String, Vec<WorkspaceEntry>>,
   pub(super) expanded: HashSet<String>,
+  /// `flatten` of the three fields above, dropped whenever one changes.
+  tree_rows: Option<Rc<Vec<TreeRow>>>,
   pub(super) changed: Vec<ChangedFile>,
   tree_scroll: UniformListScrollHandle,
   pub(super) selected: Option<String>,
@@ -158,6 +161,8 @@ pub struct FileBrowserView {
   pub(super) opened: Option<Opened>,
   language: Option<&'static str>,
   pub(super) marks: LineMarks,
+  /// The file read whose hunks `marks` are, once they land.
+  marks_read: u64,
   /// Bumped per file read, so a slower earlier read is dropped.
   reads: u64,
   copied: bool,
@@ -192,6 +197,13 @@ pub struct FileBrowserView {
   _save: Option<Task<()>>,
   _copied_reset: Option<Task<()>>,
   _find_key: Option<Subscription>,
+  /// The files' revision when the browser was hidden, while another tab
+  /// or workspace shows.
+  hidden_at: Option<u64>,
+  /// The file row the pointer rests on, and the files read ahead that way,
+  /// by path, until the workspace's files change.
+  hovered: prefetch::Intent<String>,
+  prefetched: prefetch::Lru<String, String>,
 }
 
 impl HasTooltips for FileBrowserView {
@@ -223,6 +235,7 @@ impl FileBrowserView {
       editors,
       root: None,
       cache: HashMap::new(),
+      tree_rows: None,
       expanded: HashSet::new(),
       changed: Vec::new(),
       tree_scroll: UniformListScrollHandle::new(),
@@ -232,6 +245,7 @@ impl FileBrowserView {
       opened: None,
       language: None,
       marks: LineMarks::default(),
+      marks_read: 0,
       reads: 0,
       copied: false,
       copied_path: false,
@@ -261,6 +275,9 @@ impl FileBrowserView {
       _save: None,
       _copied_reset: None,
       _find_key: None,
+      hidden_at: None,
+      hovered: prefetch::Intent::default(),
+      prefetched: prefetch::Lru::new(8),
     };
     this.start(route, cx);
     this
@@ -271,6 +288,7 @@ impl FileBrowserView {
   fn start(&mut self, route: Route, cx: &mut Context<Self>) {
     let base = self.base();
     self.expanded = HashSet::from([base]);
+    self.tree_rows = None;
     self.load_root(cx);
     self.load_changed(cx);
     self.hydrate_review(cx);
@@ -305,6 +323,33 @@ impl FileBrowserView {
     self.apply_route(route, cx);
   }
 
+  /// Its tree's first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.root.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows; shown again, it reads
+  /// the tree and the open file again behind what it draws, unless a
+  /// newer revision already did.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    match (shown, self.hidden_at) {
+      (false, None) => {
+        self.hidden_at = Some(self.revision);
+        // Cmd+F is the shown view's; drawing again listens again.
+        self._find_key = None;
+      }
+      (true, Some(at)) => {
+        self.hidden_at = None;
+        // Until its first read lands (a view made ahead), that read is
+        // still on the way.
+        if at == self.revision && self.ready() {
+          self.refresh(cx);
+        }
+      }
+      _ => {}
+    }
+  }
+
   /// `initialSelectedFile` and `initialExpandedDir`, when they change.
   fn apply_route(&mut self, route: Route, cx: &mut Context<Self>) {
     if self.route == route {
@@ -326,6 +371,7 @@ impl FileBrowserView {
   /// The workspace's files changed: read the open file, the expanded
   /// directories and the changed files again.
   fn refresh(&mut self, cx: &mut Context<Self>) {
+    self.prefetched.clear();
     if let Some(path) = self.selected.clone() {
       self.select_file(&path, cx);
     }
@@ -400,8 +446,13 @@ impl FileBrowserView {
       |view, result, cx| match result {
         Ok(entries) => {
           let first = view.root.is_none();
-          view.cache.insert(view.base(), entries.clone());
-          view.root = Some(entries);
+          // A refresh that lists the same entries keeps the tree's rows.
+          let base = view.base();
+          if view.root.as_ref() != Some(&entries) || view.cache.get(&base) != Some(&entries) {
+            view.cache.insert(base, entries.clone());
+            view.root = Some(entries);
+            view.tree_rows = None;
+          }
           if first {
             view.open_readme(cx);
           }
@@ -410,6 +461,7 @@ impl FileBrowserView {
           log::warn!("Failed to list directory: {err}");
           if view.root.is_none() {
             view.root = Some(Vec::new());
+            view.tree_rows = None;
           }
         }
       },
@@ -441,6 +493,7 @@ impl FileBrowserView {
     if !force && self.cache.contains_key(&dir) {
       if expand {
         self.expanded.insert(dir);
+        self.tree_rows = None;
         cx.notify();
       }
       return;
@@ -456,9 +509,12 @@ impl FileBrowserView {
             Vec::new()
           }
         };
-        view.cache.insert(dir.clone(), entries);
-        if expand {
-          view.expanded.insert(dir);
+        if view.cache.get(&dir) != Some(&entries) {
+          view.cache.insert(dir.clone(), entries);
+          view.tree_rows = None;
+        }
+        if expand && view.expanded.insert(dir) {
+          view.tree_rows = None;
         }
       },
       cx,
@@ -480,6 +536,7 @@ impl FileBrowserView {
 
   fn click_dir(&mut self, path: String, cx: &mut Context<Self>) {
     if self.expanded.remove(&path) {
+      self.tree_rows = None;
       cx.notify();
     } else {
       self.load_dir(path, false, true, cx);
@@ -538,33 +595,64 @@ impl FileBrowserView {
     }
     let rel = self.rel(path);
     let hunks = self.changed.iter().any(|f| f.path == rel);
-    let (repo, workspace_id) = (self.parent.repo_path.clone(), self.parent.workspace_id());
+    if hunks {
+      // The hunks are read beside the file, and mark it once they land.
+      let (repo, workspace_id) = (self.parent.repo_path.clone(), self.parent.workspace_id());
+      self.run(
+        move |host| {
+          host
+            .file_hunks(&repo, workspace_id, vec![rel.clone()])
+            .map(|batch| {
+              batch
+                .files
+                .into_iter()
+                .find(|f| f.path == rel)
+                .map(|f| f.hunks)
+                .unwrap_or_default()
+            })
+        },
+        move |view, result, _| {
+          if view.reads != read {
+            return;
+          }
+          view.marks_read = read;
+          view.marks = match result {
+            Ok(hunks) => line_marks(&hunks),
+            Err(err) => {
+              log::warn!("Failed to load jj hunks: {err}");
+              LineMarks::default()
+            }
+          };
+        },
+        cx,
+      );
+    }
+    // Read ahead while the pointer rested on its row: drawn at once.
+    let now = cx.background_executor().now();
+    if let Some(content) = (!refreshing)
+      .then(|| self.prefetched.take_fresh(&path.to_string(), now))
+      .flatten()
+    {
+      self.loading_file = false;
+      self.marks = LineMarks::default();
+      self.show_content(content, false, cx);
+      return;
+    }
     let file = path.to_string();
     self.run(
-      move |host| {
-        let content = host.read_file(&file)?;
-        if too_large(&content) || !hunks {
-          return Ok((content, None));
-        }
-        let read = host
-          .file_hunks(&repo, workspace_id, vec![rel.clone()])
-          .map(|batch| {
-            batch
-              .files
-              .into_iter()
-              .find(|f| f.path == rel)
-              .map(|f| f.hunks)
-              .unwrap_or_default()
-          });
-        Ok::<_, String>((content, Some(read)))
-      },
+      move |host| host.read_file(&file),
       move |view, result, cx| {
         if view.reads != read {
           return;
         }
         view.loading_file = false;
+        // Another file's marks never show on this one; a file read again
+        // keeps its marks until the new ones land.
+        if !hunks || (!refreshing && view.marks_read != read) {
+          view.marks = LineMarks::default();
+        }
         match result {
-          Ok((content, _)) if too_large(&content) => {
+          Ok(content) if too_large(&content) => {
             view.toast(
               ToastTone::Warning,
               "File too large",
@@ -573,17 +661,7 @@ impl FileBrowserView {
             view.selected = None;
             view.opened = None;
           }
-          Ok((content, hunks)) => {
-            view.marks = match hunks {
-              Some(Ok(hunks)) => line_marks(&hunks),
-              Some(Err(err)) => {
-                log::warn!("Failed to load jj hunks: {err}");
-                LineMarks::default()
-              }
-              None => LineMarks::default(),
-            };
-            view.show_content(content, refreshing, cx);
-          }
+          Ok(content) => view.show_content(content, refreshing, cx),
           Err(err) => {
             view.toast(ToastTone::Error, "Failed to read file", err);
             view.opened = Some(Opened::default());
@@ -594,6 +672,44 @@ impl FileBrowserView {
       cx,
     );
     cx.notify();
+  }
+
+  /// The pointer entered or left file `path`'s row.
+  fn hover_file(&mut self, path: String, hovered: bool, cx: &mut Context<Self>) {
+    let file = path.clone();
+    self.hovered.hover(path, hovered, cx, move |view, cx| {
+      view.prefetch_file(file, cx)
+    });
+  }
+
+  /// Reads file `path` ahead, unless it is open or was read ahead lately.
+  /// Nothing redraws.
+  fn prefetch_file(&mut self, path: String, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    if is_binary(&path)
+      || self.selected.as_ref() == Some(&path)
+      || self.prefetched.has_fresh(&path, now)
+    {
+      return;
+    }
+    let (host, key) = (self.host.clone(), self.parent.key());
+    cx.spawn(async move |this, cx| {
+      let file = path.clone();
+      let read = cx
+        .background_spawn(async move { host.read_file(&file) })
+        .await;
+      let content = match read {
+        Ok(content) if !too_large(&content) => content,
+        _ => return,
+      };
+      let _ = this.update(cx, |view, cx| {
+        if view.parent.key() == key {
+          let now = cx.background_executor().now();
+          view.prefetched.insert(path, now, content);
+        }
+      });
+    })
+    .detach();
   }
 
   fn show_content(&mut self, content: String, refreshing: bool, cx: &mut Context<Self>) {
@@ -1338,7 +1454,8 @@ impl FileBrowserView {
       .bg(p.sidebar)
       .overflow_hidden();
     let Some(root) = self.root.as_ref() else {
-      return panel.child(
+      return panel.child(ui::delayed(
+        "file-tree-loading",
         div()
           .debug_selector(|| "file-tree-loading".into())
           .flex()
@@ -1346,9 +1463,12 @@ impl FileBrowserView {
           .justify_center()
           .p_4()
           .child(ui::spinner("file-tree-spin", 24., p.muted_foreground)),
-      );
+      ));
     };
-    let rows = Rc::new(flatten(root, &self.expanded, &self.cache));
+    let rows = self
+      .tree_rows
+      .get_or_insert_with(|| Rc::new(flatten(root, &self.expanded, &self.cache)))
+      .clone();
     let count = rows.len();
     panel.child(
       uniform_list(
@@ -1481,6 +1601,10 @@ impl FileBrowserView {
           cx,
         )))
       })
+      .on_hover({
+        let path = path.clone();
+        cx.listener(move |view, hovered: &bool, _, cx| view.hover_file(path.clone(), *hovered, cx))
+      })
       .on_click(cx.listener(move |view, _, _, cx| view.select_file(&path, cx)))
       .into_any_element()
   }
@@ -1513,10 +1637,13 @@ impl FileBrowserView {
         .into_any_element();
     }
     if self.loading_file {
-      return Self::centered(p)
-        .debug_selector(|| "file-browser-loading".into())
-        .child(ui::spinner("file-spin", 24., p.muted_foreground))
-        .into_any_element();
+      return ui::delayed(
+        "file-browser-loading",
+        Self::centered(p)
+          .debug_selector(|| "file-browser-loading".into())
+          .child(ui::spinner("file-spin", 24., p.muted_foreground)),
+      )
+      .into_any_element();
     }
     let Some(opened) = self.opened.clone().filter(|o| !o.content.is_empty()) else {
       return Self::centered(p)

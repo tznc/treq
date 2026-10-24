@@ -19,6 +19,7 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   popup::{PopupRequest, PopupSink, Side, TooltipContent},
+  screen::prefetch,
   theme::{self, Palette},
   title_bar,
 };
@@ -96,7 +97,12 @@ pub struct RepoSection {
 #[serde(rename_all = "camelCase")]
 pub struct SidebarRow {
   pub id: i64,
+  /// The workspace's branch.
   pub title: String,
+  /// The workspace's own title, drawn in place of the branch; `None` when
+  /// it has none.
+  #[serde(default)]
+  pub name: Option<String>,
   /// 0 for a stack root, +1 per level below it.
   pub depth: u32,
   pub selected: bool,
@@ -232,6 +238,11 @@ pub enum SidebarAction {
   ToggleRepo {
     repo_path: String,
   },
+  /// The pointer rests on a workspace row of the active repository: read
+  /// ahead what selecting it would show.
+  PrefetchWorkspace {
+    id: i64,
+  },
 }
 
 /// A workspace row being dragged.
@@ -239,6 +250,8 @@ pub enum SidebarAction {
 struct DraggedWorkspace {
   id: i64,
   title: SharedString,
+  /// The title is a branch, drawn in mono as its row draws it.
+  mono: bool,
   palette: Palette,
 }
 
@@ -252,7 +265,7 @@ impl Render for DraggedWorkspace {
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
       .text_color(self.palette.sidebar_foreground)
-      .font_family(theme::MONO_FONT)
+      .when(self.mono, |this| this.font_family(theme::MONO_FONT))
       .shadow_md()
       .child(self.title.clone())
   }
@@ -288,6 +301,8 @@ pub struct Sidebar {
   hovered_row: Option<SharedString>,
   /// The width while the resize handle is dragged, ahead of React.
   drag_width: Option<f32>,
+  /// The workspace row the pointer rests on, to read ahead.
+  prefetch: prefetch::Intent<i64>,
 }
 
 impl Sidebar {
@@ -301,6 +316,7 @@ impl Sidebar {
       tooltip: None,
       hovered_row: None,
       drag_width: None,
+      prefetch: prefetch::Intent::default(),
     }
   }
 
@@ -447,6 +463,14 @@ impl Sidebar {
       cx.notify();
     }
     self.hover_tooltip(key, hovered, cx);
+  }
+
+  /// The pointer entered or left workspace `id`'s row: once it rests there,
+  /// what selecting the row would show is read ahead.
+  fn hover_workspace(&mut self, id: i64, hovered: bool, cx: &mut Context<Self>) {
+    self.prefetch.hover(id, hovered, cx, move |this, cx| {
+      (this.sink)(SidebarAction::PrefetchWorkspace { id }, cx)
+    });
   }
 
   fn start_tooltip(&mut self, key: SharedString, cx: &mut Context<Self>) {
@@ -1027,6 +1051,7 @@ impl Sidebar {
     };
     let shown = self.tooltip_shown(&key);
     let tip = TooltipContent::Branch {
+      name: None,
       title: label.clone().into(),
       conflicted: false,
       pr: None,
@@ -1208,7 +1233,9 @@ impl Sidebar {
       palette.muted_foreground
     };
 
+    let label = row.name.as_ref().unwrap_or(&row.title).clone();
     let tip = TooltipContent::Branch {
+      name: row.name.clone().map(Into::into),
       title: row.title.clone().into(),
       conflicted: row.conflicted,
       pr: row.pr,
@@ -1287,7 +1314,7 @@ impl Sidebar {
       .id(("workspace", id as u64))
       .debug_selector(move || selector)
       .role(Role::Button)
-      .aria_label(row.title.clone())
+      .aria_label(label.clone())
       .aria_selected(row.selected)
       .test_support()
       .group(group.clone())
@@ -1330,9 +1357,12 @@ impl Sidebar {
           .flex_1()
           .min_w_0()
           .truncate()
-          .font_family(theme::MONO_FONT)
+          // A branch is code; a title is prose.
+          .when(row.name.is_none(), |this| {
+            this.font_family(theme::MONO_FONT)
+          })
           .text_color(title_color)
-          .child(row.title.clone()),
+          .child(label.clone()),
       )
       .child(
         div()
@@ -1362,7 +1392,13 @@ impl Sidebar {
       )
       .on_hover(cx.listener({
         let key = key.clone();
-        move |this, hovered: &bool, _, cx| this.hover_row_tooltip(key.clone(), *hovered, cx)
+        let prefetch = !row.archiving && !row.selected && repo_active;
+        move |this, hovered: &bool, _, cx| {
+          this.hover_row_tooltip(key.clone(), *hovered, cx);
+          if prefetch {
+            this.hover_workspace(id, *hovered, cx);
+          }
+        }
       }))
       .when(self.tooltip_shown(&key), |this| {
         this.child(self.tooltip_anchor(key.clone(), Side::Right, tip, 0.))
@@ -1382,7 +1418,8 @@ impl Sidebar {
           .on_drag(
             DraggedWorkspace {
               id,
-              title: row.title.clone().into(),
+              title: label.clone().into(),
+              mono: row.name.is_none(),
               palette: *palette,
             },
             |dragged, _, _, cx| cx.new(|_| dragged.clone()),

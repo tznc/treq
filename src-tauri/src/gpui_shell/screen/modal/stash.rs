@@ -93,11 +93,7 @@ fn line_prefix(line: &str) -> &'static str {
 
 /// A diff line without its `+`, `-` or space marker.
 fn line_text(line: &str) -> &str {
-  if line.starts_with(['+', '-', ' ']) {
-    &line[1..]
-  } else {
-    line
-  }
+  line.strip_prefix(['+', '-', ' ']).unwrap_or(line)
 }
 
 /// `files_changed.length` as the list writes it.
@@ -639,7 +635,11 @@ impl StashView {
         Some(diff) => self.diff_pane(diff, p, cx),
         None => div().into_any_element(),
       },
-      _ => message("stash-diff-loading", "Loading diff...", p).into_any_element(),
+      _ => ui::delayed(
+        "stash-diff-loading",
+        message("stash-diff-loading", "Loading diff...", p),
+      )
+      .into_any_element(),
     };
     pane.gap_3().child(header).child(
       // The diff's list scrolls itself.
@@ -956,7 +956,11 @@ impl Render for StashView {
     );
     let entries = self.entries.clone();
     let body = match &entries {
-      None => message("stash-loading", "Loading stashes...", &p).into_any_element(),
+      None => ui::delayed(
+        "stash-loading",
+        message("stash-loading", "Loading stashes...", &p),
+      )
+      .into_any_element(),
       Some(entries) if entries.is_empty() => message(
         "stash-empty",
         "No stashed changes yet. Stash working-copy changes from the Changes panel to save them here.",

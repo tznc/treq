@@ -62,7 +62,30 @@ impl ReposScreen {
     let repo = path.clone();
     load::run(
       cx,
-      async move { remote::read::<RemoteRepoProbe>(TreqCommandRequest::ProbeRepo { repo }).await },
+      async move {
+        let probe =
+          remote::read::<RemoteRepoProbe>(TreqCommandRequest::ProbeRepo { repo: repo.clone() })
+            .await?;
+        if probe.exists && probe.is_repo {
+          // A plain Git repository needs jj colocated before its workspaces
+          // load; one that has it is left as it is.
+          let repo = if probe.path.is_empty() {
+            repo
+          } else {
+            probe.path.clone()
+          };
+          if let remote::Mutation::Ambiguous(reason) =
+            remote::mutate(TreqCommandRequest::InitRepo {
+              repo,
+              idempotency_key: format!("InitRepo:{}", uuid::Uuid::new_v4()),
+            })
+            .await?
+          {
+            return Err(reason);
+          }
+        }
+        Ok(probe)
+      },
       move |this, result, cx| {
         this.probing = false;
         match result {

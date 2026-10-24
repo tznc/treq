@@ -182,6 +182,8 @@ pub struct LogsView {
   scroll: UniformListScrollHandle,
   debounce: Option<Task<()>>,
   find_key_watched: bool,
+  /// Hidden while another tab shows, so Cmd+F is another view's.
+  hidden: bool,
   /// The lines drawn, and the find bar's matches among them.
   visible: Rc<Vec<LogRecordView>>,
   matches: Vec<usize>,
@@ -228,6 +230,7 @@ impl LogsView {
       scroll: UniformListScrollHandle::new(),
       debounce: None,
       find_key_watched: false,
+      hidden: false,
       visible: Rc::default(),
       matches: Vec::new(),
       _subscriptions: Vec::new(),
@@ -235,6 +238,11 @@ impl LogsView {
     this.read_workflows(cx);
     this.load(cx);
     this
+  }
+
+  /// Hidden while another tab shows; it keeps what it read.
+  pub fn set_shown(&mut self, shown: bool) {
+    self.hidden = !shown;
   }
 
   pub fn set_repo(&mut self, repo_path: String, dark: bool, cx: &mut Context<Self>) {
@@ -627,6 +635,7 @@ impl LogsView {
           && !crate::gpui_shell::keys::held(k.modifiers).shift
           && !crate::gpui_shell::keys::held(k.modifiers).alt
           && !view.explorer_open
+          && !view.hidden
         {
           view.find.open = true;
           view.find.focus = true;

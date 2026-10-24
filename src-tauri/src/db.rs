@@ -28,6 +28,8 @@ impl Database {
     // busy_timeout retries a write conflict instead of failing at once with
     // "database is locked".
     conn.pragma_update(None, "journal_mode", "WAL")?;
+    // Crash-safe under WAL; avoids an fsync per commit.
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(Database { conn })
   }
@@ -268,8 +270,13 @@ impl Database {
     let mut hasher = Sha256::new();
     hasher.update(repo_path.as_bytes());
     let hash = hasher.finalize();
-    let hash_hex: String = hash.iter().map(|byte| format!("{:02x}", byte)).collect();
-    format!("repo_{}_{}", &hash_hex[..16], key) // Use first 16 chars of hash
+    // First 16 hex chars of the hash (8 bytes)
+    let hash_hex: String = hash
+      .iter()
+      .take(8)
+      .map(|byte| format!("{:02x}", byte))
+      .collect();
+    format!("repo_{}_{}", hash_hex, key)
   }
 
   pub fn get_repo_setting(&self, repo_path: &str, key: &str) -> Result<Option<String>> {
