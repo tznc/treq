@@ -743,9 +743,9 @@ pub fn type_keystroke(app: &AppHandle, keystroke: &'static str) {
   });
 }
 
-/// Window `label` gained focus.
-pub fn window_focused(app: &AppHandle, label: &str) {
-  window::window_focused(app, label);
+/// Window `label` gained (`focused`) or lost focus.
+pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
+  window::window_focused(app, label, focused);
 }
 
 /// The cloud workspace connected (for window `label`, which asked) or its

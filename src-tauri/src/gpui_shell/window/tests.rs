@@ -16,7 +16,7 @@ use tauri_plugin_gpui::gpui;
 use super::{
   actions::{Menu, Shortcut},
   controller::{Presentation, WindowController},
-  data::{Flags, POLL, SESSIONS_POLL},
+  data::{Flags, BACKGROUND_EVERY, POLL, SESSIONS_POLL},
   host::{FileWatch, WindowHost},
   remote::{RemoteHost, UserManagedValues},
   tree::tests::workspace,
@@ -802,6 +802,36 @@ fn polls_on_swr_intervals(cx: &mut TestAppContext) {
   cx.executor().advance_clock(SESSIONS_POLL - POLL);
   cx.run_until_parked();
   assert_eq!(host.count("sessions /repo"), 2);
+}
+
+/// A window in the background polls a third as often, and reads what it
+/// skipped as soon as it is back in front.
+#[gpui::test]
+fn a_background_window_polls_less_and_catches_up_on_focus(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.controller.update(cx, |c, _| c.blurred());
+  for _ in 0..BACKGROUND_EVERY {
+    cx.executor().advance_clock(POLL);
+    cx.run_until_parked();
+  }
+  assert_eq!(host.count("workspaces /repo"), 2, "one read in three ticks");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 2);
+  window.controller.update(cx, |c, cx| c.focused(cx));
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 3, "the skipped tick, read");
+  window.controller.update(cx, |c, cx| c.focused(cx));
+  cx.run_until_parked();
+  assert_eq!(
+    host.count("workspaces /repo"),
+    3,
+    "nothing more to catch up"
+  );
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 4, "every tick in front");
 }
 
 #[gpui::test]
