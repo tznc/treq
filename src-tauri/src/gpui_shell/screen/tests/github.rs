@@ -394,8 +394,11 @@ fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   assert!(h.drawn("github-issue-1"));
   assert!(h.drawn("github-issue-2"));
   assert!(!h.drawn("github-detail"));
+  // The two reads run side by side, in no set order.
+  let mut calls = host.calls();
+  calls.sort();
   assert_eq!(
-    host.calls(),
+    calls,
     ["read issues acme/treq open None", "read workspaces"]
   );
 

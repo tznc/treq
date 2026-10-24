@@ -1749,7 +1749,9 @@ impl WorkspaceView {
 
 /// Tailwind's `animate-pulse`: 2s, opacity dipping to half midway.
 fn pulse() -> Animation {
-  Animation::new(Duration::from_secs(2)).repeat()
+  Animation::new(Duration::from_secs(2))
+    .repeat()
+    .with_max_fps(ui::PULSE_FPS)
 }
 
 fn pulse_opacity(delta: f32) -> f32 {

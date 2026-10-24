@@ -7809,6 +7809,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
   assert_eq!(shown, [path]);
 }
 
+mod allocs;
 mod changes_large;
 mod commit_diffs;
 mod commits_large;
@@ -7816,6 +7817,7 @@ mod conflicts;
 mod file_browser;
 mod fuzz;
 mod github;
+mod idle;
 mod kept_tabs;
 mod linear_view;
 mod logs_explorer;
