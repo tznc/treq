@@ -95,8 +95,12 @@ pub struct Listing {
 /// What the screen asks of the backend; faked in tests. Blocking calls run
 /// off the main thread.
 pub trait MachinesHost: ToolsHost {
-  /// Blocks: lists the dev containers through Docker.
+  /// Blocks: lists the machines and recent repositories, without the dev
+  /// containers, which wait on Docker (see `containers`).
   fn listing(&self) -> Listing;
+  /// Blocks: asks Docker for the dev containers, as machines and the
+  /// repositories on them.
+  fn containers(&self) -> (Vec<Machine>, Vec<Recent>);
   /// Blocks: asks the machine over SSH or `docker exec`.
   fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String>;
   /// Opens the local repository at `path` in this window.
@@ -243,33 +247,36 @@ impl MachinesHost for Backend {
         saved_id: Some(repo.id),
       })
     }));
-    if containers {
-      for container in devcontainer::containers() {
-        let id = format!("devcontainer:{}", container.id);
-        let name = last_segment(&container.repo_path).to_string();
-        listing.recents.push(Recent {
-          machine_id: id.clone(),
-          name: name.clone(),
-          path: container.repo_path.clone(),
-          saved_id: None,
-        });
-        listing.machines.push(Machine {
-          id,
-          detail: if container.running {
-            "Running".into()
-          } else {
-            "Stopped".into()
-          },
-          place: Place::DevContainer {
-            container_id: container.id,
-            repo_path: container.repo_path,
-            running: container.running,
-          },
-          name,
-        });
-      }
-    }
     listing
+  }
+
+  fn containers(&self) -> (Vec<Machine>, Vec<Recent>) {
+    let (mut machines, mut recents) = (Vec::new(), Vec::new());
+    for container in devcontainer::containers() {
+      let id = format!("devcontainer:{}", container.id);
+      let name = last_segment(&container.repo_path).to_string();
+      recents.push(Recent {
+        machine_id: id.clone(),
+        name: name.clone(),
+        path: container.repo_path.clone(),
+        saved_id: None,
+      });
+      machines.push(Machine {
+        id,
+        detail: if container.running {
+          "Running".into()
+        } else {
+          "Stopped".into()
+        },
+        place: Place::DevContainer {
+          container_id: container.id,
+          repo_path: container.repo_path,
+          running: container.running,
+        },
+        name,
+      });
+    }
+    (machines, recents)
   }
 
   fn machine_tools(&self, place: &Place) -> Result<Vec<PrerequisiteStatus>, String> {
