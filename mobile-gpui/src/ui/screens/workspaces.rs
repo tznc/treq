@@ -571,7 +571,6 @@ impl WorkspacesScreen {
 impl Render for WorkspacesScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let query = self.query.read(cx).value().to_string();
-    let list: Vec<WorkspaceSummary> = self.list.ready().cloned().unwrap_or_default();
     let body = match &self.list {
       Load::Idle | Load::Loading => {
         widgets::card(cx).child(widgets::centered_message("Loading workspaces…", cx))
@@ -603,20 +602,20 @@ impl Render for WorkspacesScreen {
         .text_center()
         .into_any_element(),
       ]),
-      Load::Ready(_) => {
-        let entries: Vec<Entry> = stack_order(&list)
+      Load::Ready(list) => {
+        let entries: Vec<Entry> = stack_order(list)
           .into_iter()
           .filter(|e| matches(&list[e.index], &query))
           .collect();
         if entries.is_empty() {
           widgets::card(cx).child(widgets::centered_message("No workspaces match.", cx))
         } else {
-          let rows: Vec<AnyElement> = entries.iter().map(|e| self.row(e, &list, cx)).collect();
+          let rows: Vec<AnyElement> = entries.iter().map(|e| self.row(e, list, cx)).collect();
           widgets::card(cx).children(rows)
         }
       }
     };
-    let count = list.len();
+    let count = self.list.ready().map_or(0, Vec::len);
     let palette = treq_ui::theme::current(cx);
     v_flex()
       .size_full()
