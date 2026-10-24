@@ -144,7 +144,7 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     include_target: bool,
     limit: Option<usize>,
   ) -> Result<JjLogResult, String>;
-  /// Every workspace's current record (`listWorkspaceStatuses`).
+  /// Every workspace's current record, for the stack panel.
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
@@ -211,12 +211,10 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.workspaces();
     }
-    Ok(
-      core::list_workspace_statuses(repo_path)?
-        .into_iter()
-        .map(|status| status.current)
-        .collect(),
-    )
+    // The stored records: the stack needs only branches and targets, and
+    // the window poll keeps them in step with jj. Statuses would rediscover
+    // every workspace under the repo's commit lock, behind any rebase.
+    core::list_all_workspaces(repo_path)
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {
