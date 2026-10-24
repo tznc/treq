@@ -518,7 +518,7 @@ impl ChangesView {
     }
     self.loading = true;
     let show = self.show_committed();
-    self.run(
+    self.run_changed(
       move |host, parent| {
         // The generated-file rules don't depend on the diff: read both at once.
         std::thread::scope(|scope| {
@@ -538,35 +538,53 @@ impl ChangesView {
       },
       |view, result, cx| {
         view.loading = false;
-        match result {
+        // A refresh that reads back what shows draws no frame.
+        let changed = match result {
           Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
             view.review.stale.clear();
             view.review.parked = None;
-            view.apply(snapshot, cx)
+            view.apply(snapshot, cx);
+            true
           }
-          Ok(snapshot) if view.park(&snapshot) => {}
+          Ok(snapshot) if view.park(&snapshot) => true,
           // The reviewed hunks were read from this same diff.
           Ok(snapshot)
             if view.in_review()
               && snapshot.token.is_some()
-              && snapshot.token == view.hunks_token => {}
-          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
+              && snapshot.token == view.hunks_token =>
+          {
+            false
+          }
+          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
+            view.recheck(snapshot, cx);
+            false
+          }
           Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
             view.toast(ToastTone::Error, "JJ Error", err);
             view.snapshot.get_or_insert_with(Snapshot::default);
             view.layout_gen += 1;
+            true
           }
-        }
+        };
         if std::mem::take(&mut view.reload) {
           view.load(cx);
         }
+        changed
       },
       cx,
     );
   }
 
-  fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
+  /// Shows `snapshot`; `true` when that changed what is drawn. Hunks still
+  /// to read redraw as they land.
+  fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) -> bool {
+    let marks = |view: &Self| {
+      let s = &view.staging;
+      let staging = s.staged.len() + s.selected.len() + s.selected_staged.len();
+      (view.layout_gen, view.viewed.len(), staging)
+    };
+    let before = marks(self);
     self.staging.retain(&snapshot.files);
     // Generated files are read only once "Load diff" asks.
     let paths: Vec<String> = snapshot
@@ -597,6 +615,7 @@ impl ChangesView {
       self.load_hunks(paths, token, cx);
     }
     self.unmark_stale(None, cx);
+    marks(self) != before
   }
 
   /// "Load diff" on a generated file: its diff, read now if it is the
