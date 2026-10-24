@@ -6,12 +6,10 @@
 
 use args::{Matches, SubcommandMatches};
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
 use crate::agent_dispatch;
-use crate::binary_paths;
 use crate::core;
 use crate::db::Database;
 use crate::local_db;
@@ -94,17 +92,6 @@ pub(super) fn lookup_workspace_from_cwd(repo_path: &str) -> Option<local_db::Wor
   local_db::get_workspace_by_path(repo_path, &name)
     .ok()
     .flatten()
-}
-
-/// Initialize binary paths cache for CLI mode (no database needed).
-pub fn init_cli_binary_paths() {
-  let mut paths = HashMap::new();
-  for name in ["jj", "git"] {
-    if let Some(path) = binary_paths::detect_binary(name) {
-      paths.insert(name.to_string(), path);
-    }
-  }
-  binary_paths::init_binary_paths_cache(paths);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -194,7 +194,9 @@ where
     eprintln!("{}", build_command("treq", &cli_config()).render_usage());
     return USAGE_ERROR_EXIT_CODE;
   };
-  super::init_cli_binary_paths();
+  // No binary detection here: it spawns a login shell and a `which` per
+  // binary on every call, and a remote host runs one process per request.
+  // Push and fetch look their `git` up when they need it.
   super::handle_cli_command(&subcommand).unwrap_or_else(|| {
     eprintln!("Unknown command: {}", subcommand.name);
     USAGE_ERROR_EXIT_CODE
@@ -234,6 +236,20 @@ mod tests {
   fn usage_errors_exit_with_code_two() {
     assert_eq!(run(["treq", "bogus"]), USAGE_ERROR_EXIT_CODE);
     assert_eq!(run(["treq", "commit", "feat/x"]), USAGE_ERROR_EXIT_CODE);
+  }
+
+  #[test]
+  fn running_a_command_detects_no_binaries() {
+    // Detection spawns a login shell and a `which` per binary.
+    let missing = tempfile::tempdir().unwrap().path().join("none");
+    run([
+      "treq".as_ref(),
+      "workspace".as_ref(),
+      "--repo".as_ref(),
+      missing.as_os_str(),
+      "list".as_ref(),
+    ]);
+    assert_eq!(crate::binary_paths::get_binary_path("git"), None);
   }
 
   #[test]
