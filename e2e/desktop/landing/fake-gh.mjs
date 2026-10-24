@@ -375,6 +375,15 @@ if (group === "api" && command === "user") {
   }
   out({ login: "octocat" });
 }
+// The merge preview's GitHub merge: squash by default, rebase merges off.
+if (group === "repo" && command === "view") {
+  out({
+    viewerDefaultMergeMethod: "SQUASH",
+    mergeCommitAllowed: true,
+    squashMergeAllowed: true,
+    rebaseMergeAllowed: false,
+  });
+}
 if (group === "issue" && command === "view") {
   const issue = issues.find((i) => String(i.number) === args[2]);
   if (!issue) fail("issue not found");

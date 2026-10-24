@@ -1867,8 +1867,8 @@ mod tests {
     resolve_workspace_diff_base_revision_from_last_rebased,
     resolve_workspace_diff_conflict_marker_style,
     resolve_workspace_diff_tip_revision_from_workspace_state,
-    resolve_workspace_diff_workspace_revision, HunkSpec, WorkspaceMetadata, WorkspaceMoveRequest,
-    WorkspaceRetarget, WorkspaceTargetMoveStep,
+    resolve_workspace_diff_workspace_revision, retarget_child_prs, HunkSpec, MergeLandingPlan,
+    WorkspaceMetadata, WorkspaceMoveRequest, WorkspaceRetarget, WorkspaceTargetMoveStep,
   };
   use crate::jj;
   use crate::local_db::Workspace;
@@ -2639,6 +2639,17 @@ mod tests {
   }
 
   #[test]
+  fn retarget_child_prs_skips_a_merge_without_children() {
+    let plan = MergeLandingPlan {
+      target_branch: "main".into(),
+      landed_branches: vec!["feat/a".into()],
+      retargeted: vec![],
+      can_rollup: false,
+    };
+    assert!(retarget_child_prs("/nonexistent", &plan).is_empty());
+  }
+
+  #[test]
   fn plan_merge_landing_lands_workspace_into_its_target() {
     let parent = test_workspace(1, "feat/parent", Some("main"));
     let child = test_workspace(2, "feat/child", Some("feat/parent"));
@@ -3170,6 +3181,38 @@ pub struct MergeResult {
   pub notes: Vec<String>,
 }
 
+/// Move each retargeted child's open PR onto its new base, so stacked PRs
+/// follow their workspace once the parent lands. Best-effort: needs `gh` and
+/// a GitHub remote; returns one note per PR moved or failed.
+pub fn retarget_child_prs(repo_path: &str, plan: &MergeLandingPlan) -> Vec<String> {
+  if plan.retargeted.is_empty() {
+    return Vec::new();
+  }
+  let Some(remote) = crate::github::get_git_remote_url_impl(repo_path)
+    .ok()
+    .flatten()
+  else {
+    return Vec::new();
+  };
+  let Some(gh) =
+    crate::binary_paths::get_binary_path("gh").or_else(|| crate::binary_paths::detect_binary("gh"))
+  else {
+    return Vec::new();
+  };
+  let retargets: Vec<(String, String)> = plan
+    .retargeted
+    .iter()
+    .map(|r| (r.branch_name.clone(), r.to_branch.clone()))
+    .collect();
+  crate::github::gh_retarget_open_prs_impl(
+    &gh,
+    repo_path,
+    &remote.full_name,
+    &retargets,
+    &crate::binary_paths::get_extended_path(),
+  )
+}
+
 /// Options for a local merge beyond the strategy.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalMergeOptions {
@@ -3369,7 +3412,10 @@ pub fn sync_after_remote_merge(
 
 /// Merge the workspace's PR on GitHub, then sync the target branch and the
 /// stack locally. Nothing local changes when GitHub refuses the merge.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn merge_workspace_on_github(
   repo_path: &str,
   workspace_id: i64,
