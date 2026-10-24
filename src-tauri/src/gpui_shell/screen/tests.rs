@@ -1251,6 +1251,9 @@ impl commits_data::CommitsHost for FakeHost {
 
   fn abandon(&self, _: &str, _: Option<i64>, change_id: &str) -> Result<String, String> {
     self.record(format!("abandon {change_id}"));
+    if self.failing.contains(&"abandon") {
+      return Err("abandon failed".into());
+    }
     Ok("op1".into())
   }
 
@@ -4191,6 +4194,22 @@ fn commits_tab_removes_an_abandoned_commit(cx: &mut TestAppContext) {
     .advance_clock(std::time::Duration::from_millis(300));
   assert!(!h.drawn("commit-row-a"));
   assert!(h.drawn("commit-row-b"));
+}
+
+#[gpui::test]
+fn commits_tab_keeps_a_commit_it_failed_to_abandon(cx: &mut TestAppContext) {
+  let mut host = commits_host();
+  host.failing = vec!["abandon"];
+  let (mut h, host) = workspace_harness(cx, host, commits_route());
+  h.click("commit-row-a");
+  h.click("delete-commit-a");
+  h.answer("Delete commit");
+  assert!(host.writes().contains(&"abandon a".to_string()));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  assert!(h.drawn("commit-row-a"), "put back");
+  assert!(h.drawn("delete-commit-a"));
 }
 
 #[gpui::test]
