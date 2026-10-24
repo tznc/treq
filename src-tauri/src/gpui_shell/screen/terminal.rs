@@ -1263,7 +1263,6 @@ impl TerminalView {
           .border_color(theme::data_color(scheme.foreground))
       }
     });
-    let lines = frame.lines;
     div()
       .absolute()
       .inset_0()
@@ -1271,9 +1270,9 @@ impl TerminalView {
         gpui::canvas(
           |_, _, _| {},
           move |bounds, _, window, cx| {
-            for (row, runs) in lines.into_iter().enumerate() {
+            for (row, runs) in frame.lines.iter().enumerate() {
               let y = bounds.origin.y + px(TOP_PAD + row as f32 * h);
-              for run in runs {
+              for run in runs.iter() {
                 let x = bounds.origin.x + px(run.col as f32 * w);
                 if let Some(bg) = run.bg {
                   window.paint_quad(gpui::fill(
@@ -1284,7 +1283,7 @@ impl TerminalView {
                 if run.text.trim().is_empty() && !run.underline && !run.strike {
                   continue;
                 }
-                paint_run(&run, point(x, y), (w, h, advance), font_size, window, cx);
+                paint_run(run, point(x, y), (w, h, advance), font_size, window, cx);
               }
             }
           },
