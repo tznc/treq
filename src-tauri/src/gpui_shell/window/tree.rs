@@ -31,13 +31,17 @@ pub fn rows(
   statuses: &[WorkspaceSidebarStatus],
   has_changes: &HashMap<i64, bool>,
 ) -> Vec<Row> {
+  // The first status of each id, as a search from the front finds it.
+  let mut by_id: HashMap<i64, &WorkspaceSidebarStatus> = HashMap::with_capacity(statuses.len());
+  for status in statuses {
+    by_id.entry(status.current.id).or_insert(status);
+  }
   workspaces
     .iter()
     .map(|workspace| {
-      let status = statuses
-        .iter()
-        .find(|s| s.current.id == workspace.id)
-        .cloned()
+      let status = by_id
+        .get(&workspace.id)
+        .map(|s| (*s).clone())
         .unwrap_or_else(|| WorkspaceSidebarStatus {
           current: workspace.clone(),
           has_conflicts: false,

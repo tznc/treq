@@ -186,14 +186,14 @@ impl Data {
     if let Some(workspaces) = read.workspaces {
       let ids = |list: &[Workspace]| list.iter().map(|w| w.id).collect::<Vec<_>>();
       let before = repo.workspaces.as_deref().map(ids);
-      if repo.workspaces.as_deref().map(json) != Some(json(&workspaces)) {
+      if repo.workspaces.as_ref() != Some(&workspaces) {
         applied.changed = true;
       }
       applied.before = Some(before.unwrap_or_default());
       repo.workspaces = Some(workspaces);
     }
     if let Some(statuses) = read.statuses {
-      if json(&repo.statuses) != json(&statuses) {
+      if repo.statuses != statuses {
         applied.changed = true;
       }
       repo.statuses = statuses;

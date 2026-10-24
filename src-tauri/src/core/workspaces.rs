@@ -124,7 +124,7 @@ pub struct WorkspacePartialStatus {
   pub commits_ahead: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct WorkspaceSidebarStatus {
   pub current: local_db::Workspace,
   pub has_conflicts: bool,
