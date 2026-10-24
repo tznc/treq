@@ -1711,10 +1711,9 @@ impl SettingsView {
         .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
-      let input =
-        self
-          .controls
-          .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
+      let input = self
+        .controls
+        .password("linear.apiKey", &linear.draft, "lin_api_...", window, cx);
       if let Some(state) = self.account.linear.as_mut().filter(|l| l.focus) {
         state.focus = false;
         input.read(cx).focus_handle(cx).focus(window, cx);
