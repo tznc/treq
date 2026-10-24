@@ -2010,12 +2010,56 @@ impl CodeView {
     };
     let untouched_count = entries.iter().filter(|e| untouched(e)).count();
     let show_untouched = self.show_untouched;
-    let entries: Vec<_> = entries
-      .into_iter()
-      .filter(|e| show_untouched || !untouched(e))
-      .collect();
-    let shown = entries.len();
+    // Changed entries, then the toggle, then the untouched entries it shows.
+    let (rest, mut entries): (Vec<_>, Vec<_>) = entries.into_iter().partition(|e| untouched(e));
+    let changed = entries.len();
+    let mut toggle = (untouched_count > 0).then(|| {
+      let label = if show_untouched {
+        "Hide unchanged files".to_string()
+      } else if untouched_count == 1 {
+        "Show 1 unchanged file".to_string()
+      } else {
+        format!("Show {untouched_count} unchanged files")
+      };
+      ui::text(div(), TextSize::Xs)
+        .id("code-unchanged-toggle")
+        .debug_selector(|| "code-unchanged-toggle".into())
+        .role(Role::Button)
+        .aria_label(label.clone())
+        .aria_expanded(show_untouched)
+        .test_support()
+        .when(changed > 0, |this| this.border_t_1().border_color(p.border))
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_4()
+        .py_1p5()
+        .text_color(muted_fg)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .child(ui::icon(
+          if show_untouched {
+            theme::ICON_CHEVRON_DOWN
+          } else {
+            theme::ICON_CHEVRON_RIGHT
+          },
+          12.,
+          muted_fg,
+        ))
+        .child(label)
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.show_untouched = !view.show_untouched;
+          cx.notify();
+        }))
+        .into_any_element()
+    });
+    if show_untouched {
+      entries.extend(rest);
+    }
     for (i, entry) in entries.into_iter().enumerate() {
+      if i == changed {
+        list = list.children(toggle.take());
+      }
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
       let icon = match (&pin, entry.is_directory) {
@@ -2045,11 +2089,13 @@ impl CodeView {
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
       let syncing = self.syncing_submodule;
+      // A row has something above it: an earlier row, or the toggle.
+      let divided = i > 0 || (i >= changed && untouched_count > 0);
       list =
         list.child(
           div()
             .debug_selector(move || selector)
-            .when(i > 0, |this| this.border_t_1().border_color(p.border))
+            .when(divided, |this| this.border_t_1().border_color(p.border))
             .flex()
             .items_center()
             .hover(move |s| s.bg(hover))
@@ -2130,47 +2176,7 @@ impl CodeView {
             }),
         );
     }
-    if untouched_count > 0 {
-      let label = if show_untouched {
-        "Hide unchanged files".to_string()
-      } else if untouched_count == 1 {
-        "Show 1 unchanged file".to_string()
-      } else {
-        format!("Show {untouched_count} unchanged files")
-      };
-      list = list.child(
-        ui::text(div(), TextSize::Xs)
-          .id("code-unchanged-toggle")
-          .debug_selector(|| "code-unchanged-toggle".into())
-          .role(Role::Button)
-          .aria_label(label.clone())
-          .aria_expanded(show_untouched)
-          .test_support()
-          .when(shown > 0, |this| this.border_t_1().border_color(p.border))
-          .flex()
-          .items_center()
-          .gap_2()
-          .px_4()
-          .py_1p5()
-          .text_color(muted_fg)
-          .cursor_pointer()
-          .hover(move |s| s.bg(hover))
-          .child(ui::icon(
-            if show_untouched {
-              theme::ICON_CHEVRON_DOWN
-            } else {
-              theme::ICON_CHEVRON_RIGHT
-            },
-            12.,
-            muted_fg,
-          ))
-          .child(label)
-          .on_click(cx.listener(|view, _, _, cx| {
-            view.show_untouched = !view.show_untouched;
-            cx.notify();
-          })),
-      );
-    }
+    list = list.children(toggle);
     if loaded && empty {
       list = list.child(
         ui::text(div(), TextSize::Sm)

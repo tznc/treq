@@ -59,8 +59,8 @@ test("file-status: Code tab file list", async ({ page }) => {
     name: "21-file-status-02-unchanged-shown",
     title: "Code tab: unchanged files shown",
     expectations: [
-      "Untouched entries such as README.md now show, greyed out and without a pip",
-      "The last row reads 'Hide unchanged files' with a down chevron",
+      "Changed entries stay on top, then a 'Hide unchanged files' row with a down chevron",
+      "Untouched entries (.gitignore, README.md) follow below that row, greyed out and without a pip",
     ],
   });
   await page.getByRole("button", { name: "Hide unchanged files" }).click();

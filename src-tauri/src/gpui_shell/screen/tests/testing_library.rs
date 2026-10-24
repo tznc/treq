@@ -523,3 +523,23 @@ fn code_tab_keeps_entries_without_a_status_visible(cx: &mut TestAppContext) {
     .query_by_role(by::role(Role::Button).name("Show 1 unchanged file"))
     .is_none());
 }
+
+#[gpui::test]
+fn code_tab_lists_unchanged_files_below_their_toggle(cx: &mut TestAppContext) {
+  let mut host = code_host();
+  host.overview.entries = vec![
+    status_entry(".gitignore", "untouched"),
+    status_entry("dirty.txt", "workingCopy"),
+  ];
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  h.click("code-unchanged-toggle");
+  let top = |h: &mut Harness, selector: &'static str| {
+    h.cx.run_until_parked();
+    h.cx.debug_bounds(selector).expect(selector).origin.y
+  };
+  let changed = top(&mut h, "code-entry-dirty.txt");
+  let toggle = top(&mut h, "code-unchanged-toggle");
+  let unchanged = top(&mut h, "code-entry-.gitignore");
+  assert!(changed < toggle, "changed files come first");
+  assert!(toggle < unchanged, "unchanged files follow the toggle row");
+}
