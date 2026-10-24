@@ -1423,6 +1423,7 @@ fn popup_window(
   owner: &str,
 ) -> Option<(tauri::Window<Wry>, WeakEntity<PopupView>)> {
   let label = slot.label(owner);
+  let built_at = std::time::Instant::now();
   if let Some(found) = WINDOWS.with(|windows| {
     windows
       .borrow()
@@ -1505,6 +1506,7 @@ fn popup_window(
     window.show().ignore_closed();
     window.hide().ignore_closed();
   }
+  log::info!("perf-r6: built popup window {label} in {:?}", built_at.elapsed());
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
       label,

@@ -68,6 +68,7 @@ fn modal_window(
   }) {
     return Some(found);
   }
+  let built_at = std::time::Instant::now();
   let parent = tauri::Manager::get_window(app, owner)?;
   let window = tauri::WindowBuilder::new(app, label(owner))
     // Unnamed, it would be listed as Tauri's default "Tauri App".
@@ -116,6 +117,7 @@ fn modal_window(
     window.show().ignore_closed();
     window.hide().ignore_closed();
   }
+  log::info!("perf-r6: built modal window for {owner} in {:?}", built_at.elapsed());
   MODALS.with(|modals| {
     modals.borrow_mut().insert(
       owner.to_string(),
