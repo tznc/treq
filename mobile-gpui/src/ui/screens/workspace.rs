@@ -20,6 +20,7 @@ use serde::Deserialize;
 use treq_lib::{
   core::{
     remote::TreqCommandRequest,
+    remote_control_plane::SshEndpoint,
     workspaces::{WorkspaceStatus, WorkspaceSummary},
   },
   jj::{JjBranch, JjFileChange, JjRevisionDiff},
@@ -31,7 +32,9 @@ use treq_ui::{
 };
 
 use super::{
-  commits::CommitsScreen, conflicts, diff, mutation_message, on_epoch, terminal::Sessions,
+  commits::{self, CommitsScreen},
+  conflicts, diff, mutation_message, on_epoch,
+  terminal::Sessions,
   workspaces,
 };
 use crate::{
@@ -127,6 +130,32 @@ fn counted(tab: Tab, count: usize) -> Tab {
   }
 }
 
+fn status_request(target: &Target) -> TreqCommandRequest {
+  TreqCommandRequest::InspectWorkspace {
+    repo: target.repo.clone(),
+    workspace: target.id.clone(),
+  }
+}
+
+fn diff_request(target: &Target) -> TreqCommandRequest {
+  TreqCommandRequest::WorkspaceDiff {
+    repo: target.repo.clone(),
+    workspace: target.id.clone(),
+  }
+}
+
+/// Starts reading workspace `id`'s status and changes on `endpoint`, for a
+/// screen about to open.
+pub fn prefetch(endpoint: &SshEndpoint, repo: &str, id: &str) {
+  let target = Target {
+    repo: repo.to_string(),
+    id: id.to_string(),
+    name: String::new(),
+  };
+  remote::prefetch_on::<WorkspaceStatus>(endpoint.clone(), status_request(&target));
+  remote::prefetch_on::<JjRevisionDiff>(endpoint.clone(), diff_request(&target));
+}
+
 /// "M" → "Modified", for a changed file's row.
 fn status_name(status: &str) -> &str {
   match status {
@@ -196,13 +225,27 @@ impl WorkspaceScreen {
       }
     })
     .detach();
-    let sessions = cx.new(|_| Sessions::new(target.clone()));
+    // Shown at once when this workspace was open before; refetched either way.
+    let status = remote::last::<WorkspaceStatus>(&status_request(&target));
+    // The record names the workspace's sessions. The last status or the
+    // list's summary has it, so sessions are listed without waiting for
+    // this status (a round trip on the default tab).
+    let workspace = status
+      .as_ref()
+      .map(|s| s.partial.current.clone())
+      .or_else(|| {
+        remote::last::<Vec<WorkspaceSummary>>(&workspaces::summaries_request(&target.repo))?
+          .into_iter()
+          .find(|s| s.workspace.id.to_string() == target.id)
+          .map(|s| s.workspace)
+      });
+    let sessions = cx.new(|cx| Sessions::new(target.clone(), workspace, cx));
     cx.observe(&sessions, |_, _, cx| cx.notify()).detach();
     let mut this = Self {
-      target,
       view: View::Terminals,
-      status: Load::Idle,
-      diff: Load::Idle,
+      status: status.map_or(Load::Idle, Load::Ready),
+      diff: remote::last(&diff_request(&target)).map_or(Load::Idle, Load::Ready),
+      target,
       marker: None,
       sessions,
       commits: None,
@@ -213,54 +256,55 @@ impl WorkspaceScreen {
       changed: false,
       _poll: poll,
     };
-    this.reload(cx);
+    this.fetch(true, cx);
+    this.poll_marker(cx);
     this
   }
 
   fn reload(&mut self, cx: &mut Context<Self>) {
+    self.fetch(false, cx);
+    self.poll_marker(cx);
+  }
+
+  /// Reads the workspace's status, changes and sessions. `join` as in
+  /// [`remote::read_cached`].
+  fn fetch(&mut self, join: bool, cx: &mut Context<Self>) {
     if self.status.ready().is_none() {
       self.status = Load::Loading;
     }
     if self.diff.ready().is_none() {
       self.diff = Load::Loading;
     }
-    let Target { repo, id, .. } = self.target.clone();
-    let (r, w) = (repo.clone(), id.clone());
+    let first = join;
     load::run(
       cx,
-      async move {
-        remote::read::<WorkspaceStatus>(TreqCommandRequest::InspectWorkspace {
-          repo: r,
-          workspace: w,
-        })
-        .await
-      },
-      |this, result, cx| {
+      remote::read_cached::<WorkspaceStatus>(status_request(&self.target), join),
+      move |this, result, cx| {
         if let Ok(status) = &result {
           let workspace = status.partial.current.clone();
           this
             .sessions
             .update(cx, |sessions, cx| sessions.set_workspace(workspace, cx));
+          // Once the tab's own reads are back, the Commits tab's is
+          // started so that tab opens on content.
+          if first && this.commits.is_none() {
+            commits::prefetch(&this.target);
+          }
         }
         this.status = Load::from_result(result);
       },
     );
     load::run(
       cx,
-      async move {
-        remote::read::<JjRevisionDiff>(TreqCommandRequest::WorkspaceDiff {
-          repo,
-          workspace: id,
-        })
-        .await
-      },
+      remote::read_cached::<JjRevisionDiff>(diff_request(&self.target), join),
       |this, result, _| this.diff = Load::from_result(result),
     );
-    self.sessions.update(cx, |sessions, cx| sessions.reload(cx));
-    if let Some(commits) = &self.commits {
-      commits.update(cx, |commits, cx| commits.reload(cx));
+    if !join {
+      self.sessions.update(cx, |sessions, cx| sessions.reload(cx));
+      if let Some(commits) = &self.commits {
+        commits.update(cx, |commits, cx| commits.reload(cx));
+      }
     }
-    self.poll_marker(cx);
   }
 
   /// Refetches when the workspace changed on the host since the last poll.
@@ -280,7 +324,8 @@ impl WorkspaceScreen {
           let changed = this.marker.is_some() && this.marker != marker.operation_id;
           this.marker = marker.operation_id;
           if changed {
-            this.reload(cx);
+            // The marker was just read: refetch the rest only.
+            this.fetch(false, cx);
           }
         }
       },
@@ -937,16 +982,19 @@ fn switcher(repo: String, current: String, cx: &mut App) {
     cx.new(|cx| {
       load::run(
         cx,
-        workspaces::load_summaries(repo.clone()),
+        workspaces::load_summaries(repo.clone(), true),
         |this: &mut Switcher, result, cx| {
           this.list = Load::from_result(result);
           cx.notify();
         },
       );
+      // The list as last read shows until the fresh one is back.
+      let list =
+        remote::last(&workspaces::summaries_request(&repo)).map_or(Load::Loading, Load::Ready);
       Switcher {
         repo,
         current,
-        list: Load::Loading,
+        list,
       }
     })
   });
