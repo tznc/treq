@@ -5294,6 +5294,39 @@ fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_agent_comment_poll_that_reads_the_same_comments_changes_nothing(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("agent-review-comment-card"));
+  let revision = |h: &mut Harness| {
+    h.screen.read_with(&h.cx, |screen, cx| {
+      let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+      workspace
+        .changes()
+        .expect("changes")
+        .read(cx)
+        .threads
+        .revision
+    })
+  };
+  let (before, reads) = (revision(&mut h), count_calls(&host, "read agent comments"));
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
+  h.cx.run_until_parked();
+  assert!(count_calls(&host, "read agent comments") > reads, "polled");
+  assert_eq!(revision(&mut h), before, "nothing new, nothing redone");
+
+  host.agent.lock().unwrap()[0].comment_text = "Changed".into();
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
+  h.cx.run_until_parked();
+  assert_ne!(revision(&mut h), before);
+}
+
+#[gpui::test]
 fn changes_tab_applies_an_agent_suggestion_and_reads_again(cx: &mut TestAppContext) {
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(Some("b and c"))];

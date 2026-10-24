@@ -138,7 +138,7 @@ pub struct GhLabel {
   pub color: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct GhAuthor {
   pub login: String,
   #[serde(default)]
@@ -1553,7 +1553,7 @@ pub fn list_prs_with_checks_via_gh_impl(
 
 // ── GitHub PR review comment threads (read-only) ────────────────────────────
 
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, Clone, PartialEq)]
 pub struct GhReviewComment {
   pub id: String,
   pub body: String,
@@ -1564,7 +1564,7 @@ pub struct GhReviewComment {
   pub reactions: Vec<GhReactionGroup>,
 }
 
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, Clone, PartialEq)]
 pub struct GhReviewThread {
   pub id: String,
   pub is_resolved: bool,
