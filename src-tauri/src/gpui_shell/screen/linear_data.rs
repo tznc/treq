@@ -801,7 +801,7 @@ mod tests {
     let (states, leads) = project_filter_options(&all);
     assert_eq!(
       states.iter().map(|s| s.value.as_str()).collect::<Vec<_>>(),
-      ["completed", "planned", "started"]
+      ["backlog", "completed", "planned", "started"]
     );
     assert_eq!(
       leads.iter().map(|l| l.label.as_str()).collect::<Vec<_>>(),
