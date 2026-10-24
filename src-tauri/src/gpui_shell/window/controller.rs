@@ -11,7 +11,7 @@ use tauri_plugin_gpui::gpui::{prelude::*, App, Context, Task};
 
 use super::{
   actions::{Menu, Shortcut},
-  data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
+  data::{Data, Read, RepoRead, BACKGROUND_EVERY, POLL, SESSIONS_POLL},
   host::{read_repo, FileWatch, WindowHost},
   model::{self, Confirm, Effect, FolderPurpose, Model},
   remote::{self, Opened, RemoteEffect},
@@ -63,6 +63,11 @@ pub struct WindowController {
   recheck_branch: bool,
   /// The checkout watched for edits on disk, and the task that hears them.
   watching: Option<(String, Task<()>)>,
+  /// Another window or app has the focus: polls read only every
+  /// [`BACKGROUND_EVERY`]th tick, and what they skip waits in `skipped`
+  /// for the window to come back.
+  background: bool,
+  skipped: Option<Read>,
   _pollers: Vec<Task<()>>,
 }
 
@@ -99,6 +104,8 @@ impl WindowController {
       queued: None,
       recheck_branch: false,
       watching: None,
+      background: false,
+      skipped: None,
       _pollers: pollers,
     };
     let host = this.host.clone();
@@ -148,12 +155,32 @@ impl WindowController {
   }
 
   fn poll(every: std::time::Duration, read: Read, cx: &mut Context<Self>) -> Task<()> {
-    cx.spawn(async move |this, cx| loop {
-      cx.background_executor().timer(every).await;
-      if this.update(cx, |this, cx| this.read(read, cx)).is_err() {
-        break;
+    cx.spawn(async move |this, cx| {
+      let mut tick = 0u32;
+      loop {
+        cx.background_executor().timer(every).await;
+        tick = tick.wrapping_add(1);
+        if this
+          .update(cx, |this, cx| this.tick(read, tick, cx))
+          .is_err()
+        {
+          break;
+        }
       }
     })
+  }
+
+  /// A poll's `tick`th turn: it reads, unless the window is in the
+  /// background and this turn is one it skips.
+  fn tick(&mut self, read: Read, tick: u32, cx: &mut Context<Self>) {
+    if self.background && !tick.is_multiple_of(BACKGROUND_EVERY) {
+      let skipped = self.skipped.get_or_insert_with(Read::default);
+      skipped.workspaces |= read.workspaces;
+      skipped.sessions |= read.sessions;
+      skipped.detail |= read.detail;
+      return;
+    }
+    self.read(read, cx);
   }
 
   #[cfg(test)]
@@ -214,9 +241,19 @@ impl WindowController {
 
   /// The window gained focus: the Changes tab and file browser read again
   /// (`useChangesRevision`); SWR itself does not revalidate on focus.
+  /// Back from the background, it reads what its polls skipped meanwhile.
   pub fn focused(&mut self, cx: &mut Context<Self>) {
+    self.background = false;
+    if let Some(read) = self.skipped.take() {
+      self.read(read, cx);
+    }
     self.model.view.changes_revision += 1;
     self.present(cx);
+  }
+
+  /// The window lost focus: its polls slow down until it is back.
+  pub fn blurred(&mut self) {
+    self.background = true;
   }
 
   /// The watched checkout changed on disk: the Changes tab reads again.

@@ -41,6 +41,28 @@ fn drives(label: &str) -> bool {
 
 pub(in crate::gpui_shell) fn forget(label: &str) {
   driven().lock_or_recover().remove(label);
+  set_focused(label, false);
+}
+
+/// The windows in front, by label: none while the app is in the background.
+fn in_front() -> &'static Mutex<HashSet<String>> {
+  static IN_FRONT: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+  IN_FRONT.get_or_init(Default::default)
+}
+
+/// Records whether window `label` has the focus, and tells the PR status
+/// poller whether any window does, so it slows down while none is.
+fn set_focused(label: &str, focused: bool) {
+  let none = {
+    let mut in_front = in_front().lock_or_recover();
+    if focused {
+      in_front.insert(label.to_string());
+    } else {
+      in_front.remove(label);
+    }
+    in_front.is_empty()
+  };
+  crate::pr_status::global().set_background(none);
 }
 
 /// Gives window `label` its model, on `repo`. Main thread, outside a GPUI
@@ -242,9 +264,14 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   true
 }
 
-/// Window `label` gained focus. Any thread.
-pub fn window_focused(app: &AppHandle, label: &str) {
-  with_controller(app, label, |c, cx| c.focused(cx));
+/// Window `label` gained (`focused`) or lost focus. Any thread.
+pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
+  set_focused(label, focused);
+  if focused {
+    with_controller(app, label, |c, cx| c.focused(cx));
+  } else {
+    with_controller(app, label, |c, _| c.blurred());
+  }
 }
 
 /// Follows the app-wide events the window's data depends on. Once.

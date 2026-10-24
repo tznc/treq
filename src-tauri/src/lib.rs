@@ -517,6 +517,12 @@ pub fn run() {
   let builder = builder.plugin(tauri_plugin_cli::init());
   builder
     .on_window_event(|window, event| {
+      // Any window counts toward the app being in front, a modal one too.
+      #[cfg(feature = "gpui-shell")]
+      #[cfg(desktop)]
+      if let tauri::WindowEvent::Focused(focused) = event {
+        gpui_shell::window_focused(window.app_handle(), window.label(), *focused);
+      }
       // A shell window losing focus closes its tooltips and menus, as
       // native ones would; its toasts follow it as it moves or resizes.
       #[cfg(feature = "gpui-shell")]
@@ -524,10 +530,7 @@ pub fn run() {
       if !window.label().starts_with("gpui-popup-") {
         match event {
           tauri::WindowEvent::Focused(false) => gpui_shell::hide_popups(window.app_handle()),
-          tauri::WindowEvent::Focused(true) => {
-            commands::cloud::window_focused(window.app_handle());
-            gpui_shell::window_focused(window.app_handle(), window.label());
-          }
+          tauri::WindowEvent::Focused(true) => commands::cloud::window_focused(window.app_handle()),
           tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
             gpui_shell::place_toasts(window.app_handle(), window.label())
           }

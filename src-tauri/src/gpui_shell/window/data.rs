@@ -20,6 +20,9 @@ use crate::{
 pub const POLL: Duration = Duration::from_secs(10);
 /// `sessions` and the linked repositories': `refreshInterval: 30000`.
 pub const SESSIONS_POLL: Duration = Duration::from_secs(30);
+/// In the background a window's polls read on every this many ticks, so
+/// every 30 s and 90 s; back in front, it reads what they skipped at once.
+pub const BACKGROUND_EVERY: u32 = 3;
 
 /// What to read of a repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
