@@ -163,6 +163,11 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// How long typing pauses before `search_files` runs: nothing for a local
+  /// in-memory index, a debounce for a remote host's round trip.
+  fn file_search_delay(&self, _repo_path: &str) -> std::time::Duration {
+    std::time::Duration::from_millis(150)
+  }
   /// Builds the file index `search_files` reads, unless it is built.
   fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
@@ -278,23 +283,21 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.search_files(workspace_id, query, limit);
     }
-    crate::commands::workspace::ensure_workspace_indexed(
-      repo_path.to_string(),
-      workspace_id,
-      workspace_path.to_string(),
-    )?;
-    core::search_workspace_files(repo_path, workspace_id, query, limit)
+    Ok(crate::commands::workspace::workspace_file_index(workspace_path)?.search(query, limit))
   }
 
-  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str) {
+  fn file_search_delay(&self, repo_path: &str) -> std::time::Duration {
+    if self.remote_containing(repo_path).is_some() {
+      return std::time::Duration::from_millis(150);
+    }
+    std::time::Duration::ZERO
+  }
+
+  fn warm_file_index(&self, repo_path: &str, _workspace_id: Option<i64>, workspace_path: &str) {
     if self.remote_containing(repo_path).is_some() {
       return;
     }
-    if let Err(err) = crate::commands::workspace::ensure_workspace_indexed(
-      repo_path.to_string(),
-      workspace_id,
-      workspace_path.to_string(),
-    ) {
+    if let Err(err) = crate::commands::workspace::workspace_file_index(workspace_path) {
       log::warn!("file index: {err}");
     }
   }
