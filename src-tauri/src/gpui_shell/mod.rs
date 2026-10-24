@@ -322,6 +322,8 @@ pub fn open_window(
 
   let shell_label = label.to_string();
   let shell_app = app.clone();
+  // The first frame follows the OS appearance, before GPUI reports it.
+  let os_dark = window.theme().ok().map(|theme| theme == tauri::Theme::Dark);
   window.attach_gpui(move |cx| {
     let shell = cx.new(|_| Shell {
       app: shell_app,
@@ -331,7 +333,7 @@ pub fn open_window(
       modal: None,
       window: None,
       presented: None,
-      os_dark: None,
+      os_dark,
       shortcuts: None,
       confirm_focus: None,
     });
