@@ -69,8 +69,8 @@ type TerminalPlace = (String, Option<i64>, u64);
 /// Which workspace a header read is for (`Route::key`).
 type RouteKey = (String, Option<i64>, String);
 
-/// How often the idle reads ahead check that the shown tab has read and the
-/// window is in front.
+/// How often the idle reads ahead check that the shown tab has read. A
+/// window in the background waits to come to the front instead.
 const IDLE_POLL: Duration = Duration::from_millis(500);
 
 /// How long the window idles on a workspace before the workspaces shown
@@ -634,10 +634,11 @@ impl WorkspaceView {
         loop {
           cx.background_executor().timer(IDLE_POLL).await;
           match this.update_in(cx, |view, window, cx| {
-            window.is_window_active() && view.settled(cx)
+            (window.is_window_active(), view.settled(cx))
           }) {
-            Ok(true) => break,
-            Ok(false) => {}
+            Ok((true, true)) => break,
+            Ok((false, _)) => in_front(&this, cx).await,
+            Ok((true, false)) => {}
             Err(_) => return,
           }
         }
@@ -1744,6 +1745,28 @@ impl WorkspaceView {
       .child(div().flex().min_w_0().items_center().gap_2().child(list))
       .child(div().flex_1().min_w_0())
       .child(status)
+  }
+}
+
+/// Returns once the window comes to the front, waking for nothing before.
+async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowContext) {
+  let (tx, rx) = futures::channel::oneshot::channel();
+  let mut tx = Some(tx);
+  let Ok(watch) = this.update_in(cx, |_, window, cx| {
+    (!window.is_window_active()).then(|| {
+      cx.observe_window_activation(window, move |_, window, _| {
+        if window.is_window_active() {
+          if let Some(tx) = tx.take() {
+            let _ = tx.send(());
+          }
+        }
+      })
+    })
+  }) else {
+    return;
+  };
+  if let Some(_watch) = watch {
+    let _ = rx.await;
   }
 }
 
