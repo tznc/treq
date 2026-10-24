@@ -7810,18 +7810,17 @@ fn resolve_local_target_branch_revision(
 /// Find the newest workspace ancestor whose tree is identical to the target.
 /// This recognizes the old tip represented by a GitHub squash commit, allowing
 /// stacked child commits to be separated from the already-merged parent commits.
+/// A squash commit is new, so the old tip is never the target's ancestor: only
+/// the workspace's side is read, not the whole history below it.
 fn resolve_tree_equivalent_workspace_base(
   loaded: &LoadedWorkspaceRepo,
   target_revision: &str,
 ) -> Option<String> {
   let target = resolve_commit_by_revision(loaded, target_revision).ok()?;
-  let target_descendants = evaluate_revset(
-    loaded,
-    &format!("{}::", format_revset_symbol(&target.id().hex())),
-  )
-  .ok()?;
+  let target_symbol = format_revset_symbol(&target.id().hex());
+  let target_descendants = evaluate_revset(loaded, &format!("{target_symbol}::")).ok()?;
   let is_target_descendant = target_descendants.containing_fn();
-  let ancestors = evaluate_revset(loaded, "::@-").ok()?;
+  let ancestors = evaluate_revset(loaded, &format!("{target_symbol}..@-")).ok()?;
   ancestors
     .iter()
     .commits(loaded.repo.store())
