@@ -219,3 +219,7 @@ harness = false
 [[bench]]
 name = "file_search"
 harness = false
+
+[[bench]]
+name = "window_open"
+harness = false

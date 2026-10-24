@@ -175,6 +175,8 @@ impl Render for Shell {
       e2e::begin_frame(window);
       e2e::shell_window(window.window_handle());
     }
+    static FIRST: std::sync::Once = std::sync::Once::new();
+    FIRST.call_once(|| crate::startup::mark("first render"));
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
@@ -308,6 +310,7 @@ pub fn open_window(
     .title_bar_style(tauri::TitleBarStyle::Overlay)
     .hidden_title(true);
   let window = window.build()?;
+  crate::startup::mark("window built");
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;
 
@@ -332,7 +335,9 @@ pub fn open_window(
     shell
   })?;
 
+  crate::startup::mark("gpui attached");
   window::start(app, label, repo)?;
+  crate::startup::mark("window model started");
   Ok(())
 }
 

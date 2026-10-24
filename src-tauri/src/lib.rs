@@ -49,6 +49,8 @@ pub mod pty_stream;
 pub mod repo_config;
 pub mod review_aggregate;
 pub mod send_dispatch;
+#[cfg(feature = "gui")]
+pub(crate) mod startup;
 pub mod telemetry;
 pub mod tracker;
 pub mod unified_patch;
@@ -469,6 +471,7 @@ where
   reason = "a Tauri build failure at startup is unrecoverable"
 )]
 pub fn run() {
+  startup::mark("run");
   telemetry::install_panic_hook();
   // CLI invocations never start Tauri: see `cli::args` for why.
   #[cfg(desktop)]
@@ -561,6 +564,7 @@ pub fn run() {
       }
     })
     .setup(move |app| {
+      startup::mark("tauri built, setup begins");
       let log_dir = app
         .path()
         .app_log_dir()
@@ -568,6 +572,7 @@ pub fn run() {
       let telemetry =
         telemetry::init(&log_dir).map_err(|e| format!("Failed to initialize telemetry: {e}"))?;
 
+      startup::mark("telemetry");
       let app_dir = app
         .path()
         .app_data_dir()
@@ -581,6 +586,7 @@ pub fn run() {
       db.init()
         .map_err(|e| format!("Failed to initialize database: {e}"))?;
 
+      startup::mark("database");
       // The saved repo opens with the window (avoids Onboarding flash).
       let saved_repo_path = db.get_setting("last_opened_repo_path").ok().flatten();
       // The e2e suite opens its fixture repository instead.
@@ -601,6 +607,7 @@ pub fn run() {
         binary_paths::init_editor_apps_cache(editor_apps);
       }
 
+      startup::mark("binary caches");
       let pty_manager = PtyManager::new();
 
       // Background PR-status poller (sidebar reads from its cache)
@@ -630,6 +637,7 @@ pub fn run() {
       );
 
       app.manage(app_state);
+      startup::mark("state managed");
       if !undetected_binaries.is_empty() {
         let handle = app.handle().clone();
         std::thread::spawn(move || {
@@ -656,16 +664,22 @@ pub fn run() {
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       match gpui_shell::init(app) {
-        Ok(()) => open_repo_window(app.handle(), "main", saved_repo_path, "Treq - Stacking ADE")?,
+        Ok(()) => {
+          startup::mark("gpui init");
+          open_repo_window(app.handle(), "main", saved_repo_path, "Treq - Stacking ADE")?;
+          startup::mark("main window open");
+        }
         Err(err) => quit_without_gpui(app.handle(), &err),
       }
       // Rust owns the Supabase session; the windows draw the account.
       commands::cloud::start(app.handle());
+      startup::mark("cloud");
       start_agent_ipc_listener(app.handle().clone(), dispatch_listener);
       start_instance_registry_heartbeat(app.handle().clone());
       crate::core::app_setup_script::spawn_run_if_needed(
         crate::core::app_setup_script::Trigger::Startup,
       );
+      startup::mark("background services");
 
       // Deep links: sign-in callbacks and agent starts.
       #[cfg(desktop)]
@@ -983,11 +997,15 @@ pub fn run() {
         });
       } // #[cfg(desktop)]
 
+      startup::mark("setup done");
       Ok(())
     })
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app_handle, event| {
+      if let tauri::RunEvent::Ready = event {
+        startup::mark("event loop ready");
+      }
       // Local and remote PTY children (and their reader threads) are
       // otherwise only closed by an explicit `pty_close`/`remote_pty_close`
       // call from the frontend. Neither happens when a window is closed
