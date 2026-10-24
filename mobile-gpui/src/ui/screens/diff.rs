@@ -49,9 +49,9 @@ pub enum LineKind {
 }
 
 pub fn line_kind(line: &str) -> LineKind {
-  if line.starts_with('+') && !line.starts_with("+++") {
+  if line.starts_with('+') {
     LineKind::Added
-  } else if line.starts_with('-') && !line.starts_with("---") {
+  } else if line.starts_with('-') {
     LineKind::Removed
   } else {
     LineKind::Context
@@ -236,11 +236,14 @@ mod tests {
   use super::{line_kind, LineKind};
 
   #[test]
-  fn colours_added_and_removed_lines_but_not_file_headers() {
+  fn colours_lines_by_their_first_character() {
     assert_eq!(line_kind("+added"), LineKind::Added);
     assert_eq!(line_kind("-removed"), LineKind::Removed);
-    assert_eq!(line_kind("+++ b/file"), LineKind::Context);
-    assert_eq!(line_kind("--- a/file"), LineKind::Context);
+    // Hunk lines carry no file headers: these are a removed `-- comment`
+    // and `---` (Markdown front matter), and an added `++count`.
+    assert_eq!(line_kind("--- comment"), LineKind::Removed);
+    assert_eq!(line_kind("----"), LineKind::Removed);
+    assert_eq!(line_kind("+++count"), LineKind::Added);
     assert_eq!(line_kind(" context"), LineKind::Context);
   }
 }

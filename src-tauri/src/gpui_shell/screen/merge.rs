@@ -864,9 +864,9 @@ impl MergeView {
 /// A line of a hunk's `<pre className="p-2 text-xs font-mono">`, clipped
 /// at the card's edge like the other diffs.
 fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
-  let bg = if line.starts_with('+') && !line.starts_with("+++") {
+  let bg = if line.starts_with('+') {
     Some(Tone::GitOpen.tint(p))
-  } else if line.starts_with('-') && !line.starts_with("---") {
+  } else if line.starts_with('-') {
     Some(Tone::GitClosed.tint(p))
   } else {
     None
