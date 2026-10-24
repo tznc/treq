@@ -1050,7 +1050,9 @@ impl CodeView {
 fn pulse(el: Div, id: &'static str) -> impl IntoElement {
   el.with_animation(
     id,
-    Animation::new(Duration::from_secs(2)).repeat(),
+    Animation::new(Duration::from_secs(2))
+      .repeat()
+      .with_max_fps(ui::PULSE_FPS),
     |el, delta| el.opacity(1. - 0.5 * (1. - (2. * delta - 1.).abs())),
   )
 }

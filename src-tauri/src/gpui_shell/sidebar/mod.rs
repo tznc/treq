@@ -1274,11 +1274,15 @@ impl Sidebar {
           .rounded_full()
           .bg(color);
         if pulse {
-          this.child(dot.with_animation(
-            ("queue-pulse", id as u64),
-            Animation::new(Duration::from_secs(2)).repeat(),
-            |dot, delta| dot.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
-          ))
+          this.child(
+            dot.with_animation(
+              ("queue-pulse", id as u64),
+              Animation::new(Duration::from_secs(2))
+                .repeat()
+                .with_max_fps(ui::PULSE_FPS),
+              |dot, delta| dot.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
+            ),
+          )
         } else {
           this.child(dot)
         }

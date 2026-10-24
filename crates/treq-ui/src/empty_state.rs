@@ -186,7 +186,9 @@ impl RenderOnce for Skeleton {
       }))
       .with_animation(
         self.id,
-        Animation::new(Duration::from_millis(1500)).repeat(),
+        Animation::new(Duration::from_millis(1500))
+          .repeat()
+          .with_max_fps(crate::PULSE_FPS),
         |el, delta| el.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
       )
   }

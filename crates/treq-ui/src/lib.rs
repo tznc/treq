@@ -157,11 +157,21 @@ pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoEle
   spin(id, icon(theme::ICON_SPINNER, size, color))
 }
 
+/// How often a spinner redraws. Each of its frames draws the whole window,
+/// and half the display's rate still turns smoothly.
+pub const SPIN_FPS: f32 = 30.;
+
+/// How often a pulse redraws. Its opacity moves by half in a second, so a
+/// dozen steps a second look the same as sixty, for a fifth of the frames.
+pub const PULSE_FPS: f32 = 12.;
+
 /// Spins `icon` once a second, as Tailwind's `animate-spin` does.
 pub fn spin(id: impl Into<ElementId>, icon: gpui::Svg) -> impl IntoElement {
   icon.with_animation(
     id,
-    Animation::new(Duration::from_secs(1)).repeat(),
+    Animation::new(Duration::from_secs(1))
+      .repeat()
+      .with_max_fps(SPIN_FPS),
     |svg, delta| svg.with_transformation(Transformation::rotate(gpui::percentage(delta))),
   )
 }
@@ -182,7 +192,9 @@ where
   let shown = format!("{id}-shown");
   placeholder.with_animation(
     ElementId::Name(id),
-    Animation::new(SPINNER_DELAY),
+    // One frame when the delay is up, rather than one every frame while
+    // nothing shows.
+    Animation::new(SPINNER_DELAY).with_max_fps(1. / SPINNER_DELAY.as_secs_f32()),
     move |el, delta| {
       if delta < 1. {
         el.opacity(0.)
