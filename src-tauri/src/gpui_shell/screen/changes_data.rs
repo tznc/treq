@@ -729,15 +729,20 @@ pub fn full_path(workspace_path: &str, path: &str) -> String {
 
 /// `computeHunksHash`: djb2 over each hunk's header and lines, in hex.
 pub fn hunks_hash(hunks: &[JjDiffHunk]) -> String {
-  let text = hunks
-    .iter()
-    .map(|h| format!("{}{}", h.header, h.lines.concat()))
-    .collect::<Vec<_>>()
-    .join("|");
   let mut hash: u64 = 5381;
-  // JavaScript's `charCodeAt` counts UTF-16 units.
-  for unit in text.encode_utf16() {
-    hash = (hash * 33 + u64::from(unit)) % (1 << 32);
+  // JavaScript's `charCodeAt` counts UTF-16 units. Hashed piece by piece,
+  // as the hunks' text joined with `|`, without building that string.
+  let mut add = |text: &str| {
+    for unit in text.encode_utf16() {
+      hash = (hash * 33 + u64::from(unit)) % (1 << 32);
+    }
+  };
+  for (i, hunk) in hunks.iter().enumerate() {
+    if i > 0 {
+      add("|");
+    }
+    add(&hunk.header);
+    hunk.lines.iter().for_each(|line| add(line));
   }
   format!("{hash:x}")
 }
@@ -1152,6 +1157,18 @@ mod tests {
     // "ab" under djb2: ((5381*33 + 97)*33 + 98) = 5863208, in hex.
     let h = hunk("a", &["b"]);
     assert_eq!(hunks_hash(&[h]), format!("{:x}", 5863208));
+  }
+
+  #[test]
+  fn hunks_hash_joins_hunks_with_a_bar() {
+    let djb2 = |text: &str| {
+      let hash = text
+        .encode_utf16()
+        .fold(5381u64, |h, u| (h * 33 + u64::from(u)) % (1 << 32));
+      format!("{hash:x}")
+    };
+    let hunks = [hunk("@@ 1", &["+a", " é"]), hunk("@@ 2", &[])];
+    assert_eq!(hunks_hash(&hunks), djb2("@@ 1+a é|@@ 2"));
   }
 
   #[test]
