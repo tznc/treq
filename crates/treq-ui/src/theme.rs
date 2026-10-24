@@ -194,6 +194,13 @@ pub fn init(cx: &mut App) {
     log::error!("failed to load bundled fonts: {err:#}");
   }
   gpui_kit::init(cx);
+  // gpui-kit's input takes ⌘/Ctrl+Enter itself and, when multi-line, inserts
+  // a newline, so the key never reaches the submit handlers in the screens.
+  cx.bind_keys([gpui::KeyBinding::new(
+    "secondary-enter",
+    gpui::NoAction,
+    Some("Input"),
+  )]);
   // Each blink repaints the window; at gpui-kit's 500ms that cost was
   // noticeable while idling in a focused input.
   gpui_kit::base::input::CursorBlinkDefaults::new()
