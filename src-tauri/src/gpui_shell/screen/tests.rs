@@ -8011,6 +8011,7 @@ fn opening_a_repository_remembers_it_and_reports_it_open() {
 
 mod allocs;
 mod changes_large;
+mod code_files_large;
 mod commit_diffs;
 mod commits_large;
 mod conflicts;
