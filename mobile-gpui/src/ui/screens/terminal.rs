@@ -32,7 +32,7 @@ use crate::{
   backend, errors, remote,
   ui::{
     self, load, nav, sheet,
-    terminal_view::{PtyEvent, TerminalView},
+    terminal_view::{self, PtyEvent, TerminalView},
     widgets, Load, Location,
   },
 };
@@ -41,7 +41,7 @@ use crate::{
 static ATTACH_COMMANDS: std::sync::LazyLock<AttachCommandCache> =
   std::sync::LazyLock::new(AttachCommandCache::default);
 
-/// Size used to start a session, until the view measures itself.
+/// Size used to start the first session, until its view measures itself.
 const INITIAL_SIZE: (u16, u16) = (80, 24);
 
 /// How long a reattached session must stay up before a later drop gets
@@ -733,6 +733,7 @@ impl TerminalScreen {
     let label = self.label.clone();
     let remote_dir = workspace_dir(&repo, &workspace);
     let session_id = format!("gpui-{label}-{}", uuid::Uuid::new_v4());
+    let (cols, rows) = terminal_view::last_size().unwrap_or(INITIAL_SIZE);
     let (tx, rx) = mpsc::unbounded::<PtyEvent>();
     let request = TreqCommandRequest::PtyAttachCommand {
       repo: repo.clone(),
@@ -740,8 +741,8 @@ impl TerminalScreen {
       label,
       remote_dir: remote_dir.clone(),
       launch,
-      cols: INITIAL_SIZE.0,
-      rows: INITIAL_SIZE.1,
+      cols,
+      rows,
     };
     let binding = RemotePtyBinding {
       endpoint_id: endpoint.id.clone(),
@@ -769,8 +770,8 @@ impl TerminalScreen {
           binding,
           &endpoint,
           &command,
-          INITIAL_SIZE.0,
-          INITIAL_SIZE.1,
+          cols,
+          rows,
           move |bytes| {
             let _ = output.unbounded_send(PtyEvent::Output(bytes));
           },
@@ -793,7 +794,7 @@ impl TerminalScreen {
           let view = cx.new(|cx| {
             TerminalView::new(
               session_id,
-              INITIAL_SIZE,
+              (cols, rows),
               rx,
               move |status, window, cx| {
                 screen

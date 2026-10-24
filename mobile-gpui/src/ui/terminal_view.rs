@@ -6,7 +6,7 @@
 //! (including IME commits) is written to the PTY. Named keys and Ctrl/Alt
 //! combinations are encoded in `on_key_down`.
 
-use std::ops::Range;
+use std::{cell::Cell, ops::Range};
 
 use futures::{channel::mpsc, StreamExt};
 use gpui_kit::{component::ActiveTheme, *};
@@ -16,6 +16,17 @@ use crate::{backend, terminal};
 const FONT_SIZE: f32 = 13.;
 const LINE_HEIGHT: f32 = 17.;
 const SCROLLBACK: usize = 5000;
+
+thread_local! {
+  /// The grid size the last terminal measured, in columns and rows.
+  static LAST_SIZE: Cell<Option<(u16, u16)>> = const { Cell::new(None) };
+}
+
+/// The size the last terminal measured, so the next session starts at it
+/// instead of resizing (and the shell reprinting its prompt) once shown.
+pub fn last_size() -> Option<(u16, u16)> {
+  LAST_SIZE.with(Cell::get)
+}
 
 /// What the PTY channel reports to the view.
 pub enum PtyEvent {
@@ -124,6 +135,7 @@ impl TerminalView {
       .max(10.) as u16;
     let rows = (f32::from(bounds.height) / LINE_HEIGHT).floor().max(4.) as u16;
     self.cell = Some(cell);
+    LAST_SIZE.with(|last| last.set(Some((cols, rows))));
     if (cols, rows) == self.size {
       return;
     }
