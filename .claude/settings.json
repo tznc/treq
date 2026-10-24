@@ -19,10 +19,7 @@
       "Read(./web/package-lock.json)",
       "Read(./supabase/.temp/**)",
       "Read(./supabase/.branches/**)",
-      "Read(./coverage/**)",
-      "Read(./scripts/*/.generated/**)",
-      "Read(./assets/screenshots/**)",
-      "Read(./web/static/img/landing/**)"
+      "Read(./coverage/**)"
     ]
   },
   "attribution": {
