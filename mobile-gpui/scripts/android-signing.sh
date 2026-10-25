@@ -27,10 +27,12 @@ keyPassword=$ANDROID_KEYSTORE_PASSWORD
 EOF
 
 # Declare the config ahead of buildTypes, then point the release type at it.
+# `Properties` is the generated file's java.util.Properties import: written
+# out as `java.util.Properties`, `java` resolves to the Java plugin extension.
 perl -0pi -e '
   s/^(\s*)buildTypes \{/$1signingConfigs {
 $1    create("release") {
-$1        val props = java.util.Properties().apply {
+$1        val props = Properties().apply {
 $1            rootProject.file("keystore.properties").inputStream().use { load(it) }
 $1        }
 $1        storeFile = file(props.getProperty("storeFile"))
