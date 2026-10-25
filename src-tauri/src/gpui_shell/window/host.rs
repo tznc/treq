@@ -523,7 +523,14 @@ impl WindowHost for Backend {
     let mut gitignore = GitignoreFilter::new(Path::new(path));
     let watcher: Arc<Mutex<Option<CheckoutWatcher>>> = Arc::default();
     let weak = Arc::downgrade(&watcher);
-    let debouncer = notify_debouncer_full::new_debouncer(
+    // `NoCache` on every platform: the default `FileIdMap` (macOS, Windows)
+    // walks and stats every file under the root up front and holds an entry
+    // per file, while the handler below only asks whether any path matters.
+    let debouncer = notify_debouncer_full::new_debouncer_opt::<
+      _,
+      notify::RecommendedWatcher,
+      notify_debouncer_full::NoCache,
+    >(
       WATCH_SETTLE,
       None,
       move |result: notify_debouncer_full::DebounceEventResult| match result {
@@ -551,6 +558,8 @@ impl WindowHost for Backend {
         }
         Err(errors) => log::warn!("File watch errors: {errors:?}"),
       },
+      notify_debouncer_full::NoCache,
+      notify::Config::default(),
     )
     .map_err(|err| log::warn!("Failed to create a file watcher: {err}"))
     .ok()?;
@@ -818,10 +827,8 @@ fn is_ignored(path: &Path) -> bool {
     .is_some_and(|p| p.ends_with(".swp") || p.ends_with('~'))
 }
 
-type CheckoutDebouncer = notify_debouncer_full::Debouncer<
-  notify::RecommendedWatcher,
-  notify_debouncer_full::RecommendedCache,
->;
+type CheckoutDebouncer =
+  notify_debouncer_full::Debouncer<notify::RecommendedWatcher, notify_debouncer_full::NoCache>;
 
 /// A checkout's file watcher. Linux's inotify costs a kernel watch per
 /// directory, so there each directory outside ignored trees (`node_modules`,
