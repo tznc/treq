@@ -90,6 +90,9 @@ extern crate self as treq_lib;
 #[allow(clippy::unwrap_used, reason = "test fixture")]
 mod test_repo;
 
+#[cfg(test)]
+mod growth_perf;
+
 #[cfg(feature = "gui")]
 pub(crate) struct AppState {
   db: Mutex<Database>,
