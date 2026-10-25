@@ -30,7 +30,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// How long operations are kept.
-pub const OPERATION_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+pub const OPERATION_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 /// Fewest prunable operations worth the one-time index rebuild a prune costs.
 pub const MIN_PRUNABLE_OPERATIONS: usize = 200;
