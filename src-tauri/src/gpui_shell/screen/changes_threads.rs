@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use super::{
   changes_review::{number_and_side, Side},
-  commits_data::line_numbers,
+  commits_data::{line_numbers, numbered},
 };
 use crate::{github::GhReviewThread, jj::JjDiffHunk, local_db::AgentReviewComment};
 
@@ -25,6 +25,19 @@ pub struct Placed {
   pub unplaced: HashMap<String, Vec<usize>>,
 }
 
+/// The first hunk of a file that has a line, by number and side.
+type LineIndex = HashMap<(u32, Side), usize>;
+
+fn line_index(hunks: &[JjDiffHunk]) -> LineIndex {
+  let mut index = LineIndex::new();
+  for (h, hunk) in hunks.iter().enumerate() {
+    for (l, n) in numbered(hunk).enumerate() {
+      index.entry(number_and_side(n, l)).or_insert(h);
+    }
+  }
+  index
+}
+
 /// `placeGithubReviewThreads`: a thread sits on the first hunk that has
 /// its line on its side, from the working copy's hunks then the committed
 /// ones; GitHub's `is_outdated` is ignored.
@@ -33,8 +46,10 @@ pub fn place_threads(
   maps: &[&HashMap<String, &[JjDiffHunk]>],
 ) -> Placed {
   let mut placed = Placed::default();
+  // A file's lines are numbered once for all the threads on it.
+  let mut indexes: HashMap<(usize, &str), LineIndex> = HashMap::new();
   for (i, thread) in threads.iter().enumerate() {
-    match place(thread, maps) {
+    match place(thread, maps, &mut indexes) {
       Some(key) => placed.by_line.entry(key).or_default().push(i),
       None => placed
         .unplaced
@@ -46,25 +61,26 @@ pub fn place_threads(
   placed
 }
 
-fn place(thread: &GhReviewThread, maps: &[&HashMap<String, &[JjDiffHunk]>]) -> Option<LineKey> {
+fn place<'a>(
+  thread: &'a GhReviewThread,
+  maps: &[&HashMap<String, &[JjDiffHunk]>],
+  indexes: &mut HashMap<(usize, &'a str), LineIndex>,
+) -> Option<LineKey> {
   let line = u32::try_from(thread.line?).ok()?;
   let side = if thread.diff_side == "LEFT" {
     Side::Old
   } else {
     Side::New
   };
-  for map in maps {
+  for (m, map) in maps.iter().enumerate() {
     let Some(hunks) = map.get(&thread.path) else {
       continue;
     };
-    for hunk in hunks.iter() {
-      let hit = line_numbers(hunk)
-        .into_iter()
-        .enumerate()
-        .any(|(l, n)| number_and_side(n, l) == (line, side));
-      if hit {
-        return Some((thread.path.clone(), hunk.id.clone(), line, side));
-      }
+    let index = indexes
+      .entry((m, thread.path.as_str()))
+      .or_insert_with(|| line_index(hunks));
+    if let Some(&h) = index.get(&(line, side)) {
+      return Some((thread.path.clone(), hunks[h].id.clone(), line, side));
     }
   }
   None

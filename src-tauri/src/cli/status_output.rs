@@ -309,10 +309,14 @@ pub(crate) fn format_workspace_diff_lines(
     for file in conflict_hunks {
       lines.push(format!("=== {} ===", file.path));
       for hunk in &file.hunks {
-        if hunk.patch.is_empty() {
+        if hunk.header.is_empty() && hunk.lines.is_empty() {
           continue;
         }
-        lines.push(hunk.patch.trim_end().to_string());
+        lines.push(
+          format!("{}\n{}", hunk.header, hunk.lines.join("\n"))
+            .trim_end()
+            .to_string(),
+        );
       }
     }
   }
@@ -548,8 +552,10 @@ mod tests {
         hunks: vec![crate::jj::JjDiffHunk {
           id: "h1".to_string(),
           header: "@@".to_string(),
-          lines: vec!["<<<<<<<".to_string()],
-          patch: "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>>".to_string(),
+          lines: ["<<<<<<< HEAD", "ours", "=======", "theirs", ">>>>>>>"]
+            .map(String::from)
+            .to_vec(),
+          patch: String::new(),
           conflict_style: crate::conflict_markers::ConflictStyle::GitMerge,
           conflict_regions: Vec::new(),
         }],

@@ -380,3 +380,97 @@ fn refresh_perf(cx: &mut TestAppContext, token: Option<&str>) {
     .collect();
   report(&format!("refresh, token {token:?}"), &mut samples);
 }
+
+/// `count` modified Rust files, `src/f{i}.rs`, one added line each, and the
+/// extra `(path, status)` files after them.
+fn listed_host(count: usize, extra: &[(&str, &str)]) -> FakeHost {
+  let mut host = code_host();
+  let paths: Vec<(String, String)> = (0..count)
+    .map(|i| (format!("src/f{i}.rs"), "M".to_string()))
+    .chain(extra.iter().map(|(p, s)| (p.to_string(), s.to_string())))
+    .collect();
+  let files: Vec<_> = paths
+    .iter()
+    .map(|(path, status)| {
+      serde_json::json!({
+        "path": path, "status": status, "previous_path": null,
+        "changed_line_count": 1, "diff_deferred": false,
+      })
+    })
+    .collect();
+  let hunks: Vec<_> = paths
+    .iter()
+    .map(|(path, _)| {
+      serde_json::json!({
+        "path": path,
+        "hunks": [{ "id": "h", "header": "@@ -1 +1,2 @@", "lines": [" a", "+b"], "patch": "" }],
+      })
+    })
+    .collect();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": files,
+    "hunks_by_file": hunks,
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+#[gpui::test]
+fn a_long_file_list_draws_only_the_rows_on_screen(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, listed_host(3_000, &[]), changes_route());
+  assert!(h.drawn("file-row-src/f0.rs"));
+  assert!(!h.drawn("file-row-src/f2999.rs"), "far below the window");
+  assert!(h.drawn("changes-section-toggle"));
+  // Scrolling the list brings the last rows in.
+  let toggle = h.cx.debug_bounds("changes-section-toggle").expect("header");
+  // Each wheel step moves the list as far as the rows measured so far reach.
+  for _ in 0..200 {
+    if h.drawn("file-row-src/f2999.rs") {
+      break;
+    }
+    h.cx.simulate_event(gpui::ScrollWheelEvent {
+      position: toggle.center() + gpui::point(gpui::px(0.), gpui::px(200.)),
+      delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-100_000.))),
+      modifiers: Modifiers::none(),
+      touch_phase: gpui::TouchPhase::Moved,
+    });
+    h.cx.run_until_parked();
+    h.cx.update(|window, cx| window.draw(cx).clear(cx));
+  }
+  let shown: Vec<usize> = (0..3_000)
+    .filter(|i| {
+      h.cx
+        .debug_bounds(leak(format!("file-row-src/f{i}.rs")))
+        .is_some()
+    })
+    .collect();
+  assert!(
+    shown.contains(&2_999),
+    "rows drawn after scrolling: {:?}..{:?}",
+    shown.first(),
+    shown.last()
+  );
+  assert!(!h.drawn("file-row-src/f0.rs"));
+  // A row picked after scrolling selects that file.
+  h.click("file-row-src/f2999.rs");
+  assert!(h.cx.debug_bounds("file-row-src/f2999.rs").is_some());
+}
+
+#[gpui::test]
+fn hunks_of_binary_and_deleted_files_are_not_read(cx: &mut TestAppContext) {
+  let host = listed_host(2, &[("logo.png", "M"), ("old.rs", "D")]);
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("file-row-logo.png"));
+  assert!(h.drawn("file-row-old.rs"));
+  let reads: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("read hunks"))
+    .collect();
+  assert_eq!(
+    reads,
+    vec![r#"read hunks ["src/f0.rs", "src/f1.rs"]"#.to_string()]
+  );
+}
