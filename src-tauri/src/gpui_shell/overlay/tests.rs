@@ -5,6 +5,7 @@ use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use super::*;
 
 mod fuzz;
+mod perf;
 
 #[derive(Default)]
 struct FakeHost {

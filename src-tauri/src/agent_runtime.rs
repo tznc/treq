@@ -22,7 +22,7 @@ pub(crate) fn extract_repo_from_agent_deep_link(url: &str) -> Option<String> {
   None
 }
 
-fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> Option<String> {
+pub(crate) fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> Option<String> {
   let state = app.state::<AppState>();
   let normalized_target = agent_dispatch::normalize_repo_path(repo);
   let windows = app.windows();

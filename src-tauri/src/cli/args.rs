@@ -69,10 +69,24 @@ struct CommandConfig {
   clippy::expect_used,
   reason = "tauri.conf.json is embedded at build time and checked by tests"
 )]
-fn cli_config() -> CommandConfig {
-  let config: Value = serde_json::from_str(TAURI_CONFIG).expect("tauri.conf.json is valid JSON");
-  serde_json::from_value(config["plugins"]["cli"].clone())
-    .expect("tauri.conf.json plugins.cli uses only the keys the CLI parser supports")
+fn cli_config() -> &'static CommandConfig {
+  // Only `plugins.cli` is deserialised: serde skips the rest of the 28 KB
+  // file without building a `Value` tree for it.
+  #[derive(Deserialize)]
+  struct TauriConfig {
+    plugins: Plugins,
+  }
+  #[derive(Deserialize)]
+  struct Plugins {
+    cli: CommandConfig,
+  }
+  static CONFIG: std::sync::OnceLock<CommandConfig> = std::sync::OnceLock::new();
+  CONFIG.get_or_init(|| {
+    serde_json::from_str::<TauriConfig>(TAURI_CONFIG)
+      .expect("tauri.conf.json plugins.cli uses only the keys the CLI parser supports")
+      .plugins
+      .cli
+  })
 }
 
 fn build_command(name: &str, config: &CommandConfig) -> Command {
@@ -159,15 +173,15 @@ where
   S: Into<std::ffi::OsString> + Clone,
 {
   let config = cli_config();
-  let command = build_command("treq", &config).version(env!("CARGO_PKG_VERSION"));
+  let command = build_command("treq", config).version(env!("CARGO_PKG_VERSION"));
   let matches = command.try_get_matches_from(args)?;
-  Ok(to_matches(&config, &matches))
+  Ok(to_matches(config, &matches))
 }
 
 /// `treq <name> --help` text, for tests.
 #[cfg(test)]
 pub(super) fn subcommand_help(name: &str) -> String {
-  let mut command = build_command("treq", &cli_config());
+  let mut command = build_command("treq", cli_config());
   command.build();
   let sub = command.find_subcommand_mut(name).expect("known subcommand");
   sub.render_long_help().to_string()
@@ -192,7 +206,7 @@ where
     }
   };
   let Some(subcommand) = matches.subcommand else {
-    eprintln!("{}", build_command("treq", &cli_config()).render_usage());
+    eprintln!("{}", build_command("treq", cli_config()).render_usage());
     return USAGE_ERROR_EXIT_CODE;
   };
   // No binary detection here: it spawns a login shell and a `which` per
@@ -212,7 +226,7 @@ mod tests {
   fn every_configured_command_parses() {
     let config = cli_config();
     assert!(config.subcommands.contains_key("st"));
-    build_command("treq", &config).debug_assert();
+    build_command("treq", config).debug_assert();
   }
 
   #[test]

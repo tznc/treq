@@ -2,13 +2,62 @@ use crate::file_indexer::FileIndex;
 use crate::local_db::Workspace;
 use crate::lock_ext::LockExt;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-// The file index of each workspace built this session. Each workspace has its
-// own lock, held while it indexes, so a search waits for an index another
-// thread (the warm-up when a workspace shows) is still building.
-type IndexSlot = Arc<Mutex<Option<Arc<FileIndex>>>>;
-static FILE_INDEXES: OnceLock<Mutex<HashMap<String, IndexSlot>>> = OnceLock::new();
+// The file indexes of the workspaces searched lately, least recently used
+// dropped past `INDEXES`: an index holds every tracked path (about 200 bytes
+// each), and a day's work visits more workspaces than are searched at once.
+// Each workspace has its own slot, whose lock is held while the first index
+// builds, so a search waits for an index another thread (the warm-up when a
+// workspace shows) is still building.
+const INDEXES: usize = 4;
+
+#[derive(Default)]
+struct IndexSlot {
+  index: Mutex<Option<Arc<FileIndex>>>,
+  /// A thread is building the index again.
+  rebuilding: AtomicBool,
+  /// The files changed since the last build began.
+  stale: AtomicBool,
+}
+
+#[derive(Default)]
+struct Indexes {
+  slots: HashMap<String, (Arc<IndexSlot>, u64)>,
+  used: u64,
+}
+
+static FILE_INDEXES: OnceLock<Mutex<Indexes>> = OnceLock::new();
+
+impl Indexes {
+  /// The workspace's slot, made if need be; the least recently used slots
+  /// past [`INDEXES`] are dropped.
+  fn slot(&mut self, workspace_path: &str) -> Arc<IndexSlot> {
+    self.used += 1;
+    let used = self.used;
+    let slot = self.slots.entry(workspace_path.to_string()).or_default();
+    slot.1 = used;
+    let slot = slot.0.clone();
+    while self.slots.len() > INDEXES {
+      let oldest = self
+        .slots
+        .iter()
+        .min_by_key(|(_, (_, used))| *used)
+        .map(|(path, _)| path.clone());
+      let Some(oldest) = oldest else { break };
+      self.slots.remove(&oldest);
+    }
+    slot
+  }
+}
+
+fn index_slot(workspace_path: &str) -> Arc<IndexSlot> {
+  FILE_INDEXES
+    .get_or_init(Mutex::default)
+    .lock_or_recover()
+    .slot(workspace_path)
+}
 
 /// Fires the repo's `.treq/config.yaml` `setup_script` (if any) for a newly
 /// created workspace, in the background so workspace creation itself isn't
@@ -41,15 +90,11 @@ pub(crate) fn spawn_setup_script_if_configured(workspace: &Workspace) {
   });
 }
 
-/// The workspace's file index, built on first use.
+/// The workspace's file index, built on first use. Later calls return the
+/// index as last built; [`refresh_workspace_file_index`] reads the files again.
 pub fn workspace_file_index(workspace_path: &str) -> Result<Arc<FileIndex>, String> {
-  let slot = FILE_INDEXES
-    .get_or_init(|| Mutex::new(HashMap::new()))
-    .lock_or_recover()
-    .entry(workspace_path.to_string())
-    .or_default()
-    .clone();
-  let mut index = slot.lock_or_recover();
+  let slot = index_slot(workspace_path);
+  let mut index = slot.index.lock_or_recover();
   if let Some(index) = index.as_ref() {
     return Ok(index.clone());
   }
@@ -58,11 +103,122 @@ pub fn workspace_file_index(workspace_path: &str) -> Result<Arc<FileIndex>, Stri
   Ok(built)
 }
 
+/// Builds the workspace's index, or builds it again so files created or
+/// removed since appear. Searches meanwhile use the index they had. Calls
+/// that arrive while a build runs share the one build that follows it.
+pub fn refresh_workspace_file_index(workspace_path: &str) -> Result<(), String> {
+  refresh_with(workspace_path, FileIndex::build)
+}
+
+fn refresh_with(
+  workspace_path: &str,
+  build: impl Fn(&str) -> Result<FileIndex, String>,
+) -> Result<(), String> {
+  let slot = index_slot(workspace_path);
+  if slot.index.lock_or_recover().is_none() {
+    // Nothing to search yet: the first build is the one searches wait for.
+    let mut index = slot.index.lock_or_recover();
+    if index.is_none() {
+      *index = Some(Arc::new(build(workspace_path)?));
+    }
+    return Ok(());
+  }
+  slot.stale.store(true, Ordering::SeqCst);
+  loop {
+    if slot.rebuilding.swap(true, Ordering::SeqCst) {
+      // The thread building sees `stale` when it finishes.
+      return Ok(());
+    }
+    while slot.stale.swap(false, Ordering::SeqCst) {
+      match build(workspace_path) {
+        Ok(built) => *slot.index.lock_or_recover() = Some(Arc::new(built)),
+        Err(error) => {
+          slot.rebuilding.store(false, Ordering::SeqCst);
+          return Err(error);
+        }
+      }
+    }
+    slot.rebuilding.store(false, Ordering::SeqCst);
+    // A change that arrived between the last check and the release.
+    if !slot.stale.load(Ordering::SeqCst) {
+      return Ok(());
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   // TODO: Add unit tests when a mockable workspace DB abstraction exists.
+  use super::*;
   use std::fs;
+  use std::sync::atomic::AtomicUsize;
   use tempfile::TempDir;
+
+  /// Lists the files in `dir`, as the jj snapshot the real index is built from.
+  fn list(dir: &str) -> Result<FileIndex, String> {
+    let mut paths: Vec<String> = fs::read_dir(dir)
+      .map_err(|e| e.to_string())?
+      .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+      .collect();
+    paths.sort();
+    Ok(FileIndex::new(paths))
+  }
+
+  #[test]
+  fn a_file_created_after_the_index_was_built_appears_once_it_is_refreshed() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().to_str().unwrap();
+    fs::write(dir.path().join("old.rs"), "").unwrap();
+    refresh_with(path, list).unwrap();
+    assert_eq!(workspace_file_index(path).unwrap().len(), 1);
+
+    fs::write(dir.path().join("new.rs"), "").unwrap();
+    // Until the refresh, searches keep the index they had.
+    assert!(workspace_file_index(path)
+      .unwrap()
+      .search("new", 10)
+      .is_empty());
+    refresh_with(path, list).unwrap();
+    assert_eq!(
+      workspace_file_index(path).unwrap().search("new", 10),
+      vec!["new.rs".to_string()]
+    );
+  }
+
+  #[test]
+  fn overlapping_refreshes_share_one_follow_up_build() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().to_str().unwrap().to_string();
+    refresh_with(&path, list).unwrap();
+    let builds = Arc::new(AtomicUsize::new(0));
+    let slot = index_slot(&path);
+    slot.rebuilding.store(true, Ordering::SeqCst);
+    for _ in 0..5 {
+      let counted = builds.clone();
+      refresh_with(&path, move |dir| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        list(dir)
+      })
+      .unwrap();
+    }
+    // A build is running, so none started; it will see the file change flag.
+    assert_eq!(builds.load(Ordering::SeqCst), 0);
+    assert!(slot.stale.load(Ordering::SeqCst));
+  }
+
+  #[test]
+  fn only_the_recently_searched_workspaces_keep_an_index() {
+    let mut indexes = Indexes::default();
+    for n in 0..INDEXES + 2 {
+      indexes.slot(&format!("/w/{n}"));
+      // Workspace 0 is searched again and again.
+      indexes.slot("/w/0");
+    }
+    assert_eq!(indexes.slots.len(), INDEXES);
+    assert!(indexes.slots.contains_key("/w/0"));
+    assert!(indexes.slots.contains_key(&format!("/w/{}", INDEXES + 1)));
+    assert!(!indexes.slots.contains_key("/w/1"));
+  }
 
   // Unit tests cover DB cleanup only; full jj+directory cleanup is e2e-tested.
   #[test]

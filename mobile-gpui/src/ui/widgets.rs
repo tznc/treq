@@ -56,6 +56,8 @@ pub fn card(cx: &App) -> Div {
     .border_color(cx.theme().border)
     .bg(cx.theme().background)
     .overflow_hidden()
+    // A card with overflow_hidden may otherwise shrink below its rows.
+    .flex_shrink_0()
 }
 
 /// A tappable list row with a title, optional detail line and a chevron.
@@ -130,9 +132,20 @@ fn row_base(
     .py_2()
     .gap_3()
     .items_center()
-    .border_b_1()
-    .border_color(theme.border)
+    .relative()
     .active(|s| s.bg(theme.accent))
+    // The divider sits just below the row: on the next row's top edge, or
+    // on the card's bottom border under the last row. It stops short of
+    // the card's rounded corners, which the card's mask doesn't clip to.
+    .child(
+      div()
+        .absolute()
+        .bottom(px(-1.))
+        .left(theme.radius_lg)
+        .right(theme.radius_lg)
+        .h(px(1.))
+        .bg(theme.border),
+    )
     .children(leading)
     .child(
       v_flex()

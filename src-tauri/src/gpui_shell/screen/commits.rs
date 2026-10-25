@@ -15,7 +15,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
 use std::{
-  collections::{HashMap, HashSet},
+  collections::{HashMap, HashSet, VecDeque},
   rc::Rc,
   time::Duration,
 };
@@ -54,6 +54,8 @@ use crate::{
 
 /// `REMOVE_ANIMATION_MS`: how long a removed commit stays, its buttons
 /// disabled, before it leaves the list.
+/// Diffs of collapsed commits kept, so opening one again draws at once.
+const CLOSED_DIFFS: usize = 4;
 const REMOVE_DELAY: Duration = Duration::from_millis(220);
 const RESOLVE_DOCS_PATH: &str = "/docs/concepts/commit-management#resolve-commit-conflicts-inplace";
 const RESOLVE_HELP: &str = "Treq opens short-lived resolve directories for each conflicted \
@@ -177,6 +179,9 @@ pub struct CommitsView {
   pub(super) hide_tentative: bool,
   pub(super) expanded: HashSet<String>,
   pub(super) diffs: HashMap<String, DiffState>,
+  /// Collapsed commits whose diff is still in `diffs`, the oldest first: a
+  /// diff can hold thousands of lines, so only the last few stay.
+  closed: VecDeque<String>,
   shifting: bool,
   /// The commit whose "Move commit" menu is open.
   pub(super) move_menu: Option<String>,
@@ -231,6 +236,7 @@ impl CommitsView {
       hide_tentative: false,
       expanded: HashSet::new(),
       diffs: HashMap::new(),
+      closed: VecDeque::new(),
       shifting: false,
       move_menu: None,
       selection: None,
@@ -289,6 +295,7 @@ impl CommitsView {
       self.unconfirmed.clear();
       self.expanded.clear();
       self.diffs.clear();
+      self.closed.clear();
       self.selection = None;
       self.comment = None;
       self.dialog = None;
@@ -454,15 +461,32 @@ impl CommitsView {
   }
 
   pub(super) fn toggle(&mut self, commit_id: &str, cx: &mut Context<Self>) {
-    if !self.expanded.remove(commit_id) {
+    if self.expanded.remove(commit_id) {
+      self.keep_closed(commit_id);
+    } else {
       self.expand(commit_id, cx);
     }
     cx.notify();
   }
 
+  /// Remembers that `commit_id` closed with its diff read, and drops the
+  /// diffs of the commits closed longest ago. Opening one again reads it
+  /// from [`CommitDiffs`] or the backend.
+  fn keep_closed(&mut self, commit_id: &str) {
+    self.closed.push_back(commit_id.to_string());
+    while self.closed.len() > CLOSED_DIFFS {
+      if let Some(old) = self.closed.pop_front() {
+        if !self.expanded.contains(&old) {
+          self.diffs.remove(&old);
+        }
+      }
+    }
+  }
+
   /// `fetchAndExpand`.
   fn expand(&mut self, commit_id: &str, cx: &mut Context<Self>) {
     self.expanded.insert(commit_id.to_string());
+    self.closed.retain(|closed| closed != commit_id);
     if self.diffs.contains_key(commit_id) {
       return;
     }
@@ -497,7 +521,10 @@ impl CommitsView {
       },
       move |view, result, _| {
         view.layout_gen += 1;
-        let state = view.diffs.entry(id).or_default();
+        // A diff dropped while it read is not kept.
+        let Some(state) = view.diffs.get_mut(&id) else {
+          return;
+        };
         state.loading = false;
         match result {
           Ok(diff) => state.diff = Some(diff),

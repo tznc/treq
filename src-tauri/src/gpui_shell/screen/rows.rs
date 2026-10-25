@@ -5,8 +5,8 @@
 
 use tauri_plugin_gpui::gpui::{px, ListAlignment, ListState, Pixels, Window};
 
-pub(super) struct Rows<T> {
-  pub(super) list: ListState,
+pub(in crate::gpui_shell) struct Rows<T> {
+  pub(in crate::gpui_shell) list: ListState,
   rows: Vec<T>,
   /// The rem size the rows were measured at.
   rem: Pixels,
@@ -27,7 +27,12 @@ impl<T> Default for Rows<T> {
 impl<T> Rows<T> {
   /// Takes the rows the screen shows now. `same` says whether a row still
   /// draws what it drew, so its height holds.
-  pub(super) fn sync(&mut self, window: &Window, rows: Vec<T>, same: impl Fn(&T, &T) -> bool) {
+  pub(in crate::gpui_shell) fn sync(
+    &mut self,
+    window: &Window,
+    rows: Vec<T>,
+    same: impl Fn(&T, &T) -> bool,
+  ) {
     let rem = window.rem_size();
     if rem != self.rem {
       self.rem = rem;
@@ -54,11 +59,11 @@ impl<T> Rows<T> {
     self.rows = rows;
   }
 
-  pub(super) fn get(&self, ix: usize) -> Option<&T> {
+  pub(in crate::gpui_shell) fn get(&self, ix: usize) -> Option<&T> {
     self.rows.get(ix)
   }
 
-  pub(super) fn len(&self) -> usize {
+  pub(in crate::gpui_shell) fn len(&self) -> usize {
     self.rows.len()
   }
 }

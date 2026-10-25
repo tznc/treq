@@ -328,6 +328,51 @@ pub fn pasted_image_dir() -> PathBuf {
   std::env::temp_dir().join("treq-pasted-images")
 }
 
+/// Pasted images older than this are deleted when another is pasted, for
+/// the ones whose session ended without the app closing it.
+const PASTED_IMAGE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+fn sweep_old_files(dir: &Path, max_age: std::time::Duration) {
+  let Ok(entries) = std::fs::read_dir(dir) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    let old = entry
+      .metadata()
+      .and_then(|m| m.modified())
+      .ok()
+      .and_then(|modified| modified.elapsed().ok())
+      .is_some_and(|age| age > max_age);
+    if old {
+      std::fs::remove_file(entry.path()).ok();
+    }
+  }
+}
+
+/// Deletes the temporary files of a terminal session that ended: images
+/// pasted into it and the agent files written for it. Anything else in
+/// `paths` is left alone.
+pub fn remove_session_files(paths: &[String]) {
+  let temp = std::env::temp_dir();
+  let pasted = pasted_image_dir();
+  let mut agent_files = Vec::new();
+  for path in paths {
+    let path_ref = Path::new(path);
+    if path_ref.parent() == Some(pasted.as_path()) {
+      std::fs::remove_file(path_ref).ok();
+    } else if path_ref.parent() == Some(temp.as_path())
+      && path_ref
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("treq-agent-"))
+    {
+      agent_files.push(path.clone());
+    }
+  }
+  if let Err(error) = crate::core::agent_cli::cleanup_agent_cli_files(&agent_files) {
+    log::warn!("could not remove agent files: {error}");
+  }
+}
+
 /// Save a clipboard image pasted into a terminal under `dir`, in a new file
 /// named for its format, so the agent CLI can read it from its path.
 pub fn write_pasted_image(dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
@@ -336,6 +381,7 @@ pub fn write_pasted_image(dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     return Err("pasted data is not a supported image".to_string());
   }
   std::fs::create_dir_all(dir).map_err(|e| format!("failed to create pasted image dir: {e}"))?;
+  sweep_old_files(dir, PASTED_IMAGE_MAX_AGE);
   let path = dir.join(format!("paste-{}.{ext}", uuid::Uuid::new_v4()));
   std::fs::write(&path, bytes).map_err(|e| format!("failed to write pasted image: {e}"))?;
   Ok(path)
@@ -546,6 +592,30 @@ mod tests {
     assert_eq!(path.parent(), Some(dir.as_path()));
     assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
     assert_eq!(std::fs::read(&path).unwrap(), PNG);
+  }
+
+  #[test]
+  fn removes_the_pasted_images_of_an_ended_session_and_nothing_else() {
+    let dir = pasted_image_dir();
+    let mine = write_pasted_image(&dir, PNG).expect("mine");
+    let other = write_pasted_image(&dir, PNG).expect("other");
+    let outside = tempfile::NamedTempFile::new().expect("outside");
+    remove_session_files(&[
+      mine.to_string_lossy().to_string(),
+      outside.path().to_string_lossy().to_string(),
+    ]);
+    assert!(!mine.exists());
+    assert!(other.exists());
+    assert!(outside.path().exists());
+    std::fs::remove_file(other).ok();
+  }
+
+  #[test]
+  fn sweeps_pasted_images_left_by_old_sessions() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let old = write_pasted_image(temp.path(), PNG).expect("old");
+    sweep_old_files(temp.path(), std::time::Duration::ZERO);
+    assert!(!old.exists());
   }
 
   #[test]

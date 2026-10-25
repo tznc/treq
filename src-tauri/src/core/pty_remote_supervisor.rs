@@ -426,6 +426,92 @@ pub fn stop_session(repo: &str, workspace: &str, label: &str) -> Result<(), Stri
   Ok(())
 }
 
+/// Pastes `text` into a running session as one bracketed paste (so a TUI
+/// such as Claude Code takes it as typed input, newlines included), then
+/// presses Enter when `submit`. Errors when the session is not running.
+pub fn paste_text(
+  repo: &str,
+  workspace: &str,
+  label: &str,
+  text: &str,
+  submit: bool,
+) -> Result<(), String> {
+  let backend = detect_backend().ok_or_else(no_backend_error)?;
+  let name = session_name(repo, workspace, label);
+  if !session_exists(backend, &name) {
+    return Err(format!("session_not_found: {label} is not running"));
+  }
+  match backend {
+    PtyBackend::Tmux => {
+      let target = format!("={name}:");
+      let buffer = format!("treq-paste-{name}");
+      run_tmux_with_input(&["load-buffer", "-b", &buffer, "-"], text)?;
+      run_tmux(&["paste-buffer", "-p", "-d", "-b", &buffer, "-t", &target])?;
+      if submit {
+        // A TUI reads Enter straight after a paste as part of it.
+        std::thread::sleep(std::time::Duration::from_millis(SUBMIT_DELAY_MS));
+        run_tmux(&["send-keys", "-t", &target, "Enter"])?;
+      }
+    }
+    PtyBackend::Screen => {
+      let mut stuffed = text.to_string();
+      if submit {
+        stuffed.push('\r');
+      }
+      let status = Command::new("screen")
+        .args(["-S", &name, "-X", "stuff", &stuffed])
+        .status()
+        .map_err(|e| format!("dependency_error: Failed to run screen: {e}"))?;
+      if !status.success() {
+        return Err(format!("session_not_found: {label} is not running"));
+      }
+    }
+  }
+  Ok(())
+}
+
+/// How long `paste_text` waits between the paste and Enter.
+const SUBMIT_DELAY_MS: u64 = 300;
+
+fn run_tmux(args: &[&str]) -> Result<(), String> {
+  let output = Command::new("tmux")
+    .args(args)
+    .output()
+    .map_err(|e| format!("dependency_error: Failed to run tmux: {e}"))?;
+  tmux_result(output)
+}
+
+fn run_tmux_with_input(args: &[&str], input: &str) -> Result<(), String> {
+  use std::io::Write as _;
+  let mut child = Command::new("tmux")
+    .args(args)
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
+    .spawn()
+    .map_err(|e| format!("dependency_error: Failed to run tmux: {e}"))?;
+  if let Some(mut stdin) = child.stdin.take() {
+    stdin
+      .write_all(input.as_bytes())
+      .map_err(|e| format!("Failed to send text to tmux: {e}"))?;
+  }
+  let output = child
+    .wait_with_output()
+    .map_err(|e| format!("dependency_error: Failed to run tmux: {e}"))?;
+  tmux_result(output)
+}
+
+fn tmux_result(output: std::process::Output) -> Result<(), String> {
+  if output.status.success() {
+    return Ok(());
+  }
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  if stderr.contains("can't find") || stderr.contains("no server running") {
+    return Err("session_not_found: that terminal is not running".into());
+  }
+  Err(format!("tmux failed: {}", stderr.trim()))
+}
+
 /// Explicitly resizes a session's virtual terminal, independent of any
 /// attached client. Normally unnecessary (see module docs: tmux/screen
 /// auto-resize to the attached client's window), but useful to pre-size a
@@ -682,6 +768,46 @@ mod tests {
     )
     .unwrap_err();
     assert!(error.contains("dependency_error"));
+  }
+
+  #[test]
+  fn paste_types_text_into_a_running_session_and_submits_it() {
+    if !tmux_available() {
+      tracing::warn!("skipping: tmux not installed in this environment");
+      return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().to_str().unwrap();
+    let (workspace, label) = ("test-ws-paste", "shell");
+    let out = dir.path().join("pasted.txt");
+
+    assert!(paste_text(repo_path, workspace, label, "echo hi", true)
+      .unwrap_err()
+      .contains("session_not_found"));
+
+    start_session(
+      repo_path,
+      repo_path,
+      workspace,
+      label,
+      &PtyLaunchSpec::Shell,
+      80,
+      24,
+    )
+    .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let command = format!("printf 'a\\nb' > {}", out.display());
+    paste_text(repo_path, workspace, label, &command, true).unwrap();
+    let mut pasted = String::new();
+    for _ in 0..50 {
+      pasted = std::fs::read_to_string(&out).unwrap_or_default();
+      if !pasted.is_empty() {
+        break;
+      }
+      std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    stop_session(repo_path, workspace, label).unwrap();
+    assert_eq!(pasted, "a\nb");
   }
 
   #[test]

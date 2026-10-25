@@ -12,6 +12,9 @@ use std::sync::{Mutex, OnceLock};
 use crate::agent_dispatch::{InstanceWindowSnapshot, RegisteredInstance};
 use crate::jj::DiscoveredWorkspace;
 
+mod pool;
+use pool::{ConnectionPool, PooledConnection};
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Workspace {
   pub id: i64,
@@ -958,11 +961,17 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
   Ok(db_path)
 }
 
+/// Idle connections kept open between `get_connection` calls (see `pool`).
+/// 16 covers the repos and remote scopes of a few open windows; each one
+/// holds two file handles.
+static CONNECTION_POOL: ConnectionPool = ConnectionPool::new(16, 4);
+
 /// Get a database connection for a repository.
 ///
 /// Ensures the database is initialized before returning the connection.
 /// Uses a cache to avoid re-initializing databases that have already been set up in this session.
-fn get_connection(repo_path: &str) -> Result<Connection, String> {
+/// The connection goes back to `CONNECTION_POOL` when dropped.
+fn get_connection(repo_path: &str) -> Result<PooledConnection<'static>, String> {
   let initialized = INITIALIZED_DBS.get_or_init(|| Mutex::new(HashSet::new()));
   let db_key = repo_path.to_string();
 
@@ -976,6 +985,10 @@ fn get_connection(repo_path: &str) -> Result<Connection, String> {
   }
 
   let db_path = resolve_db_path(repo_path)?;
+  CONNECTION_POOL.check_out(&db_path, || open_connection(repo_path, &db_path))
+}
+
+fn open_connection(repo_path: &str, db_path: &Path) -> Result<Connection, String> {
   let conn = Connection::open(db_path).map_err(|e| format!("Failed to open local db: {}", e))?;
   let enforce_foreign_keys = RepoStateScope::parse(repo_path).enforces_foreign_keys();
   conn
@@ -998,6 +1011,19 @@ fn get_connection(repo_path: &str) -> Result<Connection, String> {
     .busy_timeout(std::time::Duration::from_secs(5))
     .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
   Ok(conn)
+}
+
+/// Closes the idle connections to databases under `dir`, so the directory
+/// can be moved or deleted (Windows refuses while a file in it is open).
+pub fn release_connections_under(dir: &Path) {
+  CONNECTION_POOL.release_under(dir);
+}
+
+/// Closes every idle connection. The last connection to close a database
+/// checkpoints its WAL, so the next process to open it need not replay it.
+/// Call before the process exits.
+pub fn close_idle_connections() {
+  CONNECTION_POOL.release_all();
 }
 
 pub fn upsert_instance_registry(
@@ -1750,27 +1776,27 @@ pub fn sync_discovered_workspaces(
     .map_err(|e| e.to_string())
 }
 
+/// Last rebased target commit recorded in an already-loaded workspace's metadata.
+pub fn last_rebased_commit_of(workspace: &Workspace) -> Option<String> {
+  let json = serde_json::from_str::<serde_json::Value>(workspace.metadata.as_deref()?).ok()?;
+  json
+    .get("last_rebased_target_commit")
+    .and_then(|v| v.as_str())
+    .map(|s| s.to_string())
+}
+
 /// Get last rebased commit from workspace metadata
 pub fn get_workspace_last_rebased_commit(
   repo_path: &str,
   id: i64,
 ) -> Result<Option<String>, String> {
   let workspaces = get_workspaces(repo_path)?;
-  let workspace = workspaces.iter().find(|w| w.id == id);
-
-  if let Some(ws) = workspace {
-    if let Some(metadata) = &ws.metadata {
-      if let Ok(json) = serde_json::from_str::<serde_json::Value>(metadata) {
-        return Ok(
-          json
-            .get("last_rebased_target_commit")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        );
-      }
-    }
-  }
-  Ok(None)
+  Ok(
+    workspaces
+      .iter()
+      .find(|w| w.id == id)
+      .and_then(last_rebased_commit_of),
+  )
 }
 
 /// Update last rebased commit in workspace metadata.
@@ -1784,6 +1810,27 @@ pub fn update_workspace_last_rebased_commit(
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
   set_last_rebased_commit(&conn, id, commit_id)
+}
+
+/// Records the same rebased target commit for several workspaces in one
+/// transaction (one commit instead of one per workspace).
+pub fn update_workspaces_last_rebased_commit(
+  repo_path: &str,
+  ids: &[i64],
+  commit_id: &str,
+) -> Result<(), String> {
+  if ids.is_empty() {
+    return Ok(());
+  }
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
+  for id in ids {
+    set_last_rebased_commit(&tx, *id, commit_id)?;
+  }
+  tx.commit()
+    .map_err(|e| format!("Failed to commit rebase bookkeeping: {}", e))
 }
 
 fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Result<(), String> {
@@ -2415,9 +2462,19 @@ pub fn add_prompt_history(
 
 /// Get every prompt ever sent in this repository, most recent first.
 pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
+  get_prompt_history_page(repo_path, i64::MAX as usize, 0)
+}
+
+/// Up to `limit` prompts sent in this repository after the newest `offset`
+/// of them, most recent first.
+pub fn get_prompt_history_page(
+  repo_path: &str,
+  limit: usize,
+  offset: usize,
+) -> Result<Vec<PromptHistoryEntry>, String> {
   let conn = get_connection(repo_path)?;
   let sql = format!(
-    "{} ORDER BY ph.created_at DESC, ph.id DESC",
+    "{} ORDER BY ph.created_at DESC, ph.id DESC LIMIT ?1 OFFSET ?2",
     PROMPT_HISTORY_SELECT
   );
   let mut stmt = conn
@@ -2425,7 +2482,13 @@ pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, St
     .map_err(|e| format!("Failed to prepare prompt history query: {}", e))?;
 
   let entries = stmt
-    .query_map([], prompt_history_from_row)
+    .query_map(
+      params![
+        limit.min(i64::MAX as usize) as i64,
+        offset.min(i64::MAX as usize) as i64
+      ],
+      prompt_history_from_row,
+    )
     .map_err(|e| format!("Failed to query prompt history: {}", e))?;
 
   entries
@@ -2921,6 +2984,44 @@ mod tests {
       .map(|i| i.instance_id)
       .collect();
     assert_eq!(ids, vec!["me".to_string()]);
+  }
+
+  fn cost_instance(heartbeat: u64) -> RegisteredInstance {
+    RegisteredInstance {
+      instance_id: "me".to_string(),
+      pid: 1,
+      started_at: 0,
+      last_heartbeat_at: heartbeat,
+      endpoint: "127.0.0.1:1".to_string(),
+      windows: Vec::new(),
+    }
+  }
+
+  /// 200 one-row writes through `get_connection`. Count the fsyncs with
+  /// `strace -f -e trace=fsync,fdatasync` on the test binary, e.g.
+  /// `strace -f -c -e trace=fdatasync <bin> local_db_write_cost --ignored`.
+  #[test]
+  #[ignore]
+  fn local_db_write_cost() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    upsert_instance_registry(&repo_path, cost_instance(0)).unwrap();
+    for heartbeat in 1..=200 {
+      upsert_instance_registry(&repo_path, cost_instance(heartbeat)).unwrap();
+    }
+  }
+
+  /// 200 one-row reads through `get_connection`, for callgrind:
+  /// `valgrind --tool=callgrind --toggle-collect='*local_db_read_cost*' <bin> local_db_read_cost --ignored`.
+  #[test]
+  #[ignore]
+  fn local_db_read_cost() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    upsert_instance_registry(&repo_path, cost_instance(0)).unwrap();
+    for _ in 0..200 {
+      assert_eq!(list_instance_registry(&repo_path).unwrap().len(), 1);
+    }
   }
 
   /// `cargo test --lib init_local_db_cost -- --ignored --nocapture`

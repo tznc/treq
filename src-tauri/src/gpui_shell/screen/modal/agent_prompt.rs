@@ -289,7 +289,28 @@ impl AgentPromptView {
       self,
       cx,
       |host, route| task_settings(host.as_ref(), &route.repo_path),
-      |view, settings, _cx| view.settings = Some(settings)
+      |view, settings, cx| {
+        let environment = settings.environment.is_some();
+        view.settings = Some(settings);
+        if environment {
+          view.load_environment_status(cx);
+        }
+      }
+    );
+  }
+
+  /// Whether the repository's devcontainer runs (a `docker ps`), read after
+  /// the settings so the default agent shows without waiting for it.
+  fn load_environment_status(&mut self, cx: &mut Context<Self>) {
+    read!(
+      self,
+      cx,
+      |host, route| host.devcontainer_status(&route.repo_path),
+      |view, status, _cx| {
+        if let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) {
+          env.status = Some(status);
+        }
+      }
     );
   }
 
