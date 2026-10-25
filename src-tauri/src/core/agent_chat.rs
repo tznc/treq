@@ -10,22 +10,49 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
-/// A chat file as last read or written by this process, valid while the
-/// file's modification time and length still match.
+/// A session's chat held in memory while it records. The file stamp says
+/// which file contents `chat` mirrors: when the file's modification time and
+/// length differ, someone else wrote it and it is read again.
 struct CachedChat {
   modified: Option<SystemTime>,
   len: u64,
   chat: AgentChat,
+  /// How many leading `chat.messages` the file already holds. Messages past
+  /// it are appended to the file instead of writing the whole chat again.
+  persisted: usize,
+  /// The agent's last logged screen, so a later one is compared with it
+  /// rather than with every message since the user spoke. `None` after a load.
+  snapshot: Option<String>,
 }
 
 static CHAT_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedChat>>> = OnceLock::new();
 
+/// Forgets a finished session's in-memory chat and its lock. The file stays.
+pub fn end_session(repo_path: &str, session_id: i64) {
+  let path = chat_path(repo_path, session_id);
+  if let Some(cache) = CHAT_CACHE.get() {
+    cache
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner())
+      .remove(&path);
+  }
+  chat_locks()
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner())
+    .remove(&path);
+}
+
 /// One lock per chat file, so a session's once-a-second screen recording never
 /// waits on another session's I/O.
+type ChatLocks = Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>;
+
+fn chat_locks() -> &'static ChatLocks {
+  static LOCKS: OnceLock<ChatLocks> = OnceLock::new();
+  LOCKS.get_or_init(Mutex::default)
+}
+
 fn chat_lock(repo_path: &str, session_id: i64) -> Arc<Mutex<()>> {
-  static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
-  let mut locks = LOCKS
-    .get_or_init(Mutex::default)
+  let mut locks = chat_locks()
     .lock()
     .unwrap_or_else(|poisoned| poisoned.into_inner());
   locks
@@ -348,26 +375,18 @@ pub fn screen_diff(old_screen: &str, new_screen: &str) -> String {
   trim_empty_lines(&new_section.join("\n"))
 }
 
-fn last_user_text(messages: &[ChatMessage]) -> String {
+fn last_user_text(messages: &[ChatMessage]) -> &str {
   messages
     .iter()
     .rev()
     .find(|m| m.role == ChatRole::User)
-    .map(|m| m.message.clone())
+    .map(|m| m.message.as_str())
     .unwrap_or_default()
 }
 
-/// Returns whether the chat changed.
-fn update_last_agent_message(chat: &mut AgentChat, screen: &str, timestamp: &str) -> bool {
-  let raw = screen_diff(&chat.screen_before_last_user_message, screen);
-  let agent_message = format_agent_message(chat.agent, &raw, &last_user_text(&chat.messages));
-  let last_is_user = chat
-    .messages
-    .last()
-    .map(|m| m.role == ChatRole::User)
-    .unwrap_or(true);
-  let previous_agent = chat
-    .messages
+/// What the agent's trailing messages add up to: the screen last logged.
+fn trailing_agent_text(messages: &[ChatMessage]) -> String {
+  messages
     .iter()
     .rev()
     .take_while(|m| m.role == ChatRole::Agent)
@@ -375,20 +394,65 @@ fn update_last_agent_message(chat: &mut AgentChat, screen: &str, timestamp: &str
     .collect::<Vec<_>>()
     .into_iter()
     .rev()
-    .collect::<String>();
-  if previous_agent == agent_message || agent_message.is_empty() {
+    .collect()
+}
+
+/// The lines of `current` that `previous` did not already show, or `None`
+/// when nothing new is left. Snapshots are cumulative until the screen
+/// scrolls, so the text after `previous` is new; once it scrolled, the new
+/// lines are the ones after the lines both snapshots share. A line the agent
+/// redraws in place (a spinner) is the only one allowed to differ.
+fn new_portion(previous: &str, current: &str) -> Option<String> {
+  if let Some(rest) = current.strip_prefix(previous) {
+    return Some(trim_whitespace(rest)).filter(|rest| !rest.is_empty());
+  }
+  let before: Vec<&str> = previous.split('\n').collect();
+  let now: Vec<&str> = current.split('\n').collect();
+  for skip in 0..before.len() {
+    for tail in [&before[skip..], &before[skip..before.len() - 1]] {
+      let shared = tail.len();
+      if tail.iter().any(|line| !line.trim().is_empty()) && now.get(..shared) == Some(tail) {
+        return Some(trim_empty_lines(&now[shared..].join("\n"))).filter(|rest| !rest.is_empty());
+      }
+    }
+  }
+  Some(current.to_string())
+}
+
+/// Returns whether the chat changed.
+fn update_last_agent_message(
+  chat: &mut AgentChat,
+  snapshot: &mut Option<String>,
+  screen: &str,
+  timestamp: &str,
+) -> bool {
+  let raw = screen_diff(&chat.screen_before_last_user_message, screen);
+  let agent_message = format_agent_message(chat.agent, &raw, last_user_text(&chat.messages));
+  let last_is_user = chat
+    .messages
+    .last()
+    .map(|m| m.role == ChatRole::User)
+    .unwrap_or(true);
+  let previous = snapshot.get_or_insert_with(|| {
+    if last_is_user {
+      String::new()
+    } else {
+      trailing_agent_text(&chat.messages)
+    }
+  });
+  if *previous == agent_message || agent_message.is_empty() {
     return false;
   }
   // Terminal snapshots are cumulative. Persist only the newly arrived portion
   // so every screen update remains an individually timestamped log event.
-  let event_message = if !last_is_user {
-    agent_message
-      .strip_prefix(&previous_agent)
-      .map(trim_whitespace)
-      .filter(|message| !message.is_empty())
-      .unwrap_or_else(|| agent_message.clone())
+  let event_message = if last_is_user {
+    Some(agent_message.clone())
   } else {
-    agent_message
+    new_portion(previous, &agent_message)
+  };
+  *previous = agent_message;
+  let Some(event_message) = event_message else {
+    return false;
   };
   let conversation_message = ChatMessage {
     id: 0,
@@ -411,12 +475,18 @@ fn update_last_agent_message(chat: &mut AgentChat, screen: &str, timestamp: &str
 }
 
 /// Record a user message. `screen_before` is the terminal snapshot taken before keystrokes.
-pub fn note_user_message(chat: &mut AgentChat, screen_before: &str, text: &str, timestamp: &str) {
+pub fn note_user_message(
+  chat: &mut AgentChat,
+  snapshot: &mut Option<String>,
+  screen_before: &str,
+  text: &str,
+  timestamp: &str,
+) {
   let trimmed = trim_whitespace(text);
   if trimmed.is_empty() {
     return;
   }
-  update_last_agent_message(chat, screen_before, timestamp);
+  update_last_agent_message(chat, snapshot, screen_before, timestamp);
   chat.screen_before_last_user_message = screen_before.to_string();
   chat.messages.push(ChatMessage {
     id: 0,
@@ -425,63 +495,136 @@ pub fn note_user_message(chat: &mut AgentChat, screen_before: &str, text: &str, 
     time: timestamp.to_string(),
   });
   reindex(&mut chat.messages);
+  // The agent's next screen is compared with nothing: it is a new reply.
+  *snapshot = Some(String::new());
 }
 
 /// Record a later screen snapshot; updates (or appends) the current agent message.
 /// Returns whether the chat changed.
-pub fn note_screen(chat: &mut AgentChat, screen: &str, timestamp: &str) -> bool {
-  update_last_agent_message(chat, screen, timestamp)
+pub fn note_screen(
+  chat: &mut AgentChat,
+  snapshot: &mut Option<String>,
+  screen: &str,
+  timestamp: &str,
+) -> bool {
+  update_last_agent_message(chat, snapshot, screen, timestamp)
 }
 
-fn load_chat_unlocked(repo_path: &str, session_id: i64) -> Result<Option<AgentChat>, String> {
+fn stamped(metadata: &fs::Metadata, chat: AgentChat, persisted: usize) -> CachedChat {
+  CachedChat {
+    modified: metadata.modified().ok(),
+    len: metadata.len(),
+    chat,
+    persisted,
+    snapshot: None,
+  }
+}
+
+/// The session's chat: the one held in memory while the file is as this
+/// process left it, otherwise the file. The caller holds the session's lock
+/// and puts the chat back with [`keep`].
+fn take_chat_unlocked(repo_path: &str, session_id: i64) -> Result<Option<CachedChat>, String> {
   let path = chat_path(repo_path, session_id);
   let Ok(metadata) = fs::metadata(&path) else {
     return Ok(None);
   };
   let cache = CHAT_CACHE.get_or_init(Mutex::default);
-  if let Some(cached) = cache
+  let mut cache = cache
     .lock()
-    .unwrap_or_else(|poisoned| poisoned.into_inner())
-    .get(&path)
-    .filter(|cached| cached.modified == metadata.modified().ok() && cached.len == metadata.len())
-  {
-    return Ok(Some(cached.chat.clone()));
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
+  if let Some(cached) = cache.remove(&path) {
+    if cached.modified == metadata.modified().ok() && cached.len == metadata.len() {
+      return Ok(Some(cached));
+    }
   }
+  drop(cache);
   let raw = fs::read_to_string(&path).map_err(|e| format!("Failed to read agent chat: {e}"))?;
   let chat: AgentChat =
     serde_json::from_str(&raw).map_err(|e| format!("Failed to parse agent chat: {e}"))?;
-  cache_chat(&path, &metadata, &chat);
-  Ok(Some(chat))
+  let persisted = chat.messages.len();
+  Ok(Some(stamped(&metadata, chat, persisted)))
 }
 
-fn cache_chat(path: &Path, metadata: &fs::Metadata, chat: &AgentChat) {
+fn keep(repo_path: &str, session_id: i64, cached: CachedChat) {
   CHAT_CACHE
     .get_or_init(Mutex::default)
     .lock()
     .unwrap_or_else(|poisoned| poisoned.into_inner())
-    .insert(
-      path.to_path_buf(),
-      CachedChat {
-        modified: metadata.modified().ok(),
-        len: metadata.len(),
-        chat: chat.clone(),
-      },
-    );
+    .insert(chat_path(repo_path, session_id), cached);
 }
 
-fn save_chat_unlocked(repo_path: &str, chat: &AgentChat) -> Result<(), String> {
+fn load_chat_unlocked(repo_path: &str, session_id: i64) -> Result<Option<AgentChat>, String> {
+  let Some(cached) = take_chat_unlocked(repo_path, session_id)? else {
+    return Ok(None);
+  };
+  let chat = cached.chat.clone();
+  keep(repo_path, session_id, cached);
+  Ok(Some(chat))
+}
+
+/// Writes the whole chat, replacing the file atomically so a reader never
+/// sees a half-written one.
+fn save_chat_unlocked(repo_path: &str, cached: &mut CachedChat) -> Result<(), String> {
   let dir = agent_chats_dir(repo_path);
   fs::create_dir_all(&dir).map_err(|e| format!("Failed to create agent-chats dir: {e}"))?;
-  let path = chat_path(repo_path, chat.session_id);
-  let raw =
-    serde_json::to_string(chat).map_err(|e| format!("Failed to serialize agent chat: {e}"))?;
-  // Replace atomically so a reader never sees a half-written file.
+  let path = chat_path(repo_path, cached.chat.session_id);
+  let raw = serde_json::to_string(&cached.chat)
+    .map_err(|e| format!("Failed to serialize agent chat: {e}"))?;
   let tmp = path.with_extension("json.tmp");
   fs::write(&tmp, raw).map_err(|e| format!("Failed to write agent chat: {e}"))?;
   fs::rename(&tmp, &path).map_err(|e| format!("Failed to write agent chat: {e}"))?;
-  if let Ok(metadata) = fs::metadata(&path) {
-    cache_chat(&path, &metadata, chat);
+  restamp(&path, cached);
+  Ok(())
+}
+
+fn restamp(path: &Path, cached: &mut CachedChat) {
+  cached.persisted = cached.chat.messages.len();
+  if let Ok(metadata) = fs::metadata(path) {
+    cached.modified = metadata.modified().ok();
+    cached.len = metadata.len();
   }
+}
+
+/// Adds the messages the file lacks to the end of its `messages` array,
+/// writing only their bytes. The file is the compact serialization of the
+/// chat, which ends `…}]}`.
+fn append_chat_unlocked(repo_path: &str, cached: &mut CachedChat) -> Result<(), String> {
+  use std::io::{Read, Seek, SeekFrom, Write};
+  let new = &cached.chat.messages[cached.persisted..];
+  if new.is_empty() {
+    return Ok(());
+  }
+  if cached.persisted == 0 || cached.len < 2 {
+    return save_chat_unlocked(repo_path, cached);
+  }
+  let mut bytes = Vec::new();
+  for message in new {
+    bytes.push(b',');
+    serde_json::to_writer(&mut bytes, message)
+      .map_err(|e| format!("Failed to serialize agent chat: {e}"))?;
+  }
+  bytes.extend_from_slice(b"]}");
+  let path = chat_path(repo_path, cached.chat.session_id);
+  // Only a file that ends as this process writes it can be appended to;
+  // another writer's formatting is replaced by a whole write.
+  let written = fs::OpenOptions::new()
+    .read(true)
+    .write(true)
+    .open(&path)
+    .and_then(|mut file| {
+      let mut tail = [0u8; 2];
+      file.seek(SeekFrom::Start(cached.len - 2))?;
+      file.read_exact(&mut tail)?;
+      if &tail != b"]}" {
+        return Err(std::io::Error::other("unexpected end of chat file"));
+      }
+      file.seek(SeekFrom::Start(cached.len - 2))?;
+      file.write_all(&bytes)
+    });
+  if written.is_err() {
+    return save_chat_unlocked(repo_path, cached);
+  }
+  restamp(&path, cached);
   Ok(())
 }
 
@@ -527,8 +670,21 @@ pub fn register_agent_chat(
     screen_before_last_user_message: String::new(),
     messages,
   };
-  save_chat_unlocked(repo_path, &chat)?;
+  let mut cached = CachedChat {
+    modified: None,
+    len: 0,
+    chat: chat.clone(),
+    persisted: 0,
+    snapshot: None,
+  };
+  save_chat_unlocked(repo_path, &mut cached)?;
+  keep(repo_path, session_id, cached);
   Ok(chat)
+}
+
+fn registered(repo_path: &str, session_id: i64) -> Result<CachedChat, String> {
+  take_chat_unlocked(repo_path, session_id)?
+    .ok_or_else(|| format!("Agent chat {session_id} is not registered"))
 }
 
 pub fn record_user_message(
@@ -536,30 +692,46 @@ pub fn record_user_message(
   session_id: i64,
   screen_before: &str,
   text: &str,
-) -> Result<AgentChat, String> {
+) -> Result<(), String> {
   let lock = chat_lock(repo_path, session_id);
   let _guard = lock.lock().map_err(|e| e.to_string())?;
-  let mut chat = load_chat_unlocked(repo_path, session_id)?
-    .ok_or_else(|| format!("Agent chat {session_id} is not registered"))?;
-  note_user_message(&mut chat, screen_before, text, &now_rfc3339());
-  save_chat_unlocked(repo_path, &chat)?;
-  Ok(chat)
+  let mut cached = registered(repo_path, session_id)?;
+  let CachedChat { chat, snapshot, .. } = &mut cached;
+  note_user_message(chat, snapshot, screen_before, text, &now_rfc3339());
+  // The message also moves `screen_before_last_user_message`, which comes
+  // before the messages in the file: this is the one record that rewrites it.
+  let saved = save_chat_unlocked(repo_path, &mut cached);
+  keep(repo_path, session_id, cached);
+  saved
 }
 
-pub fn record_screen(repo_path: &str, session_id: i64, screen: &str) -> Result<AgentChat, String> {
+pub fn record_screen(repo_path: &str, session_id: i64, screen: &str) -> Result<(), String> {
   let lock = chat_lock(repo_path, session_id);
   let _guard = lock.lock().map_err(|e| e.to_string())?;
-  let mut chat = load_chat_unlocked(repo_path, session_id)?
-    .ok_or_else(|| format!("Agent chat {session_id} is not registered"))?;
-  // Most snapshots repeat the last one; skip the rewrite then.
-  if note_screen(&mut chat, screen, &now_rfc3339()) {
-    save_chat_unlocked(repo_path, &chat)?;
-  }
-  Ok(chat)
+  let mut cached = registered(repo_path, session_id)?;
+  // The first reply takes the place of the empty message the chat starts with.
+  let replaces = cached.persisted == cached.chat.messages.len()
+    && cached
+      .chat
+      .messages
+      .last()
+      .is_some_and(|m| m.role == ChatRole::Agent && m.message.is_empty());
+  let CachedChat { chat, snapshot, .. } = &mut cached;
+  // Most snapshots repeat the last one; write nothing then.
+  let saved = if note_screen(chat, snapshot, screen, &now_rfc3339()) {
+    if replaces {
+      save_chat_unlocked(repo_path, &mut cached)
+    } else {
+      append_chat_unlocked(repo_path, &mut cached)
+    }
+  } else {
+    Ok(())
+  };
+  keep(repo_path, session_id, cached);
+  saved
 }
 
 pub fn list_agent_chats(repo_path: &str) -> Result<Vec<AgentChatSummary>, String> {
-  // Writes replace the file atomically, so listing needs no lock.
   let dir = agent_chats_dir(repo_path);
   if !dir.exists() {
     return Ok(Vec::new());
@@ -571,6 +743,13 @@ pub fn list_agent_chats(repo_path: &str) -> Result<Vec<AgentChatSummary>, String
     if path.extension().and_then(|e| e.to_str()) != Some("json") {
       continue;
     }
+    // Appends are not atomic, so read under the session's lock.
+    let lock = path
+      .file_stem()
+      .and_then(|stem| stem.to_str())
+      .and_then(|stem| stem.parse::<i64>().ok())
+      .map(|session_id| chat_lock(repo_path, session_id));
+    let _guard = lock.as_ref().map(|lock| lock.lock());
     let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let chat: AgentChat = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     summaries.push(AgentChatSummary {
@@ -628,8 +807,10 @@ mod tests {
   #[test]
   fn initial_screen_is_first_agent_message() {
     let mut chat = sample_chat();
+    let mut snap = None;
     note_screen(
       &mut chat,
+      &mut snap,
       "Welcome to Claude\n───────────────\n>\n───────────────",
       "t1",
     );
@@ -641,15 +822,16 @@ mod tests {
   #[test]
   fn user_message_then_new_output_becomes_agent_reply() {
     let mut chat = sample_chat();
+    let mut snap = None;
     note_screen(
       &mut chat,
+      &mut snap,
       "Welcome\n───────────────\n>\n───────────────",
       "t1",
     );
     let before = "Welcome\n───────────────\n>\n───────────────";
-    note_user_message(&mut chat, before, "fix the bug", "t2");
-    note_screen(
-      &mut chat,
+    note_user_message(&mut chat, &mut snap, before, "fix the bug", "t2");
+    note_screen(&mut chat, &mut snap,
       "Welcome\n───────────────\n> fix the bug\n───────────────\nI'll look at src/main.rs\n───────────────\n>\n───────────────",
       "t3",
     );
@@ -666,10 +848,11 @@ mod tests {
   #[test]
   fn later_screen_updates_create_separate_timestamped_messages() {
     let mut chat = sample_chat();
+    let mut snap = None;
     let before = "hi";
-    note_user_message(&mut chat, before, "hello", "t1");
-    note_screen(&mut chat, "hi\npartial", "t2");
-    note_screen(&mut chat, "hi\npartial reply done", "t3");
+    note_user_message(&mut chat, &mut snap, before, "hello", "t1");
+    note_screen(&mut chat, &mut snap, "hi\npartial", "t2");
+    note_screen(&mut chat, &mut snap, "hi\npartial reply done", "t3");
     let agents: Vec<_> = chat
       .messages
       .iter()
@@ -700,7 +883,8 @@ mod tests {
   #[test]
   fn empty_user_message_is_ignored() {
     let mut chat = sample_chat();
-    note_user_message(&mut chat, "screen", "   ", "t1");
+    let mut snap = None;
+    note_user_message(&mut chat, &mut snap, "screen", "   ", "t1");
     assert_eq!(chat.messages.len(), 1);
   }
 
@@ -792,6 +976,87 @@ mod tests {
     assert_eq!(chat.messages[0].role, ChatRole::Agent);
     assert_eq!(chat.messages[1].role, ChatRole::User);
     assert_eq!(chat.messages[1].message, "fix the live logs");
+  }
+
+  fn scrolling_screen(t: usize) -> String {
+    let mut rows: Vec<String> = (0..20)
+      .map(|row| format!("output line {}", t + row))
+      .collect();
+    rows.push(format!("✻ Thinking… ({t}s)"));
+    rows.push("───────────────".to_string());
+    rows.push(">".to_string());
+    rows.push("───────────────".to_string());
+    rows.join("\n")
+  }
+
+  #[test]
+  fn scrolling_output_logs_only_the_lines_that_are_new() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    register_agent_chat(&repo, 11, "pty-11", "Claude", "claude", None, None).unwrap();
+    for t in 0..40 {
+      record_screen(&repo, 11, &scrolling_screen(t)).unwrap();
+    }
+    let chat = get_agent_chat(&repo, 11).unwrap().unwrap();
+    let logged: usize = chat.messages.iter().map(|m| m.message.len()).sum();
+    // The first screen once, then a line and the spinner per tick.
+    assert!(
+      logged < 3_000,
+      "logged {logged} bytes for 40 one-line scrolls"
+    );
+    let lines: std::collections::HashSet<&str> = chat
+      .messages
+      .iter()
+      .flat_map(|m| m.message.lines())
+      .collect();
+    for line in 0..59 {
+      assert!(
+        lines.contains(format!("output line {line}").as_str()),
+        "line {line} was lost"
+      );
+    }
+  }
+
+  #[test]
+  fn appended_messages_leave_a_file_that_parses_as_the_chat() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    register_agent_chat(&repo, 12, "pty-12", "Claude", "claude", None, None).unwrap();
+    record_screen(&repo, 12, "first").unwrap();
+    record_user_message(&repo, 12, "first", "do it").unwrap();
+    record_screen(&repo, 12, "first\nsecond").unwrap();
+    record_screen(&repo, 12, "first\nsecond\nthird").unwrap();
+    let from_disk: AgentChat =
+      serde_json::from_str(&fs::read_to_string(chat_path(&repo, 12)).unwrap()).unwrap();
+    assert_eq!(from_disk, get_agent_chat(&repo, 12).unwrap().unwrap());
+    assert_eq!(from_disk.messages.last().unwrap().message, "third");
+    assert_eq!(from_disk.messages.len(), 4);
+  }
+
+  #[test]
+  fn ending_a_session_drops_its_chat_from_memory_but_keeps_the_file() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    register_agent_chat(&repo, 13, "pty-13", "Claude", "claude", None, None).unwrap();
+    record_screen(&repo, 13, "hello").unwrap();
+    let path = chat_path(&repo, 13);
+    assert!(CHAT_CACHE
+      .get()
+      .unwrap()
+      .lock()
+      .unwrap()
+      .contains_key(&path));
+    end_session(&repo, 13);
+    assert!(!CHAT_CACHE
+      .get()
+      .unwrap()
+      .lock()
+      .unwrap()
+      .contains_key(&path));
+    assert_eq!(
+      get_agent_chat(&repo, 13).unwrap().unwrap().messages[0].message,
+      "hello"
+    );
   }
 
   #[test]

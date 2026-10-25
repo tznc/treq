@@ -55,12 +55,7 @@ pub fn check_and_rebase_all(
     // Filter workspaces that need rebasing
     let workspaces_needing_rebase: Vec<&Workspace> = workspaces
       .iter()
-      .filter(|w| {
-        let last_rebased = local_db::get_workspace_last_rebased_commit(repo_path, w.id)
-          .ok()
-          .flatten();
-        last_rebased.as_ref() != Some(&current_target_commit)
-      })
+      .filter(|w| local_db::last_rebased_commit_of(w).as_ref() != Some(&current_target_commit))
       .collect();
 
     if workspaces_needing_rebase.is_empty() {

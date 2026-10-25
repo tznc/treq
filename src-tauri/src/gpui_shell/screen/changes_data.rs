@@ -79,9 +79,8 @@ pub trait ChangesHost: CommitsHost {
   /// The workspace's `linguist-generated` rules (`.gitattributes`).
   fn generated_files(&self, repo_path: &str, workspace_id: Option<i64>) -> GeneratedFiles;
   fn discard_file(&self, workspace_path: &str, path: &str) -> Result<(), String>;
-  /// `create_commit`: the whole working copy. A local commit leaves the
-  /// auto-push to the caller ([`ChangesHost::auto_pushes`]), so the commit is
-  /// reported before the push.
+  /// `create_commit`: the whole working copy, pushed if the repository
+  /// auto-pushes.
   fn commit(
     &self,
     repo_path: &str,
@@ -96,11 +95,6 @@ pub trait ChangesHost: CommitsHost {
     paths: Vec<String>,
   ) -> Result<String, String>;
   fn push_remote(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<String, String>;
-  /// Whether a commit [`ChangesHost::commit`] made should be pushed after it
-  /// (the repository's auto-push setting).
-  fn auto_pushes(&self, _repo_path: &str) -> bool {
-    false
-  }
   fn stash_all(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<StashEntry, String>;
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String>;
   fn unmark_viewed(&self, workspace_path: &str, path: &str) -> Result<(), String>;
@@ -231,7 +225,7 @@ impl ChangesHost for Backend {
   ) -> Result<String, String> {
     match self.remote_containing(repo_path) {
       Some(remote) => remote.create_commit(workspace_id, message),
-      None => core::commit_workspace(repo_path, workspace_id, message),
+      None => core::commit_workspace_with_auto_push(repo_path, workspace_id, message),
     }
   }
 
@@ -252,11 +246,6 @@ impl ChangesHost for Backend {
       Some(remote) => remote.push(workspace_id),
       None => core::push_workspace_to_remote(repo_path, workspace_id),
     }
-  }
-
-  fn auto_pushes(&self, repo_path: &str) -> bool {
-    // A remote host pushes after its own commit.
-    self.remote_containing(repo_path).is_none() && core::resolve_auto_push(repo_path)
   }
 
   fn stash_all(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<StashEntry, String> {
@@ -486,6 +475,24 @@ impl Snapshot {
     }
   }
 
+  /// Takes the hunks of committed files that read the same as in
+  /// `previous`, so that comparing the two is a pointer check and the
+  /// rows built from them are kept.
+  pub fn sharing_hunks(mut self, previous: Option<&Snapshot>) -> Self {
+    let Some(previous) = previous else {
+      return self;
+    };
+    for (path, new) in &mut self.committed_hunks {
+      if let Some(old) = previous.committed_hunks.get(path) {
+        if new.hunks != old.hunks {
+          continue;
+        }
+        new.hunks = old.hunks.clone();
+      }
+    }
+    self
+  }
+
   /// Marks the listed paths `rules` call generated.
   pub fn with_generated(mut self, rules: &GeneratedFiles) -> Self {
     self.generated = self
@@ -508,15 +515,17 @@ impl Snapshot {
 }
 
 /// `filterVisibleCommittedFiles`: committed files show when the toggle is
-/// on, or when they are also dirty or conflicted.
-pub fn visible_committed<'a>(
-  committed: &'a [JjFileChange],
+/// on, or when they are also dirty or conflicted. By index into `committed`.
+pub fn visible_committed_at(
+  committed: &[JjFileChange],
   show: bool,
   always: &HashSet<String>,
-) -> Vec<&'a JjFileChange> {
+) -> Vec<usize> {
   committed
     .iter()
-    .filter(|f| show || always.contains(&f.path))
+    .enumerate()
+    .filter(|(_, f)| show || always.contains(&f.path))
+    .map(|(ix, _)| ix)
     .collect()
 }
 
@@ -826,6 +835,12 @@ pub struct BodyInput<'a> {
   pub generated: bool,
   /// "Load diff" was clicked on the generated file.
   pub loaded_generated: bool,
+}
+
+/// Whether the tab draws a diff for the file: a binary file shows a note
+/// and a deleted one a placeholder, so their hunks are not read.
+pub fn draws_hunks(path: &str, status: &str) -> bool {
+  !is_binary(path) && status != "D"
 }
 
 /// Whether the file card is shut: comments keep it open; binary files and
@@ -1353,9 +1368,9 @@ mod tests {
     assert_eq!(committed, ["done.rs", "clash.rs"]);
     assert_eq!(snap.committed[1].status, "C");
     let always = set(&["dirty.rs", "clash.rs"]);
-    let visible: Vec<&str> = visible_committed(&snap.committed, false, &always)
+    let visible: Vec<&str> = visible_committed_at(&snap.committed, false, &always)
       .iter()
-      .map(|f| f.path.as_str())
+      .map(|&ix| snap.committed[ix].path.as_str())
       .collect();
     assert_eq!(visible, ["clash.rs"]);
   }

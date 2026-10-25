@@ -506,7 +506,7 @@ pub fn line_number(hunk: &JjDiffHunk, l: usize) -> (Option<u32>, Option<u32>) {
   numbered(hunk).nth(l).unwrap_or((None, None))
 }
 
-fn numbered(hunk: &JjDiffHunk) -> impl Iterator<Item = (Option<u32>, Option<u32>)> + '_ {
+pub fn numbered(hunk: &JjDiffHunk) -> impl Iterator<Item = (Option<u32>, Option<u32>)> + '_ {
   let (mut old, mut new) = hunk_starts(&hunk.header);
   hunk.lines.iter().map(move |line| {
     if line.starts_with('+') {

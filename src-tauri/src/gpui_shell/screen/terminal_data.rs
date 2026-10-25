@@ -6,7 +6,7 @@ use crate::result_ext::ResultExt;
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},
-  time::Instant,
+  time::{Duration, Instant},
 };
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -108,6 +108,8 @@ pub fn session_running(list: &serde_json::Value, label: &str) -> Option<bool> {
 pub struct Prepared {
   pub command: String,
   pub skill_write_warning: Option<String>,
+  /// The files written for this session (prompt, settings, skills).
+  pub file_paths: Vec<String>,
 }
 
 pub trait TerminalHost:
@@ -155,6 +157,8 @@ pub trait TerminalHost:
     session_id: i64,
     screen: &str,
   ) -> Result<(), String>;
+  /// The session's terminal closed: its chat is no longer held in memory.
+  fn end_chat(&self, _repo_path: &str, _session_id: i64) {}
   /// `recordUserMessage`: what was sent to the agent, after `screen_before`.
   fn record_chat_message(
     &self,
@@ -174,6 +178,10 @@ pub trait TerminalHost:
   ) -> Result<String, String>;
   /// A clipboard image pasted into a terminal: where it was saved.
   fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String>;
+  /// Deletes the temporary files of a session that ended: its agent files
+  /// ([`Prepared::file_paths`]) and the images pasted into it. Paths that
+  /// are not Treq's temporary files are left alone.
+  fn remove_session_files(&self, _paths: &[String]) {}
 }
 
 pub type Host = Arc<dyn TerminalHost>;
@@ -422,6 +430,7 @@ impl TerminalHost for Backend {
     Ok(Prepared {
       command: prepared.command,
       skill_write_warning: prepared.skill_write_warning,
+      file_paths: prepared.file_paths,
     })
   }
 
@@ -444,7 +453,7 @@ impl TerminalHost for Backend {
     session_id: i64,
     screen: &str,
   ) -> Result<(), String> {
-    crate::core::agent_chat::record_screen(repo_path, session_id, screen).map(drop)
+    crate::core::agent_chat::record_screen(repo_path, session_id, screen)
   }
 
   fn record_chat_message(
@@ -455,7 +464,6 @@ impl TerminalHost for Backend {
     text: &str,
   ) -> Result<(), String> {
     crate::core::agent_chat::record_user_message(repo_path, session_id, screen_before, text)
-      .map(drop)
   }
 
   fn read_send_asset(&self, path: &str) -> Result<String, String> {
@@ -470,6 +478,14 @@ impl TerminalHost for Backend {
   ) -> Result<String, String> {
     crate::send_dispatch::write_send_review_image_bytes(repo_path, name, png)
       .map(|path| path.to_string_lossy().to_string())
+  }
+
+  fn end_chat(&self, repo_path: &str, session_id: i64) {
+    crate::core::agent_chat::end_session(repo_path, session_id);
+  }
+
+  fn remove_session_files(&self, paths: &[String]) {
+    crate::send_dispatch::remove_session_files(paths);
   }
 
   fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String> {
@@ -575,12 +591,34 @@ pub fn consume_echo<'a>(pending: &str, chunk: &'a str) -> (String, &'a str) {
   (echo[e..].iter().collect(), &chunk[c..])
 }
 
+/// How long typing waits for its echo, and how much of it is kept. A TUI
+/// repaints with escape sequences rather than echoing, so its typing is
+/// never matched; this keeps it from piling up.
+const ECHO_EXPIRES: Duration = Duration::from_secs(2);
+const ECHO_MAX: usize = 4096;
+
+#[derive(Default)]
+struct Echo {
+  text: String,
+  typed_at: Option<Instant>,
+}
+
+impl Echo {
+  /// What is still waiting for its echo: nothing once it expired.
+  fn pending(&mut self) -> &mut String {
+    if self.typed_at.is_some_and(|at| at.elapsed() > ECHO_EXPIRES) {
+      self.text.clear();
+    }
+    &mut self.text
+  }
+}
+
 /// A terminal's state, shared by the PTY's output listener and every view
 /// drawing it; it lives as long as the PTY, so reopening the pane keeps the
 /// scrollback.
 pub struct Live {
   pub emulator: Mutex<Emulator>,
-  pending_echo: Mutex<String>,
+  pending_echo: Mutex<Echo>,
   /// When the process (not the echo of typing) last wrote output.
   pub last_output: Mutex<Option<Instant>>,
   watchers: Mutex<Vec<UnboundedSender<bool>>>,
@@ -609,12 +647,13 @@ impl Live {
   /// [`Self::push`] for the bytes a PTY read.
   pub fn push_bytes(&self, chunk: &[u8]) -> Vec<String> {
     let from_process = {
-      let mut pending = self.pending_echo.lock_or_recover();
+      let mut echo = self.pending_echo.lock_or_recover();
+      let pending = echo.pending();
       if pending.is_empty() {
         !chunk.is_empty()
       } else {
         let text = String::from_utf8_lossy(chunk);
-        let (left, process) = consume_echo(&pending, &text);
+        let (left, process) = consume_echo(pending, &text);
         let from_process = !process.is_empty();
         *pending = left;
         from_process
@@ -645,7 +684,15 @@ impl Live {
 
   /// Notes what the user typed, so its echo isn't taken for output.
   pub fn typed(&self, data: &str) {
-    self.pending_echo.lock_or_recover().push_str(data);
+    let mut echo = self.pending_echo.lock_or_recover();
+    let pending = echo.pending();
+    if pending.len() + data.len() > ECHO_MAX {
+      pending.clear();
+    }
+    if data.len() <= ECHO_MAX {
+      pending.push_str(data);
+    }
+    echo.typed_at = Some(Instant::now());
   }
 
   /// A message per output chunk: whether the process wrote it.
@@ -754,6 +801,20 @@ mod tests {
     assert_eq!(consume_echo("ls\r", "ls\nfile"), (String::new(), "file"));
     assert_eq!(consume_echo("lsx", "lq"), ("sx".to_string(), "q"));
     assert_eq!(consume_echo("é", "éa"), (String::new(), "a"));
+  }
+
+  #[test]
+  fn typing_a_tui_never_echoes_is_capped_and_expires() {
+    let live = Live::new(20, 2);
+    for _ in 0..10_000 {
+      live.typed("abcdefgh");
+    }
+    assert!(live.pending_echo.lock_or_recover().text.len() <= ECHO_MAX);
+    live.typed("x");
+    live.pending_echo.lock_or_recover().typed_at = Some(Instant::now() - ECHO_EXPIRES * 2);
+    // Output that does not start with the typing is the process writing, and
+    // the expired typing is forgotten rather than matched against later output.
+    assert_eq!(live.pending_echo.lock_or_recover().pending().len(), 0);
   }
 
   #[test]

@@ -78,6 +78,8 @@ const IDLE_POLL: Duration = Duration::from_millis(500);
 /// lately have their headers read ahead, and the pause between them.
 const IDLE_RECENT: Duration = Duration::from_secs(3);
 const IDLE_STAGGER: Duration = Duration::from_secs(1);
+/// How long after a workspace's last change its file index is read again.
+const REINDEX_AFTER: Duration = Duration::from_millis(1500);
 
 /// How many workspaces shown lately keep their header's last read.
 const RECENT: usize = 3;
@@ -348,6 +350,10 @@ pub struct WorkspaceView {
   branches: prefetch::Lru<String, Vec<String>>,
   /// The workspace whose file index was last asked to be built.
   indexed: Option<RouteKey>,
+  /// The route's `changes_revision` the file index was last asked to read.
+  indexed_revision: u64,
+  /// The file index's pending re-read, replaced by the next change.
+  _reindex: Task<()>,
   dark: bool,
   popups: PopupSink,
   /// The element whose tooltip is pending or shown (`true`).
@@ -437,6 +443,8 @@ impl WorkspaceView {
       target_hover: prefetch::Intent::default(),
       branches: prefetch::Lru::new(1),
       indexed: None,
+      indexed_revision: 0,
+      _reindex: Task::ready(()),
       dark,
       popups,
       tooltip: None,
@@ -457,6 +465,7 @@ impl WorkspaceView {
     }
     let moved = self.route.key() != route.key();
     let stale = moved || self.route.revision != route.revision;
+    let changed = self.route.changes_revision != route.changes_revision;
     let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
@@ -484,6 +493,8 @@ impl WorkspaceView {
       self.pending = Pending::None;
       self.busy = actions::Busy::default();
       self.warm_file_index(cx);
+    } else if changed {
+      self.warm_file_index(cx);
     }
     if stale {
       self.load(cx);
@@ -495,25 +506,38 @@ impl WorkspaceView {
   }
 
   /// Builds the shown workspace's file index off the main thread, once it
-  /// knows the workspace, so "Jump to File" searches it at once.
+  /// knows the workspace, so "Jump to File" searches it at once. The files
+  /// the workspace's changes add or remove are read again a moment after
+  /// the last change, so the index follows what an agent creates.
   fn warm_file_index(&mut self, cx: &mut Context<Self>) {
     let key = self.route.key();
-    if self.route.remote_chrome.is_some() || self.indexed.as_ref() == Some(&key) {
+    let first = self.indexed.as_ref() != Some(&key);
+    let revision = self.route.changes_revision;
+    if self.route.remote_chrome.is_some() || (!first && self.indexed_revision == revision) {
       return;
     }
     let Some(parent) = self.parent() else {
       return;
     };
     self.indexed = Some(key);
+    self.indexed_revision = revision;
     let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-    cx.background_spawn(async move {
+    let warm = async move {
       host.warm_file_index(
         &parent.repo_path,
         parent.workspace_id(),
         &parent.working_directory(),
       );
-    })
-    .detach();
+    };
+    if first {
+      cx.background_spawn(warm).detach();
+    } else {
+      let executor = cx.background_executor().clone();
+      self._reindex = cx.background_spawn(async move {
+        executor.timer(REINDEX_AFTER).await;
+        warm.await;
+      });
+    }
   }
 
   /// Reads ahead what showing `route`'s workspace would read, so a switch

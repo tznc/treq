@@ -33,6 +33,11 @@ pub trait SettingsHost: ToolsHost + AccountHost {
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String>;
   /// The skill registry, each skill with its install state (`list_skill_catalog`).
   fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String>;
+  /// The registry as of its last read, if there was one, without the
+  /// network: shown while `skill_catalog` reads it again.
+  fn skill_catalog_cached(&self, _repo_path: Option<&str>) -> Option<Vec<SkillCatalogSkillView>> {
+    None
+  }
   fn installed_skills(&self, repo_path: Option<&str>) -> Result<Vec<InstalledSkill>, String>;
   fn install_skill(
     &self,
@@ -110,6 +115,10 @@ impl SettingsHost for Backend {
   fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String> {
     let view = crate::gpui_shell::block_on(crate::commands::skills::catalog_view(repo_path, None))?;
     Ok(view.skills)
+  }
+
+  fn skill_catalog_cached(&self, repo_path: Option<&str>) -> Option<Vec<SkillCatalogSkillView>> {
+    crate::commands::skills::cached_catalog_view(repo_path, None).map(|view| view.skills)
   }
 
   fn installed_skills(&self, repo_path: Option<&str>) -> Result<Vec<InstalledSkill>, String> {
