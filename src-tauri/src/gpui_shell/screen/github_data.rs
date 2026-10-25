@@ -22,7 +22,7 @@ use crate::{
   local_db::Workspace,
 };
 
-/// `GitHubTab`, without the merge queue, which React still draws.
+/// `GitHubTab`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Tab {
@@ -75,14 +75,6 @@ impl StateFilter {
   }
 }
 
-/// The Merge Queue tab, while the build offers it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergeQueueTab {
-  /// A Pro subscription hides the tab's PRO badge.
-  pub pro: bool,
-}
-
 /// What React sends: where in the GitHub view the URL points.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,7 +86,6 @@ pub struct Route {
   pub selected: Option<u64>,
   /// The new issue form or new pull request dialog is open (`/new`).
   pub creating: bool,
-  pub merge_queue: Option<MergeQueueTab>,
   /// Workflow checks running from this window (`useRunningChecks` keys:
   /// `<workspace id>:<file>[:<job>]`).
   #[serde(default)]

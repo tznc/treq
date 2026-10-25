@@ -730,6 +730,12 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   window::menu_event(app, label, event, payload)
 }
 
+/// A `treq://skill/install` link for window `label`: it shows the install
+/// confirmation for catalog skill `skill_id`. Any thread.
+pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
+  window::skill_install_link(app, label, skill_id);
+}
+
 /// Types `keystroke` (GPUI's notation, e.g. "cmd-v") into the focused GPUI
 /// window, as if pressed there. On macOS a menu item's key equivalent takes
 /// the key press before the window sees it, so the Edit menu hands its keys

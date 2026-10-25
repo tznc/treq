@@ -3887,11 +3887,11 @@ echo '{"viewerDefaultMergeMethod":"SQUASH","mergeCommitAllowed":false,"squashMer
     let log = repo_dir.path().join("edits.log");
     let script = format!(
       r#"case "$*" in
-  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- feat/open")
+  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat/open")
     echo '{{"number":8,"title":"Open","state":"OPEN","url":"u","headRefName":"feat/open","baseRefName":"feat/parent","mergeStateStatus":null,"isDraft":false}}' ;;
-  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- feat/closed")
+  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat/closed")
     echo '{{"number":9,"title":"Closed","state":"CLOSED","url":"u","headRefName":"feat/closed","baseRefName":"feat/parent","mergeStateStatus":null,"isDraft":false}}' ;;
-  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft -- feat/none")
+  "pr view --json number,title,state,url,headRefName,baseRefName,mergeStateStatus,isDraft,body -- feat/none")
     echo 'no pull requests found for branch "feat/none"' >&2; exit 1 ;;
   "pr edit"*) echo "$*" >> {log} ;;
   *) exit 9 ;;

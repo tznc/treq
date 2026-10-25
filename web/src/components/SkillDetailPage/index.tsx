@@ -7,7 +7,7 @@ import { FileTree } from './FileTree';
 import { MobileFileSelect } from './MobileFileSelect';
 import { MarkdownPreview } from './MarkdownPreview';
 import type { Skill, SkillFile } from './types';
-import { formatBytes, getPrismLanguage } from './utils';
+import { formatBytes, getPrismLanguage, skillInstallDeepLink } from './utils';
 import styles from './styles.module.css';
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -104,15 +104,22 @@ function SkillDetailContent({ skill }: { skill: Skill }) {
             )}
           </div>
         </div>
-        <a
-          className={styles.githubButton}
-          href={skill.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          data-testid="repo-github-link"
-        >
-          View on GitHub ↗
-        </a>
+        <div className={styles.headerActions}>
+          {!skill.proprietary && (
+            <a className={styles.openInTreqButton} href={skillInstallDeepLink(skill.id)}>
+              Open in Treq
+            </a>
+          )}
+          <a
+            className={styles.githubButton}
+            href={skill.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="repo-github-link"
+          >
+            View on GitHub ↗
+          </a>
+        </div>
       </div>
 
       {skill.proprietary ? (
