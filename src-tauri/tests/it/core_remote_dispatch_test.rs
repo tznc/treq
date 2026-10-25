@@ -58,6 +58,15 @@ fn descriptions(repo: &TestRepo, id: i64) -> Vec<String> {
     .collect()
 }
 
+/// The commit Git's `refs/heads/{branch}` points to, if the ref exists.
+fn git_branch(repo: &TestRepo, branch: &str) -> Option<String> {
+  let git = gix::open(&repo.repo_path).unwrap();
+  git
+    .try_find_reference(format!("refs/heads/{branch}").as_str())
+    .unwrap()
+    .map(|mut r| r.peel_to_id().unwrap().to_string())
+}
+
 fn list_changes(repo: &TestRepo, id: i64) -> Vec<Value> {
   dispatch(TreqCommandRequest::ListChanges {
     repo: repo.repo_path.clone(),
@@ -91,7 +100,33 @@ fn undo_operation_restores_an_abandoned_commit() {
 }
 
 #[test]
-fn undo_commit_abandons_the_tip_commit_and_its_files() {
+fn undo_operation_moves_the_git_branch_back_to_the_restored_commit() {
+  let repo = TestRepo::new().unwrap();
+  let (ws, path) = workspace_with_commit(&repo, "feat/undo-git", "keep this commit");
+  let change_id = TestRepo::jj_change_id(&path, "@-").unwrap();
+  let committed = git_branch(&repo, "feat/undo-git");
+  assert!(committed.is_some());
+
+  let operation_id = dispatch(TreqCommandRequest::AbandonCommit {
+    repo: repo.repo_path.clone(),
+    workspace: ws.id.to_string(),
+    commit: change_id,
+    idempotency_key: key("abandon"),
+  });
+  assert_ne!(git_branch(&repo, "feat/undo-git"), committed);
+  dispatch(TreqCommandRequest::UndoOperation {
+    repo: repo.repo_path.clone(),
+    workspace: Some(ws.id.to_string()),
+    operation_id: operation_id.as_str().unwrap().to_string(),
+  });
+
+  // A branch ref left at the abandon's commit would abandon the restored
+  // commit again at the next import of Git's refs.
+  assert_eq!(git_branch(&repo, "feat/undo-git"), committed);
+}
+
+#[test]
+fn undo_commit_returns_the_tip_commits_changes_to_the_working_copy() {
   let repo = TestRepo::new().unwrap();
   let (ws, path) = workspace_with_commit(&repo, "feat/undo-commit", "add a");
 
@@ -102,7 +137,15 @@ fn undo_commit_abandons_the_tip_commit_and_its_files() {
   });
 
   assert!(!descriptions(&repo, ws.id).contains(&"add a".to_string()));
-  assert!(!Path::new(&path).join("a.txt").exists());
+  assert_eq!(
+    std::fs::read_to_string(Path::new(&path).join("a.txt")).unwrap(),
+    "a.txt\n"
+  );
+  let changes = list_changes(&repo, ws.id);
+  assert!(
+    changes.iter().any(|c| c["path"] == "a.txt"),
+    "a.txt should be an uncommitted change: {changes:?}"
+  );
 }
 
 #[test]

@@ -3544,7 +3544,14 @@ pub fn jj_undo_operation(workspace_path: &str, operation_id: &str) -> Result<Str
   };
   let parent_repo = block_on(loaded.repo.loader().load_at(&parent))
     .map_err(|e| JjError::IoError(format!("Failed to load parent operation: {}", e)))?;
-  let restored_view = parent_repo.view().store_view().clone();
+  let mut restored_view = parent_repo.view().store_view().clone();
+  // Keep the current record of Git's refs, as `jj op restore` does. With the
+  // old record, the export below would see nothing to change and leave Git's
+  // branch refs where the undone operation put them; the next import would
+  // then undo this restore.
+  let current = loaded.repo.view().store_view();
+  restored_view.git_refs = current.git_refs.clone();
+  restored_view.git_head = current.git_head.clone();
 
   let mut tx = loaded.repo.start_transaction();
   tx.repo_mut().set_view(restored_view);
@@ -3584,9 +3591,9 @@ fn undo_target_operation(
 /// backwards: once the tip is undone, its parent becomes the new tip and can then
 /// be undone in turn.
 ///
-/// Implemented as a validated abandon: the commit is removed from history and its
-/// changes are folded back into the (rebased) working copy, exactly reversing the
-/// act of committing.
+/// The commit is removed from history and its changes are folded back into the
+/// working copy, exactly reversing the act of committing. Returns the operation
+/// id.
 pub fn jj_undo_commit(
   workspace_path: &str,
   target_branch: &str,
@@ -3615,8 +3622,30 @@ pub fn jj_undo_commit(
     ));
   }
 
-  drop(loaded);
-  jj_abandon(workspace_path, change_id)
+  // The working copy keeps its tree and moves onto the tip's parents, so the
+  // tip's changes become uncommitted (`jj abandon --restore-descendants`).
+  let wc = resolve_commit_by_revision(&loaded, "@")?;
+  let mut tx = loaded.repo.start_transaction();
+  block_on(
+    tx.repo_mut()
+      .rewrite_commit(&wc)
+      .set_parents(tip.parent_ids().to_vec())
+      .write(),
+  )
+  .map_err(|e| JjError::InitFailed(format!("Failed to move the working copy: {}", e)))?;
+  tx.repo_mut().record_abandoned_commit(&tip);
+  block_on(tx.repo_mut().rebase_descendants())
+    .map_err(|e| JjError::InitFailed(format!("Failed to rebase descendants: {}", e)))?;
+  let new_repo = block_on(tx.commit("undo commit"))
+    .map_err(|e| JjError::InitFailed(format!("Failed to undo commit: {}", e)))?;
+  let op_hex = new_repo.op_id().hex();
+
+  let repo_path =
+    derive_repo_path_from_workspace(workspace_path).unwrap_or_else(|| workspace_path.to_string());
+  reconcile_all_workspaces_after_rewrite(&repo_path, None)
+    .warn_on_err("reconcile all workspaces after rewrite");
+
+  Ok(op_hex)
 }
 
 /// Create a new commit that reverses the changes of `change_id`, applied on top of

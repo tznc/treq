@@ -687,7 +687,8 @@ fn test_undo_commit_only_allows_latest_commit_sequentially() {
     .expect("Failed to get commits after undo");
   assert_eq!(commits_after.commits.len(), 1);
   assert_eq!(commits_after.commits[0].change_id, oldest_change_id);
-  assert!(!workspace_path.join("second.txt").exists());
+  // The undone commit's changes stay in the working copy.
+  assert!(workspace_path.join("second.txt").exists());
 
   // The now-tip commit (previously the older one) can be undone in turn.
   treq_lib::core::undo_commit(&repo.repo_path, workspace.id, &oldest_change_id)
@@ -696,7 +697,8 @@ fn test_undo_commit_only_allows_latest_commit_sequentially() {
   let commits_final = treq_lib::jj::jj_get_commits_ahead(workspace_path_str, default_branch)
     .expect("Failed to get commits after second undo");
   assert!(commits_final.commits.is_empty());
-  assert!(!workspace_path.join("first.txt").exists());
+  assert!(workspace_path.join("first.txt").exists());
+  assert!(workspace_path.join("second.txt").exists());
 }
 
 #[test]
