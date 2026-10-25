@@ -25,7 +25,7 @@ use super::{
   remote_control_plane::SshEndpoint,
   remote_local_keys::LocalSshIdentity,
   remote_ssh_transport::CutoffReason,
-  supabase::test_support::{client, MemoryStore},
+  supabase::test_support::client,
 };
 
 #[derive(Default)]
@@ -111,9 +111,10 @@ async fn r7_startup_and_focus_request_counts() {
     .await;
   Mock::given(method("GET"))
     .and(path("/rest/v1/subscriptions"))
-    .respond_with(ResponseTemplate::new(200).set_body_json(
-      json!([{"status": "active", "plan": "pro", "current_period_end": null}]),
-    ))
+    .respond_with(
+      ResponseTemplate::new(200)
+        .set_body_json(json!([{"status": "active", "plan": "pro", "current_period_end": null}])),
+    )
     .mount(&server)
     .await;
   let (proxy, connections) = counting_proxy(*server.address()).await;
@@ -124,7 +125,12 @@ async fn r7_startup_and_focus_request_counts() {
 
   let t = Instant::now();
   cloud.start().await;
-  println!("start(): {:?}, requests {:?}, tcp connections {}", t.elapsed(), summarize(&server).await, connections.load(Ordering::SeqCst));
+  println!(
+    "start(): {:?}, requests {:?}, tcp connections {}",
+    t.elapsed(),
+    summarize(&server).await,
+    connections.load(Ordering::SeqCst)
+  );
 
   // `commands::cloud::window_focused` spawns exactly this on every Focused(true).
   for _ in 0..10 {
@@ -222,7 +228,10 @@ async fn r7_hung_refresh_blocks_callers() {
   });
   let done = futures::future::join_all(waits).await;
   println!("3 Supabase calls behind a refresh that never answers (5 s cap here; the client cap is 160 s): {done:?}");
-  println!("requests that reached the server: {:?}", summarize(&server).await);
+  println!(
+    "requests that reached the server: {:?}",
+    summarize(&server).await
+  );
 }
 
 /// The merge queue RPC returns every merged entry ever.
@@ -244,10 +253,14 @@ async fn r7_queue_entries_parse_cost() {
       .mount(&server)
       .await;
     let (supabase, _) = client(&server.uri());
-    let _ = account::queue_entries(&supabase, "o/r").await.unwrap();
+    let _ = account::queue_entries(&supabase, "o/r", None)
+      .await
+      .unwrap();
     let t = Instant::now();
     for _ in 0..20 {
-      let _ = account::queue_entries(&supabase, "o/r").await.unwrap();
+      let _ = account::queue_entries(&supabase, "o/r", None)
+        .await
+        .unwrap();
     }
     println!(
       "{rows} merged rows, {} KB: {:?} per poll (loopback, incl. http + parse + sort, debug build)",
@@ -255,4 +268,42 @@ async fn r7_queue_entries_parse_cost() {
       t.elapsed() / 20
     );
   }
+}
+
+/// Wire bytes of the queue payload with and without gzip (the server's
+/// `Content-Encoding` is what the client now asks for).
+#[tokio::test]
+#[ignore]
+async fn r7_queue_entries_gzip_wire_bytes() {
+  use std::io::Write;
+  let body: Vec<Value> = (0..5000)
+    .map(|i| {
+      json!({"branch_name": format!("branch-{i}"), "pr_number": i, "pr_title": format!("title {i}"),
+             "status": "merged", "position": i, "target_branch": "main"})
+    })
+    .collect();
+  let raw = serde_json::to_vec(&body).unwrap();
+  let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+  gz.write_all(&raw).unwrap();
+  let gz = gz.finish().unwrap();
+  let server = MockServer::start().await;
+  Mock::given(method("POST"))
+    .and(path("/rest/v1/rpc/get_repo_branch_queue_statuses"))
+    .respond_with(
+      ResponseTemplate::new(200)
+        .insert_header("content-encoding", "gzip")
+        .set_body_raw(gz.clone(), "application/json"),
+    )
+    .mount(&server)
+    .await;
+  let (supabase, _) = client(&server.uri());
+  let rows = account::queue_entries(&supabase, "o/r", None)
+    .await
+    .unwrap();
+  println!(
+    "5000 rows: {} KB on the wire with gzip (was {} KB), {} rows decoded",
+    gz.len() / 1024,
+    raw.len() / 1024,
+    rows.len()
+  );
 }

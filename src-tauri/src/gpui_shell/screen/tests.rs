@@ -144,6 +144,8 @@ struct FakeHost {
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
   /// `None` fails the read, as when it never answers.
   queue: Mutex<Option<(bool, Vec<merge_queue_data::QueueEntry>)>>,
+  /// The merged-history size each queue read asked for.
+  queue_history: Mutex<Vec<usize>>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -1460,14 +1462,27 @@ impl merge_queue_data::MergeQueueHost for FakeHost {
   fn merge_queue(
     &self,
     full_name: &str,
+    history: usize,
   ) -> Result<(bool, Vec<merge_queue_data::QueueEntry>), String> {
     self.record(format!("read queue {full_name}"));
-    self
+    self.queue_history.lock().unwrap().push(history);
+    let (enabled, mut entries) = self
       .queue
       .lock()
       .unwrap()
       .clone()
-      .ok_or_else(|| "unread".to_string())
+      .ok_or_else(|| "unread".to_string())?;
+    // Like the RPC: every queued entry, the newest `history` merged ones.
+    let mut merged = 0;
+    entries.sort_by_key(|e| std::cmp::Reverse(e.position));
+    entries.retain(|e| {
+      e.status != "merged" || {
+        merged += 1;
+        merged <= history
+      }
+    });
+    entries.sort_by_key(|e| e.position);
+    Ok((enabled, entries))
   }
 
   fn dequeue(&self, full_name: &str, branches: &[String]) -> Result<(), String> {
