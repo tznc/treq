@@ -50,6 +50,7 @@ jobs:
               - "Cargo.toml"
               - "Cargo.lock"
               - ".config/nextest.toml"
+              - "deny.toml"
               - "mobile-gpui/Cargo.toml"
               - ".github/workflows/ci.yml"
             js:
@@ -237,6 +238,24 @@ jobs:
 
   # clippy and the Rust tests share one job: each takes 1-2 min on a warm
   # cache, so a second job only paid for another runner and setup.
+  # Advisories, licenses, crate sources and duplicates (deny.toml).
+  cargo-deny:
+    needs: detect-changes
+    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
+    timeout-minutes: 10
+    name: cargo-deny / ubuntu-22.04
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny
+        run: cargo deny --locked check
+
   test-rust:
     needs: detect-changes
     if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
