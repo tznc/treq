@@ -4823,14 +4823,9 @@ fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjError> {
       // Start new hunk
       current_hunk = Some((line.to_string(), Vec::new()));
     } else if let Some((_, ref mut lines)) = current_hunk {
-      // Skip diff metadata lines (be specific to avoid filtering conflict markers)
-      if !line.starts_with("diff --git")
-        && !line.starts_with("index ")
-        && !line.starts_with("--- ")
-        && !line.starts_with("+++ ")
-      {
-        lines.push(line.to_string());
-      }
+      // The input is hunks only (no file headers), so a line such as
+      // `--- end` is a removed `-- end`, not metadata.
+      lines.push(line.to_string());
     }
   }
 
@@ -10348,6 +10343,19 @@ mod tests {
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn text_hunks_keep_lines_that_look_like_file_headers() {
+    let hunks = build_text_hunks("-- users\nkeep\n---\n", "++ accounts\nkeep\n");
+    let lines: Vec<&str> = hunks
+      .iter()
+      .flat_map(|h| h.lines.iter().map(String::as_str))
+      .collect();
+    assert!(lines.contains(&"--- users"), "{lines:?}");
+    assert!(lines.contains(&"----"), "{lines:?}");
+    assert!(lines.contains(&"+++ accounts"), "{lines:?}");
+    assert_eq!(count_changed_lines(&hunks), 3);
+  }
 
   #[test]
   fn git_subprocess_environment_turns_off_auto_maintenance() {

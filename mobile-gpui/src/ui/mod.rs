@@ -8,6 +8,7 @@ mod home;
 mod load;
 #[cfg(test)]
 mod perf;
+mod review;
 mod screens;
 pub mod sheet;
 mod terminal_view;

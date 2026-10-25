@@ -213,6 +213,15 @@ pub enum TreqCommandRequest {
     revision: String,
     path: String,
   },
+  /// One directory of the workspace's files (Git-ignored entries left out),
+  /// directories first; `path` is relative to the workspace, empty for its
+  /// root. See [`RemoteFileEntry`].
+  ListFiles {
+    repo: String,
+    workspace: Option<String>,
+    #[serde(default)]
+    path: String,
+  },
   /// Fuzzy file-name search over the workspace file index.
   SearchFiles {
     repo: String,
@@ -472,6 +481,24 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     idempotency_key: String,
   },
+  /// The workspace branch's GitHub pull request and its checks, read with
+  /// the host's `gh`.
+  WorkspacePullRequest {
+    repo: String,
+    workspace: String,
+  },
+  /// Pushes the workspace, then opens a pull request from its branch into
+  /// its target branch with the host's `gh`.
+  CreatePullRequest {
+    repo: String,
+    workspace: String,
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    draft: bool,
+    idempotency_key: String,
+  },
   // -- Phase 5: agent lifecycle (VM-local supervisor) -----------------------------
   AgentStart {
     repo: String,
@@ -523,6 +550,13 @@ pub enum TreqCommandRequest {
     repo: String,
     workspace: String,
     label: String,
+  },
+  /// Names a persistent PTY session; an empty title clears it. Idempotent.
+  PtyRename {
+    repo: String,
+    workspace: String,
+    label: String,
+    title: String,
   },
   /// Returns the literal command line an SSH PTY channel should exec to
   /// attach (creating first if necessary) to a persistent session.
@@ -640,8 +674,10 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::ProbeRepo { .. }
       | Self::GitRemoteInfo { .. }
+      | Self::WorkspacePullRequest { .. }
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
@@ -683,11 +719,13 @@ impl TreqCommandRequest {
       | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitPush { .. }
+      | Self::CreatePullRequest { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
       | Self::AgentStop { .. }
       | Self::PtyStart { .. }
       | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
       | Self::PtyPaste { .. }
       | Self::ReviewSave { .. }
       | Self::ReviewClear { .. } => true,
@@ -716,6 +754,7 @@ impl TreqCommandRequest {
       | Self::RevertCommit { .. }
       | Self::ResolveConflict { .. }
       | Self::GitPush { .. }
+      | Self::CreatePullRequest { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
       | Self::PtyStart { .. }
@@ -737,6 +776,7 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
       | Self::MachineTools { .. }
@@ -758,11 +798,13 @@ impl TreqCommandRequest {
       | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitRemoteInfo { .. }
+      | Self::WorkspacePullRequest { .. }
       | Self::AgentStatus { .. }
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
       | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
       | Self::PtyAttachCommand { .. }
       | Self::ReviewLoad { .. }
       | Self::ReviewSave { .. }
@@ -789,6 +831,7 @@ impl TreqCommandRequest {
       Self::CommitDiff { .. } => "CommitDiff",
       Self::CommitFileDiff { .. } => "CommitFileDiff",
       Self::SearchFiles { .. } => "SearchFiles",
+      Self::ListFiles { .. } => "ListFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
       Self::MachineUsage { .. } => "MachineUsage",
       Self::MachineTools { .. } => "MachineTools",
@@ -826,6 +869,8 @@ impl TreqCommandRequest {
       Self::GitBookmarkTrack { .. } => "GitBookmarkTrack",
       Self::GitRemoteInfo { .. } => "GitRemoteInfo",
       Self::GitPush { .. } => "GitPush",
+      Self::WorkspacePullRequest { .. } => "WorkspacePullRequest",
+      Self::CreatePullRequest { .. } => "CreatePullRequest",
       Self::AgentStart { .. } => "AgentStart",
       Self::AgentInput { .. } => "AgentInput",
       Self::AgentStatus { .. } => "AgentStatus",
@@ -834,6 +879,7 @@ impl TreqCommandRequest {
       Self::PtyStart { .. } => "PtyStart",
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
+      Self::PtyRename { .. } => "PtyRename",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
       Self::PtyPaste { .. } => "PtyPaste",
       Self::ReviewLoad { .. } => "ReviewLoad",
@@ -903,6 +949,7 @@ impl TreqCommandRequest {
     "PtyStart",
     "PtyList",
     "PtyStop",
+    "PtyRename",
     "PtyAttachCommand",
     "PtyPaste",
     "ReviewLoad",
@@ -912,6 +959,9 @@ impl TreqCommandRequest {
     "CommitDiff",
     "CommitFileDiff",
     "SearchFiles",
+    "ListFiles",
+    "WorkspacePullRequest",
+    "CreatePullRequest",
   ];
 }
 
@@ -1731,6 +1781,18 @@ impl TreqCommandRequest {
         }
         ("file", "search", repo)
       }
+      Self::ListFiles {
+        repo,
+        workspace,
+        path,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // The workspace root is an empty path, which `--path` refuses.
+        if !path.is_empty() {
+          fields.path = Some(path);
+        }
+        ("file", "list", repo)
+      }
       Self::DiffFile {
         repo,
         workspace,
@@ -1963,6 +2025,27 @@ impl TreqCommandRequest {
         fields.idempotency_key = Some(idempotency_key);
         ("git", "push", repo)
       }
+      Self::WorkspacePullRequest { repo, workspace } => {
+        fields.workspace = Some(workspace);
+        ("git", "pr", repo)
+      }
+      Self::CreatePullRequest {
+        repo,
+        workspace,
+        title,
+        body,
+        draft,
+        idempotency_key,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.value = Some(body.clone());
+        fields.extra.push(("title", title.clone()));
+        if *draft {
+          fields.extra.push(("draft", "true".into()));
+        }
+        fields.idempotency_key = Some(idempotency_key);
+        ("git", "pr-create", repo)
+      }
       Self::AgentStart {
         repo,
         workspace,
@@ -2027,6 +2110,17 @@ impl TreqCommandRequest {
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         ("pty-remote", "stop", repo)
+      }
+      Self::PtyRename {
+        repo,
+        workspace,
+        label,
+        title,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(title.clone());
+        ("pty-remote", "rename", repo)
       }
       Self::PtyAttachCommand {
         repo,
@@ -2488,6 +2582,15 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       workspace_id(workspace.as_ref())?,
       &query,
       limit.unwrap_or(50),
+    )),
+    TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path,
+    } => json(list_workspace_files(
+      &repo,
+      workspace_id(workspace.as_ref())?,
+      &path,
     )),
     TreqCommandRequest::ProbeRepo { repo } => json(probe_repo_path(&repo)),
     TreqCommandRequest::InitRepo {
@@ -2981,6 +3084,34 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
         ))
       },
     ),
+    TreqCommandRequest::WorkspacePullRequest { repo, workspace } => json(workspace_pull_request(
+      &repo,
+      workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?,
+    )),
+    TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace,
+      title,
+      body,
+      draft,
+      idempotency_key,
+    } => with_idempotency_key(
+      &repo,
+      "git.pr-create",
+      Some(idempotency_key.as_str()),
+      request_snapshot
+        .as_ref()
+        .expect("CreatePullRequest is a mutation"),
+      || {
+        json(create_pull_request(
+          &repo,
+          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?,
+          &title,
+          &body,
+          draft,
+        ))
+      },
+    ),
     TreqCommandRequest::AgentStart {
       repo,
       workspace,
@@ -3065,6 +3196,14 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       label,
     } => json(crate::core::pty_remote_supervisor::stop_session(
       &repo, &workspace, &label,
+    )),
+    TreqCommandRequest::PtyRename {
+      repo,
+      workspace,
+      label,
+      title,
+    } => json(crate::core::pty_remote_supervisor::rename_session(
+      &repo, &workspace, &label, &title,
     )),
     TreqCommandRequest::PtyAttachCommand {
       repo,
@@ -3262,6 +3401,152 @@ fn search_files_local(
       .map(|f| RemoteFileSearchResult {
         file_path: f.file_path,
         relative_path: f.relative_path,
+      })
+      .collect(),
+  )
+}
+
+/// [`TreqCommandRequest::WorkspacePullRequest`]'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemotePullRequestStatus {
+  /// The repository's GitHub `owner/name`; absent when it has no GitHub
+  /// remote, so no pull request can be made.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub github_repo: Option<String>,
+  /// The branch's pull request, when it has one.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub pull_request: Option<crate::github::PrInfo>,
+  /// Its checks, once any are reported.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub checks: Option<crate::github::PrCiStatus>,
+}
+
+/// [`TreqCommandRequest::CreatePullRequest`]'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatedPullRequest {
+  pub number: u64,
+  pub url: String,
+}
+
+fn workspace_record(repo: &str, id: i64) -> Result<crate::local_db::Workspace, String> {
+  crate::local_db::get_workspace_by_id(repo, id)?
+    .ok_or_else(|| format!("workspace_not_found: Workspace {id} was not found"))
+}
+
+/// [`TreqCommandRequest::WorkspacePullRequest`]. A repository without a
+/// GitHub remote reads as no pull request, without running `gh`.
+fn workspace_pull_request(repo: &str, id: i64) -> Result<RemotePullRequestStatus, String> {
+  let workspace = workspace_record(repo, id)?;
+  let Some(remote) = crate::github::get_git_remote_url_impl(repo)? else {
+    return Ok(RemotePullRequestStatus {
+      github_repo: None,
+      pull_request: None,
+      checks: None,
+    });
+  };
+  let dir = resolve_workspace_path(repo, Some(id))?;
+  let gh = crate::core::github_cli::gh_path()?;
+  let path = crate::binary_paths::get_extended_path();
+  let branch = &workspace.branch_name;
+  let pull_request = crate::github::get_pr_info_via_gh_impl(&gh, &dir, branch, &path)?;
+  let checks = match &pull_request {
+    Some(_) => crate::github::get_pr_checks_via_gh_impl(&gh, &dir, branch, &path)?,
+    None => None,
+  };
+  Ok(RemotePullRequestStatus {
+    github_repo: Some(remote.full_name),
+    pull_request,
+    checks,
+  })
+}
+
+/// [`TreqCommandRequest::CreatePullRequest`]: pushes first, since GitHub
+/// needs the branch, then opens the pull request into the target branch.
+fn create_pull_request(
+  repo: &str,
+  id: i64,
+  title: &str,
+  body: &str,
+  draft: bool,
+) -> Result<CreatedPullRequest, String> {
+  let title = title.trim();
+  if title.is_empty() {
+    return Err("invalid_arguments: a pull request needs a title".into());
+  }
+  let workspace = workspace_record(repo, id)?;
+  let remote = crate::github::get_git_remote_url_impl(repo)?
+    .ok_or("invalid_arguments: this repository has no GitHub remote")?;
+  let gh = crate::core::github_cli::gh_path()?;
+  crate::core::workspaces::push_workspace_to_remote(repo, Some(id))?;
+  let base = workspace.target_branch.as_deref().unwrap_or("main");
+  let number = crate::github::gh_create_pr_impl(
+    &gh,
+    &remote.full_name,
+    title,
+    body,
+    base,
+    &workspace.branch_name,
+    draft,
+    &crate::binary_paths::get_extended_path(),
+  )?;
+  Ok(CreatedPullRequest {
+    number,
+    url: format!("https://github.com/{}/pull/{number}", remote.full_name),
+  })
+}
+
+/// An entry of [`TreqCommandRequest::ListFiles`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteFileEntry {
+  pub name: String,
+  /// Relative to the workspace, with `/` separators.
+  pub path: String,
+  pub is_directory: bool,
+  /// "conflict", "workingCopy" or "committed" (for a directory, the most
+  /// severe among its files); absent when untouched.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub status: Option<String>,
+}
+
+/// [`TreqCommandRequest::ListFiles`]: one directory of the workspace, with
+/// hidden directories (`.git`, `.jj`) left out as the desktop tree does.
+fn list_workspace_files(
+  repo: &str,
+  workspace: Option<i64>,
+  path: &str,
+) -> Result<Vec<RemoteFileEntry>, String> {
+  let path = path.trim().trim_matches('/');
+  if Path::new(path)
+    .components()
+    .any(|c| !matches!(c, std::path::Component::Normal(_)))
+  {
+    return Err(format!(
+      "invalid_arguments: {path} is not a path inside the workspace"
+    ));
+  }
+  let root = resolve_workspace_path(repo, workspace)?;
+  let dir = Path::new(&root).join(path);
+  let mut entries: Vec<_> = crate::core::list_directory(&dir.to_string_lossy())?
+    .into_iter()
+    .filter(|e| !(e.is_directory && e.name.starts_with('.')))
+    .collect();
+  let target = crate::local_db::get_workspace_by_id(repo, workspace.unwrap_or(0))
+    .ok()
+    .flatten()
+    .and_then(|w| w.target_branch);
+  crate::core::files::annotate_entry_statuses(&root, &mut entries, target.as_deref());
+  Ok(
+    entries
+      .into_iter()
+      .map(|e| RemoteFileEntry {
+        path: if path.is_empty() {
+          e.name.clone()
+        } else {
+          format!("{path}/{}", e.name)
+        },
+        name: e.name,
+        is_directory: e.is_directory,
+        status: e.status,
       })
       .collect(),
   )
@@ -4020,6 +4305,70 @@ mod tests {
     assert!(!load_review(repo, id, ReviewScope::Changes)
       .unwrap()
       .is_empty());
+  }
+
+  #[test]
+  fn create_pull_request_needs_a_title_before_touching_the_repo() {
+    let error = create_pull_request("/nonexistent", 1, "  ", "", false).unwrap_err();
+    assert!(error.contains("needs a title"), "{error}");
+  }
+
+  #[test]
+  fn list_files_lists_one_directory_without_ignored_or_hidden_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::process::Command::new("git")
+      .args(["init", "-q"])
+      .current_dir(root)
+      .status()
+      .unwrap();
+    for sub in ["src/ui", "target", ".github"] {
+      fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::write(root.join("README.md"), "").unwrap();
+    fs::write(root.join("src/main.rs"), "").unwrap();
+    let repo = root.to_str().unwrap().to_string();
+
+    let names = |path: &str| -> Vec<(String, String, bool)> {
+      let value = execute_local_request(TreqCommandRequest::ListFiles {
+        repo: repo.clone(),
+        workspace: None,
+        path: path.into(),
+      })
+      .unwrap();
+      serde_json::from_value::<Vec<RemoteFileEntry>>(value)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.name, e.path, e.is_directory))
+        .collect()
+    };
+    assert_eq!(
+      names(""),
+      vec![
+        ("src".into(), "src".into(), true),
+        (".gitignore".into(), ".gitignore".into(), false),
+        ("README.md".into(), "README.md".into(), false),
+      ]
+    );
+    assert_eq!(
+      names("src/"),
+      vec![
+        ("ui".into(), "src/ui".into(), true),
+        ("main.rs".into(), "src/main.rs".into(), false),
+      ]
+    );
+    for outside in ["..", "../etc", "/etc", "src/../.."] {
+      assert!(
+        execute_local_request(TreqCommandRequest::ListFiles {
+          repo: repo.clone(),
+          workspace: None,
+          path: outside.into(),
+        })
+        .is_err(),
+        "{outside}"
+      );
+    }
   }
 
   #[cfg(unix)]
@@ -5365,7 +5714,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 67);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 71);
   }
 
   #[test]

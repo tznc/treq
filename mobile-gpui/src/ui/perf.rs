@@ -27,7 +27,7 @@ use treq_lib::{
   jj::{JjDiffHunk, JjFileChange, JjFileDiff, JjRevisionDiff},
 };
 
-use super::screens::{diff::DiffScreen, workspaces::WorkspacesScreen};
+use super::screens::workspaces::WorkspacesScreen;
 use super::terminal_view::{PtyEvent, TerminalView};
 
 struct Counting;
@@ -670,21 +670,6 @@ fn mobile_render_diff_as_text(cx: &mut TestAppContext) {
   }
 }
 
-#[gpui_kit::test]
-#[ignore]
-fn mobile_render_diff_screen(cx: &mut TestAppContext) {
-  for n in rows_env(&[200, 2000, 10000]) {
-    let hunks: Vec<JjDiffHunk> = (0..n / 100).map(|_| hunk(100)).collect();
-    let (window, _) = mount(cx, |_, cx| cx.new(|_| DiffScreen::for_test(hunks)));
-    draw(cx, window);
-    measure(
-      &format!("diff screen {n} lines idle redraw"),
-      frames().min(if n >= 10000 { 5 } else { 50 }),
-      || draw(cx, window),
-    );
-  }
-}
-
 fn feed(tx: &mpsc::UnboundedSender<PtyEvent>, bytes: Vec<u8>) {
   tx.unbounded_send(PtyEvent::Output(bytes)).unwrap();
 }
@@ -1040,7 +1025,7 @@ fn cached_page_rerenders_for_its_own_and_observed_state_only(cx: &mut TestAppCon
   assert_eq!(*shown.borrow(), "two/b");
 }
 
-/// The virtualized lists draw (they panic if an item asks the list for
+/// The virtualized list draws (they panic if an item asks the list for
 /// its state while it builds items) and show only part of a long page.
 #[gpui_kit::test]
 fn long_lists_draw(cx: &mut TestAppContext) {
@@ -1066,10 +1051,4 @@ fn long_lists_draw(cx: &mut TestAppContext) {
   let first = first.expect("the second row is laid out");
   assert!(first.size.height >= px(56.) && first.origin.y < viewport.size.height);
   assert!(last.is_none_or(|b| b.origin.y > viewport.size.height));
-
-  let (window, _) = mount(cx, |_, cx| {
-    cx.new(|_| DiffScreen::for_test(vec![hunk(500), hunk(3)]))
-  });
-  draw(cx, window);
-  redraw(cx, window);
 }

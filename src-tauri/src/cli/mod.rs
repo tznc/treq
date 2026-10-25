@@ -520,6 +520,11 @@ pub(crate) fn parse_remote_command_request(
       query: value.unwrap_or_default(),
       limit: optional_usize(matches, "limit")?,
     }),
+    ("file", "list") => Ok(TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path: path.unwrap_or_default(),
+    }),
     ("changes", "diff") => Ok(TreqCommandRequest::DiffFile {
       repo,
       workspace,
@@ -639,6 +644,18 @@ pub(crate) fn parse_remote_command_request(
       workspace,
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
+    ("git", "pr") => Ok(TreqCommandRequest::WorkspacePullRequest {
+      repo,
+      workspace: require_workspace()?,
+    }),
+    ("git", "pr-create") => Ok(TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace: require_workspace()?,
+      title: get_arg_value(matches, "title").ok_or("--title is required")?,
+      body: value.unwrap_or_default(),
+      draft: get_arg_value(matches, "draft").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("agent-remote", "start") => Ok(TreqCommandRequest::AgentStart {
       repo,
       workspace: require_workspace()?,
@@ -690,6 +707,13 @@ pub(crate) fn parse_remote_command_request(
       repo,
       workspace: require_workspace()?,
       label: require_target("session label")?,
+    }),
+    ("pty-remote", "rename") => Ok(TreqCommandRequest::PtyRename {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      // An empty or missing value clears the title.
+      title: value.clone().unwrap_or_default(),
     }),
     ("pty-remote", "attach-command") => {
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;

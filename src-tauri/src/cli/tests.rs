@@ -898,6 +898,11 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       query: "main".into(),
       limit: Some(4),
     },
+    R::ListFiles {
+      repo: repo(),
+      workspace: Some("1".into()),
+      path: "src".into(),
+    },
     R::WorkspaceChangeMarker {
       repo: repo(),
       workspace: Some("1".into()),
@@ -1078,6 +1083,18 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       workspace: Some("1".into()),
       idempotency_key: key(),
     },
+    R::WorkspacePullRequest {
+      repo: repo(),
+      workspace: "1".into(),
+    },
+    R::CreatePullRequest {
+      repo: repo(),
+      workspace: "1".into(),
+      title: "Fix the schema".into(),
+      body: "Line one\nline two".into(),
+      draft: true,
+      idempotency_key: key(),
+    },
     R::AgentStart {
       repo: repo(),
       workspace: "1".into(),
@@ -1121,6 +1138,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       repo: repo(),
       workspace: "1".into(),
       label: "shell".into(),
+    },
+    R::PtyRename {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "claude-1".into(),
+      title: "Fix login redirect".into(),
     },
     R::PtyAttachCommand {
       repo: repo(),
