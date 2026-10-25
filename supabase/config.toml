@@ -293,15 +293,6 @@ verify_jwt = false
 # check inside the function (STRIPE_WEBHOOK_SECRET), not a Supabase JWT.
 verify_jwt = false
 
-[functions.merge-queue-worker]
-# Invoked by cron / the webhook nudge with the service-role key; the
-# function rejects any other bearer token (_shared/auth/service-role.ts).
-verify_jwt = true
-
-[functions.merge-queue-reconciler]
-# Same: cron only, service-role key required.
-verify_jwt = true
-
 [functions.remote-ssh-relay]
 # WebSocket relay to sshd on managed Sprites. Native clients send the user's
 # Supabase JWT in the Authorization header of the upgrade request, so the

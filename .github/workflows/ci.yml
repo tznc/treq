@@ -121,7 +121,7 @@ jobs:
         if: ${{ !cancelled() && env.JS == 'true' }}
         run: npm run test:functions
 
-      # The Supabase-side unit tests (billing, merge queue, Linear proxy).
+      # The Supabase-side unit tests (billing, Linear proxy).
       # They share this job's npm ci instead of paying for their own runner.
       - name: test
         if: ${{ !cancelled() && env.JS == 'true' }}

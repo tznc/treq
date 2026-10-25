@@ -7,7 +7,6 @@
     "pro": true,
     "stripePayments": false,
     "emailSignup": false,
-    "mergeQueue": false,
     "githubApp": true,
     "skillsInstallation": false,
     "remoteSsh": false,

@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * The Supabase-side unit tests: billing, merge queue, Linear proxy and the
+ * The Supabase-side unit tests: billing, Linear proxy and the
  * remote SSH relay's traceability. The desktop app's tests are Rust
  * (`cargo test`); `scripts/service-qa` has its own config.
  */
@@ -11,7 +11,6 @@ export default defineConfig({
     globals: true,
     include: [
       "test/billing/**/*.test.ts",
-      "test/merge-queue/**/*.test.ts",
       "test/linear-proxy/**/*.test.ts",
       "test/desktop-token/**/*.test.ts",
       "test/edge-http/**/*.test.ts",
