@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -620,6 +621,11 @@ pub fn form(
   });
 }
 
+/// Whether a form with `title` can be sent: GitHub needs a title.
+pub fn title_ready(title: &str) -> bool {
+  !title.trim().is_empty()
+}
+
 /// An issue's title and body, new or edited.
 pub struct FormSheet {
   title: Entity<InputState>,
@@ -638,12 +644,16 @@ impl FormSheet {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
+    let title = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("Title")
+        .default_value(title)
+    });
+    // Redraw as the title changes, so the submit button follows it.
+    cx.subscribe(&title, |_, _, _: &InputEvent, cx| cx.notify())
+      .detach();
     Self {
-      title: cx.new(|cx| {
-        InputState::new(window, cx)
-          .placeholder("Title")
-          .default_value(title)
-      }),
+      title,
       body: cx.new(|cx| {
         TextareaState::new(window, cx)
           .placeholder("Description (optional)")
@@ -658,9 +668,8 @@ impl FormSheet {
 
   fn submit(&mut self, cx: &mut Context<Self>) {
     let title = self.title.read(cx).value().trim().to_string();
-    if title.is_empty() {
-      self.error = Some("Enter a title.".into());
-      return cx.notify();
+    if !title_ready(&title) {
+      return;
     }
     let body = self.body.read(cx).value().to_string();
     sheet::close(cx);
@@ -686,6 +695,7 @@ impl Render for FormSheet {
           .w_full()
           .h(px(widgets::CTA_H - 8.))
           .label(self.submit_label)
+          .disabled(!title_ready(&self.title.read(cx).value()))
           .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
       )
   }
@@ -695,6 +705,13 @@ impl Render for FormSheet {
 mod tests {
   use super::*;
   use treq_lib::github::GhAuthor;
+
+  #[core::prelude::v1::test]
+  fn an_issue_needs_a_title_to_submit() {
+    assert!(!title_ready(""));
+    assert!(!title_ready("  \n"));
+    assert!(title_ready("Crash on start"));
+  }
 
   fn issue(number: u64, title: &str) -> GhIssue {
     GhIssue {

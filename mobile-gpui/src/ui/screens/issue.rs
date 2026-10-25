@@ -68,6 +68,35 @@ fn day(timestamp: &str) -> &str {
   timestamp.get(..10).unwrap_or(timestamp)
 }
 
+/// Shows a write the host confirmed on the loaded `issue`, so the page
+/// changes at once; the refetch that follows replaces it with GitHub's copy.
+pub fn apply(issue: &mut GhIssue, action: &GithubAction) {
+  match action {
+    GithubAction::CloseIssue { .. } => issue.state = "CLOSED".into(),
+    GithubAction::ReopenIssue { .. } => issue.state = "OPEN".into(),
+    GithubAction::EditIssue { title, body, .. } => {
+      issue.title = title.clone();
+      issue.body = Some(body.clone());
+    }
+    GithubAction::CommentOnIssue { body, .. } => {
+      issue
+        .comments
+        .get_or_insert_with(Vec::new)
+        .push(GhIssueComment {
+          id: String::new(),
+          body: body.clone(),
+          author: treq_lib::github::GhAuthor {
+            login: "You".into(),
+            avatar_url: None,
+          },
+          created_at: String::new(),
+          reactions: Vec::new(),
+        });
+    }
+    _ => {}
+  }
+}
+
 pub struct IssueScreen {
   repo: String,
   number: u64,
@@ -158,7 +187,7 @@ impl IssueScreen {
     self.message = None;
     let request = TreqCommandRequest::GithubWrite {
       repo: self.repo.clone(),
-      action,
+      action: action.clone(),
       idempotency_key: key,
     };
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
@@ -175,6 +204,9 @@ impl IssueScreen {
         },
       ));
       if matches!(outcome, Ok(Mutation::Applied(_))) {
+        if let Load::Ready(issue) = &mut this.issue {
+          apply(issue, &action);
+        }
         (this.on_changed)(cx);
         after(this, cx);
       }
@@ -588,7 +620,7 @@ impl Render for IssueScreen {
           .gap_4()
           .child(self.header(&issue, cx))
           .child(widgets::card(cx).p_4().child(match body {
-            Some(body) => div().child(body).into_any_element(),
+            Some(body) => widgets::markdown("issue-body", &body, cx).into_any_element(),
             None => widgets::muted("No description provided.", cx).into_any_element(),
           }))
           .child(
@@ -596,15 +628,18 @@ impl Render for IssueScreen {
               .when(comments.is_empty(), |s| {
                 s.child(widgets::card(cx).child(widgets::centered_message("No comments yet.", cx)))
               })
-              .children(comments.iter().map(|comment| {
+              .children(comments.iter().enumerate().map(|(i, comment)| {
                 widgets::card(cx)
                   .p_4()
                   .gap_2()
                   .child(widgets::muted(
-                    format!("{} · {}", comment.author.login, day(&comment.created_at)),
+                    match day(&comment.created_at) {
+                      "" => comment.author.login.clone(),
+                      date => format!("{} · {date}", comment.author.login),
+                    },
                     cx,
                   ))
-                  .child(div().child(comment.body.clone()))
+                  .child(widgets::markdown(("issue-comment", i), &comment.body, cx))
                   .child(self.reactions(comment, cx))
               })),
           )
@@ -633,5 +668,67 @@ impl Render for IssueScreen {
           ),
       )
       .child(self.bottom_bar(cx))
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use treq_lib::github::GhAuthor;
+
+  fn issue(state: &str) -> GhIssue {
+    GhIssue {
+      number: 7,
+      title: "Old".into(),
+      state: state.into(),
+      url: "u".into(),
+      body: Some("old body".into()),
+      author: GhAuthor {
+        login: "alice".into(),
+        avatar_url: None,
+      },
+      labels: vec![],
+      created_at: "c".into(),
+      updated_at: "u".into(),
+      comments: Some(vec![]),
+    }
+  }
+
+  #[core::prelude::v1::test]
+  fn applied_writes_show_before_the_refetch() {
+    let mut i = issue("OPEN");
+    apply(
+      &mut i,
+      &GithubAction::CloseIssue {
+        number: 7,
+        reason: "completed".into(),
+      },
+    );
+    assert_eq!(i.state, "CLOSED");
+    apply(&mut i, &GithubAction::ReopenIssue { number: 7 });
+    assert_eq!(i.state, "OPEN");
+    apply(
+      &mut i,
+      &GithubAction::EditIssue {
+        number: 7,
+        title: "New".into(),
+        body: "new body".into(),
+      },
+    );
+    assert_eq!(
+      (i.title.as_str(), i.body.as_deref()),
+      ("New", Some("new body"))
+    );
+    apply(
+      &mut i,
+      &GithubAction::CommentOnIssue {
+        number: 7,
+        body: "hi".into(),
+      },
+    );
+    let comments = i.comments.as_ref().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0].body, "hi");
+    assert_eq!(comments[0].author.login, "You");
   }
 }
