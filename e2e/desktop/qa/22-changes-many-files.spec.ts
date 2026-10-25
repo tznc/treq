@@ -52,9 +52,11 @@ test("changes-many-files: a long file list scrolls and picks a file", async ({ p
     });
     // Scroll the sidebar list to its end.
     await page.mouse.move(330, 500);
-    for (let i = 0; i < 6; i++) {
+    // The virtual list moves as far as the rows measured so far reach per
+    // wheel step, so it takes a few dozen steps to get to the end.
+    for (let i = 0; i < 80; i++) {
       await page.mouse.wheel(0, 100_000);
-      await page.waitForTimeout(150);
+      await page.waitForTimeout(60);
     }
     await settle(page, 800);
     await capture(page, {
