@@ -206,7 +206,7 @@ impl WorkspaceScreen {
       "uncommitted"
     };
     let body = match (hunks, uncommitted) {
-      (Some(h), _) if h.is_empty() => {
+      (Some([]), _) => {
         widgets::centered_message("No diff to show (binary or empty).", cx).into_any_element()
       }
       (Some(h), _) => {
