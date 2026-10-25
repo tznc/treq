@@ -351,6 +351,13 @@ fn view<T>(h: &mut Harness, f: impl FnOnce(&GithubView) -> T) -> T {
   })
 }
 
+fn view_mut<T>(h: &mut Harness, f: impl FnOnce(&mut GithubView) -> T) -> T {
+  h.screen.update(&mut h.cx, |screen, cx| {
+    let view = screen.github.clone().expect("github view");
+    view.update(cx, |view, _| f(view))
+  })
+}
+
 /// Types `value` into `field`, as its control reports it.
 fn type_into(h: &mut Harness, field: &str, value: &str) {
   h.screen.update(&mut h.cx, |screen, cx| {
@@ -427,7 +434,7 @@ fn github_loads_more_pages_once_each(cx: &mut TestAppContext) {
   assert!(h.drawn("github-issue-3"));
   assert!(!h.drawn("github-load-more"));
   // The repeated #2 shows once.
-  assert_eq!(view(&mut h, |v| v.issue_items().len()), 3);
+  assert_eq!(view_mut(&mut h, |v| v.issue_items().len()), 3);
   assert!(host
     .calls()
     .contains(&"read issues acme/treq open Some(\"c1\")".to_string()));
@@ -1059,8 +1066,8 @@ fn github_reads_an_issue_ahead_while_the_pointer_rests_on_its_row(cx: &mut TestA
 /// hundreds of rows. Run with `cargo test --features gpui-shell --lib
 /// gh_scale -- --ignored --nocapture --test-threads=1`.
 mod gh_scale {
-  use super::*;
   use super::super::changes_large::{frame, report, timed};
+  use super::*;
 
   fn n() -> usize {
     std::env::var("PERF_N")
@@ -1106,7 +1113,12 @@ mod gh_scale {
 
   fn issues_fake(count: usize) -> Fake {
     let items: Vec<_> = (0..count)
-      .map(|i| issue(i as u64 + 1, &format!("Issue {i} about the thing {}", i % 31)))
+      .map(|i| {
+        issue(
+          i as u64 + 1,
+          &format!("Issue {i} about the thing {}", i % 31),
+        )
+      })
       .collect();
     Fake {
       remote: acme(),
@@ -1126,7 +1138,7 @@ mod gh_scale {
   #[ignore = "benchmark; run with --ignored --nocapture"]
   fn gh_scale_pr_list(cx: &mut TestAppContext) {
     let (mut h, _) = harness(cx, prs_fake(n()), route("prs", None, false));
-    let rows = view(&mut h, |v| v.pr_items().len());
+    let rows = view_mut(&mut h, |v| v.pr_items().len());
     println!("PR rows loaded: {rows}");
     let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
     report("pr list steady frame", &mut f);
@@ -1147,7 +1159,10 @@ mod gh_scale {
   #[ignore = "benchmark; run with --ignored --nocapture"]
   fn gh_scale_issue_list(cx: &mut TestAppContext) {
     let (mut h, _) = harness(cx, issues_fake(n()), route("issues", None, false));
-    println!("issue rows: {}", view(&mut h, |v| v.issue_items().len()));
+    println!(
+      "issue rows: {}",
+      view_mut(&mut h, |v| v.issue_items().len())
+    );
     let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
     report("issue list steady frame", &mut f);
   }

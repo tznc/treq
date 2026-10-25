@@ -594,8 +594,8 @@ fn linear_document_comments_show_at_the_paragraph_they_quote(cx: &mut TestAppCon
 /// --features gpui-shell --lib lin_scale -- --ignored --nocapture
 /// --test-threads=1`.
 mod lin_scale {
-  use super::*;
   use super::super::changes_large::{frame, report, timed};
+  use super::*;
 
   fn n() -> usize {
     std::env::var("PERF_N")
@@ -661,7 +661,13 @@ mod lin_scale {
     let mut v: Vec<_> = (0..6)
       .map(|i| {
         timed(&mut h, |h| {
-          h.click(["linear-view-active", "linear-view-backlog", "linear-view-all"][i % 3])
+          h.click(
+            [
+              "linear-view-active",
+              "linear-view-backlog",
+              "linear-view-all",
+            ][i % 3],
+          )
         })
       })
       .collect();

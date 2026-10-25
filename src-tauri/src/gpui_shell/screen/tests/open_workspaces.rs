@@ -742,8 +742,8 @@ mod pr_query {
 /// --features gpui-shell --lib dlg_scale -- --ignored --nocapture
 /// --test-threads=1`.
 mod dlg_scale {
-  use super::*;
   use super::super::changes_large::{frame, report, timed};
+  use super::*;
 
   #[gpui::test]
   #[ignore = "benchmark; run with --ignored --nocapture"]
@@ -755,7 +755,13 @@ mod dlg_scale {
     let mut host = FakeHost::default();
     host.linear.viewer = Some(user("u1", "Me"));
     host.linear.issues = (0..n)
-      .map(|i| issue(&i.to_string(), ("Todo", "unstarted"), Some(user("u2", "You"))))
+      .map(|i| {
+        issue(
+          &i.to_string(),
+          ("Todo", "unstarted"),
+          Some(user("u2", "You")),
+        )
+      })
       .collect();
     host.github.remote = acme();
     let (mut h, _) = dialog_with(host, true, cx);
@@ -770,8 +776,10 @@ mod dlg_scale {
       .map(|i| {
         timed(&mut h, |h| {
           let s = self::screen(h);
-          s.user()
-            .type_text(&s.get_by_label_text("Workspaces"), if i % 2 == 0 { "a" } else { "\n" });
+          s.user().type_text(
+            &s.get_by_label_text("Workspaces"),
+            if i % 2 == 0 { "a" } else { "\n" },
+          );
         })
       })
       .collect();
