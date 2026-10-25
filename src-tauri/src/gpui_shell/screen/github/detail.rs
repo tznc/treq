@@ -22,7 +22,7 @@ use crate::{
     popup::{Side, TooltipContent},
     screen::{
       code::markdown,
-      github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab, SETUP_KEY},
+      github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab},
       workspace_modal::{dialog_description, dialog_header, dialog_panel},
     },
     theme::{self, Palette},
@@ -1252,7 +1252,6 @@ impl GithubView {
       .as_ref()
       .is_some_and(|s| s.configured && (s.status == "pending" || s.status == "running"));
     let can_run = checks.trusted && !setup_running;
-    let rerunning_setup = is_running(SETUP_KEY, None);
     let mut panel = named(div(), "workspace-checks")
       .flex()
       .flex_col()
@@ -1300,59 +1299,6 @@ impl GithubView {
                     Err(err) => log::warn!("github panel: trust: {err}"),
                   },
                 );
-              })),
-          ),
-      );
-    }
-    if let Some(setup) = checks.setup.as_ref().filter(|s| s.configured) {
-      let failed = setup.status == "failed";
-      let label = if setup_running {
-        "Running workspace setup script before checks can run…".to_string()
-      } else if failed {
-        "Workspace setup script failed. Checks can still run.".to_string()
-      } else {
-        format!("Setup script: {}", setup.status)
-      };
-      let setup_ws = ws.clone();
-      panel = panel.child(
-        ui::text(named(div(), "setup-script-status"), TextSize::Sm)
-          .flex()
-          .items_center()
-          .justify_between()
-          .gap_2()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .px_4()
-          .py_2()
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .min_w_0()
-              .child(if failed {
-                ui::icon(theme::ICON_TRIANGLE_ALERT, 16., p.destructive).into_any_element()
-              } else {
-                status_icon("github-setup-status", Some(&setup.status), 16., p)
-              })
-              .child(label),
-          )
-          .child(
-            Button::new("github-rerun-setup", p)
-              .aria_label("Re-run setup script")
-              .variant(Variant::Ghost)
-              .size(Size::Sm)
-              .gap_0()
-              .disabled(rerunning_setup || setup_running)
-              .child(if rerunning_setup {
-                ui::spinner("github-rerun-setup-spin", 12., p.foreground).into_any_element()
-              } else {
-                ui::icon(theme::ICON_ROTATE_CW, 12., p.foreground).into_any_element()
-              })
-              .child(div().ml_1().child("Re-run setup script"))
-              .on_click(cx.listener(move |view, _, _, cx| {
-                view.run_treq_check(&setup_ws, CheckRun::Setup, cx)
               })),
           ),
       );
@@ -1644,17 +1590,7 @@ impl GithubView {
           let text = if lines.is_empty() {
             "(empty)".to_string()
           } else {
-            lines
-              .iter()
-              .map(|l| {
-                if l.stream == "stderr" {
-                  format!("[stderr] {}", l.body)
-                } else {
-                  l.body.clone()
-                }
-              })
-              .collect::<Vec<_>>()
-              .join("\n")
+            log_text(lines)
           };
           ui::text(
             div().id(SharedString::from(format!(
@@ -1692,6 +1628,21 @@ impl GithubView {
       )
       .child(body)
   }
+}
+
+/// A job log as text, stderr lines marked.
+fn log_text(lines: &[data::LogLine]) -> String {
+  lines
+    .iter()
+    .map(|l| {
+      if l.stream == "stderr" {
+        format!("[stderr] {}", l.body)
+      } else {
+        l.body.clone()
+      }
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 fn chevron(open: bool, p: &Palette) -> impl IntoElement {

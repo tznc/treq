@@ -503,3 +503,76 @@ fn the_farewell_after_deleting_an_account_is_an_alert(cx: &mut TestAppContext) {
   let s = screen(&mut h);
   expect(s.get_by_role(by::role(Role::Alert).name("Sorry to see you go"))).to_be_visible();
 }
+
+fn setup_status(status: &str) -> crate::core::SetupScriptStatus {
+  crate::core::SetupScriptStatus {
+    configured: true,
+    status: status.into(),
+    run_id: Some(4),
+  }
+}
+
+#[gpui::test]
+fn code_tab_alerts_on_a_failed_setup_script_and_opens_its_logs(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("failed")),
+    logs_preview: true,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  h.click("code-setup-logs");
+  h.cx.run_until_parked();
+  assert!(
+    h.sent().contains(&ScreenAction::Field {
+      field: "workspace.openLogs".into(),
+      value: "setup-script".into(),
+    }),
+    "{:?}",
+    h.sent()
+  );
+}
+
+#[gpui::test]
+fn code_tab_offers_setup_logs_only_once_the_script_has_run(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(crate::core::SetupScriptStatus {
+      run_id: None,
+      ..setup_status("pending")
+    }),
+    logs_preview: true,
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  assert!(!h.drawn("code-setup-logs"));
+}
+
+#[gpui::test]
+fn code_tab_offers_no_setup_logs_without_the_logs_preview(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("failed")),
+    ..code_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, code_route());
+  assert!(h.drawn("code-setup"));
+  assert!(!h.drawn("code-setup-logs"));
+}
+
+#[gpui::test]
+fn code_tab_reruns_the_setup_script(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    setup_status: Some(setup_status("passed")),
+    ..code_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("code-setup-rerun");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"run setup 7".to_string()));
+}
+
+#[gpui::test]
+fn code_tab_draws_no_setup_alert_without_a_setup_script(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  assert!(!h.drawn("code-setup"));
+}

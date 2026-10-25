@@ -99,6 +99,10 @@ impl LogsHost for Backend {
   }
 }
 
+/// The "open in Logs" source for a workspace setup script: the check logs,
+/// filtered to the setup script's runs.
+pub const SETUP_SCRIPT_SOURCE: &str = "setup-script";
+
 /// `LogSource`: where the tab reads its lines from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Source {
@@ -117,6 +121,8 @@ impl Source {
     Source::System,
   ];
 
+  /// The source an "open in Logs" link names; anything unknown, such as
+  /// [`SETUP_SCRIPT_SOURCE`], opens the check logs.
   pub fn parse(value: &str) -> Self {
     match value {
       "agent-chats" => Source::Agent,

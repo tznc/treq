@@ -505,10 +505,10 @@ fn store_job_result(
 /// Synthetic workflow filename used to store the setup script's runs in the
 /// same `workflow_runs`/`workflow_job_results` tables as regular checks, so
 /// it gets run history and browsable logs for free.
-const SETUP_SCRIPT_FILENAME: &str = "__setup__";
+pub const SETUP_SCRIPT_FILENAME: &str = "__setup__";
 const SETUP_SCRIPT_JOB_ID: &str = "setup";
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SetupScriptStatus {
   /// Whether `.treq/config.yaml` declares a `setup_script`.
   pub configured: bool,

@@ -24,7 +24,7 @@ use super::{
   logs_data::{
     agent_chat_records, chart, filter_label, find_matches, format_timestamp, log_lines_prompt,
     sql_result_prompt, toggle, Chart, Host, LineSelection, Source, DEFAULT_QUERY, LEVELS, SERIES,
-    TEMPLATES,
+    SETUP_SCRIPT_SOURCE, TEMPLATES,
   },
   ActionSink, ScreenAction,
 };
@@ -213,7 +213,12 @@ impl LogsView {
       source: source.map(Source::parse).unwrap_or_default(),
       explorer_open: false,
       levels: Vec::new(),
-      checks: Vec::new(),
+      // The setup script's runs are stored as a check of their own.
+      checks: if source == Some(SETUP_SCRIPT_SOURCE) {
+        vec![crate::core::SETUP_SCRIPT_FILENAME.to_string()]
+      } else {
+        Vec::new()
+      },
       workflows: Vec::new(),
       search: String::new(),
       search_input: None,
@@ -927,11 +932,23 @@ impl LogsView {
       .bg(p.muted.opacity(0.3))
       .child(self.filter_button("log-level-filter", level_label, Open::Levels, p, cx));
     match self.source {
-      Source::Checks if !self.workflows.is_empty() => {
+      Source::Checks if !self.workflows.is_empty() || !self.checks.is_empty() => {
         let options: Vec<(String, String)> = self
           .workflows
           .iter()
           .map(|w| (w.filename.clone(), w.name.clone()))
+          .chain(
+            self
+              .checks
+              .iter()
+              .any(|c| c == crate::core::SETUP_SCRIPT_FILENAME)
+              .then(|| {
+                (
+                  crate::core::SETUP_SCRIPT_FILENAME.to_string(),
+                  "Setup script".to_string(),
+                )
+              }),
+          )
           .collect();
         let label = filter_label(&self.checks, &options, "All checks", "checks");
         bar = bar.child(self.filter_button("check-workflow-filter", label, Open::Workflows, p, cx));

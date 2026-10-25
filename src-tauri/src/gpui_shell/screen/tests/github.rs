@@ -823,7 +823,6 @@ fn github_pr_detail_runs_its_workspace_checks(cx: &mut TestAppContext) {
   let before = reads(&host);
   h.click("github-run-0");
   h.click("github-run-0-0");
-  h.click("github-rerun-setup");
   h.cx.run_until_parked();
   let runs: Vec<String> = host
     .calls()
@@ -835,11 +834,10 @@ fn github_pr_detail_runs_its_workspace_checks(cx: &mut TestAppContext) {
     [
       "run 3:ci.yml in /repo/.treq/workspaces/feat/a",
       "run 3:ci.yml:test in /repo/.treq/workspaces/feat/a",
-      "run 3:<setup> in /repo/.treq/workspaces/feat/a",
     ]
   );
   assert!(h.sent().is_empty(), "React runs none of them");
-  assert_eq!(reads(&host), before + 3, "each end reads the checks again");
+  assert_eq!(reads(&host), before + 2, "each end reads the checks again");
   assert!(host
     .calls()
     .contains(&"notify workspaceChanged".to_string()));
@@ -890,10 +888,8 @@ fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
   };
   let (mut h, host) = harness_with(cx, host, route("prs", Some(1), false));
   assert!(h.drawn("github-treq-checks"));
-  assert!(h.drawn("setup-script-status"));
   h.click("github-run-0");
   h.click("github-run-0-0");
-  h.click("github-rerun-setup");
   h.click("github-open-logs");
   let target = serde_json::json!({
     "repoPath": "/repo",
@@ -911,15 +907,7 @@ fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
   };
   assert_eq!(
     h.sent(),
-    [
-      run(None),
-      run(Some("test")),
-      ScreenAction::Field {
-        field: "github.checks.setup".into(),
-        value: target,
-      },
-      press("github.openLogs:3"),
-    ]
+    [run(None), run(Some("test")), press("github.openLogs:3"),]
   );
 
   // A run React started shows as running, and its end reads the checks again.
@@ -1234,4 +1222,17 @@ mod gh_scale {
       report(&format!("pr detail {count} notify"), &mut hov);
     }
   }
+}
+
+#[gpui::test]
+fn github_pr_detail_leaves_the_setup_script_to_the_code_tab(cx: &mut TestAppContext) {
+  let fake = Fake {
+    workspaces: vec![workspace(3, "feat/a", Some("main"))],
+    treq: treq(),
+    ..prs()
+  };
+  let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
+  assert!(h.drawn("github-treq-checks"));
+  assert!(!h.drawn("setup-script-status"));
+  assert!(!h.drawn("github-rerun-setup"));
 }
