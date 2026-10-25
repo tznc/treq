@@ -812,8 +812,9 @@ impl WorkspaceScreen {
                 .enumerate()
                 .map(|(i, change)| {
                   let (t, path) = (target.clone(), change.path.clone());
+                  let deleted = change.status == "D";
                   file_row(("uncommitted", i), change, cx)
-                    .on_click(move |_, _, cx| diff::open(t.clone(), path.clone(), cx))
+                    .on_click(move |_, _, cx| diff::open(t.clone(), path.clone(), deleted, cx))
                 }),
             )
             .when(!diff.uncommitted_files.is_empty(), |card| {
