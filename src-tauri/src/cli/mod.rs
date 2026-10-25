@@ -482,6 +482,23 @@ pub(crate) fn parse_remote_command_request(
       snapshot_id: require_target("snapshot id")?,
     }),
     ("changes", "list") => Ok(TreqCommandRequest::ListChanges { repo, workspace }),
+    ("changes", "review") => Ok(TreqCommandRequest::ReviewLoad {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+    }),
+    ("changes", "review-save") => Ok(TreqCommandRequest::ReviewSave {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+      review: serde_json::from_str(&require_value("review JSON")?)
+        .map_err(|e| format!("invalid_arguments: --value must be a review: {e}"))?,
+    }),
+    ("changes", "review-clear") => Ok(TreqCommandRequest::ReviewClear {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+    }),
     ("changes", "workspace-diff") => Ok(TreqCommandRequest::WorkspaceDiff {
       repo,
       workspace: require_workspace()?,
@@ -507,6 +524,15 @@ pub(crate) fn parse_remote_command_request(
       repo,
       workspace,
       path: path.ok_or_else(|| "--path is required".to_string())?,
+    }),
+    ("changes", "diff-files") => Ok(TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths: serde_json::from_str(
+        &get_arg_value(matches, "paths").ok_or_else(|| "--paths is required".to_string())?,
+      )
+      .map_err(|e| format!("invalid_arguments: --paths must be a JSON list of paths: {e}"))?,
+      token: get_arg_value(matches, "token"),
     }),
     ("file", "read") => Ok(TreqCommandRequest::ReadFile {
       repo,
@@ -652,6 +678,14 @@ pub(crate) fn parse_remote_command_request(
       })
     }
     ("pty-remote", "list") => Ok(TreqCommandRequest::PtyList { repo, workspace }),
+    ("pty-remote", "paste") => Ok(TreqCommandRequest::PtyPaste {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      text: require_value("text to paste")?,
+      submit: get_arg_value(matches, "submit").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
       repo,
       workspace: require_workspace()?,

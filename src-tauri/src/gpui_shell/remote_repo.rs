@@ -243,6 +243,9 @@ pub struct Reads {
   /// `(workspace_path, id)` of each repository's last listing, by cache
   /// key: `location` finds a workspace without another round trip.
   workspaces: Mutex<HashMap<String, Vec<(String, i64)>>>,
+  /// When each repository's host last failed a `DiffFiles` (an older
+  /// `treq`), by cache key: its batches read file by file for a while.
+  no_diff_files: Mutex<HashMap<String, Instant>>,
 }
 
 /// Ends a [`Flight`] when the read that leads it returns or panics.
@@ -343,6 +346,24 @@ impl Reads {
     if let Some(listed) = self.workspaces.lock_or_recover().get_mut(cache_key) {
       listed.retain(|(_, known)| *known != id);
     }
+  }
+
+  /// Whether `DiffFiles` is worth asking of the host: it has not failed
+  /// within the last few minutes.
+  fn asks_diff_files(&self, cache_key: &str) -> bool {
+    const RETRY_AFTER: Duration = Duration::from_secs(300);
+    self
+      .no_diff_files
+      .lock_or_recover()
+      .get(cache_key)
+      .is_none_or(|at| at.elapsed() >= RETRY_AFTER)
+  }
+
+  fn diff_files_failed(&self, cache_key: &str) {
+    self
+      .no_diff_files
+      .lock_or_recover()
+      .insert(cache_key.to_string(), Instant::now());
   }
 
   fn known_workspace(&self, cache_key: &str, path: &str) -> Option<i64> {
@@ -742,13 +763,32 @@ impl Remote {
     Ok(hunks.unwrap_or_default())
   }
 
-  /// `transportGetWorkspaceFileHunksBatch`: one `DiffFile` per path, a few
-  /// at a time.
+  /// `transportGetWorkspaceFileHunksBatch`: one `DiffFiles` read from the
+  /// trees `token` names (see `core::list_file_hunks_batch`); a host that
+  /// fails it (older than `DiffFiles`) is asked one `DiffFile` per path, a
+  /// few at a time.
   pub fn file_hunks_batch(
     &self,
     workspace_id: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String> {
+    let reads = self.transport.reads();
+    if reads.asks_diff_files(&self.repo.cache_key) {
+      let batch = self.read::<WorkspaceFileHunksBatch>(TreqCommandRequest::DiffFiles {
+        repo: self.repo_arg(),
+        workspace: workspace_arg(workspace_id),
+        paths: paths.clone(),
+        token: token.map(str::to_string),
+      });
+      match batch {
+        Ok(batch) => return Ok(batch),
+        Err(err) => {
+          log::info!("DiffFiles failed, reading file by file: {err}");
+          reads.diff_files_failed(&self.repo.cache_key);
+        }
+      }
+    }
     let files = parallel_map(paths, |path| {
       let hunks = self.file_hunks(workspace_id, &path)?;
       Ok(WorkspaceFileHunksBatchFile {
@@ -1295,19 +1335,93 @@ pub(crate) mod tests {
   fn a_hunk_batch_reads_a_few_files_at_once_in_order() {
     let (remote, transport) = slow_remote(Duration::from_millis(30));
     transport.answer("DiffFile", serde_json::json!([]));
+    // An older host.
+    transport.answers.lock().unwrap().insert(
+      "DiffFiles",
+      Err("unknown changes action 'diff-files'".into()),
+    );
     let paths: Vec<String> = (0..12).map(|i| format!("f{i}.rs")).collect();
     let started = Instant::now();
-    let batch = remote.file_hunks_batch(Some(1), paths.clone()).unwrap();
+    let batch = remote
+      .file_hunks_batch(Some(1), paths.clone(), None)
+      .unwrap();
     let took = started.elapsed();
     let got: Vec<&str> = batch.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(got, paths.iter().map(String::as_str).collect::<Vec<_>>());
-    assert_eq!(transport.sent().len(), 12);
+    assert_eq!(transport.sent().len(), 1 + 12);
     let most = transport
       .most_reading
       .load(std::sync::atomic::Ordering::SeqCst);
     assert!((2..=PARALLEL_READS).contains(&most), "{most} at once");
-    // 12 serial reads would take 360 ms.
-    assert!(took < Duration::from_millis(300), "{took:?}");
+    // 12 serial reads would take 360 ms, after the failed `DiffFiles`.
+    assert!(took < Duration::from_millis(330), "{took:?}");
+  }
+
+  #[test]
+  fn a_hunk_batch_is_one_read_of_the_diffs_trees() {
+    let (remote, transport) = remote();
+    transport.answer(
+      "DiffFiles",
+      serde_json::json!({
+        "snapshotToken": "p..t:git",
+        "files": [
+          {"path": "a.rs", "hunks": [{"id": "h", "header": "@@", "lines": ["+a"], "patch": ""}]},
+          {"path": "b.rs", "hunks": [], "error": "gone"}
+        ]
+      }),
+    );
+    let paths = vec!["a.rs".to_string(), "b.rs".to_string()];
+
+    let batch = remote
+      .file_hunks_batch(Some(1), paths.clone(), Some("p..t:git"))
+      .unwrap();
+
+    assert_eq!(
+      transport.sent(),
+      [TreqCommandRequest::DiffFiles {
+        repo: "/srv/app".into(),
+        workspace: Some("1".into()),
+        paths,
+        token: Some("p..t:git".into()),
+      }]
+    );
+    assert_eq!(batch.snapshot_token, "p..t:git");
+    assert_eq!(batch.files[0].hunks[0].lines, ["+a"]);
+    assert_eq!(batch.files[1].error.as_deref(), Some("gone"));
+  }
+
+  #[test]
+  fn an_older_host_is_asked_file_by_file_for_a_while() {
+    let (remote, transport) = remote();
+    transport.answer("DiffFile", serde_json::json!([]));
+    transport.answers.lock().unwrap().insert(
+      "DiffFiles",
+      Err("unknown changes action 'diff-files'".into()),
+    );
+    let kinds = |transport: &FakeTransport| {
+      transport
+        .sent()
+        .iter()
+        .map(|r| r.kind_name())
+        .collect::<Vec<_>>()
+    };
+
+    let first = remote
+      .file_hunks_batch(None, vec!["a.rs".into()], Some("t"))
+      .unwrap();
+    assert_eq!(kinds(&transport), ["DiffFiles", "DiffFile"]);
+    assert_eq!(
+      first.snapshot_token, "remote",
+      "no token: not the diff's trees"
+    );
+    remote
+      .file_hunks_batch(None, vec!["b.rs".into()], Some("t"))
+      .unwrap();
+    assert_eq!(
+      kinds(&transport),
+      ["DiffFiles", "DiffFile", "DiffFile"],
+      "not asked again right away"
+    );
   }
 
   #[test]
@@ -1318,7 +1432,7 @@ pub(crate) mod tests {
       .lock()
       .unwrap()
       .insert("DiffFile", Err("boom".into()));
-    let result = remote.file_hunks_batch(None, vec!["a".into(), "b".into()]);
+    let result = remote.file_hunks_batch(None, vec!["a".into(), "b".into()], None);
     assert_eq!(result.err().as_deref(), Some("boom"));
   }
 

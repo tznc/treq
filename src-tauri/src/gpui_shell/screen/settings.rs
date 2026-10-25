@@ -627,6 +627,21 @@ impl SettingsView {
 
   fn load_skills(&mut self, cx: &mut Context<Self>) {
     let repo = self.route.repo_path.clone();
+    // The registry as last read shows at once; the read below replaces it.
+    if self.skills.as_ref().is_some_and(|s| s.catalog.is_none()) {
+      let cached_repo = repo.clone();
+      self.spawn(
+        cx,
+        move |host| host.skill_catalog_cached(cached_repo.as_deref()),
+        |view, cached, _| {
+          if let Some((skills, cached)) = view.skills.as_mut().zip(cached) {
+            if skills.catalog.is_none() {
+              skills.catalog = Some(Ok(cached));
+            }
+          }
+        },
+      );
+    }
     self.spawn(
       cx,
       move |host| {

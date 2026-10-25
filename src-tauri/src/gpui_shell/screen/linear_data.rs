@@ -512,7 +512,8 @@ pub fn project_view<'a>(
     .filter(|p| match view {
       ProjectView::All => true,
       ProjectView::Active => p.state == "started",
-      ProjectView::Backlog => p.state == "planned",
+      // Not started yet: Linear's `backlog` and `planned` project states.
+      ProjectView::Backlog => matches!(p.state.as_str(), "backlog" | "planned"),
       ProjectView::Mine => viewer.is_some_and(|v| p.lead.as_ref().is_some_and(|l| l.id == v)),
     })
     .collect()
@@ -599,6 +600,37 @@ pub fn highlight_quoted(content: &str, anchors: &[Anchor]) -> String {
   result
 }
 
+/// The markdown's blocks: runs of lines between blank lines, a fenced code
+/// block kept whole, so a comment can show under the one it quotes.
+pub fn paragraphs(content: &str) -> Vec<String> {
+  let mut blocks = Vec::new();
+  let mut block: Vec<&str> = Vec::new();
+  let mut fenced = false;
+  for line in content.lines() {
+    if line.trim_start().starts_with("```") {
+      fenced = !fenced;
+    }
+    if line.trim().is_empty() && !fenced {
+      if !block.is_empty() {
+        blocks.push(block.join("\n"));
+        block.clear();
+      }
+    } else {
+      block.push(line);
+    }
+  }
+  if !block.is_empty() {
+    blocks.push(block.join("\n"));
+  }
+  blocks
+}
+
+/// The first of `blocks` that holds `quote`, where its comment shows.
+pub fn quoted_block(blocks: &[String], quote: Option<&str>) -> Option<usize> {
+  let quote = quote.map(str::trim).filter(|q| !q.is_empty())?;
+  blocks.iter().position(|b| b.contains(quote))
+}
+
 /// Linear's own anchors: `bg-yellow-200/70 dark:bg-yellow-500/30`.
 pub fn comment_mark(dark: bool) -> &'static str {
   if dark {
@@ -672,6 +704,24 @@ pub fn agent_count_label(n: usize) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn paragraphs_keep_fenced_code_whole() {
+    let text = "# Title\n\nFirst line\nsecond line\n\n```\na\n\nb\n```\n\n\nLast";
+    assert_eq!(
+      paragraphs(text),
+      [
+        "# Title",
+        "First line\nsecond line",
+        "```\na\n\nb\n```",
+        "Last"
+      ]
+    );
+    let blocks = paragraphs(text);
+    assert_eq!(quoted_block(&blocks, Some(" second line ")), Some(1));
+    assert_eq!(quoted_block(&blocks, Some("missing")), None);
+    assert_eq!(quoted_block(&blocks, None), None);
+  }
 
   pub(crate) fn issue(id: &str, state: (&str, &str)) -> LinearIssue {
     serde_json::from_value(serde_json::json!({
@@ -838,6 +888,7 @@ mod tests {
       project("1", "started", Some(("me", "Me"))),
       project("2", "planned", Some(("u2", "Bo"))),
       project("3", "completed", None),
+      project("4", "backlog", None),
     ];
     let pick = |v, viewer| {
       project_view(&projects, v, viewer)
@@ -846,7 +897,7 @@ mod tests {
         .collect::<Vec<_>>()
     };
     assert_eq!(pick(ProjectView::Active, None), ["1"]);
-    assert_eq!(pick(ProjectView::Backlog, None), ["2"]);
+    assert_eq!(pick(ProjectView::Backlog, None), ["2", "4"]);
     assert_eq!(pick(ProjectView::Mine, Some("me")), ["1"]);
     assert!(pick(ProjectView::Mine, None).is_empty());
 
@@ -854,7 +905,7 @@ mod tests {
     let (states, leads) = project_filter_options(&all);
     assert_eq!(
       states.iter().map(|s| s.value.as_str()).collect::<Vec<_>>(),
-      ["completed", "planned", "started"]
+      ["backlog", "completed", "planned", "started"]
     );
     assert_eq!(
       leads.iter().map(|l| l.label.as_str()).collect::<Vec<_>>(),

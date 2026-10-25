@@ -243,6 +243,16 @@ impl PrStatusManager {
     watched.remove(repo_path);
   }
 
+  /// Stops watching every repo `keep` rejects, so a repo no window shows any
+  /// more costs no `gh` calls.
+  pub fn retain_watched(&self, keep: impl Fn(&str) -> bool) {
+    self
+      .inner
+      .watched
+      .lock_or_recover()
+      .retain(|repo| keep(repo));
+  }
+
   /// Synchronously refresh one repo (tests + post-create-PR invalidation).
   pub fn refresh_repo_now(&self, repo_path: &str) {
     poll_one_repo(&self.inner, repo_path);
@@ -1219,6 +1229,19 @@ mod tests {
     assert!(mgr.is_watching("/tmp/repo"));
     mgr.unwatch_repo("/tmp/repo");
     assert!(!mgr.is_watching("/tmp/repo"));
+    mgr.shutdown();
+  }
+
+  #[test]
+  fn retain_watched_drops_repos_no_window_shows() {
+    let fetch: PrFetchFn = Arc::new(|_, _| Ok(None));
+    let (mgr, _) = manager_with(fetch, vec!["feat".into()]);
+
+    mgr.watch_repo("/tmp/shown");
+    mgr.watch_repo("/tmp/closed");
+    mgr.retain_watched(|repo| repo == "/tmp/shown");
+    assert!(mgr.is_watching("/tmp/shown"));
+    assert!(!mgr.is_watching("/tmp/closed"));
     mgr.shutdown();
   }
 

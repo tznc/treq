@@ -159,6 +159,26 @@ struct LinearGraphqlResponse<T> {
 #[derive(Deserialize)]
 struct LinearGraphqlError {
   message: String,
+  #[serde(default)]
+  extensions: Option<LinearGraphqlErrorExtensions>,
+}
+
+#[derive(Deserialize)]
+struct LinearGraphqlErrorExtensions {
+  #[serde(default)]
+  code: Option<String>,
+}
+
+impl LinearGraphqlError {
+  /// Linear answers a missing, revoked or mistyped key with this error
+  /// (`AUTHENTICATION_ERROR`), whatever the HTTP status.
+  fn is_authentication(&self) -> bool {
+    self
+      .extensions
+      .as_ref()
+      .and_then(|e| e.code.as_deref())
+      .is_some_and(|code| code == "AUTHENTICATION_ERROR")
+  }
 }
 
 const LINEAR_GRAPHQL_URL: &str = "https://api.linear.app/graphql";
@@ -261,6 +281,12 @@ fn parse_graphql_response<T: DeserializeOwned>(
   };
 
   if let Some(errors) = result.errors.filter(|errors| !errors.is_empty()) {
+    // "Authentication required" says nothing about what to fix; the key is.
+    if matches!(status.as_u16(), 401 | 403)
+      || errors.iter().any(LinearGraphqlError::is_authentication)
+    {
+      return Err(auth_error(status, via_proxy));
+    }
     return Err(format!(
       "Linear API error: {}",
       errors
@@ -291,21 +317,29 @@ fn http_status_error(status: reqwest::StatusCode, text: &str, via_proxy: bool) -
     }
   }
   match status.as_u16() {
-    401 | 403 if via_proxy => {
-      format!(
-        "treq could not authenticate with the Linear proxy ({status}). Sign in to treq again."
-      )
-    }
-    401 | 403 => {
-      format!(
-        "Linear rejected the API key ({status}). Check the Linear settings for this repository."
-      )
-    }
+    401 | 403 => auth_error(status, via_proxy),
     429 => format!("Linear rate limit reached ({status}). Try again in a minute."),
     _ => {
       let body: String = text.chars().take(300).collect();
       format!("Linear API error ({status}): {body}")
     }
+  }
+}
+
+/// Whether `error` (a read's) means Linear is not connected or refuses the
+/// key, which only Settings can fix.
+pub fn needs_connection(error: &str) -> bool {
+  error == NOT_CONNECTED || error.starts_with(REJECTED_KEY) || error.starts_with(REJECTED_PROXY)
+}
+
+const REJECTED_KEY: &str = "Linear rejected the API key";
+const REJECTED_PROXY: &str = "treq could not authenticate with the Linear proxy";
+
+fn auth_error(status: reqwest::StatusCode, via_proxy: bool) -> String {
+  if via_proxy {
+    format!("{REJECTED_PROXY} ({status}). Sign in to treq again.")
+  } else {
+    format!("{REJECTED_KEY} ({status}). Check the Linear settings for this repository.")
   }
 }
 
@@ -1274,6 +1308,31 @@ mod tests {
     )
     .unwrap_err();
     assert_eq!(err, "Linear API error: Argument Validation Error");
+  }
+
+  #[test]
+  fn authentication_errors_point_at_the_key() {
+    // Linear's answer to a revoked or mistyped key.
+    let err = parse_graphql_response::<ViewerOnly>(
+      reqwest::StatusCode::BAD_REQUEST,
+      r#"{"errors":[{"message":"Authentication required, not authenticated","extensions":{"type":"authentication error","code":"AUTHENTICATION_ERROR"}}]}"#,
+      false,
+    )
+    .unwrap_err();
+    assert!(err.contains("rejected the API key"), "{err}");
+
+    let err = parse_graphql_response::<ViewerOnly>(
+      reqwest::StatusCode::UNAUTHORIZED,
+      r#"{"errors":[{"message":"Authentication required"}]}"#,
+      false,
+    )
+    .unwrap_err();
+    assert!(err.contains("rejected the API key"), "{err}");
+    assert!(needs_connection(&err));
+    assert!(needs_connection(NOT_CONNECTED));
+    assert!(!needs_connection(
+      "Linear rate limit reached (429). Try again in a minute."
+    ));
   }
 
   #[test]

@@ -173,6 +173,7 @@ use gix::refs::Target;
 use imara_diff::intern::InternedInput;
 use imara_diff::sink::Counter;
 use imara_diff::{diff, Algorithm, UnifiedDiffBuilder};
+use jj_lib::backend::{TreeId, TreeValue};
 use jj_lib::commit::Commit;
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::conflict_labels::ConflictLabels;
@@ -186,7 +187,7 @@ use jj_lib::git;
 use jj_lib::gitignore::GitIgnoreFile;
 use jj_lib::lock::FileLock;
 use jj_lib::matchers::{Matcher, NothingMatcher, PrefixMatcher};
-use jj_lib::merge::{Diff, Merge};
+use jj_lib::merge::{Diff, Merge, MergedTreeValue};
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::merged_tree_builder::MergedTreeBuilder;
 use jj_lib::object_id::{HexPrefix, ObjectId};
@@ -205,6 +206,7 @@ use jj_lib::rewrite::{
   RewriteRefsOptions,
 };
 use jj_lib::settings::UserSettings;
+use jj_lib::store::Store;
 use jj_lib::str_util::StringExpression;
 use jj_lib::tree_merge::MergeOptions;
 use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
@@ -214,6 +216,7 @@ use jj_lib::workspace::{
 use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1336,6 +1339,9 @@ pub struct JjDiffHunk {
   pub id: String,
   pub header: String,
   pub lines: Vec<String>,
+  /// Always empty now: the header and lines are the hunk's text. Kept so
+  /// that a peer that still requires the field can read it.
+  #[serde(default)]
   pub patch: String,
   #[serde(default)]
   pub conflict_style: ConflictStyle,
@@ -1351,6 +1357,11 @@ pub struct JjFileChange {
   pub previous_path: Option<String>,
   pub changed_line_count: usize,
   pub diff_deferred: bool,
+  /// Names the file's two sides in a working-copy diff (with the marker
+  /// style, from `workspace_diff`): equal ids mean equal hunks, so a reread
+  /// keeps the hunks of files whose id held. `None` when unknown.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub content_id: Option<String>,
 }
 
 /// File content lines for context expansion
@@ -3030,6 +3041,7 @@ pub fn get_workspace_branch(workspace_path: &str) -> Result<String, JjError> {
 pub fn remove_workspace_directory_only(workspace_path: &str) -> Result<(), JjError> {
   let workspace_dir = Path::new(workspace_path);
   if workspace_dir.exists() {
+    local_db::release_connections_under(workspace_dir);
     fs::remove_dir_all(workspace_dir).map_err(|e| JjError::IoError(e.to_string()))?;
   }
   Ok(())
@@ -4401,6 +4413,9 @@ fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> V
       .diff_stream(tree, &diff_matcher)
       .collect::<Vec<_>>(),
   );
+  // Hunks are read against all parents merged; with one parent that is the
+  // tree diffed here, so its values name what the hunks are read between.
+  let content_ids = wc_commit.parent_ids().len() <= 1;
 
   let mut changes = Vec::new();
   for entry in diff_entries {
@@ -4415,15 +4430,40 @@ fn tree_changes(repo: &ReadonlyRepo, wc_commit: &Commit, tree: &MergedTree) -> V
     } else {
       "M"
     };
+    let content_id = content_ids.then(|| {
+      format!(
+        "{}>{}",
+        tree_value_id(&values.before),
+        tree_value_id(&values.after)
+      )
+    });
     changes.push(JjFileChange {
       path: file_path,
       status: status.to_string(),
       previous_path: None,
       changed_line_count: 0,
       diff_deferred: false,
+      content_id,
     });
   }
   changes
+}
+
+/// Names one side of a path in a tree diff by its object ids.
+fn tree_value_id(value: &MergedTreeValue) -> String {
+  value
+    .iter()
+    .map(|term| match term {
+      None => "-".to_string(),
+      Some(TreeValue::File { id, executable, .. }) => {
+        format!("{}{}", if *executable { "x" } else { "f" }, id.hex())
+      }
+      Some(TreeValue::Symlink(id)) => format!("l{}", id.hex()),
+      Some(TreeValue::Tree(id)) => format!("t{}", id.hex()),
+      Some(TreeValue::GitSubmodule(id)) => format!("s{}", id.hex()),
+    })
+    .collect::<Vec<_>>()
+    .join(",")
 }
 
 /// [`jj_is_working_copy_empty`] from a snapshot the caller already took, so
@@ -4605,7 +4645,7 @@ pub fn jj_get_file_hunks_batch(
       .iter()
       .map(|file_path| {
         file_hunks_between(
-          &loaded,
+          loaded.repo.store(),
           &parent_tree,
           &tree,
           file_path,
@@ -4618,8 +4658,71 @@ pub fn jj_get_file_hunks_batch(
   })
 }
 
+/// [`jj_get_file_hunks_batch`] for the diff `token` (a
+/// [`working_copy_token`]) names: its trees are read from the store by id,
+/// with no lock or snapshot, so the hunks show the state the token was read
+/// at. `None` when the store has no such trees.
+pub fn jj_get_file_hunks_at(
+  workspace_path: &str,
+  token: &str,
+  file_paths: &[String],
+  conflict_marker_style: &str,
+) -> Result<Option<FileHunksBatch>, JjError> {
+  let repo_path_opt = derive_repo_path_from_workspace(workspace_path);
+  let settings = create_user_settings(repo_path_opt.as_deref().unwrap_or(workspace_path))?;
+  // The store is all a read by id needs: no operation or view is loaded.
+  let workspace = Workspace::load(
+    &settings,
+    Path::new(workspace_path),
+    &StoreFactories::default(),
+    &default_working_copy_factories(),
+  )
+  .map_err(|e| JjError::IoError(format!("Failed to load workspace: {}", e)))?;
+  let store = workspace.repo_loader().store();
+  let Some((parent_tree, tree)) = working_copy_token_trees(store, token) else {
+    return Ok(None);
+  };
+  // A token from another repository, or trees since collected.
+  if block_on(parent_tree.trees()).is_err() || block_on(tree.trees()).is_err() {
+    return Ok(None);
+  }
+  let merge_options = MergeOptions::from_settings(&settings)
+    .map_err(|e| JjError::IoError(format!("Failed to load merge options: {}", e)))?;
+  let style = parse_conflict_marker_style(conflict_marker_style);
+  let hunks = file_paths
+    .iter()
+    .map(|file_path| {
+      file_hunks_between(store, &parent_tree, &tree, file_path, style, &merge_options)
+    })
+    .collect();
+  Ok(Some((token.to_string(), hunks)))
+}
+
+/// The two trees a [`working_copy_token`] names; `None` when it is not one.
+fn working_copy_token_trees(store: &Arc<Store>, token: &str) -> Option<(MergedTree, MergedTree)> {
+  let tree = |hex: &str| {
+    let ids = hex
+      .split(',')
+      .map(TreeId::try_from_hex)
+      .collect::<Option<Vec<_>>>()?;
+    // A merge has one more side than bases.
+    if ids.len() % 2 == 0 {
+      return None;
+    }
+    let ids = Merge::from_vec(ids);
+    Some(MergedTree::new(
+      store.clone(),
+      ids,
+      ConflictLabels::unlabeled(),
+    ))
+  };
+  let (parent, wc) = token.split_once("..")?;
+  Some((tree(parent)?, tree(wc)?))
+}
+
 /// Names a working-copy diff by its two trees: reads with the same token
-/// list the same files with the same hunks.
+/// list the same files with the same hunks. [`jj_get_file_hunks_at`]
+/// reads the trees back from it.
 fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
   let hex = |tree: &MergedTree| {
     tree
@@ -4634,7 +4737,7 @@ fn working_copy_token(parent_tree: &MergedTree, tree: &MergedTree) -> String {
 
 /// One file's hunks between the working copy's parent tree and its tree.
 fn file_hunks_between(
-  loaded: &LoadedWorkspaceRepo,
+  store: &Arc<Store>,
   parent_tree: &MergedTree,
   tree: &MergedTree,
   file_path: &str,
@@ -4652,14 +4755,14 @@ fn file_hunks_between(
     .map_err(|e| JjError::IoError(format!("Failed to read working path value: {}", e)))?;
   let labels = ConflictLabels::unlabeled();
   let before_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
-    loaded.repo.store(),
+    store,
     target_repo_path.as_ref(),
     before,
     &labels,
   ))
   .map_err(|e| JjError::IoError(format!("Failed to materialize parent value: {}", e)))?;
   let after_materialized = block_on(jj_lib::conflicts::materialize_tree_value(
-    loaded.repo.store(),
+    store,
     target_repo_path.as_ref(),
     after,
     &labels,
@@ -4708,9 +4811,9 @@ fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjError> {
       if let Some((header, lines)) = current_hunk.take() {
         hunks.push(JjDiffHunk {
           id: format!("hunk-{}", hunk_index),
-          header: header.clone(),
-          lines: lines.clone(),
-          patch: format!("{}\n{}", header, lines.join("\n")),
+          header,
+          lines,
+          patch: String::new(),
           conflict_style: ConflictStyle::Unknown,
           conflict_regions: Vec::new(),
         });
@@ -4735,9 +4838,9 @@ fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjError> {
   if let Some((header, lines)) = current_hunk {
     hunks.push(JjDiffHunk {
       id: format!("hunk-{}", hunk_index),
-      header: header.clone(),
-      lines: lines.clone(),
-      patch: format!("{}\n{}", header, lines.join("\n")),
+      header,
+      lines,
+      patch: String::new(),
       conflict_style: ConflictStyle::Unknown,
       conflict_regions: Vec::new(),
     });
@@ -7737,7 +7840,29 @@ fn git_subprocess_options(settings: &UserSettings) -> Result<git::GitSubprocessO
     .to_subprocess_options();
   options.executable_path =
     PathBuf::from(binary_paths::resolve_remote_git().map_err(JjError::IoError)?);
+  disable_auto_maintenance(&mut options.environment);
   Ok(options)
+}
+
+/// Keeps `git fetch` and `git push` from spawning `git maintenance run --auto`
+/// (and a possible auto-gc that can stall a big repo) after every call. Passed
+/// through `GIT_CONFIG_COUNT` so any config the caller's environment already
+/// injects stays in force.
+fn disable_auto_maintenance(environment: &mut HashMap<OsString, OsString>) {
+  let existing = std::env::var("GIT_CONFIG_COUNT")
+    .ok()
+    .and_then(|count| count.parse::<usize>().ok())
+    .unwrap_or(0);
+  let settings = [("maintenance.auto", "false"), ("gc.auto", "0")];
+  for (offset, (key, value)) in settings.into_iter().enumerate() {
+    let index = existing + offset;
+    environment.insert(format!("GIT_CONFIG_KEY_{index}").into(), key.into());
+    environment.insert(format!("GIT_CONFIG_VALUE_{index}").into(), value.into());
+  }
+  environment.insert(
+    "GIT_CONFIG_COUNT".into(),
+    (existing + settings.len()).to_string().into(),
+  );
 }
 
 /// Branch status indicating whether a branch exists locally and/or remotely
@@ -9281,6 +9406,29 @@ fn get_commit_copy_records(
   Ok(copy_records)
 }
 
+/// Past this many changed paths a diff skips rename and copy tracking: gix's
+/// rewrite tracker pairs added files with removed ones, which takes seconds
+/// for thousands of paths (1.3 s for 10,000), and a diff this large is
+/// nearly always too large to render, as each path changes a line or more.
+const COPY_TRACKING_MAX_ENTRIES: usize = TOO_LARGE_COMMIT_DIFF_THRESHOLD / 2;
+
+/// Whether the diff from `from_tree` to `to_tree` lists more paths than
+/// [`COPY_TRACKING_MAX_ENTRIES`], counted without reading any file.
+fn too_many_paths_to_track_copies(
+  from_tree: &MergedTree,
+  to_tree: &MergedTree,
+  matcher: &PrefixMatcher,
+  limit: usize,
+) -> bool {
+  let counted = block_on(
+    from_tree
+      .diff_stream(to_tree, matcher)
+      .take(limit + 1)
+      .count(),
+  );
+  counted > limit
+}
+
 fn get_copy_records_between(
   store: &jj_lib::store::Store,
   root: &jj_lib::backend::CommitId,
@@ -9326,6 +9474,7 @@ fn build_file_change(
     previous_path,
     changed_line_count,
     diff_deferred,
+    content_id: None,
   }
 }
 
@@ -9415,13 +9564,27 @@ fn merge_diff_between_revisions_in(
   let from_tree = from_commit.tree();
   let to_tree = to_commit.tree();
 
+  let key = MergeDiffKey {
+    repo: loaded.workspace.repo_path().to_path_buf(),
+    from: from_commit.id().clone(),
+    to: to_commit.id().clone(),
+    style: _conflict_marker_style.to_string(),
+  };
+  if let Some(diff) = merge_diff_cache().get(&key) {
+    return Ok(diff);
+  }
   let matcher = repo_root_matcher();
-  let copy_records = get_copy_records_between(
-    loaded.repo.store(),
-    from_commit.id(),
-    to_commit.id(),
-    &matcher,
-  )?;
+  let copy_records =
+    if too_many_paths_to_track_copies(&from_tree, &to_tree, &matcher, COPY_TRACKING_MAX_ENTRIES) {
+      CopyRecords::default()
+    } else {
+      get_copy_records_between(
+        loaded.repo.store(),
+        from_commit.id(),
+        to_commit.id(),
+        &matcher,
+      )?
+    };
   let conflict_labels = Diff::new(from_tree.labels(), to_tree.labels());
   let diff_stream = materialized_diff_stream(
     loaded.repo.store(),
@@ -9479,7 +9642,7 @@ fn merge_diff_between_revisions_in(
     }
   });
 
-  Ok(JjRevisionDiff {
+  let diff = JjRevisionDiff {
     committed_files,
     hunks_by_file,
     uncommitted_files: Vec::new(),
@@ -9487,6 +9650,68 @@ fn merge_diff_between_revisions_in(
     too_large_to_render: false,
     render_block_reason: None,
     working_copy_token: None,
+  };
+  merge_diff_cache().put(key, &diff);
+  Ok(diff)
+}
+
+/// What a merge diff was read from: commit ids name their trees, so the
+/// same key always yields the same diff.
+#[derive(Clone, PartialEq, Eq)]
+struct MergeDiffKey {
+  repo: PathBuf,
+  from: jj_lib::backend::CommitId,
+  to: jj_lib::backend::CommitId,
+  style: String,
+}
+
+/// The last few merge diffs: a Changes reload that moved only the working
+/// copy re-reads the committed part from here, not from the store.
+struct MergeDiffCache {
+  entries: std::sync::Mutex<Vec<(MergeDiffKey, Arc<JjRevisionDiff>)>>,
+}
+
+impl MergeDiffCache {
+  const CAPACITY: usize = 3;
+  /// Diffs with more text than this are not kept.
+  const MAX_BYTES: usize = 64 << 20;
+
+  fn get(&self, key: &MergeDiffKey) -> Option<JjRevisionDiff> {
+    let mut entries = self.entries.lock().ok()?;
+    let at = entries.iter().position(|(k, _)| k == key)?;
+    // Most recently used last.
+    let hit = entries.remove(at);
+    let diff = hit.1.clone();
+    entries.push(hit);
+    drop(entries);
+    Some((*diff).clone())
+  }
+
+  fn put(&self, key: MergeDiffKey, diff: &JjRevisionDiff) {
+    let bytes: usize = diff
+      .hunks_by_file
+      .iter()
+      .flat_map(|f| &f.hunks)
+      .map(|h| h.lines.iter().map(String::len).sum::<usize>())
+      .sum();
+    if bytes > Self::MAX_BYTES {
+      return;
+    }
+    let Ok(mut entries) = self.entries.lock() else {
+      return;
+    };
+    entries.retain(|(k, _)| *k != key);
+    if entries.len() >= Self::CAPACITY {
+      entries.remove(0);
+    }
+    entries.push((key, Arc::new(diff.clone())));
+  }
+}
+
+fn merge_diff_cache() -> &'static MergeDiffCache {
+  static CACHE: std::sync::OnceLock<MergeDiffCache> = std::sync::OnceLock::new();
+  CACHE.get_or_init(|| MergeDiffCache {
+    entries: std::sync::Mutex::new(Vec::new()),
   })
 }
 
@@ -9504,9 +9729,18 @@ pub fn jj_get_commit_diff(
   let parent_tree = block_on(commit.parent_tree(loaded.repo.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
   let commit_tree = commit.tree();
-  let copy_records = get_commit_copy_records(loaded.repo.store(), &commit)?;
-  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let matcher = repo_root_matcher();
+  let copy_records = if too_many_paths_to_track_copies(
+    &parent_tree,
+    &commit_tree,
+    &matcher,
+    COPY_TRACKING_MAX_ENTRIES,
+  ) {
+    CopyRecords::default()
+  } else {
+    get_commit_copy_records(loaded.repo.store(), &commit)?
+  };
+  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let diff_stream = materialized_diff_stream(
     loaded.repo.store(),
     parent_tree.diff_stream_with_copies(&commit_tree, &matcher, &copy_records),
@@ -9608,9 +9842,19 @@ pub fn jj_get_commit_file_diff(
   let parent_tree = block_on(commit.parent_tree(loaded.repo.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
   let commit_tree = commit.tree();
-  let copy_records = get_commit_copy_records(loaded.repo.store(), &commit)?;
-  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let matcher = repo_root_matcher();
+  // As the commit's file list tracked them.
+  let copy_records = if too_many_paths_to_track_copies(
+    &parent_tree,
+    &commit_tree,
+    &matcher,
+    COPY_TRACKING_MAX_ENTRIES,
+  ) {
+    CopyRecords::default()
+  } else {
+    get_commit_copy_records(loaded.repo.store(), &commit)?
+  };
+  let conflict_labels = Diff::new(parent_tree.labels(), commit_tree.labels());
   let diff_stream = materialized_diff_stream(
     loaded.repo.store(),
     parent_tree.diff_stream_with_copies(&commit_tree, &matcher, &copy_records),
@@ -10100,9 +10344,29 @@ fn import_remaining_git_refs(loaded: &mut LoadedWorkspaceRepo) -> Result<(), JjE
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::ffi::OsStr;
   use std::fs;
   use std::process::Command;
   use tempfile::TempDir;
+
+  #[test]
+  fn git_subprocess_environment_turns_off_auto_maintenance() {
+    let mut environment = HashMap::new();
+    disable_auto_maintenance(&mut environment);
+    let get = |key: &str| environment.get(OsStr::new(key)).and_then(|v| v.to_str());
+    let count: usize = get("GIT_CONFIG_COUNT").unwrap().parse().unwrap();
+    // Entries below an inherited `GIT_CONFIG_COUNT` belong to the caller.
+    let configured: Vec<_> = (0..count)
+      .filter_map(|i| {
+        Some((
+          get(&format!("GIT_CONFIG_KEY_{i}"))?,
+          get(&format!("GIT_CONFIG_VALUE_{i}"))?,
+        ))
+      })
+      .collect();
+    assert!(configured.contains(&("maintenance.auto", "false")));
+    assert!(configured.contains(&("gc.auto", "0")));
+  }
 
   #[test]
   fn shared_read_serves_callers_that_pile_up_with_one_more_run() {

@@ -77,7 +77,8 @@ pub fn open(repo: String, cx: &mut App) {
   );
 }
 
-fn repo_name(path: &str) -> &str {
+/// A repository's folder name, from its path on the host.
+pub fn repo_name(path: &str) -> &str {
   path
     .trim_end_matches('/')
     .rsplit('/')
@@ -228,7 +229,15 @@ impl WorkspacesScreen {
     let list = remote::last(&summaries_request(&repo)).map_or(Load::Idle, Load::Ready);
     let poll = cx.spawn(async move |this, cx| loop {
       cx.background_executor().timer(MARKER_POLL).await;
-      if this.update(cx, |this, cx| this.poll_marker(cx)).is_err() {
+      let polled = this.update(cx, |this, cx| {
+        // Nothing shows the result under another page or in the
+        // background. The next tick once shown catches up, and a return
+        // to the foreground refetches at once.
+        if crate::backend::in_foreground() && nav::is_top(cx.entity_id(), cx) {
+          this.poll_marker(cx);
+        }
+      });
+      if polled.is_err() {
         break;
       }
     });

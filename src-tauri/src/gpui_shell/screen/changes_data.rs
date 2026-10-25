@@ -58,11 +58,14 @@ pub trait ChangesHost: CommitsHost {
   ) -> Result<Vec<JjFileChange>, String>;
   /// `get_workspace_diff`: working copy, committed files and conflicts.
   fn workspace_diff(&self, repo_path: &str, workspace_id: i64) -> Result<JjRevisionDiff, String>;
+  /// The hunks of `paths`, from the diff `token` names (`working_copy_token`)
+  /// when given and still readable, else from a snapshot.
   fn file_hunks(
     &self,
     repo_path: &str,
     workspace_id: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String>;
   /// Lines `start..=end` of the working-copy file, for context.
   fn file_lines(
@@ -169,13 +172,14 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String> {
     if let Some(remote) = self.remote_containing(repo_path) {
-      return remote.file_hunks_batch(workspace_id, paths);
+      return remote.file_hunks_batch(workspace_id, paths, token);
     }
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     let style = core::resolve_conflict_marker_style(&state.db);
-    core::list_file_hunks_batch(repo_path, workspace_id, paths, &style)
+    core::list_file_hunks_batch(repo_path, workspace_id, paths, &style, token)
   }
 
   fn file_lines(
@@ -418,12 +422,19 @@ pub struct Snapshot {
   pub generated: HashSet<String>,
   /// The diff `files` were read from (`working_copy_token`), when known.
   pub token: Option<String>,
+  /// Each file's `content_id` in that diff, where known.
+  pub content_ids: HashMap<String, String>,
 }
 
 impl Snapshot {
   /// What `loadChangedFiles` keeps of a workspace's diff.
   pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: bool) -> Self {
     let files = ChangedFile::parse(&diff.uncommitted_files);
+    let content_ids = diff
+      .uncommitted_files
+      .iter()
+      .filter_map(|f| Some((f.path.clone(), f.content_id.clone()?)))
+      .collect();
     let conflicted = diff.conflicted_files.clone();
     let uncommitted: HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
     let mut committed = diff.committed_files.clone();
@@ -435,6 +446,7 @@ impl Snapshot {
           previous_path: None,
           changed_line_count: 0,
           diff_deferred: false,
+          content_id: None,
         });
       }
     }
@@ -459,7 +471,26 @@ impl Snapshot {
       conflicted: Some(conflicted),
       generated: HashSet::new(),
       token: diff.working_copy_token,
+      content_ids,
     }
+  }
+
+  /// Takes the hunks of committed files that read the same as in
+  /// `previous`, so that comparing the two is a pointer check and the
+  /// rows built from them are kept.
+  pub fn sharing_hunks(mut self, previous: Option<&Snapshot>) -> Self {
+    let Some(previous) = previous else {
+      return self;
+    };
+    for (path, new) in &mut self.committed_hunks {
+      if let Some(old) = previous.committed_hunks.get(path) {
+        if new.hunks != old.hunks {
+          continue;
+        }
+        new.hunks = old.hunks.clone();
+      }
+    }
+    self
   }
 
   /// Marks the listed paths `rules` call generated.
@@ -484,15 +515,17 @@ impl Snapshot {
 }
 
 /// `filterVisibleCommittedFiles`: committed files show when the toggle is
-/// on, or when they are also dirty or conflicted.
-pub fn visible_committed<'a>(
-  committed: &'a [JjFileChange],
+/// on, or when they are also dirty or conflicted. By index into `committed`.
+pub fn visible_committed_at(
+  committed: &[JjFileChange],
   show: bool,
   always: &HashSet<String>,
-) -> Vec<&'a JjFileChange> {
+) -> Vec<usize> {
   committed
     .iter()
-    .filter(|f| show || always.contains(&f.path))
+    .enumerate()
+    .filter(|(_, f)| show || always.contains(&f.path))
+    .map(|(ix, _)| ix)
     .collect()
 }
 
@@ -769,6 +802,9 @@ pub struct FileHunks {
   pub hunks: Arc<Vec<JjDiffHunk>>,
   pub loading: bool,
   pub error: Option<String>,
+  /// The file's `content_id` the hunks were read at, when known: a reread
+  /// listing the same id keeps them.
+  pub content_id: Option<String>,
 }
 
 /// What a file card shows below its header (`fileDisplayState.body`).
@@ -799,6 +835,12 @@ pub struct BodyInput<'a> {
   pub generated: bool,
   /// "Load diff" was clicked on the generated file.
   pub loaded_generated: bool,
+}
+
+/// Whether the tab draws a diff for the file: a binary file shows a note
+/// and a deleted one a placeholder, so their hunks are not read.
+pub fn draws_hunks(path: &str, status: &str) -> bool {
+  !is_binary(path) && status != "D"
 }
 
 /// Whether the file card is shut: comments keep it open; binary files and
@@ -1232,6 +1274,7 @@ mod tests {
       previous_path: None,
       changed_line_count: 1,
       diff_deferred: false,
+      content_id: None,
     };
     let snapshot = Snapshot {
       files: ChangedFile::parse(&[change("Cargo.lock"), change("src/a.rs")]),
@@ -1309,6 +1352,7 @@ mod tests {
       previous_path: None,
       changed_line_count: 1,
       diff_deferred: false,
+      content_id: None,
     };
     let diff = JjRevisionDiff {
       committed_files: vec![change("done.rs", "M")],
@@ -1324,9 +1368,9 @@ mod tests {
     assert_eq!(committed, ["done.rs", "clash.rs"]);
     assert_eq!(snap.committed[1].status, "C");
     let always = set(&["dirty.rs", "clash.rs"]);
-    let visible: Vec<&str> = visible_committed(&snap.committed, false, &always)
+    let visible: Vec<&str> = visible_committed_at(&snap.committed, false, &always)
       .iter()
-      .map(|f| f.path.as_str())
+      .map(|&ix| snap.committed[ix].path.as_str())
       .collect();
     assert_eq!(visible, ["clash.rs"]);
   }

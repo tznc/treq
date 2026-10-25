@@ -58,6 +58,8 @@ pub mod tracker;
 pub mod unified_patch;
 
 #[cfg(feature = "gui")]
+use crate::lock_ext::LockExt;
+#[cfg(feature = "gui")]
 use crate::result_ext::ResultExt;
 #[cfg(feature = "gui")]
 use agent_runtime::{
@@ -138,6 +140,32 @@ fn repo_windows(app: &AppHandle) -> HashMap<String, tauri::Window> {
     .into_iter()
     .filter(|(label, _)| !label.starts_with("gpui-popup-"))
     .collect()
+}
+
+/// Stops the PR poller watching repos no window shows, as a main or a
+/// supporting repo, after a window closed or switched repo.
+#[cfg(feature = "gui")]
+pub(crate) fn unwatch_unshown_repos(app: &AppHandle) {
+  let Some(state) = app.try_state::<AppState>() else {
+    return;
+  };
+  // Normalized on both sides: reads watch a repo by whichever spelling they
+  // were given, and a mismatch would unwatch then re-watch (a full poll).
+  let normalize = agent_dispatch::normalize_repo_path;
+  let mut shown: std::collections::HashSet<String> = state
+    .window_repo_paths
+    .lock_or_recover()
+    .values()
+    .map(|path| normalize(path))
+    .collect();
+  for paths in state
+    .window_supporting_repo_paths
+    .lock_or_recover()
+    .values()
+  {
+    shown.extend(paths.iter().map(|path| normalize(path)));
+  }
+  pr_status::global().retain_watched(|repo| shown.contains(&normalize(repo)));
 }
 
 /// Whether closing window `closed` leaves no repo window open, given the
@@ -489,7 +517,9 @@ pub fn run() {
   // CLI invocations never start Tauri: see `cli::args` for why.
   #[cfg(desktop)]
   if is_cli_process(std::env::args_os()) {
-    std::process::exit(cli::args::run(std::env::args_os()));
+    let code = cli::args::run(std::env::args_os());
+    local_db::close_idle_connections();
+    std::process::exit(code);
   }
   #[cfg(feature = "gpui-shell")]
   #[cfg(desktop)]
@@ -560,10 +590,19 @@ pub fn run() {
       // every terminal.
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
+        core::agent_launch::forget_window(&label);
         #[cfg(feature = "gpui-shell")]
         #[cfg(desktop)]
         gpui_shell::forget_window(&label);
         let app_handle = window.app_handle().clone();
+        if let Some(state) = app_handle.try_state::<AppState>() {
+          state.window_repo_paths.lock_or_recover().remove(&label);
+          state
+            .window_supporting_repo_paths
+            .lock_or_recover()
+            .remove(&label);
+        }
+        unwatch_unshown_repos(&app_handle);
         if is_last_repo_window(&label, repo_windows(&app_handle).keys()) {
           #[cfg(feature = "gpui-shell")]
           #[cfg(desktop)]
@@ -1038,6 +1077,7 @@ pub fn run() {
         if let Some(state) = app_handle.try_state::<AppState>() {
           state.pty_manager.close_all();
         }
+        local_db::close_idle_connections();
         if let Some(state) = app_handle.try_state::<commands::remote_pty_commands::RemotePtyState>()
         {
           tauri::async_runtime::block_on(state.0.close_all());
@@ -1051,7 +1091,9 @@ pub fn run() {
 #[allow(clippy::exit, reason = "the CLI hands its exit code to the shell")]
 pub fn run() {
   telemetry::install_panic_hook();
-  std::process::exit(cli::args::run(std::env::args_os()));
+  let code = cli::args::run(std::env::args_os());
+  local_db::close_idle_connections();
+  std::process::exit(code);
 }
 
 #[cfg(all(test, feature = "gui"))]

@@ -827,7 +827,7 @@ fn workspace_create_rejects_invalid_metadata_json() {
 /// end to end: `cli_args` must only emit flags the remote CLI declares, and
 /// parsing those args back must give the same request.
 fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> {
-  use crate::core::remote::{FileRevision, TreqCommandRequest as R};
+  use crate::core::remote::{FileRevision, ReviewScope, TreqCommandRequest as R};
   use crate::core::remote_pty::PtyLaunchSpec;
   use crate::core::workspaces::HunkSpec;
   let repo = || "/srv/r".to_string();
@@ -854,6 +854,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       repo: repo(),
       workspace: Some("1".into()),
       path: "a.rs".into(),
+    },
+    R::DiffFiles {
+      repo: repo(),
+      workspace: Some("1".into()),
+      paths: vec!["a.rs".into(), "b,c.rs".into()],
+      token: Some("t..u:git".into()),
     },
     R::ReadFile {
       repo: repo(),
@@ -1124,6 +1130,34 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       launch: PtyLaunchSpec::Shell,
       cols: 80,
       rows: 24,
+    },
+    R::PtyPaste {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      text: "## Code Review\n\n> tidy".into(),
+      submit: true,
+      idempotency_key: key(),
+    },
+    R::ReviewLoad {
+      repo: repo(),
+      workspace: "1".into(),
+      scope: ReviewScope::Changes,
+    },
+    R::ReviewSave {
+      repo: repo(),
+      workspace: "1".into(),
+      scope: ReviewScope::Files,
+      review: crate::core::review::Stored {
+        comments: vec![],
+        summary: "tidy".into(),
+        notes: vec![],
+      },
+    },
+    R::ReviewClear {
+      repo: repo(),
+      workspace: "1".into(),
+      scope: ReviewScope::Changes,
     },
   ]
 }

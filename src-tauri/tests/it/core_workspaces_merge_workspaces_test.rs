@@ -455,3 +455,43 @@ fn merge_returns_clear_error_when_target_branch_missing() {
     err
   );
 }
+
+#[test]
+fn test_merge_removing_directory_later_moves_home_after_returning() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace: Workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/deferred-home",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
+  TestRepo::write_workspace_file(
+    workspace_path.to_str().unwrap(),
+    "deferred.txt",
+    "deferred content",
+  )
+  .expect("Failed to write feature file");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add deferred")
+    .expect("Failed to commit");
+
+  treq_lib::core::merge_workspace_removing_directory_later(
+    &repo.repo_path,
+    workspace.id,
+    "Merge feat/deferred-home",
+    MergeCommit::SquashAndMerge,
+  )
+  .expect("Failed to merge workspace");
+
+  // The sidebar poll takes the repo's commit lock, so it waits for the home
+  // checkout to move: once it returns, the merged file is there.
+  treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("poll after merge");
+  assert!(
+    Path::new(&repo.repo_path).join("deferred.txt").exists(),
+    "home repo should be on the target branch once the poll returns"
+  );
+}
