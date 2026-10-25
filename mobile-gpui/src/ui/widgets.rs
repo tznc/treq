@@ -4,7 +4,11 @@ use std::sync::{Arc, LazyLock};
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{h_flex, v_flex, ActiveTheme, IconName},
+  component::{
+    h_flex,
+    text::{TextView, TextViewStyle},
+    v_flex, ActiveTheme, IconName,
+  },
   *,
 };
 
@@ -239,4 +243,18 @@ pub fn page() -> Div {
 
 pub fn centered_message(text: impl Into<SharedString>, cx: &App) -> Div {
   div().py_6().px_4().text_center().child(muted(text, cx))
+}
+
+/// GitHub-flavoured Markdown, as issue and pull request text is written;
+/// selectable, so a phrase can be copied.
+pub fn markdown(id: impl Into<ElementId>, text: &str, cx: &App) -> Div {
+  let style = TextViewStyle {
+    is_dark: cx.theme().mode.is_dark(),
+    ..TextViewStyle::default()
+  };
+  div().child(
+    TextView::markdown(id, SharedString::from(text.to_string()))
+      .style(style)
+      .selectable(true),
+  )
 }
