@@ -2407,47 +2407,7 @@ impl SettingsView {
       .border_color(p.border)
       .rounded(radius::MD)
       .p_3()
-      .pr_20()
       .debug_selector(move || selector)
-      // The uninstall and docs icons share one row in the top right corner;
-      // docs is last, so it stays in one column whether or not a skill is
-      // installed.
-      .when(row.has_url || row.installed.is_some(), |this| {
-        this.child(
-          div()
-            .absolute()
-            .top_2()
-            .right_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .when(row.installed.is_some(), |this| {
-              this.child(
-                Button::new(format!("skill-uninstall-{id}"), p)
-                  .aria_label("Uninstall")
-                  .variant(Variant::Outline)
-                  .size(Size::IconXs)
-                  .disabled(row.busy)
-                  .border_color(p.destructive.opacity(0.3))
-                  .text_color(p.destructive)
-                  .hover_bg(p.destructive.opacity(0.1))
-                  .icon(theme::ICON_TRASH, 14.)
-                  .on_click(self.press(&format!("skills.uninstall:{id}"))),
-              )
-            })
-            .when(row.has_url, |this| {
-              this.child(
-                Button::new(format!("skill-source-{id}"), p)
-                  .aria_label("Open source")
-                  .variant(Variant::Ghost)
-                  .size(Size::IconXs)
-                  .text_color(p.muted_foreground)
-                  .icon(theme::ICON_BOOK_OPEN, 14.)
-                  .on_click(self.press(&format!("skills.source:{id}"))),
-              )
-            }),
-        )
-      })
       .child(
         div().flex().items_start().justify_between().gap_3().child(
           div()
@@ -2498,77 +2458,102 @@ impl SettingsView {
             }),
         ),
       )
-      .map(|this| {
-        if row.proprietary {
-          this.child(
+      .child(self.skill_actions(row, level, p))
+  }
+
+  /// A skill row's bottom line: Customise and Docs on the left; the install
+  /// level, its select and Uninstall (or Install…) on the right.
+  fn skill_actions(
+    &self,
+    row: &SkillRow,
+    level: Option<gpui::Entity<form::SelectStateOf>>,
+    p: &Palette,
+  ) -> gpui::Div {
+    let id = &row.id;
+    let customise = (!row.uncatalogued && (row.custom || level.is_some())).then(|| {
+      Button::new(format!("skill-customize-{id}"), p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .disabled(row.busy)
+        .aria_label(format!("Customise {}", row.name))
+        .icon(theme::ICON_PENCIL, 14.)
+        .label("Customise")
+        .on_click(self.press(&format!("skills.customize:{id}")))
+    });
+    let docs = row.has_url.then(|| {
+      Button::new(format!("skill-source-{id}"), p)
+        .variant(Variant::Link)
+        .size(Size::Sm)
+        .aria_label(format!("Docs for {}", row.name))
+        .icon(theme::ICON_EXTERNAL_LINK, 14.)
+        .label("Docs")
+        .on_click(self.press(&format!("skills.source:{id}")))
+    });
+    let right = if row.proprietary {
+      Some(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Proprietary skills cannot be installed from the registry.")
+          .into_any_element(),
+      )
+    } else if let Some(level) = level {
+      Some(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(
             ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("Proprietary skills cannot be installed from the registry."),
+              .font_weight(FontWeight::MEDIUM)
+              .child("Install level"),
           )
-        } else if row.custom {
-          this.child(
-            div().flex().child(
-              Button::new(format!("skill-customize-{id}"), p)
-                .variant(Variant::Outline)
-                .size(Size::Sm)
-                .aria_label(format!("Customise {}", row.name))
-                .icon(theme::ICON_PENCIL, 14.)
-                .label("Customise")
-                .on_click(self.press(&format!("skills.customize:{id}"))),
-            ),
+          .child(div().w(zpx(120.)).child(form::small_select_field(
+            format!("skill-level-{id}"),
+            "Install level",
+            &level,
+            row.busy,
+          )))
+          .child(
+            Button::new(format!("skill-uninstall-{id}"), p)
+              .aria_label("Uninstall")
+              .variant(Variant::Outline)
+              .size(Size::IconSm)
+              .disabled(row.busy)
+              .border_color(p.destructive.opacity(0.3))
+              .text_color(p.destructive)
+              .hover_bg(p.destructive.opacity(0.1))
+              .icon(theme::ICON_TRASH, 14.)
+              .on_click(self.press(&format!("skills.uninstall:{id}"))),
           )
-        } else if let Some(level) = level {
-          let customize_aria = format!("Customise {}", row.name);
-          this.child(
-            div()
-              .w_full()
-              .flex()
-              .items_center()
-              .justify_between()
-              .gap_2()
-              .child(if row.uncatalogued {
-                div().into_any_element()
-              } else {
-                Button::new(format!("skill-customize-{id}"), p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .disabled(row.busy)
-                  .aria_label(customize_aria)
-                  .icon(theme::ICON_PENCIL, 14.)
-                  .label("Customise")
-                  .on_click(self.press(&format!("skills.customize:{id}")))
-                  .into_any_element()
-              })
-              .child(
-                div()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .child(
-                    ui::text(div(), TextSize::Sm)
-                      .font_weight(FontWeight::MEDIUM)
-                      .child("Install level"),
-                  )
-                  .child(div().w(zpx(120.)).child(form::small_select_field(
-                    format!("skill-level-{id}"),
-                    "Install level",
-                    &level,
-                    row.busy,
-                  ))),
-              ),
-          )
-        } else {
-          this.child(
-            div().flex().justify_end().child(
-              Button::new(format!("skill-install-{id}"), p)
-                .size(Size::Sm)
-                .disabled(row.busy)
-                .label("Install…")
-                .on_click(self.press(&format!("skills.install:{id}"))),
-            ),
-          )
-        }
-      })
+          .into_any_element(),
+      )
+    } else if row.custom {
+      None
+    } else {
+      Some(
+        Button::new(format!("skill-install-{id}"), p)
+          .size(Size::Sm)
+          .disabled(row.busy)
+          .label("Install…")
+          .on_click(self.press(&format!("skills.install:{id}")))
+          .into_any_element(),
+      )
+    };
+    div()
+      .w_full()
+      .flex()
+      .items_center()
+      .justify_between()
+      .gap_2()
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .children(customise)
+          .children(docs),
+      )
+      .children(right)
   }
 
   /// The install dialog: where to store the skill.

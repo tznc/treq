@@ -119,7 +119,7 @@ test("skill link: confirm, install, customize with an agent", async ({ page }) =
     name: "19-skill-link-level-open",
     title: "The install level dropdown, open",
     expectations: [
-      "The Install level select is compact: the same height as the Customise button",
+      "One bottom line: Customise then a Docs link on the left; Install level, the compact select and a trash button on the right, all the same height",
       "Its menu lists Application (selected) and Repository under the select, inside the window",
     ],
   });
