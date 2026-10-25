@@ -48,6 +48,17 @@ pub enum Modal {
 pub trait ModalsHost: CodeHost {
   /// Every prompt sent in the repository, most recent first.
   fn prompt_history(&self, repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String>;
+  /// Up to `limit` of them after the newest `offset`, most recent first.
+  fn prompt_history_page(
+    &self,
+    repo_path: &str,
+    offset: usize,
+    limit: usize,
+  ) -> Result<Vec<PromptHistoryEntry>, String> {
+    self
+      .prompt_history(repo_path)
+      .map(|all| all.into_iter().skip(offset).take(limit).collect())
+  }
   fn stashes(&self, repo_path: &str) -> Result<Vec<StashEntry>, String>;
   fn stash_diff(&self, repo_path: &str, stash_id: i64) -> Result<JjRevisionDiff, String>;
   /// Copies the stash onto `target_branch` (`.` for the home repo).
@@ -59,6 +70,15 @@ pub trait ModalsHost: CodeHost {
 impl ModalsHost for Backend {
   fn prompt_history(&self, repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
     crate::core::sessions::prompt_history(&self.state_scope(repo_path))
+  }
+
+  fn prompt_history_page(
+    &self,
+    repo_path: &str,
+    offset: usize,
+    limit: usize,
+  ) -> Result<Vec<PromptHistoryEntry>, String> {
+    crate::core::sessions::prompt_history_page(&self.state_scope(repo_path), limit, offset)
   }
 
   fn stashes(&self, repo_path: &str) -> Result<Vec<StashEntry>, String> {

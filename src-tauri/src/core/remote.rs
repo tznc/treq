@@ -3565,11 +3565,12 @@ fn clone_repo_local(repo_url: &str, destination: &str) -> Result<RepositoryInspe
   inspect_repository_path(destination)
 }
 
-/// Applies a base64-encoded unified diff to `path` inside the given
-/// workspace (or the repo root) using `git apply`. Base64 keeps the exec
-/// argument vector a plain string even though the payload contains newlines.
+/// Fails with the same errors as `inspect_repository_path` for a missing or
+/// non-repository path, but only stats the path: no jj load, ref import or
+/// working-copy snapshot (which writes an op), so read commands stay read-only.
 fn require_existing_repo(repo: &str) -> Result<(), String> {
-  inspect_repository_path(repo).map(|_| ())
+  let root = validate_repository_path(repo)?;
+  detect_repository_type(&root).map(|_| ())
 }
 
 /// Applies a base64-encoded unified diff to `path` inside the given
@@ -3747,6 +3748,39 @@ pub async fn execute_remote_command<T: DeserializeOwned>(
       })?;
   serde_json::from_slice::<T>(&output.stdout)
     .map_err(|error| RemoteCommandError::InvalidJson(error.to_string()))
+}
+
+impl RemoteCommandError {
+  /// Whether the command failed because the pooled connection was dead
+  /// without being known to be: a channel error (closed session, relay
+  /// recycled), a channel that never opened, or the deadline. A read is safe
+  /// to send again on a fresh connection.
+  pub fn is_stale_connection(&self) -> bool {
+    use crate::core::remote_ssh_transport::SshTransportError;
+    matches!(self, Self::Transport(message)
+      if message.starts_with(&SshTransportError::ChannelError(String::new()).to_string())
+        || *message == SshTransportError::DeadlineExceeded.to_string())
+  }
+}
+
+/// [`execute_remote_command`] for a read: after a stale-connection failure
+/// (see [`RemoteCommandError::is_stale_connection`]) the dead connection is
+/// dropped and the read is sent once more on a fresh one. Mutations never go
+/// through here; they verify before any retry ([`retry_after_reconnect`]).
+pub async fn execute_remote_read<T: DeserializeOwned>(
+  pool: &crate::core::remote_ssh_transport::SshConnectionPool,
+  endpoint: &crate::core::remote_control_plane::SshEndpoint,
+  request: TreqCommandRequest,
+  limits: crate::core::remote_ssh_transport::ExecLimits,
+  cancellation: &crate::core::remote_ssh_transport::CancellationToken,
+) -> Result<T, RemoteCommandError> {
+  match execute_remote_command::<T>(pool, endpoint, request.clone(), limits, cancellation).await {
+    Err(error) if error.is_stale_connection() => {
+      pool.mark_dead(endpoint).await;
+      execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await
+    }
+    result => result,
+  }
 }
 
 impl TransportError {

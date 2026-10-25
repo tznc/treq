@@ -124,7 +124,9 @@ pub struct TaskSettings {
   pub new_workspace: bool,
   /// The editor font size the file list uses (`terminal_font_size`).
   pub font_size: f32,
-  /// `None` while the devcontainers preview is off.
+  /// `None` while the devcontainers preview is off. Its `status` is left
+  /// for [`CodeHost::devcontainer_status`] to fill, a `docker ps` the
+  /// settings should not wait for.
   pub environment: Option<Environment>,
 }
 
@@ -169,7 +171,8 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   fn file_search_delay(&self, _repo_path: &str) -> std::time::Duration {
     std::time::Duration::from_millis(150)
   }
-  /// Builds the file index `search_files` reads, unless it is built.
+  /// Builds the file index `search_files` reads, or reads the files again
+  /// when it is built: a search meanwhile uses the one it has.
   fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
@@ -297,7 +300,7 @@ impl CodeHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return;
     }
-    if let Err(err) = crate::commands::workspace::workspace_file_index(workspace_path) {
+    if let Err(err) = crate::commands::workspace::refresh_workspace_file_index(workspace_path) {
       log::warn!("file index: {err}");
     }
   }
@@ -409,7 +412,9 @@ impl CodeHost for Backend {
 }
 
 /// Reads the task input's settings (`TaskInput`'s `agentSettings` and
-/// `newWorkspaceSetting`, `useRepoEnvironment`).
+/// `newWorkspaceSetting`, `useRepoEnvironment`). The environment's status
+/// is not read: the caller asks for it next, so the agent and the other
+/// settings show without waiting for `docker ps`.
 pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
   let repo = host
@@ -426,7 +431,7 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   let repo_agent = Agent::parse(get(&repo, "default_agent").as_deref());
   let environment = host.devcontainers_enabled().then(|| Environment {
     devcontainer: get(&repo, ENVIRONMENT_SETTING).as_deref() == Some("devcontainer"),
-    status: Some(host.devcontainer_status(repo_path)),
+    status: None,
   });
   TaskSettings {
     agent: repo_agent
