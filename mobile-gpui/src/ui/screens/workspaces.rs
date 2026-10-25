@@ -279,6 +279,12 @@ impl WorkspacesScreen {
     }
   }
 
+  /// The list's viewport and the bounds of its item `ix`, once drawn.
+  #[cfg(test)]
+  pub(crate) fn drawn(&self, ix: usize) -> (Bounds<Pixels>, Option<Bounds<Pixels>>) {
+    (self.rows.viewport_bounds(), self.rows.bounds_for_item(ix))
+  }
+
   #[cfg(test)]
   pub(crate) fn set_selecting(
     &mut self,
@@ -926,7 +932,8 @@ impl WorkspacesScreen {
 
   /// Item `ix` of the list: the head, the rows (or their placeholder), the tail.
   fn item(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
-    let last = self.rows.item_count().saturating_sub(1);
+    // The list is borrowed while it builds items, so its count is not asked.
+    let last = 1 + self.entries.len().max(1);
     if ix == 0 {
       return self.head(cx);
     }

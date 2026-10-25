@@ -1039,3 +1039,37 @@ fn cached_page_rerenders_for_its_own_and_observed_state_only(cx: &mut TestAppCon
   assert_eq!(renders.get(), settled + 2);
   assert_eq!(*shown.borrow(), "two/b");
 }
+
+/// The virtualized lists draw (they panic if an item asks the list for
+/// its state while it builds items) and show only part of a long page.
+#[gpui_kit::test]
+fn long_lists_draw(cx: &mut TestAppContext) {
+  let list = summaries(300);
+  let (window, screen) = mount(cx, |window, cx| {
+    cx.new(|cx| WorkspacesScreen::for_test(list, window, cx))
+  });
+  draw(cx, window);
+  cx.update_window(window, |_, _, cx| {
+    screen.update(cx, |s, cx| s.set_selecting([1, 2], cx))
+  })
+  .unwrap();
+  redraw(cx, window);
+  // The viewport is the phone's screen, the first rows are in it and the
+  // last of 300 is not built.
+  let (viewport, first, last) = cx
+    .update_window(window, |_, _, cx| {
+      let screen = screen.read(cx);
+      (screen.drawn(0).0, screen.drawn(2).1, screen.drawn(250).1)
+    })
+    .unwrap();
+  assert!(viewport.size.height > px(400.), "{viewport:?}");
+  let first = first.expect("the second row is laid out");
+  assert!(first.size.height >= px(56.) && first.origin.y < viewport.size.height);
+  assert!(last.is_none_or(|b| b.origin.y > viewport.size.height));
+
+  let (window, _) = mount(cx, |_, cx| {
+    cx.new(|_| DiffScreen::for_test(vec![hunk(500), hunk(3)]))
+  });
+  draw(cx, window);
+  redraw(cx, window);
+}

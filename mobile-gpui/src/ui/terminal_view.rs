@@ -189,37 +189,6 @@ fn scrolled_to(current: usize, lines: f32, remainder: &mut f32) -> usize {
   target as usize
 }
 
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  fn drag(px_per_event: f32, events: usize) -> usize {
-    let (mut scrollback, mut remainder) = (0, 0.);
-    for _ in 0..events {
-      scrollback = scrolled_to(scrollback, px_per_event / LINE_HEIGHT, &mut remainder);
-    }
-    scrollback
-  }
-
-  #[core::prelude::v1::test]
-  fn slow_drags_scroll_and_fast_ones_do_not_overshoot() {
-    // 20 events: 340 px is 20 lines at 17 px per line.
-    assert_eq!(drag(3., 20), 3);
-    assert_eq!(drag(8., 20), 9);
-    assert_eq!(drag(9., 20), 10);
-    assert_eq!(drag(17., 20), 20);
-  }
-
-  #[core::prelude::v1::test]
-  fn dragging_back_to_the_live_screen_stops_there() {
-    let mut remainder = 0.;
-    assert_eq!(scrolled_to(2, -0.4, &mut remainder), 2);
-    assert_eq!(scrolled_to(2, -3., &mut remainder), 0);
-    assert_eq!(remainder, 0.);
-    assert_eq!(scrolled_to(0, 0.5, &mut remainder), 0);
-  }
-}
-
 impl Drop for TerminalView {
   fn drop(&mut self) {
     // Detach: the remote session keeps running and can be reattached.
@@ -416,5 +385,36 @@ impl EntityInputHandler for TerminalView {
     _: &mut Context<Self>,
   ) -> Option<usize> {
     None
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn drag(px_per_event: f32, events: usize) -> usize {
+    let (mut scrollback, mut remainder) = (0, 0.);
+    for _ in 0..events {
+      scrollback = scrolled_to(scrollback, px_per_event / LINE_HEIGHT, &mut remainder);
+    }
+    scrollback
+  }
+
+  #[core::prelude::v1::test]
+  fn slow_drags_scroll_and_fast_ones_do_not_overshoot() {
+    // 20 events: 340 px is 20 lines at 17 px per line.
+    assert_eq!(drag(3., 20), 3);
+    assert_eq!(drag(8., 20), 9);
+    assert_eq!(drag(9., 20), 10);
+    assert_eq!(drag(17., 20), 20);
+  }
+
+  #[core::prelude::v1::test]
+  fn dragging_back_to_the_live_screen_stops_there() {
+    let mut remainder = 0.;
+    assert_eq!(scrolled_to(2, -0.4, &mut remainder), 2);
+    assert_eq!(scrolled_to(2, -3., &mut remainder), 0);
+    assert_eq!(remainder, 0.);
+    assert_eq!(scrolled_to(0, 0.5, &mut remainder), 0);
   }
 }

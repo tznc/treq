@@ -1172,4 +1172,61 @@ mod tests {
       "Renamed · from src/b.rs · 12 lines"
     );
   }
+
+  fn file(path: &str) -> JjFileChange {
+    JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    }
+  }
+
+  fn revision(conflicted: usize, uncommitted: usize, committed: usize) -> JjRevisionDiff {
+    let files = |n: usize| (0..n).map(|i| file(&format!("f{i}"))).collect::<Vec<_>>();
+    JjRevisionDiff {
+      committed_files: files(committed),
+      hunks_by_file: Vec::new(),
+      uncommitted_files: files(uncommitted),
+      conflicted_files: (0..conflicted).map(|i| format!("c{i}")).collect(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    }
+  }
+
+  #[core::prelude::v1::test]
+  fn changes_flatten_to_titled_cards_closed_by_the_commit_bar() {
+    let at = |first, last| Slot { first, last };
+    assert_eq!(
+      change_items(&revision(1, 2, 1)),
+      vec![
+        ChangeItem::Title(Section::Conflicts),
+        ChangeItem::Conflict(0, at(true, true)),
+        ChangeItem::Title(Section::Uncommitted),
+        ChangeItem::Uncommitted(0, at(true, false)),
+        ChangeItem::Uncommitted(1, at(false, false)),
+        ChangeItem::CommitBar,
+        ChangeItem::Title(Section::Committed),
+        ChangeItem::Committed(0, at(true, true)),
+        ChangeItem::End,
+      ]
+    );
+  }
+
+  #[core::prelude::v1::test]
+  fn empty_sections_show_their_message() {
+    assert_eq!(
+      change_items(&revision(0, 0, 0)),
+      vec![
+        ChangeItem::Title(Section::Uncommitted),
+        ChangeItem::Empty(Section::Uncommitted),
+        ChangeItem::Title(Section::Committed),
+        ChangeItem::Empty(Section::Committed),
+        ChangeItem::End,
+      ]
+    );
+  }
 }
