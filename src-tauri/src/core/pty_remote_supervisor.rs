@@ -852,9 +852,15 @@ mod tests {
 
   #[test]
   fn titles_are_one_trimmed_bounded_line() {
-    assert_eq!(clean_title("  Fix\nlogin\t redirect "), Some("Fix login redirect".into()));
+    assert_eq!(
+      clean_title("  Fix\nlogin\t redirect "),
+      Some("Fix login redirect".into())
+    );
     assert_eq!(clean_title(" \n "), None);
-    assert_eq!(clean_title(&"x".repeat(200)).unwrap().chars().count(), TITLE_MAX_CHARS);
+    assert_eq!(
+      clean_title(&"x".repeat(200)).unwrap().chars().count(),
+      TITLE_MAX_CHARS
+    );
   }
 
   #[test]
