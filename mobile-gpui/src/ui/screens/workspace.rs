@@ -418,7 +418,13 @@ impl WorkspaceScreen {
     self.view = view;
     if view == View::Commits && self.commits.is_none() {
       let target = self.target.clone();
-      self.commits = Some(cx.new(|cx| CommitsScreen::new(target, cx)));
+      let commits = cx.new(|cx| CommitsScreen::new(target, cx));
+      cx.subscribe(&commits, |this, _, _: &commits::Changed, cx| {
+        this.changed = true;
+        this.reload(cx);
+      })
+      .detach();
+      self.commits = Some(commits);
     }
     if view == View::Code && self.code.is_none() {
       let (target, sessions) = (self.target.clone(), self.sessions.clone());
