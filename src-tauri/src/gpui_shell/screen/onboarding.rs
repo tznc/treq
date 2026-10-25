@@ -14,6 +14,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Window,
@@ -28,7 +29,11 @@ use super::{
   ActionSink, Ctx, ScreenAction,
 };
 use crate::{
-  core::{self, pty_remote_supervisor::PtyBackend, PrerequisiteStatus},
+  core::{
+    self,
+    pty_remote_supervisor::{PtyBackend, TerminalStatus},
+    PrerequisiteStatus,
+  },
   gpui_shell::{
     confirm::{self, Question},
     native::{Backend, NativeEvent, ToastTone},
@@ -95,6 +100,9 @@ pub struct OnboardingView {
   /// By machine id: a terminals change running (`None`), or how the last
   /// one went, shown in the machine's popover.
   terminals: HashMap<String, Option<Result<(), String>>>,
+  /// By machine id: what the host last said holds its terminals, or
+  /// `None` while it is asked.
+  live: HashMap<String, Option<Result<TerminalStatus, String>>>,
 }
 
 /// The listing the last onboarding screen read, which the next one draws
@@ -142,6 +150,7 @@ impl OnboardingView {
       cloud_seen: cloud_seen(cx),
       confirm: None,
       terminals: HashMap::new(),
+      live: HashMap::new(),
     };
     // Signing in, or the cloud workspace changing state, changes its row.
     cx.observe_global::<super::account_data::Account>(|view, cx| {
@@ -396,6 +405,25 @@ impl OnboardingView {
     }
   }
 
+  /// Asks the machine what holds its terminals (`treq pty-remote status`).
+  fn ask_terminals(&mut self, id: &str, place: Place, cx: &mut Context<Self>) {
+    self.live.insert(id.to_string(), None);
+    cx.notify();
+    let (host, id) = (self.host.clone(), id.to_string());
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_spawn(async move { host.terminal_status(&place) })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          view.live.insert(id, Some(result));
+          cx.notify();
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
   /// Runs a change to a machine's terminals off the main thread, then lists
   /// the machines again so its popover shows the outcome.
   fn change_terminals(
@@ -413,7 +441,10 @@ impl OnboardingView {
         .await;
       this
         .update(cx, |view, cx| {
-          view.terminals.insert(id, Some(result));
+          view.terminals.insert(id.clone(), Some(result));
+          if let Some(machine) = view.machine(&id).cloned() {
+            view.ask_terminals(&id, machine.place, cx);
+          }
           view.load(cx);
         })
         .ignore_closed();
@@ -486,7 +517,11 @@ impl OnboardingView {
       // Remote machines are asked only when their popover first opens.
       if let Some(machine) = self.machine(id).cloned() {
         if !self.tools.contains_key(id) {
-          self.check(&machine.id, machine.place, cx);
+          self.check(&machine.id, machine.place.clone(), cx);
+        }
+        // Terminals come and go, so their status is asked on every open.
+        if machine.terminals.is_some() {
+          self.ask_terminals(&machine.id, machine.place, cx);
         }
       }
     }
@@ -516,6 +551,84 @@ impl OnboardingView {
       checklist::from_statuses(&machine.name, statuses, checking)
     }
   }
+}
+
+fn plural(n: usize, one: &str) -> String {
+  if n == 1 {
+    format!("1 {one}")
+  } else {
+    format!("{n} {one}s")
+  }
+}
+
+/// What the host said holds its terminals, as one line with a dot: green
+/// when the machine's backend holds them, grey when idle, amber when the
+/// host could not answer or lacks what the machine is set to.
+fn live_status(
+  status: Option<Result<TerminalStatus, String>>,
+  backend: PtyBackend,
+  p: &Palette,
+) -> AnyElement {
+  let (tone, line) = match status {
+    None => (None, "Asking the host…".to_string()),
+    Some(Err(error)) => (
+      Some(Tone::Warning),
+      format!("Couldn't ask the host: {error}"),
+    ),
+    Some(Ok(status)) => match backend {
+      PtyBackend::Daemon => {
+        let older = (status.tmux_sessions > 0).then(|| {
+          format!(
+            " {} from before still in tmux.",
+            plural(status.tmux_sessions, "terminal")
+          )
+        });
+        match status.daemon {
+          Some(d) => (
+            Some(Tone::Success),
+            format!(
+              "Treq daemon running (pid {}, treq {}): {}.{}",
+              d.pid,
+              d.version,
+              plural(d.sessions, "terminal"),
+              older.unwrap_or_default()
+            ),
+          ),
+          None => (
+            None,
+            format!(
+              "Treq daemon not running. It starts with the first terminal.{}",
+              older.unwrap_or_default()
+            ),
+          ),
+        }
+      }
+      PtyBackend::Tmux if !status.tmux_installed => (
+        Some(Tone::Warning),
+        "tmux is not installed on the host.".to_string(),
+      ),
+      PtyBackend::Tmux => (
+        if status.tmux_sessions > 0 {
+          Some(Tone::Success)
+        } else {
+          None
+        },
+        format!("tmux: {}.", plural(status.tmux_sessions, "terminal")),
+      ),
+    },
+  };
+  div()
+    .id("machine-terminals-status")
+    .debug_selector(|| "machine-terminals-status".into())
+    .role(gpui::Role::Status)
+    .aria_label(gpui::SharedString::from(line.clone()))
+    .flex()
+    .items_center()
+    .gap_2()
+    .children(tone.map(|tone| Dot::new(tone, p)))
+    .child(ui::text(div(), TextSize::Sm).min_w_0().child(line))
+    .test_support()
+    .into_any_element()
 }
 
 fn backend_name(backend: PtyBackend) -> &'static str {
@@ -660,7 +773,6 @@ impl OnboardingView {
     let busy = matches!(state, Some(None));
     let switchable = matches!(machine.place, Place::Ssh { .. });
     div()
-      .id("machine-terminals")
       .debug_selector(|| "machine-terminals".into())
       .pt_2()
       .border_t_1()
@@ -673,6 +785,11 @@ impl OnboardingView {
           .text_color(p.muted_foreground)
           .child(format!("Terminals are held by {}.", backend_name(backend))),
       )
+      .child(live_status(
+        self.live.get(&machine.id).cloned().flatten(),
+        backend,
+        &p,
+      ))
       .when_some(
         state.cloned().flatten().and_then(Result::err),
         |d, error| {

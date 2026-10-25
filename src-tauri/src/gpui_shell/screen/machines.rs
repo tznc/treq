@@ -10,7 +10,7 @@ use crate::{
   core::{
     self, devcontainer,
     feature_preview::{self, PreviewFeature},
-    pty_remote_supervisor::PtyBackend,
+    pty_remote_supervisor::{PtyBackend, TerminalStatus},
     remote::TreqCommandRequest,
     remote_records, PrerequisiteStatus,
   },
@@ -118,6 +118,9 @@ pub trait MachinesHost: ToolsHost {
   /// Blocks: ends every terminal and agent Treq runs on the machine, and
   /// for the daemon stops it.
   fn reset_terminals(&self, place: &Place) -> Result<(), String>;
+  /// Blocks: asks the machine what holds its terminals right now
+  /// (`treq pty-remote status`).
+  fn terminal_status(&self, place: &Place) -> Result<TerminalStatus, String>;
   /// Blocks: asks for a folder; `None` when cancelled.
   fn pick_folder(&self) -> Option<String>;
   /// Blocks: builds and starts Treq's dev container for the repository.
@@ -179,6 +182,19 @@ fn cloud_machine(backend: &Backend) -> Option<Machine> {
     },
     name: "Cloud workspace".into(),
   })
+}
+
+/// The endpoint of a machine Treq reaches over SSH, for its terminals.
+fn remote_endpoint_id(place: &Place) -> Result<&str, String> {
+  match place {
+    Place::Ssh { endpoint_id } => Ok(endpoint_id),
+    Place::Cloud {
+      endpoint_id: Some(endpoint_id),
+      status,
+    } if status == "ready" => Ok(endpoint_id),
+    Place::Cloud { .. } => Err("Wake the cloud workspace to see its terminals.".into()),
+    Place::Local | Place::DevContainer { .. } => Err("Terminals here run on this computer.".into()),
+  }
 }
 
 impl MachinesHost for Backend {
@@ -382,6 +398,14 @@ impl MachinesHost for Backend {
     // Switched either way: a host that could not be reached has nothing
     // of Treq's to see, but say so.
     reset.map_err(|error| format!("Switched, but the old terminals could not be closed: {error}"))
+  }
+
+  fn terminal_status(&self, place: &Place) -> Result<TerminalStatus, String> {
+    let (endpoint, _) = self
+      .machine_endpoint(remote_endpoint_id(place)?)
+      .ok_or_else(|| "This machine cannot be reached.".to_string())?;
+    let value = self.remote_read(&endpoint, TreqCommandRequest::PtyStatus)?;
+    serde_json::from_value(value).map_err(|e| format!("invalid_remote_json: {e}"))
   }
 
   fn reset_terminals(&self, place: &Place) -> Result<(), String> {

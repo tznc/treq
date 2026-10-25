@@ -167,6 +167,9 @@ pub struct Hello {
   pub protocol: u32,
   pub version: String,
   pub sessions: usize,
+  /// The daemon's process id, for `treq pty-remote status`.
+  #[serde(default)]
+  pub pid: u32,
 }
 
 /// A client-to-daemon message on an attached stream.
@@ -456,6 +459,7 @@ fn handle_connection(daemon: &Arc<Daemon>, stream: UnixStream) {
       protocol: PROTOCOL_VERSION,
       version: env!("CARGO_PKG_VERSION").to_string(),
       sessions: daemon.lock().sessions.len(),
+      pid: std::process::id(),
     }),
     Request::Start { name, spec } => match ensure_session(daemon, &name, &spec) {
       Ok(()) => ok(()),

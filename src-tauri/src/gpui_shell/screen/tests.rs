@@ -32,6 +32,8 @@ struct FakeHost {
   containers: (Vec<machines::Machine>, Vec<machines::Recent>),
   /// What a host machine says is installed on it.
   host_tools: Option<Result<Vec<crate::core::PrerequisiteStatus>, String>>,
+  /// What a host says holds its terminals (`treq pty-remote status`).
+  terminal_status: Option<Result<crate::core::pty_remote_supervisor::TerminalStatus, String>>,
   /// What `check_prerequisites` reports.
   installed: Vec<(&'static str, bool)>,
   /// App and repository settings, by key.
@@ -332,6 +334,17 @@ impl machines::MachinesHost for FakeHost {
   fn reset_terminals(&self, place: &machines::Place) -> Result<(), String> {
     self.record(format!("reset terminals {place:?}"));
     Ok(())
+  }
+
+  fn terminal_status(
+    &self,
+    place: &machines::Place,
+  ) -> Result<crate::core::pty_remote_supervisor::TerminalStatus, String> {
+    self.record(format!("terminal status {place:?}"));
+    self
+      .terminal_status
+      .clone()
+      .unwrap_or_else(|| Err("ssh: connection refused".into()))
   }
 
   fn pick_folder(&self) -> Option<String> {
@@ -2198,6 +2211,97 @@ fn onboarding_switches_a_hosts_terminals_to_tmux_after_confirming(cx: &mut TestA
       .any(|c| c.starts_with("terminals Ssh") && c.ends_with("Tmux")),
     "{:?}",
     host.calls()
+  );
+}
+
+fn running_daemon(sessions: usize) -> crate::core::pty_remote_supervisor::TerminalStatus {
+  crate::core::pty_remote_supervisor::TerminalStatus {
+    daemon: Some(crate::core::pty_remote_supervisor::DaemonStatus {
+      pid: 4242,
+      version: "0.3.0".into(),
+      sessions,
+    }),
+    tmux_installed: true,
+    tmux_sessions: 0,
+  }
+}
+
+/// Opens the SSH host's popover and reads what it says about terminals.
+fn host_terminals_text(cx: &mut TestAppContext, host: Arc<FakeHost>) -> (Harness, Vec<String>) {
+  use gpui_testing_library::prelude::*;
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.drawn("machine-terminals-status"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  let status: Vec<String> = screen
+    .get_all_by_role(by::role(gpui::Role::Status))
+    .iter()
+    .filter_map(|n| n.name())
+    .collect();
+  let texts = [
+    "Treq daemon running",
+    "Treq daemon not running",
+    "Couldn't ask the host",
+    "tmux",
+  ]
+  .iter()
+  .filter(|t| status.iter().any(|s| s.contains(**t)))
+  .map(|t| t.to_string())
+  .collect();
+  (h, texts)
+}
+
+#[gpui::test]
+fn onboarding_shows_the_daemon_the_host_reports(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Ok(running_daemon(2))),
+    ..FakeHost::default()
+  });
+  let (mut h, texts) = host_terminals_text(cx, host.clone());
+  assert!(
+    texts.contains(&"Treq daemon running".to_string()),
+    "{texts:?}"
+  );
+  assert!(h.drawn("machine-terminals-status"));
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("terminal status Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_says_when_the_daemon_is_not_running(cx: &mut TestAppContext) {
+  let mut status = running_daemon(0);
+  status.daemon = None;
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Ok(status)),
+    ..FakeHost::default()
+  });
+  let (_, texts) = host_terminals_text(cx, host);
+  assert!(
+    texts.contains(&"Treq daemon not running".to_string()),
+    "{texts:?}"
+  );
+}
+
+#[gpui::test]
+fn onboarding_says_when_the_host_cannot_report_its_terminals(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Err("ssh: connection refused".into())),
+    ..FakeHost::default()
+  });
+  let (_, texts) = host_terminals_text(cx, host);
+  assert!(
+    texts.contains(&"Couldn't ask the host".to_string()),
+    "{texts:?}"
   );
 }
 

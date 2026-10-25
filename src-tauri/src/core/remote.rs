@@ -572,6 +572,9 @@ pub enum TreqCommandRequest {
   /// Ends every Treq session on the host under `backend`, whatever its
   /// repository, and for the daemon stops the daemon: a machine's "Reset
   /// terminals".
+  /// What holds Treq's terminals on the host right now: the daemon (its
+  /// pid, version and sessions) and Treq's sessions in tmux.
+  PtyStatus,
   PtyReset {
     #[serde(
       default,
@@ -740,6 +743,7 @@ impl TreqCommandRequest {
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
+      | Self::PtyStatus
       | Self::PtyAttachCommand { .. }
       | Self::WorkspaceChangeMarker { .. }
       | Self::MachineUsage { .. }
@@ -866,6 +870,7 @@ impl TreqCommandRequest {
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
+      | Self::PtyStatus
       | Self::PtyStop { .. }
       | Self::PtyRename { .. }
       | Self::PtyReset { .. }
@@ -947,6 +952,7 @@ impl TreqCommandRequest {
       Self::PtyStop { .. } => "PtyStop",
       Self::PtyRename { .. } => "PtyRename",
       Self::PtyReset { .. } => "PtyReset",
+      Self::PtyStatus => "PtyStatus",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
       Self::PtyPaste { .. } => "PtyPaste",
       Self::ReviewLoad { .. } => "ReviewLoad",
@@ -1018,6 +1024,7 @@ impl TreqCommandRequest {
     "PtyStop",
     "PtyRename",
     "PtyReset",
+    "PtyStatus",
     "PtyAttachCommand",
     "PtyPaste",
     "ReviewLoad",
@@ -2202,6 +2209,7 @@ impl TreqCommandRequest {
         fields.workspace = workspace.as_deref();
         ("pty-remote", "list", repo)
       }
+      Self::PtyStatus => ("pty-remote", "status", "/"),
       Self::PtyReset { backend } => {
         push_backend(&mut fields, *backend);
         // Reset reaches every repository on the host; `--repo` only
@@ -3326,6 +3334,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       &repo,
       workspace.as_deref(),
     )),
+    TreqCommandRequest::PtyStatus => json(crate::core::pty_remote_supervisor::terminal_status()),
     TreqCommandRequest::PtyReset { backend } => {
       json(crate::core::pty_remote_supervisor::reset_sessions(backend))
     }
@@ -6170,6 +6179,10 @@ mod tests {
     let at = tmux.iter().position(|a| a == "--backend").unwrap();
     assert_eq!(tmux[at + 1], "tmux");
     assert_eq!(
+      TreqCommandRequest::PtyStatus.cli_args().unwrap()[..2],
+      ["pty-remote".to_string(), "status".to_string()]
+    );
+    assert_eq!(
       TreqCommandRequest::PtyReset {
         backend: PtyBackend::Daemon
       }
@@ -6185,7 +6198,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 74);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 75);
   }
 
   #[test]

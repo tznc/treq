@@ -571,6 +571,64 @@ fn tmux_kill(name: &str) {
     .best_effort();
 }
 
+/// What `treq pty-remote status` reports: what holds Treq's terminals on
+/// this host right now, whichever backend the app has picked for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalStatus {
+  /// The Treq terminal daemon, while it runs. It starts with the first
+  /// terminal and stops a minute after the last one ends.
+  pub daemon: Option<DaemonStatus>,
+  pub tmux_installed: bool,
+  /// Treq's sessions in tmux, from machines set to tmux.
+  pub tmux_sessions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonStatus {
+  pub pid: u32,
+  /// The `treq` version the daemon runs.
+  pub version: String,
+  pub sessions: usize,
+}
+
+/// Reads both backends without starting the daemon.
+pub fn terminal_status() -> Result<TerminalStatus, String> {
+  let tmux_installed = tmux_available();
+  Ok(TerminalStatus {
+    daemon: daemon::status(&daemon::paths()?)?,
+    tmux_installed,
+    tmux_sessions: tmux_sessions()
+      .iter()
+      .filter(|session| parse_session_name(&session.name).is_some())
+      .count(),
+  })
+}
+
+/// One line per backend, for `treq pty-remote status` without `--format json`.
+pub fn describe_status(status: &TerminalStatus) -> String {
+  let plural = |n: usize| if n == 1 { "" } else { "s" };
+  let daemon = match &status.daemon {
+    Some(d) => format!(
+      "Treq daemon: running (pid {}, treq {}), {} session{}",
+      d.pid,
+      d.version,
+      d.sessions,
+      plural(d.sessions)
+    ),
+    None => "Treq daemon: not running (starts with the first terminal)".to_string(),
+  };
+  let tmux = if status.tmux_installed {
+    format!(
+      "tmux: installed, {} Treq session{}",
+      status.tmux_sessions,
+      plural(status.tmux_sessions)
+    )
+  } else {
+    "tmux: not installed".to_string()
+  };
+  format!("{daemon}\n{tmux}")
+}
+
 /// Ends every Treq session on the host under `backend`, whatever its
 /// repository: the machine's "Reset terminals". For the daemon this also
 /// stops the daemon and clears its directory; for tmux it leaves sessions
@@ -946,6 +1004,19 @@ mod daemon {
     pty_daemon::reset(paths)
   }
 
+  pub(super) fn status(paths: &DaemonPaths) -> Result<Option<DaemonStatus>, String> {
+    let Some(value) = pty_daemon::request_if_running(paths, &Request::Hello)? else {
+      return Ok(None);
+    };
+    let hello: pty_daemon::Hello = serde_json::from_value(value)
+      .map_err(|e| format!("daemon_error: unexpected hello from the terminal daemon: {e}"))?;
+    Ok(Some(DaemonStatus {
+      pid: hello.pid,
+      version: hello.version,
+      sessions: hello.sessions,
+    }))
+  }
+
   pub(super) fn attach(
     name: &str,
     remote_dir: &str,
@@ -1001,6 +1072,9 @@ mod daemon {
   }
   pub(super) fn reset(_: &DaemonPaths) -> Result<(), String> {
     unsupported()
+  }
+  pub(super) fn status(_: &DaemonPaths) -> Result<Option<DaemonStatus>, String> {
+    Ok(None)
   }
   pub(super) fn attach(_: &str, _: &str, _: &PtyLaunchSpec, _: u16, _: u16) -> Result<(), String> {
     unsupported()
@@ -1324,6 +1398,37 @@ mod tests {
       assert!(session.idle_secs.is_some_and(|s| s < 10));
       daemon::rename(&served.paths, &name, None).unwrap();
       assert_eq!(daemon::sessions(&served.paths).unwrap()[0].title, None);
+    }
+
+    #[test]
+    fn status_reports_no_daemon_and_starts_none() {
+      let dir = tempfile::Builder::new()
+        .prefix("tsup")
+        .tempdir_in("/tmp")
+        .unwrap();
+      let paths = DaemonPaths::new(dir.path().join("pty"));
+      assert_eq!(daemon::status(&paths).unwrap(), None);
+      assert!(!paths.socket().exists());
+    }
+
+    #[test]
+    fn status_reports_the_running_daemon_and_its_sessions() {
+      let served = Served::start();
+      daemon::start(
+        &served.paths,
+        "treq-pty-a",
+        "/",
+        &PtyLaunchSpec::Shell,
+        80,
+        24,
+      )
+      .unwrap();
+      let status = daemon::status(&served.paths)
+        .unwrap()
+        .expect("daemon running");
+      assert_eq!(status.sessions, 1);
+      assert_eq!(status.version, env!("CARGO_PKG_VERSION"));
+      assert_eq!(status.pid, std::process::id());
     }
 
     #[test]

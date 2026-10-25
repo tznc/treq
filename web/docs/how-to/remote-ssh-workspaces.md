@@ -75,6 +75,16 @@ Remote terminals and agents keep running when the connection drops. When you rec
 
 By default the Treq terminal daemon holds these sessions. The `treq` CLI starts it on the host the first time it is needed, and it stops itself a minute after the last session ends. The daemon listens on a socket in `~/.treq/pty/` that only your user can open, and opens no network port. It runs on Linux and macOS hosts.
 
+The host's tools popover on the start screen shows what holds its terminals right now, for example **Treq daemon running (pid 4242, treq 0.3.0): 2 terminals**. To ask the host yourself, run `treq pty-remote status` there:
+
+```text
+$ treq pty-remote status
+Treq daemon: running (pid 4242, treq 0.3.0), 2 sessions
+tmux: installed, 0 Treq sessions
+```
+
+Add `--format json` for the same report as JSON.
+
 To keep sessions in tmux instead, open the host's tools popover on the start screen and click **Use tmux…**. The host then needs tmux installed. Switching closes the terminals and agents that are running on the host.
 
 To close every Treq terminal and agent on a host, click **Reset terminals…** in the same popover. With the daemon, this also stops the daemon.

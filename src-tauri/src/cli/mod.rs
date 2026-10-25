@@ -712,6 +712,7 @@ pub(crate) fn parse_remote_command_request(
       repo,
       workspace,
     }),
+    ("pty-remote", "status") => Ok(TreqCommandRequest::PtyStatus),
     ("pty-remote", "reset") => Ok(TreqCommandRequest::PtyReset {
       backend: pty_backend(matches)?,
     }),
@@ -806,9 +807,16 @@ fn handle_remote_review_command(
   format: OutputFormat,
 ) -> Result<(), String> {
   let request = parse_remote_command_request(command, matches)?;
+  let status = matches!(request, core::remote::TreqCommandRequest::PtyStatus);
   let value = crate::core::remote::execute_local_request(request)?;
   match format {
     OutputFormat::Json => print_json(&value),
+    OutputFormat::Human if status => {
+      let status: core::pty_remote_supervisor::TerminalStatus =
+        serde_json::from_value(value).map_err(|e| e.to_string())?;
+      println!("{}", core::pty_remote_supervisor::describe_status(&status));
+      Ok(())
+    }
     OutputFormat::Human => {
       println!("{value:#}");
       Ok(())
