@@ -18,6 +18,10 @@ struct Sample {
   time: Duration,
   allocs: usize,
   bytes: usize,
+  /// What the frame after the dispatch cost (the rest is the dispatch and
+  /// the effects it queued, which may draw by itself in the test platform).
+  frame: Duration,
+  frame_allocs: usize,
 }
 
 /// `act`, the effects it starts, and the frame after, measured.
@@ -26,13 +30,17 @@ fn sample(h: &mut Harness, act: impl FnOnce(&mut Harness)) -> Sample {
   let start = Instant::now();
   act(h);
   h.cx.run_until_parked();
+  let (fa, fstart) = (counts().0, Instant::now());
   h.cx.update(|window, cx| window.draw(cx).clear(cx));
+  let frame = fstart.elapsed();
   let time = start.elapsed();
   let (a2, b2) = counts();
   Sample {
     time,
     allocs: a2 - a,
     bytes: b2 - b,
+    frame,
+    frame_allocs: a2 - fa,
   }
 }
 
@@ -43,13 +51,17 @@ fn report(name: &str, mut samples: Vec<Sample>) {
   allocs.sort();
   let mut bytes: Vec<usize> = samples.iter().map(|s| s.bytes).collect();
   bytes.sort();
+  let mut frame: Vec<(Duration, usize)> = samples.iter().map(|s| (s.frame, s.frame_allocs)).collect();
+  frame.sort();
   println!(
-    "{name:<44} n={:<3} p50={:>8.2}ms max={:>8.2}ms allocs(p50)={:>7} KiB(p50)={:>8.1}",
+    "{name:<44} n={:<3} p50={:>8.2}ms max={:>8.2}ms allocs(p50)={:>7} KiB(p50)={:>8.1} | last draw p50={:>6.2}ms allocs={:>6}",
     samples.len(),
     mid.time.as_secs_f64() * 1000.,
     samples.last().map_or(0., |s| s.time.as_secs_f64() * 1000.),
     allocs[allocs.len() / 2],
     bytes[bytes.len() / 2] as f64 / 1024.,
+    frame[frame.len() / 2].0.as_secs_f64() * 1000.,
+    frame[frame.len() / 2].1,
   );
 }
 
@@ -58,9 +70,31 @@ fn typing(h: &mut Harness, n: usize) -> Vec<Sample> {
   (0..n)
     .map(|i| {
       let ch = ["a", "b", "c", "d", "e", "f"][i % 6];
-      sample(h, |h| h.cx.simulate_input(ch))
+      // One keystroke: `simulate_input` dispatches an empty keystroke
+      // before and after each character, which triples the dispatch work.
+      sample(h, |h| h.cx.simulate_keystrokes(ch))
     })
     .collect()
+}
+
+/// The text of the focused field, to check the keystrokes landed.
+fn focused_value(h: &mut Harness) -> String {
+  use gpui_testing_library::prelude::*;
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+    .elements()
+    .into_iter()
+    .find(|node| {
+      node.is_focused()
+        && matches!(
+          node.role(),
+          Some(gpui::Role::TextInput | gpui::Role::MultilineTextInput | gpui::Role::SearchInput)
+        )
+    })
+    .and_then(|node| node.value())
+    .unwrap_or_default()
 }
 
 /// A frame nothing asked for: what an idle redraw costs.
@@ -87,6 +121,7 @@ fn input_latency_commit_message(cx: &mut TestAppContext) {
   report("changes large: full refresh", full(&mut h, 10));
   h.click("commit-message");
   report("commit message: keystroke", typing(&mut h, 30));
+  assert!(focused_value(&mut h).starts_with("abcdef"));
 }
 
 #[gpui::test]
@@ -108,7 +143,7 @@ fn input_latency_find_bar(cx: &mut TestAppContext) {
   // debounce, then rebuilds it.
   let mut landed = Vec::new();
   for ch in ["v", "a", "l", "u", "e", "_", "1"] {
-    sample(&mut h, |h| h.cx.simulate_input(ch));
+    sample(&mut h, |h| h.cx.simulate_keystrokes(ch));
     h.cx.executor().advance_clock(Duration::from_millis(150));
     landed.push(sample(&mut h, |_| {}));
   }
@@ -119,6 +154,13 @@ fn input_latency_find_bar(cx: &mut TestAppContext) {
   );
 }
 
+/// Pastes `text` into the focused field, in one edit.
+fn paste(h: &mut Harness, text: &str) {
+  h.cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+  h.cx.simulate_keystrokes("cmd-v");
+  h.cx.run_until_parked();
+}
+
 #[gpui::test]
 #[ignore = "benchmark"]
 fn input_latency_composer(cx: &mut TestAppContext) {
@@ -127,9 +169,19 @@ fn input_latency_composer(cx: &mut TestAppContext) {
   report("code tab: full refresh", full(&mut h, 10));
   h.click("task-input");
   report("composer: keystroke", typing(&mut h, 30));
-  // A long prompt: the whole value is copied per key.
-  h.cx.simulate_input(&"lorem ipsum dolor sit amet\n".repeat(200));
-  report("composer, 5 KB prompt: keystroke", typing(&mut h, 30));
+  assert!(focused_value(&mut h).starts_with("abcdef"));
+  // A long prompt (a pasted log): the cost per key with the prompt's size.
+  let line = "lorem ipsum dolor sit amet, consectetur adipiscing elit sed do\n";
+  let mut have = 0;
+  for kb in [5, 50, 200] {
+    let more = kb * 1024 / line.len() - have;
+    have += more;
+    paste(&mut h, &line.repeat(more));
+    report(
+      &format!("composer, {kb} KB prompt: keystroke"),
+      typing(&mut h, 15),
+    );
+  }
 }
 
 #[gpui::test]
@@ -232,4 +284,79 @@ fn input_latency_window_changes(cx: &mut TestAppContext) {
     })
     .collect();
   report("theme light <-> dark", theme);
+}
+
+/// `n` small files, each one hunk of one replaced line.
+fn many_files_host(n: usize) -> FakeHost {
+  let mut host = code_host();
+  let files: Vec<_> = (0..n)
+    .map(|f| {
+      serde_json::json!({
+        "path": format!("src/dir_{}/module_{f}.rs", f % 40),
+        "status": "M",
+        "previous_path": null,
+        "changed_line_count": 2,
+        "diff_deferred": false,
+      })
+    })
+    .collect();
+  let hunks: Vec<_> = (0..n)
+    .map(|f| {
+      serde_json::json!({
+        "path": format!("src/dir_{}/module_{f}.rs", f % 40),
+        "hunks": [{
+          "id": "h",
+          "header": "@@ -1,1 +1,1 @@",
+          "lines": [format!("-let a = {f};"), format!("+let a = {};", f + 1)],
+          "patch": "",
+        }],
+      })
+    })
+    .collect();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": files,
+    "hunks_by_file": hunks,
+    "too_large_to_render": false
+  }))
+  .ok();
+  host
+}
+
+/// A find-bar keystroke notifies the whole Changes view; with a long file
+/// list the sidebar is part of that.
+#[gpui::test]
+#[ignore = "benchmark"]
+fn input_latency_find_bar_many_files(cx: &mut TestAppContext) {
+  let n = std::env::var("FILES")
+    .ok()
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(1000);
+  let (mut h, _) = workspace_harness(cx, many_files_host(n), changes_route());
+  if h.drawn("view-large-changeset") {
+    h.click("view-large-changeset");
+  }
+  h.cx.run_until_parked();
+  report("many files: idle frame", idle(&mut h, 10));
+  report("many files: full refresh", full(&mut h, 5));
+  h.click("commit-message");
+  report("many files: commit message keystroke", typing(&mut h, 12));
+  h.cx.simulate_keystrokes("cmd-f");
+  h.cx.run_until_parked();
+  report("many files: find keystroke", typing(&mut h, 12));
+}
+
+/// Typing in an inline review comment under the large diff.
+#[gpui::test]
+#[ignore = "benchmark"]
+fn input_latency_review_comment(cx: &mut TestAppContext) {
+  let mut h = changes_large::expanded_with(cx, changes_large::reviewed_host());
+  assert!(h.drawn("inline-comment-card"));
+  report("reviewed diff: idle frame", idle(&mut h, 10));
+  report("reviewed diff: full refresh", full(&mut h, 5));
+  // A new comment on the first line of the first file (hover shows the +).
+  h.click("add-comment-src/module_0.rs-0-1");
+  assert!(h.drawn("comment-input"));
+  h.click("comment-input");
+  report("review comment draft: keystroke", typing(&mut h, 20));
 }
