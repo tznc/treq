@@ -53,6 +53,8 @@ use crate::{
 
 /// How often the review agent's comments are read again (`refreshMs`).
 const REVIEW_POLL: Duration = Duration::from_secs(10);
+/// How long the issues a visit read stand in for reading them again.
+const ISSUES_FRESH: Duration = Duration::from_secs(30);
 
 /// `Issues` or `Projects`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -165,7 +167,7 @@ pub struct LinearView {
   teams: Fetch<Vec<LinearTeam>>,
   viewer: Option<LinearUser>,
   /// The issues, by team.
-  pub(super) issues: HashMap<Option<String>, Fetch<Vec<LinearIssue>>>,
+  pub(super) issues: HashMap<Option<String>, Fetch<Rc<Vec<LinearIssue>>>>,
   pub(super) mode: IssueMode,
   pub(super) issue_view: IssueView,
   pub(super) issue_filters: IssueFilters,
@@ -328,7 +330,7 @@ impl LinearView {
       },
       cx,
     );
-    self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
   }
 
   /// Runs `work` off the main thread, then `apply` on the view, unless the
@@ -357,6 +359,26 @@ impl LinearView {
     .detach();
   }
 
+  /// Reads the issues again, unless a read the cache holds is under
+  /// [`ISSUES_FRESH`] old: opening the panel, switching the section or the
+  /// team would otherwise repeat every page of a long list each time.
+  fn load_issues_unless_fresh(&mut self, cx: &mut Context<Self>) {
+    let key = (self.route.repo_path.clone(), self.team.clone());
+    let fresh = cache(cx)
+      .linear_issues
+      .age(&key, Instant::now())
+      .is_some_and(|age| age < ISSUES_FRESH);
+    if fresh
+      && self
+        .issues
+        .get(&self.team)
+        .is_some_and(|f| f.data.is_some())
+    {
+      return;
+    }
+    self.load_issues(cx);
+  }
+
   fn load_issues(&mut self, cx: &mut Context<Self>) {
     let team = self.team.clone();
     let seed = cache(cx)
@@ -372,6 +394,7 @@ impl LinearView {
     self.run(
       move |host, repo| host.linear_issues(repo, team.as_deref()),
       move |view, result, cx| {
+        let result = result.map(Rc::new);
         if let Ok(issues) = &result {
           cache(cx).linear_issues.insert(
             (view.route.repo_path.clone(), key.clone()),
@@ -530,7 +553,7 @@ impl LinearView {
         self.issue_view = IssueView::All;
         self.issue_filters = IssueFilters::default();
         self.open_issue = None;
-        self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
       }
       Section::Projects => {
         self.project_view = ProjectView::All;
@@ -550,7 +573,7 @@ impl LinearView {
     }
     self.team = team;
     self.open_issue = None;
-    self.load_issues(cx);
+    self.load_issues_unless_fresh(cx);
     cx.notify();
   }
 
@@ -704,7 +727,7 @@ impl LinearView {
   // ---- What the view shows. ----
 
   pub(super) fn current_issues(&self) -> Option<&Vec<LinearIssue>> {
-    self.issues.get(&self.team).and_then(|f| f.data.as_ref())
+    self.issues.get(&self.team).and_then(|f| f.data.as_deref())
   }
 
   fn viewer_id(&self) -> Option<&str> {
