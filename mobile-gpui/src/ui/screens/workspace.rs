@@ -53,6 +53,10 @@ use crate::{
 /// How often the change marker is polled to notice remote edits.
 const MARKER_POLL: Duration = Duration::from_secs(15);
 
+/// How often the Terminals tab rereads its sessions while shown, so each
+/// agent's working or idle state stays current.
+const SESSIONS_POLL: Duration = Duration::from_secs(5);
+
 /// The repository and workspace a view works in. `id` is the numeric
 /// workspace id the remote CLI expects.
 #[derive(Clone)]
@@ -225,6 +229,7 @@ pub struct WorkspaceScreen {
   /// list) refetch when this one closes.
   changed: bool,
   _poll: Task<()>,
+  _sessions_poll: Task<()>,
 }
 
 impl WorkspaceScreen {
@@ -244,6 +249,20 @@ impl WorkspaceScreen {
         // to the foreground refetches at once.
         if crate::backend::in_foreground() && nav::is_top(cx.entity_id(), cx) {
           this.poll_marker(cx);
+        }
+      });
+      if polled.is_err() {
+        break;
+      }
+    });
+    let sessions_poll = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(SESSIONS_POLL).await;
+      let polled = this.update(cx, |this, cx| {
+        if this.view == View::Terminals
+          && crate::backend::in_foreground()
+          && nav::is_top(cx.entity_id(), cx)
+        {
+          this.sessions.update(cx, |sessions, cx| sessions.reload(cx));
         }
       });
       if polled.is_err() {
@@ -297,6 +316,7 @@ impl WorkspaceScreen {
       keys: IdempotencyKeys::default(),
       changed: false,
       _poll: poll,
+      _sessions_poll: sessions_poll,
     };
     this.load_hunks(cx);
     this.fetch(true, cx);

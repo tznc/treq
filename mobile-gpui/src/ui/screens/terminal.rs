@@ -52,6 +52,114 @@ const AUTO_REATTACH_RESET: Duration = Duration::from_secs(10);
 /// the text as typed rather than pasted (a pasted newline doesn't submit).
 const SUBMIT_DELAY: Duration = Duration::from_millis(60);
 
+/// How long after its last output a session still counts as working: an
+/// agent's spinner prints several times a second while it works.
+const WORKING_WITHIN_SECS: u64 = 3;
+
+/// Longest title taken from a first message, in characters.
+const TITLE_CHARS: usize = 60;
+
+/// A new session's title, from the first message it was given: the
+/// message's first line, shortened.
+fn title_from_message(message: &str) -> Option<String> {
+  let line = message.lines().map(str::trim).find(|l| !l.is_empty())?;
+  if line.chars().count() <= TITLE_CHARS {
+    return Some(line.to_string());
+  }
+  let cut: String = line.chars().take(TITLE_CHARS - 1).collect();
+  Some(format!("{}…", cut.trim_end()))
+}
+
+/// "12s", "5m", "3h", "2d".
+fn short_duration(secs: u64) -> String {
+  match secs {
+    0..60 => format!("{secs}s"),
+    60..3600 => format!("{}m", secs / 60),
+    3600..86400 => format!("{}h", secs / 3600),
+    _ => format!("{}d", secs / 86400),
+  }
+}
+
+/// Whether a running session is working, from how long ago it printed.
+/// `None` when the host doesn't say (screen, or an older treq).
+fn activity(idle_secs: Option<u64>) -> Option<(bool, String)> {
+  let idle = idle_secs?;
+  Some(if idle <= WORKING_WITHIN_SECS {
+    (true, "Working".to_string())
+  } else {
+    (false, format!("Idle {}", short_duration(idle)))
+  })
+}
+
+/// What a session is called: its title, else its program.
+fn session_title(session: &PtySessionInfo) -> String {
+  session
+    .title
+    .clone()
+    .unwrap_or_else(|| Program::of_label(&session.label).name().to_string())
+}
+
+/// A session's row: its title, and what runs in it and what it is doing.
+fn session_row(
+  id: impl Into<ElementId>,
+  session: &PtySessionInfo,
+  current: bool,
+  cx: &App,
+) -> Stateful<Div> {
+  let theme = cx.theme();
+  let program = Program::of_label(&session.label);
+  let leading = div()
+    .text_color(if session.running {
+      theme.foreground
+    } else {
+      theme.muted_foreground
+    })
+    .child(program.icon())
+    .into_any_element();
+  let state = if session.running {
+    activity(session.idle_secs)
+  } else {
+    Some((false, "exited".to_string()))
+  };
+  let detail = match (&session.title, &state) {
+    (Some(_), Some((_, state))) => format!("{} · {state}", program.name()),
+    (Some(_), None) => program.name().to_string(),
+    (None, Some((_, state))) => format!("{} · {state}", session.label),
+    (None, None) => session.label.clone(),
+  };
+  let working = matches!(state, Some((true, _)));
+  let trailing = h_flex()
+    .gap_2()
+    .items_center()
+    .when(working, |t| {
+      t.child(div().size(px(8.)).rounded_full().bg(theme.success))
+    })
+    .when(current, |t| t.child(IconName::Check))
+    .into_any_element();
+  widgets::row_full(
+    id,
+    Some(leading),
+    session_title(session),
+    Some(detail.into()),
+    Some(trailing),
+    cx,
+  )
+  .when(!session.running, |row| row.opacity(0.6))
+}
+
+/// Opening a session's page.
+struct Opening {
+  label: String,
+  launch: PtyLaunchSpec,
+  /// The session's title as last listed.
+  title: Option<String>,
+  /// A title to give the session once attached (a new agent's first
+  /// message).
+  name: Option<String>,
+  /// In place of the current page, as the terminal switcher does.
+  replace: bool,
+}
+
 /// A toolbar key: a named key (encoded for the program's cursor mode), a
 /// control combination, or fixed bytes.
 #[derive(Clone, Copy)]
@@ -333,8 +441,7 @@ impl Sessions {
     load::run(cx, remote::mutate(request), move |this, outcome, cx| {
       let (ok, message) = super::mutation_message(&outcome, "");
       if ok {
-        let program = Program::of_label(&label);
-        this.open(label, program.launch(Vec::new()), cx);
+        this.open_listed(&label, false, cx);
         done(Ok(()), cx);
       } else {
         done(Err(errors::describe(&message).message), cx);
@@ -349,11 +456,39 @@ impl Sessions {
 
   fn start(&mut self, program: Program, args: Vec<String>, cx: &mut Context<Self>) {
     let label = new_session_label(program, chrono::Utc::now().timestamp_millis());
-    self.open(label, program.launch(args), cx);
+    let name = args.first().and_then(|message| title_from_message(message));
+    self.open(
+      Opening {
+        label,
+        launch: program.launch(args),
+        title: None,
+        name,
+        replace: false,
+      },
+      cx,
+    );
   }
 
-  /// Attaches to `label`, starting it with `launch` if it isn't running.
-  fn open(&mut self, label: String, launch: PtyLaunchSpec, cx: &mut Context<Self>) {
+  /// Attaches to a listed session; an exited one starts its program again.
+  fn open_listed(&mut self, label: &str, replace: bool, cx: &mut Context<Self>) {
+    let title = self.listed(label).and_then(|s| s.title.clone());
+    let program = Program::of_label(label);
+    self.open(
+      Opening {
+        label: label.to_string(),
+        // A running session ignores the launch.
+        launch: program.launch(Vec::new()),
+        title,
+        name: None,
+        replace,
+      },
+      cx,
+    );
+  }
+
+  /// Attaches to `opening.label`, starting it with its launch if it isn't
+  /// running.
+  fn open(&mut self, opening: Opening, cx: &mut Context<Self>) {
     let Some(workspace) = self.workspace.clone() else {
       return;
     };
@@ -361,11 +496,24 @@ impl Sessions {
     TerminalScreen::open(
       self.target.clone(),
       workspace,
-      label,
-      launch,
+      opening,
       cx.weak_entity(),
       cx,
     );
+  }
+
+  fn listed(&self, label: &str) -> Option<&PtySessionInfo> {
+    self.sessions.ready()?.iter().find(|s| s.label == label)
+  }
+
+  /// Shows a new title at once, before the list is read again.
+  fn set_title(&mut self, label: &str, title: Option<String>, cx: &mut Context<Self>) {
+    if let Load::Ready(list) = &mut self.sessions {
+      if let Some(session) = list.iter_mut().find(|s| s.label == label) {
+        session.title = title;
+        cx.notify();
+      }
+    }
   }
 
   fn new_agent(&mut self, cx: &mut Context<Self>) {
@@ -402,42 +550,14 @@ impl Sessions {
           cx,
         ))
         .into_any_element(),
-      Load::Ready(list) => {
-        let theme = cx.theme();
-        widgets::card(cx)
-          .children(list.iter().enumerate().map(|(i, session)| {
-            let program = Program::of_label(&session.label);
-            let label = session.label.clone();
-            let leading = div()
-              .text_color(if session.running {
-                theme.foreground
-              } else {
-                theme.muted_foreground
-              })
-              .child(program.icon())
-              .into_any_element();
-            let detail = if session.running {
-              session.label.clone()
-            } else {
-              format!("{} · exited", session.label)
-            };
-            widgets::row_full(
-              ("session", i),
-              Some(leading),
-              program.name(),
-              Some(detail.into()),
-              None,
-              cx,
-            )
-            .when(!session.running, |row| row.opacity(0.6))
-            .on_click(cx.listener(move |this, _, _, cx| {
-              // A running session ignores the launch; an exited one
-              // starts its program again.
-              this.open(label.clone(), program.launch(Vec::new()), cx)
-            }))
-          }))
-          .into_any_element()
-      }
+      Load::Ready(list) => widgets::card(cx)
+        .children(list.iter().enumerate().map(|(i, session)| {
+          let label = session.label.clone();
+          session_row(("session", i), session, false, cx).on_click(cx.listener(
+            move |this, _, _, cx| this.open_listed(&label, false, cx),
+          ))
+        }))
+        .into_any_element(),
     }
   }
 }
@@ -591,6 +711,10 @@ pub struct TerminalScreen {
   workspace: Workspace,
   label: String,
   program: Program,
+  /// The session's title; the page shows the program's name without one.
+  title: Option<String>,
+  /// A title to give the session once attached.
+  name: Option<String>,
   view: Load<Entity<TerminalView>>,
   /// Set when the session ended, with its exit status (`None` when the
   /// connection dropped). Its last screen stays up so its final output
@@ -610,12 +734,11 @@ impl TerminalScreen {
   fn open(
     target: Target,
     workspace: Workspace,
-    label: String,
-    launch: PtyLaunchSpec,
+    opening: Opening,
     sessions: WeakEntity<Sessions>,
     cx: &mut App,
   ) {
-    let program = Program::of_label(&label);
+    let program = Program::of_label(&opening.label);
     let location = Location {
       repo: Some(target.repo.clone()),
       workspace: Some(crate::store::SnapshotWorkspace {
@@ -624,16 +747,24 @@ impl TerminalScreen {
       }),
     };
     let screen: Rc<std::cell::RefCell<Option<WeakEntity<Self>>>> = Default::default();
-    let menu_screen = screen.clone();
+    let (menu_screen, title_screen) = (screen.clone(), screen.clone());
     let header = nav::Header {
-      on_title: None,
+      on_title: Some(Rc::new(move |_, cx| {
+        if let Some(screen) = title_screen.borrow().clone() {
+          screen.update(cx, |screen, cx| screen.switcher(cx)).ok();
+        }
+      })),
       more: Some(Rc::new(move |_, cx| {
         let Some(screen) = menu_screen.borrow().clone() else {
           return;
         };
+        let rename = screen.clone();
         sheet::menu(
           program.name(),
           vec![
+            sheet::MenuEntry::new("rename", "Rename…", move |_, cx| {
+              rename.update(cx, |screen, cx| screen.rename_sheet(cx)).ok();
+            }),
             sheet::MenuEntry::new("stop", "Stop session…", move |_, cx| {
               screen.update(cx, |screen, cx| screen.confirm_stop(cx)).ok();
             })
@@ -643,28 +774,39 @@ impl TerminalScreen {
         );
       })),
     };
-    nav::push_with(program.name(), header, location, cx, move |window, cx| {
-      let entity = cx.new(|cx| {
-        Self::new(
-          target, workspace, label, program, launch, sessions, window, cx,
-        )
-      });
+    let page_title = opening
+      .title
+      .clone()
+      .unwrap_or_else(|| program.name().to_string());
+    let replace = opening.replace;
+    let build = move |window: &mut Window, cx: &mut App| {
+      let entity = cx.new(|cx| Self::new(target, workspace, opening, sessions, window, cx));
       *screen.borrow_mut() = Some(entity.downgrade());
       entity
-    });
+    };
+    if replace {
+      nav::replace_with(page_title, header, location, cx, build);
+    } else {
+      nav::push_with(page_title, header, location, cx, build);
+    }
   }
 
-  #[allow(clippy::too_many_arguments)]
   fn new(
     target: Target,
     workspace: Workspace,
-    label: String,
-    program: Program,
-    launch: PtyLaunchSpec,
+    opening: Opening,
     sessions: WeakEntity<Sessions>,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Self {
+    let Opening {
+      label,
+      launch,
+      title,
+      name,
+      ..
+    } = opening;
+    let program = Program::of_label(&label);
     let draft = sessions
       .upgrade()
       .and_then(|list| list.update(cx, |list, _| list.drafts.remove(&label)))
@@ -708,6 +850,8 @@ impl TerminalScreen {
       workspace,
       label,
       program,
+      title,
+      name,
       view: Load::Loading,
       ended: None,
       auto_spent: false,
@@ -793,6 +937,10 @@ impl TerminalScreen {
     load::run_in(window, cx, attach, move |this, result, window, cx| {
       this.view = match result {
         Ok(()) => {
+          // The session exists now, so it can be named.
+          if let Some(name) = this.name.take() {
+            this.rename(name, |_, _| {}, cx);
+          }
           let view = cx.new(|cx| {
             TerminalView::new(
               session_id,
@@ -880,6 +1028,71 @@ impl TerminalScreen {
     .detach();
   }
 
+  /// Names the session on the host (an empty `title` clears the name),
+  /// then shows it here and in the list. `done` gets the outcome.
+  fn rename(
+    &mut self,
+    title: String,
+    done: impl FnOnce(Result<(), String>, &mut App) + 'static,
+    cx: &mut Context<Self>,
+  ) {
+    let request = TreqCommandRequest::PtyRename {
+      repo: self.target.repo.clone(),
+      workspace: self.workspace.workspace_name.clone(),
+      label: self.label.clone(),
+      title,
+    };
+    load::run(
+      cx,
+      remote::read::<Option<String>>(request),
+      move |this, result, cx| match result {
+        Ok(title) => {
+          nav::set_title(
+            cx.entity_id(),
+            title
+              .clone()
+              .unwrap_or_else(|| this.program.name().to_string()),
+            cx,
+          );
+          let label = this.label.clone();
+          this
+            .sessions
+            .update(cx, |list, cx| list.set_title(&label, title.clone(), cx))
+            .ok();
+          this.title = title;
+          done(Ok(()), cx);
+        }
+        Err(error) => {
+          log::warn!("naming terminal {} failed: {error}", this.label);
+          done(Err(errors::describe(&error).message), cx);
+        }
+      },
+    );
+  }
+
+  fn rename_sheet(&mut self, cx: &mut Context<Self>) {
+    let screen = cx.weak_entity();
+    let title = self.title.clone().unwrap_or_default();
+    sheet::open(Some("Rename terminal".into()), cx, move |window, cx| {
+      cx.new(|cx| RenameSheet::new(screen, title, window, cx))
+    });
+  }
+
+  /// Jump to another terminal in this workspace.
+  fn switcher(&mut self, cx: &mut Context<Self>) {
+    let sessions = self.sessions.clone();
+    let current = self.label.clone();
+    sessions.update(cx, |list, cx| list.reload(cx)).ok();
+    sheet::open(Some("Terminals".into()), cx, move |_, cx| {
+      cx.new(|cx| {
+        if let Some(list) = sessions.upgrade() {
+          cx.observe(&list, |_, _, cx| cx.notify()).detach();
+        }
+        Switcher { sessions, current }
+      })
+    });
+  }
+
   fn confirm_stop(&mut self, cx: &mut Context<Self>) {
     let this = cx.weak_entity();
     sheet::confirm(
@@ -951,6 +1164,138 @@ impl TerminalScreen {
               })
           }),
       )
+  }
+}
+
+/// Naming a terminal.
+struct RenameSheet {
+  screen: WeakEntity<TerminalScreen>,
+  input: Entity<InputState>,
+  saving: bool,
+  error: Option<String>,
+}
+
+impl RenameSheet {
+  fn new(
+    screen: WeakEntity<TerminalScreen>,
+    title: String,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Self {
+    let input = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("Title")
+        .default_value(title)
+    });
+    input.update(cx, |state, cx| state.focus(window, cx));
+    cx.subscribe(&input, |this, _, event: &InputEvent, cx| {
+      if let InputEvent::PressEnter { .. } = event {
+        this.save(cx);
+      }
+    })
+    .detach();
+    Self {
+      screen,
+      input,
+      saving: false,
+      error: None,
+    }
+  }
+
+  fn save(&mut self, cx: &mut Context<Self>) {
+    if self.saving {
+      return;
+    }
+    self.saving = true;
+    self.error = None;
+    let title = self.input.read(cx).value().trim().to_string();
+    let sheet = cx.weak_entity();
+    self
+      .screen
+      .update(cx, |screen, cx| {
+        screen.rename(
+          title,
+          move |result, cx| match result {
+            Ok(()) => sheet::close(cx),
+            Err(error) => {
+              sheet
+                .update(cx, |this, cx| {
+                  this.saving = false;
+                  this.error = Some(error);
+                  cx.notify();
+                })
+                .ok();
+            }
+          },
+          cx,
+        )
+      })
+      .ok();
+    cx.notify();
+  }
+}
+
+impl Render for RenameSheet {
+  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    v_flex()
+      .px_4()
+      .pt_1()
+      .gap_3()
+      .child(Input::new(&self.input).large())
+      .child(widgets::muted(
+        "Leave empty to show the program's name.",
+        cx,
+      ))
+      .children(self.error.clone().map(|e| widgets::error_text(e, cx)))
+      .child(
+        Button::new("rename-save")
+          .primary()
+          .large()
+          .w_full()
+          .label("Save")
+          .loading(self.saving)
+          .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+      )
+  }
+}
+
+/// The workspace's other terminals, from a terminal's title.
+struct Switcher {
+  sessions: WeakEntity<Sessions>,
+  current: String,
+}
+
+impl Render for Switcher {
+  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let Some(sessions) = self.sessions.upgrade() else {
+      return div().into_any_element();
+    };
+    let list = match &sessions.read(cx).sessions {
+      Load::Idle | Load::Loading => {
+        return widgets::centered_message("Loading…", cx).into_any_element()
+      }
+      Load::Failed(error) => {
+        return widgets::error_text(errors::describe(error).message, cx)
+          .px_4()
+          .into_any_element()
+      }
+      Load::Ready(list) => list.clone(),
+    };
+    v_flex()
+      .children(list.iter().enumerate().map(|(i, session)| {
+        let current = session.label == self.current;
+        let label = session.label.clone();
+        let sessions = self.sessions.clone();
+        session_row(("switch-session", i), session, current, cx).on_click(move |_, _, cx| {
+          sheet::close(cx);
+          if !current {
+            sessions
+              .update(cx, |list, cx| list.open_listed(&label, true, cx))
+              .ok();
+          }
+        })
+      }))
+      .into_any_element()
   }
 }
 
@@ -1059,6 +1404,27 @@ mod tests {
     assert_eq!(Program::of_label("shell-abc"), Program::Shell);
     // Sessions from other clients keep working as shells.
     assert_eq!(Program::of_label("main"), Program::Shell);
+  }
+
+  #[core::prelude::v1::test]
+  fn new_agents_are_titled_by_their_first_message() {
+    assert_eq!(
+      title_from_message("\n  Fix the login redirect\nthen add tests"),
+      Some("Fix the login redirect".into())
+    );
+    assert_eq!(title_from_message("  \n "), None);
+    let long = title_from_message(&"word ".repeat(40)).unwrap();
+    assert_eq!(long.chars().count(), TITLE_CHARS);
+    assert!(long.ends_with('…'));
+  }
+
+  #[core::prelude::v1::test]
+  fn recent_output_reads_as_working() {
+    assert_eq!(activity(None), None);
+    assert_eq!(activity(Some(1)), Some((true, "Working".into())));
+    assert_eq!(activity(Some(45)), Some((false, "Idle 45s".into())));
+    assert_eq!(activity(Some(600)), Some((false, "Idle 10m".into())));
+    assert_eq!(activity(Some(7200)), Some((false, "Idle 2h".into())));
   }
 
   #[core::prelude::v1::test]
