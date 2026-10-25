@@ -850,32 +850,39 @@ pub fn reauthenticate(cx: &mut App) {
   .detach();
 }
 
-/// On return to the foreground: rebuild a stale managed connection, then
-/// have every screen refetch (PRD mobile acceptance criterion 7).
+/// How long the pooled connection gets to answer on return to the
+/// foreground before it counts as dead.
+const RESUME_PROBE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// On return to the foreground: check the pooled connection (a silent one is
+/// dropped, so the refetch reconnects at once instead of waiting out a channel
+/// open), have every screen refetch (PRD mobile acceptance criterion 7), and
+/// rebuild a stale Treq Cloud connection. The staleness check runs alongside
+/// the refetch; the rebuild refetches again.
 fn resume(cx: &mut App) {
   let model = model(cx);
+  let probe = backend::get().endpoint().ok().map(|endpoint| {
+    backend::spawn(async move { backend::get().pool.probe(&endpoint, RESUME_PROBE).await })
+  });
   // The Treq Cloud machine may have slept, or its certificate lapsed, while
   // the app was in the background. Only a ready one is rechecked.
   let managed = model.read(cx).machine(MANAGED_MACHINE).status == MachineStatus::Ready;
-  if managed {
-    let stale = backend::spawn(managed::is_stale());
-    cx.spawn(async move |cx| {
-      if let Ok(true) = stale.await {
-        cx.update(|cx| connect(Machine::Managed, false, cx));
-      } else {
-        model.update(cx, |m, cx| {
-          m.epoch += 1;
-          cx.notify();
-        });
-      }
-    })
-    .detach();
-  } else {
+  let stale = managed.then(|| backend::spawn(managed::is_stale()));
+  cx.spawn(async move |cx| {
+    if let Some(probe) = probe {
+      let _ = probe.await;
+    }
     model.update(cx, |m, cx| {
       m.epoch += 1;
       cx.notify();
     });
-  }
+    if let Some(stale) = stale {
+      if let Ok(true) = stale.await {
+        cx.update(|cx| connect(Machine::Managed, false, cx));
+      }
+    }
+  })
+  .detach();
 }
 
 /// Restores the Supabase session, then the last endpoint, repository and

@@ -1,6 +1,6 @@
 //! Typed commands to the connected host, through treq's SSH transport.
 //!
-//! Reads go through `execute_remote_command`; mutations through
+//! Reads go through `execute_remote_read`; mutations through
 //! `retry_after_reconnect`, which verifies state before any retry and never
 //! blindly resends (see `core::remote`).
 
@@ -9,7 +9,7 @@ use std::{collections::HashMap, future::Future, sync::LazyLock};
 use serde::de::DeserializeOwned;
 use treq_lib::core::{
   remote::{
-    execute_remote_command, retry_after_reconnect, MutationRetryOutcome, RemoteHostCheck,
+    execute_remote_read, retry_after_reconnect, MutationRetryOutcome, RemoteHostCheck,
     TreqCommandRequest,
   },
   remote_control_plane::SshEndpoint,
@@ -56,24 +56,18 @@ pub async fn read_on<T: DeserializeOwned>(
   request: TreqCommandRequest,
 ) -> Result<T, String> {
   let backend = backend::get();
-  let cancellation = CancellationToken::new();
-  let run = || {
-    execute_remote_command::<T>(
-      &backend.pool,
-      endpoint,
-      request.clone(),
-      ExecLimits::default(),
-      &cancellation,
-    )
-  };
-  let mut result = run().await.map_err(|e| e.to_string());
   // After the host restarts or the network changes, the pooled connection
   // is dead but not yet known to be. A read is safe to send again, on a
-  // fresh connection.
-  if result.as_ref().is_err_and(|e| is_stale_connection(e)) {
-    backend.pool.mark_dead(endpoint).await;
-    result = run().await.map_err(|e| e.to_string());
-  }
+  // fresh connection (done once inside).
+  let result = execute_remote_read::<T>(
+    &backend.pool,
+    endpoint,
+    request,
+    ExecLimits::default(),
+    &CancellationToken::new(),
+  )
+  .await
+  .map_err(|e| e.to_string());
   if let Err(error) = &result {
     note_cutoff(error);
   }
@@ -140,11 +134,6 @@ where
 /// Forgets every remembered read (sign-out, a forgotten host).
 pub fn forget_reads() {
   READS.clear();
-}
-
-/// Whether a read failed on a pooled connection that has since died.
-fn is_stale_connection(error: &str) -> bool {
-  error.starts_with("transport_error: ssh channel error")
 }
 
 /// What the machine can run. `None` when its treq predates host checks.
@@ -219,17 +208,6 @@ impl IdempotencyKeys {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn only_channel_errors_count_as_a_stale_connection() {
-    assert!(is_stale_connection(
-      "transport_error: ssh channel error: Channel send error"
-    ));
-    assert!(!is_stale_connection(
-      "transport_error: ssh connection failed: refused"
-    ));
-    assert!(!is_stale_connection("treq_command_failed: nope"));
-  }
 
   #[test]
   fn keys_are_reused_until_settled() {

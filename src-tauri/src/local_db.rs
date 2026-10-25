@@ -1776,27 +1776,27 @@ pub fn sync_discovered_workspaces(
     .map_err(|e| e.to_string())
 }
 
+/// Last rebased target commit recorded in an already-loaded workspace's metadata.
+pub fn last_rebased_commit_of(workspace: &Workspace) -> Option<String> {
+  let json = serde_json::from_str::<serde_json::Value>(workspace.metadata.as_deref()?).ok()?;
+  json
+    .get("last_rebased_target_commit")
+    .and_then(|v| v.as_str())
+    .map(|s| s.to_string())
+}
+
 /// Get last rebased commit from workspace metadata
 pub fn get_workspace_last_rebased_commit(
   repo_path: &str,
   id: i64,
 ) -> Result<Option<String>, String> {
   let workspaces = get_workspaces(repo_path)?;
-  let workspace = workspaces.iter().find(|w| w.id == id);
-
-  if let Some(ws) = workspace {
-    if let Some(metadata) = &ws.metadata {
-      if let Ok(json) = serde_json::from_str::<serde_json::Value>(metadata) {
-        return Ok(
-          json
-            .get("last_rebased_target_commit")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        );
-      }
-    }
-  }
-  Ok(None)
+  Ok(
+    workspaces
+      .iter()
+      .find(|w| w.id == id)
+      .and_then(last_rebased_commit_of),
+  )
 }
 
 /// Update last rebased commit in workspace metadata.
@@ -1810,6 +1810,27 @@ pub fn update_workspace_last_rebased_commit(
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
   set_last_rebased_commit(&conn, id, commit_id)
+}
+
+/// Records the same rebased target commit for several workspaces in one
+/// transaction (one commit instead of one per workspace).
+pub fn update_workspaces_last_rebased_commit(
+  repo_path: &str,
+  ids: &[i64],
+  commit_id: &str,
+) -> Result<(), String> {
+  if ids.is_empty() {
+    return Ok(());
+  }
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
+  for id in ids {
+    set_last_rebased_commit(&tx, *id, commit_id)?;
+  }
+  tx.commit()
+    .map_err(|e| format!("Failed to commit rebase bookkeeping: {}", e))
 }
 
 fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Result<(), String> {
@@ -2441,9 +2462,19 @@ pub fn add_prompt_history(
 
 /// Get every prompt ever sent in this repository, most recent first.
 pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
+  get_prompt_history_page(repo_path, i64::MAX as usize, 0)
+}
+
+/// Up to `limit` prompts sent in this repository after the newest `offset`
+/// of them, most recent first.
+pub fn get_prompt_history_page(
+  repo_path: &str,
+  limit: usize,
+  offset: usize,
+) -> Result<Vec<PromptHistoryEntry>, String> {
   let conn = get_connection(repo_path)?;
   let sql = format!(
-    "{} ORDER BY ph.created_at DESC, ph.id DESC",
+    "{} ORDER BY ph.created_at DESC, ph.id DESC LIMIT ?1 OFFSET ?2",
     PROMPT_HISTORY_SELECT
   );
   let mut stmt = conn
@@ -2451,7 +2482,13 @@ pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, St
     .map_err(|e| format!("Failed to prepare prompt history query: {}", e))?;
 
   let entries = stmt
-    .query_map([], prompt_history_from_row)
+    .query_map(
+      params![
+        limit.min(i64::MAX as usize) as i64,
+        offset.min(i64::MAX as usize) as i64
+      ],
+      prompt_history_from_row,
+    )
     .map_err(|e| format!("Failed to query prompt history: {}", e))?;
 
   entries

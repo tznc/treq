@@ -12,6 +12,7 @@ use std::{
   ops::Range,
   rc::Rc,
   sync::Arc,
+  time::{Duration, Instant},
 };
 
 use tauri_plugin_gpui::gpui::{
@@ -29,7 +30,7 @@ use crate::{
         Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
-      commits_data::line_numbers,
+      commits_data::{line_number, line_numbers},
       highlight, intraline,
     },
     theme::{self, Palette},
@@ -128,6 +129,8 @@ pub(super) struct DiffRows {
   /// Bumped each time the rows are laid out again: the find index and the
   /// placed threads are derived from the same inputs and follow it.
   pub(super) revision: u64,
+  /// How long the last layout of the rows took.
+  pub(super) layout_cost: Duration,
 }
 
 /// Every input of `layout_rows`. The snapshot, the hunks and the lines read
@@ -161,6 +164,7 @@ impl Default for DiffRows {
       rem: px(0.),
       key: None,
       revision: 0,
+      layout_cost: Duration::ZERO,
     }
   }
 }
@@ -360,7 +364,9 @@ impl ChangesView {
     if self.diff.key.as_ref() == Some(&key) {
       return;
     }
+    let started = Instant::now();
     let (cards, rows) = self.layout_rows();
+    self.diff.layout_cost = started.elapsed();
     self.diff.key = Some(key);
     self.diff.revision += 1;
     let old = (&self.diff.rows, &self.diff.cards);
@@ -590,6 +596,12 @@ impl ChangesView {
         context_row(n, line, language, p).into_any_element()
       }
       Row::Line(_, _, l) => {
+        // Numbered with the card's other lines, not by counting up to this one.
+        let numbers = card
+          .prepared
+          .as_ref()
+          .and_then(|prep| prep.numbers.get(h)?.get(l).copied())
+          .unwrap_or_else(|| line_number(hunk, l));
         let changed = card
           .prepared
           .as_ref()
@@ -598,13 +610,24 @@ impl ChangesView {
         div()
           .child(
             self
-              .diff_line(path, hunks, h, l, changed, language, card.conflicted, p, cx)
+              .diff_line(
+                path,
+                hunks,
+                h,
+                l,
+                numbers,
+                changed,
+                language,
+                card.conflicted,
+                p,
+                cx,
+              )
               .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
               ),
           )
-          .children(self.line_extras(path, hunks, h, l, p, cx))
+          .children(self.line_extras(path, hunks, h, l, numbers, p, cx))
           .into_any_element()
       }
       Row::Below(..) => {

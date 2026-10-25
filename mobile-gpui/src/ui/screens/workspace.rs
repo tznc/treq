@@ -840,8 +840,9 @@ impl WorkspaceScreen {
       }
       ChangeItem::Uncommitted(i, slot) => {
         let path = diff.uncommitted_files[i].path.clone();
+        let deleted = diff.uncommitted_files[i].status == "D";
         let row = file_row(("uncommitted", i), &diff.uncommitted_files[i], cx)
-          .on_click(move |_, _, cx| diff::open(target.clone(), path.clone(), cx));
+          .on_click(move |_, _, cx| diff::open(target.clone(), path.clone(), deleted, cx));
         card(row, slot, cx)
       }
       ChangeItem::Committed(i, slot) => {
