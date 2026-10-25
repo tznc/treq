@@ -691,6 +691,7 @@ impl TreqCommandRequest {
       | Self::ProbeRepo { .. }
       | Self::GitRemoteInfo { .. }
       | Self::WorkspacePullRequest { .. }
+      | Self::GithubRead { .. }
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
@@ -814,6 +815,7 @@ impl TreqCommandRequest {
       | Self::GitBookmarkTrack { .. }
       | Self::GitRemoteInfo { .. }
       | Self::WorkspacePullRequest { .. }
+      | Self::GithubRead { .. }
       | Self::AgentStatus { .. }
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
@@ -3153,7 +3155,9 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
       &repo,
       "git.github-write",
       Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("GithubWrite is a mutation"),
+      request_snapshot
+        .as_ref()
+        .expect("GithubWrite is a mutation"),
       || github_write(&repo, action),
     ),
     TreqCommandRequest::AgentStart {
@@ -3708,8 +3712,9 @@ fn github_write(repo: &str, action: GithubAction) -> Result<serde_json::Value, S
   let name = github_full_name(repo)?;
   let name = name.as_str();
   match action {
-    GithubAction::CreateIssue { title, body } => gh::create_issue(name, &title, &body)
-      .map(|number| serde_json::json!({ "number": number })),
+    GithubAction::CreateIssue { title, body } => {
+      gh::create_issue(name, &title, &body).map(|number| serde_json::json!({ "number": number }))
+    }
     GithubAction::EditIssue {
       number,
       title,

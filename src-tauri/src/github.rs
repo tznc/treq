@@ -2146,7 +2146,9 @@ mod tests {
   /// that JSON back must give the same values.
   #[test]
   fn github_types_survive_a_serialize_deserialize_round_trip() {
-    fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(value: &T) -> serde_json::Value {
+    fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(
+      value: &T,
+    ) -> serde_json::Value {
       let json = serde_json::to_value(value).unwrap();
       let back: T = serde_json::from_value(json.clone()).unwrap();
       assert_eq!(serde_json::to_value(&back).unwrap(), json);
